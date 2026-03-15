@@ -1,0 +1,22 @@
+[package]
+name = "talos-prompt"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Talos - prompt"
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+talos-error = { workspace = true }
+talos-llm-provider = { workspace = true }
+talos-memory = { workspace = true }
+talos-tools = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+async-trait = { workspace = true }
+serde_json = { workspace = true }

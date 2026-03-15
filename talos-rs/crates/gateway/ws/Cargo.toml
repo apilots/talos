@@ -1,0 +1,26 @@
+[package]
+name = "talos-gateway-ws"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+talos-gateway = { path = "../../gateway/core" }
+talos-error = { path = "../../../crates/infra/error" }
+tokio-tungstenite = "0.20"
+tokio = { version = "1.0", features = ["full"] }
+futures-util = "0.3"
+serde_json = "1.0"
+async-trait = "0.1"
+arc-swap = "1.0"
+log = "0.4"
+uuid = { version = "1.0", features = ["v4"] }
+bytes = "1.0"
+pin-project = "1.0"
+thiserror = "1.0"
+tokio-stream = { version = "0.1", features = ["net"] }
+serde = { version = "1.0", features = ["derive"] }
+url = "2.0"
+
+[dev-dependencies]
+tokio-test = "0.4"
+talos-types = { path = "../../common/types" }

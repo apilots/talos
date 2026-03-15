@@ -1,0 +1,24 @@
+[package]
+name = "talos-agent-kernel"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Talos orchestration agent kernel"
+repository.workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+talos-error = { workspace = true }
+talos-config = { workspace = true }
+talos-llm-provider = { workspace = true }
+talos-memory = { workspace = true }
+talos-prompt = { workspace = true }
+talos-tools = { workspace = true }
+talos-types = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v4", "serde"] }

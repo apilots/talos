@@ -1,0 +1,26 @@
+[package]
+name = "talos-config"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Talos - Configuration Management"
+repository.workspace = true
+
+[dependencies]
+# Serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+serde_yaml = "0.9"
+
+# Config loading
+config = "0.14"
+
+# Error handling
+talos-error = { path = "../error" }
+
+# Logging
+talos-logging = { path = "../logging" }
+
+# Utils
+dirs = "5"

@@ -1,0 +1,80 @@
+gateway:
+  port: 8080
+  host: "0.0.0.0"
+  token: "talos-local-test-token"
+  jwt_secret: ${JWT_SECRET}
+  auth: false
+
+agent:
+  name: "talos"
+  model: "qwen-max"
+  workspace: "~/.talos/workspace"
+  kernel:
+    max_iters: 1
+    max_task_per_turn: 3
+    tool_parallelism: 4
+    max_llm_calls: 8
+    max_tool_rounds: 8
+    tool_result_max_bytes: 65536
+    context_compaction_max_bytes: 262144
+    default_workspace_id: "default"
+    planner_mode: "built_in"
+    allow_request_planner_override: false
+    prompt:
+      max_static_tokens: 1200
+      max_dynamic_tokens: 3200
+      include_workspace_summary: true
+      include_recent_messages: true
+    memory:
+      workspace_dir: "~/.talos/workspace/memory"
+      hot_recent_messages: 64
+      context_target_messages: 24
+      enable_summary: true
+      summary_recent_count: 2
+      summary_max_chars: 1200
+      compaction_threshold_bytes: 262144
+      long_term_fact_extraction_enabled: true
+      long_term_min_importance: 0.7
+    binding:
+      default_agent_kind: "llm"
+
+channels:
+  whatsapp:
+    enabled: false
+  telegram:
+    enabled: false
+    dm_scope: "per_channel_peer_topic"
+  discord:
+    enabled: false
+  feishu:
+    enabled: false
+
+llm:
+  provider: "bailian"
+  model: "qwen-max"
+  anthropic:
+    enabled: false
+  openai:
+    enabled: false
+  bailian:
+    api_key: ${BAILIAN_API_KEY}
+    enabled: true
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    supported_models:
+      - "qwen-max"
+      - "qwen-plus"
+      - "qwen-turbo"
+  ollama:
+    enabled: false
+    base_url: "http://localhost:11434"
+
+logging:
+  level: "info"
+  format: "text"
+  stdout: true
+  file: "logs/talos.log"
+
+storage:
+  database_type: "sqlite"
+  connection_string: "talos.db"
+  max_connections: 5

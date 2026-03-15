@@ -1,0 +1,27 @@
+[package]
+name = "talos-llm-openai"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Talos - OpenAI (GPT) LLM Provider"
+repository.workspace = true
+
+[dependencies]
+# Core
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+# HTTP
+reqwest = { version = "0.12", features = ["json", "stream"] }
+futures-util = "0.3"
+
+# Talos
+talos-error = { path = "../../../infra/error" }
+talos-llm-provider = { path = "../provider" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

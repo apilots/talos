@@ -1,0 +1,32 @@
+[package]
+name = "talos"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "talos"
+path = "src/main.rs"
+
+[dependencies]
+talos-gateway = { path = "../../crates/gateway/core" }
+talos-gateway-http = { path = "../../crates/gateway/http" }
+talos-channels = { path = "../../crates/gateway/channels" }
+talos-coordinator = { path = "../../crates/orchestration/coordinator" }
+talos-router = { path = "../../crates/orchestration/router" }
+talos-session-store = { path = "../../crates/orchestration/session-store" }
+talos-agent = { path = "../../crates/orchestration/agent" }
+talos-agent-kernel = { path = "../../crates/orchestration/agent-kernel" }
+talos-types = { path = "../../crates/common/types" }
+talos-llm-provider = { path = "../../crates/common/llm/provider" }
+talos-llm-anthropic = { path = "../../crates/common/llm/anthropic" }
+talos-llm-openai = { path = "../../crates/common/llm/openai" }
+talos-storage = { path = "../../crates/infra/storage" }
+talos-config = { path = "../../crates/infra/config" }
+talos-memory = { path = "../../crates/cognition/memory" }
+talos-tools = { path = "../../crates/action/tools" }
+talos-error = { path = "../../crates/infra/error" }
+talos-logging = { path = "../../crates/infra/logging" }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+dotenv = "0.15"

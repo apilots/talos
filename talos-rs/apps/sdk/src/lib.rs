@@ -1,0 +1,407 @@
+//! Talos Client Library
+//!
+//! Strongly typed SDK for Talos Session-first HTTP APIs.
+
+use futures_util::StreamExt;
+use reqwest::{Client, RequestBuilder, Response};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use tokio::sync::mpsc;
+
+use talos_error::{TalosError, TalosResult};
+pub use talos_types::canonical::{
+    CanonicalContext, CanonicalEvent, CanonicalEventType, CanonicalInputItem,
+    CanonicalMessageRequest, CanonicalMessageResponse, CanonicalOutputItem,
+};
+
+#[derive(Clone, Debug)]
+pub struct ClientConfig {
+    pub gateway_url: String,
+    pub auth_token: Option<String>,
+    pub timeout: u64,
+}
+
+impl Default for ClientConfig {
+    fn default() -> Self {
+        Self {
+            gateway_url: "http://localhost:8080".to_string(),
+            auth_token: None,
+            timeout: 30,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionConfig {
+    pub context: Option<CanonicalContext>,
+    pub model: Option<String>,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionHandle {
+    pub id: String,
+    pub current_model: String,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionInfo {
+    pub id: String,
+    pub current_model: String,
+    pub message_count: u64,
+    pub last_activity: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelInfo {
+    pub id: String,
+    pub provider: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionUpdate {
+    pub model: Option<String>,
+    pub metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CreateSessionRequest {
+    context: CanonicalContext,
+    model: Option<String>,
+    metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CreateSessionResponse {
+    id: String,
+    model: String,
+    created_at: u64,
+    context: CanonicalContext,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SessionEnvelope {
+    id: String,
+    model: String,
+    message_count: u64,
+    last_activity: u64,
+    context: CanonicalContext,
+    metadata: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ListModelsResponse {
+    data: Vec<ModelInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ListSessionsResponse {
+    data: Vec<SessionEnvelope>,
+}
+
+pub struct TalosClient {
+    http_client: Client,
+    config: ClientConfig,
+}
+
+impl TalosClient {
+    pub fn new(config: ClientConfig) -> TalosResult<Self> {
+        let mut builder = Client::builder().timeout(std::time::Duration::from_secs(config.timeout));
+
+        // For local gateway endpoints, bypass system proxy settings to avoid
+        // loopback requests being intercepted by desktop proxy tools.
+        if is_local_gateway_url(&config.gateway_url) {
+            builder = builder.no_proxy();
+        }
+
+        let http_client = builder
+            .build()
+            .map_err(|e| TalosError::ClientError(e.to_string()))?;
+
+        Ok(Self {
+            http_client,
+            config,
+        })
+    }
+
+    pub fn new_default() -> TalosResult<Self> {
+        Self::new(ClientConfig::default())
+    }
+
+    pub async fn list_models(&self) -> TalosResult<Vec<ModelInfo>> {
+        let url = format!("{}/v1/models", self.config.gateway_url);
+        let response = self
+            .authorized(self.http_client.get(&url))
+            .send()
+            .await
+            .map_err(|e| TalosError::ClientError(e.to_string()))?;
+        let payload: ListModelsResponse = Self::decode_json(response).await?;
+        Ok(payload.data)
+    }
+
+    pub async fn create_session(&self, config: &SessionConfig) -> TalosResult<SessionHandle> {
+        let request = CreateSessionRequest {
+            context: config
+                .context
+                .clone()
+                .unwrap_or_else(|| default_context("anonymous")),
+            model: config.model.clone(),
+            metadata: config.metadata.clone(),
+        };
+
+        let url = format!("{}/v1/sessions", self.config.gateway_url);
+        let response = self
+            .authorized(self.http_client.post(&url).json(&request))
+            .send()
+            .await
+            .map_err(|e| TalosError::ClientError(e.to_string()))?;
+        let payload: CreateSessionResponse = Self::decode_json(response).await?;
+
+        Ok(SessionHandle {
+            id: payload.id,
+            current_model: payload.model,
+            created_at: payload.created_at,
+        })
+    }
+
+    pub async fn get_session(&self, session_id: &str) -> TalosResult<SessionInfo> {
+        let url = format!("{}/v1/sessions/{}", self.config.gateway_url, session_id);
+        let response = self
+            .authorized(self.http_client.get(&url))
+            .send()
+            .await
+            .map_err(|e| TalosError::ClientError(e.to_string()))?;
+        let payload: SessionEnvelope = Self::decode_json(response).await?;
+        Ok(Self::to_session_info(payload))
+    }
+
+    pub async fn list_sessions(&self) -> TalosResult<Vec<SessionInfo>> {
+        let url = format!("{}/v1/sessions", self.config.gateway_url);
+        let response = self
+            .authorized(self.http_client.get(&url))
+            .send()
+            .await
+            .map_err(|e| TalosError::ClientError(e.to_string()))?;
+        let payload: ListSessionsResponse = Self::decode_json(response).await?;
+        Ok(payload
+            .data
+            .into_iter()
+            .map(Self::to_session_info)
+            .collect())
+    }
+
+    pub async fn update_session(
+        &self,
+        session_id: &str,
+        update: &SessionUpdate,
+    ) -> TalosResult<SessionInfo> {
+        let url = format!("{}/v1/sessions/{}", self.config.gateway_url, session_id);
+        let response = self
+            .authorized(self.http_client.patch(&url).json(update))
+            .send()
+            .await
+            .map_err(|e| TalosError::ClientError(e.to_string()))?;
+        let payload: SessionEnvelope = Self::decode_json(response).await?;
+        Ok(Self::to_session_info(payload))
+    }
+
+    pub async fn update_session_model(
+        &self,
+        session_id: &str,
+        model: &str,
+    ) -> TalosResult<SessionInfo> {
+        let update = SessionUpdate {
+            model: Some(model.to_string()),
+            metadata: None,
+        };
+        self.update_session(session_id, &update).await
+    }
+
+    pub async fn send_message(
+        &self,
+        session_id: &str,
+        request: &CanonicalMessageRequest,
+    ) -> TalosResult<CanonicalMessageResponse> {
+        let url = format!(
+            "{}/v1/sessions/{}/messages",
+            self.config.gateway_url, session_id
+        );
+        let response = self
+            .authorized(self.http_client.post(&url).json(request))
+            .send()
+            .await
+            .map_err(|e| TalosError::ClientError(e.to_string()))?;
+        Self::decode_json(response).await
+    }
+
+    pub async fn send_message_stream(
+        &self,
+        session_id: &str,
+        request: &CanonicalMessageRequest,
+    ) -> TalosResult<mpsc::Receiver<CanonicalEvent>> {
+        let mut stream_request = request.clone();
+        stream_request.stream = Some(true);
+
+        let url = format!(
+            "{}/v1/sessions/{}/messages",
+            self.config.gateway_url, session_id
+        );
+        let response = self
+            .authorized(self.http_client.post(&url).json(&stream_request))
+            .send()
+            .await
+            .map_err(|e| TalosError::ClientError(e.to_string()))?;
+
+        if !response.status().is_success() {
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(TalosError::ClientError(error_text));
+        }
+
+        let (tx, rx) = mpsc::channel(256);
+        let mut bytes_stream = response.bytes_stream();
+
+        tokio::spawn(async move {
+            let mut buffer = String::new();
+            while let Some(chunk) = bytes_stream.next().await {
+                let Ok(bytes) = chunk else { break };
+                buffer.push_str(&String::from_utf8_lossy(&bytes));
+
+                while let Some(newline_pos) = buffer.find('\n') {
+                    let line = buffer[..newline_pos].trim_end_matches('\r').to_string();
+                    buffer = buffer[newline_pos + 1..].to_string();
+
+                    if let Some(data) = line.strip_prefix("data:") {
+                        let payload = data.trim();
+                        if payload.is_empty() || payload == "[DONE]" {
+                            continue;
+                        }
+
+                        let Ok(event) = serde_json::from_str::<CanonicalEvent>(payload) else {
+                            continue;
+                        };
+
+                        if tx.send(event).await.is_err() {
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+
+        Ok(rx)
+    }
+
+    fn authorized(&self, builder: RequestBuilder) -> RequestBuilder {
+        if let Some(token) = &self.config.auth_token {
+            return builder.bearer_auth(token);
+        }
+        builder
+    }
+
+    async fn decode_json<T: DeserializeOwned>(response: Response) -> TalosResult<T> {
+        if !response.status().is_success() {
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(TalosError::ClientError(error_text));
+        }
+
+        response
+            .json::<T>()
+            .await
+            .map_err(|e| TalosError::ClientError(e.to_string()))
+    }
+
+    fn to_session_info(session: SessionEnvelope) -> SessionInfo {
+        SessionInfo {
+            id: session.id,
+            current_model: session.model,
+            message_count: session.message_count,
+            last_activity: session.last_activity,
+        }
+    }
+}
+
+fn default_context(user_id: &str) -> CanonicalContext {
+    CanonicalContext {
+        source_type: "api".to_string(),
+        provider: "talos-client".to_string(),
+        channel_id: "default".to_string(),
+        user_id: user_id.to_string(),
+        thread_id: None,
+        message_id: None,
+        trace_id: None,
+    }
+}
+
+fn is_local_gateway_url(gateway_url: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(gateway_url) else {
+        return false;
+    };
+
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_client_creation() {
+        let config = ClientConfig::default();
+        let client = TalosClient::new(config);
+        assert!(client.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_client_config_defaults() {
+        let config = ClientConfig::default();
+        assert_eq!(config.gateway_url, "http://localhost:8080");
+        assert_eq!(config.timeout, 30);
+        assert!(config.auth_token.is_none());
+    }
+
+    #[test]
+    fn test_default_context_values() {
+        let ctx = default_context("user-1");
+        assert_eq!(ctx.source_type, "api");
+        assert_eq!(ctx.provider, "talos-client");
+        assert_eq!(ctx.channel_id, "default");
+        assert_eq!(ctx.user_id, "user-1");
+    }
+
+    #[test]
+    fn test_is_local_gateway_url() {
+        assert!(is_local_gateway_url("http://localhost:8080"));
+        assert!(is_local_gateway_url("http://127.0.0.1:8080"));
+        assert!(!is_local_gateway_url("http://example.com:8080"));
+    }
+
+    #[test]
+    fn test_to_session_info_mapping() {
+        let envelope = SessionEnvelope {
+            id: "sess_1".to_string(),
+            model: "gpt-4o-mini".to_string(),
+            message_count: 7,
+            last_activity: 123,
+            context: default_context("u"),
+            metadata: Some(serde_json::json!({"k":"v"})),
+        };
+
+        let info = TalosClient::to_session_info(envelope);
+        assert_eq!(info.id, "sess_1");
+        assert_eq!(info.current_model, "gpt-4o-mini");
+        assert_eq!(info.message_count, 7);
+        assert_eq!(info.last_activity, 123);
+    }
+}

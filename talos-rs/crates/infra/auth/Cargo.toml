@@ -1,0 +1,30 @@
+[package]
+name = "talos-auth"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Talos - Authentication Layer (JWT/Device Pairing)"
+repository.workspace = true
+
+[dependencies]
+# Async
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# JWT
+jsonwebtoken = "9"
+
+# Error handling
+talos-error = { path = "../error" }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Utils
+uuid = { workspace = true }
+rand = "0.8"

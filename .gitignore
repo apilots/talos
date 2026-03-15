@@ -1,0 +1,37 @@
+# Logs
+logs/
+*.log
+
+# Build
+target/
+**/target/
+
+# Cargo
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Environment
+.env
+.env.local
+
+# Claude
+claude*
+AGENTS.md
+
+# DB
+*.db
+
+# ci
+*reports
+
+# sisyphus
+.sisyphus
+docs

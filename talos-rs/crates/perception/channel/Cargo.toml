@@ -1,0 +1,16 @@
+[package]
+name = "talos-channel"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Talos - channel"
+repository.workspace = true
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+tracing = "0.1"
+tokio = { version = "1.0", features = ["full"] }
+async-trait = "0.1"
+talos-types = { path = "../../../crates/common/types" }

@@ -1,0 +1,33 @@
+[package]
+name = "talos-llm-provider"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Talos - LLM Provider Trait"
+repository.workspace = true
+
+[dependencies]
+# Async
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+derive_builder = "0.20"
+
+# Error handling
+talos-error = { path = "../../../infra/error" }
+
+# Types
+talos-types = { path = "../../types" }
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# Logging
+tracing = { workspace = true }
+
+# Utilities
+thiserror = { workspace = true }

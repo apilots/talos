@@ -1,0 +1,25 @@
+[package]
+name = "talos-agent"
+version = "0.1.0"
+edition = "2021"
+description = "Talos orchestration agent module"
+
+[dependencies]
+talos-error = { workspace = true }
+talos-config = { workspace = true }
+talos-types = { workspace = true }
+talos-llm-provider = { workspace = true }
+talos-memory = { workspace = true }
+talos-tools = { workspace = true }
+talos-tools-policy = { workspace = true }
+talos-session-store = { path = "../session-store" }
+talos-agent-kernel = { path = "../agent-kernel" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+uuid = { workspace = true, features = ["v4", "serde"] }
+chrono = { workspace = true, features = ["serde"] }
+dashmap = "5.4"

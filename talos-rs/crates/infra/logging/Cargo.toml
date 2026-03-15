@@ -1,0 +1,20 @@
+[package]
+name = "talos-logging"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Talos - Logging and Tracing"
+repository.workspace = true
+
+[dependencies]
+# Core tracing
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+
+# Error handling
+talos-error = { path = "../error" }
+
+# Config
+serde = { workspace = true }
