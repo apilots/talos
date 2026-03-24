@@ -458,20 +458,13 @@ impl Default for GatewayConfig {
     }
 }
 
-/// 渠道配置
+/// Channel configurations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ChannelsConfig {
-    /// WhatsApp 配置
     pub whatsapp: ChannelConfig,
-
-    /// Telegram 配置
-    pub telegram: ChannelConfig,
-
-    /// Discord 配置
+    pub telegram: TelegramChannelsConfig,
     pub discord: ChannelConfig,
-
-    /// Feishu 配置
     pub feishu: ChannelConfig,
 }
 
@@ -479,43 +472,28 @@ impl Default for ChannelsConfig {
     fn default() -> Self {
         Self {
             whatsapp: ChannelConfig::default(),
-            telegram: ChannelConfig::default(),
+            telegram: TelegramChannelsConfig::default(),
             discord: ChannelConfig::default(),
             feishu: ChannelConfig::default(),
         }
     }
 }
 
-/// 单个渠道配置
+/// Generic channel configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelConfig {
-    /// 是否启用
     #[serde(default)]
     pub enabled: bool,
-
-    /// 认证 Token/密钥
     #[serde(default)]
     pub token: Option<String>,
-
-    /// 允许的用户列表
     #[serde(default)]
     pub allow_from: Vec<String>,
-
-    /// DM 策略 (pairing/allowlist/open)
+    /// DM policy: open/pairing/allowlist
     #[serde(default = "default_dm_policy")]
     pub dm_policy: String,
-
-    /// Session DM scope (per_channel_peer_topic/per_channel_peer/main)
+    /// DM scope: per_channel_peer_topic/per_channel_peer/main
     #[serde(default = "default_dm_scope")]
     pub dm_scope: String,
-}
-
-fn default_dm_policy() -> String {
-    "pairing".to_string()
-}
-
-fn default_dm_scope() -> String {
-    "per_channel_peer_topic".to_string()
 }
 
 impl Default for ChannelConfig {
@@ -526,6 +504,139 @@ impl Default for ChannelConfig {
             allow_from: Vec::new(),
             dm_policy: default_dm_policy(),
             dm_scope: default_dm_scope(),
+        }
+    }
+}
+
+/// Telegram channels config (multi-account support)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TelegramChannelsConfig {
+    pub enabled: bool,
+    pub token: Option<String>,
+    pub allow_from: Vec<String>,
+    /// DM policy: open/pairing/allowlist
+    pub dm_policy: String,
+    /// Group policy: open/mention/allowlist
+    pub group_policy: String,
+    pub group_allow_from: Vec<String>,
+    /// DM scope: per_channel_peer_topic/per_channel_peer/main
+    pub dm_scope: String,
+    /// Mode: polling/webhook
+    pub mode: String,
+    pub webhook_url: Option<String>,
+    pub webhook_secret: Option<String>,
+    pub accounts: Vec<TelegramAccountConfig>,
+}
+
+/// Telegram account config
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TelegramAccountConfig {
+    pub id: String,
+    pub enabled: bool,
+    pub token: Option<String>,
+    pub token_file: Option<String>,
+    /// DM policy: open/pairing/allowlist
+    pub dm_policy: String,
+    /// Group policy: open/mention/allowlist
+    pub group_policy: String,
+    pub allow_from: Vec<String>,
+    pub group_allow_from: Vec<String>,
+    /// Mode: polling/webhook
+    pub mode: String,
+    pub webhook_url: Option<String>,
+    pub groups: Vec<TelegramGroupConfig>,
+}
+
+/// Telegram group config
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TelegramGroupConfig {
+    pub id: String,
+    pub require_mention: bool,
+    pub allow_from: Vec<String>,
+    pub topics: Vec<TelegramTopicConfig>,
+}
+
+/// Telegram topic config
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TelegramTopicConfig {
+    pub id: String,
+    pub require_mention: bool,
+    pub allow_from: Vec<String>,
+}
+
+fn default_dm_policy() -> String {
+    "open".to_string()
+}
+
+fn default_group_policy() -> String {
+    "mention".to_string()
+}
+
+fn default_dm_scope() -> String {
+    "per_channel_peer_topic".to_string()
+}
+
+fn default_telegram_mode() -> String {
+    "polling".to_string()
+}
+
+impl Default for TelegramChannelsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            token: None,
+            allow_from: Vec::new(),
+            dm_policy: default_dm_policy(),
+            group_policy: default_group_policy(),
+            group_allow_from: Vec::new(),
+            dm_scope: default_dm_scope(),
+            mode: default_telegram_mode(),
+            webhook_url: None,
+            webhook_secret: None,
+            accounts: Vec::new(),
+        }
+    }
+}
+
+impl Default for TelegramAccountConfig {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            enabled: true,
+            token: None,
+            token_file: None,
+            dm_policy: default_dm_policy(),
+            group_policy: default_group_policy(),
+            allow_from: Vec::new(),
+            group_allow_from: Vec::new(),
+            mode: default_telegram_mode(),
+            webhook_url: None,
+            groups: Vec::new(),
+        }
+    }
+}
+
+impl Default for TelegramGroupConfig {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            require_mention: true,
+            allow_from: Vec::new(),
+            topics: Vec::new(),
+        }
+    }
+}
+
+impl Default for TelegramTopicConfig {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            require_mention: false,
+            allow_from: Vec::new(),
         }
     }
 }
@@ -1104,7 +1215,6 @@ pub fn generate_default_config() -> String {
 # Agent 配置
 agent:
   name: jarvis
-  workspace: ~/.openclaw/workspace
   model: claude-3-5-sonnet
   kernel:
     max_iters: 1

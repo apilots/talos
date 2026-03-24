@@ -99,6 +99,7 @@ impl HttpApiState {
 pub struct HttpServer {
     gateway: Arc<dyn Gateway>,
     session_service: Arc<dyn SessionService>,
+    host: String,
     port: u16,
     jwt_secret: String,
     static_token: Option<String>,
@@ -112,6 +113,7 @@ impl HttpServer {
     pub fn new(
         gateway: Arc<dyn Gateway>,
         session_service: Arc<dyn SessionService>,
+        host: impl Into<String>,
         port: u16,
         _default_model: impl Into<String>,
         model_provider: impl Into<String>,
@@ -120,6 +122,7 @@ impl HttpServer {
         Self {
             gateway,
             session_service,
+            host: host.into(),
             port,
             jwt_secret: String::new(),
             static_token: None,
@@ -149,7 +152,7 @@ impl HttpServer {
 
     /// Start the HTTP server.
     pub async fn run(&self) -> TalosResult<()> {
-        info!("Starting HTTP server on port {}", self.port);
+        info!("Starting HTTP server on {}:{}", self.host, self.port);
 
         let state = Arc::new(HttpApiState::new(
             self.gateway.clone(),
@@ -180,14 +183,14 @@ impl HttpServer {
             .layer(middleware::from_fn_with_state(state, auth_middleware))
             .layer(CorsLayer::permissive());
 
-        let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", self.port))
+        let listener = tokio::net::TcpListener::bind(self.listen_addr())
             .await
             .map_err(|e| {
-                error!("Failed to bind to port {}: {}", self.port, e);
+                error!("Failed to bind to {}:{}: {}", self.host, self.port, e);
                 talos_error::TalosError::NetworkError(e.to_string())
             })?;
 
-        info!("HTTP server listening on port {}", self.port);
+        info!("HTTP server listening on {}:{}", self.host, self.port);
 
         axum::serve(listener, app)
             .with_graceful_shutdown(shutdown_signal())
@@ -198,6 +201,10 @@ impl HttpServer {
             })?;
 
         Ok(())
+    }
+
+    fn listen_addr(&self) -> String {
+        format!("{}:{}", self.host, self.port)
     }
 }
 
@@ -948,6 +955,21 @@ mod tests {
             .await
             .expect("request should succeed");
         assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn test_http_server_listen_addr_uses_configured_host() {
+        let server = HttpServer::new(
+            Arc::new(MockGateway),
+            Arc::new(MockSessionService),
+            "127.0.0.1",
+            8080,
+            "qwen-max",
+            "mock-provider",
+            vec!["qwen-max".to_string()],
+        );
+
+        assert_eq!(server.listen_addr(), "127.0.0.1:8080");
     }
 
     #[tokio::test]

@@ -1,6 +1,6 @@
 use crate::{
-    Agent, ContextStateBags, DefaultRunner, KernelStreamEvent, RunRequest, Runner,
-    SessionHandle, TaskResult,
+    Agent, ContextStateBags, DefaultRunner, KernelStreamEvent, RunRequest, Runner, SessionHandle,
+    TaskResult,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -110,9 +110,7 @@ impl KernelRuntime {
             metadata: input.metadata,
             session_handle: input.session_handle,
             initial_state_bags: input.initial_state_bags,
-            kernel_config: input
-                .kernel_config
-                .map(|c| c.clone()),
+            kernel_config: input.kernel_config.map(|c| c.clone()),
             stream_tx: input.stream_tx,
         };
 

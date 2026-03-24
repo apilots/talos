@@ -10,7 +10,7 @@ path = "src/main.rs"
 [dependencies]
 talos-gateway = { path = "../../crates/gateway/core" }
 talos-gateway-http = { path = "../../crates/gateway/http" }
-talos-channels = { path = "../../crates/gateway/channels" }
+talos-channel = { path = "../../crates/perception/channels" }
 talos-coordinator = { path = "../../crates/orchestration/coordinator" }
 talos-router = { path = "../../crates/orchestration/router" }
 talos-session-store = { path = "../../crates/orchestration/session-store" }

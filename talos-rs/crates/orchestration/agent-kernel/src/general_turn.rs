@@ -308,9 +308,7 @@ async fn stream_round(
     })
 }
 
-pub async fn run_general_turn(
-    ctx: &GeneralTurnContext,
-) -> TalosResult<GeneralTurnResult> {
+pub async fn run_general_turn(ctx: &GeneralTurnContext) -> TalosResult<GeneralTurnResult> {
     // Extract fields from context for local use
     let session_id = &ctx.session_id;
     let agent_id = &ctx.agent_id;

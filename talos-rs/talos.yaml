@@ -8,7 +8,6 @@ gateway:
 agent:
   name: "talos"
   model: "qwen-max"
-  workspace: "~/.talos/workspace"
   kernel:
     max_iters: 1
     max_task_per_turn: 3
@@ -43,7 +42,42 @@ channels:
     enabled: false
   telegram:
     enabled: false
+    token: ${TELEGRAM_BOT_TOKEN}
+    allow_from: []
+    dm_policy: "open"
+    group_policy: "mention"
+    group_allow_from: []
     dm_scope: "per_channel_peer_topic"
+    mode: "polling"
+    webhook_url: null
+    accounts:
+      - id: "telegram-default"
+        enabled: false
+        token: ${TELEGRAM_ACCOUNT_1_TOKEN}
+        dm_policy: "open"
+        group_policy: "mention"
+        allow_from: []
+        group_allow_from: []
+        mode: "polling"
+        webhook_url: ${TELEGRAM_ACCOUNT_1_WEBHOOK_URL}
+        groups:
+          - id: ${TELEGRAM_GROUP_ID}
+            require_mention: true
+            allow_from: []
+            topics:
+              - id: ${TELEGRAM_TOPIC_ID}
+                require_mention: false
+                allow_from: []
+      - id: "telegram-webhook"
+        enabled: false
+        token: ${TELEGRAM_ACCOUNT_2_TOKEN}
+        dm_policy: "open"
+        group_policy: "mention"
+        allow_from: []
+        group_allow_from: []
+        mode: "webhook"
+        webhook_url: ${TELEGRAM_ACCOUNT_2_WEBHOOK_URL}
+        groups: []
   discord:
     enabled: false
   feishu:
@@ -53,8 +87,11 @@ llm:
   provider: "bailian"
   model: "qwen-max"
   anthropic:
+    api_key: ${ANTHROPIC_API_KEY}
     enabled: false
   openai:
+    api_key: ${OPENAI_API_KEY}
+    base_url: "https://api.openai.com/v1"
     enabled: false
   bailian:
     api_key: ${BAILIAN_API_KEY}
@@ -65,6 +102,7 @@ llm:
       - "qwen-plus"
       - "qwen-turbo"
   ollama:
+    api_key: null
     enabled: false
     base_url: "http://localhost:11434"
 
