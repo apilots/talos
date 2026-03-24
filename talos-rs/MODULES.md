@@ -359,25 +359,28 @@ pub enum Input {
 ---
 
 ### 15. `talos-channel`
-**路径**: `crates/perception/channel/`
+**路径**: `crates/perception/channels/`
 
-**职责**：Channel trait 定义
+**职责**：IM channel 接入与 ChannelServer 运行时
 
 **核心功能**：
-- `Channel` trait（所有渠道的统一接口）
-- 消息类型定义
-- 渠道适配器基类
+- `ChannelServer`（统一管理和运行各 IM channel）
+- `Channel` trait（平台适配接口）
+- Telegram channel 实现与出站/流式适配器
 
 **关键 trait**：
 ```rust
+pub struct ChannelServer;
+
 pub trait Channel: Send + Sync {
-    async fn receive(&self) -> Result<Message>;
-    async fn send(&self, message: Message) -> Result<()>;
-    fn name(&self) -> &str;
+    fn definition(&self) -> &ChannelDefinition;
+    fn enabled_account_ids(&self, config: &Config) -> Vec<String>;
+    async fn start_account(&self, ctx: ChannelRuntimeContext) -> TalosResult<()>;
+    async fn stop_account(&self, account_id: &str) -> TalosResult<()>;
 }
 ```
 
-**依赖**：`talos-types`, `talos-error`, `talos-input`
+**依赖**：`talos-types`, `talos-error`, `talos-config`
 
 ---
 

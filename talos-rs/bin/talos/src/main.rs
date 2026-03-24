@@ -1,9 +1,11 @@
+mod host;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use dotenv::dotenv;
 use talos_agent::{AgentImpl, AgentOrchestrator};
-use talos_channels::Channels;
+use talos_channel::{ChannelServer, TelegramChannel};
 use talos_config::Config;
 use talos_coordinator::{Coordinator, CoordinatorImpl};
 use talos_error::TalosResult;
@@ -17,6 +19,8 @@ use talos_storage::{create_storage, StorageConfig};
 use talos_tools::{EditTool, ExecTool, ReadTool, ToolRegistry, WriteTool};
 use talos_types::{RequestHandler, SessionService};
 use tracing::{error, info};
+
+use crate::host::TalosHost;
 
 #[tokio::main]
 async fn main() {
@@ -91,29 +95,25 @@ async fn main() {
 
     let request_handler: Arc<dyn RequestHandler> = coordinator.clone();
     let session_service: Arc<dyn SessionService> = coordinator.clone();
-    let gateway: Arc<dyn Gateway> = Arc::new(GatewayImpl::new(request_handler));
+    let gateway: Arc<dyn Gateway> = Arc::new(GatewayImpl::new(request_handler.clone()));
 
-    let _channels = match Channels::start_enabled(gateway.clone(), &config).await {
-        Ok(channels) => channels,
-        Err(e) => {
-            error!("failed to start telegram channel: {}", e);
-            std::process::exit(1);
-        }
-    };
+    let mut channel_server = ChannelServer::new(Arc::new(config.clone()), request_handler);
+    channel_server.register(Box::new(TelegramChannel::new()));
 
     let default_model = config.llm.model.clone();
     let model_provider = resolve_model_provider(&config);
     let supported_models = resolve_supported_models(&config, &default_model);
-    let mut server = HttpServer::new(
+    let mut http_server = HttpServer::new(
         gateway,
         session_service,
+        config.gateway.host.clone(),
         config.gateway.port,
         default_model,
         model_provider,
         supported_models,
     );
     if config.gateway.auth {
-        server = server.with_jwt_secret(
+        http_server = http_server.with_jwt_secret(
             config
                 .gateway
                 .jwt_secret
@@ -122,14 +122,16 @@ async fn main() {
         );
     }
     if let Some(token) = config.gateway.token.clone() {
-        server = server.with_static_token(token);
+        http_server = http_server.with_static_token(token);
     }
     if !config.gateway.auth {
-        server = server.with_auth_disabled(true);
+        http_server = http_server.with_auth_disabled(true);
     }
 
-    if let Err(e) = server.run().await {
-        error!("server error: {}", e);
+    let host = TalosHost::new().server(http_server).channel(channel_server);
+
+    if let Err(e) = host.run().await {
+        error!("host error: {}", e);
     }
 }
 

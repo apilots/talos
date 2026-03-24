@@ -42,7 +42,10 @@ impl Runner for DefaultRunner {
             stream_tx,
         } = request;
 
-        let config = kernel_config.as_ref().map(|c| c.clone()).unwrap_or_default();
+        let config = kernel_config
+            .as_ref()
+            .map(|c| c.clone())
+            .unwrap_or_default();
 
         let mut ctx = crate::InvocationContext {
             session_id,

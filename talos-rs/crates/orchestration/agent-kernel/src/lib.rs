@@ -22,6 +22,6 @@ pub use runtime::{KernelBuilder, KernelInput, KernelOutput, KernelRuntime};
 pub use traits::{Agent, BaseKernelAgent, Planner, Plugin, Runner, TaskHandler};
 pub use types::{
     AgentRunResult, ContextStateBags, InvocationContext, InvocationLimits, KernelEvent,
-    KernelEventType, KernelStreamEvent, RunRequest, RunResponse, SessionHandle,
-    TaskConstraints, TaskKind, TaskPlan, TaskResult, TaskSpec, TaskStatus,
+    KernelEventType, KernelStreamEvent, RunRequest, RunResponse, SessionHandle, TaskConstraints,
+    TaskKind, TaskPlan, TaskResult, TaskSpec, TaskStatus,
 };

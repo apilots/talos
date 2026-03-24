@@ -1,0 +1,39 @@
+[package]
+name = "talos-channel"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Talos - Channel abstraction and implementations"
+repository.workspace = true
+
+[dependencies]
+# Async
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Telegram
+teloxide = { version = "0.12", features = ["macros"] }
+
+# Internal
+talos-types = { path = "../../../crates/common/types" }
+talos-error = { path = "../../../crates/infra/error" }
+talos-config = { path = "../../../crates/infra/config" }
+
+# Utils
+chrono = { version = "0.4", features = ["serde"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
