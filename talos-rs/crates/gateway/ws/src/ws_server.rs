@@ -9,7 +9,8 @@ use tokio_tungstenite::{accept_async, tungstenite::Error as WsError};
 use uuid::Uuid;
 
 use talos_error::{TalosError, TalosResult};
-use talos_gateway::{Gateway, GatewayRequest, GatewayResponse};
+use talos_gateway::{Gateway, GatewayRequest, TalosInputItem};
+use talos_types::talos::TalosContext;
 
 // WebSocket连接状态枚举
 #[derive(Debug, Clone)]
@@ -153,7 +154,7 @@ impl WsServer {
         info!("WebSocket connection {} registered", conn_id);
 
         // 将WebSocket流分割为发送和接收部分
-        let (mut ws_sender, mut ws_receiver) = ws_stream.split();
+        let (ws_sender, mut ws_receiver) = ws_stream.split();
 
         // 消息发送任务 - 从内部队列获取消息并发送到WebSocket
         let send_task = {
@@ -215,13 +216,13 @@ impl WsServer {
 
                                     // 将消息转发给网关处理
                                     let request = GatewayRequest {
-                                        channel: format!("ws_{}", conn_id_clone),
-                                        user_id: conn_id_clone.clone(),
-                                        content: text.clone(),
-                                        model: None,
-                                        session_id: None,
-                                        context: None,
-                                        metadata: None,
+                                        session_id: format!("ws-session-{}", conn_id_clone),
+                                        workspace_id: None,
+                                        input: vec![TalosInputItem::Text {
+                                            text: text.clone(),
+                                        }],
+                                        context: TalosContext::ws(conn_id_clone.clone())
+                                            .with_channel_id(format!("ws_{}", conn_id_clone)),
                                     };
 
                                     if let Err(e) = gateway_clone.handle_request(request).await {
@@ -245,13 +246,16 @@ impl WsServer {
                                     let text_content =
                                         format!("binary_data_{}", String::from_utf8_lossy(&data));
                                     let request = GatewayRequest {
-                                        channel: format!("ws_{}_binary", conn_id_clone),
-                                        user_id: conn_id_clone.clone(),
-                                        content: text_content,
-                                        model: None,
-                                        session_id: None,
-                                        context: None,
-                                        metadata: None,
+                                        session_id: format!("ws-binary-session-{}", conn_id_clone),
+                                        workspace_id: None,
+                                        input: vec![TalosInputItem::Text {
+                                            text: text_content,
+                                        }],
+                                        context: TalosContext::ws(conn_id_clone.clone())
+                                            .with_channel_id(format!(
+                                                "ws_{}_binary",
+                                                conn_id_clone
+                                            )),
                                     };
 
                                     if let Err(e) = gateway_clone.handle_request(request).await {
@@ -362,43 +366,46 @@ impl WsServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use talos_gateway::Gateway;
+    use talos_gateway::{Gateway, GatewayResponse};
+    use talos_types::talos::{
+        TalosEvent, TalosEventType, TalosInputItem, TalosOutputItem, TalosReasoning, TalosUsage,
+    };
 
     struct MockGateway;
 
     #[async_trait::async_trait]
     impl Gateway for MockGateway {
         async fn handle_request(&self, request: GatewayRequest) -> TalosResult<GatewayResponse> {
-            println!("Mock gateway received: {}", request.content);
+            let text = extract_text_input(&request.input);
+            println!("Mock gateway received: {}", text);
             Ok(GatewayResponse {
-                content: format!("Echo: {}", request.content),
-                output_items: vec![talos_types::canonical::CanonicalOutputItem::OutputText {
-                    text: format!("Echo: {}", request.content),
+                content: format!("Echo: {}", text),
+                output_items: vec![TalosOutputItem::OutputText {
+                    text: format!("Echo: {}", text),
+                }],
+                reasoning: vec![TalosReasoning {
+                    text: "mock reasoning".to_string(),
                 }],
                 stop_reason: "end_turn".to_string(),
-                usage: talos_types::canonical::CanonicalUsage::default(),
+                usage: TalosUsage::default(),
                 success: true,
                 model: "mock-model".to_string(),
-                session_id: None,
+                session_id: "session-mock".to_string(),
             })
         }
 
         async fn handle_request_stream(
             &self,
             request: GatewayRequest,
-        ) -> TalosResult<tokio::sync::mpsc::Receiver<talos_types::canonical::CanonicalEvent>>
-        {
+        ) -> TalosResult<tokio::sync::mpsc::Receiver<TalosEvent>> {
             let response = self.handle_request(request).await?;
             let (tx, rx) = tokio::sync::mpsc::channel(8);
             tokio::spawn(async move {
                 let _ = tx
-                    .send(talos_types::canonical::CanonicalEvent {
-                        event_type: talos_types::canonical::CanonicalEventType::MessageStarted,
+                    .send(TalosEvent {
+                        event_type: TalosEventType::MessageStarted,
                         message_id: "msg_mock".to_string(),
-                        session_id: response
-                            .session_id
-                            .clone()
-                            .unwrap_or_else(|| "session-mock".to_string()),
+                        session_id: response.session_id.clone(),
                         sequence: 0,
                         data: serde_json::json!({"model": response.model}),
                     })
@@ -410,6 +417,16 @@ mod tests {
         async fn start(&self) -> TalosResult<()> {
             Ok(())
         }
+    }
+
+    fn extract_text_input(input: &[TalosInputItem]) -> String {
+        input.iter()
+            .filter_map(|item| match item {
+                TalosInputItem::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     #[tokio::test]

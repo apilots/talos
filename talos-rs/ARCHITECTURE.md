@@ -373,7 +373,6 @@ pub struct Learner {
 ### Phase 3 - Agent + 会话（Week 7-9）
 
 ```
-├── orchestration/session/
 ├── orchestration/session-store/
 ├── orchestration/agent/
 └── orchestration/agent-workspace/
@@ -524,7 +523,7 @@ talos-rs/
 | 3 | 创建 `common/llm/provider/` | 🔴 高 | ⏳ 待开始 |
 | 4 | 创建 `common/types/` | 🟡 中 | ⏳ 待开始 |
 | 5 | 实现 `cognition/memory/` | 🟡 中 | ⏳ 待开始 |
-| 6 | 实现 `orchestration/session/` | 🟡 中 | ⏳ 待开始 |
+| 6 | 实现 `orchestration/session-store/` | 🟡 中 | ⏳ 待开始 |
 | 7 | 实现 `orchestration/agent/` | 🟡 中 | ⏳ 待开始 |
 | 8 | 补充所有 crate 的依赖关系 | 🔴 高 | ⏳ 待开始 |
 

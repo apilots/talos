@@ -26,18 +26,12 @@ import os
 payload = {
     "input": [
         {
-            "type": "input_text",
+            "type": "text",
             "text": os.environ["INPUT_TEXT"]
         }
     ],
     "stream": False,
-    "model": None,
-    "metadata": {
-        "case": "bilingual_and_tools",
-        "max_tool_rounds": 8,
-        "tool_output_max_bytes": 65536,
-        "context_compaction_max_bytes": 262144,
-    },
+    "workspace_id": None,
 }
 print(json.dumps(payload, ensure_ascii=False))
 PY
@@ -51,16 +45,14 @@ import os
 
 payload = {
     "context": {
-        "source_type": "api",
-        "provider": "scenario",
+        "source_type": "http",
+        "provider": "http",
         "channel_id": "bilingual-tools",
         "user_id": os.environ["USER_ID"],
         "thread_id": None,
-        "message_id": None,
-        "trace_id": None,
+        "message_id": "msg-bilingual-tools",
+        "trace_id": "trace-bilingual-tools",
     },
-    "model": None,
-    "metadata": {"case": "bilingual_and_tools"},
 }
 print(json.dumps(payload, ensure_ascii=False))
 PY
@@ -226,18 +218,11 @@ import json
 payload = {
     "input": [
         {
-            "type": "input_text",
+            "type": "text",
             "text": "You must call exec tool with command ls, then summarize in one short sentence.",
         }
     ],
     "stream": True,
-    "model": None,
-    "metadata": {
-        "case": "bilingual_and_tools_stream",
-        "max_tool_rounds": 8,
-        "tool_output_max_bytes": 65536,
-        "context_compaction_max_bytes": 262144,
-    },
 }
 print(json.dumps(payload, ensure_ascii=False))
 PY

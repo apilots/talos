@@ -6,22 +6,22 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::{
-    Agent, AgentOrchestrator, AgentResponse, AgentStream, OrchestratorEvent, OrchestratorExecution,
-    OrchestratorRequest,
+    Agent, AgentOrchestrator, AgentRequest, AgentResponse, OrchestratorEvent,
+    OrchestratorExecution, OrchestratorRequest,
 };
 use serde_json::{json, Value};
 use talos_agent_kernel::{
-    Agent as KernelAgent, AgentRunResult, BuiltInPlanner, InvocationContext, KernelInput,
-    KernelRuntime, KernelStreamEvent, LlmKernelAgent, LoopKernelAgent, ParallelKernelAgent,
-    PlanReActPlanner, Planner, RoutingKernelAgent, SequentialKernelAgent, SessionHandle, TaskKind,
-    TaskResult, TaskStatus,
+    flush_session_memory, Agent as KernelAgent, AgentRunResult, BuiltInPlanner,
+    InvocationContext, KernelRuntime, KernelStreamEvent, LlmKernelAgent, LoopKernelAgent,
+    ParallelKernelAgent, PlanReActPlanner, Planner, RoutingKernelAgent, RunRequest,
+    SequentialKernelAgent, TaskKind, TaskResult, TaskStatus,
 };
 use talos_config::AgentKernelConfig;
 use talos_error::TalosResult;
 use talos_llm_provider::{ChatMessage, FunctionCall, LlmProvider};
 use talos_memory::MemoryStore;
 use talos_tools::ToolRegistry;
-use talos_types::canonical::{CanonicalOutputItem, CanonicalUsage};
+use talos_types::talos::{TalosInputItem, TalosOutputItem, TalosReasoning, TalosUsage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum KernelExecutionMode {
@@ -94,10 +94,6 @@ impl KernelAgentRegistry {
             .or_else(|| self.kind_map.get(self.default_kind.as_str()).copied())
             .unwrap_or(KernelAgentKind::Llm)
     }
-
-    fn supports_kind(&self, kind: &str) -> bool {
-        self.kind_map.contains_key(&kind.to_ascii_lowercase())
-    }
 }
 
 #[derive(Clone)]
@@ -116,6 +112,63 @@ pub struct AgentImpl {
 }
 
 impl AgentImpl {
+    fn extract_text_input(input: &[TalosInputItem]) -> String {
+        input
+            .iter()
+            .filter_map(|item| match item {
+                TalosInputItem::Text { text } => {
+                    let normalized = text.trim();
+                    if normalized.is_empty() {
+                        None
+                    } else {
+                        Some(normalized.to_string())
+                    }
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+
+    fn collect_reasoning(output_items: &[TalosOutputItem]) -> Vec<TalosReasoning> {
+        output_items
+            .iter()
+            .filter_map(|item| match item {
+                TalosOutputItem::Reasoning { text } => Some(TalosReasoning { text: text.clone() }),
+                _ => None,
+            })
+            .collect()
+    }
+
+    async fn finalize_session_memory(&self, session: &talos_types::TalosSession) -> TalosResult<()> {
+        let selected_model = if session.config.llm.model.trim().is_empty() {
+            self.model.as_str()
+        } else {
+            session.config.llm.model.as_str()
+        };
+        flush_session_memory(
+            &session.context.session_id,
+            selected_model,
+            self.llm_provider.clone(),
+            &self.memory_store,
+            &self.kernel_config,
+            false,
+            false,
+            self.kernel_config.memory.workspace_memory_flush_enabled,
+        )
+        .await
+    }
+
+    fn to_agent_request(&self, request: OrchestratorRequest) -> AgentRequest {
+        AgentRequest {
+            session: request.session,
+            input: request.input,
+            phase: talos_agent_kernel::TurnPhase::Execution,
+            planning_instruction: None,
+            transfer_to: None,
+        }
+    }
+
     fn normalized_kernel_config(mut kernel_config: AgentKernelConfig) -> AgentKernelConfig {
         if PlannerMode::parse(&kernel_config.planner_mode).is_none() {
             kernel_config.planner_mode = PlannerMode::BuiltIn.as_str().to_string();
@@ -138,17 +191,17 @@ impl AgentImpl {
         kernel_config.prompt.max_static_tokens = kernel_config.prompt.max_static_tokens.max(1);
         kernel_config.prompt.max_dynamic_tokens = kernel_config.prompt.max_dynamic_tokens.max(1);
         kernel_config.memory.hot_recent_messages = kernel_config.memory.hot_recent_messages.max(1);
-        kernel_config.memory.context_target_messages =
-            kernel_config.memory.context_target_messages.max(1);
-        kernel_config.memory.summary_recent_count =
-            kernel_config.memory.summary_recent_count.max(1);
-        kernel_config.memory.summary_max_chars = kernel_config.memory.summary_max_chars.max(128);
+        kernel_config.memory.session_recent_messages_limit =
+            kernel_config.memory.session_recent_messages_limit.max(1);
+        kernel_config.memory.session_summary_recent_count =
+            kernel_config.memory.session_summary_recent_count.max(1);
+        kernel_config.memory.session_summary_max_chars =
+            kernel_config.memory.session_summary_max_chars.max(128);
         kernel_config.memory.compaction_threshold_bytes =
             kernel_config.memory.compaction_threshold_bytes.max(1024);
-        kernel_config.memory.long_term_min_importance = kernel_config
-            .memory
-            .long_term_min_importance
-            .clamp(0.0, 1.0);
+        kernel_config.memory.search_max_results = kernel_config.memory.search_max_results.max(1);
+        kernel_config.memory.search_min_score =
+            kernel_config.memory.search_min_score.clamp(0.0, 1.0);
         kernel_config
     }
 
@@ -160,10 +213,6 @@ impl AgentImpl {
         self.memory_store = Arc::new(Self::build_memory_store_from_kernel_config(
             &self.kernel_config,
         ));
-    }
-
-    fn default_planner_mode(&self) -> PlannerMode {
-        PlannerMode::parse(&self.kernel_config.planner_mode).unwrap_or(PlannerMode::BuiltIn)
     }
 
     pub fn new(
@@ -242,7 +291,7 @@ impl AgentImpl {
         let context = self.tool_registry.build_context(
             format!("agent-{}", self.id),
             self.name.clone(),
-            HashMap::new(),
+            Some(Arc::new(self.kernel_config_snapshot())),
         );
 
         for tool_call in tool_calls {
@@ -342,123 +391,6 @@ After receiving tool outputs, continue reasoning and provide the final response.
         )
     }
 
-    fn merged_kernel_metadata(&self, metadata: Option<Value>) -> Option<Value> {
-        let mut data = match metadata {
-            Some(Value::Object(map)) => map,
-            Some(other) => {
-                let mut map = serde_json::Map::new();
-                map.insert("request_metadata".to_string(), other);
-                map
-            }
-            None => serde_json::Map::new(),
-        };
-        let kernel = &self.kernel_config;
-        Self::upsert_u64(
-            &mut data,
-            "max_tool_rounds",
-            kernel.max_tool_rounds as u64,
-            kernel.max_tool_rounds as u64,
-        );
-        Self::upsert_u64(
-            &mut data,
-            "tool_output_max_bytes",
-            kernel.tool_result_max_bytes as u64,
-            kernel.tool_result_max_bytes as u64,
-        );
-        Self::upsert_u64(
-            &mut data,
-            "context_compaction_max_bytes",
-            kernel.context_compaction_max_bytes as u64,
-            kernel.context_compaction_max_bytes as u64,
-        );
-        Self::upsert_u64(
-            &mut data,
-            "prompt_max_static_tokens",
-            kernel.prompt.max_static_tokens as u64,
-            kernel.prompt.max_static_tokens as u64,
-        );
-        Self::upsert_u64(
-            &mut data,
-            "prompt_max_dynamic_tokens",
-            kernel.prompt.max_dynamic_tokens as u64,
-            kernel.prompt.max_dynamic_tokens as u64,
-        );
-        Self::upsert_bool(
-            &mut data,
-            "prompt_include_workspace_summary",
-            kernel.prompt.include_workspace_summary,
-        );
-        Self::upsert_bool(
-            &mut data,
-            "prompt_include_recent_messages",
-            kernel.prompt.include_recent_messages,
-        );
-        Self::upsert_u64(
-            &mut data,
-            "memory_context_target_messages",
-            kernel.memory.context_target_messages as u64,
-            kernel.memory.context_target_messages as u64,
-        );
-        Self::upsert_bool(
-            &mut data,
-            "memory_enable_summary",
-            kernel.memory.enable_summary,
-        );
-        Self::upsert_u64(
-            &mut data,
-            "memory_summary_recent_count",
-            kernel.memory.summary_recent_count as u64,
-            kernel.memory.summary_recent_count as u64,
-        );
-        Self::upsert_u64(
-            &mut data,
-            "memory_summary_max_chars",
-            kernel.memory.summary_max_chars as u64,
-            kernel.memory.summary_max_chars as u64,
-        );
-        Self::upsert_u64(
-            &mut data,
-            "memory_compaction_threshold_bytes",
-            kernel.memory.compaction_threshold_bytes as u64,
-            kernel.memory.compaction_threshold_bytes as u64,
-        );
-        Self::upsert_bool(
-            &mut data,
-            "memory_long_term_fact_extraction_enabled",
-            kernel.memory.long_term_fact_extraction_enabled,
-        );
-        Self::upsert_f64(
-            &mut data,
-            "memory_long_term_min_importance",
-            kernel.memory.long_term_min_importance as f64,
-        );
-
-        let default_planner_mode = self.default_planner_mode();
-        if !kernel.allow_request_planner_override {
-            data.insert(
-                "planner_mode".to_string(),
-                json!(default_planner_mode.as_str()),
-            );
-        } else {
-            let normalized = data
-                .get("planner_mode")
-                .and_then(Value::as_str)
-                .and_then(PlannerMode::parse)
-                .unwrap_or(default_planner_mode)
-                .as_str()
-                .to_string();
-            data.insert("planner_mode".to_string(), json!(normalized));
-        }
-
-        let resolved_agent_kind =
-            Self::metadata_str(Some(&Value::Object(data.clone())), "kernel_agent_kind")
-                .unwrap_or_else(|| self.kernel_agent_registry.default_kind().to_string())
-                .to_ascii_lowercase();
-        data.insert("kernel_agent_kind".to_string(), json!(resolved_agent_kind));
-
-        Some(Value::Object(data))
-    }
-
     fn build_llm_kernel_agent(
         &self,
         id: impl Into<String>,
@@ -495,75 +427,30 @@ After receiving tool outputs, continue reasoning and provide the final response.
         }
     }
 
-    fn resolve_planner_mode(&self, metadata: Option<&Value>) -> PlannerMode {
-        let default_mode = self.default_planner_mode();
-        if !self.kernel_config.allow_request_planner_override {
-            return default_mode;
-        }
-        Self::metadata_str(metadata, "planner_mode")
-            .and_then(|value| PlannerMode::parse(&value))
-            .unwrap_or(default_mode)
+    fn resolve_planner_mode(&self) -> PlannerMode {
+        PlannerMode::parse(&self.kernel_config.planner_mode).unwrap_or(PlannerMode::BuiltIn)
     }
 
-    fn build_planner_for_request(&self, metadata: Option<&Value>) -> Arc<dyn Planner> {
+    fn build_planner_for_request(&self) -> Arc<dyn Planner> {
         if let Some(planner) = self.planner_override.as_ref() {
             return planner.clone();
         }
-        match self.resolve_planner_mode(metadata) {
+        match self.resolve_planner_mode() {
             PlannerMode::BuiltIn => Arc::new(BuiltInPlanner::new()),
             PlannerMode::PlanReAct => Arc::new(PlanReActPlanner::new()),
         }
     }
 
-    fn resolve_kernel_agent_kind(&self, metadata: Option<&Value>) -> KernelAgentKind {
-        let requested = Self::metadata_str(metadata, "kernel_agent_kind");
-        if let Some(kind) = requested.as_deref() {
-            if !self.kernel_agent_registry.supports_kind(kind) {
-                tracing::warn!(
-                    requested_kind = %kind,
-                    fallback_kind = %self.kernel_agent_registry.default_kind(),
-                    "unknown kernel_agent_kind, fallback to default"
-                );
-            }
-        }
-        self.kernel_agent_registry.resolve(requested.as_deref())
+    fn resolve_kernel_agent_kind(&self) -> KernelAgentKind {
+        self.kernel_agent_registry
+            .resolve(Some(self.kernel_agent_registry.default_kind()))
     }
 
-    fn metadata_u64(metadata: Option<&Value>, key: &str) -> Option<u64> {
-        metadata
-            .and_then(|value| value.get(key))
-            .and_then(|value| value.as_u64())
-    }
-
-    fn metadata_str(metadata: Option<&Value>, key: &str) -> Option<String> {
-        metadata
-            .and_then(|value| value.get(key))
-            .and_then(|value| value.as_str())
-            .map(|value| value.to_string())
-    }
-
-    fn upsert_u64(data: &mut serde_json::Map<String, Value>, key: &str, default: u64, cap: u64) {
-        let bounded = data
-            .get(key)
-            .and_then(Value::as_u64)
-            .map(|value| value.clamp(1, cap.max(1)))
-            .unwrap_or(default.max(1));
-        data.insert(key.to_string(), json!(bounded));
-    }
-
-    fn upsert_bool(data: &mut serde_json::Map<String, Value>, key: &str, default: bool) {
-        let value = data.get(key).and_then(Value::as_bool).unwrap_or(default);
-        data.insert(key.to_string(), json!(value));
-    }
-
-    fn upsert_f64(data: &mut serde_json::Map<String, Value>, key: &str, default: f64) {
-        let value = data.get(key).and_then(Value::as_f64).unwrap_or(default);
-        data.insert(key.to_string(), json!(value));
-    }
-
-    fn resolve_kernel_mode(metadata: Option<&Value>) -> KernelExecutionMode {
-        let mode = Self::metadata_str(metadata, "kernel_mode")
-            .unwrap_or_else(|| "single".to_string())
+    fn resolve_kernel_mode(&self) -> KernelExecutionMode {
+        let mode = self
+            .kernel_config
+            .execution_mode
+            .trim()
             .to_ascii_lowercase();
         match mode.as_str() {
             "sequential" => KernelExecutionMode::Sequential,
@@ -574,16 +461,12 @@ After receiving tool outputs, continue reasoning and provide the final response.
         }
     }
 
-    fn build_kernel_agent_for_request(&self, metadata: Option<&Value>) -> Arc<dyn KernelAgent> {
-        let planner = self.build_planner_for_request(metadata);
-        let agent_kind = self.resolve_kernel_agent_kind(metadata);
-        let mode = Self::resolve_kernel_mode(metadata);
-        let child_count = Self::metadata_u64(metadata, "kernel_children")
-            .unwrap_or(2)
-            .clamp(1, 4) as usize;
-        let loop_iters = Self::metadata_u64(metadata, "kernel_loop_iters")
-            .unwrap_or(3)
-            .clamp(1, 16) as u32;
+    fn build_kernel_agent_for_request(&self) -> Arc<dyn KernelAgent> {
+        let planner = self.build_planner_for_request();
+        let agent_kind = self.resolve_kernel_agent_kind();
+        let mode = self.resolve_kernel_mode();
+        let child_count = self.kernel_config.execution_children.clamp(1, 4);
+        let loop_iters = self.kernel_config.execution_loop_iters.clamp(1, 16);
 
         match mode {
             KernelExecutionMode::Single => self.build_kernel_agent_by_kind(
@@ -764,60 +647,6 @@ impl Agent for AgentImpl {
         self
     }
 
-    async fn handle_message(&self, content: &str) -> TalosResult<String> {
-        self.handle_message_with_model(content, None).await
-    }
-
-    async fn handle_message_with_model(
-        &self,
-        content: &str,
-        model: Option<&str>,
-    ) -> TalosResult<String> {
-        let execution = <Self as AgentOrchestrator>::run(
-            self,
-            OrchestratorRequest {
-                agent_id: self.id.clone(),
-                session_id: "embedded-session".to_string(),
-                invocation_id: Some(format!("inv-{}", Utc::now().timestamp_millis())),
-                workspace_id: "default".to_string(),
-                input: content.to_string(),
-                model: model.map(ToString::to_string),
-                metadata: None,
-            },
-        )
-        .await?;
-        Ok(execution.output_text)
-    }
-
-    async fn stream_response(&self, content: &str) -> TalosResult<mpsc::Receiver<AgentStream>> {
-        let mut kernel_events = <Self as AgentOrchestrator>::run_stream(
-            self,
-            OrchestratorRequest {
-                agent_id: self.id.clone(),
-                session_id: "embedded-session".to_string(),
-                invocation_id: Some(format!("inv-{}", Utc::now().timestamp_millis())),
-                workspace_id: "default".to_string(),
-                input: content.to_string(),
-                model: None,
-                metadata: None,
-            },
-        )
-        .await?;
-        let (tx, rx) = mpsc::channel(100);
-        tokio::spawn(async move {
-            while let Some(event) = kernel_events.recv().await {
-                let _ = tx
-                    .send(AgentStream {
-                        event_type: event.event_type,
-                        data: event.data,
-                    })
-                    .await;
-            }
-        });
-
-        Ok(rx)
-    }
-
     async fn execute_tool(
         &self,
         tool_name: &str,
@@ -834,10 +663,7 @@ impl Agent for AgentImpl {
         let tool_context = self.tool_registry.build_context(
             format!("agent-{}", self.id),
             self.name.clone(),
-            HashMap::from([(
-                "tool_output_max_bytes".to_string(),
-                json!(self.kernel_config.tool_result_max_bytes),
-            )]),
+            Some(Arc::new(self.kernel_config_snapshot())),
         );
         let tool_result = self
             .tool_registry
@@ -854,9 +680,10 @@ impl Agent for AgentImpl {
         };
 
         Ok(AgentResponse {
-            content,
+            output_text: content,
+            output_items: Vec::new(),
+            reasoning: Vec::new(),
             tool_calls: vec![], // Tool calls from within a tool execution context would go here
-            metadata: HashMap::new(),
         })
     }
 }
@@ -868,59 +695,52 @@ impl AgentOrchestrator for AgentImpl {
     }
 
     async fn run(&self, request: OrchestratorRequest) -> TalosResult<OrchestratorExecution> {
-        let invocation_id = request
-            .invocation_id
-            .unwrap_or_else(|| format!("inv-{}", Utc::now().timestamp_millis()));
-        let model = request.model.unwrap_or_else(|| self.model.clone());
-        let metadata = self.merged_kernel_metadata(request.metadata);
-        let session_handle = Some(SessionHandle {
-            selected_model: Some(model.clone()),
-            session_metadata: metadata.clone(),
-            trace_id: metadata
-                .as_ref()
-                .and_then(|value| value.get("trace_id"))
-                .and_then(|value| value.as_str())
-                .map(|value| value.to_string()),
-            channel_id: metadata
-                .as_ref()
-                .and_then(|value| value.get("channel_id"))
-                .and_then(|value| value.as_str())
-                .map(|value| value.to_string()),
-            user_id: metadata
-                .as_ref()
-                .and_then(|value| value.get("user_id"))
-                .and_then(|value| value.as_str())
-                .map(|value| value.to_string()),
-            recent_messages: Vec::new(),
-            global_context: HashMap::new(),
-        });
-        let kernel_agent = self.build_kernel_agent_for_request(metadata.as_ref());
+        let agent_request = self.to_agent_request(request);
+        let input = Self::extract_text_input(&agent_request.input);
+        let invocation_id = format!("inv-{}", Utc::now().timestamp_millis());
+        let model = if agent_request.session.config.llm.model.is_empty() {
+            self.model.clone()
+        } else {
+            agent_request.session.config.llm.model.clone()
+        };
+        let phase = agent_request.phase.clone();
+        let planning_instruction = agent_request.planning_instruction.clone();
+        let transfer_to = agent_request.transfer_to.clone();
+        let kernel_agent = self.build_kernel_agent_for_request();
         let result = self
             .kernel_runtime
             .run_turn(
                 kernel_agent,
-                KernelInput {
-                    session_id: request.session_id,
-                    invocation_id: Some(invocation_id),
-                    agent_id: request.agent_id,
-                    workspace_id: request.workspace_id,
-                    input: request.input,
+                RunRequest {
+                    session_id: agent_request.session.context.session_id.clone(),
+                    invocation_id,
+                    agent_id: self.id.clone(),
+                    workspace_id: agent_request
+                        .session
+                        .context
+                        .workspace_id
+                        .clone()
+                        .unwrap_or_default(),
+                    input,
                     model,
-                    metadata,
-                    session_handle,
+                    phase,
+                    planning_instruction,
+                    transfer_to,
                     initial_state_bags: None,
                     kernel_config: Some(self.kernel_config.clone()),
                     stream_tx: None,
                 },
             )
             .await?;
+        let reasoning = Self::collect_reasoning(&result.output_items);
         Ok(OrchestratorExecution {
             output_text: result.output_text,
             output_items: result.output_items,
+            reasoning,
             stop_reason: result.stop_reason,
             usage: result.usage,
             task_count: result.task_results.len() as u32,
-            metadata: result.metadata,
+            session_id: agent_request.session.context.session_id,
         })
     }
 
@@ -931,45 +751,36 @@ impl AgentOrchestrator for AgentImpl {
         let (tx, rx) = mpsc::channel(256);
         let this = self.clone();
         tokio::spawn(async move {
+            let agent_request = this.to_agent_request(request);
+            let input = Self::extract_text_input(&agent_request.input);
             let request_id = format!("req_{}", Uuid::new_v4().simple());
-            let invocation_id = request
-                .invocation_id
-                .unwrap_or_else(|| format!("inv-{}", Utc::now().timestamp_millis()));
-            let model = request.model.unwrap_or_else(|| this.model.clone());
-            let metadata = this.merged_kernel_metadata(request.metadata);
-            let session_handle = Some(SessionHandle {
-                selected_model: Some(model.clone()),
-                session_metadata: metadata.clone(),
-                trace_id: metadata
-                    .as_ref()
-                    .and_then(|value| value.get("trace_id"))
-                    .and_then(|value| value.as_str())
-                    .map(|value| value.to_string()),
-                channel_id: metadata
-                    .as_ref()
-                    .and_then(|value| value.get("channel_id"))
-                    .and_then(|value| value.as_str())
-                    .map(|value| value.to_string()),
-                user_id: metadata
-                    .as_ref()
-                    .and_then(|value| value.get("user_id"))
-                    .and_then(|value| value.as_str())
-                    .map(|value| value.to_string()),
-                recent_messages: Vec::new(),
-                global_context: HashMap::new(),
-            });
-            let kernel_agent = this.build_kernel_agent_for_request(metadata.as_ref());
+            let invocation_id = format!("inv-{}", Utc::now().timestamp_millis());
+            let model = if agent_request.session.config.llm.model.is_empty() {
+                this.model.clone()
+            } else {
+                agent_request.session.config.llm.model.clone()
+            };
+            let phase = agent_request.phase.clone();
+            let planning_instruction = agent_request.planning_instruction.clone();
+            let transfer_to = agent_request.transfer_to.clone();
+            let kernel_agent = this.build_kernel_agent_for_request();
             let (kernel_tx, mut kernel_rx) = mpsc::channel(256);
             let runtime = this.kernel_runtime.clone();
-            let kernel_input = KernelInput {
-                session_id: request.session_id,
-                invocation_id: Some(invocation_id),
-                agent_id: request.agent_id,
-                workspace_id: request.workspace_id,
-                input: request.input,
+            let kernel_input = RunRequest {
+                session_id: agent_request.session.context.session_id.clone(),
+                invocation_id,
+                agent_id: this.id.clone(),
+                workspace_id: agent_request
+                    .session
+                    .context
+                    .workspace_id
+                    .clone()
+                    .unwrap_or_default(),
+                input,
                 model: model.clone(),
-                metadata,
-                session_handle,
+                phase,
+                planning_instruction,
+                transfer_to,
                 initial_state_bags: None,
                 kernel_config: Some(this.kernel_config.clone()),
                 stream_tx: Some(kernel_tx),
@@ -981,7 +792,7 @@ impl AgentOrchestrator for AgentImpl {
                     data: json!({
                         "request_id": request_id,
                         "model": model,
-                        "usage": CanonicalUsage::default(),
+                        "usage": TalosUsage::default(),
                         "iteration": 0_u64,
                         "step_id": "start",
                     }),
@@ -1043,6 +854,10 @@ impl AgentOrchestrator for AgentImpl {
         });
         Ok(rx)
     }
+
+    async fn close_session(&self, session: talos_types::TalosSession) -> TalosResult<()> {
+        self.finalize_session_memory(&session).await
+    }
 }
 
 // Mock implementation for testing
@@ -1060,25 +875,18 @@ impl Agent for MockAgent {
         self
     }
 
-    async fn handle_message(&self, content: &str) -> TalosResult<String> {
-        Ok(format!("Mock response to: {}", content))
-    }
-
-    async fn stream_response(&self, _content: &str) -> TalosResult<mpsc::Receiver<AgentStream>> {
-        let (tx, rx) = mpsc::channel(1);
-        drop(tx); // Close the sender immediately for mock
-        Ok(rx)
-    }
-
     async fn execute_tool(
         &self,
         _tool_name: &str,
         _args: serde_json::Value,
     ) -> TalosResult<AgentResponse> {
         Ok(AgentResponse {
-            content: "Mock tool execution".to_string(),
+            output_text: "Mock tool execution".to_string(),
+            output_items: vec![TalosOutputItem::OutputText {
+                text: "Mock tool execution".to_string(),
+            }],
+            reasoning: Vec::new(),
             tool_calls: vec![],
-            metadata: std::collections::HashMap::new(),
         })
     }
 }
@@ -1092,18 +900,18 @@ impl KernelAgent for MockAgent {
     async fn run(&self, _ctx: &mut InvocationContext) -> TalosResult<AgentRunResult> {
         Ok(AgentRunResult {
             output_text: "Mock response".to_string(),
-            output_items: vec![CanonicalOutputItem::OutputText {
+            output_items: vec![TalosOutputItem::OutputText {
                 text: "Mock response".to_string(),
             }],
             stop_reason: "end_turn".to_string(),
-            usage: CanonicalUsage::default(),
+            usage: TalosUsage::default(),
             task_results: vec![TaskResult {
                 task_id: "mock-task".to_string(),
                 kind: TaskKind::General,
                 goal: "mock".to_string(),
                 status: TaskStatus::Success,
                 output: "Mock response".to_string(),
-                output_items: vec![CanonicalOutputItem::OutputText {
+                output_items: vec![TalosOutputItem::OutputText {
                     text: "Mock response".to_string(),
                 }],
                 tool_traces: Vec::new(),
@@ -1113,7 +921,6 @@ impl KernelAgent for MockAgent {
             state_delta: HashMap::new(),
             continue_loop: false,
             requested_transfer: None,
-            metadata: HashMap::new(),
         })
     }
 }
@@ -1125,18 +932,18 @@ impl AgentOrchestrator for MockAgent {
     }
 
     async fn run(&self, request: OrchestratorRequest) -> TalosResult<OrchestratorExecution> {
-        let output = self
-            .handle_message_with_model(&request.input, request.model.as_deref())
-            .await?;
+        let input = AgentImpl::extract_text_input(&request.input);
+        let output = format!("Mock response to: {}", input);
         Ok(OrchestratorExecution {
             output_text: output,
-            output_items: vec![CanonicalOutputItem::OutputText {
+            output_items: vec![TalosOutputItem::OutputText {
                 text: "Mock response".to_string(),
             }],
+            reasoning: Vec::new(),
             stop_reason: "end_turn".to_string(),
-            usage: CanonicalUsage::default(),
+            usage: TalosUsage::default(),
             task_count: 1,
-            metadata: HashMap::new(),
+            session_id: request.session.context.session_id,
         })
     }
 
@@ -1154,7 +961,7 @@ impl AgentOrchestrator for MockAgent {
                     data: json!({
                         "request_id": request_id,
                         "model": "mock-model",
-                        "usage": CanonicalUsage::default(),
+                        "usage": TalosUsage::default(),
                         "iteration": 0_u64,
                         "step_id": "start",
                     }),
@@ -1188,6 +995,10 @@ impl AgentOrchestrator for MockAgent {
         });
         Ok(rx)
     }
+
+    async fn close_session(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1195,9 +1006,17 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::sync::Arc;
+    use tempfile::TempDir;
+    use talos_agent_kernel::TurnPhase;
+    use talos_config::AgentKernelConfig;
     use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Role, Usage};
+    use talos_memory::{
+        Memory, RecordHeader, TalosMessage, TalosMessageRole, TalosTurn,
+    };
     use talos_tools::{ReadTool, ToolRegistry, WebSearchTool};
     use talos_tools_policy::ToolPolicy;
+    use talos_types::talos::{TalosProvider, TalosSourceType};
+    use talos_types::{SessionContext, SessionState, TalosSession};
     use tokio;
 
     fn build_test_agent() -> AgentImpl {
@@ -1212,6 +1031,23 @@ mod tests {
         )
     }
 
+    fn build_temp_agent() -> (TempDir, AgentImpl) {
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let mut kernel_config = AgentKernelConfig::default();
+        kernel_config.memory.workspace_dir = temp_dir.path().display().to_string();
+        kernel_config.memory.compaction_threshold_bytes = usize::MAX;
+        let agent = AgentImpl::new(
+            "test_agent".to_string(),
+            "Test Agent".to_string(),
+            "An agent for testing".to_string(),
+            Arc::new(MockLlmProvider {}),
+            "gpt-4o".to_string(),
+            Arc::new(ToolRegistry::new()),
+            kernel_config,
+        );
+        (temp_dir, agent)
+    }
+
     fn mock_invocation_ctx() -> InvocationContext {
         InvocationContext {
             session_id: "s1".to_string(),
@@ -1220,13 +1056,36 @@ mod tests {
             workspace_id: "w1".to_string(),
             input: "hello".to_string(),
             model: "m1".to_string(),
-            metadata: None,
+            phase: TurnPhase::Execution,
+            planning_instruction: None,
+            transfer_to: None,
             state: HashMap::new(),
             state_bags: Default::default(),
-            session_handle: Some(SessionHandle::default()),
             limits: Default::default(),
             events: Vec::new(),
             stream_tx: None,
+        }
+    }
+
+    fn build_test_session(session_id: &str, workspace_id: &str) -> TalosSession {
+        TalosSession {
+            context: SessionContext {
+                session_id: session_id.to_string(),
+                workspace_id: Some(workspace_id.to_string()),
+                source_type: TalosSourceType::Cli,
+                provider: TalosProvider::Cli,
+                user_id: "local-user".to_string(),
+                message_id: "message-1".to_string(),
+                trace_id: "trace-1".to_string(),
+                channel_id: None,
+                thread_id: None,
+            },
+            config: talos_config::Config::default(),
+            state: SessionState {
+                created_at: 1,
+                last_activity: 1,
+                message_count: 2,
+            },
         }
     }
 
@@ -1339,7 +1198,67 @@ mod tests {
 
         assert!(result.is_ok());
         let response = result.unwrap();
-        assert!(response.content.contains("Search results for 'test'"));
+        assert!(response.output_text.contains("Search results for 'test'"));
+    }
+
+    #[tokio::test]
+    async fn test_close_session_flushes_workspace_memory() {
+        let (_guard, agent) = build_temp_agent();
+        let session_id = "session-close-flush";
+        let session = build_test_session(session_id, "workspace-a");
+        let timestamp = Utc::now();
+        let turn = TalosTurn {
+            turn_id: "turn-1".to_string(),
+            session_id: session_id.to_string(),
+            seq: 1,
+            timestamp,
+            messages: vec![
+                TalosMessage {
+                    header: RecordHeader {
+                        id: "msg-user".to_string(),
+                        session_id: session_id.to_string(),
+                        turn_id: Some("turn-1".to_string()),
+                        timestamp,
+                    },
+                    role: TalosMessageRole::User,
+                    text: "Remember that I prefer tea over coffee.".to_string(),
+                },
+                TalosMessage {
+                    header: RecordHeader {
+                        id: "msg-assistant".to_string(),
+                        session_id: session_id.to_string(),
+                        turn_id: Some("turn-1".to_string()),
+                        timestamp,
+                    },
+                    role: TalosMessageRole::Assistant,
+                    text: "Noted. You prefer tea over coffee.".to_string(),
+                },
+            ],
+            reasoning: Vec::new(),
+            tool_calls: Vec::new(),
+            tool_results: Vec::new(),
+        };
+
+        agent
+            .memory_store
+            .append_turn(&turn)
+            .await
+            .expect("session turn should be persisted");
+
+        agent
+            .close_session(session)
+            .await
+            .expect("session close should flush workspace memory");
+
+        let file_path = _guard
+            .path()
+            .join("memory")
+            .join(format!("{}.md", Utc::now().format("%Y-%m-%d")));
+        let content = tokio::fs::read_to_string(file_path)
+            .await
+            .expect("workspace daily memory file should exist");
+        assert!(content.contains("## Durable Memory"));
+        assert!(!content.trim().is_empty());
     }
 
     #[test]
@@ -1351,64 +1270,18 @@ mod tests {
     }
 
     #[test]
-    fn test_merged_kernel_metadata_respects_planner_override_policy_and_budget_caps() {
+    fn test_planner_mode_comes_from_kernel_config() {
         let mut agent = build_test_agent();
         agent.set_default_planner_mode("plan_react");
-        agent.set_allow_request_planner_override(false);
-        agent.set_prompt_budget(1200, 3200);
-
-        let merged = agent
-            .merged_kernel_metadata(Some(json!({
-                "planner_mode": "built_in",
-                "prompt_max_static_tokens": 99999,
-                "prompt_max_dynamic_tokens": 88888
-            })))
-            .expect("merged metadata should exist");
-
-        assert_eq!(
-            merged
-                .get("planner_mode")
-                .and_then(|v| v.as_str())
-                .expect("planner_mode should exist"),
-            "plan_react"
-        );
-        assert_eq!(
-            merged
-                .get("prompt_max_static_tokens")
-                .and_then(|v| v.as_u64())
-                .expect("prompt_max_static_tokens should exist"),
-            1200
-        );
-        assert_eq!(
-            merged
-                .get("prompt_max_dynamic_tokens")
-                .and_then(|v| v.as_u64())
-                .expect("prompt_max_dynamic_tokens should exist"),
-            3200
-        );
-    }
-
-    #[test]
-    fn test_planner_mode_override_enabled_and_invalid_value_fallback() {
-        let mut agent = build_test_agent();
-        agent.set_default_planner_mode("built_in");
-        agent.set_allow_request_planner_override(true);
-
-        let plan_react_meta = json!({ "planner_mode": "plan_react" });
-        let planner = agent.build_planner_for_request(Some(&plan_react_meta));
+        let planner = agent.build_planner_for_request();
         let ctx = mock_invocation_ctx();
         assert!(planner.build_planning_instruction(&ctx).is_some());
-
-        let invalid_meta = json!({ "planner_mode": "invalid_mode" });
-        let planner = agent.build_planner_for_request(Some(&invalid_meta));
-        assert!(planner.build_planning_instruction(&ctx).is_none());
     }
 
     #[test]
-    fn test_unknown_kernel_agent_kind_fallbacks_to_llm() {
+    fn test_kernel_agent_kind_comes_from_binding_default() {
         let agent = build_test_agent();
-        let metadata = json!({ "kernel_agent_kind": "unknown_kind" });
-        let kind = agent.resolve_kernel_agent_kind(Some(&metadata));
+        let kind = agent.resolve_kernel_agent_kind();
         assert_eq!(kind, KernelAgentKind::Llm);
     }
 

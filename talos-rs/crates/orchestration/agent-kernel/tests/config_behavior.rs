@@ -123,12 +123,12 @@ fn test_boundary_validation() {
         "memory.hot_recent_messages must be > 0"
     );
     assert!(
-        config.memory.context_target_messages > 0,
-        "memory.context_target_messages must be > 0"
+        config.memory.session_recent_messages_limit > 0,
+        "memory.session_recent_messages_limit must be > 0"
     );
     assert!(
-        (0.0..=1.0).contains(&config.memory.long_term_min_importance),
-        "memory.long_term_min_importance must be in [0.0, 1.0]"
+        (0.0..=1.0).contains(&config.memory.search_min_score),
+        "memory.search_min_score must be in [0.0, 1.0]"
     );
 
     assert!(
@@ -146,11 +146,12 @@ fn test_boundary_validation() {
 fn test_nested_config_defaults() {
     let config = AgentKernelConfig::default();
 
-    assert!(config.prompt.include_workspace_summary);
+    assert!(config.prompt.include_session_summary);
     assert!(config.prompt.include_recent_messages);
+    assert!(config.prompt.include_root_memory);
 
-    assert!(config.memory.enable_summary);
-    assert!(config.memory.long_term_fact_extraction_enabled);
+    assert!(config.memory.session_summary_enabled);
+    assert!(config.memory.workspace_memory_flush_enabled);
 }
 
 /// Tests that config can be cloned and remains independent.

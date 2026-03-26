@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use talos_agent::{Agent, AgentImpl};
+use talos_agent::{AgentImpl, AgentOrchestrator, OrchestratorRequest};
 use talos_error::TalosResult;
 use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, Role, ToolStream,
@@ -10,6 +10,8 @@ use talos_llm_provider::{
 };
 use talos_tools::{Tool, ToolContext, ToolOutput, ToolRegistry};
 use talos_tools_policy::ToolPolicy;
+use talos_types::talos::{TalosInputItem, TalosProvider, TalosSourceType};
+use talos_types::{SessionContext, SessionState, TalosSession};
 use tokio::sync::mpsc;
 
 #[derive(Default)]
@@ -257,17 +259,41 @@ fn create_agent_with_tool(state: Arc<IntegrationState>) -> AgentImpl {
     )
 }
 
+fn build_request(input: &str) -> OrchestratorRequest {
+    OrchestratorRequest {
+        session: TalosSession {
+            context: SessionContext {
+                session_id: "integration-session".to_string(),
+                workspace_id: Some("default".to_string()),
+                source_type: TalosSourceType::System,
+                provider: TalosProvider::System,
+                user_id: "integration-user".to_string(),
+                message_id: "integration-message".to_string(),
+                trace_id: "integration-trace".to_string(),
+                channel_id: None,
+                thread_id: None,
+            },
+            config: talos_config::Config::default(),
+            state: SessionState::default(),
+        },
+        input: vec![TalosInputItem::Text {
+            text: input.to_string(),
+        }],
+    }
+}
+
 #[tokio::test]
 async fn integration_tool_call_loop_executes_tool_and_returns_final_output() {
     let state = Arc::new(IntegrationState::default());
     let agent = create_agent_with_tool(state.clone());
 
     let response = agent
-        .handle_message("Please use your tool first and then answer.")
+        .run(build_request("Please use your tool first and then answer."))
         .await
         .expect("agent should return a response");
 
-    assert!(response.contains("echo:ping"));
+    assert!(response.output_text.contains("echo:ping"));
+    assert!(!response.reasoning.is_empty());
     assert!(state.saw_tool_result_message.load(Ordering::SeqCst));
     assert_eq!(state.tool_executions.load(Ordering::SeqCst), 1);
     assert!(state.chat_round.load(Ordering::SeqCst) >= 2);
@@ -279,7 +305,7 @@ async fn integration_stream_exposes_reasoning_output_and_tool_events() {
     let agent = create_agent_with_tool(state);
 
     let mut stream = agent
-        .stream_response("Stream your response with tool events.")
+        .run_stream(build_request("Stream your response with tool events."))
         .await
         .expect("agent should return stream receiver");
 

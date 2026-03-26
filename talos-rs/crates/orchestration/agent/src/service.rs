@@ -1,32 +1,40 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use talos_agent_kernel::TurnPhase;
 use talos_error::TalosResult;
-use talos_types::canonical::{CanonicalOutputItem, CanonicalUsage};
+use talos_types::talos::{TalosInputItem, TalosOutputItem, TalosReasoning, TalosUsage};
+use talos_types::TalosSession;
 use tokio::sync::mpsc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrchestratorRequest {
-    pub agent_id: String,
-    pub session_id: String,
-    pub invocation_id: Option<String>,
-    pub workspace_id: String,
-    pub input: String,
-    pub model: Option<String>,
-    pub metadata: Option<Value>,
+    pub session: TalosSession,
+    pub input: Vec<TalosInputItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrchestratorExecution {
     pub output_text: String,
     #[serde(default)]
-    pub output_items: Vec<CanonicalOutputItem>,
+    pub output_items: Vec<TalosOutputItem>,
+    #[serde(default)]
+    pub reasoning: Vec<TalosReasoning>,
     pub stop_reason: String,
     #[serde(default)]
-    pub usage: CanonicalUsage,
+    pub usage: TalosUsage,
     pub task_count: u32,
-    pub metadata: HashMap<String, Value>,
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentRequest {
+    pub session: TalosSession,
+    pub input: Vec<TalosInputItem>,
+    #[serde(default)]
+    pub phase: TurnPhase,
+    pub planning_instruction: Option<String>,
+    pub transfer_to: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,4 +51,5 @@ pub trait AgentOrchestrator: Send + Sync {
         &self,
         request: OrchestratorRequest,
     ) -> TalosResult<mpsc::Receiver<OrchestratorEvent>>;
+    async fn close_session(&self, session: TalosSession) -> TalosResult<()>;
 }

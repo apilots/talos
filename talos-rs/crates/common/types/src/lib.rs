@@ -3,6 +3,7 @@
 //! Defines common types and ID structures
 
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -10,6 +11,7 @@ use uuid::Uuid;
 // Re-export key types for convenience
 pub use async_trait::async_trait;
 pub use talos_error::{TalosError, TalosResult};
+pub type TalosConfig = talos_config::Config;
 
 /// Agent ID
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -85,20 +87,19 @@ impl Default for MessageId {
 
 /// Gateway module
 pub mod gateway {
-    use crate::canonical::{CanonicalContext, CanonicalOutputItem, CanonicalUsage};
+    use crate::talos::{
+        TalosContext, TalosInputItem, TalosOutputItem, TalosReasoning, TalosUsage,
+    };
     use serde::{Deserialize, Serialize};
-    use serde_json::Value;
 
     /// Request coming into the gateway
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct GatewayRequest {
-        pub channel: String,
-        pub user_id: String,
-        pub content: String,
-        pub model: Option<String>,
-        pub session_id: Option<String>,
-        pub context: Option<CanonicalContext>,
-        pub metadata: Option<Value>,
+        pub session_id: String,
+        #[serde(default)]
+        pub workspace_id: Option<String>,
+        pub input: Vec<TalosInputItem>,
+        pub context: TalosContext,
     }
 
     /// Response from the gateway
@@ -106,45 +107,210 @@ pub mod gateway {
     pub struct GatewayResponse {
         pub content: String,
         #[serde(default)]
-        pub output_items: Vec<CanonicalOutputItem>,
+        pub output_items: Vec<TalosOutputItem>,
+        #[serde(default)]
+        pub reasoning: Vec<TalosReasoning>,
         pub stop_reason: String,
         #[serde(default)]
-        pub usage: CanonicalUsage,
+        pub usage: TalosUsage,
         pub success: bool,
         pub model: String,
-        pub session_id: Option<String>,
+        pub session_id: String,
     }
 }
 
-/// Canonical gateway protocol types shared by native and compatibility APIs.
-pub mod canonical {
+/// Talos gateway protocol types shared by native and compatibility APIs.
+pub mod talos {
     use super::*;
+
+    /// High-level source category.
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case")]
+    pub enum TalosSourceType {
+        Http,
+        Im,
+        Cli,
+        Ws,
+        System,
+    }
+
+    impl Default for TalosSourceType {
+        fn default() -> Self {
+            Self::System
+        }
+    }
+
+    impl TalosSourceType {
+        pub fn as_str(&self) -> &'static str {
+            match self {
+                Self::Http => "http",
+                Self::Im => "im",
+                Self::Cli => "cli",
+                Self::Ws => "ws",
+                Self::System => "system",
+            }
+        }
+
+        pub fn parse(value: &str) -> Self {
+            match value {
+                "http" => Self::Http,
+                "im" => Self::Im,
+                "cli" => Self::Cli,
+                "ws" => Self::Ws,
+                _ => Self::System,
+            }
+        }
+    }
+
+    impl fmt::Display for TalosSourceType {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "{}", self.as_str())
+        }
+    }
+
+    /// Concrete source provider.
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case")]
+    pub enum TalosProvider {
+        Http,
+        Sdk,
+        Cli,
+        Telegram,
+        WebSocket,
+        System,
+    }
+
+    impl Default for TalosProvider {
+        fn default() -> Self {
+            Self::System
+        }
+    }
+
+    impl TalosProvider {
+        pub fn as_str(&self) -> &'static str {
+            match self {
+                Self::Http => "http",
+                Self::Sdk => "sdk",
+                Self::Cli => "cli",
+                Self::Telegram => "telegram",
+                Self::WebSocket => "websocket",
+                Self::System => "system",
+            }
+        }
+
+        pub fn parse(value: &str) -> Self {
+            match value {
+                "http" => Self::Http,
+                "sdk" => Self::Sdk,
+                "cli" => Self::Cli,
+                "telegram" => Self::Telegram,
+                "websocket" => Self::WebSocket,
+                _ => Self::System,
+            }
+        }
+    }
+
+    impl fmt::Display for TalosProvider {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "{}", self.as_str())
+        }
+    }
 
     /// Cross-channel request context.
     #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-    pub struct CanonicalContext {
-        pub source_type: String,
-        pub provider: String,
-        pub channel_id: String,
+    pub struct TalosContext {
+        pub source_type: TalosSourceType,
+        pub provider: TalosProvider,
         pub user_id: String,
+        pub message_id: String,
+        pub trace_id: String,
+        #[serde(default)]
+        pub channel_id: Option<String>,
+        #[serde(default)]
         pub thread_id: Option<String>,
-        pub message_id: Option<String>,
-        pub trace_id: Option<String>,
     }
 
-    /// Canonical message input item.
+    impl TalosContext {
+        pub fn new(
+            source_type: TalosSourceType,
+            provider: TalosProvider,
+            user_id: impl Into<String>,
+            message_id: impl Into<String>,
+            trace_id: impl Into<String>,
+        ) -> Self {
+            Self {
+                source_type,
+                provider,
+                user_id: user_id.into(),
+                message_id: message_id.into(),
+                trace_id: trace_id.into(),
+                channel_id: None,
+                thread_id: None,
+            }
+        }
+
+        pub fn with_channel_id(mut self, channel_id: impl Into<String>) -> Self {
+            self.channel_id = Some(channel_id.into());
+            self
+        }
+
+        pub fn with_thread_id(mut self, thread_id: impl Into<String>) -> Self {
+            self.thread_id = Some(thread_id.into());
+            self
+        }
+
+        pub fn http(user_id: impl Into<String>) -> Self {
+            Self::generated(TalosSourceType::Http, TalosProvider::Http, user_id)
+        }
+
+        pub fn sdk(user_id: impl Into<String>) -> Self {
+            Self::generated(TalosSourceType::Http, TalosProvider::Sdk, user_id)
+        }
+
+        pub fn cli(user_id: impl Into<String>) -> Self {
+            Self::generated(TalosSourceType::Cli, TalosProvider::Cli, user_id)
+        }
+
+        pub fn ws(user_id: impl Into<String>) -> Self {
+            Self::generated(TalosSourceType::Ws, TalosProvider::WebSocket, user_id)
+        }
+
+        pub fn im(provider: TalosProvider, user_id: impl Into<String>) -> Self {
+            Self::generated(TalosSourceType::Im, provider, user_id)
+        }
+
+        pub fn system(user_id: impl Into<String>) -> Self {
+            Self::generated(TalosSourceType::System, TalosProvider::System, user_id)
+        }
+
+        fn generated(
+            source_type: TalosSourceType,
+            provider: TalosProvider,
+            user_id: impl Into<String>,
+        ) -> Self {
+            Self::new(
+                source_type,
+                provider,
+                user_id,
+                format!("msg_{}", Uuid::new_v4().simple()),
+                format!("trace_{}", Uuid::new_v4().simple()),
+            )
+        }
+    }
+
+    /// Talos message input item.
     #[derive(Debug, Clone, Serialize, Deserialize)]
     #[serde(tag = "type", rename_all = "snake_case")]
-    pub enum CanonicalInputItem {
-        InputText {
+    pub enum TalosInputItem {
+        Text {
             text: String,
         },
-        InputImage {
+        Image {
             url: String,
             #[serde(default)]
             mime_type: Option<String>,
         },
-        InputFile {
+        File {
             #[serde(default)]
             url: Option<String>,
             #[serde(default)]
@@ -152,7 +318,7 @@ pub mod canonical {
             #[serde(default)]
             mime_type: Option<String>,
         },
-        InputAudio {
+        Voice {
             #[serde(default)]
             url: Option<String>,
             #[serde(default)]
@@ -160,20 +326,26 @@ pub mod canonical {
             #[serde(default)]
             mime_type: Option<String>,
         },
+        Video {
+            #[serde(default)]
+            url: Option<String>,
+            #[serde(default)]
+            mime_type: Option<String>,
+        },
     }
 
-    /// Canonical content item for rich output blocks.
+    /// Talos content item for rich output blocks.
     #[derive(Debug, Clone, Serialize, Deserialize)]
     #[serde(tag = "type", rename_all = "snake_case")]
-    pub enum CanonicalContentItem {
+    pub enum TalosContentItem {
         Text { text: String },
         Json { value: serde_json::Value },
     }
 
-    /// Canonical message output item.
+    /// Talos message output item.
     #[derive(Debug, Clone, Serialize, Deserialize)]
     #[serde(tag = "type", rename_all = "snake_case")]
-    pub enum CanonicalOutputItem {
+    pub enum TalosOutputItem {
         Reasoning {
             text: String,
         },
@@ -187,46 +359,53 @@ pub mod canonical {
         },
         ToolResult {
             call_id: String,
-            content: Vec<CanonicalContentItem>,
+            content: Vec<TalosContentItem>,
             #[serde(default)]
             is_error: bool,
         },
     }
 
-    /// Canonical message request payload for session interactions.
+    /// Reasoning block exposed to clients.
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+    pub struct TalosReasoning {
+        pub text: String,
+    }
+
+    /// Talos message request payload for session interactions.
     #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct CanonicalMessageRequest {
-        pub input: Vec<CanonicalInputItem>,
+    pub struct TalosMessageRequest {
+        pub input: Vec<TalosInputItem>,
         #[serde(default)]
         pub stream: Option<bool>,
-        pub model: Option<String>,
-        pub metadata: Option<serde_json::Value>,
+        pub workspace_id: Option<String>,
     }
 
     /// Token usage values.
     #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-    pub struct CanonicalUsage {
+    pub struct TalosUsage {
         pub input_tokens: u32,
         pub output_tokens: u32,
         pub total_tokens: u32,
     }
 
-    /// Canonical response shape returned by session interaction APIs.
+    /// Talos response shape returned by session interaction APIs.
     #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct CanonicalMessageResponse {
+    pub struct TalosMessageResponse {
         pub request_id: String,
         pub message_id: String,
         pub session_id: String,
         pub model: String,
-        pub output: Vec<CanonicalOutputItem>,
+        pub output: Vec<TalosOutputItem>,
+        #[serde(default)]
+        pub reasoning: Vec<TalosReasoning>,
         pub stop_reason: String,
-        pub usage: CanonicalUsage,
+        pub usage: TalosUsage,
     }
 
     /// Stream event type.
     #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
     #[serde(rename_all = "snake_case")]
-    pub enum CanonicalEventType {
+    pub enum TalosEventType {
         MessageStarted,
         MessageReasoningDelta,
         MessageOutputDelta,
@@ -238,8 +417,8 @@ pub mod canonical {
 
     /// Canonical stream event payload.
     #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct CanonicalEvent {
-        pub event_type: CanonicalEventType,
+    pub struct TalosEvent {
+        pub event_type: TalosEventType,
         pub message_id: String,
         pub session_id: String,
         pub sequence: u64,
@@ -250,12 +429,197 @@ pub mod canonical {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionRecord {
     pub id: String,
-    pub context: canonical::CanonicalContext,
+    pub context: talos::TalosContext,
     pub model: String,
     pub created_at: u64,
     pub last_activity: u64,
     pub message_count: u64,
-    pub metadata: Option<serde_json::Value>,
+    #[serde(default)]
+    pub conf: HashMap<String, serde_json::Value>,
+}
+
+impl SessionRecord {
+    pub fn from_session(session: &TalosSession, base_model: &str) -> Self {
+        let effective_model = session.config.llm.model.clone();
+        let conf = SessionConfigOverridePolicy::build_conf_for_model(base_model, &effective_model);
+
+        Self {
+            id: session.context.session_id.clone(),
+            context: talos::TalosContext {
+                source_type: session.context.source_type.clone(),
+                provider: session.context.provider.clone(),
+                user_id: session.context.user_id.clone(),
+                message_id: session.context.message_id.clone(),
+                trace_id: session.context.trace_id.clone(),
+                channel_id: session.context.channel_id.clone(),
+                thread_id: session.context.thread_id.clone(),
+            },
+            model: effective_model,
+            created_at: session.state.created_at,
+            last_activity: session.state.last_activity,
+            message_count: session.state.message_count,
+            conf,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionContext {
+    pub session_id: String,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+    pub source_type: talos::TalosSourceType,
+    pub provider: talos::TalosProvider,
+    pub user_id: String,
+    pub message_id: String,
+    pub trace_id: String,
+    #[serde(default)]
+    pub channel_id: Option<String>,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+}
+
+impl SessionContext {
+    pub fn from_record(record: &SessionRecord, workspace_id: Option<String>) -> Self {
+        Self {
+            session_id: record.id.clone(),
+            workspace_id,
+            source_type: record.context.source_type.clone(),
+            provider: record.context.provider.clone(),
+            user_id: record.context.user_id.clone(),
+            message_id: record.context.message_id.clone(),
+            trace_id: record.context.trace_id.clone(),
+            channel_id: record.context.channel_id.clone(),
+            thread_id: record.context.thread_id.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionState {
+    pub created_at: u64,
+    pub last_activity: u64,
+    pub message_count: u64,
+}
+
+impl SessionState {
+    pub fn from_record(record: &SessionRecord) -> Self {
+        Self {
+            created_at: record.created_at,
+            last_activity: record.last_activity,
+            message_count: record.message_count,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TalosSession {
+    pub context: SessionContext,
+    pub config: TalosConfig,
+    pub state: SessionState,
+}
+
+pub struct SessionConfigOverridePolicy;
+
+impl SessionConfigOverridePolicy {
+    pub const AGENT_MODEL_KEY: &'static str = "agent.model";
+
+    pub fn validate_conf(conf: &HashMap<String, serde_json::Value>) -> TalosResult<()> {
+        for key in conf.keys() {
+            if key != Self::AGENT_MODEL_KEY {
+                return Err(TalosError::ValidationError(format!(
+                    "unsupported session config key: {}",
+                    key
+                )));
+            }
+        }
+
+        if let Some(value) = conf.get(Self::AGENT_MODEL_KEY) {
+            if !value.is_string() {
+                return Err(TalosError::ValidationError(
+                    "agent.model must be a string".to_string(),
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn extract_agent_model(
+        conf: &HashMap<String, serde_json::Value>,
+    ) -> TalosResult<Option<String>> {
+        Self::validate_conf(conf)?;
+        Ok(conf
+            .get(Self::AGENT_MODEL_KEY)
+            .and_then(|value| value.as_str())
+            .map(ToString::to_string))
+    }
+
+    pub fn build_conf_for_model(
+        base_model: &str,
+        effective_model: &str,
+    ) -> HashMap<String, serde_json::Value> {
+        if effective_model == base_model {
+            return HashMap::new();
+        }
+
+        let mut conf = HashMap::new();
+        conf.insert(
+            Self::AGENT_MODEL_KEY.to_string(),
+            serde_json::Value::String(effective_model.to_string()),
+        );
+        conf
+    }
+
+    pub fn single_model_conf(model: &str) -> HashMap<String, serde_json::Value> {
+        let mut conf = HashMap::new();
+        conf.insert(
+            Self::AGENT_MODEL_KEY.to_string(),
+            serde_json::Value::String(model.to_string()),
+        );
+        conf
+    }
+
+    pub fn apply_to_config(
+        base_config: &TalosConfig,
+        record_model: &str,
+        conf: &HashMap<String, serde_json::Value>,
+    ) -> TalosResult<TalosConfig> {
+        let mut config = base_config.clone();
+        let model = Self::extract_agent_model(conf)?
+            .unwrap_or_else(|| record_model.to_string());
+        config.agent.model = model.clone();
+        config.llm.model = model;
+        Ok(config)
+    }
+}
+
+impl TalosSession {
+    pub fn restore(
+        record: &SessionRecord,
+        base_config: &TalosConfig,
+        workspace_id: Option<String>,
+    ) -> TalosResult<Self> {
+        let config = SessionConfigOverridePolicy::apply_to_config(
+            base_config,
+            &record.model,
+            &record.conf,
+        )?;
+
+        Ok(Self {
+            context: SessionContext::from_record(record, workspace_id),
+            config,
+            state: SessionState::from_record(record),
+        })
+    }
+
+    pub fn from_record(
+        record: &SessionRecord,
+        base_config: &TalosConfig,
+        workspace_id: Option<String>,
+    ) -> TalosResult<Self> {
+        Self::restore(record, base_config, workspace_id)
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -267,17 +631,27 @@ pub struct SessionQuery {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SessionPatch {
-    pub model: Option<String>,
-    pub metadata: Option<serde_json::Value>,
+    #[serde(default)]
+    pub conf: HashMap<String, serde_json::Value>,
+}
+
+impl SessionPatch {
+    pub fn agent_model(&self) -> TalosResult<Option<String>> {
+        SessionConfigOverridePolicy::extract_agent_model(&self.conf)
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SessionPatchAck {
+    pub success: bool,
 }
 
 #[async_trait]
 pub trait SessionService: Send + Sync {
     async fn create_session(
         &self,
-        context: canonical::CanonicalContext,
+        context: talos::TalosContext,
         model: Option<String>,
-        metadata: Option<serde_json::Value>,
     ) -> TalosResult<SessionRecord>;
 
     async fn list_sessions(&self, query: SessionQuery) -> TalosResult<Vec<SessionRecord>>;
@@ -288,7 +662,9 @@ pub trait SessionService: Send + Sync {
         &self,
         session_id: &str,
         patch: SessionPatch,
-    ) -> TalosResult<Option<SessionRecord>>;
+    ) -> TalosResult<SessionPatchAck>;
+
+    async fn close_session(&self, session_id: &str) -> TalosResult<()>;
 }
 
 pub fn now() -> u64 {
@@ -301,7 +677,6 @@ pub fn now() -> u64 {
 /// Messages module
 pub mod messages {
     use super::*;
-    use serde_json;
 
     /// Different types of message payloads
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -323,7 +698,6 @@ pub mod messages {
         pub content: String,
         pub timestamp: std::time::SystemTime,
         pub payload: MessagePayload,
-        pub metadata: HashMap<String, serde_json::Value>,
     }
 }
 
@@ -340,7 +714,6 @@ pub mod agents {
         pub agent_type: String,
         pub status: String,
         pub capabilities: Vec<String>,
-        pub metadata: HashMap<String, serde_json::Value>,
     }
 }
 
@@ -354,7 +727,6 @@ pub mod tools {
         pub id: String,
         pub name: String,
         pub arguments: serde_json::Value,
-        pub execution_context: HashMap<String, serde_json::Value>,
     }
 
     /// Result of a tool execution
@@ -364,7 +736,6 @@ pub mod tools {
         pub tool_call_id: String,
         pub result: String,
         pub success: bool,
-        pub execution_context: HashMap<String, serde_json::Value>,
     }
 }
 
@@ -380,25 +751,21 @@ pub trait RequestHandler: Send + Sync {
         request: gateway::GatewayRequest,
     ) -> TalosResult<gateway::GatewayResponse>;
 
-    /// Handle a gateway request and return canonical stream events.
+    /// Handle a gateway request and return Talos stream events.
     ///
     /// Default implementation falls back to non-stream `handle` and converts
     /// output items to canonical events in process order.
     async fn handle_stream(
         &self,
         request: gateway::GatewayRequest,
-    ) -> TalosResult<tokio::sync::mpsc::Receiver<canonical::CanonicalEvent>> {
+    ) -> TalosResult<tokio::sync::mpsc::Receiver<talos::TalosEvent>> {
         let response = self.handle(request.clone()).await?;
         let request_id = format!("req_{}", uuid::Uuid::new_v4().simple());
         let message_id = format!("msg_{}", uuid::Uuid::new_v4().simple());
-        let session_id = response
-            .session_id
-            .clone()
-            .or(request.session_id.clone())
-            .unwrap_or_else(|| "session-unknown".to_string());
+        let session_id = response.session_id.clone();
 
         let output = if response.output_items.is_empty() {
-            vec![canonical::CanonicalOutputItem::OutputText {
+            vec![talos::TalosOutputItem::OutputText {
                 text: response.content.clone(),
             }]
         } else {
@@ -407,8 +774,8 @@ pub trait RequestHandler: Send + Sync {
 
         let mut events = Vec::new();
         let mut sequence: u64 = 0;
-        events.push(canonical::CanonicalEvent {
-            event_type: canonical::CanonicalEventType::MessageStarted,
+        events.push(talos::TalosEvent {
+            event_type: talos::TalosEventType::MessageStarted,
             message_id: message_id.clone(),
             session_id: session_id.clone(),
             sequence,
@@ -426,9 +793,9 @@ pub trait RequestHandler: Send + Sync {
             let iteration = item_index as u64 + 1;
             let step_id = format!("step-{}", iteration);
             match item {
-                canonical::CanonicalOutputItem::Reasoning { text } => {
-                    events.push(canonical::CanonicalEvent {
-                        event_type: canonical::CanonicalEventType::MessageReasoningDelta,
+                talos::TalosOutputItem::Reasoning { text } => {
+                    events.push(talos::TalosEvent {
+                        event_type: talos::TalosEventType::MessageReasoningDelta,
                         message_id: message_id.clone(),
                         session_id: session_id.clone(),
                         sequence,
@@ -442,9 +809,9 @@ pub trait RequestHandler: Send + Sync {
                         }),
                     });
                 }
-                canonical::CanonicalOutputItem::OutputText { text } => {
-                    events.push(canonical::CanonicalEvent {
-                        event_type: canonical::CanonicalEventType::MessageOutputDelta,
+                talos::TalosOutputItem::OutputText { text } => {
+                    events.push(talos::TalosEvent {
+                        event_type: talos::TalosEventType::MessageOutputDelta,
                         message_id: message_id.clone(),
                         session_id: session_id.clone(),
                         sequence,
@@ -457,13 +824,13 @@ pub trait RequestHandler: Send + Sync {
                         }),
                     });
                 }
-                canonical::CanonicalOutputItem::ToolCall {
+                talos::TalosOutputItem::ToolCall {
                     call_id,
                     name,
                     arguments,
                 } => {
-                    events.push(canonical::CanonicalEvent {
-                        event_type: canonical::CanonicalEventType::MessageToolCallStarted,
+                    events.push(talos::TalosEvent {
+                        event_type: talos::TalosEventType::MessageToolCallStarted,
                         message_id: message_id.clone(),
                         session_id: session_id.clone(),
                         sequence,
@@ -479,13 +846,13 @@ pub trait RequestHandler: Send + Sync {
                         }),
                     });
                 }
-                canonical::CanonicalOutputItem::ToolResult {
+                talos::TalosOutputItem::ToolResult {
                     call_id,
                     content,
                     is_error,
                 } => {
-                    events.push(canonical::CanonicalEvent {
-                        event_type: canonical::CanonicalEventType::MessageToolCallCompleted,
+                    events.push(talos::TalosEvent {
+                        event_type: talos::TalosEventType::MessageToolCallCompleted,
                         message_id: message_id.clone(),
                         session_id: session_id.clone(),
                         sequence,
@@ -506,8 +873,8 @@ pub trait RequestHandler: Send + Sync {
             sequence = sequence.saturating_add(1);
         }
 
-        events.push(canonical::CanonicalEvent {
-            event_type: canonical::CanonicalEventType::MessageCompleted,
+        events.push(talos::TalosEvent {
+            event_type: talos::TalosEventType::MessageCompleted,
             message_id: message_id.clone(),
             session_id: session_id.clone(),
             sequence,
@@ -553,22 +920,105 @@ mod tests {
     }
 
     #[test]
-    fn test_canonical_roundtrip() {
-        let req = canonical::CanonicalMessageRequest {
-            input: vec![canonical::CanonicalInputItem::InputText {
+    fn test_talos_roundtrip() {
+        let req = talos::TalosMessageRequest {
+            input: vec![talos::TalosInputItem::Text {
                 text: "hello".to_string(),
             }],
             stream: Some(false),
-            model: Some("gpt-4o-mini".to_string()),
-            metadata: Some(serde_json::json!({"k":"v"})),
+            workspace_id: Some("workspace-1".to_string()),
         };
 
         let encoded = serde_json::to_string(&req).unwrap();
-        let decoded: canonical::CanonicalMessageRequest = serde_json::from_str(&encoded).unwrap();
+        let decoded: talos::TalosMessageRequest = serde_json::from_str(&encoded).unwrap();
         assert!(decoded.stream.is_some());
+        assert_eq!(decoded.workspace_id.as_deref(), Some("workspace-1"));
         assert!(matches!(
             decoded.input.first(),
-            Some(canonical::CanonicalInputItem::InputText { text }) if text == "hello"
+            Some(talos::TalosInputItem::Text { text }) if text == "hello"
         ));
+    }
+
+    #[test]
+    fn test_session_context_and_state_from_record() {
+        let record = SessionRecord {
+            id: "session-1".to_string(),
+            context: talos::TalosContext {
+                source_type: talos::TalosSourceType::Im,
+                provider: talos::TalosProvider::Telegram,
+                user_id: "user-1".to_string(),
+                message_id: "message-1".to_string(),
+                trace_id: "trace-1".to_string(),
+                channel_id: Some("channel-1".to_string()),
+                thread_id: Some("thread-1".to_string()),
+            },
+            model: "qwen-max".to_string(),
+            created_at: 100,
+            last_activity: 200,
+            message_count: 3,
+            conf: HashMap::new(),
+        };
+
+        let context = SessionContext::from_record(&record, Some("workspace-1".to_string()));
+        let state = SessionState::from_record(&record);
+
+        assert_eq!(context.session_id, "session-1");
+        assert_eq!(context.workspace_id.as_deref(), Some("workspace-1"));
+        assert_eq!(context.provider, talos::TalosProvider::Telegram);
+        assert_eq!(state.created_at, 100);
+        assert_eq!(state.last_activity, 200);
+        assert_eq!(state.message_count, 3);
+    }
+
+    #[test]
+    fn test_talos_session_from_record_applies_conf_override() {
+        let mut record = SessionRecord {
+            id: "session-1".to_string(),
+            context: talos::TalosContext {
+                source_type: talos::TalosSourceType::Http,
+                provider: talos::TalosProvider::Http,
+                user_id: "user-1".to_string(),
+                message_id: "message-1".to_string(),
+                trace_id: "trace-1".to_string(),
+                channel_id: Some("default".to_string()),
+                thread_id: None,
+            },
+            model: "qwen-max".to_string(),
+            created_at: 100,
+            last_activity: 200,
+            message_count: 3,
+            conf: HashMap::new(),
+        };
+        record.conf.insert(
+            "agent.model".to_string(),
+            serde_json::Value::String("qwen-plus".to_string()),
+        );
+
+        let session = TalosSession::from_record(&record, &TalosConfig::default(), None)
+            .expect("talos session restore should succeed");
+        assert_eq!(session.config.agent.model, "qwen-plus");
+        assert_eq!(session.config.llm.model, "qwen-plus");
+    }
+
+    #[test]
+    fn test_session_override_policy_rejects_unknown_keys() {
+        let mut conf = HashMap::new();
+        conf.insert(
+            "agent.kernel.prompt.max_dynamic_tokens".to_string(),
+            serde_json::Value::Number(1.into()),
+        );
+
+        let error = SessionConfigOverridePolicy::validate_conf(&conf)
+            .expect_err("unknown conf key should be rejected");
+        assert!(error.to_string().contains("unsupported session config key"));
+    }
+
+    #[test]
+    fn test_session_override_policy_builds_model_conf() {
+        let conf = SessionConfigOverridePolicy::single_model_conf("gpt-4o");
+        let model = SessionConfigOverridePolicy::extract_agent_model(&conf)
+            .expect("conf extraction should succeed");
+
+        assert_eq!(model.as_deref(), Some("gpt-4o"));
     }
 }

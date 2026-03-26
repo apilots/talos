@@ -1,9 +1,9 @@
 use crate::{
-    run_general_turn, Agent, AgentRunResult, GeneralTurnContext, InvocationContext, Planner,
-    TaskResult, TaskSpec, TaskStatus,
+    run_general_turn, Agent, AgentRunResult, InvocationContext, Planner, TaskResult, TaskSpec,
+    TaskStatus, TurnPhase,
 };
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
@@ -11,7 +11,7 @@ use talos_error::TalosResult;
 use talos_llm_provider::LlmProvider;
 use talos_memory::MemoryStore;
 use talos_tools::ToolRegistry;
-use talos_types::canonical::{CanonicalOutputItem, CanonicalUsage};
+use talos_types::talos::{TalosOutputItem, TalosUsage};
 
 pub struct LlmKernelAgent {
     id: String,
@@ -57,26 +57,19 @@ impl LlmKernelAgent {
         let mut state_delta = HashMap::new();
         let mut error = None;
         let mut status = TaskStatus::Success;
-        let mut output_items: Vec<CanonicalOutputItem> = Vec::new();
+        let mut output_items: Vec<TalosOutputItem> = Vec::new();
 
         let output = match run_general_turn(
-            &GeneralTurnContext::builder()
-                .session_id(&ctx.session_id)
-                .agent_id(&self.id)
-                .agent_name(&self.name)
-                .agent_description(&self.description)
-                .input(&task.goal)
-                .selected_model(&ctx.model)
-                .llm_provider(self.llm_provider.clone())
-                .tool_registry(self.tool_registry.clone())
-                .memory_store(self.memory_store.clone())
-                .kernel_config(self.kernel_config.clone())
-                .metadata(ctx.metadata.clone())
-                .stream_tx(ctx.stream_tx.clone())
-                .build(),
+            ctx,
+            &self.name,
+            &self.description,
+            &task.goal,
+            self.llm_provider.clone(),
+            self.tool_registry.clone(),
+            self.memory_store.clone(),
+            &self.kernel_config,
         )
-        .await
-        {
+        .await {
             Ok(general_result) => {
                 output_items = general_result.output_items;
                 general_result.output_text
@@ -84,7 +77,7 @@ impl LlmKernelAgent {
             Err(e) => {
                 status = TaskStatus::Failed;
                 error = Some(e.to_string());
-                output_items.push(CanonicalOutputItem::Reasoning {
+                output_items.push(TalosOutputItem::Reasoning {
                     text: "Kernel summary: general task failed during kernel orchestration."
                         .to_string(),
                 });
@@ -94,9 +87,9 @@ impl LlmKernelAgent {
 
         if !output_items
             .iter()
-            .any(|item| matches!(item, CanonicalOutputItem::OutputText { .. }))
+            .any(|item| matches!(item, TalosOutputItem::OutputText { .. }))
         {
-            output_items.push(CanonicalOutputItem::OutputText {
+            output_items.push(TalosOutputItem::OutputText {
                 text: output.clone(),
             });
         }
@@ -117,33 +110,6 @@ impl LlmKernelAgent {
         })
     }
 
-    fn inject_planning_instruction_metadata(
-        ctx: &mut InvocationContext,
-        instruction: impl Into<String>,
-    ) {
-        let mut metadata = match ctx.metadata.take() {
-            Some(Value::Object(map)) => map,
-            Some(other) => {
-                let mut map = serde_json::Map::new();
-                map.insert("request_metadata".to_string(), other);
-                map
-            }
-            None => serde_json::Map::new(),
-        };
-        metadata.insert(
-            "planning_instruction".to_string(),
-            json!(instruction.into()),
-        );
-        ctx.metadata = Some(Value::Object(metadata));
-    }
-
-    fn metadata_str(metadata: Option<&Value>, key: &str) -> Option<String> {
-        metadata
-            .and_then(|value| value.get(key))
-            .and_then(|value| value.as_str())
-            .map(|value| value.to_string())
-    }
-
     fn maybe_request_transfer(ctx: &mut InvocationContext) -> Option<String> {
         if ctx
             .state_bags
@@ -153,7 +119,7 @@ impl LlmKernelAgent {
         {
             return None;
         }
-        let transfer_to = Self::metadata_str(ctx.metadata.as_ref(), "kernel_transfer_to")?;
+        let transfer_to = ctx.transfer_to.clone()?;
         if transfer_to.trim().is_empty() {
             return None;
         }
@@ -174,7 +140,8 @@ impl Agent for LlmKernelAgent {
                 "planning_instruction".to_string(),
                 json!(instruction.clone()),
             );
-            Self::inject_planning_instruction_metadata(ctx, instruction);
+            ctx.phase = TurnPhase::Planning;
+            ctx.planning_instruction = Some(instruction);
         }
 
         let plan = self.planner.plan(ctx).await?;
@@ -202,36 +169,160 @@ impl Agent for LlmKernelAgent {
             .flat_map(|result| result.output_items.clone())
             .collect::<Vec<_>>();
 
-        let mut metadata = HashMap::new();
-        metadata.insert("planned_task_count".to_string(), json!(plan.tasks.len()));
-        metadata.insert("executed_task_count".to_string(), json!(task_results.len()));
-        metadata.insert(
-            "max_tool_rounds".to_string(),
-            json!(self.kernel_config.max_tool_rounds),
-        );
-        metadata.insert(
-            "tool_output_max_bytes".to_string(),
-            json!(self.kernel_config.tool_result_max_bytes),
-        );
-        metadata.insert(
-            "context_compaction_max_bytes".to_string(),
-            json!(self.kernel_config.context_compaction_max_bytes),
-        );
         if let Some(processed) = self.planner.process_planning_response(ctx, &output_text) {
             ctx.set_request_state("planning_response".to_string(), json!(processed));
-            metadata.insert("planning_response".to_string(), json!(processed));
         }
 
         Ok(AgentRunResult {
             output_text,
             output_items,
             stop_reason: "end_turn".to_string(),
-            usage: CanonicalUsage::default(),
+            usage: TalosUsage::default(),
             task_results,
             state_delta: merged_state_delta,
             continue_loop: false,
             requested_transfer: Self::maybe_request_transfer(ctx),
-            metadata,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ContextStateBags, InvocationLimits, TaskPlan};
+    use async_trait::async_trait;
+    use std::collections::HashMap;
+    use talos_error::TalosResult;
+    use talos_llm_provider::{
+        ChatChunk, ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage,
+    };
+    use talos_tools::ToolRegistry;
+    use tokio::sync::mpsc;
+
+    struct NoopLlmProvider;
+
+    #[async_trait]
+    impl LlmProvider for NoopLlmProvider {
+        fn name(&self) -> &str {
+            "noop"
+        }
+
+        async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
+            Ok(ChatResponse {
+                content: String::new(),
+                model: "noop".to_string(),
+                usage: Usage::default(),
+                finish_reason: Some("stop".to_string()),
+                tool_calls: None,
+            })
+        }
+
+        async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
+            let (_tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(1);
+            Ok(ChatStream::new(rx))
+        }
+
+        fn default_model(&self) -> &str {
+            "noop"
+        }
+    }
+
+    struct AssertingPlanner;
+
+    #[async_trait]
+    impl Planner for AssertingPlanner {
+        fn build_planning_instruction(&self, _ctx: &InvocationContext) -> Option<String> {
+            Some("build a short plan first".to_string())
+        }
+
+        async fn plan(&self, ctx: &InvocationContext) -> TalosResult<TaskPlan> {
+            assert_eq!(ctx.phase, TurnPhase::Planning);
+            assert_eq!(
+                ctx.planning_instruction.as_deref(),
+                Some("build a short plan first")
+            );
+            Ok(TaskPlan::default())
+        }
+    }
+
+    struct EmptyPlanner;
+
+    #[async_trait]
+    impl Planner for EmptyPlanner {
+        async fn plan(&self, _ctx: &InvocationContext) -> TalosResult<TaskPlan> {
+            Ok(TaskPlan::default())
+        }
+    }
+
+    fn build_agent(planner: Arc<dyn Planner>) -> LlmKernelAgent {
+        LlmKernelAgent::new(
+            "agent-1",
+            "Test Agent",
+            "Test kernel agent",
+            Arc::new(NoopLlmProvider),
+            Arc::new(MemoryStore::new(
+                std::env::temp_dir().join("talos-llm-agent-tests"),
+            )),
+            AgentKernelConfig::default(),
+            Arc::new(ToolRegistry::new()),
+            planner,
+        )
+    }
+
+    fn build_ctx() -> InvocationContext {
+        InvocationContext {
+            session_id: "s1".to_string(),
+            invocation_id: "i1".to_string(),
+            agent_id: "a1".to_string(),
+            workspace_id: "w1".to_string(),
+            input: "hello".to_string(),
+            model: "m1".to_string(),
+            phase: TurnPhase::Execution,
+            planning_instruction: None,
+            transfer_to: None,
+            state: HashMap::new(),
+            state_bags: ContextStateBags::default(),
+            limits: InvocationLimits::default(),
+            events: Vec::new(),
+            stream_tx: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_run_sets_typed_planning_phase_before_plan() {
+        let agent = build_agent(Arc::new(AssertingPlanner));
+        let mut ctx = build_ctx();
+
+        let result = agent.run(&mut ctx).await.expect("run should succeed");
+
+        assert_eq!(ctx.phase, TurnPhase::Planning);
+        assert_eq!(
+            ctx.planning_instruction.as_deref(),
+            Some("build a short plan first")
+        );
+        assert_eq!(result.output_text, "No task produced output");
+    }
+
+    #[test]
+    fn test_maybe_request_transfer_consumes_typed_transfer_once() {
+        let mut ctx = build_ctx();
+        ctx.transfer_to = Some("agent-b".to_string());
+
+        assert_eq!(
+            LlmKernelAgent::maybe_request_transfer(&mut ctx),
+            Some("agent-b".to_string())
+        );
+        assert!(LlmKernelAgent::maybe_request_transfer(&mut ctx).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_run_returns_typed_transfer_request() {
+        let agent = build_agent(Arc::new(EmptyPlanner));
+        let mut ctx = build_ctx();
+        ctx.transfer_to = Some("agent-b".to_string());
+
+        let result = agent.run(&mut ctx).await.expect("run should succeed");
+
+        assert_eq!(result.requested_transfer.as_deref(), Some("agent-b"));
     }
 }

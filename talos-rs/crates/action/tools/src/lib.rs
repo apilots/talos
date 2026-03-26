@@ -11,6 +11,7 @@ pub use registry::ToolRegistry;
 pub mod tools {
     pub mod edit;
     pub mod exec;
+    pub mod memory;
     pub mod network;
     pub mod read;
     pub mod write;
@@ -20,6 +21,7 @@ pub mod tools {
 pub use tools::{
     edit::EditTool,
     exec::ExecTool,
+    memory::{MemoryGetTool, MemorySearchTool},
     network::{HttpRequestTool, WebFetchTool, WebSearchTool},
     read::ReadTool,
     write::WriteTool,

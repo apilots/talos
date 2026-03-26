@@ -23,3 +23,6 @@ async-trait = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 chrono = { workspace = true, features = ["serde"] }
 dashmap = "5.4"
+
+[dev-dependencies]
+tempfile = "3.8"

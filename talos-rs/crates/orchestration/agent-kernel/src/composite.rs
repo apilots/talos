@@ -1,13 +1,12 @@
 use crate::{Agent, AgentRunResult, InvocationContext, TaskResult};
 use async_trait::async_trait;
-use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use talos_error::TalosResult;
-use talos_types::canonical::CanonicalUsage;
+use talos_types::talos::TalosUsage;
 use tokio::task::JoinSet;
 
-fn merge_usage(mut acc: CanonicalUsage, usage: &CanonicalUsage) -> CanonicalUsage {
+fn merge_usage(mut acc: TalosUsage, usage: &TalosUsage) -> TalosUsage {
     acc.input_tokens = acc.input_tokens.saturating_add(usage.input_tokens);
     acc.output_tokens = acc.output_tokens.saturating_add(usage.output_tokens);
     acc.total_tokens = acc.total_tokens.saturating_add(usage.total_tokens);
@@ -47,10 +46,9 @@ impl Agent for SequentialKernelAgent {
         let mut output_text = String::new();
         let mut output_items = Vec::new();
         let mut stop_reason = "end_turn".to_string();
-        let mut usage = CanonicalUsage::default();
+        let mut usage = TalosUsage::default();
         let mut task_results: Vec<TaskResult> = Vec::new();
         let mut state_delta = HashMap::new();
-        let mut metadata = HashMap::new();
         let mut requested_transfer = None;
         let mut continue_loop = false;
 
@@ -62,7 +60,6 @@ impl Agent for SequentialKernelAgent {
             usage = merge_usage(usage, &result.usage);
             task_results.extend(result.task_results.clone());
             merge_state_delta(&mut state_delta, &result.state_delta);
-            metadata.extend(result.metadata.clone());
             continue_loop = continue_loop || result.continue_loop;
 
             if let Some(transfer) = result.requested_transfer {
@@ -80,7 +77,6 @@ impl Agent for SequentialKernelAgent {
             state_delta,
             continue_loop,
             requested_transfer,
-            metadata,
         })
     }
 }
@@ -131,10 +127,9 @@ impl Agent for ParallelKernelAgent {
         let mut output_text = String::new();
         let mut output_items = Vec::new();
         let mut stop_reason = "end_turn".to_string();
-        let mut usage = CanonicalUsage::default();
+        let mut usage = TalosUsage::default();
         let mut task_results: Vec<TaskResult> = Vec::new();
         let mut state_delta = HashMap::new();
-        let mut metadata = HashMap::new();
         let mut requested_transfer = None;
         let mut continue_loop = false;
 
@@ -145,7 +140,6 @@ impl Agent for ParallelKernelAgent {
             usage = merge_usage(usage, &result.usage);
             task_results.extend(result.task_results);
             merge_state_delta(&mut state_delta, &result.state_delta);
-            metadata.extend(result.metadata);
             continue_loop = continue_loop || result.continue_loop;
             if requested_transfer.is_none() {
                 requested_transfer = result.requested_transfer;
@@ -161,7 +155,6 @@ impl Agent for ParallelKernelAgent {
             state_delta,
             continue_loop,
             requested_transfer,
-            metadata,
         })
     }
 }
@@ -193,12 +186,11 @@ impl Agent for LoopKernelAgent {
             output_text: String::new(),
             output_items: Vec::new(),
             stop_reason: "end_turn".to_string(),
-            usage: CanonicalUsage::default(),
+            usage: TalosUsage::default(),
             task_results: Vec::new(),
             state_delta: HashMap::new(),
             continue_loop: false,
             requested_transfer: None,
-            metadata: HashMap::new(),
         };
 
         for _ in 0..self.max_iterations {
@@ -209,7 +201,6 @@ impl Agent for LoopKernelAgent {
             merged.usage = merge_usage(merged.usage, &result.usage);
             merged.task_results.extend(result.task_results.clone());
             merge_state_delta(&mut merged.state_delta, &result.state_delta);
-            merged.metadata.extend(result.metadata.clone());
             merged.continue_loop = result.continue_loop;
 
             if let Some(transfer) = result.requested_transfer {
@@ -267,12 +258,11 @@ impl Agent for RoutingKernelAgent {
             output_text: String::new(),
             output_items: Vec::new(),
             stop_reason: "end_turn".to_string(),
-            usage: CanonicalUsage::default(),
+            usage: TalosUsage::default(),
             task_results: Vec::new(),
             state_delta: HashMap::new(),
             continue_loop: false,
             requested_transfer: None,
-            metadata: HashMap::new(),
         };
 
         while hops < self.max_hops {
@@ -290,13 +280,8 @@ impl Agent for RoutingKernelAgent {
             merged.usage = merge_usage(merged.usage, &result.usage);
             merged.task_results.extend(result.task_results.clone());
             merge_state_delta(&mut merged.state_delta, &result.state_delta);
-            merged.metadata.extend(result.metadata.clone());
-
             if let Some(next) = result.requested_transfer {
                 if self.nodes.contains_key(&next) {
-                    merged
-                        .metadata
-                        .insert("routing_transfer".to_string(), json!(next.clone()));
                     current = next;
                     continue;
                 }
@@ -316,7 +301,7 @@ impl Agent for RoutingKernelAgent {
 mod tests {
     use super::*;
     use crate::{TaskKind, TaskStatus};
-    use talos_types::canonical::CanonicalOutputItem;
+    use talos_types::talos::TalosOutputItem;
 
     #[derive(Clone)]
     struct StaticAgent {
@@ -335,11 +320,11 @@ mod tests {
         async fn run(&self, _ctx: &mut InvocationContext) -> TalosResult<AgentRunResult> {
             Ok(AgentRunResult {
                 output_text: self.output.clone(),
-                output_items: vec![CanonicalOutputItem::OutputText {
+                output_items: vec![TalosOutputItem::OutputText {
                     text: self.output.clone(),
                 }],
                 stop_reason: "end_turn".to_string(),
-                usage: CanonicalUsage::default(),
+                usage: TalosUsage::default(),
                 task_results: vec![TaskResult {
                     task_id: format!("task-{}", self.id),
                     kind: TaskKind::General,
@@ -354,7 +339,6 @@ mod tests {
                 state_delta: HashMap::new(),
                 continue_loop: self.continue_loop,
                 requested_transfer: self.transfer.clone(),
-                metadata: HashMap::new(),
             })
         }
     }
@@ -367,10 +351,11 @@ mod tests {
             workspace_id: "w1".to_string(),
             input: "hello".to_string(),
             model: "m1".to_string(),
-            metadata: None,
+            phase: crate::TurnPhase::Execution,
+            planning_instruction: None,
+            transfer_to: None,
             state: HashMap::new(),
             state_bags: crate::ContextStateBags::default(),
-            session_handle: None,
             limits: crate::InvocationLimits::default(),
             events: Vec::new(),
             stream_tx: None,

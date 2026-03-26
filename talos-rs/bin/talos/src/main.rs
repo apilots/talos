@@ -16,7 +16,9 @@ use talos_llm_openai::OpenAIProvider;
 use talos_router::{Binding, MatchRule, Router, RouterImpl};
 use talos_session_store::{DatabaseSessionStore, SessionStore};
 use talos_storage::{create_storage, StorageConfig};
-use talos_tools::{EditTool, ExecTool, ReadTool, ToolRegistry, WriteTool};
+use talos_tools::{
+    EditTool, ExecTool, MemoryGetTool, MemorySearchTool, ReadTool, ToolRegistry, WriteTool,
+};
 use talos_types::{RequestHandler, SessionService};
 use tracing::{error, info};
 
@@ -72,6 +74,8 @@ async fn main() {
     tool_registry.register(Arc::new(WriteTool));
     tool_registry.register(Arc::new(EditTool));
     tool_registry.register(Arc::new(ExecTool));
+    tool_registry.register(Arc::new(MemorySearchTool));
+    tool_registry.register(Arc::new(MemoryGetTool));
 
     let agent = AgentImpl::new(
         "default".to_string(),
@@ -85,7 +89,8 @@ async fn main() {
     let agent: Arc<dyn AgentOrchestrator> = Arc::new(agent);
 
     let coordinator = Arc::new(
-        CoordinatorImpl::new(router, session_store, config.llm.model.clone())
+        CoordinatorImpl::new(router, session_store, config.clone())
+            .with_channel_dm_scope("telegram", config.channels.telegram.dm_scope.clone())
             .with_default_workspace_id(config.agent.kernel.default_workspace_id.clone()),
     );
     coordinator

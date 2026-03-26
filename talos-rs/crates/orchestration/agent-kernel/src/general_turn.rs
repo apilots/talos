@@ -1,7 +1,7 @@
-use crate::{GeneralTurnContext, KernelStreamEvent};
+use crate::{InvocationContext, KernelStreamEvent};
 use chrono::Utc;
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 use talos_error::TalosResult;
@@ -9,12 +9,13 @@ use talos_llm_provider::{
     ChatMessage, ChatRequest, FunctionCall, LlmProvider, ToolChoice, ToolStreamEvent,
 };
 use talos_memory::{
-    CanonicalMessage, CanonicalMessageRole, CanonicalTurn, Memory, MemoryStore, RecordHeader,
-    SummaryRecord, ToolCallRecord, ToolResultRecord,
+    Memory, MemoryGetResult, MemorySearchResponse, MemoryStore, RecordHeader,
+    RetrievedMemoryItem, TalosMessage, TalosMessageRole, TalosTurn,
+    SessionPromptContextConfig, SummaryRecord, ToolCallRecord, ToolResultRecord,
 };
 use talos_prompt::{PromptBudget, PromptBuildConfig, PromptBuilder, PromptLoadPolicy, PromptPhase};
 use talos_tools::ToolRegistry;
-use talos_types::canonical::{CanonicalContentItem, CanonicalOutputItem, CanonicalUsage};
+use talos_types::talos::{TalosContentItem, TalosOutputItem, TalosUsage};
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -22,32 +23,46 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub struct GeneralTurnResult {
     pub output_text: String,
-    pub output_items: Vec<CanonicalOutputItem>,
+    pub output_items: Vec<TalosOutputItem>,
     pub stop_reason: String,
-    pub usage: CanonicalUsage,
+    pub usage: TalosUsage,
 }
 
-async fn compact_workspace_context_if_needed(
+pub async fn flush_session_memory(
     session_id: &str,
     selected_model: &str,
     llm_provider: Arc<dyn LlmProvider>,
     memory_store: &MemoryStore,
     kernel_config: &AgentKernelConfig,
-    metadata: Option<&Value>,
+    enforce_threshold: bool,
+    persist_session_summary: bool,
+    flush_workspace_memory: bool,
 ) -> TalosResult<()> {
-    let threshold = metadata_u64(metadata, "memory_compaction_threshold_bytes")
-        .or_else(|| metadata_u64(metadata, "context_compaction_max_bytes"))
-        .unwrap_or(kernel_config.memory.compaction_threshold_bytes as u64);
-    if threshold == 0 {
-        return Ok(());
-    }
-    let session_bytes = memory_store.session_size_bytes(session_id).await?;
-    if session_bytes < threshold {
+    if persist_session_summary || flush_workspace_memory {
+        if enforce_threshold {
+            let threshold = kernel_config.memory.compaction_threshold_bytes as u64;
+            if threshold == 0 {
+                return Ok(());
+            }
+            let session_bytes = memory_store.session_size_bytes(session_id).await?;
+            if session_bytes < threshold {
+                return Ok(());
+            }
+        }
+    } else {
         return Ok(());
     }
 
     let context = memory_store
-        .build_prompt_context(session_id, 48, false, 0, 0)
+        .build_session_prompt_context(
+            session_id,
+            &SessionPromptContextConfig {
+                recent_messages_limit: 48,
+                include_summary: false,
+                summary_recent_count: 0,
+                summary_max_chars: 0,
+            },
+        )
         .await?;
     if context.recent_messages.is_empty() {
         return Ok(());
@@ -56,9 +71,9 @@ async fn compact_workspace_context_if_needed(
         .recent_messages
         .iter()
         .map(|message| match message.role {
-            CanonicalMessageRole::User => format!("User: {}", message.text.trim()),
-            CanonicalMessageRole::Assistant => format!("Assistant: {}", message.text.trim()),
-            CanonicalMessageRole::System => format!("System: {}", message.text.trim()),
+            TalosMessageRole::User => format!("User: {}", message.text.trim()),
+            TalosMessageRole::Assistant => format!("Assistant: {}", message.text.trim()),
+            TalosMessageRole::System => format!("System: {}", message.text.trim()),
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -90,23 +105,55 @@ async fn compact_workspace_context_if_needed(
         .filter_map(|item| item.header.turn_id.as_deref())
         .collect::<std::collections::HashSet<_>>()
         .len();
-    memory_store
-        .save_summary(&SummaryRecord {
-            version: 2,
-            header: RecordHeader {
-                id: Uuid::new_v4().to_string(),
-                session_id: session_id.to_string(),
-                turn_id: None,
+    if persist_session_summary {
+        memory_store
+            .save_summary(&SummaryRecord {
+                version: 2,
+                header: RecordHeader {
+                    id: Uuid::new_v4().to_string(),
+                    session_id: session_id.to_string(),
+                    turn_id: None,
+                    timestamp: Utc::now(),
+                },
+                covers_until_seq: latest_seq,
+                source_turn_count,
+                content: summary.clone(),
+            })
+            .await?;
+    }
+
+    if flush_workspace_memory {
+        memory_store
+            .append_workspace_memory(&talos_memory::WorkspaceMemoryRecord {
                 timestamp: Utc::now(),
-                metadata: HashMap::new(),
-            },
-            covers_until_seq: latest_seq,
-            source_turn_count,
-            content: summary,
-        })
-        .await?;
+                title: Some("Durable Memory".to_string()),
+                content: summary.clone(),
+            })
+            .await?;
+    }
 
     Ok(())
+}
+
+async fn compact_workspace_context_if_needed(
+    session_id: &str,
+    selected_model: &str,
+    llm_provider: Arc<dyn LlmProvider>,
+    memory_store: &MemoryStore,
+    kernel_config: &AgentKernelConfig,
+) -> TalosResult<()> {
+    flush_session_memory(
+        session_id,
+        selected_model,
+        llm_provider,
+        memory_store,
+        kernel_config,
+        true,
+        true,
+        kernel_config.memory.workspace_memory_flush_enabled
+            && kernel_config.memory.workspace_memory_flush_on_compaction,
+    )
+    .await
 }
 
 fn build_reasoning_summary(tool_call_count: usize, tool_error_count: usize) -> String {
@@ -152,17 +199,130 @@ struct ToolResultLog {
     size_bytes: usize,
 }
 
-fn metadata_u64(metadata: Option<&Value>, key: &str) -> Option<u64> {
-    metadata
-        .and_then(|m| m.get(key))
-        .and_then(|value| value.as_u64())
+fn parse_retrieved_memory_items(tool_name: &str, payload: &Value) -> Vec<RetrievedMemoryItem> {
+    match tool_name {
+        "memory_search" => match serde_json::from_value::<MemorySearchResponse>(payload.clone()) {
+            Ok(response) => response.into_retrieved_items(),
+            Err(err) => {
+                warn!(
+                    tool_name = %tool_name,
+                    error = %err,
+                    payload = %payload,
+                    "failed to parse memory_search payload"
+                );
+                Vec::new()
+            }
+        },
+        "memory_get" => match serde_json::from_value::<MemoryGetResult>(payload.clone()) {
+            Ok(result) if !result.text.trim().is_empty() => vec![RetrievedMemoryItem {
+                path: result.path,
+                snippet: result.text.trim().to_string(),
+                citation: None,
+                score: 1.0,
+            }],
+            Ok(_) => Vec::new(),
+            Err(err) => {
+                warn!(
+                    tool_name = %tool_name,
+                    error = %err,
+                    payload = %payload,
+                    "failed to parse memory_get payload"
+                );
+                Vec::new()
+            }
+        },
+        _ => Vec::new(),
+    }
 }
 
-fn metadata_str(metadata: Option<&Value>, key: &str) -> Option<String> {
-    metadata
-        .and_then(|m| m.get(key))
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string())
+fn build_retrieved_memories_message(
+    items: &[RetrievedMemoryItem],
+    max_items: usize,
+    max_chars: usize,
+) -> Option<ChatMessage> {
+    if items.is_empty() || max_items == 0 || max_chars == 0 {
+        return None;
+    }
+    let mut content = String::new();
+    for item in items.iter().take(max_items) {
+        let line = format!(
+            "- {}{}: {}",
+            item.path,
+            item.citation
+                .as_ref()
+                .map(|citation| format!(" ({citation})"))
+                .unwrap_or_default(),
+            item.snippet.trim()
+        );
+        if content.len() + line.len() + 1 > max_chars {
+            break;
+        }
+        if !content.is_empty() {
+            content.push('\n');
+        }
+        content.push_str(&line);
+    }
+    if content.is_empty() {
+        None
+    } else {
+        Some(ChatMessage::system(format!(
+            "Retrieved memories:\n{}",
+            content
+        )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_retrieved_memory_items_from_memory_search() {
+        let payload = json!(MemorySearchResponse {
+            results: vec![talos_memory::MemorySearchResult {
+                path: "memory/2026-03-24.md".to_string(),
+                snippet: "launch on friday".to_string(),
+                citation: Some("memory/2026-03-24.md#L1-L1".to_string()),
+                score: 0.9,
+                start_line: 1,
+                end_line: 1,
+            }],
+        });
+
+        let items = parse_retrieved_memory_items("memory_search", &payload);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].path, "memory/2026-03-24.md");
+        assert_eq!(items[0].score, 0.9);
+    }
+
+    #[test]
+    fn test_parse_retrieved_memory_items_ignores_invalid_search_rows() {
+        let payload = json!({
+            "results": [
+                {
+                    "path": "memory/2026-03-25.md",
+                    "snippet": "missing score"
+                }
+            ]
+        });
+
+        let items = parse_retrieved_memory_items("memory_search", &payload);
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn test_parse_retrieved_memory_items_from_memory_get() {
+        let payload = json!(MemoryGetResult {
+            path: "MEMORY.md".to_string(),
+            text: "remember tea preference".to_string(),
+            from: 1,
+            lines: 5,
+        });
+
+        let items = parse_retrieved_memory_items("memory_get", &payload);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].path, "MEMORY.md");
+    }
 }
 
 async fn emit_stream_event(
@@ -308,79 +468,67 @@ async fn stream_round(
     })
 }
 
-pub async fn run_general_turn(ctx: &GeneralTurnContext) -> TalosResult<GeneralTurnResult> {
-    // Extract fields from context for local use
+#[allow(clippy::too_many_arguments)]
+pub async fn run_general_turn(
+    ctx: &InvocationContext,
+    agent_name: &str,
+    agent_description: &str,
+    input: &str,
+    llm_provider: Arc<dyn LlmProvider>,
+    tool_registry: Arc<ToolRegistry>,
+    memory_store: Arc<MemoryStore>,
+    kernel_config: &AgentKernelConfig,
+) -> TalosResult<GeneralTurnResult> {
     let session_id = &ctx.session_id;
     let agent_id = &ctx.agent_id;
-    let agent_name = &ctx.agent_name;
-    let agent_description = &ctx.agent_description;
-    let input = &ctx.input;
-    let selected_model = &ctx.selected_model;
-    let llm_provider = ctx.llm_provider.clone();
-    let tool_registry = ctx.tool_registry.clone();
-    let memory_store = ctx.memory_store.clone();
-    let kernel_config = &ctx.kernel_config;
-    let metadata = ctx.metadata.as_ref();
+    let selected_model = &ctx.model;
     let stream_tx = ctx.stream_tx.clone();
 
-    let phase = if metadata_str(metadata, "planning_instruction").is_some() {
-        PromptPhase::Planning
-    } else {
-        PromptPhase::Execution
+    let phase = match ctx.phase {
+        crate::TurnPhase::Planning => PromptPhase::Planning,
+        crate::TurnPhase::Execution => PromptPhase::Execution,
     };
 
-    let mut prompt_builder = PromptBuilder::new()
+    let prompt_builder = PromptBuilder::new()
         .agent(agent_name.to_string(), agent_description.to_string())
         .phase(phase)
+        .planner_mode(kernel_config.planner_mode.clone())
+        .planning_instruction(ctx.planning_instruction.clone())
         .config(PromptBuildConfig {
             budget: PromptBudget {
                 max_static_tokens: kernel_config.prompt.max_static_tokens,
                 max_dynamic_tokens: kernel_config.prompt.max_dynamic_tokens,
             },
             load_policy: PromptLoadPolicy {
-                include_workspace_summary: kernel_config.prompt.include_workspace_summary,
+                include_session_summary: kernel_config.prompt.include_session_summary,
                 include_recent_messages: kernel_config.prompt.include_recent_messages,
-                workspace_recent_limit: kernel_config.memory.context_target_messages,
+                include_root_memory: kernel_config.prompt.include_root_memory,
+                include_retrieved_memories: kernel_config.prompt.include_retrieved_memories,
+                session_recent_limit: kernel_config.memory.session_recent_messages_limit,
+                retrieved_memory_max_items: kernel_config.prompt.retrieved_memory_max_items,
+                retrieved_memory_max_chars: kernel_config.prompt.retrieved_memory_max_chars,
                 unified_recent_limit: 10,
             },
+            prompt: kernel_config.prompt.clone(),
+            memory: kernel_config.memory.clone(),
         })
         .tools(tool_registry.as_ref())
         .memory_store(session_id, memory_store.as_ref())
         .user_input(input.to_string());
-    if let Some(metadata_value) = metadata {
-        prompt_builder = prompt_builder.metadata(metadata_value);
-    }
     let mut messages = prompt_builder.build().await?;
 
     let tool_definitions = tool_registry.get_tool_definitions();
-    let configured_rounds = metadata_u64(metadata, "max_tool_rounds")
-        .unwrap_or(kernel_config.max_tool_rounds as u64) as u32;
-    let max_tool_rounds = configured_rounds.max(1);
-
-    let mut tool_context_metadata = metadata
-        .and_then(Value::as_object)
-        .map(|object| {
-            object
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.clone()))
-                .collect::<HashMap<_, _>>()
-        })
-        .unwrap_or_default();
-    if !tool_context_metadata.contains_key("tool_output_max_bytes") {
-        tool_context_metadata.insert(
-            "tool_output_max_bytes".to_string(),
-            json!(kernel_config.tool_result_max_bytes),
-        );
-    }
+    let max_tool_rounds = kernel_config.max_tool_rounds.max(1);
 
     let mut round = 0_u32;
-    let mut output_items: Vec<CanonicalOutputItem> = Vec::new();
-    let usage = CanonicalUsage::default();
+    let mut output_items: Vec<TalosOutputItem> = Vec::new();
+    let usage = TalosUsage::default();
     let mut tool_call_count = 0_usize;
     let mut tool_error_count = 0_usize;
     let mut reasoning_log: Vec<String> = Vec::new();
     let mut tool_call_log: Vec<ToolCallRecord> = Vec::new();
     let mut tool_result_log: Vec<ToolResultLog> = Vec::new();
+    let mut retrieved_memories: Vec<RetrievedMemoryItem> = Vec::new();
     let mut saw_output_delta = false;
 
     let (mut final_text, stop_reason) = loop {
@@ -406,7 +554,7 @@ pub async fn run_general_turn(ctx: &GeneralTurnContext) -> TalosResult<GeneralTu
 
         if !round_response.reasoning.trim().is_empty() {
             let reasoning = round_response.reasoning.trim().to_string();
-            output_items.push(CanonicalOutputItem::Reasoning {
+            output_items.push(TalosOutputItem::Reasoning {
                 text: reasoning.clone(),
             });
             reasoning_log.push(reasoning);
@@ -415,7 +563,7 @@ pub async fn run_general_turn(ctx: &GeneralTurnContext) -> TalosResult<GeneralTu
         if !round_response.tool_calls.is_empty() && !tool_definitions.is_empty() {
             let calls = round_response.tool_calls;
             for call in &calls {
-                output_items.push(CanonicalOutputItem::ToolCall {
+                output_items.push(TalosOutputItem::ToolCall {
                     call_id: call.id.clone(),
                     name: call.name.clone(),
                     arguments: call.arguments.clone(),
@@ -436,7 +584,7 @@ pub async fn run_general_turn(ctx: &GeneralTurnContext) -> TalosResult<GeneralTu
             let context = tool_registry.build_context(
                 format!("agent-{}", agent_id),
                 agent_name.to_string(),
-                tool_context_metadata.clone(),
+                Some(Arc::new(kernel_config.clone())),
             );
 
             let mut tool_messages = Vec::new();
@@ -481,9 +629,9 @@ pub async fn run_general_turn(ctx: &GeneralTurnContext) -> TalosResult<GeneralTu
                             .and_then(|v| v.as_bool())
                             .map(|ok| !ok)
                             .unwrap_or(true);
-                        output_items.push(CanonicalOutputItem::ToolResult {
+                        output_items.push(TalosOutputItem::ToolResult {
                             call_id: call.id.clone(),
-                            content: vec![CanonicalContentItem::Json {
+                            content: vec![TalosContentItem::Json {
                                 value: payload.clone(),
                             }],
                             is_error,
@@ -513,6 +661,8 @@ pub async fn run_general_turn(ctx: &GeneralTurnContext) -> TalosResult<GeneralTu
                                 .map(|buf| buf.len())
                                 .unwrap_or(0),
                         });
+                        retrieved_memories
+                            .extend(parse_retrieved_memory_items(&call.name, &payload));
 
                         tool_messages.push(ChatMessage::tool(
                             call.id.clone(),
@@ -535,9 +685,9 @@ pub async fn run_general_turn(ctx: &GeneralTurnContext) -> TalosResult<GeneralTu
                             "tool": call.name,
                             "error": e.to_string(),
                         });
-                        output_items.push(CanonicalOutputItem::ToolResult {
+                        output_items.push(TalosOutputItem::ToolResult {
                             call_id: call.id.clone(),
-                            content: vec![CanonicalContentItem::Json {
+                            content: vec![TalosContentItem::Json {
                                 value: payload.clone(),
                             }],
                             is_error: true,
@@ -563,6 +713,8 @@ pub async fn run_general_turn(ctx: &GeneralTurnContext) -> TalosResult<GeneralTu
                                 .map(|buf| buf.len())
                                 .unwrap_or(0),
                         });
+                        retrieved_memories
+                            .extend(parse_retrieved_memory_items(&call.name, &payload));
                         tool_messages.push(ChatMessage::tool(
                             call.id.clone(),
                             call.name.clone(),
@@ -581,6 +733,20 @@ pub async fn run_general_turn(ctx: &GeneralTurnContext) -> TalosResult<GeneralTu
             }
 
             messages.extend(tool_messages);
+            if kernel_config.prompt.include_retrieved_memories {
+                if let Some(message) = build_retrieved_memories_message(
+                    &retrieved_memories,
+                    kernel_config.prompt.retrieved_memory_max_items,
+                    kernel_config.prompt.retrieved_memory_max_chars,
+                ) {
+                    if !messages.iter().rev().take(4).any(|item| {
+                        item.role == talos_llm_provider::Role::System
+                            && item.content == message.content
+                    }) {
+                        messages.push(message);
+                    }
+                }
+            }
             round += 1;
             if round >= max_tool_rounds {
                 break (
@@ -630,42 +796,40 @@ pub async fn run_general_turn(ctx: &GeneralTurnContext) -> TalosResult<GeneralTu
         }),
     )
     .await;
-    output_items.push(CanonicalOutputItem::Reasoning {
+    output_items.push(TalosOutputItem::Reasoning {
         text: reasoning_summary.clone(),
     });
-    output_items.push(CanonicalOutputItem::OutputText {
+    output_items.push(TalosOutputItem::OutputText {
         text: final_text.clone(),
     });
 
     let seq = memory_store.next_turn_seq(session_id).await?;
     let turn_id = Uuid::new_v4().to_string();
     let now = Utc::now();
-    let canonical_turn = CanonicalTurn {
+    let talos_turn = TalosTurn {
         turn_id: turn_id.clone(),
         session_id: session_id.to_string(),
         seq,
         timestamp: now,
         messages: vec![
-            CanonicalMessage {
+            TalosMessage {
                 header: RecordHeader {
                     id: format!("{}:u", turn_id),
                     session_id: session_id.to_string(),
                     turn_id: Some(turn_id.clone()),
                     timestamp: now,
-                    metadata: HashMap::new(),
                 },
-                role: CanonicalMessageRole::User,
+                role: TalosMessageRole::User,
                 text: input.to_string(),
             },
-            CanonicalMessage {
+            TalosMessage {
                 header: RecordHeader {
                     id: format!("{}:a", turn_id),
                     session_id: session_id.to_string(),
                     turn_id: Some(turn_id.clone()),
                     timestamp: now,
-                    metadata: HashMap::new(),
                 },
-                role: CanonicalMessageRole::Assistant,
+                role: TalosMessageRole::Assistant,
                 text: final_text.clone(),
             },
         ],
@@ -683,7 +847,6 @@ pub async fn run_general_turn(ctx: &GeneralTurnContext) -> TalosResult<GeneralTu
                     session_id: session_id.to_string(),
                     turn_id: Some(turn_id.clone()),
                     timestamp: now,
-                    metadata: HashMap::new(),
                 },
                 call_id: item.call_id.clone(),
                 tool: item.tool.clone(),
@@ -694,7 +857,7 @@ pub async fn run_general_turn(ctx: &GeneralTurnContext) -> TalosResult<GeneralTu
             })
             .collect(),
     };
-    if let Err(err) = memory_store.append_turn(&canonical_turn).await {
+    if let Err(err) = memory_store.append_turn(&talos_turn).await {
         warn!(
             session_id = %session_id,
             error = %err,
@@ -708,7 +871,6 @@ pub async fn run_general_turn(ctx: &GeneralTurnContext) -> TalosResult<GeneralTu
         llm_provider.clone(),
         memory_store.as_ref(),
         kernel_config,
-        metadata,
     )
     .await
     {

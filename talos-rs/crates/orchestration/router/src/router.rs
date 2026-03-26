@@ -6,7 +6,7 @@ use tracing::debug;
 use talos_error::TalosResult;
 
 use crate::router_trait::Router;
-use crate::types::{Binding, BindingConfig, MatchRule, RouterConfig};
+use crate::types::{Binding, MatchRule, RouterConfig};
 
 /// 路由器实现
 pub struct RouterImpl {
@@ -115,6 +115,7 @@ impl Router for RouterImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::BindingConfig;
 
     #[tokio::test]
     async fn test_add_and_list_bindings() {

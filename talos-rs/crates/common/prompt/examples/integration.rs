@@ -4,7 +4,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use talos_llm_provider::{ChatMessage, ChatRequest, LlmProvider};
 use talos_memory::{
-    CanonicalMessage, CanonicalMessageRole, CanonicalTurn, Memory, MemoryStore, RecordHeader,
+    Memory, MemoryStore, RecordHeader, SessionPromptContextConfig, TalosMessage,
+    TalosMessageRole, TalosTurn,
 };
 use talos_prompt::{PromptManager, PromptTemplate};
 use talos_tools::{Tool, ToolRegistry};
@@ -68,14 +69,22 @@ Based on the request and available tools, decide if a tool should be used. If ye
         }
     }
 
-    pub async fn handle_message(
+    pub async fn run_text_request(
         &self,
         user_message: &str,
     ) -> Result<String, Box<dyn std::error::Error>> {
         // 1. Retrieve conversation context from memory
         let context_snapshot = self
             .memory
-            .build_prompt_context(DEFAULT_SESSION_ID, 5, false, 0, 0)
+            .build_session_prompt_context(
+                DEFAULT_SESSION_ID,
+                &SessionPromptContextConfig {
+                    recent_messages_limit: 5,
+                    include_summary: false,
+                    summary_recent_count: 0,
+                    summary_max_chars: 0,
+                },
+            )
             .await?;
         let conversation_context = context_snapshot
             .recent_messages
@@ -84,9 +93,9 @@ Based on the request and available tools, decide if a tool should be used. If ye
                 format!(
                     "{}: {}",
                     match message.role {
-                        CanonicalMessageRole::User => "user",
-                        CanonicalMessageRole::Assistant => "assistant",
-                        CanonicalMessageRole::System => "system",
+                        TalosMessageRole::User => "user",
+                        TalosMessageRole::Assistant => "assistant",
+                        TalosMessageRole::System => "system",
                     },
                     message.text
                 )
@@ -126,32 +135,30 @@ Based on the request and available tools, decide if a tool should be used. If ye
         let turn_id = uuid::Uuid::new_v4().to_string();
         let seq = self.memory.next_turn_seq(DEFAULT_SESSION_ID).await?;
         let timestamp = chrono::Utc::now();
-        let canonical_turn = CanonicalTurn {
+        let talos_turn = TalosTurn {
             turn_id: turn_id.clone(),
             session_id: DEFAULT_SESSION_ID.to_string(),
             seq,
             timestamp,
             messages: vec![
-                CanonicalMessage {
+                TalosMessage {
                     header: RecordHeader {
                         id: format!("{turn_id}:u"),
                         session_id: DEFAULT_SESSION_ID.to_string(),
                         turn_id: Some(turn_id.clone()),
                         timestamp,
-                        metadata: std::collections::HashMap::new(),
                     },
-                    role: CanonicalMessageRole::User,
+                    role: TalosMessageRole::User,
                     text: user_message.to_string(),
                 },
-                CanonicalMessage {
+                TalosMessage {
                     header: RecordHeader {
                         id: format!("{turn_id}:a"),
                         session_id: DEFAULT_SESSION_ID.to_string(),
                         turn_id: Some(turn_id.clone()),
                         timestamp,
-                        metadata: std::collections::HashMap::new(),
                     },
-                    role: CanonicalMessageRole::Assistant,
+                    role: TalosMessageRole::Assistant,
                     text: response.content.clone(),
                 },
             ],
@@ -159,7 +166,7 @@ Based on the request and available tools, decide if a tool should be used. If ye
             tool_calls: Vec::new(),
             tool_results: Vec::new(),
         };
-        self.memory.append_turn(&canonical_turn).await?;
+        self.memory.append_turn(&talos_turn).await?;
 
         Ok(response.content)
     }
@@ -224,7 +231,7 @@ mod tests {
             Box::new(MockLlmProvider),
         );
 
-        let response = agent.handle_message("Hello, world!").await;
+        let response = agent.run_text_request("Hello, world!").await;
         assert!(response.is_ok());
         println!("Agent response: {}", response.unwrap());
     }

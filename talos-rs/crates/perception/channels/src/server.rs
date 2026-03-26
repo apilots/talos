@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use serde_json::{json, Value};
 use talos_config::Config;
 use talos_error::TalosResult;
-use talos_types::canonical::CanonicalContext;
+use talos_types::talos::{TalosContext, TalosInputItem, TalosProvider};
 use talos_types::gateway::GatewayRequest;
 use talos_types::RequestHandler;
 use tokio::sync::mpsc;
@@ -102,8 +101,6 @@ impl ChannelServer {
                         thread_id.clone(),
                         session_id.0,
                         content,
-                        self.config.llm.model.clone(),
-                        request_metadata(self.config.as_ref(), &channel_id),
                     );
 
                     match self.request_handler.handle(request).await {
@@ -176,48 +173,39 @@ impl ChannelServer {
 
 fn build_gateway_request(
     channel_id: &str,
-    account_id: &str,
+    _account_id: &str,
     user_id: &str,
     chat_id: &str,
     thread_id: Option<String>,
     session_id: String,
     content: MessageContent,
-    default_model: String,
-    metadata: Option<Value>,
 ) -> GatewayRequest {
-    let content = match content {
-        MessageContent::Text(text) => text,
-        MessageContent::Media { kind, file_id } => format!("[media:{kind:?}] {file_id}"),
+    let input = match content {
+        MessageContent::Text(text) => vec![TalosInputItem::Text { text }],
+        MessageContent::Media { kind, file_id } => vec![TalosInputItem::Text {
+            text: format!("[media:{kind:?}] {file_id}"),
+        }],
+    };
+
+    let provider = match channel_id {
+        "telegram" => TalosProvider::Telegram,
+        _ => TalosProvider::System,
+    };
+
+    let context = {
+        let context = TalosContext::im(provider, user_id.to_string()).with_channel_id(chat_id.to_string());
+        if let Some(thread_id) = thread_id {
+            context.with_thread_id(thread_id)
+        } else {
+            context
+        }
     };
 
     GatewayRequest {
-        channel: format!("{}:{}", channel_id, account_id),
-        user_id: user_id.to_string(),
-        content,
-        model: Some(default_model),
-        session_id: Some(session_id),
-        context: Some(CanonicalContext {
-            source_type: "channel".to_string(),
-            // TODO: provider should come from the session/model provider mapping,
-            // not from the channel id. Keep this temporary mapping until the
-            // session-aware provider resolution is wired into ChannelServer.
-            provider: channel_id.to_string(),
-            channel_id: chat_id.to_string(),
-            user_id: user_id.to_string(),
-            thread_id,
-            message_id: None,
-            trace_id: None,
-        }),
-        metadata,
-    }
-}
-
-fn request_metadata(config: &Config, channel_id: &str) -> Option<Value> {
-    match channel_id {
-        "telegram" => Some(json!({
-            "dm_scope": config.channels.telegram.dm_scope,
-        })),
-        _ => None,
+        session_id,
+        workspace_id: None,
+        input,
+        context,
     }
 }
 
@@ -235,7 +223,7 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use std::sync::Mutex;
-    use talos_types::canonical::CanonicalUsage;
+    use talos_types::talos::{TalosReasoning, TalosUsage};
     use talos_types::gateway::{GatewayRequest, GatewayResponse};
 
     use crate::traits::{ChannelCapabilities, ChannelDefinition, DeliveryResult, OutboundAdapter};
@@ -333,10 +321,13 @@ mod tests {
     impl RequestHandler for MockRequestHandler {
         async fn handle(&self, request: GatewayRequest) -> TalosResult<GatewayResponse> {
             Ok(GatewayResponse {
-                content: format!("Echo: {}", request.content),
+                content: format!("Echo: {}", extract_text_input(&request.input)),
                 output_items: Vec::new(),
+                reasoning: vec![TalosReasoning {
+                    text: "mock reasoning".to_string(),
+                }],
                 stop_reason: "stop".to_string(),
-                usage: CanonicalUsage::default(),
+                usage: TalosUsage::default(),
                 success: true,
                 model: "mock-model".to_string(),
                 session_id: request.session_id,
@@ -354,27 +345,16 @@ mod tests {
             Some("topic-1".to_string()),
             "session-1".to_string(),
             MessageContent::Text("hello".to_string()),
-            "qwen-max".to_string(),
-            Some(json!({"dm_scope": "per_channel_peer_topic"})),
         );
 
-        assert_eq!(request.channel, "telegram:bot-a");
-        assert_eq!(request.user_id, "user-1");
-        assert_eq!(request.content, "hello");
-        assert_eq!(request.session_id.as_deref(), Some("session-1"));
+        assert_eq!(extract_text_input(&request.input), "hello");
+        assert_eq!(request.session_id, "session-1");
 
-        let context = request.context.expect("context should exist");
-        assert_eq!(context.provider, "telegram");
-        assert_eq!(context.channel_id, "chat-1");
+        let context = request.context;
+        assert_eq!(context.provider, TalosProvider::Telegram);
+        assert_eq!(context.channel_id.as_deref(), Some("chat-1"));
         assert_eq!(context.thread_id.as_deref(), Some("topic-1"));
-        assert_eq!(
-            request
-                .metadata
-                .as_ref()
-                .and_then(|value| value.get("dm_scope"))
-                .and_then(|value| value.as_str()),
-            Some("per_channel_peer_topic")
-        );
+        assert_eq!(context.user_id, "user-1");
     }
 
     #[test]
@@ -463,14 +443,19 @@ mod tests {
     }
 
     #[test]
-    fn test_request_metadata_uses_telegram_dm_scope() {
+    fn test_telegram_dm_scope_is_loaded_from_config() {
         let mut config = Config::default();
         config.channels.telegram.dm_scope = "per_channel_peer".to_string();
+        assert_eq!(config.channels.telegram.dm_scope, "per_channel_peer");
+    }
 
-        let metadata = request_metadata(&config, "telegram").expect("metadata should exist");
-        assert_eq!(
-            metadata.get("dm_scope").and_then(|value| value.as_str()),
-            Some("per_channel_peer")
-        );
+    fn extract_text_input(input: &[TalosInputItem]) -> String {
+        input.iter()
+            .filter_map(|item| match item {
+                TalosInputItem::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }

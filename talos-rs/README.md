@@ -105,16 +105,13 @@ curl -X POST http://localhost:8080/v1/sessions \
   -H "Authorization: Bearer your-token-here" \
   -d '{
     "context": {
-      "source_type": "api",
-      "provider": "cli",
-      "channel_id": "default",
+      "source_type": "http",
+      "provider": "http",
       "user_id": "user123",
-      "thread_id": null,
-      "message_id": null,
-      "trace_id": null
+      "message_id": "msg-create-1",
+      "trace_id": "trace-create-1"
     },
-    "model": "gpt-4o-mini",
-    "metadata": null
+    "model": "gpt-4o-mini"
   }'
 ```
 
@@ -125,11 +122,9 @@ curl -X POST http://localhost:8080/v1/sessions/<session_id>/messages \
   -H "Authorization: Bearer your-token-here" \
   -d '{
     "input": [
-      { "type": "input_text", "text": "Hello, how are you?" }
+      { "type": "text", "text": "Hello, how are you?" }
     ],
-    "stream": false,
-    "model": null,
-    "metadata": null
+    "stream": false
   }'
 ```
 

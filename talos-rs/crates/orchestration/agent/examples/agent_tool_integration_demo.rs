@@ -2,11 +2,13 @@
 
 use serde_json::json;
 use std::sync::Arc;
-use talos_agent::{Agent, AgentImpl};
+use talos_agent::{Agent, AgentImpl, AgentOrchestrator, OrchestratorRequest};
 use talos_error::TalosResult;
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
 use talos_tools::{ToolRegistry, WebSearchTool};
 use talos_tools_policy::ToolPolicy;
+use talos_types::talos::{TalosInputItem, TalosProvider, TalosSourceType};
+use talos_types::{SessionContext, SessionState, TalosSession};
 
 /// Simple mock LLM provider for demo purposes
 struct DemoLlmProvider;
@@ -88,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("   ✓ Tool executed successfully");
             println!(
                 "   Result: {}",
-                result.content.chars().take(100).collect::<String>()
+                result.output_text.chars().take(100).collect::<String>()
             );
         }
         Err(e) => {
@@ -99,14 +101,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Test the agent's message handling
     println!("\n4. Testing agent message handling:");
     match agent
-        .handle_message("Tell me about Rust programming language")
+        .run(OrchestratorRequest {
+            session: TalosSession {
+                context: SessionContext {
+                    session_id: "demo-session".to_string(),
+                    workspace_id: Some("default".to_string()),
+                    source_type: TalosSourceType::System,
+                    provider: TalosProvider::System,
+                    user_id: "demo-user".to_string(),
+                    message_id: "demo-message".to_string(),
+                    trace_id: "demo-trace".to_string(),
+                    channel_id: None,
+                    thread_id: None,
+                },
+                config: talos_config::Config::default(),
+                state: SessionState::default(),
+            },
+            input: vec![TalosInputItem::Text {
+                text: "Tell me about Rust programming language".to_string(),
+            }],
+        })
         .await
     {
         Ok(response) => {
             println!("   ✓ Message handled successfully");
             println!(
                 "   Response: {}",
-                response.chars().take(100).collect::<String>()
+                response.output_text.chars().take(100).collect::<String>()
             );
         }
         Err(e) => {

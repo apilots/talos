@@ -3,7 +3,9 @@ use talos_agent::{Agent, AgentImpl};
 use talos_client::{ClientConfig, TalosClient};
 use talos_error::TalosResult;
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
-use talos_tools::{ReadTool, ToolRegistry, WebSearchTool, WriteTool};
+use talos_tools::{
+    MemoryGetTool, MemorySearchTool, ReadTool, ToolRegistry, WebSearchTool, WriteTool,
+};
 use talos_tools_policy::ToolPolicy;
 use talos_ui_tui::{run_tui_app, run_tui_app_with_client};
 
@@ -73,11 +75,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Starting in direct agent mode...");
 
         let llm_provider = Arc::new(DemoLlmProvider {});
-        let policy = ToolPolicy::allow_list(vec!["web_search", "read", "write"]);
+        let policy = ToolPolicy::allow_list(vec![
+            "web_search",
+            "read",
+            "write",
+            "memory_search",
+            "memory_get",
+        ]);
         let tool_registry = Arc::new(ToolRegistry::new_with_policy(policy));
         tool_registry.register(Arc::new(WebSearchTool));
         tool_registry.register(Arc::new(ReadTool));
         tool_registry.register(Arc::new(WriteTool));
+        tool_registry.register(Arc::new(MemorySearchTool));
+        tool_registry.register(Arc::new(MemoryGetTool));
 
         let agent_impl = AgentImpl::new(
             "tui_demo_agent".to_string(),

@@ -29,6 +29,11 @@ impl Default for ToolPolicy {
                 "write".to_string(),
                 "edit".to_string(),
                 "exec".to_string(),
+                "memory_search".to_string(),
+                "memory_get".to_string(),
+                "web_search".to_string(),
+                "web_fetch".to_string(),
+                "http_request".to_string(),
                 "echo_test".to_string(),
             ]
             .into_iter()
@@ -197,5 +202,13 @@ mod tests {
         assert!(checker
             .check_tools_access(&vec!["read".to_string(), "exec".to_string()])
             .is_err());
+    }
+
+    #[test]
+    fn test_default_policy_allows_memory_tools() {
+        let policy = ToolPolicy::default();
+
+        assert!(policy.is_allowed("memory_search"));
+        assert!(policy.is_allowed("memory_get"));
     }
 }

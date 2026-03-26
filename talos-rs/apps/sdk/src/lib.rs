@@ -6,13 +6,13 @@ use futures_util::StreamExt;
 use reqwest::{Client, RequestBuilder, Response};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use std::collections::HashMap;
 use tokio::sync::mpsc;
 
 use talos_error::{TalosError, TalosResult};
-pub use talos_types::canonical::{
-    CanonicalContext, CanonicalEvent, CanonicalEventType, CanonicalInputItem,
-    CanonicalMessageRequest, CanonicalMessageResponse, CanonicalOutputItem,
+pub use talos_types::talos::{
+    TalosContext, TalosEvent, TalosEventType, TalosMessageRequest, TalosMessageResponse,
+    TalosInputItem, TalosOutputItem, TalosProvider, TalosSourceType,
 };
 
 #[derive(Clone, Debug)]
@@ -33,10 +33,9 @@ impl Default for ClientConfig {
 }
 
 #[derive(Debug, Clone)]
-pub struct SessionConfig {
-    pub context: Option<CanonicalContext>,
+pub struct SessionCreateParams {
+    pub context: Option<TalosContext>,
     pub model: Option<String>,
-    pub metadata: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,15 +61,13 @@ pub struct ModelInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionUpdate {
-    pub model: Option<String>,
-    pub metadata: Option<Value>,
+    pub conf: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CreateSessionRequest {
-    context: CanonicalContext,
+    context: TalosContext,
     model: Option<String>,
-    metadata: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,7 +75,7 @@ struct CreateSessionResponse {
     id: String,
     model: String,
     created_at: u64,
-    context: CanonicalContext,
+    context: TalosContext,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,8 +84,7 @@ struct SessionEnvelope {
     model: String,
     message_count: u64,
     last_activity: u64,
-    context: CanonicalContext,
-    metadata: Option<Value>,
+    context: TalosContext,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,6 +95,11 @@ struct ListModelsResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ListSessionsResponse {
     data: Vec<SessionEnvelope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SessionPatchResponse {
+    success: bool,
 }
 
 pub struct TalosClient {
@@ -141,14 +142,16 @@ impl TalosClient {
         Ok(payload.data)
     }
 
-    pub async fn create_session(&self, config: &SessionConfig) -> TalosResult<SessionHandle> {
+    pub async fn create_session(
+        &self,
+        params: &SessionCreateParams,
+    ) -> TalosResult<SessionHandle> {
         let request = CreateSessionRequest {
-            context: config
+            context: params
                 .context
                 .clone()
                 .unwrap_or_else(|| default_context("anonymous")),
-            model: config.model.clone(),
-            metadata: config.metadata.clone(),
+            model: params.model.clone(),
         };
 
         let url = format!("{}/v1/sessions", self.config.gateway_url);
@@ -196,34 +199,53 @@ impl TalosClient {
         &self,
         session_id: &str,
         update: &SessionUpdate,
-    ) -> TalosResult<SessionInfo> {
+    ) -> TalosResult<()> {
         let url = format!("{}/v1/sessions/{}", self.config.gateway_url, session_id);
         let response = self
             .authorized(self.http_client.patch(&url).json(update))
             .send()
             .await
             .map_err(|e| TalosError::ClientError(e.to_string()))?;
-        let payload: SessionEnvelope = Self::decode_json(response).await?;
-        Ok(Self::to_session_info(payload))
+        let payload: SessionPatchResponse = Self::decode_json(response).await?;
+        if payload.success {
+            return Ok(());
+        }
+        Err(TalosError::ClientError(
+            "session patch did not succeed".to_string(),
+        ))
     }
 
-    pub async fn update_session_model(
-        &self,
-        session_id: &str,
-        model: &str,
-    ) -> TalosResult<SessionInfo> {
-        let update = SessionUpdate {
-            model: Some(model.to_string()),
-            metadata: None,
-        };
+    pub async fn update_session_model(&self, session_id: &str, model: &str) -> TalosResult<()> {
+        let mut conf = HashMap::new();
+        conf.insert(
+            "agent.model".to_string(),
+            serde_json::Value::String(model.to_string()),
+        );
+        let update = SessionUpdate { conf };
         self.update_session(session_id, &update).await
+    }
+
+    pub async fn close_session(&self, session_id: &str) -> TalosResult<()> {
+        let url = format!("{}/v1/sessions/{}", self.config.gateway_url, session_id);
+        let response = self
+            .authorized(self.http_client.delete(&url))
+            .send()
+            .await
+            .map_err(|e| TalosError::ClientError(e.to_string()))?;
+        let payload: SessionPatchResponse = Self::decode_json(response).await?;
+        if payload.success {
+            return Ok(());
+        }
+        Err(TalosError::ClientError(
+            "session close did not succeed".to_string(),
+        ))
     }
 
     pub async fn send_message(
         &self,
         session_id: &str,
-        request: &CanonicalMessageRequest,
-    ) -> TalosResult<CanonicalMessageResponse> {
+        request: &TalosMessageRequest,
+    ) -> TalosResult<TalosMessageResponse> {
         let url = format!(
             "{}/v1/sessions/{}/messages",
             self.config.gateway_url, session_id
@@ -239,8 +261,8 @@ impl TalosClient {
     pub async fn send_message_stream(
         &self,
         session_id: &str,
-        request: &CanonicalMessageRequest,
-    ) -> TalosResult<mpsc::Receiver<CanonicalEvent>> {
+        request: &TalosMessageRequest,
+    ) -> TalosResult<mpsc::Receiver<TalosEvent>> {
         let mut stream_request = request.clone();
         stream_request.stream = Some(true);
 
@@ -281,7 +303,7 @@ impl TalosClient {
                             continue;
                         }
 
-                        let Ok(event) = serde_json::from_str::<CanonicalEvent>(payload) else {
+                        let Ok(event) = serde_json::from_str::<TalosEvent>(payload) else {
                             continue;
                         };
 
@@ -328,16 +350,8 @@ impl TalosClient {
     }
 }
 
-fn default_context(user_id: &str) -> CanonicalContext {
-    CanonicalContext {
-        source_type: "api".to_string(),
-        provider: "talos-client".to_string(),
-        channel_id: "default".to_string(),
-        user_id: user_id.to_string(),
-        thread_id: None,
-        message_id: None,
-        trace_id: None,
-    }
+fn default_context(user_id: &str) -> TalosContext {
+    TalosContext::sdk(user_id).with_channel_id("default")
 }
 
 fn is_local_gateway_url(gateway_url: &str) -> bool {
@@ -374,9 +388,9 @@ mod tests {
     #[test]
     fn test_default_context_values() {
         let ctx = default_context("user-1");
-        assert_eq!(ctx.source_type, "api");
-        assert_eq!(ctx.provider, "talos-client");
-        assert_eq!(ctx.channel_id, "default");
+        assert_eq!(ctx.source_type, TalosSourceType::Http);
+        assert_eq!(ctx.provider, TalosProvider::Sdk);
+        assert_eq!(ctx.channel_id.as_deref(), Some("default"));
         assert_eq!(ctx.user_id, "user-1");
     }
 
@@ -395,7 +409,6 @@ mod tests {
             message_count: 7,
             last_activity: 123,
             context: default_context("u"),
-            metadata: Some(serde_json::json!({"k":"v"})),
         };
 
         let info = TalosClient::to_session_info(envelope);

@@ -1,7 +1,7 @@
 //! Demo example showcasing the Agent with enhanced tool system
 
 use std::sync::Arc;
-use talos_agent::{Agent, AgentImpl};
+use talos_agent::MockAgent;
 use talos_tools::{
     ExecTool, HttpRequestTool, ReadTool, ToolRegistry, WebFetchTool, WebSearchTool, WriteTool,
 };
@@ -11,11 +11,8 @@ use talos_tools_policy::ToolPolicy;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Agent with Enhanced Tool System Demo ===\n");
 
-    // For this demo, we'll use a mock LLM provider from the agent crate
-    use talos_agent::MockAgent;
-
     // Create a mock agent instance to focus on tool integration
-    let agent = MockAgent::new();
+    let _agent = MockAgent::new();
 
     // This demo focuses on demonstrating the agent's interface and tool integration
     // In a real implementation, you would create a real agent with a proper LLM provider

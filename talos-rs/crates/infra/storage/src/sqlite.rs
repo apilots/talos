@@ -185,6 +185,24 @@ impl Storage for SqliteStorage {
     async fn init_schema(&self) -> TalosResult<()> {
         info!("Initializing database schema");
 
+        if self.table_exists("sessions").await? {
+            let session_columns = self.query("PRAGMA table_info(sessions)", &[]).await?;
+            let mut existing = std::collections::HashSet::new();
+            for row in session_columns {
+                if let Some(name) = row.get_string("name") {
+                    existing.insert(name);
+                }
+            }
+
+            let required = ["context_json", "model", "message_count", "conf_json"];
+            let needs_rebuild = required.iter().any(|name| !existing.contains(*name));
+            if needs_rebuild {
+                info!("Rebuilding legacy sessions schema");
+                self.execute("DROP TABLE IF EXISTS messages", &[]).await?;
+                self.execute("DROP TABLE IF EXISTS sessions", &[]).await?;
+            }
+        }
+
         // Sessions table
         let create_sessions = r#"
             CREATE TABLE IF NOT EXISTS sessions (
@@ -199,7 +217,10 @@ impl Storage for SqliteStorage {
                 thread_id TEXT,
                 created_at INTEGER NOT NULL,
                 last_activity INTEGER NOT NULL,
-                metadata TEXT
+                context_json TEXT,
+                model TEXT,
+                message_count INTEGER NOT NULL DEFAULT 0,
+                conf_json TEXT
             )
         "#;
 

@@ -9,15 +9,14 @@ struct Context {
     channel_id: String,
     user_id: String,
     thread_id: Option<String>,
-    message_id: Option<String>,
-    trace_id: Option<String>,
+    message_id: String,
+    trace_id: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct SessionCreateRequest {
     context: Context,
     model: Option<String>,
-    metadata: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -36,8 +35,7 @@ struct MessageInputItem {
 struct MessageRequest {
     input: Vec<MessageInputItem>,
     stream: bool,
-    model: Option<String>,
-    metadata: Option<serde_json::Value>,
+    workspace_id: Option<String>,
 }
 
 #[tokio::main]
@@ -76,16 +74,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nTesting messages endpoint...");
     let session_request = SessionCreateRequest {
         context: Context {
-            source_type: "api".to_string(),
-            provider: "integration-test".to_string(),
+            source_type: "http".to_string(),
+            provider: "http".to_string(),
             channel_id: "default".to_string(),
             user_id: "test_user".to_string(),
             thread_id: None,
-            message_id: None,
-            trace_id: None,
+            message_id: "msg-integration-test".to_string(),
+            trace_id: "trace-integration-test".to_string(),
         },
         model: None,
-        metadata: None,
     };
     let token = std::env::var("GATEWAY_TOKEN").unwrap_or_else(|_| "talos-local-test-token".to_string());
 
@@ -111,8 +108,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             text: "hello from integration test".to_string(),
         }],
         stream: false,
-        model: None,
-        metadata: None,
+        workspace_id: None,
     };
 
     match client

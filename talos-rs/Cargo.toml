@@ -36,7 +36,6 @@ members = [
     "crates/orchestration/agent-kernel",
     "crates/orchestration/agent",
     "crates/orchestration/agent-workspace",
-    "crates/orchestration/session",
     "crates/orchestration/session-store",
     "crates/orchestration/router",
     "crates/orchestration/scheduler",

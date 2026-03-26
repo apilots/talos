@@ -1,7 +1,7 @@
 use dashmap::DashMap;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::sync::Arc;
+use talos_config::AgentKernelConfig;
 use talos_error::TalosResult;
 use talos_llm_provider::ToolDefinition;
 use tracing::warn;
@@ -22,9 +22,8 @@ pub struct ToolRegistry {
 impl ToolRegistry {
     fn resolve_max_output_bytes(context: &ToolContext) -> usize {
         context
-            .metadata("tool_output_max_bytes")
-            .and_then(|value| value.as_u64())
-            .map(|value| value as usize)
+            .kernel_config()
+            .map(|config| config.tool_result_max_bytes)
             .filter(|value| *value > 0)
             .unwrap_or(DEFAULT_TOOL_OUTPUT_MAX_BYTES)
     }
@@ -202,14 +201,14 @@ impl ToolRegistry {
             .collect()
     }
 
-    /// Build a context from execution metadata.
+    /// Build a context from execution state.
     pub fn build_context(
         &self,
         session_id: impl Into<String>,
         user_id: impl Into<String>,
-        metadata: HashMap<String, Value>,
+        kernel_config: Option<Arc<AgentKernelConfig>>,
     ) -> ToolContext {
-        ToolContext::new(session_id, user_id, metadata)
+        ToolContext::new_with_kernel_config(session_id, user_id, kernel_config)
     }
 
     /// Update the policy for the registry
@@ -233,10 +232,18 @@ impl Default for ToolRegistry {
 mod tests {
     use super::*;
     use crate::trait_impl::EchoTestTool;
+    use crate::MemorySearchTool;
     use async_trait::async_trait;
+    use talos_config::AgentKernelConfig;
     use talos_tools_policy::ToolPolicy;
 
     struct LargeErrorTool;
+
+    fn test_kernel_config_with_output_limit(limit: usize) -> Arc<AgentKernelConfig> {
+        let mut config = AgentKernelConfig::default();
+        config.tool_result_max_bytes = limit;
+        Arc::new(config)
+    }
 
     #[async_trait]
     impl Tool for LargeErrorTool {
@@ -356,11 +363,7 @@ mod tests {
         let registry = ToolRegistry::new_with_policy(policy);
         registry.register(Arc::new(EchoTestTool));
 
-        let context = ToolContext::new(
-            "session-ctx",
-            "user-ctx",
-            HashMap::from([("trace_id".to_string(), serde_json::json!("t-1"))]),
-        );
+        let context = ToolContext::new("session-ctx", "user-ctx");
 
         let result = registry
             .execute_with_context("echo_test", serde_json::json!("hello"), context)
@@ -368,6 +371,43 @@ mod tests {
             .unwrap();
         assert!(result.success);
         assert_eq!(result.output, "hello");
+    }
+
+    #[tokio::test]
+    async fn test_default_registry_allows_memory_search() {
+        let registry = ToolRegistry::new();
+        registry.register(Arc::new(MemorySearchTool));
+
+        let workspace_dir = std::env::temp_dir().join(format!(
+            "talos-memory-registry-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be valid")
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&workspace_dir)
+            .await
+            .expect("workspace dir should create");
+        tokio::fs::write(workspace_dir.join("MEMORY.md"), "Search target memory\n")
+            .await
+            .expect("root memory should write");
+
+        let mut config = AgentKernelConfig::default();
+        config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+        config.memory.search_min_score = 0.0;
+        let context =
+            ToolContext::new_with_kernel_config("session-ctx", "user-ctx", Some(Arc::new(config)));
+
+        let result = registry
+            .execute_with_context(
+                "memory_search",
+                serde_json::json!({ "query": "target" }),
+                context,
+            )
+            .await
+            .expect("default policy should allow memory_search");
+
+        assert!(result.success);
     }
 
     #[test]
@@ -384,13 +424,10 @@ mod tests {
         let registry = ToolRegistry::new();
         registry.register(Arc::new(EchoTestTool));
 
-        let context = ToolContext::new(
+        let context = ToolContext::new_with_kernel_config(
             "session",
             "user",
-            HashMap::from([(
-                "tool_output_max_bytes".to_string(),
-                serde_json::json!(64_u64),
-            )]),
+            Some(test_kernel_config_with_output_limit(64)),
         );
 
         let large_text = "a".repeat(256);
@@ -409,13 +446,10 @@ mod tests {
         let registry = ToolRegistry::new_with_policy(ToolPolicy::allow_list(vec!["large_error"]));
         registry.register(Arc::new(LargeErrorTool));
 
-        let context = ToolContext::new(
+        let context = ToolContext::new_with_kernel_config(
             "session",
             "user",
-            HashMap::from([(
-                "tool_output_max_bytes".to_string(),
-                serde_json::json!(80_u64),
-            )]),
+            Some(test_kernel_config_with_output_limit(80)),
         );
 
         let result = registry

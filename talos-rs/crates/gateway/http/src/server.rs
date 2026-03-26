@@ -21,9 +21,9 @@ use uuid::Uuid;
 use talos_auth::{Auth, AuthResult, JwtAuth, TokenType};
 use talos_error::TalosResult;
 use talos_gateway::{Gateway, GatewayRequest};
-use talos_types::canonical::{
-    CanonicalContext, CanonicalEventType, CanonicalInputItem, CanonicalMessageRequest,
-    CanonicalMessageResponse, CanonicalOutputItem,
+use talos_types::talos::{
+    TalosContext, TalosEventType, TalosInputItem, TalosMessageRequest, TalosMessageResponse,
+    TalosOutputItem,
 };
 use talos_types::{SessionPatch, SessionQuery, SessionService};
 
@@ -68,7 +68,7 @@ struct HttpApiState {
     static_token: Option<String>,
     auth_disabled: bool,
     model_provider: String,
-    idempotency_cache: Arc<RwLock<HashMap<String, CanonicalMessageResponse>>>,
+    idempotency_cache: Arc<RwLock<HashMap<String, TalosMessageResponse>>>,
     models: Arc<Vec<String>>,
 }
 
@@ -173,7 +173,9 @@ impl HttpServer {
             )
             .route(
                 "/v1/sessions/:session_id",
-                get(get_session_handler).patch(patch_session_handler),
+                get(get_session_handler)
+                    .patch(patch_session_handler)
+                    .delete(close_session_handler),
             )
             .route(
                 "/v1/sessions/:session_id/messages",
@@ -285,15 +287,14 @@ async fn list_models_handler(
 
 #[derive(Debug, Deserialize)]
 struct CreateSessionRequest {
-    context: CanonicalContext,
+    context: TalosContext,
     model: Option<String>,
-    metadata: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
 struct PatchSessionRequest {
-    model: Option<String>,
-    metadata: Option<Value>,
+    #[serde(default)]
+    conf: HashMap<String, Value>,
 }
 
 async fn create_session_handler(
@@ -303,12 +304,12 @@ async fn create_session_handler(
 ) -> Result<Json<Value>, ApiError> {
     validate_auth_context(&auth.0, &request.context, DEFAULT_SCOPE_SESSIONS_WRITE)?;
     if let Some(model) = request.model.as_deref() {
-        validate_model_supported(&state, model)?;
+        validate_model_supported(&state, &model)?;
     }
 
     let session = state
         .session_service
-        .create_session(request.context, request.model, request.metadata)
+        .create_session(request.context, request.model)
         .await
         .map_err(|e| {
             ApiError::new(
@@ -388,7 +389,6 @@ async fn get_session_handler(
         "message_count": session.message_count,
         "last_activity": session.last_activity,
         "context": session.context,
-        "metadata": session.metadata,
     })))
 }
 
@@ -398,15 +398,14 @@ async fn patch_session_handler(
     Path(session_id): Path<String>,
     Json(request): Json<PatchSessionRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    if let Some(model) = request.model.as_deref() {
-        validate_model_supported(&state, model)?;
+    let patch = SessionPatch { conf: request.conf };
+    if let Some(model) = patch
+        .agent_model()
+        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, "invalid_request", e.to_string()))?
+    {
+        validate_model_supported(&state, &model)?;
     }
-
-    let patch = SessionPatch {
-        model: request.model,
-        metadata: request.metadata,
-    };
-    let Some(session) = state
+    let ack = state
         .session_service
         .patch_session(&session_id, patch)
         .await
@@ -416,23 +415,39 @@ async fn patch_session_handler(
                 "internal_error",
                 e.to_string(),
             )
-        })?
-    else {
+        })?;
+
+    if !ack.success {
         return Err(ApiError::new(
             StatusCode::NOT_FOUND,
             "invalid_request",
             "session not found",
         ));
-    };
+    }
 
-    Ok(Json(json!({
-        "id": session.id,
-        "model": session.model,
-        "message_count": session.message_count,
-        "last_activity": session.last_activity,
-        "context": session.context,
-        "metadata": session.metadata,
-    })))
+    Ok(Json(json!({ "success": true })))
+}
+
+async fn close_session_handler(
+    State(state): State<Arc<HttpApiState>>,
+    _auth: axum::extract::Extension<AuthResult>,
+    Path(session_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    state
+        .session_service
+        .close_session(&session_id)
+        .await
+        .map_err(|err| match err {
+            talos_error::TalosError::ResourceNotFound(_) => {
+                ApiError::new(StatusCode::NOT_FOUND, "invalid_request", "session not found")
+            }
+            other => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                other.to_string(),
+            ),
+        })?;
+    Ok(Json(json!({ "success": true })))
 }
 
 async fn session_message_handler(
@@ -440,7 +455,7 @@ async fn session_message_handler(
     auth: axum::extract::Extension<AuthResult>,
     headers: HeaderMap,
     Path(session_id): Path<String>,
-    Json(request): Json<CanonicalMessageRequest>,
+    Json(request): Json<TalosMessageRequest>,
 ) -> Result<Response, ApiError> {
     let stream = request.stream.unwrap_or(false);
 
@@ -456,7 +471,7 @@ async fn stream_session_message(
     state: Arc<HttpApiState>,
     auth: AuthResult,
     session_id: String,
-    request: CanonicalMessageRequest,
+    request: TalosMessageRequest,
 ) -> Result<Response, ApiError> {
     let Some(session) = state
         .session_service
@@ -478,20 +493,13 @@ async fn stream_session_message(
     };
 
     validate_auth_context(&auth, &session.context, DEFAULT_SCOPE_MESSAGES_WRITE)?;
-    if let Some(model) = request.model.as_deref() {
-        validate_model_supported(&state, model)?;
-    }
-
-    let input_text = extract_input_text(&request.input)?;
+    validate_text_input(&request.input)?;
     let context = session.context.clone();
     let gateway_request = GatewayRequest {
-        channel: format!("{}:{}", context.provider, context.channel_id),
-        user_id: context.user_id.clone(),
-        content: input_text,
-        model: request.model.clone().or(Some(session.model.clone())),
-        session_id: Some(session_id.clone()),
-        context: Some(context),
-        metadata: request.metadata.clone(),
+        session_id: session_id.clone(),
+        workspace_id: request.workspace_id.clone(),
+        input: request.input.clone(),
+        context,
     };
 
     let stream_rx = state
@@ -506,8 +514,8 @@ async fn stream_session_message(
             )
         })?;
     let stream = ReceiverStream::new(stream_rx).map(|event| {
-        let event_name = canonical_event_name(&event.event_type);
-        let data = serde_json::to_string(&event).expect("failed to serialize canonical event");
+        let event_name = talos_event_name(&event.event_type);
+        let data = serde_json::to_string(&event).expect("failed to serialize talos event");
         Ok::<Event, Infallible>(Event::default().event(event_name).data(data))
     });
     let sse = Sse::new(stream).keep_alive(KeepAlive::default());
@@ -519,8 +527,8 @@ async fn process_session_message(
     auth: AuthResult,
     headers: HeaderMap,
     session_id: String,
-    request: CanonicalMessageRequest,
-) -> Result<CanonicalMessageResponse, ApiError> {
+    request: TalosMessageRequest,
+) -> Result<TalosMessageResponse, ApiError> {
     let Some(session) = state
         .session_service
         .get_session(&session_id)
@@ -541,10 +549,6 @@ async fn process_session_message(
     };
 
     validate_auth_context(&auth, &session.context, DEFAULT_SCOPE_MESSAGES_WRITE)?;
-    if let Some(model) = request.model.as_deref() {
-        validate_model_supported(&state, model)?;
-    }
-
     let idempotency_key = headers
         .get("Idempotency-Key")
         .and_then(|v| v.to_str().ok())
@@ -556,17 +560,14 @@ async fn process_session_message(
         }
     }
 
-    let input_text = extract_input_text(&request.input)?;
+    validate_text_input(&request.input)?;
     let context = session.context.clone();
 
     let gateway_request = GatewayRequest {
-        channel: format!("{}:{}", context.provider, context.channel_id),
-        user_id: context.user_id.clone(),
-        content: input_text,
-        model: request.model.clone().or(Some(session.model.clone())),
-        session_id: Some(session_id.clone()),
-        context: Some(context),
-        metadata: request.metadata.clone(),
+        session_id: session_id.clone(),
+        workspace_id: request.workspace_id.clone(),
+        input: request.input.clone(),
+        context,
     };
 
     let gateway_response = state
@@ -582,19 +583,20 @@ async fn process_session_message(
         })?;
 
     let output = if gateway_response.output_items.is_empty() {
-        vec![CanonicalOutputItem::OutputText {
+        vec![TalosOutputItem::OutputText {
             text: gateway_response.content.clone(),
         }]
     } else {
         gateway_response.output_items.clone()
     };
 
-    let response = CanonicalMessageResponse {
+    let response = TalosMessageResponse {
         request_id: format!("req_{}", Uuid::new_v4().simple()),
         message_id: format!("msg_{}", Uuid::new_v4().simple()),
         session_id,
         model: gateway_response.model.clone(),
         output,
+        reasoning: gateway_response.reasoning.clone(),
         stop_reason: if gateway_response.success {
             gateway_response.stop_reason.clone()
         } else {
@@ -614,10 +616,10 @@ async fn process_session_message(
     Ok(response)
 }
 
-fn extract_input_text(input: &[CanonicalInputItem]) -> Result<String, ApiError> {
+fn validate_text_input(input: &[TalosInputItem]) -> Result<(), ApiError> {
     let mut texts = Vec::new();
     for item in input {
-        if let CanonicalInputItem::InputText { text } = item {
+        if let TalosInputItem::Text { text } = item {
             let normalized = text.trim();
             if !normalized.is_empty() {
                 texts.push(normalized.to_string());
@@ -629,11 +631,11 @@ fn extract_input_text(input: &[CanonicalInputItem]) -> Result<String, ApiError> 
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_request",
-            "input must include at least one non-empty input_text item",
+            "input must include at least one non-empty text item",
         ));
     }
 
-    Ok(texts.join("\n"))
+    Ok(())
 }
 
 fn validate_model_supported(state: &HttpApiState, model: &str) -> Result<(), ApiError> {
@@ -650,7 +652,7 @@ fn validate_model_supported(state: &HttpApiState, model: &str) -> Result<(), Api
 
 fn validate_auth_context(
     auth: &AuthResult,
-    context: &CanonicalContext,
+    context: &TalosContext,
     required_scope: &str,
 ) -> Result<(), ApiError> {
     match auth.token_type {
@@ -685,7 +687,7 @@ fn validate_auth_context(
                 && !auth
                     .allowed_channels
                     .iter()
-                    .any(|v| v == "*" || v == &context.channel_id)
+                    .any(|v| v == "*" || context.channel_id.as_deref() == Some(v.as_str()))
             {
                 return Err(ApiError::new(
                     StatusCode::FORBIDDEN,
@@ -709,15 +711,15 @@ fn validate_auth_context(
     }
 }
 
-fn canonical_event_name(event_type: &CanonicalEventType) -> &'static str {
+fn talos_event_name(event_type: &TalosEventType) -> &'static str {
     match event_type {
-        CanonicalEventType::MessageStarted => "message.started",
-        CanonicalEventType::MessageReasoningDelta => "message.reasoning.delta",
-        CanonicalEventType::MessageOutputDelta => "message.output.delta",
-        CanonicalEventType::MessageToolCallStarted => "message.tool_call.started",
-        CanonicalEventType::MessageToolCallCompleted => "message.tool_call.completed",
-        CanonicalEventType::MessageCompleted => "message.completed",
-        CanonicalEventType::MessageError => "message.error",
+        TalosEventType::MessageStarted => "message.started",
+        TalosEventType::MessageReasoningDelta => "message.reasoning.delta",
+        TalosEventType::MessageOutputDelta => "message.output.delta",
+        TalosEventType::MessageToolCallStarted => "message.tool_call.started",
+        TalosEventType::MessageToolCallCompleted => "message.tool_call.completed",
+        TalosEventType::MessageCompleted => "message.completed",
+        TalosEventType::MessageError => "message.error",
     }
 }
 
@@ -751,7 +753,9 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::Request;
-    use talos_types::canonical::CanonicalEvent;
+    use talos_types::talos::{
+        TalosEvent, TalosProvider, TalosReasoning, TalosSourceType, TalosUsage,
+    };
     use tower::util::ServiceExt;
 
     struct MockGateway;
@@ -765,41 +769,44 @@ mod tests {
         ) -> TalosResult<talos_gateway::GatewayResponse> {
             Ok(talos_gateway::GatewayResponse {
                 content: "mock content".to_string(),
-                output_items: vec![CanonicalOutputItem::OutputText {
+                output_items: vec![TalosOutputItem::OutputText {
                     text: "mock content".to_string(),
                 }],
+                reasoning: vec![TalosReasoning {
+                    text: "mock reasoning".to_string(),
+                }],
                 stop_reason: "end_turn".to_string(),
-                usage: talos_types::canonical::CanonicalUsage::default(),
+                usage: TalosUsage::default(),
                 success: true,
                 model: "qwen-max".to_string(),
-                session_id: Some("mock-session".to_string()),
+                session_id: "mock-session".to_string(),
             })
         }
 
         async fn handle_request_stream(
             &self,
             _request: GatewayRequest,
-        ) -> TalosResult<tokio::sync::mpsc::Receiver<CanonicalEvent>> {
+        ) -> TalosResult<tokio::sync::mpsc::Receiver<TalosEvent>> {
             let (tx, rx) = tokio::sync::mpsc::channel(8);
             tokio::spawn(async move {
                 let _ = tx
-                    .send(CanonicalEvent {
-                        event_type: CanonicalEventType::MessageStarted,
+                    .send(TalosEvent {
+                        event_type: TalosEventType::MessageStarted,
                         message_id: "msg_mock".to_string(),
                         session_id: "mock-session".to_string(),
                         sequence: 0,
                         data: json!({
                             "request_id": "req_mock",
                             "model": "qwen-max",
-                            "usage": talos_types::canonical::CanonicalUsage::default(),
+                            "usage": TalosUsage::default(),
                             "iteration": 0_u64,
                             "step_id": "start",
                         }),
                     })
                     .await;
                 let _ = tx
-                    .send(CanonicalEvent {
-                        event_type: CanonicalEventType::MessageOutputDelta,
+                    .send(TalosEvent {
+                        event_type: TalosEventType::MessageOutputDelta,
                         message_id: "msg_mock".to_string(),
                         session_id: "mock-session".to_string(),
                         sequence: 1,
@@ -813,15 +820,15 @@ mod tests {
                     })
                     .await;
                 let _ = tx
-                    .send(CanonicalEvent {
-                        event_type: CanonicalEventType::MessageCompleted,
+                    .send(TalosEvent {
+                        event_type: TalosEventType::MessageCompleted,
                         message_id: "msg_mock".to_string(),
                         session_id: "mock-session".to_string(),
                         sequence: 2,
                         data: json!({
                             "request_id": "req_mock",
                             "stop_reason": "end_turn",
-                            "usage": talos_types::canonical::CanonicalUsage::default(),
+                            "usage": TalosUsage::default(),
                             "total_output_items": 1_u64,
                             "iteration": 2_u64,
                             "step_id": "completed",
@@ -837,25 +844,23 @@ mod tests {
         }
     }
 
-    fn mock_context() -> CanonicalContext {
-        CanonicalContext {
-            source_type: "api".to_string(),
-            provider: "test".to_string(),
-            channel_id: "test-channel".to_string(),
-            user_id: "static-token".to_string(),
-            thread_id: None,
-            message_id: None,
-            trace_id: None,
-        }
+    fn mock_context() -> TalosContext {
+        TalosContext::new(
+            TalosSourceType::Http,
+            TalosProvider::Http,
+            "static-token",
+            "message-1",
+            "trace-1",
+        )
+        .with_channel_id("test-channel")
     }
 
     #[async_trait::async_trait]
     impl SessionService for MockSessionService {
         async fn create_session(
             &self,
-            context: CanonicalContext,
+            context: TalosContext,
             model: Option<String>,
-            metadata: Option<Value>,
         ) -> TalosResult<talos_types::SessionRecord> {
             Ok(talos_types::SessionRecord {
                 id: "mock-session".to_string(),
@@ -864,7 +869,7 @@ mod tests {
                 created_at: 0,
                 last_activity: 0,
                 message_count: 0,
-                metadata,
+                conf: std::collections::HashMap::new(),
             })
         }
 
@@ -889,7 +894,7 @@ mod tests {
                 created_at: 0,
                 last_activity: 0,
                 message_count: 1,
-                metadata: None,
+                conf: std::collections::HashMap::new(),
             }))
         }
 
@@ -897,8 +902,12 @@ mod tests {
             &self,
             _session_id: &str,
             _patch: talos_types::SessionPatch,
-        ) -> TalosResult<Option<talos_types::SessionRecord>> {
-            Ok(None)
+        ) -> TalosResult<talos_types::SessionPatchAck> {
+            Ok(talos_types::SessionPatchAck { success: true })
+        }
+
+        async fn close_session(&self, _session_id: &str) -> TalosResult<()> {
+            Ok(())
         }
     }
 
@@ -1040,13 +1049,12 @@ mod tests {
             vec!["qwen-max".to_string()],
         ));
 
-        let request = CanonicalMessageRequest {
-            input: vec![CanonicalInputItem::InputText {
+        let request = TalosMessageRequest {
+            input: vec![TalosInputItem::Text {
                 text: "hello".to_string(),
             }],
             stream: Some(false),
-            model: None,
-            metadata: None,
+            workspace_id: None,
         };
 
         let result = process_session_message(
@@ -1061,9 +1069,10 @@ mod tests {
 
         assert_eq!(result.session_id, "mock-session");
         assert_eq!(result.stop_reason, "end_turn");
+        assert_eq!(result.reasoning.len(), 1);
         assert!(matches!(
             result.output.first(),
-            Some(CanonicalOutputItem::OutputText { text }) if text == "mock content"
+            Some(TalosOutputItem::OutputText { text }) if text == "mock content"
         ));
     }
 
@@ -1079,13 +1088,12 @@ mod tests {
             vec!["qwen-max".to_string()],
         ));
 
-        let request = CanonicalMessageRequest {
-            input: vec![CanonicalInputItem::InputText {
+        let request = TalosMessageRequest {
+            input: vec![TalosInputItem::Text {
                 text: "hello".to_string(),
             }],
             stream: Some(true),
-            model: None,
-            metadata: None,
+            workspace_id: None,
         };
 
         let response =

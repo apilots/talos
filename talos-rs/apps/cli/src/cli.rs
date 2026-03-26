@@ -7,10 +7,9 @@
 use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
-
 use talos_client::{
-    CanonicalContext, CanonicalEventType, CanonicalInputItem, CanonicalMessageRequest,
-    CanonicalMessageResponse, CanonicalOutputItem, ClientConfig, SessionConfig, TalosClient,
+    ClientConfig, SessionCreateParams, TalosClient, TalosContext, TalosEventType,
+    TalosInputItem, TalosMessageRequest, TalosMessageResponse, TalosOutputItem,
 };
 
 /// Command-line interface for Talos AI system - Full-featured command set for system access
@@ -111,9 +110,6 @@ enum SessionCommands {
         /// Session name
         #[arg(long)]
         name: Option<String>,
-        /// Additional metadata as JSON
-        #[arg(long)]
-        metadata: Option<String>,
     },
 
     /// List all sessions
@@ -238,12 +234,11 @@ async fn execute_chat_command(
             user,
             stream,
         } => {
-            let config = SessionConfig {
+            let params = SessionCreateParams {
                 context: Some(default_chat_context(user.as_deref().unwrap_or("cli-user"))),
                 model: model.clone(),
-                metadata: None,
             };
-            let session = client.create_session(&config).await?;
+            let session = client.create_session(&params).await?;
             let request = build_message_request(&message, model, stream);
             send_and_render_message(client, &session.id, &request, stream).await?;
         }
@@ -286,18 +281,12 @@ async fn execute_session_command(
     cmd: SessionCommands,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match cmd {
-        SessionCommands::Create {
-            model,
-            name: _,
-            metadata,
-        } => {
-            let metadata_json = metadata.and_then(|m| serde_json::from_str(&m).ok());
-            let config = SessionConfig {
+        SessionCommands::Create { model, name: _ } => {
+            let params = SessionCreateParams {
                 context: None,
                 model,
-                metadata: metadata_json,
             };
-            let session = client.create_session(&config).await?;
+            let session = client.create_session(&params).await?;
             println!(
                 "Session created: {} (model: {})",
                 session.id, session.current_model
@@ -321,7 +310,8 @@ async fn execute_session_command(
             println!("  Messages: {}", session.message_count);
         }
         SessionCommands::SetModel { session_id, model } => {
-            let session = client.update_session_model(&session_id, &model).await?;
+            client.update_session_model(&session_id, &model).await?;
+            let session = client.get_session(&session_id).await?;
             println!("Session model updated:");
             println!("  ID: {}", session.id);
             println!("  Model: {}", session.current_model);
@@ -346,6 +336,9 @@ async fn execute_session_command(
 
                 let input = line.trim();
                 if input == "quit" || input == "exit" {
+                    if let Err(err) = client.close_session(&session_id).await {
+                        eprintln!("Failed to close session {}: {}", session_id, err);
+                    }
                     break;
                 }
 
@@ -404,44 +397,43 @@ async fn execute_info_command(_client: &TalosClient) -> Result<(), Box<dyn std::
 
 fn build_message_request(
     message: &str,
-    model: Option<String>,
+    _model: Option<String>,
     stream: bool,
-) -> CanonicalMessageRequest {
-    CanonicalMessageRequest {
-        input: vec![CanonicalInputItem::InputText {
+) -> TalosMessageRequest {
+    TalosMessageRequest {
+        input: vec![TalosInputItem::Text {
             text: message.to_string(),
         }],
         stream: Some(stream),
-        model,
-        metadata: None,
+        workspace_id: None,
     }
 }
 
 async fn send_and_render_message(
     client: &TalosClient,
     session_id: &str,
-    request: &CanonicalMessageRequest,
+    request: &TalosMessageRequest,
     stream: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
     if !stream {
         let response = client.send_message(session_id, request).await?;
         for item in &response.output {
             match item {
-                CanonicalOutputItem::Reasoning { text } => {
+                TalosOutputItem::Reasoning { text } => {
                     let trimmed = text.trim();
                     if !trimmed.is_empty() {
                         eprintln!("REASONING {}", trimmed);
                     }
                 }
-                CanonicalOutputItem::ToolCall { call_id, name, .. } => {
+                TalosOutputItem::ToolCall { call_id, name, .. } => {
                     eprintln!("TOOL_CALL name={} call_id={}", name, call_id);
                 }
-                CanonicalOutputItem::ToolResult {
+                TalosOutputItem::ToolResult {
                     call_id, is_error, ..
                 } => {
                     eprintln!("TOOL_RESULT call_id={} is_error={}", call_id, is_error);
                 }
-                CanonicalOutputItem::OutputText { .. } => {}
+                TalosOutputItem::OutputText { .. } => {}
             }
         }
         let text = extract_output_text(&response);
@@ -455,7 +447,7 @@ async fn send_and_render_message(
 
     while let Some(event) = events.recv().await {
         match event.event_type {
-            CanonicalEventType::MessageReasoningDelta => {
+            TalosEventType::MessageReasoningDelta => {
                 let delta = event
                     .data
                     .get("delta")
@@ -483,14 +475,14 @@ async fn send_and_render_message(
                     );
                 }
             }
-            CanonicalEventType::MessageOutputDelta => {
+            TalosEventType::MessageOutputDelta => {
                 if let Some(delta) = event.data.get("delta").and_then(|value| value.as_str()) {
                     output_text.push_str(delta);
                     write!(output_stream, "{}", delta)?;
                     output_stream.flush()?;
                 }
             }
-            CanonicalEventType::MessageToolCallStarted => {
+            TalosEventType::MessageToolCallStarted => {
                 let name = event
                     .data
                     .get("name")
@@ -511,7 +503,7 @@ async fn send_and_render_message(
                     name, call_id, step_id
                 );
             }
-            CanonicalEventType::MessageToolCallCompleted => {
+            TalosEventType::MessageToolCallCompleted => {
                 let call_id = event
                     .data
                     .get("call_id")
@@ -532,10 +524,10 @@ async fn send_and_render_message(
                     call_id, tool, is_error
                 );
             }
-            CanonicalEventType::MessageError => {
+            TalosEventType::MessageError => {
                 eprintln!("MESSAGE_ERROR {}", event.data);
             }
-            CanonicalEventType::MessageStarted | CanonicalEventType::MessageCompleted => {}
+            TalosEventType::MessageStarted | TalosEventType::MessageCompleted => {}
         }
     }
 
@@ -546,12 +538,12 @@ async fn send_and_render_message(
     Ok(output_text)
 }
 
-fn extract_output_text(response: &CanonicalMessageResponse) -> String {
+fn extract_output_text(response: &TalosMessageResponse) -> String {
     let texts: Vec<String> = response
         .output
         .iter()
         .filter_map(|item| match item {
-            CanonicalOutputItem::OutputText { text } => Some(text.clone()),
+            TalosOutputItem::OutputText { text } => Some(text.clone()),
             _ => None,
         })
         .collect();
@@ -563,16 +555,8 @@ fn extract_output_text(response: &CanonicalMessageResponse) -> String {
     texts.join("\n")
 }
 
-fn default_chat_context(user_id: &str) -> CanonicalContext {
-    CanonicalContext {
-        source_type: "cli".to_string(),
-        provider: "talos-cli".to_string(),
-        channel_id: "cli".to_string(),
-        user_id: user_id.to_string(),
-        thread_id: None,
-        message_id: None,
-        trace_id: None,
-    }
+fn default_chat_context(user_id: &str) -> TalosContext {
+    TalosContext::cli(user_id).with_channel_id("cli")
 }
 
 #[cfg(test)]

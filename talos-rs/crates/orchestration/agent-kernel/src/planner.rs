@@ -20,7 +20,6 @@ fn build_single_task_plan(ctx: &InvocationContext) -> TaskPlan {
 
     TaskPlan {
         tasks: vec![task],
-        metadata: Default::default(),
     }
 }
 
@@ -74,10 +73,10 @@ impl Planner for PlanReActPlanner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ContextStateBags, InvocationLimits, SessionHandle};
+    use crate::{ContextStateBags, InvocationLimits, TurnPhase};
     use std::collections::HashMap;
 
-    fn mock_ctx(input: &str, metadata: Option<serde_json::Value>) -> InvocationContext {
+    fn mock_ctx(input: &str, _context_hint: Option<serde_json::Value>) -> InvocationContext {
         InvocationContext {
             session_id: "s1".to_string(),
             invocation_id: "i1".to_string(),
@@ -85,10 +84,11 @@ mod tests {
             workspace_id: "w1".to_string(),
             input: input.to_string(),
             model: "m1".to_string(),
-            metadata,
+            phase: TurnPhase::Execution,
+            planning_instruction: None,
+            transfer_to: None,
             state: HashMap::new(),
             state_bags: ContextStateBags::default(),
-            session_handle: Some(SessionHandle::default()),
             limits: InvocationLimits::default(),
             events: Vec::new(),
             stream_tx: None,
@@ -106,7 +106,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_built_in_planner_ignores_direct_tool_mode_metadata() {
+    async fn test_built_in_planner_ignores_direct_tool_mode_context_hint() {
         let planner = BuiltInPlanner::new();
         let ctx = mock_ctx("run ls", Some(json!({"direct_tool_mode": true})));
         let plan = planner.plan(&ctx).await.expect("plan should succeed");

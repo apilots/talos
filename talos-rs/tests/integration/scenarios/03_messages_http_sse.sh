@@ -19,16 +19,14 @@ trap stop_server EXIT
 
 create_payload='{
   "context": {
-    "source_type": "api",
-    "provider": "scenario",
+    "source_type": "http",
+    "provider": "http",
     "channel_id": "session-messages",
     "user_id": "msg-user",
     "thread_id": null,
-    "message_id": null,
-    "trace_id": null
-  },
-  "model": null,
-  "metadata": {"case":"messages_http_session"}
+    "message_id": "msg-messages-http",
+    "trace_id": "trace-messages-http"
+  }
 }'
 create_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
   -H "Content-Type: application/json" \
@@ -64,10 +62,9 @@ PY
 }
 
 msg_payload='{
-  "input": [{"type":"input_text","text":"please answer with one short sentence"}],
+  "input": [{"type":"text","text":"please answer with one short sentence"}],
   "stream": false,
-  "model": null,
-  "metadata": {"case":"messages_http"}
+  "workspace_id": null
 }'
 msg_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
   -H "Content-Type: application/json" \
@@ -86,10 +83,9 @@ echo "DETAIL messages_non_stream_output=${output_text}"
 
 sse_log="${ROOT_DIR}/tests/integration/reports/sse_events.log"
 sse_payload='{
-  "input": [{"type":"input_text","text":"please answer with one short sentence"}],
+  "input": [{"type":"text","text":"please answer with one short sentence"}],
   "stream": true,
-  "model": null,
-  "metadata": {"case":"messages_http_sse"}
+  "workspace_id": null
 }'
 curl -sS -N -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
   -H "Content-Type: application/json" \

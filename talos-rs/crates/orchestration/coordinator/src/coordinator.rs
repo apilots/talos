@@ -1,4 +1,4 @@
-use crate::{Coordinator, CoordinatorResponse, CoordinatorStatus};
+use crate::Coordinator;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -6,29 +6,243 @@ use talos_agent::{AgentOrchestrator, OrchestratorRequest};
 use talos_error::TalosResult;
 use talos_router::Router;
 use talos_session_store::SessionStore;
-use talos_types::canonical::{CanonicalContext, CanonicalEvent, CanonicalEventType};
+use talos_types::talos::{
+    TalosContext, TalosEvent, TalosEventType, TalosInputItem, TalosProvider,
+};
 use talos_types::gateway::{GatewayRequest, GatewayResponse};
-use talos_types::{RequestHandler, SessionPatch, SessionQuery, SessionRecord, SessionService};
+use talos_types::{
+    RequestHandler, SessionPatch, SessionPatchAck, SessionQuery, SessionRecord, SessionService,
+    TalosConfig, TalosSession,
+};
 use tokio::sync::{mpsc, RwLock};
-use tracing::{debug, error, info};
+use tracing::info;
 use uuid::Uuid;
+
+#[derive(Clone)]
+struct SessionManager {
+    session_store: Arc<dyn SessionStore>,
+    session_cache: Arc<RwLock<HashMap<String, TalosSession>>>,
+    base_config: TalosConfig,
+    default_workspace_id: String,
+    channel_dm_scopes: HashMap<String, String>,
+}
+
+impl SessionManager {
+    fn new(session_store: Arc<dyn SessionStore>, base_config: TalosConfig) -> Self {
+        Self {
+            session_store,
+            session_cache: Arc::new(RwLock::new(HashMap::new())),
+            base_config,
+            default_workspace_id: "default".to_string(),
+            channel_dm_scopes: HashMap::new(),
+        }
+    }
+
+    fn with_default_workspace_id(mut self, workspace_id: impl Into<String>) -> Self {
+        self.default_workspace_id = workspace_id.into();
+        self
+    }
+
+    fn with_channel_dm_scope(
+        mut self,
+        channel_id: impl Into<String>,
+        dm_scope: impl Into<String>,
+    ) -> Self {
+        self.channel_dm_scopes
+            .insert(channel_id.into(), dm_scope.into());
+        self
+    }
+
+    fn base_model(&self) -> &str {
+        self.base_config.llm.model.as_str()
+    }
+
+    fn resolve_dm_scope(&self, provider: &TalosProvider) -> Option<String> {
+        self.channel_dm_scopes.get(provider.as_str()).cloned()
+    }
+
+    fn build_session(
+        &self,
+        record: &SessionRecord,
+        workspace_id: Option<String>,
+    ) -> TalosResult<TalosSession> {
+        TalosSession::restore(record, &self.base_config, workspace_id)
+    }
+
+    async fn cache_session(&self, session: TalosSession) -> TalosSession {
+        let session_id = session.context.session_id.clone();
+        self.session_cache
+            .write()
+            .await
+            .insert(session_id, session.clone());
+        session
+    }
+
+    async fn get_cached_session(&self, session_id: &str) -> Option<TalosSession> {
+        self.session_cache.read().await.get(session_id).cloned()
+    }
+
+    async fn invalidate_cached_session(&self, session_id: &str) {
+        self.session_cache.write().await.remove(session_id);
+    }
+
+    async fn resolve_session(&self, request: &GatewayRequest) -> TalosResult<TalosSession> {
+        let workspace_id = request
+            .workspace_id
+            .clone()
+            .unwrap_or_else(|| self.default_workspace_id.clone());
+        let session_id = request.session_id.as_str();
+        if let Some(session) = self.get_cached_session(session_id).await {
+            return Ok(session);
+        }
+
+        let record = self.session_store.get_session_record(session_id).await?;
+        let record = record.ok_or_else(|| {
+            talos_error::TalosError::ResourceNotFound(format!("session {}", session_id))
+        })?;
+        let session = self.build_session(&record, Some(workspace_id))?;
+        Ok(self.cache_session(session).await)
+    }
+
+    async fn record_turn_completion(
+        &self,
+        session_id: &str,
+        user_input: &str,
+        assistant_output: &str,
+        assistant_model: &str,
+        message_delta: u64,
+    ) -> TalosResult<()> {
+        self.session_store
+            .append_message_by_session_id(session_id, "user", user_input)
+            .await?;
+        self.session_store
+            .append_message_by_session_id(session_id, "assistant", assistant_output)
+            .await?;
+        self.update_cached_session_after_turn(session_id, assistant_model, message_delta)
+            .await;
+        Ok(())
+    }
+
+    async fn record_stream_completion(
+        &self,
+        session_id: &str,
+        user_input: &str,
+        assistant_output: &str,
+        assistant_model: &str,
+    ) {
+        let _ = self
+            .session_store
+            .append_message_by_session_id(session_id, "user", user_input)
+            .await;
+        if !assistant_output.trim().is_empty() {
+            let _ = self
+                .session_store
+                .append_message_by_session_id(session_id, "assistant", assistant_output)
+                .await;
+        }
+        self.update_cached_session_after_turn(session_id, assistant_model, 2)
+            .await;
+    }
+
+    async fn update_cached_session_after_turn(
+        &self,
+        session_id: &str,
+        assistant_model: &str,
+        message_delta: u64,
+    ) {
+        let mut cache = self.session_cache.write().await;
+        if let Some(session) = cache.get_mut(session_id) {
+            let now = talos_types::now();
+            session.state.last_activity = now;
+            session.state.message_count = session.state.message_count.saturating_add(message_delta);
+            session.config.agent.model = assistant_model.to_string();
+            session.config.llm.model = assistant_model.to_string();
+        }
+    }
+
+    async fn create_session(
+        &self,
+        context: TalosContext,
+        target_agent: &str,
+        model: Option<String>,
+    ) -> TalosResult<SessionRecord> {
+        let record = self
+            .session_store
+            .create_session(
+                &context,
+                target_agent,
+                self.base_model(),
+                model.as_deref(),
+                self.resolve_dm_scope(&context.provider),
+            )
+            .await?;
+        let session = self.build_session(&record, Some(self.default_workspace_id.clone()))?;
+        self.cache_session(session).await;
+        Ok(record)
+    }
+
+    async fn list_sessions(&self, query: SessionQuery) -> TalosResult<Vec<SessionRecord>> {
+        self.session_store.list_session_records(&query).await
+    }
+
+    async fn get_session(&self, session_id: &str) -> TalosResult<Option<SessionRecord>> {
+        if let Some(session) = self.get_cached_session(session_id).await {
+            return Ok(Some(SessionRecord::from_session(&session, self.base_model())));
+        }
+        self.session_store.get_session_record(session_id).await
+    }
+
+    async fn load_session(
+        &self,
+        session_id: &str,
+        workspace_id: Option<String>,
+    ) -> TalosResult<Option<TalosSession>> {
+        if let Some(session) = self.get_cached_session(session_id).await {
+            return Ok(Some(session));
+        }
+        let Some(record) = self.session_store.get_session_record(session_id).await? else {
+            return Ok(None);
+        };
+        let session = self.build_session(
+            &record,
+            workspace_id.or_else(|| Some(self.default_workspace_id.clone())),
+        )?;
+        Ok(Some(self.cache_session(session).await))
+    }
+
+    async fn patch_session(
+        &self,
+        session_id: &str,
+        patch: SessionPatch,
+    ) -> TalosResult<SessionPatchAck> {
+        let ack = self
+            .session_store
+            .patch_session_record(session_id, &patch)
+            .await?;
+        if ack.success {
+            self.invalidate_cached_session(session_id).await;
+        }
+        Ok(ack)
+    }
+
+    async fn close_session(&self, session_id: &str) -> TalosResult<Option<TalosSession>> {
+        let session = self
+            .load_session(session_id, Some(self.default_workspace_id.clone()))
+            .await?;
+        Ok(session)
+    }
+}
 
 /// Implementation of the Coordinator trait
 pub struct CoordinatorImpl {
     /// Router instance for routing messages to appropriate agents
     router: Arc<dyn Router>,
 
-    /// Session store for managing conversation state
-    session_store: Arc<dyn SessionStore>,
+    /// Session lifecycle owner
+    sessions: Arc<SessionManager>,
 
     /// Registered agents map
     agents: Arc<RwLock<HashMap<String, Arc<dyn AgentOrchestrator>>>>,
-
-    /// Default model name
-    default_model: String,
-
-    /// Default workspace id when request metadata does not include one
-    default_workspace_id: String,
 }
 
 impl CoordinatorImpl {
@@ -36,20 +250,44 @@ impl CoordinatorImpl {
     pub fn new(
         router: Arc<dyn Router>,
         session_store: Arc<dyn SessionStore>,
-        default_model: impl Into<String>,
+        base_config: TalosConfig,
     ) -> Self {
         Self {
             router,
-            session_store,
+            sessions: Arc::new(SessionManager::new(session_store, base_config)),
             agents: Arc::new(RwLock::new(HashMap::new())),
-            default_model: default_model.into(),
-            default_workspace_id: "default".to_string(),
         }
     }
 
     pub fn with_default_workspace_id(mut self, workspace_id: impl Into<String>) -> Self {
-        self.default_workspace_id = workspace_id.into();
+        self.sessions = Arc::new(
+            self.sessions
+                .as_ref()
+                .clone()
+                .with_default_workspace_id(workspace_id),
+        );
         self
+    }
+
+    pub fn with_channel_dm_scope(
+        mut self,
+        channel_id: impl Into<String>,
+        dm_scope: impl Into<String>,
+    ) -> Self {
+        self.sessions = Arc::new(
+            self.sessions
+                .as_ref()
+                .clone()
+                .with_channel_dm_scope(channel_id, dm_scope),
+        );
+        self
+    }
+
+    fn route_channel(context: &TalosContext) -> String {
+        match context.channel_id.as_deref() {
+            Some(channel_id) => format!("{}:{}", context.provider, channel_id),
+            None => context.provider.to_string(),
+        }
     }
 
     /// Get reference to registered agents
@@ -57,15 +295,15 @@ impl CoordinatorImpl {
         self.agents.clone()
     }
 
-    fn map_orchestrator_event_type(event_type: &str) -> Option<CanonicalEventType> {
+    fn map_orchestrator_event_type(event_type: &str) -> Option<TalosEventType> {
         match event_type {
-            "message.started" => Some(CanonicalEventType::MessageStarted),
-            "message.reasoning.delta" => Some(CanonicalEventType::MessageReasoningDelta),
-            "message.output.delta" => Some(CanonicalEventType::MessageOutputDelta),
-            "message.tool_call.started" => Some(CanonicalEventType::MessageToolCallStarted),
-            "message.tool_call.completed" => Some(CanonicalEventType::MessageToolCallCompleted),
-            "message.completed" => Some(CanonicalEventType::MessageCompleted),
-            "message.error" => Some(CanonicalEventType::MessageError),
+            "message.started" => Some(TalosEventType::MessageStarted),
+            "message.reasoning.delta" => Some(TalosEventType::MessageReasoningDelta),
+            "message.output.delta" => Some(TalosEventType::MessageOutputDelta),
+            "message.tool_call.started" => Some(TalosEventType::MessageToolCallStarted),
+            "message.tool_call.completed" => Some(TalosEventType::MessageToolCallCompleted),
+            "message.completed" => Some(TalosEventType::MessageCompleted),
+            "message.error" => Some(TalosEventType::MessageError),
             _ => None,
         }
     }
@@ -73,58 +311,6 @@ impl CoordinatorImpl {
 
 #[async_trait]
 impl Coordinator for CoordinatorImpl {
-    async fn handle_message(
-        &self,
-        channel: &str,
-        user_id: &str,
-        content: &str,
-        model: Option<&str>,
-    ) -> TalosResult<CoordinatorResponse> {
-        debug!(
-            "Handling message from channel: {}, user: {}, model: {:?}",
-            channel, user_id, model
-        );
-
-        // First, determine which agent should handle this message based on channel and user
-        let target_agent = self.router.route(channel, user_id).await?;
-
-        match target_agent {
-            Some(agent_id) => {
-                let agents = self.agents.read().await;
-
-                if let Some(agent) = agents.get(&agent_id) {
-                    let response = agent
-                        .run(OrchestratorRequest {
-                            agent_id: agent_id.clone(),
-                            session_id: format!("legacy:{}:{}", channel, user_id),
-                            invocation_id: Some(format!("inv-{}", talos_types::now())),
-                            workspace_id: self.default_workspace_id.clone(),
-                            input: content.to_string(),
-                            model: model.map(ToString::to_string),
-                            metadata: None,
-                        })
-                        .await?;
-
-                    Ok(CoordinatorResponse {
-                        result: response.output_text,
-                        data: None,
-                        status: CoordinatorStatus::Success,
-                    })
-                } else {
-                    error!("No agent found for route: {}", agent_id);
-                    Err(talos_error::TalosError::AgentNotFound(agent_id))
-                }
-            }
-            None => {
-                error!("No route found for channel: {}, user: {}", channel, user_id);
-                Err(talos_error::TalosError::RouteNotFound(format!(
-                    "{}:{}",
-                    channel, user_id
-                )))
-            }
-        }
-    }
-
     async fn register_agent(
         &self,
         agent_id: &str,
@@ -142,45 +328,21 @@ impl Coordinator for CoordinatorImpl {
 #[async_trait]
 impl RequestHandler for CoordinatorImpl {
     async fn handle(&self, request: GatewayRequest) -> TalosResult<GatewayResponse> {
-        let context = request.context.clone().unwrap_or(CanonicalContext {
-            source_type: "gateway".to_string(),
-            provider: "gateway".to_string(),
-            channel_id: request.channel.clone(),
-            user_id: request.user_id.clone(),
-            thread_id: None,
-            message_id: None,
-            trace_id: None,
-        });
+        let user_input = extract_text_input(&request.input)?;
+        let context = request.context.clone();
+        let route_channel = Self::route_channel(&context);
 
         let target_agent = self
             .router
-            .route(&request.channel, &request.user_id)
+            .route(&route_channel, &context.user_id)
             .await?
             .unwrap_or_else(|| "default".to_string());
 
-        let session = if let Some(session_id) = request.session_id.as_deref() {
-            self.session_store
-                .get_session_record(session_id)
-                .await?
-                .ok_or_else(|| {
-                    talos_error::TalosError::ResourceNotFound(format!("session {}", session_id))
-                })?
-        } else {
-            self.session_store
-                .resolve_or_create_session(
-                    &context,
-                    &target_agent,
-                    &self.default_model,
-                    request.model.as_deref(),
-                    request.metadata.clone(),
-                )
-                .await?
-        };
-
-        let model_for_turn = request
-            .model
-            .clone()
-            .unwrap_or_else(|| session.model.clone());
+        let session = self
+            .sessions
+            .resolve_session(&request)
+            .await?;
+        let model_for_turn = session.config.llm.model.clone();
 
         let agents = self.agents.read().await;
         let agent = agents
@@ -189,87 +351,54 @@ impl RequestHandler for CoordinatorImpl {
             .ok_or_else(|| talos_error::TalosError::AgentNotFound(target_agent.clone()))?;
         drop(agents);
 
-        let workspace_id = request
-            .metadata
-            .as_ref()
-            .and_then(|value| value.get("workspace_id"))
-            .and_then(|value| value.as_str())
-            .unwrap_or(self.default_workspace_id.as_str())
-            .to_string();
-
         let agent_response = agent
             .run(OrchestratorRequest {
-                agent_id: target_agent.clone(),
-                session_id: session.id.clone(),
-                invocation_id: Some(format!("inv-{}", talos_types::now())),
-                workspace_id,
-                input: request.content.clone(),
-                model: Some(model_for_turn.clone()),
-                metadata: request.metadata.clone(),
+                session: session.clone(),
+                input: request.input.clone(),
             })
             .await?;
 
-        self.session_store
-            .append_message_by_session_id(&session.id, "user", &request.content)
-            .await?;
-        self.session_store
-            .append_message_by_session_id(&session.id, "assistant", &agent_response.output_text)
+        self.sessions
+            .record_turn_completion(
+                &session.context.session_id,
+                &user_input,
+                &agent_response.output_text,
+                &model_for_turn,
+                2,
+            )
             .await?;
 
         Ok(GatewayResponse {
             content: agent_response.output_text,
             output_items: agent_response.output_items,
+            reasoning: agent_response.reasoning,
             stop_reason: agent_response.stop_reason,
             usage: agent_response.usage,
             success: true,
             model: model_for_turn,
-            session_id: Some(session.id),
+            session_id: session.context.session_id,
         })
     }
 
     async fn handle_stream(
         &self,
         request: GatewayRequest,
-    ) -> TalosResult<mpsc::Receiver<CanonicalEvent>> {
-        let context = request.context.clone().unwrap_or(CanonicalContext {
-            source_type: "gateway".to_string(),
-            provider: "gateway".to_string(),
-            channel_id: request.channel.clone(),
-            user_id: request.user_id.clone(),
-            thread_id: None,
-            message_id: None,
-            trace_id: None,
-        });
+    ) -> TalosResult<mpsc::Receiver<TalosEvent>> {
+        let user_input = extract_text_input(&request.input)?;
+        let context = request.context.clone();
+        let route_channel = Self::route_channel(&context);
 
         let target_agent = self
             .router
-            .route(&request.channel, &request.user_id)
+            .route(&route_channel, &context.user_id)
             .await?
             .unwrap_or_else(|| "default".to_string());
 
-        let session = if let Some(session_id) = request.session_id.as_deref() {
-            self.session_store
-                .get_session_record(session_id)
-                .await?
-                .ok_or_else(|| {
-                    talos_error::TalosError::ResourceNotFound(format!("session {}", session_id))
-                })?
-        } else {
-            self.session_store
-                .resolve_or_create_session(
-                    &context,
-                    &target_agent,
-                    &self.default_model,
-                    request.model.as_deref(),
-                    request.metadata.clone(),
-                )
-                .await?
-        };
-
-        let model_for_turn = request
-            .model
-            .clone()
-            .unwrap_or_else(|| session.model.clone());
+        let session = self
+            .sessions
+            .resolve_session(&request)
+            .await?;
+        let model_for_turn = session.config.llm.model.clone();
 
         let agents = self.agents.read().await;
         let agent = agents
@@ -278,31 +407,19 @@ impl RequestHandler for CoordinatorImpl {
             .ok_or_else(|| talos_error::TalosError::AgentNotFound(target_agent.clone()))?;
         drop(agents);
 
-        let workspace_id = request
-            .metadata
-            .as_ref()
-            .and_then(|value| value.get("workspace_id"))
-            .and_then(|value| value.as_str())
-            .unwrap_or(self.default_workspace_id.as_str())
-            .to_string();
-
         let mut orchestrator_stream = agent
             .run_stream(OrchestratorRequest {
-                agent_id: target_agent.clone(),
-                session_id: session.id.clone(),
-                invocation_id: Some(format!("inv-{}", talos_types::now())),
-                workspace_id,
-                input: request.content.clone(),
-                model: Some(model_for_turn.clone()),
-                metadata: request.metadata.clone(),
+                session: session.clone(),
+                input: request.input.clone(),
             })
             .await?;
 
-        let session_store = self.session_store.clone();
-        let session_id = session.id.clone();
-        let user_content = request.content.clone();
+        let sessions = self.sessions.clone();
+        let session_id = session.context.session_id.clone();
+        let user_content = user_input.clone();
         let message_id = format!("msg_{}", Uuid::new_v4().simple());
-        let stream_session_id = session.id.clone();
+        let stream_session_id = session.context.session_id.clone();
+        let response_model = model_for_turn.clone();
         let (tx, rx) = mpsc::channel(256);
         tokio::spawn(async move {
             let mut sequence: u64 = 0;
@@ -315,14 +432,14 @@ impl RequestHandler for CoordinatorImpl {
                     continue;
                 };
 
-                if event_type == CanonicalEventType::MessageOutputDelta {
+                if event_type == TalosEventType::MessageOutputDelta {
                     if let Some(delta) = event.data.get("delta").and_then(|value| value.as_str()) {
                         assistant_output.push_str(delta);
                     }
                 }
 
                 if tx
-                    .send(CanonicalEvent {
+                    .send(TalosEvent {
                         event_type,
                         message_id: message_id.clone(),
                         session_id: stream_session_id.clone(),
@@ -337,62 +454,109 @@ impl RequestHandler for CoordinatorImpl {
                 sequence = sequence.saturating_add(1);
             }
 
-            let _ = session_store
-                .append_message_by_session_id(&session_id, "user", &user_content)
+            sessions
+                .record_stream_completion(
+                    &session_id,
+                    &user_content,
+                    &assistant_output,
+                    &response_model,
+                )
                 .await;
-            if !assistant_output.trim().is_empty() {
-                let _ = session_store
-                    .append_message_by_session_id(&session_id, "assistant", &assistant_output)
-                    .await;
-            }
         });
 
         Ok(rx)
     }
 }
 
+fn extract_text_input(input: &[TalosInputItem]) -> TalosResult<String> {
+    let texts: Vec<&str> = input
+        .iter()
+        .filter_map(|item| match item {
+            TalosInputItem::Text { text } => {
+                let normalized = text.trim();
+                (!normalized.is_empty()).then_some(normalized)
+            }
+            _ => None,
+        })
+        .collect();
+
+    if texts.is_empty() {
+        return Err(talos_error::TalosError::ValidationError(
+            "gateway request must include at least one non-empty text input item".to_string(),
+        ));
+    }
+
+    Ok(texts.join("\n"))
+}
+
 #[async_trait]
 impl SessionService for CoordinatorImpl {
     async fn create_session(
         &self,
-        context: CanonicalContext,
+        context: TalosContext,
         model: Option<String>,
-        metadata: Option<serde_json::Value>,
     ) -> TalosResult<SessionRecord> {
-        let channel = format!("{}:{}", context.provider, context.channel_id);
+        let channel = Self::route_channel(&context);
         let target_agent = self
             .router
             .route(&channel, &context.user_id)
             .await?
             .unwrap_or_else(|| "default".to_string());
 
-        self.session_store
-            .create_session(
-                &context,
-                &target_agent,
-                &self.default_model,
-                model.as_deref(),
-                metadata,
-            )
-            .await
+        let record = self
+            .sessions
+            .create_session(context, &target_agent, model)
+            .await?;
+        Ok(record)
     }
 
     async fn list_sessions(&self, query: SessionQuery) -> TalosResult<Vec<SessionRecord>> {
-        self.session_store.list_session_records(&query).await
+        self.sessions.list_sessions(query).await
     }
 
     async fn get_session(&self, session_id: &str) -> TalosResult<Option<SessionRecord>> {
-        self.session_store.get_session_record(session_id).await
+        self.sessions.get_session(session_id).await
     }
 
     async fn patch_session(
         &self,
         session_id: &str,
         patch: SessionPatch,
-    ) -> TalosResult<Option<SessionRecord>> {
-        self.session_store
-            .patch_session_record(session_id, &patch)
-            .await
+    ) -> TalosResult<SessionPatchAck> {
+        self.sessions.patch_session(session_id, patch).await
+    }
+
+    async fn close_session(&self, session_id: &str) -> TalosResult<()> {
+        let Some(session) = self.sessions.close_session(session_id).await? else {
+            return Err(talos_error::TalosError::ResourceNotFound(format!(
+                "session {}",
+                session_id
+            )));
+        };
+
+        let route_channel = Self::route_channel(&TalosContext {
+            source_type: session.context.source_type.clone(),
+            provider: session.context.provider.clone(),
+            user_id: session.context.user_id.clone(),
+            message_id: session.context.message_id.clone(),
+            trace_id: session.context.trace_id.clone(),
+            channel_id: session.context.channel_id.clone(),
+            thread_id: session.context.thread_id.clone(),
+        });
+        let target_agent = self
+            .router
+            .route(&route_channel, &session.context.user_id)
+            .await?
+            .unwrap_or_else(|| "default".to_string());
+        let agents = self.agents.read().await;
+        let agent = agents
+            .get(&target_agent)
+            .cloned()
+            .ok_or_else(|| talos_error::TalosError::AgentNotFound(target_agent.clone()))?;
+        drop(agents);
+        agent.close_session(session).await?;
+        self.sessions.invalidate_cached_session(session_id).await;
+        Ok(())
     }
 }
 
@@ -400,6 +564,7 @@ impl SessionService for CoordinatorImpl {
 mod tests {
     use super::*;
     use std::sync::Arc;
+    use talos_types::talos::TalosSourceType;
     use tokio;
 
     // Define mock implementations for testing
@@ -435,7 +600,8 @@ mod tests {
         let mock_router = Arc::new(MockRouter::new());
         let mock_session_store = Arc::new(talos_session_store::MockSessionStore::new());
 
-        let coordinator = CoordinatorImpl::new(mock_router, mock_session_store, "qwen-max");
+        let coordinator =
+            CoordinatorImpl::new(mock_router, mock_session_store, TalosConfig::default());
 
         assert_eq!(coordinator.agents.read().await.len(), 0);
     }
@@ -445,7 +611,8 @@ mod tests {
         let mock_router = Arc::new(MockRouter::new());
         let mock_session_store = Arc::new(talos_session_store::MockSessionStore::new());
 
-        let coordinator = CoordinatorImpl::new(mock_router, mock_session_store, "qwen-max");
+        let coordinator =
+            CoordinatorImpl::new(mock_router, mock_session_store, TalosConfig::default());
 
         let mock_agent = Arc::new(talos_agent::MockAgent::new());
         let result = coordinator.register_agent("test_agent", mock_agent).await;
@@ -458,7 +625,8 @@ mod tests {
     async fn test_handle_stream_returns_orchestrator_events() {
         let mock_router = Arc::new(MockRouter::new());
         let mock_session_store = Arc::new(talos_session_store::MockSessionStore::new());
-        let coordinator = CoordinatorImpl::new(mock_router, mock_session_store, "qwen-max");
+        let coordinator =
+            CoordinatorImpl::new(mock_router, mock_session_store, TalosConfig::default());
         coordinator
             .register_agent("test_agent", Arc::new(talos_agent::MockAgent::new()))
             .await
@@ -466,13 +634,20 @@ mod tests {
 
         let mut stream = coordinator
             .handle_stream(GatewayRequest {
-                channel: "test-channel".to_string(),
-                user_id: "user-1".to_string(),
-                content: "hello".to_string(),
-                model: Some("qwen-max".to_string()),
-                session_id: None,
-                context: None,
-                metadata: None,
+                session_id: "test-session".to_string(),
+                workspace_id: None,
+                input: vec![TalosInputItem::Text {
+                    text: "hello".to_string(),
+                }],
+                context: TalosContext {
+                    source_type: TalosSourceType::Im,
+                    provider: TalosProvider::Telegram,
+                    user_id: "user-1".to_string(),
+                    message_id: "message-1".to_string(),
+                    trace_id: "trace-1".to_string(),
+                    channel_id: Some("test-channel".to_string()),
+                    thread_id: None,
+                },
             })
             .await
             .expect("stream request should succeed");
@@ -480,13 +655,13 @@ mod tests {
         let mut event_types = Vec::new();
         while let Some(event) = stream.recv().await {
             event_types.push(event.event_type.clone());
-            if event.event_type == CanonicalEventType::MessageCompleted {
+            if event.event_type == TalosEventType::MessageCompleted {
                 break;
             }
         }
 
-        assert!(event_types.contains(&CanonicalEventType::MessageStarted));
-        assert!(event_types.contains(&CanonicalEventType::MessageOutputDelta));
-        assert!(event_types.contains(&CanonicalEventType::MessageCompleted));
+        assert!(event_types.contains(&TalosEventType::MessageStarted));
+        assert!(event_types.contains(&TalosEventType::MessageOutputDelta));
+        assert!(event_types.contains(&TalosEventType::MessageCompleted));
     }
 }

@@ -16,7 +16,6 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
     Frame, Terminal,
 };
-use serde_json::json;
 use std::{
     collections::VecDeque,
     env,
@@ -29,11 +28,11 @@ use std::{
 };
 use talos_agent::Agent;
 use talos_client::{
-    CanonicalContext, CanonicalEvent, CanonicalInputItem, CanonicalMessageRequest, ModelInfo,
-    SessionConfig, SessionHandle, SessionInfo, TalosClient,
+    ModelInfo, SessionCreateParams, SessionHandle, SessionInfo, TalosClient, TalosContext,
+    TalosEvent, TalosInputItem, TalosMessageRequest,
 };
 use talos_error::{TalosError, TalosResult};
-use talos_types::canonical::CanonicalEventType;
+use talos_types::talos::TalosEventType;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
 use unicode_width::UnicodeWidthChar;
@@ -101,15 +100,16 @@ impl ChatBlock {
 #[async_trait]
 pub trait GatewayClient: Send + Sync {
     async fn list_models(&self) -> TalosResult<Vec<ModelInfo>>;
-    async fn create_session(&self, config: &SessionConfig) -> TalosResult<SessionHandle>;
+    async fn create_session(&self, params: &SessionCreateParams) -> TalosResult<SessionHandle>;
     async fn get_session(&self, session_id: &str) -> TalosResult<SessionInfo>;
+    async fn close_session(&self, session_id: &str) -> TalosResult<()>;
     async fn update_session_model(&self, session_id: &str, model: &str)
         -> TalosResult<SessionInfo>;
     async fn send_message_stream(
         &self,
         session_id: &str,
-        request: &CanonicalMessageRequest,
-    ) -> TalosResult<mpsc::Receiver<CanonicalEvent>>;
+        request: &TalosMessageRequest,
+    ) -> TalosResult<mpsc::Receiver<TalosEvent>>;
 }
 
 #[async_trait]
@@ -118,12 +118,16 @@ impl GatewayClient for TalosClient {
         TalosClient::list_models(self).await
     }
 
-    async fn create_session(&self, config: &SessionConfig) -> TalosResult<SessionHandle> {
-        TalosClient::create_session(self, config).await
+    async fn create_session(&self, params: &SessionCreateParams) -> TalosResult<SessionHandle> {
+        TalosClient::create_session(self, params).await
     }
 
     async fn get_session(&self, session_id: &str) -> TalosResult<SessionInfo> {
         TalosClient::get_session(self, session_id).await
+    }
+
+    async fn close_session(&self, session_id: &str) -> TalosResult<()> {
+        TalosClient::close_session(self, session_id).await
     }
 
     async fn update_session_model(
@@ -131,14 +135,15 @@ impl GatewayClient for TalosClient {
         session_id: &str,
         model: &str,
     ) -> TalosResult<SessionInfo> {
-        TalosClient::update_session_model(self, session_id, model).await
+        TalosClient::update_session_model(self, session_id, model).await?;
+        TalosClient::get_session(self, session_id).await
     }
 
     async fn send_message_stream(
         &self,
         session_id: &str,
-        request: &CanonicalMessageRequest,
-    ) -> TalosResult<mpsc::Receiver<CanonicalEvent>> {
+        request: &TalosMessageRequest,
+    ) -> TalosResult<mpsc::Receiver<TalosEvent>> {
         TalosClient::send_message_stream(self, session_id, request).await
     }
 }
@@ -169,9 +174,9 @@ pub struct TuiApp {
     active_retry_count: u8,
     active_thinking_idx: Option<usize>,
     active_assistant_idx: Option<usize>,
-    pending_stream_connect: Option<mpsc::Receiver<TalosResult<mpsc::Receiver<CanonicalEvent>>>>,
+    pending_stream_connect: Option<mpsc::Receiver<TalosResult<mpsc::Receiver<TalosEvent>>>>,
     pending_stream_task: Option<tokio::task::JoinHandle<()>>,
-    pending_stream: Option<mpsc::Receiver<CanonicalEvent>>,
+    pending_stream: Option<mpsc::Receiver<TalosEvent>>,
     active_stream_message_id: Option<String>,
     last_stream_sequence: Option<u64>,
     status_hint: Option<(String, Instant)>,
@@ -405,7 +410,7 @@ impl TuiApp {
     }
 
     fn poll_stream_connect(&mut self) {
-        let mut connect_result: Option<TalosResult<mpsc::Receiver<CanonicalEvent>>> = None;
+        let mut connect_result: Option<TalosResult<mpsc::Receiver<TalosEvent>>> = None;
         let mut should_clear = false;
 
         if let Some(rx) = self.pending_stream_connect.as_mut() {
@@ -678,6 +683,18 @@ impl TuiApp {
                 Ok(false)
             }
             "quit" => {
+                if self.connection_mode == ConnectionMode::Remote {
+                    if let (Some(client), Some(session_id)) =
+                        (self.gateway_client.clone(), self.session_id.clone())
+                    {
+                        if let Err(err) = client.close_session(&session_id).await {
+                            self.push_block(
+                                ChatRole::System,
+                                format!("Failed to close session `{}`: {}", session_id, err),
+                            );
+                        }
+                    }
+                }
                 self.push_block(ChatRole::System, "Shutting down TUI.".to_string());
                 Ok(true)
             }
@@ -760,13 +777,12 @@ impl TuiApp {
 
                 let session_id = self.ensure_remote_session().await?;
                 let active_summary = summarize_for_queue(&user_message);
-                let request = CanonicalMessageRequest {
-                    input: vec![CanonicalInputItem::InputText {
+                let request = TalosMessageRequest {
+                    input: vec![TalosInputItem::Text {
                         text: user_message.clone(),
                     }],
                     stream: Some(true),
-                    model: Some(self.current_model.clone()),
-                    metadata: Some(json!({"source":"talos-ui-tui"})),
+                    workspace_id: None,
                 };
 
                 self.abort_pending_stream_task();
@@ -817,7 +833,7 @@ impl TuiApp {
         Ok(())
     }
 
-    fn handle_stream_event(&mut self, event: CanonicalEvent) {
+    fn handle_stream_event(&mut self, event: TalosEvent) {
         self.trace_event_count = self.trace_event_count.saturating_add(1);
 
         if let Some(session_id) = self.session_id.as_deref() {
@@ -856,7 +872,7 @@ impl TuiApp {
         self.last_stream_sequence = Some(event.sequence);
         self.request_follow_bottom();
 
-        if event.event_type != CanonicalEventType::MessageOutputDelta {
+        if event.event_type != TalosEventType::MessageOutputDelta {
             self.push_right_event(format!(
                 "{} #{}",
                 canonical_event_label(&event.event_type),
@@ -865,10 +881,10 @@ impl TuiApp {
         }
 
         match event.event_type {
-            CanonicalEventType::MessageStarted => {
+            TalosEventType::MessageStarted => {
                 self.append_thinking_line("- message started");
             }
-            CanonicalEventType::MessageReasoningDelta => {
+            TalosEventType::MessageReasoningDelta => {
                 if let Some(delta) = event.data.get("delta").and_then(|v| v.as_str()) {
                     if !delta.trim().is_empty() {
                         let source = event
@@ -898,7 +914,7 @@ impl TuiApp {
                     }
                 }
             }
-            CanonicalEventType::MessageOutputDelta => {
+            TalosEventType::MessageOutputDelta => {
                 if let Some(delta) = event.data.get("delta").and_then(|v| v.as_str()) {
                     self.append_assistant(delta);
                     if !self.received_output_delta {
@@ -907,7 +923,7 @@ impl TuiApp {
                     }
                 }
             }
-            CanonicalEventType::MessageToolCallStarted => {
+            TalosEventType::MessageToolCallStarted => {
                 let name = event
                     .data
                     .get("name")
@@ -923,7 +939,7 @@ impl TuiApp {
                 self.tool_events
                     .push(format!("started [{}]: {}", step_id, name));
             }
-            CanonicalEventType::MessageToolCallCompleted => {
+            TalosEventType::MessageToolCallCompleted => {
                 let call_id = event
                     .data
                     .get("call_id")
@@ -939,7 +955,7 @@ impl TuiApp {
                 self.tool_events
                     .push(format!("completed: {} ({})", call_id, tool));
             }
-            CanonicalEventType::MessageCompleted => {
+            TalosEventType::MessageCompleted => {
                 if !self.received_output_delta {
                     if let Some(text) = extract_text_from_completed_event(&event.data) {
                         if !text.trim().is_empty() {
@@ -951,7 +967,7 @@ impl TuiApp {
                 self.append_thinking_line("- stream completed");
                 self.finish_active_stream("stream completed", false, false);
             }
-            CanonicalEventType::MessageError => {
+            TalosEventType::MessageError => {
                 self.append_thinking_line("- stream error");
                 self.push_block(ChatRole::System, format!("Stream error: {}", event.data));
                 self.finish_active_stream("stream error", true, false);
@@ -1008,25 +1024,16 @@ impl TuiApp {
             ));
         };
 
-        let context = CanonicalContext {
-            source_type: "tui".to_string(),
-            provider: "talos-ui-tui".to_string(),
-            channel_id: "terminal".to_string(),
-            user_id: env::var("USER").unwrap_or_else(|_| "local-user".to_string()),
-            thread_id: None,
-            message_id: None,
-            trace_id: None,
-        };
-        let config = SessionConfig {
+        let context = TalosContext::cli(
+            env::var("USER").unwrap_or_else(|_| "local-user".to_string()),
+        )
+        .with_channel_id("terminal");
+        let params = SessionCreateParams {
             context: Some(context),
             model: Some(self.current_model.clone()),
-            metadata: Some(json!({
-                "workspace": self.startup_workspace.display().to_string(),
-                "source": "talos-ui-tui"
-            })),
         };
 
-        let created = client.create_session(&config).await?;
+        let created = client.create_session(&params).await?;
         self.session_id = Some(created.id.clone());
         self.connection_status = "connected".to_string();
         Ok(created.id)
@@ -1674,15 +1681,15 @@ impl TuiApp {
     }
 }
 
-fn canonical_event_label(event_type: &CanonicalEventType) -> &'static str {
+fn canonical_event_label(event_type: &TalosEventType) -> &'static str {
     match event_type {
-        CanonicalEventType::MessageStarted => "message.started",
-        CanonicalEventType::MessageReasoningDelta => "message.reasoning.delta",
-        CanonicalEventType::MessageOutputDelta => "message.output.delta",
-        CanonicalEventType::MessageToolCallStarted => "message.tool_call.started",
-        CanonicalEventType::MessageToolCallCompleted => "message.tool_call.completed",
-        CanonicalEventType::MessageCompleted => "message.completed",
-        CanonicalEventType::MessageError => "message.error",
+        TalosEventType::MessageStarted => "message.started",
+        TalosEventType::MessageReasoningDelta => "message.reasoning.delta",
+        TalosEventType::MessageOutputDelta => "message.output.delta",
+        TalosEventType::MessageToolCallStarted => "message.tool_call.started",
+        TalosEventType::MessageToolCallCompleted => "message.tool_call.completed",
+        TalosEventType::MessageCompleted => "message.completed",
+        TalosEventType::MessageError => "message.error",
     }
 }
 
@@ -2001,6 +2008,7 @@ async fn run_event_loop<B: Backend>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use std::sync::Mutex;
     use talos_agent::MockAgent;
 
@@ -2054,7 +2062,7 @@ mod tests {
             Ok(self.state.lock().unwrap().models.clone())
         }
 
-        async fn create_session(&self, _config: &SessionConfig) -> TalosResult<SessionHandle> {
+        async fn create_session(&self, _params: &SessionCreateParams) -> TalosResult<SessionHandle> {
             let state = self.state.lock().unwrap();
             Ok(SessionHandle {
                 id: state.session_id.clone(),
@@ -2071,6 +2079,10 @@ mod tests {
                 message_count: 3,
                 last_activity: 2,
             })
+        }
+
+        async fn close_session(&self, _session_id: &str) -> TalosResult<()> {
+            Ok(())
         }
 
         async fn update_session_model(
@@ -2092,8 +2104,8 @@ mod tests {
         async fn send_message_stream(
             &self,
             session_id: &str,
-            request: &CanonicalMessageRequest,
-        ) -> TalosResult<mpsc::Receiver<CanonicalEvent>> {
+            request: &TalosMessageRequest,
+        ) -> TalosResult<mpsc::Receiver<TalosEvent>> {
             let delay = self.state.lock().unwrap().connect_delay_ms;
             if delay > 0 {
                 tokio::time::sleep(Duration::from_millis(delay)).await;
@@ -2104,7 +2116,7 @@ mod tests {
                 .input
                 .iter()
                 .find_map(|item| match item {
-                    CanonicalInputItem::InputText { text } => Some(text.clone()),
+                    TalosInputItem::Text { text } => Some(text.clone()),
                     _ => None,
                 })
                 .unwrap_or_else(|| "unknown".to_string());
@@ -2115,8 +2127,8 @@ mod tests {
                 format!("msg-{}", state.stream_counter)
             };
 
-            tx.send(CanonicalEvent {
-                event_type: CanonicalEventType::MessageStarted,
+            tx.send(TalosEvent {
+                event_type: TalosEventType::MessageStarted,
                 message_id: message_id.clone(),
                 session_id: session_id.to_string(),
                 sequence: 0,
@@ -2125,8 +2137,8 @@ mod tests {
             .await
             .unwrap();
 
-            tx.send(CanonicalEvent {
-                event_type: CanonicalEventType::MessageOutputDelta,
+            tx.send(TalosEvent {
+                event_type: TalosEventType::MessageOutputDelta,
                 message_id: message_id.clone(),
                 session_id: session_id.to_string(),
                 sequence: 1,
@@ -2135,8 +2147,8 @@ mod tests {
             .await
             .unwrap();
 
-            tx.send(CanonicalEvent {
-                event_type: CanonicalEventType::MessageOutputDelta,
+            tx.send(TalosEvent {
+                event_type: TalosEventType::MessageOutputDelta,
                 message_id: message_id.clone(),
                 session_id: session_id.to_string(),
                 sequence: 2,
@@ -2145,8 +2157,8 @@ mod tests {
             .await
             .unwrap();
 
-            tx.send(CanonicalEvent {
-                event_type: CanonicalEventType::MessageOutputDelta,
+            tx.send(TalosEvent {
+                event_type: TalosEventType::MessageOutputDelta,
                 message_id: message_id.clone(),
                 session_id: session_id.to_string(),
                 sequence: 3,
@@ -2155,8 +2167,8 @@ mod tests {
             .await
             .unwrap();
 
-            tx.send(CanonicalEvent {
-                event_type: CanonicalEventType::MessageCompleted,
+            tx.send(TalosEvent {
+                event_type: TalosEventType::MessageCompleted,
                 message_id,
                 session_id: session_id.to_string(),
                 sequence: 4,
@@ -2365,9 +2377,15 @@ mod tests {
         app.last_stream_sequence = Some(3);
         app.active_assistant_idx = Some(app.push_block(ChatRole::Assistant, String::new()));
 
-        app.handle_stream_event(CanonicalEvent {
-            event_type: CanonicalEventType::MessageOutputDelta,
-            message_id: "msg-old".to_string(),
+        let stale_message_id = format!(
+            "{}-stale",
+            app.active_stream_message_id
+                .as_deref()
+                .expect("active stream message id should exist")
+        );
+        app.handle_stream_event(TalosEvent {
+            event_type: TalosEventType::MessageOutputDelta,
+            message_id: stale_message_id,
             session_id: "sess-test".to_string(),
             sequence: 4,
             data: json!({"delta":"stale"}),
@@ -2395,8 +2413,8 @@ mod tests {
         app.active_assistant_idx = Some(app.push_block(ChatRole::Assistant, String::new()));
         app.session_id = Some("sess-test".to_string());
 
-        app.handle_stream_event(CanonicalEvent {
-            event_type: CanonicalEventType::MessageCompleted,
+        app.handle_stream_event(TalosEvent {
+            event_type: TalosEventType::MessageCompleted,
             message_id: "msg-new".to_string(),
             session_id: "sess-test".to_string(),
             sequence: 1,
@@ -2421,8 +2439,8 @@ mod tests {
         app.chat_manual_scroll = true;
         app.session_id = Some("sess-test".to_string());
 
-        app.handle_stream_event(CanonicalEvent {
-            event_type: CanonicalEventType::MessageOutputDelta,
+        app.handle_stream_event(TalosEvent {
+            event_type: TalosEventType::MessageOutputDelta,
             message_id: "msg-follow".to_string(),
             session_id: "sess-test".to_string(),
             sequence: 1,

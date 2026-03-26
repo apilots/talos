@@ -5,6 +5,10 @@ mod basic_tests {
     use talos_error::TalosError;
     use talos_error::TalosResult;
     use talos_gateway::{Gateway, GatewayImpl, GatewayRequest};
+    use talos_types::talos::{
+        TalosContext, TalosInputItem, TalosOutputItem, TalosProvider, TalosReasoning,
+        TalosSourceType, TalosUsage,
+    };
     use talos_types::RequestHandler;
     use tokio;
 
@@ -23,14 +27,17 @@ mod basic_tests {
             } else {
                 Ok(talos_types::gateway::GatewayResponse {
                     content: "Success response".to_string(),
-                    output_items: vec![talos_types::canonical::CanonicalOutputItem::OutputText {
+                    output_items: vec![TalosOutputItem::OutputText {
                         text: "Success response".to_string(),
                     }],
+                    reasoning: vec![TalosReasoning {
+                        text: "mock reasoning".to_string(),
+                    }],
                     stop_reason: "end_turn".to_string(),
-                    usage: talos_types::canonical::CanonicalUsage::default(),
+                    usage: TalosUsage::default(),
                     success: true,
                     model: "test-model".to_string(),
-                    session_id: Some("test-session".to_string()),
+                    session_id: "test-session".to_string(),
                 })
             }
         }
@@ -43,13 +50,20 @@ mod basic_tests {
         };
         let gateway_impl = GatewayImpl::new(Arc::new(mock_handler));
         let request = GatewayRequest {
-            channel: "test_channel".to_string(),
-            user_id: "test_user".to_string(),
-            content: "test content".to_string(),
-            model: Some("test-model".to_string()),
-            session_id: None,
-            context: None,
-            metadata: None,
+            session_id: "test-session".to_string(),
+            workspace_id: None,
+            input: vec![TalosInputItem::Text {
+                text: "test content".to_string(),
+            }],
+            context: TalosContext {
+                source_type: TalosSourceType::Http,
+                provider: TalosProvider::Http,
+                user_id: "test_user".to_string(),
+                message_id: "message-1".to_string(),
+                trace_id: "trace-1".to_string(),
+                channel_id: Some("test_channel".to_string()),
+                thread_id: None,
+            },
         };
 
         let response = gateway_impl.handle_request(request).await.unwrap();
@@ -62,13 +76,20 @@ mod basic_tests {
         let mock_handler = MockHandler { should_error: true };
         let gateway_impl = GatewayImpl::new(Arc::new(mock_handler));
         let request = GatewayRequest {
-            channel: "test_channel".to_string(),
-            user_id: "test_user".to_string(),
-            content: "test content".to_string(),
-            model: Some("test-model".to_string()),
-            session_id: None,
-            context: None,
-            metadata: None,
+            session_id: "test-session".to_string(),
+            workspace_id: None,
+            input: vec![TalosInputItem::Text {
+                text: "test content".to_string(),
+            }],
+            context: TalosContext {
+                source_type: TalosSourceType::Http,
+                provider: TalosProvider::Http,
+                user_id: "test_user".to_string(),
+                message_id: "message-1".to_string(),
+                trace_id: "trace-1".to_string(),
+                channel_id: Some("test_channel".to_string()),
+                thread_id: None,
+            },
         };
 
         let result = gateway_impl.handle_request(request).await;

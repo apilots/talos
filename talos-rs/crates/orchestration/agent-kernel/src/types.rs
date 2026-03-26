@@ -3,8 +3,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use talos_error::{TalosError, TalosResult};
-use talos_types::canonical::{CanonicalOutputItem, CanonicalUsage};
+use talos_types::talos::{TalosOutputItem, TalosUsage};
 use tokio::sync::mpsc;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnPhase {
+    #[default]
+    Execution,
+    Planning,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -32,7 +40,6 @@ pub struct TaskSpec {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TaskPlan {
     pub tasks: Vec<TaskSpec>,
-    pub metadata: HashMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -51,7 +58,7 @@ pub struct TaskResult {
     pub status: TaskStatus,
     pub output: String,
     #[serde(default)]
-    pub output_items: Vec<CanonicalOutputItem>,
+    pub output_items: Vec<TalosOutputItem>,
     pub tool_traces: Vec<Value>,
     pub state_delta: HashMap<String, Value>,
     pub error: Option<String>,
@@ -116,12 +123,13 @@ pub struct InvocationContext {
     pub workspace_id: String,
     pub input: String,
     pub model: String,
-    pub metadata: Option<Value>,
+    #[serde(default)]
+    pub phase: TurnPhase,
+    pub planning_instruction: Option<String>,
+    pub transfer_to: Option<String>,
     pub state: HashMap<String, Value>,
     #[serde(default)]
     pub state_bags: ContextStateBags,
-    #[serde(default)]
-    pub session_handle: Option<SessionHandle>,
     #[serde(default)]
     pub limits: InvocationLimits,
     pub events: Vec<KernelEvent>,
@@ -159,15 +167,14 @@ impl InvocationContext {
 pub struct AgentRunResult {
     pub output_text: String,
     #[serde(default)]
-    pub output_items: Vec<CanonicalOutputItem>,
+    pub output_items: Vec<TalosOutputItem>,
     pub stop_reason: String,
     #[serde(default)]
-    pub usage: CanonicalUsage,
+    pub usage: TalosUsage,
     pub task_results: Vec<TaskResult>,
     pub state_delta: HashMap<String, Value>,
     pub continue_loop: bool,
     pub requested_transfer: Option<String>,
-    pub metadata: HashMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -180,19 +187,6 @@ pub struct ContextStateBags {
     pub workspace_state: HashMap<String, Value>,
     #[serde(default)]
     pub request_state: HashMap<String, Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct SessionHandle {
-    pub selected_model: Option<String>,
-    pub session_metadata: Option<Value>,
-    pub trace_id: Option<String>,
-    pub channel_id: Option<String>,
-    pub user_id: Option<String>,
-    #[serde(default)]
-    pub recent_messages: Vec<String>,
-    #[serde(default)]
-    pub global_context: HashMap<String, Value>,
 }
 
 /// Runtime limits for invocation execution.
@@ -237,8 +231,10 @@ pub struct RunRequest {
     pub workspace_id: String,
     pub input: String,
     pub model: String,
-    pub metadata: Option<Value>,
-    pub session_handle: Option<SessionHandle>,
+    #[serde(default)]
+    pub phase: TurnPhase,
+    pub planning_instruction: Option<String>,
+    pub transfer_to: Option<String>,
     pub initial_state_bags: Option<ContextStateBags>,
     pub kernel_config: Option<talos_config::AgentKernelConfig>,
     #[serde(skip)]
@@ -249,16 +245,15 @@ pub struct RunRequest {
 pub struct RunResponse {
     pub output_text: String,
     #[serde(default)]
-    pub output_items: Vec<CanonicalOutputItem>,
+    pub output_items: Vec<TalosOutputItem>,
     pub stop_reason: String,
     #[serde(default)]
-    pub usage: CanonicalUsage,
+    pub usage: TalosUsage,
     pub model: String,
     pub task_results: Vec<TaskResult>,
     pub transfer_to: Option<String>,
     pub iterations: u32,
     pub events: Vec<KernelEvent>,
-    pub metadata: HashMap<String, Value>,
 }
 
 #[cfg(test)]
@@ -275,10 +270,11 @@ mod tests {
             workspace_id: "w1".to_string(),
             input: "hello".to_string(),
             model: "m1".to_string(),
-            metadata: None,
+            phase: TurnPhase::Execution,
+            planning_instruction: None,
+            transfer_to: None,
             state: HashMap::new(),
             state_bags: ContextStateBags::default(),
-            session_handle: None,
             limits: InvocationLimits::default(),
             events: Vec::new(),
             stream_tx: None,

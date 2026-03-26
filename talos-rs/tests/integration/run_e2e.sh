@@ -21,6 +21,7 @@ scenarios=(
   "04_cli_full_flow.sh"
   "05_chat_bilingual_and_tools.sh"
   "06_cli_stream_thinking_and_tools.sh"
+  "07_session_close_flushes_memory.sh"
 )
 
 pass_count=0

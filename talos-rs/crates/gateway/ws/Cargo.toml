@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 talos-gateway = { path = "../../gateway/core" }
 talos-error = { path = "../../../crates/infra/error" }
+talos-types = { path = "../../common/types" }
 tokio-tungstenite = "0.20"
 tokio = { version = "1.0", features = ["full"] }
 futures-util = "0.3"

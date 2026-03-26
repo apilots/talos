@@ -1,13 +1,15 @@
 use std::sync::Arc;
 
 use serde_json::json;
-use talos_agent::{Agent, AgentImpl};
+use talos_agent::{AgentImpl, AgentOrchestrator, OrchestratorRequest};
 use talos_error::TalosResult;
 use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, ToolStream, Usage,
 };
 use talos_tools::{ToolRegistry, WebSearchTool};
 use talos_tools_policy::ToolPolicy;
+use talos_types::talos::{TalosInputItem, TalosProvider, TalosSourceType};
+use talos_types::{SessionContext, SessionState, TalosSession};
 
 struct NativeToolMockProvider;
 
@@ -85,9 +87,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let response = agent
-        .handle_message("Find latest Rust async best practices")
+        .run(OrchestratorRequest {
+            session: TalosSession {
+                context: SessionContext {
+                    session_id: "demo-session".to_string(),
+                    workspace_id: Some("default".to_string()),
+                    source_type: TalosSourceType::System,
+                    provider: TalosProvider::System,
+                    user_id: "demo-user".to_string(),
+                    message_id: "demo-message".to_string(),
+                    trace_id: "demo-trace".to_string(),
+                    channel_id: None,
+                    thread_id: None,
+                },
+                config: talos_config::Config::default(),
+                state: SessionState::default(),
+            },
+            input: vec![TalosInputItem::Text {
+                text: "Find latest Rust async best practices".to_string(),
+            }],
+        })
         .await?;
 
-    println!("Final response: {}", response);
+    println!("Final response: {}", response.output_text);
     Ok(())
 }

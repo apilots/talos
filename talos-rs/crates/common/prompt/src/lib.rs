@@ -7,12 +7,14 @@
 //! - Dynamic prompt assembly based on context
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
+use talos_config::{AgentKernelMemoryConfig, AgentKernelPromptConfig};
 use talos_error::TalosResult;
 use talos_llm_provider::ChatMessage;
-use talos_memory::{CanonicalMessageRole, Memory, MemoryStore};
+use talos_memory::{
+    Memory, MemoryStore, RetrievedMemoryItem, SessionPromptContextConfig, TalosMessageRole,
+};
 use talos_tools::ToolRegistry;
 
 /// A prompt template that can be rendered with context variables
@@ -320,18 +322,26 @@ impl Default for PromptBudget {
 /// Prompt context loading policy.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptLoadPolicy {
-    pub include_workspace_summary: bool,
+    pub include_session_summary: bool,
     pub include_recent_messages: bool,
-    pub workspace_recent_limit: usize,
+    pub include_root_memory: bool,
+    pub include_retrieved_memories: bool,
+    pub session_recent_limit: usize,
+    pub retrieved_memory_max_items: usize,
+    pub retrieved_memory_max_chars: usize,
     pub unified_recent_limit: usize,
 }
 
 impl Default for PromptLoadPolicy {
     fn default() -> Self {
         Self {
-            include_workspace_summary: true,
+            include_session_summary: true,
             include_recent_messages: true,
-            workspace_recent_limit: 16,
+            include_root_memory: true,
+            include_retrieved_memories: true,
+            session_recent_limit: 16,
+            retrieved_memory_max_items: 4,
+            retrieved_memory_max_chars: 2000,
             unified_recent_limit: 10,
         }
     }
@@ -342,6 +352,8 @@ impl Default for PromptLoadPolicy {
 pub struct PromptBuildConfig {
     pub budget: PromptBudget,
     pub load_policy: PromptLoadPolicy,
+    pub prompt: AgentKernelPromptConfig,
+    pub memory: AgentKernelMemoryConfig,
 }
 
 /// Unified prompt builder for kernel turns.
@@ -349,11 +361,13 @@ pub struct PromptBuilder<'a> {
     agent_name: String,
     agent_description: String,
     phase: PromptPhase,
+    planner_mode: String,
+    planning_instruction: Option<String>,
     user_input: Option<String>,
-    metadata: Option<&'a Value>,
     tool_registry: Option<&'a ToolRegistry>,
     memory_store: Option<&'a MemoryStore>,
     session_id: Option<&'a str>,
+    retrieved_memories: Vec<RetrievedMemoryItem>,
     config: PromptBuildConfig,
 }
 
@@ -369,11 +383,13 @@ impl<'a> PromptBuilder<'a> {
             agent_name: "talos".to_string(),
             agent_description: "AI assistant".to_string(),
             phase: PromptPhase::Execution,
+            planner_mode: "built_in".to_string(),
+            planning_instruction: None,
             user_input: None,
-            metadata: None,
             tool_registry: None,
             memory_store: None,
             session_id: None,
+            retrieved_memories: Vec::new(),
             config: PromptBuildConfig::default(),
         }
     }
@@ -386,6 +402,16 @@ impl<'a> PromptBuilder<'a> {
 
     pub fn phase(mut self, phase: PromptPhase) -> Self {
         self.phase = phase;
+        self
+    }
+
+    pub fn planner_mode(mut self, planner_mode: impl Into<String>) -> Self {
+        self.planner_mode = planner_mode.into();
+        self
+    }
+
+    pub fn planning_instruction(mut self, planning_instruction: Option<String>) -> Self {
+        self.planning_instruction = planning_instruction;
         self
     }
 
@@ -405,13 +431,13 @@ impl<'a> PromptBuilder<'a> {
         self
     }
 
-    pub fn metadata(mut self, metadata: &'a Value) -> Self {
-        self.metadata = Some(metadata);
+    pub fn config(mut self, config: PromptBuildConfig) -> Self {
+        self.config = config;
         self
     }
 
-    pub fn config(mut self, config: PromptBuildConfig) -> Self {
-        self.config = config;
+    pub fn retrieved_memories(mut self, memories: Vec<RetrievedMemoryItem>) -> Self {
+        self.retrieved_memories = memories;
         self
     }
 
@@ -421,8 +447,8 @@ impl<'a> PromptBuilder<'a> {
         self
     }
 
-    pub fn include_workspace_summary(mut self, include: bool) -> Self {
-        self.config.load_policy.include_workspace_summary = include;
+    pub fn include_session_summary(mut self, include: bool) -> Self {
+        self.config.load_policy.include_session_summary = include;
         self
     }
 
@@ -439,7 +465,7 @@ impl<'a> PromptBuilder<'a> {
         })?;
 
         let mut static_messages = vec![ChatMessage::system(self.build_identity_prompt())];
-        if let Some(planning_instruction) = self.metadata_str("planning_instruction") {
+        if let Some(planning_instruction) = self.planning_instruction.as_deref() {
             if !planning_instruction.trim().is_empty() {
                 static_messages.push(ChatMessage::system(format!(
                     "Planning instruction:\n{}",
@@ -472,11 +498,7 @@ impl<'a> PromptBuilder<'a> {
                 "Use native tool calling when needed, then produce the final response."
             }
         };
-        let planner_mode = self
-            .metadata_str("planner_mode")
-            .unwrap_or("built_in")
-            .trim()
-            .to_ascii_lowercase();
+        let planner_mode = self.planner_mode.trim().to_ascii_lowercase();
 
         let tool_summary = self
             .tool_registry
@@ -524,40 +546,31 @@ Available tools:
 
     async fn load_dynamic_messages(&self) -> TalosResult<Vec<ChatMessage>> {
         let mut messages = Vec::new();
-        let include_summary = self
-            .metadata_bool("prompt_include_workspace_summary")
-            .unwrap_or(self.config.load_policy.include_workspace_summary);
-        let include_recent = self
-            .metadata_bool("prompt_include_recent_messages")
-            .unwrap_or(self.config.load_policy.include_recent_messages);
-        let summary_recent_count = self
-            .metadata_u64("memory_summary_recent_count")
-            .map(|v| v as usize)
-            .unwrap_or(2);
-        let summary_max_chars = self
-            .metadata_u64("memory_summary_max_chars")
-            .map(|v| v as usize)
-            .unwrap_or(1200);
-        let context_target_messages = self
-            .metadata_u64("memory_context_target_messages")
-            .map(|v| v as usize)
-            .unwrap_or(self.config.load_policy.workspace_recent_limit);
-        let memory_enable_summary = self
-            .metadata_bool("memory_enable_summary")
-            .unwrap_or(include_summary);
+        let include_summary = self.config.load_policy.include_session_summary;
+        let include_recent = self.config.load_policy.include_recent_messages;
+        let include_root_memory = self.config.load_policy.include_root_memory;
+        let include_retrieved_memories = self.config.load_policy.include_retrieved_memories;
+        let summary_recent_count = self.config.memory.session_summary_recent_count;
+        let summary_max_chars = self.config.memory.session_summary_max_chars;
+        let context_target_messages = self.config.load_policy.session_recent_limit;
+        let memory_enable_summary = self.config.memory.session_summary_enabled;
+        let retrieved_memory_max_items = self.config.load_policy.retrieved_memory_max_items;
+        let retrieved_memory_max_chars = self.config.load_policy.retrieved_memory_max_chars;
 
         if let (Some(memory_store), Some(session_id)) = (self.memory_store, self.session_id) {
             let context = memory_store
-                .build_prompt_context(
+                .build_session_prompt_context(
                     session_id,
-                    if include_recent {
-                        context_target_messages
-                    } else {
-                        0
+                    &SessionPromptContextConfig {
+                        recent_messages_limit: if include_recent {
+                            context_target_messages
+                        } else {
+                            0
+                        },
+                        include_summary: include_summary && memory_enable_summary,
+                        summary_recent_count,
+                        summary_max_chars,
                     },
-                    include_summary && memory_enable_summary,
-                    summary_recent_count,
-                    summary_max_chars,
                 )
                 .await?;
             if include_summary {
@@ -573,10 +586,58 @@ Available tools:
             }
             if include_recent {
                 for message in context.recent_messages {
-                    messages.push(Self::canonical_message_to_chat_message(
+                    messages.push(Self::talos_message_to_chat_message(
                         message.role,
                         message.text,
                     ));
+                }
+            }
+            if include_root_memory {
+                let root_memory = memory_store.load_root_memory().await?;
+                if let Some(content) = root_memory.content {
+                    let trimmed = content.trim();
+                    if !trimmed.is_empty() {
+                        messages.push(ChatMessage::system(format!(
+                            "Root memory ({}):\n{}",
+                            root_memory
+                                .path
+                                .file_name()
+                                .and_then(|value| value.to_str())
+                                .unwrap_or("MEMORY.md"),
+                            trimmed
+                        )));
+                    }
+                }
+            }
+            if include_retrieved_memories && !self.retrieved_memories.is_empty() {
+                let mut combined = String::new();
+                for item in self
+                    .retrieved_memories
+                    .iter()
+                    .take(retrieved_memory_max_items.max(1))
+                {
+                    let line = format!(
+                        "- {}{}: {}",
+                        item.path,
+                        item.citation
+                            .as_ref()
+                            .map(|citation| format!(" ({citation})"))
+                            .unwrap_or_default(),
+                        item.snippet.trim()
+                    );
+                    if combined.len() + line.len() + 1 > retrieved_memory_max_chars.max(1) {
+                        break;
+                    }
+                    if !combined.is_empty() {
+                        combined.push('\n');
+                    }
+                    combined.push_str(&line);
+                }
+                if !combined.is_empty() {
+                    messages.push(ChatMessage::system(format!(
+                        "Retrieved memories:\n{}",
+                        combined
+                    )));
                 }
             }
             return Ok(messages);
@@ -585,47 +646,21 @@ Available tools:
         Ok(messages)
     }
 
-    fn canonical_message_to_chat_message(role: CanonicalMessageRole, text: String) -> ChatMessage {
+    fn talos_message_to_chat_message(role: TalosMessageRole, text: String) -> ChatMessage {
         match role {
-            CanonicalMessageRole::User => ChatMessage::user(text),
-            CanonicalMessageRole::Assistant => ChatMessage::assistant(text),
-            CanonicalMessageRole::System => ChatMessage::system(text),
+            TalosMessageRole::User => ChatMessage::user(text),
+            TalosMessageRole::Assistant => ChatMessage::assistant(text),
+            TalosMessageRole::System => ChatMessage::system(text),
         }
     }
 
-    fn metadata_u64(&self, key: &str) -> Option<u64> {
-        self.metadata
-            .and_then(|value| value.get(key))
-            .and_then(Value::as_u64)
-    }
-
-    fn metadata_str(&self, key: &str) -> Option<&str> {
-        self.metadata
-            .and_then(|value| value.get(key))
-            .and_then(Value::as_str)
-    }
-
-    fn metadata_bool(&self, key: &str) -> Option<bool> {
-        self.metadata
-            .and_then(|value| value.get(key))
-            .and_then(Value::as_bool)
-    }
-
     fn enforce_static_budget(&self, messages: &mut Vec<ChatMessage>) {
-        let budget = self
-            .metadata_u64("prompt_max_static_tokens")
-            .map(|v| v as usize)
-            .unwrap_or(self.config.budget.max_static_tokens)
-            .max(1);
+        let budget = self.config.budget.max_static_tokens.max(1);
         Self::truncate_messages_to_budget(messages, budget, true);
     }
 
     fn enforce_dynamic_budget(&self, messages: &mut Vec<ChatMessage>) {
-        let budget = self
-            .metadata_u64("prompt_max_dynamic_tokens")
-            .map(|v| v as usize)
-            .unwrap_or(self.config.budget.max_dynamic_tokens)
-            .max(1);
+        let budget = self.config.budget.max_dynamic_tokens.max(1);
         Self::truncate_messages_to_budget(messages, budget, false);
     }
 
@@ -704,11 +739,9 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use chrono::Utc;
-    use serde_json::json;
+    use serde_json::Value;
     use talos_llm_provider::Role;
-    use talos_memory::{
-        CanonicalMessage, CanonicalMessageRole, CanonicalTurn, Memory, MemoryStore, RecordHeader,
-    };
+    use talos_memory::{Memory, MemoryStore, RecordHeader, TalosMessage, TalosMessageRole, TalosTurn};
     use talos_tools::{Tool, ToolContext, ToolOutput};
     use uuid::Uuid;
 
@@ -849,14 +882,12 @@ mod tests {
         let registry = ToolRegistry::new();
         registry.register(Arc::new(EchoTool));
 
-        let metadata = json!({
-            "planning_instruction": "build a short plan first"
-        });
         let messages = PromptBuilder::new()
             .agent("talos", "assistant")
             .phase(PromptPhase::Planning)
+            .planner_mode("plan_react")
+            .planning_instruction(Some("build a short plan first".to_string()))
             .tools(&registry)
-            .metadata(&metadata)
             .user_input("help me")
             .build()
             .await
@@ -873,20 +904,19 @@ mod tests {
             let turn_id = format!("turn-{idx}");
             let timestamp = Utc::now();
             memory
-                .append_turn(&CanonicalTurn {
+                .append_turn(&TalosTurn {
                     turn_id: turn_id.clone(),
                     session_id: "s1".to_string(),
                     seq: memory.next_turn_seq("s1").await.expect("seq should load"),
                     timestamp,
-                    messages: vec![CanonicalMessage {
+                    messages: vec![TalosMessage {
                         header: RecordHeader {
                             id: format!("{turn_id}:a"),
                             session_id: "s1".to_string(),
                             turn_id: Some(turn_id),
                             timestamp,
-                            metadata: HashMap::new(),
                         },
-                        role: CanonicalMessageRole::Assistant,
+                        role: TalosMessageRole::Assistant,
                         text: format!("historical message {}", idx),
                     }],
                     reasoning: Vec::new(),
@@ -897,13 +927,16 @@ mod tests {
                 .expect("append should succeed");
         }
 
-        let metadata = json!({
-            "prompt_max_dynamic_tokens": 8
-        });
         let messages = PromptBuilder::new()
             .agent("talos", "assistant")
             .memory_store("s1", &memory)
-            .metadata(&metadata)
+            .config(PromptBuildConfig {
+                budget: PromptBudget {
+                    max_static_tokens: 1200,
+                    max_dynamic_tokens: 8,
+                },
+                ..PromptBuildConfig::default()
+            })
             .user_input("latest")
             .build()
             .await
@@ -921,24 +954,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_prompt_builder_uses_explicit_budget_configuration() {
+        let messages = PromptBuilder::new()
+            .agent("talos", "assistant")
+            .planning_instruction(Some("keep it short".to_string()))
+            .config(PromptBuildConfig {
+                budget: PromptBudget {
+                    max_static_tokens: 12,
+                    max_dynamic_tokens: 3200,
+                },
+                ..PromptBuildConfig::default()
+            })
+            .user_input("latest")
+            .build()
+            .await
+            .expect("prompt build should succeed");
+
+        assert!(messages.len() >= 2);
+        assert!(messages
+            .iter()
+            .any(|message| message.content.contains("[truncated]")));
+    }
+
+    #[tokio::test]
     async fn test_prompt_builder_normalizes_memory_prefix() {
         let memory = MemoryStore::new(std::env::temp_dir().join(Uuid::new_v4().to_string()));
         let timestamp = Utc::now();
         memory
-            .append_turn(&CanonicalTurn {
+            .append_turn(&TalosTurn {
                 turn_id: "turn-1".to_string(),
                 session_id: "s1".to_string(),
                 seq: memory.next_turn_seq("s1").await.expect("seq should load"),
                 timestamp,
-                messages: vec![CanonicalMessage {
+                messages: vec![TalosMessage {
                     header: RecordHeader {
                         id: "turn-1:u".to_string(),
                         session_id: "s1".to_string(),
                         turn_id: Some("turn-1".to_string()),
                         timestamp,
-                        metadata: HashMap::new(),
                     },
-                    role: CanonicalMessageRole::User,
+                    role: TalosMessageRole::User,
                     text: "hello world".to_string(),
                 }],
                 reasoning: Vec::new(),

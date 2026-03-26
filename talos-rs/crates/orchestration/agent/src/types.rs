@@ -1,12 +1,15 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use talos_llm_provider::FunctionCall;
+use talos_types::talos::{TalosOutputItem, TalosReasoning};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentResponse {
-    pub content: String,
+    pub output_text: String,
+    #[serde(default)]
+    pub output_items: Vec<TalosOutputItem>,
+    #[serde(default)]
+    pub reasoning: Vec<TalosReasoning>,
     pub tool_calls: Vec<ToolCall>,
-    pub metadata: HashMap<String, serde_json::Value>,
 }
 
 pub type ToolCall = FunctionCall;

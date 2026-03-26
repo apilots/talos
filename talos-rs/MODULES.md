@@ -636,31 +636,7 @@ pub trait Agent: Send + Sync {
 
 ---
 
-### 30. `talos-session`
-**路径**: `crates/orchestration/session/`
-
-**职责**：会话管理
-
-**核心功能**：
-- SessionKey 生成（`agent:main:telegram:dm:123`）
-- dmScope 策略（main/per-peer/per-channel-peer）
-- 上下文管理
-
-**关键类型**：
-```rust
-pub struct SessionKey(String);
-pub enum DmScope {
-    Main,
-    PerPeer,
-    PerChannelPeer,
-}
-```
-
-**依赖**：`talos-types`, `talos-error`
-
----
-
-### 31. `talos-session-store`
+### 30. `talos-session-store`
 **路径**: `crates/orchestration/session-store/`
 
 **职责**：会话存储
@@ -670,11 +646,11 @@ pub enum DmScope {
 - JSONL 转录存储
 - 会话维护（prune/rotate/archive）
 
-**依赖**：`talos-session`, `talos-storage`
+**依赖**：`talos-types`, `talos-storage`
 
 ---
 
-### 32. `talos-routing`
+### 31. `talos-routing`
 **路径**: `crates/orchestration/routing/`
 
 **职责**：路由规则
@@ -698,11 +674,11 @@ pub enum MatchRule {
 }
 ```
 
-**依赖**：`talos-session`
+**依赖**：`talos-types`
 
 ---
 
-### 33. `talos-scheduler`
+### 32. `talos-scheduler`
 **路径**: `crates/orchestration/scheduler/`
 
 **职责**：任务调度

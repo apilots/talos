@@ -35,8 +35,9 @@ impl Runner for DefaultRunner {
             workspace_id,
             input,
             model,
-            metadata,
-            session_handle,
+            phase,
+            planning_instruction,
+            transfer_to,
             initial_state_bags,
             kernel_config,
             stream_tx,
@@ -54,10 +55,11 @@ impl Runner for DefaultRunner {
             workspace_id,
             input,
             model: model.clone(),
-            metadata,
+            phase,
+            planning_instruction,
+            transfer_to,
             state: HashMap::new(),
             state_bags: initial_state_bags.unwrap_or_default(),
-            session_handle,
             limits: crate::InvocationLimits::from(&config),
             events: vec![KernelEvent::new(
                 KernelEventType::UserInput,
@@ -68,8 +70,6 @@ impl Runner for DefaultRunner {
         };
 
         let mut iterations = 0_u32;
-        let mut metadata = HashMap::new();
-
         let (
             last_output,
             last_output_items,
@@ -116,9 +116,6 @@ impl Runner for DefaultRunner {
             for (k, v) in &run_result.state_delta {
                 ctx.state.insert(k.clone(), v.clone());
                 ctx.set_session_state(k.clone(), v.clone());
-            }
-            for (k, v) in run_result.metadata {
-                metadata.insert(k, v);
             }
 
             let output = run_result.output_text;
@@ -173,7 +170,6 @@ impl Runner for DefaultRunner {
             transfer_to,
             iterations,
             events: ctx.events,
-            metadata,
         })
     }
 }
@@ -187,9 +183,10 @@ impl Default for DefaultRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TurnPhase;
     use async_trait::async_trait;
     use serde_json::json;
-    use talos_types::canonical::{CanonicalOutputItem, CanonicalUsage};
+    use talos_types::talos::{TalosOutputItem, TalosUsage};
 
     struct MockKernelAgent;
 
@@ -205,11 +202,11 @@ mod tests {
         ) -> TalosResult<crate::AgentRunResult> {
             Ok(crate::AgentRunResult {
                 output_text: "ok".to_string(),
-                output_items: vec![CanonicalOutputItem::OutputText {
+                output_items: vec![TalosOutputItem::OutputText {
                     text: "ok".to_string(),
                 }],
                 stop_reason: "end_turn".to_string(),
-                usage: CanonicalUsage::default(),
+                usage: TalosUsage::default(),
                 task_results: vec![crate::TaskResult {
                     task_id: "t1".to_string(),
                     kind: crate::TaskKind::General,
@@ -224,7 +221,6 @@ mod tests {
                 state_delta: HashMap::from([(String::from("k"), json!("v"))]),
                 continue_loop: false,
                 requested_transfer: None,
-                metadata: HashMap::new(),
             })
         }
     }
@@ -242,8 +238,9 @@ mod tests {
                     workspace_id: "w1".to_string(),
                     input: "hello".to_string(),
                     model: "m1".to_string(),
-                    metadata: None,
-                    session_handle: None,
+                    phase: TurnPhase::Execution,
+                    planning_instruction: None,
+                    transfer_to: None,
                     initial_state_bags: None,
                     kernel_config: Some(talos_config::AgentKernelConfig::default()),
                     stream_tx: None,

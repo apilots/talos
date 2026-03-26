@@ -8,8 +8,8 @@ use tokio::sync::{mpsc, RwLock};
 use tracing::{error, info};
 
 use talos_client::{
-    CanonicalInputItem, CanonicalMessageRequest, CanonicalOutputItem, SessionConfig, SessionHandle,
-    SessionInfo, TalosClient,
+    SessionCreateParams, SessionHandle, SessionInfo, TalosClient, TalosInputItem,
+    TalosMessageRequest, TalosMessageResponse, TalosOutputItem,
 };
 
 /// TUI State Management - handles UI state and client integration
@@ -105,10 +105,9 @@ impl TuiAppState {
             drop(session_guard);
             let session = self
                 .client
-                .create_session(&SessionConfig {
+                .create_session(&SessionCreateParams {
                     context: None,
                     model: Some(model_guard.clone()),
-                    metadata: None,
                 })
                 .await?;
             let mut active_sess = self.active_session.write().await;
@@ -120,13 +119,12 @@ impl TuiAppState {
             .client
             .send_message(
                 &session_id,
-                &CanonicalMessageRequest {
-                    input: vec![CanonicalInputItem::InputText {
+                &TalosMessageRequest {
+                    input: vec![TalosInputItem::Text {
                         text: message.to_string(),
                     }],
                     stream: Some(false),
-                    model: Some(model_guard.clone()),
-                    metadata: None,
+                    workspace_id: None,
                 },
             )
             .await?;
@@ -134,8 +132,11 @@ impl TuiAppState {
     }
     
     /// Create a new session
-    pub async fn create_session(&self, config: &SessionConfig) -> Result<SessionHandle, Box<dyn std::error::Error>> {
-        let session = self.client.create_session(config).await?;
+    pub async fn create_session(
+        &self,
+        params: &SessionCreateParams,
+    ) -> Result<SessionHandle, Box<dyn std::error::Error>> {
+        let session = self.client.create_session(params).await?;
         
         // Update active session
         {
@@ -250,12 +251,12 @@ impl TuiAppState {
     }
 }
 
-fn extract_output_text(response: &talos_client::CanonicalMessageResponse) -> String {
+fn extract_output_text(response: &TalosMessageResponse) -> String {
     let texts: Vec<String> = response
         .output
         .iter()
         .filter_map(|item| match item {
-            CanonicalOutputItem::OutputText { text } => Some(text.clone()),
+            TalosOutputItem::OutputText { text } => Some(text.clone()),
             _ => None,
         })
         .collect();

@@ -13,6 +13,7 @@ thiserror.workspace = true
 tracing.workspace = true
 tokio.workspace = true
 talos-error = { workspace = true }
+talos-config = { workspace = true }
 talos-llm-provider = { workspace = true }
 talos-memory = { workspace = true }
 talos-tools = { workspace = true }

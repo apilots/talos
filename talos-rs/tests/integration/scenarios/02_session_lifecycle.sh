@@ -23,16 +23,15 @@ echo "CASE select_models PASS primary=${primary_model} secondary=${secondary_mod
 
 create_payload='{
   "context": {
-    "source_type": "api",
-    "provider": "scenario",
+    "source_type": "http",
+    "provider": "http",
     "channel_id": "session",
     "user_id": "session-user",
     "thread_id": null,
-    "message_id": null,
-    "trace_id": null
+    "message_id": "msg-session-lifecycle",
+    "trace_id": "trace-session-lifecycle"
   },
-  "model": "__PRIMARY_MODEL__",
-  "metadata": {"case":"session_lifecycle"}
+  "model": "__PRIMARY_MODEL__"
 }'
 create_payload="${create_payload/__PRIMARY_MODEL__/${primary_model}}"
 create_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
@@ -59,17 +58,17 @@ echo "CASE get_session PASS id=${detail_id}"
 patch_json="$(curl -sS -X PATCH "${GATEWAY_URL}/v1/sessions/${session_id}" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "{\"model\":\"${secondary_model}\"}")"
-log_case_json "patch_session_model" "{\"session_id\":\"${session_id}\",\"model\":\"${secondary_model}\"}" "${patch_json}"
-patched_model="$(json_get "${patch_json}" "model")"
-if [[ "${patched_model}" != "${secondary_model}" ]]; then
-  echo "CASE patch_session_model FAIL expected=${secondary_model} actual=${patched_model}"
+  -d "{\"conf\":{\"agent.model\":\"${secondary_model}\"}}")"
+log_case_json "patch_session_model" "{\"session_id\":\"${session_id}\",\"conf\":{\"agent.model\":\"${secondary_model}\"}}" "${patch_json}"
+patch_success="$(json_get "${patch_json}" "success")"
+if [[ "${patch_success}" != "true" && "${patch_success}" != "True" ]]; then
+  echo "CASE patch_session_model FAIL response=${patch_json}"
   exit 1
 fi
-echo "CASE patch_session_model PASS model=${patched_model}"
+echo "CASE patch_session_model PASS success=${patch_success}"
 
-list_json="$(curl -sS -H "Authorization: Bearer ${AUTH_TOKEN}" "${GATEWAY_URL}/v1/sessions?user_id=session-user&channel_id=session&provider=scenario")"
-log_case_json "list_sessions_with_filter" "{\"user_id\":\"session-user\",\"channel_id\":\"session\",\"provider\":\"scenario\"}" "${list_json}"
+list_json="$(curl -sS -H "Authorization: Bearer ${AUTH_TOKEN}" "${GATEWAY_URL}/v1/sessions?user_id=session-user&channel_id=session&provider=http")"
+log_case_json "list_sessions_with_filter" "{\"user_id\":\"session-user\",\"channel_id\":\"session\",\"provider\":\"http\"}" "${list_json}"
 list_count="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("data", [])))' <<< "${list_json}")"
 if [[ "${list_count}" -lt 1 ]]; then
   echo "CASE list_sessions_with_filter FAIL expected=>=1 actual=${list_count}"

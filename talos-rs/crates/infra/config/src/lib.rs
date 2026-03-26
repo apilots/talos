@@ -190,9 +190,21 @@ pub struct AgentKernelConfig {
     #[serde(default = "default_kernel_planner_mode")]
     pub planner_mode: String,
 
-    /// Allow request-level planner mode override from metadata
+    /// Deprecated planner override switch; request-level config no longer overrides kernel config.
     #[serde(default = "default_kernel_allow_request_planner_override")]
     pub allow_request_planner_override: bool,
+
+    /// Kernel execution mode: single, sequential, parallel, loop, or a2a.
+    #[serde(default = "default_kernel_execution_mode")]
+    pub execution_mode: String,
+
+    /// Child agent count used by sequential/parallel execution mode.
+    #[serde(default = "default_kernel_execution_children")]
+    pub execution_children: usize,
+
+    /// Iteration count used by loop/a2a execution mode.
+    #[serde(default = "default_kernel_execution_loop_iters")]
+    pub execution_loop_iters: u32,
 
     /// Prompt builder defaults
     #[serde(default)]
@@ -247,6 +259,18 @@ fn default_kernel_allow_request_planner_override() -> bool {
     false
 }
 
+fn default_kernel_execution_mode() -> String {
+    "single".to_string()
+}
+
+fn default_kernel_execution_children() -> usize {
+    2
+}
+
+fn default_kernel_execution_loop_iters() -> u32 {
+    3
+}
+
 /// Prompt defaults under agent.kernel
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentKernelPromptConfig {
@@ -258,13 +282,29 @@ pub struct AgentKernelPromptConfig {
     #[serde(default = "default_prompt_max_dynamic_tokens")]
     pub max_dynamic_tokens: usize,
 
-    /// Include workspace summary in prompt context
+    /// Include session summary in prompt context
     #[serde(default = "default_true")]
-    pub include_workspace_summary: bool,
+    pub include_session_summary: bool,
 
     /// Include recent messages in prompt context
     #[serde(default = "default_true")]
     pub include_recent_messages: bool,
+
+    /// Include root memory in prompt context
+    #[serde(default = "default_true")]
+    pub include_root_memory: bool,
+
+    /// Include retrieved memories in prompt context
+    #[serde(default = "default_true")]
+    pub include_retrieved_memories: bool,
+
+    /// Maximum retrieved memory items injected into prompt
+    #[serde(default = "default_prompt_retrieved_memory_max_items")]
+    pub retrieved_memory_max_items: usize,
+
+    /// Maximum total chars retained for retrieved memories
+    #[serde(default = "default_prompt_retrieved_memory_max_chars")]
+    pub retrieved_memory_max_chars: usize,
 }
 
 fn default_prompt_max_static_tokens() -> usize {
@@ -280,16 +320,28 @@ impl Default for AgentKernelPromptConfig {
         Self {
             max_static_tokens: default_prompt_max_static_tokens(),
             max_dynamic_tokens: default_prompt_max_dynamic_tokens(),
-            include_workspace_summary: true,
+            include_session_summary: true,
             include_recent_messages: true,
+            include_root_memory: true,
+            include_retrieved_memories: true,
+            retrieved_memory_max_items: default_prompt_retrieved_memory_max_items(),
+            retrieved_memory_max_chars: default_prompt_retrieved_memory_max_chars(),
         }
     }
+}
+
+fn default_prompt_retrieved_memory_max_items() -> usize {
+    4
+}
+
+fn default_prompt_retrieved_memory_max_chars() -> usize {
+    2000
 }
 
 /// Memory defaults under agent.kernel
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentKernelMemoryConfig {
-    /// Workspace directory for memory markdown files.
+    /// Workspace root directory for memory and session markdown files.
     #[serde(default = "default_kernel_memory_workspace_dir")]
     pub workspace_dir: String,
 
@@ -297,52 +349,92 @@ pub struct AgentKernelMemoryConfig {
     #[serde(default = "default_kernel_memory_hot_recent_messages")]
     pub hot_recent_messages: usize,
 
-    /// Target message count when building prompt context.
-    #[serde(default = "default_kernel_memory_context_target_messages")]
-    pub context_target_messages: usize,
+    /// Target message count when building session prompt context.
+    #[serde(default = "default_kernel_memory_session_recent_messages_limit")]
+    pub session_recent_messages_limit: usize,
 
-    /// Enable summary injection in prompt context.
+    /// Enable session summary injection in prompt context.
     #[serde(default = "default_true")]
-    pub enable_summary: bool,
+    pub session_summary_enabled: bool,
 
     /// Number of latest summaries to inject.
-    #[serde(default = "default_kernel_memory_summary_recent_count")]
-    pub summary_recent_count: usize,
+    #[serde(default = "default_kernel_memory_session_summary_recent_count")]
+    pub session_summary_recent_count: usize,
 
     /// Maximum characters retained per summary item.
-    #[serde(default = "default_kernel_memory_summary_max_chars")]
-    pub summary_max_chars: usize,
+    #[serde(default = "default_kernel_memory_session_summary_max_chars")]
+    pub session_summary_max_chars: usize,
 
     /// Trigger summary compaction when session memory exceeds this threshold.
     #[serde(default = "default_kernel_memory_compaction_threshold_bytes")]
     pub compaction_threshold_bytes: usize,
 
-    /// Enable extracting durable facts into long-term memory.
-    #[serde(default = "default_true")]
-    pub long_term_fact_extraction_enabled: bool,
+    /// Root memory file name.
+    #[serde(default = "default_kernel_memory_root_memory_filename")]
+    pub root_memory_filename: String,
 
-    /// Minimum importance score for extracted long-term facts.
-    #[serde(default = "default_kernel_memory_long_term_min_importance")]
-    pub long_term_min_importance: f32,
+    /// Workspace memory directory name.
+    #[serde(default = "default_kernel_memory_memory_dirname")]
+    pub memory_dirname: String,
+
+    /// Enable workspace memory flush.
+    #[serde(default = "default_true")]
+    pub workspace_memory_flush_enabled: bool,
+
+    /// Enable workspace memory flush before compaction.
+    #[serde(default = "default_true")]
+    pub workspace_memory_flush_on_compaction: bool,
+
+    /// Daily workspace memory file pattern.
+    #[serde(default = "default_kernel_memory_flush_file_pattern")]
+    pub flush_file_pattern: String,
+
+    /// Enable memory search tool.
+    #[serde(default = "default_true")]
+    pub tool_search_enabled: bool,
+
+    /// Enable memory get tool.
+    #[serde(default = "default_true")]
+    pub tool_get_enabled: bool,
+
+    /// Default max results for workspace memory search.
+    #[serde(default = "default_kernel_memory_search_max_results")]
+    pub search_max_results: usize,
+
+    /// Default minimum score for workspace memory search.
+    #[serde(default = "default_kernel_memory_search_min_score")]
+    pub search_min_score: f32,
+
+    /// Include root memory in workspace memory search.
+    #[serde(default = "default_true")]
+    pub search_include_root_memory: bool,
+
+    /// Include daily memory files in workspace memory search.
+    #[serde(default = "default_true")]
+    pub search_include_daily_memory: bool,
+
+    /// Include session transcripts in workspace memory search.
+    #[serde(default)]
+    pub search_include_sessions: bool,
 }
 
 fn default_kernel_memory_workspace_dir() -> String {
-    "~/.talos/workspace/memory".to_string()
+    "~/.talos/workspace".to_string()
 }
 
 fn default_kernel_memory_hot_recent_messages() -> usize {
     64
 }
 
-fn default_kernel_memory_context_target_messages() -> usize {
+fn default_kernel_memory_session_recent_messages_limit() -> usize {
     24
 }
 
-fn default_kernel_memory_summary_recent_count() -> usize {
+fn default_kernel_memory_session_summary_recent_count() -> usize {
     2
 }
 
-fn default_kernel_memory_summary_max_chars() -> usize {
+fn default_kernel_memory_session_summary_max_chars() -> usize {
     1200
 }
 
@@ -350,8 +442,24 @@ fn default_kernel_memory_compaction_threshold_bytes() -> usize {
     256 * 1024
 }
 
-fn default_kernel_memory_long_term_min_importance() -> f32 {
-    0.7
+fn default_kernel_memory_root_memory_filename() -> String {
+    "MEMORY.md".to_string()
+}
+
+fn default_kernel_memory_memory_dirname() -> String {
+    "memory".to_string()
+}
+
+fn default_kernel_memory_flush_file_pattern() -> String {
+    "YYYY-MM-DD.md".to_string()
+}
+
+fn default_kernel_memory_search_max_results() -> usize {
+    6
+}
+
+fn default_kernel_memory_search_min_score() -> f32 {
+    0.35
 }
 
 impl Default for AgentKernelMemoryConfig {
@@ -359,13 +467,23 @@ impl Default for AgentKernelMemoryConfig {
         Self {
             workspace_dir: default_kernel_memory_workspace_dir(),
             hot_recent_messages: default_kernel_memory_hot_recent_messages(),
-            context_target_messages: default_kernel_memory_context_target_messages(),
-            enable_summary: true,
-            summary_recent_count: default_kernel_memory_summary_recent_count(),
-            summary_max_chars: default_kernel_memory_summary_max_chars(),
+            session_recent_messages_limit: default_kernel_memory_session_recent_messages_limit(),
+            session_summary_enabled: true,
+            session_summary_recent_count: default_kernel_memory_session_summary_recent_count(),
+            session_summary_max_chars: default_kernel_memory_session_summary_max_chars(),
             compaction_threshold_bytes: default_kernel_memory_compaction_threshold_bytes(),
-            long_term_fact_extraction_enabled: true,
-            long_term_min_importance: default_kernel_memory_long_term_min_importance(),
+            root_memory_filename: default_kernel_memory_root_memory_filename(),
+            memory_dirname: default_kernel_memory_memory_dirname(),
+            workspace_memory_flush_enabled: true,
+            workspace_memory_flush_on_compaction: true,
+            flush_file_pattern: default_kernel_memory_flush_file_pattern(),
+            tool_search_enabled: true,
+            tool_get_enabled: true,
+            search_max_results: default_kernel_memory_search_max_results(),
+            search_min_score: default_kernel_memory_search_min_score(),
+            search_include_root_memory: true,
+            search_include_daily_memory: true,
+            search_include_sessions: false,
         }
     }
 }
@@ -403,6 +521,9 @@ impl Default for AgentKernelConfig {
             default_workspace_id: default_workspace_id(),
             planner_mode: default_kernel_planner_mode(),
             allow_request_planner_override: default_kernel_allow_request_planner_override(),
+            execution_mode: default_kernel_execution_mode(),
+            execution_children: default_kernel_execution_children(),
+            execution_loop_iters: default_kernel_execution_loop_iters(),
             prompt: AgentKernelPromptConfig::default(),
             memory: AgentKernelMemoryConfig::default(),
             binding: AgentKernelBindingConfig::default(),
@@ -910,6 +1031,27 @@ impl Config {
                 "agent.kernel.planner_mode must be one of: built_in, plan_react".to_string(),
             ));
         }
+        let execution_mode = self.agent.kernel.execution_mode.trim().to_ascii_lowercase();
+        if execution_mode != "single"
+            && execution_mode != "sequential"
+            && execution_mode != "parallel"
+            && execution_mode != "loop"
+            && execution_mode != "a2a"
+        {
+            return Err(TalosError::InvalidConfiguration(
+                "agent.kernel.execution_mode must be one of: single, sequential, parallel, loop, a2a".to_string(),
+            ));
+        }
+        if self.agent.kernel.execution_children == 0 {
+            return Err(TalosError::InvalidConfiguration(
+                "agent.kernel.execution_children must be > 0".to_string(),
+            ));
+        }
+        if self.agent.kernel.execution_loop_iters == 0 {
+            return Err(TalosError::InvalidConfiguration(
+                "agent.kernel.execution_loop_iters must be > 0".to_string(),
+            ));
+        }
         if self.agent.kernel.prompt.max_static_tokens == 0 {
             return Err(TalosError::InvalidConfiguration(
                 "agent.kernel.prompt.max_static_tokens must be > 0".to_string(),
@@ -932,19 +1074,19 @@ impl Config {
                 "agent.kernel.memory.hot_recent_messages must be > 0".to_string(),
             ));
         }
-        if self.agent.kernel.memory.context_target_messages == 0 {
+        if self.agent.kernel.memory.session_recent_messages_limit == 0 {
             return Err(TalosError::InvalidConfiguration(
-                "agent.kernel.memory.context_target_messages must be > 0".to_string(),
+                "agent.kernel.memory.session_recent_messages_limit must be > 0".to_string(),
             ));
         }
-        if self.agent.kernel.memory.summary_recent_count == 0 {
+        if self.agent.kernel.memory.session_summary_recent_count == 0 {
             return Err(TalosError::InvalidConfiguration(
-                "agent.kernel.memory.summary_recent_count must be > 0".to_string(),
+                "agent.kernel.memory.session_summary_recent_count must be > 0".to_string(),
             ));
         }
-        if self.agent.kernel.memory.summary_max_chars == 0 {
+        if self.agent.kernel.memory.session_summary_max_chars == 0 {
             return Err(TalosError::InvalidConfiguration(
-                "agent.kernel.memory.summary_max_chars must be > 0".to_string(),
+                "agent.kernel.memory.session_summary_max_chars must be > 0".to_string(),
             ));
         }
         if self.agent.kernel.memory.compaction_threshold_bytes == 0 {
@@ -952,9 +1094,9 @@ impl Config {
                 "agent.kernel.memory.compaction_threshold_bytes must be > 0".to_string(),
             ));
         }
-        if !(0.0..=1.0).contains(&self.agent.kernel.memory.long_term_min_importance) {
+        if self.agent.kernel.memory.search_min_score < 0.0 {
             return Err(TalosError::InvalidConfiguration(
-                "agent.kernel.memory.long_term_min_importance must be in [0.0, 1.0]".to_string(),
+                "agent.kernel.memory.search_min_score must be >= 0.0".to_string(),
             ));
         }
         if self
@@ -1122,9 +1264,12 @@ const REQUIRED_CONFIG_PATHS: &[&str] = &[
     "agent.kernel.default_workspace_id",
     "agent.kernel.planner_mode",
     "agent.kernel.allow_request_planner_override",
+    "agent.kernel.execution_mode",
+    "agent.kernel.execution_children",
+    "agent.kernel.execution_loop_iters",
     "agent.kernel.prompt.max_static_tokens",
     "agent.kernel.prompt.max_dynamic_tokens",
-    "agent.kernel.prompt.include_workspace_summary",
+    "agent.kernel.prompt.include_session_summary",
     "agent.kernel.prompt.include_recent_messages",
     "agent.kernel.binding.default_agent_kind",
     "gateway.host",
@@ -1227,10 +1372,13 @@ agent:
     default_workspace_id: default
     planner_mode: built_in
     allow_request_planner_override: false
+    execution_mode: single
+    execution_children: 2
+    execution_loop_iters: 3
     prompt:
       max_static_tokens: 1200
       max_dynamic_tokens: 3200
-      include_workspace_summary: true
+      include_session_summary: true
       include_recent_messages: true
     binding:
       default_agent_kind: llm
@@ -1338,25 +1486,30 @@ mod tests {
         assert_eq!(config.agent.kernel.default_workspace_id, "default");
         assert_eq!(config.agent.kernel.planner_mode, "built_in");
         assert!(!config.agent.kernel.allow_request_planner_override);
+        assert_eq!(config.agent.kernel.execution_mode, "single");
+        assert_eq!(config.agent.kernel.execution_children, 2);
+        assert_eq!(config.agent.kernel.execution_loop_iters, 3);
         assert_eq!(config.agent.kernel.prompt.max_static_tokens, 1200);
         assert_eq!(config.agent.kernel.prompt.max_dynamic_tokens, 3200);
-        assert!(config.agent.kernel.prompt.include_workspace_summary);
+        assert!(config.agent.kernel.prompt.include_session_summary);
         assert!(config.agent.kernel.prompt.include_recent_messages);
+        assert!(config.agent.kernel.prompt.include_root_memory);
+        assert!(config.agent.kernel.prompt.include_retrieved_memories);
         assert_eq!(
             config.agent.kernel.memory.workspace_dir,
-            "~/.talos/workspace/memory"
+            "~/.talos/workspace"
         );
         assert_eq!(config.agent.kernel.memory.hot_recent_messages, 64);
-        assert_eq!(config.agent.kernel.memory.context_target_messages, 24);
-        assert!(config.agent.kernel.memory.enable_summary);
-        assert_eq!(config.agent.kernel.memory.summary_recent_count, 2);
-        assert_eq!(config.agent.kernel.memory.summary_max_chars, 1200);
+        assert_eq!(config.agent.kernel.memory.session_recent_messages_limit, 24);
+        assert!(config.agent.kernel.memory.session_summary_enabled);
+        assert_eq!(config.agent.kernel.memory.session_summary_recent_count, 2);
+        assert_eq!(config.agent.kernel.memory.session_summary_max_chars, 1200);
         assert_eq!(
             config.agent.kernel.memory.compaction_threshold_bytes,
             256 * 1024
         );
-        assert!(config.agent.kernel.memory.long_term_fact_extraction_enabled);
-        assert!((config.agent.kernel.memory.long_term_min_importance - 0.7).abs() < f32::EPSILON);
+        assert!(config.agent.kernel.memory.workspace_memory_flush_enabled);
+        assert!((config.agent.kernel.memory.search_min_score - 0.35).abs() < f32::EPSILON);
         assert_eq!(config.agent.kernel.binding.default_agent_kind, "llm");
     }
 
