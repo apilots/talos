@@ -125,6 +125,7 @@ mod tests {
                     output_items: vec![TalosOutputItem::OutputText {
                         text: "ok".to_string(),
                     }],
+                    usage: TalosUsage::default(),
                     tool_traces: Vec::new(),
                     state_delta: HashMap::new(),
                     error: None,

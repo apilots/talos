@@ -28,13 +28,14 @@ use std::{
 };
 use talos_agent::Agent;
 use talos_client::{
-    ModelInfo, SessionCreateParams, SessionHandle, SessionInfo, TalosClient, TalosContext,
-    TalosEvent, TalosInputItem, TalosMessageRequest,
+    ModelInfo, SessionCreateParams, TalosClient, TalosContext, TalosEvent, TalosInputItem,
+    TalosMessageRequest, TalosSession,
 };
 use talos_error::{TalosError, TalosResult};
-use talos_types::talos::TalosEventType;
+use talos_types::talos::{TalosEventType, TalosUsage};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
+use tracing::{error, warn};
 use unicode_width::UnicodeWidthChar;
 
 const APP_VERSION: &str = "v0.1.0";
@@ -42,8 +43,8 @@ const DEFAULT_MODEL: &str = "gpt-5.3 high";
 const MAX_RIGHT_EVENTS: usize = 120;
 const MAX_QUEUE_LEN: usize = 3;
 const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(20);
+const SESSION_CLOSE_TIMEOUT: Duration = Duration::from_secs(4);
 const SPINNER_FRAMES: &[char] = &['|', '/', '-', '\\'];
-const INPUT_STATUS_TOKEN_LEFT_PERCENT: u8 = 48;
 
 /// Application states.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,14 +98,41 @@ impl ChatBlock {
     }
 }
 
+#[derive(Debug, Clone)]
+struct QueuedMessage {
+    text: String,
+    dispatch_attempts: u8,
+}
+
+impl QueuedMessage {
+    fn new(text: String) -> Self {
+        Self {
+            text,
+            dispatch_attempts: 0,
+        }
+    }
+}
+
+enum RemoteCommandUpdate {
+    ModelsLoaded(TalosResult<Vec<ModelInfo>>),
+    StatusLoaded(TalosResult<Option<TalosSession>>),
+    ModelSwitched {
+        requested: String,
+        result: TalosResult<TalosSession>,
+    },
+}
+
 #[async_trait]
 pub trait GatewayClient: Send + Sync {
     async fn list_models(&self) -> TalosResult<Vec<ModelInfo>>;
-    async fn create_session(&self, params: &SessionCreateParams) -> TalosResult<SessionHandle>;
-    async fn get_session(&self, session_id: &str) -> TalosResult<SessionInfo>;
+    async fn create_session(&self, params: &SessionCreateParams) -> TalosResult<TalosSession>;
+    async fn get_session(&self, session_id: &str) -> TalosResult<TalosSession>;
     async fn close_session(&self, session_id: &str) -> TalosResult<()>;
-    async fn update_session_model(&self, session_id: &str, model: &str)
-        -> TalosResult<SessionInfo>;
+    async fn update_session_model(
+        &self,
+        session_id: &str,
+        model: &str,
+    ) -> TalosResult<TalosSession>;
     async fn send_message_stream(
         &self,
         session_id: &str,
@@ -118,11 +146,11 @@ impl GatewayClient for TalosClient {
         TalosClient::list_models(self).await
     }
 
-    async fn create_session(&self, params: &SessionCreateParams) -> TalosResult<SessionHandle> {
+    async fn create_session(&self, params: &SessionCreateParams) -> TalosResult<TalosSession> {
         TalosClient::create_session(self, params).await
     }
 
-    async fn get_session(&self, session_id: &str) -> TalosResult<SessionInfo> {
+    async fn get_session(&self, session_id: &str) -> TalosResult<TalosSession> {
         TalosClient::get_session(self, session_id).await
     }
 
@@ -134,7 +162,7 @@ impl GatewayClient for TalosClient {
         &self,
         session_id: &str,
         model: &str,
-    ) -> TalosResult<SessionInfo> {
+    ) -> TalosResult<TalosSession> {
         TalosClient::update_session_model(self, session_id, model).await?;
         TalosClient::get_session(self, session_id).await
     }
@@ -156,6 +184,8 @@ pub struct TuiApp {
     startup_workspace: PathBuf,
     connection_mode: ConnectionMode,
     current_model: String,
+    session_usage: TalosUsage,
+    available_model_info: Vec<ModelInfo>,
     available_models: Vec<String>,
     session_id: Option<String>,
     connection_status: String,
@@ -163,7 +193,7 @@ pub struct TuiApp {
     chat_history: Vec<String>,
     right_panel_events: Vec<String>,
     tool_events: Vec<String>,
-    message_queue: VecDeque<String>,
+    message_queue: VecDeque<QueuedMessage>,
     chat_scroll: u16,
     chat_manual_scroll: bool,
     trace_event_count: u64,
@@ -172,11 +202,18 @@ pub struct TuiApp {
     active_message: Option<String>,
     active_message_raw: Option<String>,
     active_retry_count: u8,
+    active_user_idx: Option<usize>,
     active_thinking_idx: Option<usize>,
     active_assistant_idx: Option<usize>,
+    pending_session_connect: Option<mpsc::Receiver<TalosResult<String>>>,
+    pending_session_task: Option<tokio::task::JoinHandle<()>>,
     pending_stream_connect: Option<mpsc::Receiver<TalosResult<mpsc::Receiver<TalosEvent>>>>,
     pending_stream_task: Option<tokio::task::JoinHandle<()>>,
     pending_stream: Option<mpsc::Receiver<TalosEvent>>,
+    pending_command_update: Option<mpsc::Receiver<RemoteCommandUpdate>>,
+    pending_command_task: Option<tokio::task::JoinHandle<()>>,
+    pending_close_update: Option<mpsc::Receiver<TalosResult<String>>>,
+    pending_close_task: Option<tokio::task::JoinHandle<()>>,
     active_stream_message_id: Option<String>,
     last_stream_sequence: Option<u64>,
     status_hint: Option<(String, Instant)>,
@@ -186,6 +223,11 @@ pub struct TuiApp {
     last_stream_event_at: Option<Instant>,
     gateway_client: Option<Arc<dyn GatewayClient>>,
     _agent: Option<Arc<dyn Agent>>,
+    close_in_progress: bool,
+    close_started_at: Option<Instant>,
+    close_timeout_reported: bool,
+    closing_session_id: Option<String>,
+    should_exit: bool,
 }
 
 impl TuiApp {
@@ -201,6 +243,8 @@ impl TuiApp {
             startup_workspace: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             connection_mode,
             current_model: DEFAULT_MODEL.to_string(),
+            session_usage: TalosUsage::default(),
+            available_model_info: vec![],
             available_models: vec![],
             session_id: None,
             connection_status: "disconnected".to_string(),
@@ -217,11 +261,18 @@ impl TuiApp {
             active_message: None,
             active_message_raw: None,
             active_retry_count: 0,
+            active_user_idx: None,
             active_thinking_idx: None,
             active_assistant_idx: None,
+            pending_session_connect: None,
+            pending_session_task: None,
             pending_stream_connect: None,
             pending_stream_task: None,
             pending_stream: None,
+            pending_command_update: None,
+            pending_command_task: None,
+            pending_close_update: None,
+            pending_close_task: None,
             active_stream_message_id: None,
             last_stream_sequence: None,
             status_hint: None,
@@ -231,6 +282,11 @@ impl TuiApp {
             last_stream_event_at: None,
             gateway_client,
             _agent: agent,
+            close_in_progress: false,
+            close_started_at: None,
+            close_timeout_reported: false,
+            closing_session_id: None,
+            should_exit: false,
         };
 
         app.push_block(
@@ -409,7 +465,7 @@ impl TuiApp {
         }
     }
 
-    fn poll_stream_connect(&mut self) {
+    async fn poll_stream_connect(&mut self) {
         let mut connect_result: Option<TalosResult<mpsc::Receiver<TalosEvent>>> = None;
         let mut should_clear = false;
 
@@ -442,10 +498,263 @@ impl TuiApp {
                 self.push_right_event("stream channel connected".to_string());
             }
             Some(Err(err)) => {
-                self.push_block(ChatRole::System, format!("Failed to start stream: {}", err));
-                self.finish_active_stream("stream connect failed", true, false);
+                let retry_message = self.active_message_raw.clone();
+                let can_retry_once = self.active_retry_count == 0 && retry_message.is_some();
+                self.discard_active_pending_blocks();
+                self.finish_active_stream("stream connect failed", true, true);
+
+                if can_retry_once {
+                    if let Some(message) = retry_message {
+                        self.active_retry_count = 1;
+                        self.show_status_hint(
+                            "Failed to open stream. Retrying once...",
+                            Duration::from_secs(3),
+                        );
+                        if let Err(retry_err) =
+                            self.start_stream_for_message_internal(message, false).await
+                        {
+                            self.active_message_raw = None;
+                            self.active_retry_count = 0;
+                            self.push_block(
+                                ChatRole::System,
+                                format!("Failed to start stream: {}", retry_err),
+                            );
+                            self.push_right_event("stream connect retry failed".to_string());
+                        }
+                    }
+                } else {
+                    self.active_message_raw = None;
+                    self.active_retry_count = 0;
+                    self.push_block(ChatRole::System, format!("Failed to start stream: {}", err));
+                    self.push_right_event("queued dispatch dropped".to_string());
+                }
             }
             None => {}
+        }
+    }
+
+    fn poll_session_connect(&mut self) {
+        let mut connect_result: Option<TalosResult<String>> = None;
+        let mut should_clear = false;
+
+        if let Some(rx) = self.pending_session_connect.as_mut() {
+            match rx.try_recv() {
+                Ok(result) => {
+                    connect_result = Some(result);
+                    should_clear = true;
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    connect_result = Some(Err(TalosError::ClientError(
+                        "session connect channel dropped".to_string(),
+                    )));
+                    should_clear = true;
+                }
+            }
+        }
+
+        if should_clear {
+            self.pending_session_connect = None;
+            self.pending_session_task = None;
+        }
+
+        match connect_result {
+            Some(Ok(session_id)) => {
+                self.session_id = Some(session_id.clone());
+                self.connection_status = "connected".to_string();
+                self.push_right_event(format!("session ready: {}", session_id));
+            }
+            Some(Err(err)) => {
+                self.connection_status = "error".to_string();
+                self.push_block(
+                    ChatRole::System,
+                    format!("Failed to create remote session: {}", err),
+                );
+                self.push_right_event("session create failed".to_string());
+            }
+            None => {}
+        }
+    }
+
+    fn poll_command_updates(&mut self) {
+        let mut update: Option<RemoteCommandUpdate> = None;
+        let mut should_clear = false;
+
+        if let Some(rx) = self.pending_command_update.as_mut() {
+            match rx.try_recv() {
+                Ok(result) => {
+                    update = Some(result);
+                    should_clear = true;
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    self.push_block(
+                        ChatRole::System,
+                        "Remote command channel dropped unexpectedly.".to_string(),
+                    );
+                    should_clear = true;
+                }
+            }
+        }
+
+        if should_clear {
+            self.pending_command_update = None;
+            self.pending_command_task = None;
+        }
+
+        let Some(update) = update else {
+            return;
+        };
+
+        match update {
+            RemoteCommandUpdate::ModelsLoaded(result) => match result {
+                Ok(models) => {
+                    self.available_model_info = models;
+                    self.available_models = self
+                        .available_model_info
+                        .iter()
+                        .map(|model| model.id.clone())
+                        .filter(|id| !id.trim().is_empty())
+                        .collect();
+                    if !self
+                        .available_models
+                        .iter()
+                        .any(|model| model == &self.current_model)
+                    {
+                        if let Some(first) = self.available_models.first() {
+                            self.current_model = first.clone();
+                        }
+                    }
+                    self.push_block(
+                        ChatRole::System,
+                        format!("Available models: {}", self.available_models.join(", ")),
+                    );
+                    self.push_right_event(format!(
+                        "models loaded: {}",
+                        self.available_models.len()
+                    ));
+                }
+                Err(err) => {
+                    self.push_block(ChatRole::System, format!("Failed to load models: {}", err));
+                    self.push_right_event("models load failed".to_string());
+                }
+            },
+            RemoteCommandUpdate::StatusLoaded(result) => match result {
+                Ok(session_info) => {
+                    let mut lines = vec![
+                        format!("mode: {}", self.connection_mode.as_str()),
+                        format!("model: {}", self.current_model),
+                        format!("workspace: {}", self.startup_workspace.display()),
+                        format!(
+                            "session: {}",
+                            self.session_id
+                                .clone()
+                                .unwrap_or_else(|| "none".to_string())
+                        ),
+                        format!("connection: {}", self.connection_status),
+                        format!("in_flight: {}", self.in_flight),
+                        format!("events: {}", self.trace_event_count),
+                    ];
+                    if let Some(info) = session_info {
+                        self.apply_session_snapshot(&info);
+                        lines.push(format!("server.model: {}", info.config.llm.model));
+                        lines.push(format!("server.messages: {}", info.state.message_count));
+                        lines.push(format!(
+                            "server.usage.total: {}",
+                            info.state.usage.total_tokens
+                        ));
+                    }
+                    self.push_block(ChatRole::System, lines.join("\n"));
+                    self.push_right_event("status loaded".to_string());
+                }
+                Err(err) => {
+                    self.push_block(ChatRole::System, format!("Failed to fetch status: {}", err));
+                    self.push_right_event("status load failed".to_string());
+                }
+            },
+            RemoteCommandUpdate::ModelSwitched { requested, result } => match result {
+                Ok(info) => {
+                    self.apply_session_snapshot(&info);
+                    self.push_block(
+                        ChatRole::System,
+                        format!("Model switched to `{}`.", self.current_model),
+                    );
+                    self.push_right_event(format!("session model updated: {}", requested));
+                }
+                Err(err) => {
+                    self.push_block(ChatRole::System, format!("Failed to switch model: {}", err));
+                    self.push_right_event("model switch failed".to_string());
+                }
+            },
+        }
+    }
+
+    fn poll_close_updates(&mut self) {
+        let mut result: Option<TalosResult<String>> = None;
+        let mut should_clear = false;
+
+        if let Some(rx) = self.pending_close_update.as_mut() {
+            match rx.try_recv() {
+                Ok(update) => {
+                    result = Some(update);
+                    should_clear = true;
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    result = Some(Err(TalosError::ClientError(
+                        "session close channel dropped".to_string(),
+                    )));
+                    should_clear = true;
+                }
+            }
+        }
+
+        if should_clear {
+            self.pending_close_update = None;
+            self.pending_close_task = None;
+        }
+
+        match result {
+            Some(Ok(session_id)) => {
+                self.close_in_progress = false;
+                self.close_started_at = None;
+                self.close_timeout_reported = false;
+                self.closing_session_id = None;
+                self.connection_status = "closed".to_string();
+                self.push_right_event(format!("session close completed: {}", session_id));
+                self.push_block(
+                    ChatRole::System,
+                    format!("Shutting down TUI. Closed session `{}`.", session_id),
+                );
+                self.should_exit = true;
+            }
+            Some(Err(err)) => {
+                self.close_in_progress = false;
+                self.close_started_at = None;
+                self.close_timeout_reported = false;
+                self.closing_session_id = None;
+                self.push_block(
+                    ChatRole::System,
+                    format!("Failed to close session: {}", err),
+                );
+                self.push_right_event("session close failed".to_string());
+            }
+            None => {}
+        }
+    }
+
+    fn poll_close_timeout(&mut self) {
+        if !self.close_in_progress || self.close_timeout_reported {
+            return;
+        }
+
+        if self.is_close_timed_out() {
+            self.close_timeout_reported = true;
+            self.show_status_hint(
+                "Session close timed out. Press /quit again to force exit.",
+                Duration::from_secs(4),
+            );
+            self.push_right_event("session close timed out".to_string());
         }
     }
 
@@ -459,8 +768,12 @@ impl TuiApp {
             }
         }
 
-        self.poll_stream_connect();
+        self.poll_session_connect();
+        self.poll_stream_connect().await;
         self.poll_stream_events();
+        self.poll_command_updates();
+        self.poll_close_updates();
+        self.poll_close_timeout();
 
         if self.in_flight {
             if let Some(last_event_at) = self.last_stream_event_at {
@@ -500,7 +813,7 @@ impl TuiApp {
             }
         }
 
-        if !self.in_flight {
+        if !self.in_flight && !self.close_in_progress {
             self.dispatch_next_queued_message().await;
         }
     }
@@ -526,15 +839,10 @@ impl TuiApp {
             self.reset_input();
             self.execute_command(&user_input).await
         } else {
-            let pushed_idx = self.push_block(ChatRole::User, user_input.clone());
             self.reset_input();
             match self.send_user_message(user_input.clone()).await {
                 Ok(true) => Ok(false),
                 Ok(false) => {
-                    if self.chat_blocks.len() == pushed_idx + 1 {
-                        self.chat_blocks.pop();
-                        self.chat_history.pop();
-                    }
                     self.input_buffer = user_input;
                     self.cursor_index = self.input_buffer.chars().count();
                     Ok(false)
@@ -559,6 +867,14 @@ impl TuiApp {
         let cmd = parts.next().unwrap_or_default();
         let args = parts.collect::<Vec<_>>().join(" ");
 
+        if self.close_in_progress && cmd != "quit" {
+            self.show_status_hint(
+                "Session is closing. Wait or press /quit again after timeout.",
+                Duration::from_secs(2),
+            );
+            return Ok(false);
+        }
+
         match cmd {
             "help" => {
                 self.push_block(
@@ -569,20 +885,7 @@ impl TuiApp {
                 Ok(false)
             }
             "models" | "modes" => {
-                match self.refresh_models_from_gateway().await {
-                    Ok(()) => {
-                        self.push_block(
-                            ChatRole::System,
-                            format!("Available models: {}", self.available_models.join(", ")),
-                        );
-                    }
-                    Err(err) => {
-                        self.push_block(
-                            ChatRole::System,
-                            format!("Failed to load models: {}", err),
-                        );
-                    }
-                }
+                self.refresh_models_command()?;
                 Ok(false)
             }
             "model" => {
@@ -609,36 +912,7 @@ impl TuiApp {
                 }
 
                 if self.connection_mode == ConnectionMode::Remote {
-                    let Some(client) = self.gateway_client.clone() else {
-                        self.push_block(
-                            ChatRole::System,
-                            "Gateway client unavailable in remote mode.".to_string(),
-                        );
-                        return Ok(false);
-                    };
-                    let session_id = self.ensure_remote_session().await?;
-                    match client.update_session_model(&session_id, requested).await {
-                        Ok(info) => {
-                            self.current_model = info.current_model;
-                            self.push_block(
-                                ChatRole::System,
-                                format!(
-                                    "Model switched to `{}` for session `{}`.",
-                                    self.current_model, session_id
-                                ),
-                            );
-                            self.push_right_event(format!(
-                                "session model updated: {}",
-                                self.current_model
-                            ));
-                        }
-                        Err(err) => {
-                            self.push_block(
-                                ChatRole::System,
-                                format!("Failed to switch model: {}", err),
-                            );
-                        }
-                    }
+                    self.switch_remote_model_command(requested.to_string())?;
                 } else {
                     self.current_model = requested.to_string();
                     self.push_block(
@@ -650,50 +924,31 @@ impl TuiApp {
                 Ok(false)
             }
             "status" => {
-                let mut lines = vec![
-                    format!("mode: {}", self.connection_mode.as_str()),
-                    format!("model: {}", self.current_model),
-                    format!("workspace: {}", self.startup_workspace.display()),
-                    format!(
-                        "session: {}",
-                        self.session_id
-                            .clone()
-                            .unwrap_or_else(|| "none".to_string())
-                    ),
-                    format!("connection: {}", self.connection_status),
-                    format!("in_flight: {}", self.in_flight),
-                    format!("events: {}", self.trace_event_count),
-                ];
-
-                if self.connection_mode == ConnectionMode::Remote {
-                    if let (Some(client), Some(session_id)) =
-                        (self.gateway_client.clone(), self.session_id.clone())
-                    {
-                        match client.get_session(&session_id).await {
-                            Ok(info) => {
-                                lines.push(format!("server.model: {}", info.current_model));
-                                lines.push(format!("server.messages: {}", info.message_count));
-                            }
-                            Err(err) => lines.push(format!("server.error: {}", err)),
-                        }
-                    }
-                }
-
-                self.push_block(ChatRole::System, lines.join("\n"));
+                self.status_command()?;
                 Ok(false)
             }
             "quit" => {
                 if self.connection_mode == ConnectionMode::Remote {
-                    if let (Some(client), Some(session_id)) =
-                        (self.gateway_client.clone(), self.session_id.clone())
-                    {
-                        if let Err(err) = client.close_session(&session_id).await {
+                    if self.close_in_progress {
+                        if self.is_close_timed_out() {
+                            self.push_right_event("session force exit".to_string());
                             self.push_block(
                                 ChatRole::System,
-                                format!("Failed to close session `{}`: {}", session_id, err),
+                                "Forcing local exit while remote session closes in background."
+                                    .to_string(),
                             );
+                            self.should_exit = true;
+                            return Ok(false);
                         }
+
+                        self.show_status_hint(
+                            "Session is still closing. Wait or press /quit again after timeout.",
+                            Duration::from_secs(2),
+                        );
+                        return Ok(false);
                     }
+                    self.close_remote_session_command()?;
+                    return Ok(false);
                 }
                 self.push_block(ChatRole::System, "Shutting down TUI.".to_string());
                 Ok(true)
@@ -709,7 +964,15 @@ impl TuiApp {
     }
 
     async fn send_user_message(&mut self, user_message: String) -> TalosResult<bool> {
-        if self.in_flight {
+        if self.close_in_progress {
+            self.show_status_hint(
+                "Session is closing. New messages are blocked.",
+                Duration::from_secs(2),
+            );
+            return Ok(false);
+        }
+
+        if self.in_flight || !self.message_queue.is_empty() {
             if self.message_queue.len() >= MAX_QUEUE_LEN {
                 self.show_status_hint(
                     format!(
@@ -722,17 +985,28 @@ impl TuiApp {
                 self.push_right_event("queue full".to_string());
                 return Ok(false);
             }
-            self.message_queue.push_back(user_message.clone());
-            self.push_right_event(format!(
-                "queued ({}/{}): {}",
-                self.message_queue.len(),
-                MAX_QUEUE_LEN,
-                summarize_for_queue(&user_message)
-            ));
-            return Ok(true);
+        } else if self.message_queue.len() >= MAX_QUEUE_LEN {
+            self.show_status_hint(
+                format!(
+                    "Queue is full ({}/{}). Wait for current response.",
+                    self.message_queue.len(),
+                    MAX_QUEUE_LEN
+                ),
+                Duration::from_secs(2),
+            );
+            self.push_right_event("queue full".to_string());
+            return Ok(false);
         }
 
-        self.start_stream_for_message(user_message).await?;
+        self.message_queue
+            .push_back(QueuedMessage::new(user_message.clone()));
+        self.push_right_event(format!(
+            "queued ({}/{}): {}",
+            self.message_queue.len(),
+            MAX_QUEUE_LEN,
+            summarize_for_queue(&user_message)
+        ));
+        self.dispatch_next_queued_message().await;
         Ok(true)
     }
 
@@ -744,12 +1018,40 @@ impl TuiApp {
             return;
         };
 
-        if let Err(err) = self.start_stream_for_message(next_message).await {
+        if self.connection_mode == ConnectionMode::Remote && self.session_id.is_none() {
+            self.start_remote_session_connect();
+            return;
+        }
+
+        if let Err(err) = self
+            .start_stream_for_message(next_message.text.clone())
+            .await
+        {
+            if let Some(front) = self.message_queue.front_mut() {
+                front.dispatch_attempts = front.dispatch_attempts.saturating_add(1);
+                if front.dispatch_attempts <= 1 {
+                    self.show_status_hint(
+                        "Queued message dispatch failed. Retrying once...",
+                        Duration::from_secs(3),
+                    );
+                    self.push_right_event("queued dispatch retry".to_string());
+                    return;
+                }
+            }
+
+            let failed = self.message_queue.pop_front();
             self.push_block(
                 ChatRole::System,
                 format!("Failed to dispatch queued message: {}", err),
             );
-            self.push_right_event("queued dispatch failed".to_string());
+            if let Some(failed) = failed {
+                self.push_right_event(format!(
+                    "queued dispatch dropped: {}",
+                    summarize_for_queue(&failed.text)
+                ));
+            } else {
+                self.push_right_event("queued dispatch failed".to_string());
+            }
             return;
         }
 
@@ -775,7 +1077,11 @@ impl TuiApp {
                     return Ok(());
                 };
 
-                let session_id = self.ensure_remote_session().await?;
+                let Some(session_id) = self.session_id.clone() else {
+                    return Err(TalosError::ClientError(
+                        "remote session is not ready".to_string(),
+                    ));
+                };
                 let active_summary = summarize_for_queue(&user_message);
                 let request = TalosMessageRequest {
                     input: vec![TalosInputItem::Text {
@@ -800,6 +1106,11 @@ impl TuiApp {
                 self.active_stream_message_id = None;
                 self.last_stream_sequence = None;
 
+                if reset_retry_state {
+                    let user_idx = self.push_block(ChatRole::User, user_message.clone());
+                    self.active_user_idx = Some(user_idx);
+                }
+
                 let thinking_idx = self.push_block(
                     ChatRole::Thinking,
                     "- waiting for model response...".to_string(),
@@ -814,7 +1125,12 @@ impl TuiApp {
 
                 let handle = tokio::spawn(async move {
                     let result = client.send_message_stream(&session_id, &request).await;
-                    let _ = tx.send(result).await;
+                    if tx.send(result).await.is_err() {
+                        error!(
+                            session_id = %session_id,
+                            "failed to deliver stream connection result to TUI task"
+                        );
+                    }
                 });
                 self.pending_stream_task = Some(handle);
             }
@@ -964,6 +1280,20 @@ impl TuiApp {
                         }
                     }
                 }
+                if let Some(usage) = extract_usage_from_completed_event(&event.data) {
+                    self.session_usage.input_tokens = self
+                        .session_usage
+                        .input_tokens
+                        .saturating_add(usage.input_tokens);
+                    self.session_usage.output_tokens = self
+                        .session_usage
+                        .output_tokens
+                        .saturating_add(usage.output_tokens);
+                    self.session_usage.total_tokens = self
+                        .session_usage
+                        .total_tokens
+                        .saturating_add(usage.total_tokens);
+                }
                 self.append_thinking_line("- stream completed");
                 self.finish_active_stream("stream completed", false, false);
             }
@@ -988,8 +1318,8 @@ impl TuiApp {
 
         let models = client.list_models().await?;
         let ids: Vec<String> = models
-            .into_iter()
-            .map(|m| m.id)
+            .iter()
+            .map(|m| m.id.clone())
             .filter(|v| !v.trim().is_empty())
             .collect();
         if ids.is_empty() {
@@ -997,6 +1327,7 @@ impl TuiApp {
                 "gateway returned empty model list".to_string(),
             ));
         }
+        self.available_model_info = models;
         self.available_models = ids;
         if !self
             .available_models
@@ -1006,6 +1337,148 @@ impl TuiApp {
             self.current_model = self.available_models[0].clone();
         }
         self.push_right_event(format!("models loaded: {}", self.available_models.len()));
+        Ok(())
+    }
+
+    fn refresh_models_command(&mut self) -> TalosResult<()> {
+        if self.connection_mode != ConnectionMode::Remote {
+            return Ok(());
+        }
+
+        let Some(client) = self.gateway_client.clone() else {
+            return Err(TalosError::ClientError(
+                "missing gateway client in remote mode".to_string(),
+            ));
+        };
+
+        self.spawn_remote_command_task("models load started", async move {
+            let result = client.list_models().await;
+            RemoteCommandUpdate::ModelsLoaded(result)
+        })
+    }
+
+    fn status_command(&mut self) -> TalosResult<()> {
+        if self.connection_mode != ConnectionMode::Remote {
+            let lines = vec![
+                format!("mode: {}", self.connection_mode.as_str()),
+                format!("model: {}", self.current_model),
+                format!("workspace: {}", self.startup_workspace.display()),
+                "session: none".to_string(),
+                format!("connection: {}", self.connection_status),
+                format!("in_flight: {}", self.in_flight),
+                format!("events: {}", self.trace_event_count),
+            ];
+            self.push_block(ChatRole::System, lines.join("\n"));
+            return Ok(());
+        }
+
+        let Some(client) = self.gateway_client.clone() else {
+            return Err(TalosError::ClientError(
+                "missing gateway client in remote mode".to_string(),
+            ));
+        };
+        let session_id = self.session_id.clone();
+        self.spawn_remote_command_task("status request started", async move {
+            let result = if let Some(session_id) = session_id {
+                client.get_session(&session_id).await.map(Some)
+            } else {
+                Ok(None)
+            };
+            RemoteCommandUpdate::StatusLoaded(result)
+        })
+    }
+
+    fn switch_remote_model_command(&mut self, requested: String) -> TalosResult<()> {
+        let Some(client) = self.gateway_client.clone() else {
+            return Err(TalosError::ClientError(
+                "missing gateway client in remote mode".to_string(),
+            ));
+        };
+        let session_id = self.session_id.clone();
+        self.spawn_remote_command_task(format!("model switch started: {}", requested), async move {
+            let result = if let Some(session_id) = session_id {
+                client.update_session_model(&session_id, &requested).await
+            } else {
+                let context = TalosContext::cli(
+                    env::var("USER").unwrap_or_else(|_| "local-user".to_string()),
+                )
+                .with_channel_id("terminal");
+                client
+                    .create_session(&SessionCreateParams {
+                        context: Some(context),
+                        model: Some(requested.clone()),
+                    })
+                    .await
+            };
+            RemoteCommandUpdate::ModelSwitched { requested, result }
+        })
+    }
+
+    fn close_remote_session_command(&mut self) -> TalosResult<()> {
+        if self.close_in_progress {
+            return Ok(());
+        }
+
+        let Some(client) = self.gateway_client.clone() else {
+            return Err(TalosError::ClientError(
+                "missing gateway client in remote mode".to_string(),
+            ));
+        };
+        let session_id = self
+            .session_id
+            .clone()
+            .unwrap_or_else(|| "none".to_string());
+        let (tx, rx) = mpsc::channel(1);
+        self.pending_close_update = Some(rx);
+        self.close_in_progress = true;
+        self.close_started_at = Some(Instant::now());
+        self.close_timeout_reported = false;
+        self.closing_session_id = Some(session_id.clone());
+        self.connection_status = "closing".to_string();
+        self.show_status_hint(
+            "Closing session and flushing memory...",
+            Duration::from_secs(2),
+        );
+        self.push_right_event(format!("session close started: {}", session_id));
+
+        let handle = tokio::spawn(async move {
+            let result = client
+                .close_session(&session_id)
+                .await
+                .map(|_| session_id.clone());
+            if tx.send(result).await.is_err() {
+                error!(
+                    session_id = %session_id,
+                    "failed to deliver close session result to TUI task"
+                );
+            }
+        });
+        self.pending_close_task = Some(handle);
+        Ok(())
+    }
+
+    fn spawn_remote_command_task<F>(&mut self, event: impl Into<String>, fut: F) -> TalosResult<()>
+    where
+        F: std::future::Future<Output = RemoteCommandUpdate> + Send + 'static,
+    {
+        if self.pending_command_update.is_some() {
+            self.show_status_hint(
+                "Another remote command is still running.",
+                Duration::from_secs(2),
+            );
+            return Ok(());
+        }
+
+        let (tx, rx) = mpsc::channel(1);
+        self.pending_command_update = Some(rx);
+        self.push_right_event(event.into());
+        let handle = tokio::spawn(async move {
+            let result = fut.await;
+            if tx.send(result).await.is_err() {
+                error!("failed to deliver remote command result to TUI task");
+            }
+        });
+        self.pending_command_task = Some(handle);
         Ok(())
     }
 
@@ -1024,19 +1497,61 @@ impl TuiApp {
             ));
         };
 
-        let context = TalosContext::cli(
-            env::var("USER").unwrap_or_else(|_| "local-user".to_string()),
-        )
-        .with_channel_id("terminal");
+        let context =
+            TalosContext::cli(env::var("USER").unwrap_or_else(|_| "local-user".to_string()))
+                .with_channel_id("terminal");
         let params = SessionCreateParams {
             context: Some(context),
             model: Some(self.current_model.clone()),
         };
 
         let created = client.create_session(&params).await?;
-        self.session_id = Some(created.id.clone());
+        self.apply_session_snapshot(&created);
         self.connection_status = "connected".to_string();
-        Ok(created.id)
+        Ok(created.context.session_id)
+    }
+
+    fn start_remote_session_connect(&mut self) {
+        if self.connection_mode != ConnectionMode::Remote
+            || self.session_id.is_some()
+            || self.pending_session_connect.is_some()
+        {
+            return;
+        }
+
+        let Some(client) = self.gateway_client.clone() else {
+            self.push_block(ChatRole::System, "Gateway client unavailable.".to_string());
+            return;
+        };
+
+        let current_model = self.current_model.clone();
+        let (tx, rx) = mpsc::channel(1);
+        self.pending_session_connect = Some(rx);
+        self.connection_status = "connecting".to_string();
+        self.push_right_event("session create started".to_string());
+
+        let handle = tokio::spawn(async move {
+            let context =
+                TalosContext::cli(env::var("USER").unwrap_or_else(|_| "local-user".to_string()))
+                    .with_channel_id("terminal");
+            let result = client
+                .create_session(&SessionCreateParams {
+                    context: Some(context),
+                    model: Some(current_model),
+                })
+                .await
+                .map(|created| created.context.session_id);
+            if tx.send(result).await.is_err() {
+                error!("failed to deliver create session result to TUI task");
+            }
+        });
+        self.pending_session_task = Some(handle);
+    }
+
+    fn is_close_timed_out(&self) -> bool {
+        self.close_started_at
+            .map(|started_at| started_at.elapsed() >= SESSION_CLOSE_TIMEOUT)
+            .unwrap_or(false)
     }
 
     fn insert_char(&mut self, c: char) {
@@ -1117,6 +1632,36 @@ impl TuiApp {
         idx
     }
 
+    fn discard_active_pending_blocks(&mut self) {
+        let mut remove_indices = vec![];
+        if let Some(idx) = self.active_assistant_idx {
+            remove_indices.push(idx);
+        }
+        if let Some(idx) = self.active_thinking_idx {
+            remove_indices.push(idx);
+        }
+        if let Some(idx) = self.active_user_idx {
+            remove_indices.push(idx);
+        }
+        remove_indices.sort_unstable();
+        remove_indices.dedup();
+
+        for idx in remove_indices.into_iter().rev() {
+            if idx < self.chat_blocks.len() {
+                self.chat_blocks.remove(idx);
+            }
+        }
+
+        self.chat_history = self
+            .chat_blocks
+            .iter()
+            .map(|block| format!("{}\n{}", block.role.as_str(), block.content))
+            .collect();
+        self.active_user_idx = None;
+        self.active_thinking_idx = None;
+        self.active_assistant_idx = None;
+    }
+
     fn append_assistant(&mut self, text: &str) {
         let idx = if let Some(idx) = self.active_assistant_idx {
             idx
@@ -1177,6 +1722,7 @@ impl TuiApp {
         self.pending_stream_connect = None;
         self.pending_stream = None;
         self.abort_pending_stream_task();
+        self.active_user_idx = None;
         self.active_thinking_idx = None;
         self.active_assistant_idx = None;
         self.active_stream_message_id = None;
@@ -1375,7 +1921,9 @@ impl TuiApp {
             self.message_queue.len(),
             MAX_QUEUE_LEN
         )));
-        let phase = if self.in_flight && !self.received_output_delta {
+        let phase = if self.close_in_progress {
+            "closing"
+        } else if self.in_flight && !self.received_output_delta {
             "waiting_first_token"
         } else if self.in_flight {
             "streaming"
@@ -1416,7 +1964,13 @@ impl TuiApp {
                 .add_modifier(Modifier::BOLD)
                 .fg(Color::White),
         )));
-        if let Some(active) = &self.active_message {
+        if self.close_in_progress {
+            let session_id = self
+                .closing_session_id
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string());
+            lines.push(Line::from(format!("[~] closing {}", session_id)));
+        } else if let Some(active) = &self.active_message {
             lines.push(Line::from(format!("[~] {}", active)));
         } else {
             lines.push(Line::from("[ ] idle"));
@@ -1425,7 +1979,10 @@ impl TuiApp {
             lines.push(Line::from("[ ] queue empty"));
         } else {
             for queued in self.message_queue.iter() {
-                lines.push(Line::from(format!("[ ] {}", summarize_for_queue(queued))));
+                lines.push(Line::from(format!(
+                    "[ ] {}",
+                    summarize_for_queue(&queued.text)
+                )));
             }
         }
         lines.push(Line::from(""));
@@ -1472,17 +2029,24 @@ impl TuiApp {
 
     fn input_status_line(&self, width: usize) -> Line<'static> {
         let workspace = compact_workspace_path(&self.startup_workspace);
-        let base = if self.in_flight {
+        let token_left = self
+            .token_left_percent()
+            .map(|percent| format!("{}% left", percent))
+            .unwrap_or_else(|| "n/a left".to_string());
+        let base = if self.close_in_progress {
+            let session_id = self
+                .closing_session_id
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string());
+            format!("closing {} · flushing memory · {}", session_id, workspace)
+        } else if self.in_flight {
             let motion = self.stripe_line(6);
             format!(
-                "{} {} · {}% left · {}",
-                motion, self.current_model, INPUT_STATUS_TOKEN_LEFT_PERCENT, workspace
+                "{} {} · {} · {}",
+                motion, self.current_model, token_left, workspace
             )
         } else {
-            format!(
-                "{} · {}% left · {}",
-                self.current_model, INPUT_STATUS_TOKEN_LEFT_PERCENT, workspace
-            )
+            format!("{} · {} · {}", self.current_model, token_left, workspace)
         };
         let mut text = if let Some((hint, expires_at)) = &self.status_hint {
             if Instant::now() < *expires_at {
@@ -1499,6 +2063,30 @@ impl TuiApp {
             text = text.chars().take(max).collect();
         }
         Line::from(text)
+    }
+
+    fn apply_session_snapshot(&mut self, session: &TalosSession) {
+        self.session_id = Some(session.context.session_id.clone());
+        self.current_model = session.config.llm.model.clone();
+        self.session_usage = session.state.usage.clone();
+    }
+
+    fn token_left_percent(&self) -> Option<u8> {
+        let context_window = self
+            .available_model_info
+            .iter()
+            .find(|model| model.id == self.current_model)
+            .map(|model| model.context_window)
+            .filter(|window| *window > 0)?;
+        if context_window == 0 {
+            return None;
+        }
+        let used = self.session_usage.total_tokens.min(context_window);
+        let used_percent = used
+            .saturating_mul(100)
+            .saturating_add(context_window.saturating_sub(1))
+            / context_window;
+        Some(100_u8.saturating_sub(used_percent as u8))
     }
 
     fn queue_panel_lines(&self, max_lines: usize) -> Vec<Line<'static>> {
@@ -1528,7 +2116,7 @@ impl TuiApp {
                 "{} [ ] {}. {}",
                 branch,
                 idx + 1,
-                summarize_for_queue(msg)
+                summarize_for_queue(&msg.text)
             ));
         }
 
@@ -1724,6 +2312,17 @@ fn extract_text_from_completed_event(data: &serde_json::Value) -> Option<String>
         None
     } else {
         Some(chunks.join(""))
+    }
+}
+
+fn extract_usage_from_completed_event(data: &serde_json::Value) -> Option<TalosUsage> {
+    let usage = data.get("usage")?;
+    match serde_json::from_value::<TalosUsage>(usage.clone()) {
+        Ok(parsed) => Some(parsed),
+        Err(err) => {
+            warn!(error = %err, usage = %usage, "failed to parse usage payload from completed event");
+            None
+        }
     }
 }
 
@@ -1991,6 +2590,9 @@ async fn run_event_loop<B: Backend>(
 ) -> Result<(), Box<dyn Error>> {
     loop {
         app.on_tick().await;
+        if app.should_exit {
+            return Ok(());
+        }
         terminal.draw(|frame| app.render_ui(frame))?;
 
         if event::poll(Duration::from_millis(50))? {
@@ -2020,10 +2622,27 @@ mod tests {
         updated_model: Option<String>,
         stream_counter: u64,
         connect_delay_ms: u64,
+        create_session_delay_ms: u64,
+        stream_failures_remaining: u8,
+        close_session_delay_ms: u64,
     }
 
     struct MockGatewayClient {
         state: Arc<Mutex<MockGatewayState>>,
+    }
+
+    fn mock_model_info(id: &str, context_window: u32) -> ModelInfo {
+        ModelInfo {
+            id: id.to_string(),
+            name: id.to_string(),
+            provider: "mock".to_string(),
+            context_window,
+            max_tokens: 8_192,
+            reasoning: false,
+            input: vec![talos_types::ModelInputKind::Text],
+            cost: talos_types::ModelCostConfig::default(),
+            compat: talos_types::ModelCompatConfig::default(),
+        }
     }
 
     impl MockGatewayClient {
@@ -2031,20 +2650,17 @@ mod tests {
             Self {
                 state: Arc::new(Mutex::new(MockGatewayState {
                     models: vec![
-                        ModelInfo {
-                            id: "gpt-5.3 high".to_string(),
-                            provider: "mock".to_string(),
-                        },
-                        ModelInfo {
-                            id: "gpt-5.3 medium".to_string(),
-                            provider: "mock".to_string(),
-                        },
+                        mock_model_info("gpt-5.3 high", 128_000),
+                        mock_model_info("gpt-5.3 medium", 128_000),
                     ],
                     session_id: "sess-test".to_string(),
                     current_model: "gpt-5.3 high".to_string(),
                     updated_model: None,
                     stream_counter: 0,
                     connect_delay_ms: 0,
+                    create_session_delay_ms: 0,
+                    stream_failures_remaining: 0,
+                    close_session_delay_ms: 0,
                 })),
             }
         }
@@ -2052,6 +2668,24 @@ mod tests {
         fn with_connect_delay(connect_delay_ms: u64) -> Self {
             let client = Self::new();
             client.state.lock().unwrap().connect_delay_ms = connect_delay_ms;
+            client
+        }
+
+        fn with_session_delay(create_session_delay_ms: u64) -> Self {
+            let client = Self::new();
+            client.state.lock().unwrap().create_session_delay_ms = create_session_delay_ms;
+            client
+        }
+
+        fn with_stream_failures(stream_failures_remaining: u8) -> Self {
+            let client = Self::new();
+            client.state.lock().unwrap().stream_failures_remaining = stream_failures_remaining;
+            client
+        }
+
+        fn with_close_delay(close_session_delay_ms: u64) -> Self {
+            let client = Self::new();
+            client.state.lock().unwrap().close_session_delay_ms = close_session_delay_ms;
             client
         }
     }
@@ -2062,26 +2696,73 @@ mod tests {
             Ok(self.state.lock().unwrap().models.clone())
         }
 
-        async fn create_session(&self, _params: &SessionCreateParams) -> TalosResult<SessionHandle> {
+        async fn create_session(&self, _params: &SessionCreateParams) -> TalosResult<TalosSession> {
+            let delay = self.state.lock().unwrap().create_session_delay_ms;
+            if delay > 0 {
+                tokio::time::sleep(Duration::from_millis(delay)).await;
+            }
             let state = self.state.lock().unwrap();
-            Ok(SessionHandle {
-                id: state.session_id.clone(),
-                current_model: state.current_model.clone(),
-                created_at: 1,
+            Ok(TalosSession {
+                context: talos_types::SessionContext {
+                    session_id: state.session_id.clone(),
+                    workspace_id: None,
+                    source_type: talos_types::talos::TalosSourceType::Http,
+                    provider: talos_types::talos::TalosProvider::Sdk,
+                    user_id: "test-user".to_string(),
+                    message_id: "message-1".to_string(),
+                    trace_id: "trace-1".to_string(),
+                    channel_id: Some("terminal".to_string()),
+                    thread_id: None,
+                },
+                config: {
+                    let mut config = talos_types::TalosConfig::default();
+                    config.agent.model = state.current_model.clone();
+                    config.llm.model = state.current_model.clone();
+                    config
+                },
+                state: talos_types::SessionState {
+                    created_at: 1,
+                    last_activity: 1,
+                    message_count: 0,
+                    usage: talos_types::talos::TalosUsage::default(),
+                },
             })
         }
 
-        async fn get_session(&self, _session_id: &str) -> TalosResult<SessionInfo> {
+        async fn get_session(&self, _session_id: &str) -> TalosResult<TalosSession> {
             let state = self.state.lock().unwrap();
-            Ok(SessionInfo {
-                id: state.session_id.clone(),
-                current_model: state.current_model.clone(),
-                message_count: 3,
-                last_activity: 2,
+            Ok(TalosSession {
+                context: talos_types::SessionContext {
+                    session_id: state.session_id.clone(),
+                    workspace_id: None,
+                    source_type: talos_types::talos::TalosSourceType::Http,
+                    provider: talos_types::talos::TalosProvider::Sdk,
+                    user_id: "test-user".to_string(),
+                    message_id: "message-1".to_string(),
+                    trace_id: "trace-1".to_string(),
+                    channel_id: Some("terminal".to_string()),
+                    thread_id: None,
+                },
+                config: {
+                    let mut config = talos_types::TalosConfig::default();
+                    config.agent.model = state.current_model.clone();
+                    config.llm.model = state.current_model.clone();
+                    config
+                },
+                state: talos_types::SessionState {
+                    created_at: 1,
+                    last_activity: 2,
+                    message_count: 3,
+                    usage: talos_types::talos::TalosUsage::default(),
+                },
             })
         }
 
         async fn close_session(&self, _session_id: &str) -> TalosResult<()> {
+            let delay = self.state.lock().unwrap().close_session_delay_ms;
+            if delay > 0 {
+                tokio::time::sleep(Duration::from_millis(delay)).await;
+            }
             Ok(())
         }
 
@@ -2089,15 +2770,34 @@ mod tests {
             &self,
             _session_id: &str,
             model: &str,
-        ) -> TalosResult<SessionInfo> {
+        ) -> TalosResult<TalosSession> {
             let mut state = self.state.lock().unwrap();
             state.current_model = model.to_string();
             state.updated_model = Some(model.to_string());
-            Ok(SessionInfo {
-                id: state.session_id.clone(),
-                current_model: state.current_model.clone(),
-                message_count: 3,
-                last_activity: 2,
+            Ok(TalosSession {
+                context: talos_types::SessionContext {
+                    session_id: state.session_id.clone(),
+                    workspace_id: None,
+                    source_type: talos_types::talos::TalosSourceType::Http,
+                    provider: talos_types::talos::TalosProvider::Sdk,
+                    user_id: "test-user".to_string(),
+                    message_id: "message-1".to_string(),
+                    trace_id: "trace-1".to_string(),
+                    channel_id: Some("terminal".to_string()),
+                    thread_id: None,
+                },
+                config: {
+                    let mut config = talos_types::TalosConfig::default();
+                    config.agent.model = state.current_model.clone();
+                    config.llm.model = state.current_model.clone();
+                    config
+                },
+                state: talos_types::SessionState {
+                    created_at: 1,
+                    last_activity: 2,
+                    message_count: 3,
+                    usage: talos_types::talos::TalosUsage::default(),
+                },
             })
         }
 
@@ -2106,9 +2806,23 @@ mod tests {
             session_id: &str,
             request: &TalosMessageRequest,
         ) -> TalosResult<mpsc::Receiver<TalosEvent>> {
-            let delay = self.state.lock().unwrap().connect_delay_ms;
+            let (delay, should_fail) = {
+                let mut state = self.state.lock().unwrap();
+                let should_fail = if state.stream_failures_remaining > 0 {
+                    state.stream_failures_remaining -= 1;
+                    true
+                } else {
+                    false
+                };
+                (state.connect_delay_ms, should_fail)
+            };
             if delay > 0 {
                 tokio::time::sleep(Duration::from_millis(delay)).await;
+            }
+            if should_fail {
+                return Err(TalosError::ClientError(
+                    "mock stream connect failure".to_string(),
+                ));
             }
 
             let (tx, rx) = mpsc::channel(32);
@@ -2198,6 +2912,29 @@ mod tests {
         TuiApp::new_with_gateway_client(client)
     }
 
+    fn create_remote_app_with_session_delay(delay_ms: u64) -> TuiApp {
+        let client: Arc<dyn GatewayClient> =
+            Arc::new(MockGatewayClient::with_session_delay(delay_ms));
+        TuiApp::new_with_gateway_client(client)
+    }
+
+    fn create_remote_app_with_stream_failures(failures: u8) -> TuiApp {
+        let client: Arc<dyn GatewayClient> =
+            Arc::new(MockGatewayClient::with_stream_failures(failures));
+        TuiApp::new_with_gateway_client(client)
+    }
+
+    fn create_remote_app_with_close_delay(delay_ms: u64) -> TuiApp {
+        let client: Arc<dyn GatewayClient> =
+            Arc::new(MockGatewayClient::with_close_delay(delay_ms));
+        TuiApp::new_with_gateway_client(client)
+    }
+
+    fn set_test_model_info(app: &mut TuiApp, model_id: &str, context_window: u32) {
+        app.available_model_info = vec![mock_model_info(model_id, context_window)];
+        app.available_models = vec![model_id.to_string()];
+    }
+
     #[test]
     fn test_input_cursor_and_backspace() {
         let mut app = create_embedded_app();
@@ -2225,6 +2962,13 @@ mod tests {
         app.input_buffer = "/model gpt-5.3 medium".to_string();
         app.cursor_index = app.input_buffer.chars().count();
         let should_quit = app.submit_input().await.unwrap();
+        for _ in 0..10 {
+            app.on_tick().await;
+            tokio::task::yield_now().await;
+            if app.pending_command_update.is_none() {
+                break;
+            }
+        }
         assert!(!should_quit);
         assert_eq!(app.current_model, "gpt-5.3 medium");
     }
@@ -2251,6 +2995,13 @@ mod tests {
             .unwrap_or_default();
         assert!(assistant.contains("# Title"));
         assert!(assistant.contains("- item"));
+        let user_messages = app
+            .chat_blocks
+            .iter()
+            .filter(|b| b.role == ChatRole::User)
+            .map(|b| b.content.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(user_messages, vec!["hello".to_string()]);
     }
 
     #[tokio::test]
@@ -2277,6 +3028,13 @@ mod tests {
         app.input_buffer = "/modes".to_string();
         app.cursor_index = app.input_buffer.chars().count();
         let _ = app.submit_input().await.unwrap();
+        for _ in 0..10 {
+            app.on_tick().await;
+            tokio::task::yield_now().await;
+            if app.pending_command_update.is_none() {
+                break;
+            }
+        }
         assert!(app
             .chat_history
             .iter()
@@ -2307,6 +3065,13 @@ mod tests {
 
         assert!(app.message_queue.is_empty());
         assert!(!app.in_flight);
+        let user_messages = app
+            .chat_blocks
+            .iter()
+            .filter(|b| b.role == ChatRole::User)
+            .map(|b| b.content.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(user_messages, vec!["m1", "m2", "m3", "m4"]);
     }
 
     #[tokio::test]
@@ -2318,6 +3083,35 @@ mod tests {
         let before = app.chat_blocks.len();
         assert!(app.send_user_message("m2".to_string()).await.unwrap());
         assert_eq!(app.chat_blocks.len(), before);
+    }
+
+    #[tokio::test]
+    async fn test_submit_input_queues_without_adding_user_block() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+
+        app.input_buffer = "m1".to_string();
+        app.cursor_index = app.input_buffer.chars().count();
+        let _ = app.submit_input().await.unwrap();
+
+        app.input_buffer = "m2".to_string();
+        app.cursor_index = app.input_buffer.chars().count();
+        let before = app.chat_blocks.len();
+        let _ = app.submit_input().await.unwrap();
+
+        assert_eq!(app.chat_blocks.len(), before);
+        assert_eq!(app.message_queue.len(), 1);
+        assert_eq!(
+            app.message_queue.front().map(|msg| msg.text.as_str()),
+            Some("m2")
+        );
+        let user_messages = app
+            .chat_blocks
+            .iter()
+            .filter(|b| b.role == ChatRole::User)
+            .map(|b| b.content.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(user_messages, vec!["m1"]);
     }
 
     #[tokio::test]
@@ -2451,6 +3245,53 @@ mod tests {
     }
 
     #[test]
+    fn test_input_status_line_uses_dynamic_token_left_percent() {
+        let mut app = create_embedded_app();
+        set_test_model_info(&mut app, "qwen-max", 32_768);
+        app.current_model = "qwen-max".to_string();
+        app.session_usage = TalosUsage {
+            input_tokens: 964,
+            output_tokens: 16,
+            total_tokens: 980,
+        };
+
+        let text = line_plain_text(&app.input_status_line(120));
+
+        assert!(text.contains("97% left"));
+        assert!(!text.contains("48% left"));
+    }
+
+    #[tokio::test]
+    async fn test_message_completed_updates_session_usage() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+        set_test_model_info(&mut app, "qwen-max", 32_768);
+        app.current_model = "qwen-max".to_string();
+        app.in_flight = true;
+        app.received_output_delta = false;
+        app.active_assistant_idx = Some(app.push_block(ChatRole::Assistant, String::new()));
+        app.session_id = Some("sess-test".to_string());
+
+        app.handle_stream_event(TalosEvent {
+            event_type: TalosEventType::MessageCompleted,
+            message_id: "msg-usage".to_string(),
+            session_id: "sess-test".to_string(),
+            sequence: 1,
+            data: json!({
+                "output_text":"done",
+                "usage":{
+                    "input_tokens":964,
+                    "output_tokens":16,
+                    "total_tokens":980
+                }
+            }),
+        });
+
+        assert_eq!(app.session_usage.total_tokens, 980);
+        assert_eq!(app.token_left_percent(), Some(97));
+    }
+
+    #[test]
     fn test_chat_card_wrapped_lines_keep_border_prefix() {
         let app = create_embedded_app();
         let block = ChatBlock::new(
@@ -2569,5 +3410,150 @@ mod tests {
 
         assert!(app.send_user_message("slow-2".to_string()).await.unwrap());
         assert_eq!(app.message_queue.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_send_is_non_blocking_when_session_create_is_slow() {
+        let mut app = create_remote_app_with_session_delay(500);
+
+        let started = Instant::now();
+        assert!(app
+            .send_user_message("slow-create".to_string())
+            .await
+            .unwrap());
+        let elapsed = started.elapsed();
+
+        assert!(elapsed < Duration::from_millis(150));
+        assert_eq!(app.message_queue.len(), 1);
+        assert!(app.pending_session_connect.is_some());
+        assert!(app.chat_blocks.iter().all(|b| b.content != "slow-create"));
+    }
+
+    #[tokio::test]
+    async fn test_failed_queued_message_is_dropped_after_one_retry() {
+        let mut app = create_remote_app_with_stream_failures(2);
+        app.initialize_remote().await;
+
+        assert!(app.send_user_message("drop-me".to_string()).await.unwrap());
+        assert!(app.send_user_message("next-one".to_string()).await.unwrap());
+
+        for _ in 0..120 {
+            app.on_tick().await;
+            tokio::task::yield_now().await;
+            if !app.in_flight && app.message_queue.is_empty() {
+                break;
+            }
+        }
+
+        assert!(app.message_queue.is_empty());
+        let user_messages = app
+            .chat_blocks
+            .iter()
+            .filter(|b| b.role == ChatRole::User)
+            .map(|b| b.content.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(user_messages, vec!["next-one".to_string()]);
+        let assistant_text = app
+            .chat_blocks
+            .iter()
+            .filter(|b| b.role == ChatRole::Assistant)
+            .map(|b| b.content.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(assistant_text.contains("reply(next-one)"));
+        assert!(app
+            .right_panel_events
+            .iter()
+            .any(|line| line.contains("queued dispatch dropped")));
+    }
+
+    #[tokio::test]
+    async fn test_quit_enters_closing_state_before_remote_close_finishes() {
+        let mut app = create_remote_app_with_close_delay(500);
+        app.initialize_remote().await;
+        app.input_buffer = "/quit".to_string();
+        app.cursor_index = app.input_buffer.chars().count();
+
+        let should_quit = app.submit_input().await.unwrap();
+
+        assert!(!should_quit);
+        assert!(app.close_in_progress);
+        assert!(app.pending_close_update.is_some());
+        assert_eq!(app.connection_status, "closing");
+        assert!(app.input_status_line(120).to_string().contains("closing"));
+    }
+
+    #[tokio::test]
+    async fn test_quit_exits_after_remote_close_completes() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+        app.input_buffer = "/quit".to_string();
+        app.cursor_index = app.input_buffer.chars().count();
+
+        let should_quit = app.submit_input().await.unwrap();
+        assert!(!should_quit);
+
+        for _ in 0..20 {
+            app.on_tick().await;
+            tokio::task::yield_now().await;
+            if app.should_exit {
+                break;
+            }
+        }
+
+        assert!(app.should_exit);
+        assert!(!app.close_in_progress);
+        assert!(app
+            .right_panel_events
+            .iter()
+            .any(|line| line.contains("session close completed")));
+    }
+
+    #[tokio::test]
+    async fn test_quit_timeout_requires_second_quit_to_force_exit() {
+        let mut app = create_remote_app_with_close_delay(5_000);
+        app.initialize_remote().await;
+        app.input_buffer = "/quit".to_string();
+        app.cursor_index = app.input_buffer.chars().count();
+        let _ = app.submit_input().await.unwrap();
+
+        app.close_started_at =
+            Some(Instant::now() - SESSION_CLOSE_TIMEOUT - Duration::from_millis(1));
+        app.on_tick().await;
+
+        assert!(app.close_in_progress);
+        assert!(app.close_timeout_reported);
+        assert!(app
+            .status_hint
+            .as_ref()
+            .map(|(msg, _)| msg.contains("Press /quit again"))
+            .unwrap_or(false));
+
+        app.input_buffer = "/quit".to_string();
+        app.cursor_index = app.input_buffer.chars().count();
+        let should_quit = app.submit_input().await.unwrap();
+        assert!(!should_quit);
+        assert!(app.should_exit);
+        assert!(app
+            .right_panel_events
+            .iter()
+            .any(|line| line.contains("session force exit")));
+    }
+
+    #[tokio::test]
+    async fn test_closing_state_blocks_new_messages() {
+        let mut app = create_remote_app_with_close_delay(5_000);
+        app.initialize_remote().await;
+        app.close_remote_session_command().unwrap();
+
+        let accepted = app.send_user_message("blocked".to_string()).await.unwrap();
+
+        assert!(!accepted);
+        assert!(app.message_queue.is_empty());
+        assert!(app
+            .status_hint
+            .as_ref()
+            .map(|(msg, _)| msg.contains("closing"))
+            .unwrap_or(false));
     }
 }

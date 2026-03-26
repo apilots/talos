@@ -30,6 +30,9 @@ wait_for_health() {
   local max_retry="${1:-60}"
   local retry=0
   while (( retry < max_retry )); do
+    if [[ -n "${TALOS_SERVER_PID:-}" ]] && ! kill -0 "${TALOS_SERVER_PID}" >/dev/null 2>&1; then
+      return 1
+    fi
     if curl -sS "${HEALTH_URL}" >/dev/null 2>&1; then
       return 0
     fi
@@ -40,6 +43,15 @@ wait_for_health() {
 }
 
 start_server() {
+  if command -v lsof >/dev/null 2>&1; then
+    local existing_pid
+    existing_pid="$(lsof -t -nP -iTCP:"${PORT}" -sTCP:LISTEN | head -n 1 || true)"
+    if [[ -n "${existing_pid}" ]]; then
+      echo "Port ${PORT} is already in use by PID ${existing_pid}. Stop the existing server first." >&2
+      exit 1
+    fi
+  fi
+
   : > "${SERVER_LOG}"
   "${ROOT_DIR}/target/debug/talos" >>"${SERVER_LOG}" 2>&1 &
   export TALOS_SERVER_PID=$!
@@ -98,6 +110,30 @@ elif isinstance(node, (dict,list)):
 else:
     print(node)
 PY
+}
+
+session_id_from_json() {
+  local json="$1"
+  local session_id
+  session_id="$(json_get "${json}" "context.session_id")"
+  if [[ -n "${session_id}" ]]; then
+    echo "${session_id}"
+    return 0
+  fi
+
+  json_get "${json}" "id"
+}
+
+usage_total_from_json() {
+  local json="$1"
+  local usage_total
+  usage_total="$(json_get "${json}" "usage.total_tokens")"
+  if [[ -n "${usage_total}" ]]; then
+    echo "${usage_total}"
+    return 0
+  fi
+
+  json_get "${json}" "state.usage.total_tokens"
 }
 
 log_case_json() {

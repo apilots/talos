@@ -613,8 +613,12 @@ impl LlmProvider for AnthropicProvider {
                                         .and_then(|v| v.as_str())
                                         .map(|v| v.to_string())
                                         .or_else(|| Some("stop".to_string()));
-                                    let _ =
-                                        tx.send(Ok(ToolStreamEvent::Done { finish_reason })).await;
+                                    let _ = tx
+                                        .send(Ok(ToolStreamEvent::Done {
+                                            finish_reason,
+                                            usage: None,
+                                        }))
+                                        .await;
                                     return;
                                 }
                                 _ => {}

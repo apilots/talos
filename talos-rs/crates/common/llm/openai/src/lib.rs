@@ -117,6 +117,13 @@ struct OpenAIRequest {
     parallel_tool_calls: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     stream: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream_options: Option<OpenAIStreamOptions>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct OpenAIStreamOptions {
+    include_usage: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -315,6 +322,13 @@ impl OpenAIProvider {
             tool_choice: Self::convert_tool_choice(request.tool_choice),
             parallel_tool_calls: request.parallel_tool_calls,
             stream: Some(stream),
+            stream_options: if stream {
+                Some(OpenAIStreamOptions {
+                    include_usage: true,
+                })
+            } else {
+                None
+            },
         }
     }
 
@@ -433,6 +447,7 @@ impl LlmProvider for OpenAIProvider {
 
         tokio::spawn(async move {
             let mut stream = response.bytes_stream();
+            let mut final_finish_reason: Option<String> = None;
             while let Some(chunk_result) = stream.next().await {
                 match chunk_result {
                     Ok(bytes) => {
@@ -447,7 +462,9 @@ impl LlmProvider for OpenAIProvider {
                                 let _ = tx
                                     .send(Ok(ChatChunk {
                                         delta: String::new(),
-                                        finish_reason: Some("stop".to_string()),
+                                        finish_reason: final_finish_reason
+                                            .clone()
+                                            .or_else(|| Some("stop".to_string())),
                                     }))
                                     .await;
                                 return;
@@ -476,13 +493,7 @@ impl LlmProvider for OpenAIProvider {
                                     .and_then(|c| c.get("finish_reason"))
                                     .and_then(|r| r.as_str())
                                 {
-                                    let _ = tx
-                                        .send(Ok(ChatChunk {
-                                            delta: String::new(),
-                                            finish_reason: Some(finish_reason.to_string()),
-                                        }))
-                                        .await;
-                                    return;
+                                    final_finish_reason = Some(finish_reason.to_string());
                                 }
                             }
                         }
@@ -518,6 +529,8 @@ impl LlmProvider for OpenAIProvider {
 
             let mut stream = response.bytes_stream();
             let mut accumulators: HashMap<usize, Acc> = HashMap::new();
+            let mut final_finish_reason: Option<String> = None;
+            let mut final_usage: Option<Usage> = None;
 
             while let Some(chunk_result) = stream.next().await {
                 match chunk_result {
@@ -532,7 +545,10 @@ impl LlmProvider for OpenAIProvider {
                             if data == "[DONE]" {
                                 let _ = tx
                                     .send(Ok(ToolStreamEvent::Done {
-                                        finish_reason: Some("stop".to_string()),
+                                        finish_reason: final_finish_reason
+                                            .clone()
+                                            .or_else(|| Some("stop".to_string())),
+                                        usage: final_usage.clone(),
                                     }))
                                     .await;
                                 return;
@@ -541,6 +557,16 @@ impl LlmProvider for OpenAIProvider {
                             let Ok(event) = serde_json::from_str::<Value>(data) else {
                                 continue;
                             };
+
+                            if let Some(usage) = event.get("usage").and_then(|value| {
+                                serde_json::from_value::<OpenAIUsage>(value.clone()).ok()
+                            }) {
+                                final_usage = Some(Usage {
+                                    prompt_tokens: usage.prompt_tokens,
+                                    completion_tokens: usage.completion_tokens,
+                                    total_tokens: usage.total_tokens,
+                                });
+                            }
 
                             let choice = event
                                 .get("choices")
@@ -646,6 +672,7 @@ impl LlmProvider for OpenAIProvider {
                                 .and_then(|c| c.get("finish_reason"))
                                 .and_then(|r| r.as_str())
                             {
+                                final_finish_reason = Some(finish_reason.to_string());
                                 for (index, acc) in accumulators.drain() {
                                     let arguments = serde_json::from_str::<Value>(&acc.arguments)
                                         .unwrap_or_else(|_| Value::String(acc.arguments.clone()));
@@ -662,13 +689,6 @@ impl LlmProvider for OpenAIProvider {
                                         return;
                                     }
                                 }
-
-                                let _ = tx
-                                    .send(Ok(ToolStreamEvent::Done {
-                                        finish_reason: Some(finish_reason.to_string()),
-                                    }))
-                                    .await;
-                                return;
                             }
                         }
                     }
@@ -752,6 +772,7 @@ mod tests {
             tool_choice: Some(OpenAIToolChoice::Simple("auto".to_string())),
             parallel_tool_calls: Some(true),
             stream: None,
+            stream_options: None,
         };
 
         let json = serde_json::to_string(&req).unwrap();

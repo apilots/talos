@@ -8,7 +8,7 @@ use tokio::sync::{mpsc, RwLock};
 use tracing::{error, info};
 
 use talos_client::{
-    SessionCreateParams, SessionHandle, SessionInfo, TalosClient, TalosInputItem,
+    SessionCreateParams, TalosClient, TalosInputItem, TalosSession,
     TalosMessageRequest, TalosMessageResponse, TalosOutputItem,
 };
 
@@ -18,13 +18,13 @@ pub struct TuiAppState {
     client: Arc<TalosClient>,
     
     /// Current active session (if any)
-    active_session: RwLock<Option<SessionHandle>>,
+    active_session: RwLock<Option<TalosSession>>,
     
     /// Available models cache
     available_models: RwLock<Vec<String>>,
     
     /// Available sessions list cache
-    available_sessions: RwLock<Vec<SessionInfo>>,
+    available_sessions: RwLock<Vec<TalosSession>>,
     
     /// Currently selected model
     current_model: RwLock<String>,
@@ -42,11 +42,11 @@ pub enum TuiUpdate {
     /// Chat response received
     ChatResponse(String),
     /// Session created
-    SessionCreated(SessionHandle),
+    SessionCreated(TalosSession),
     /// Models loaded
     ModelsLoaded(Vec<String>),
     /// Sessions list updated
-    SessionsList(Vec<SessionInfo>),
+    SessionsList(Vec<TalosSession>),
     /// Error occurred
     Error(String),
 }
@@ -100,7 +100,7 @@ impl TuiAppState {
         let model_guard = self.current_model.read().await;
 
         let session_id = if let Some(session) = session_guard.as_ref() {
-            session.id.clone()
+            session.context.session_id.clone()
         } else {
             drop(session_guard);
             let session = self
@@ -112,7 +112,7 @@ impl TuiAppState {
                 .await?;
             let mut active_sess = self.active_session.write().await;
             *active_sess = Some(session.clone());
-            session.id
+            session.context.session_id.clone()
         };
 
         let response = self
@@ -135,7 +135,7 @@ impl TuiAppState {
     pub async fn create_session(
         &self,
         params: &SessionCreateParams,
-    ) -> Result<SessionHandle, Box<dyn std::error::Error>> {
+    ) -> Result<TalosSession, Box<dyn std::error::Error>> {
         let session = self.client.create_session(params).await?;
         
         // Update active session
@@ -158,16 +158,9 @@ impl TuiAppState {
     /// Switch to an existing session
     pub async fn switch_session(&self, session_id: String) -> Result<(), Box<dyn std::error::Error>> {
         let session = self.client.get_session(&session_id).await?;
-        
-        // Convert session info back to session handle for simplicity
-        let handle = SessionHandle {
-            id: session.id,
-            current_model: session.current_model,
-            created_at: session.last_activity,  // Using last activity as approximation
-        };
-        
+
         let mut active_session = self.active_session.write().await;
-        *active_session = Some(handle);
+        *active_session = Some(session);
         
         Ok(())
     }
@@ -202,7 +195,7 @@ impl TuiAppState {
     }
     
     /// Get active session info
-    pub async fn get_active_session(&self) -> Option<SessionHandle> {
+    pub async fn get_active_session(&self) -> Option<TalosSession> {
         self.active_session.read().await.clone()
     }
     
@@ -212,7 +205,7 @@ impl TuiAppState {
     }
     
     /// Get available sessions list
-    pub async fn get_available_sessions(&self) -> Vec<SessionInfo> {
+    pub async fn get_available_sessions(&self) -> Vec<TalosSession> {
         self.available_sessions.read().await.clone()
     }
     

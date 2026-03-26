@@ -8,8 +8,8 @@ use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use talos_client::{
-    ClientConfig, SessionCreateParams, TalosClient, TalosContext, TalosEventType,
-    TalosInputItem, TalosMessageRequest, TalosMessageResponse, TalosOutputItem,
+    ClientConfig, SessionCreateParams, TalosClient, TalosContext, TalosEventType, TalosInputItem,
+    TalosMessageRequest, TalosMessageResponse, TalosOutputItem,
 };
 
 /// Command-line interface for Talos AI system - Full-featured command set for system access
@@ -240,7 +240,7 @@ async fn execute_chat_command(
             };
             let session = client.create_session(&params).await?;
             let request = build_message_request(&message, model, stream);
-            send_and_render_message(client, &session.id, &request, stream).await?;
+            send_and_render_message(client, &session.context.session_id, &request, stream).await?;
         }
         ChatCommands::In {
             session_id,
@@ -262,7 +262,7 @@ async fn execute_chat_command(
                 .await
                 .ok()
                 .and_then(|sessions| sessions.into_iter().nth(index))
-                .map(|s| s.id);
+                .map(|s| s.context.session_id);
 
             if let Some(session_id) = session_id {
                 let request = build_message_request(&message, model, stream);
@@ -289,7 +289,7 @@ async fn execute_session_command(
             let session = client.create_session(&params).await?;
             println!(
                 "Session created: {} (model: {})",
-                session.id, session.current_model
+                session.context.session_id, session.config.llm.model
             );
         }
         SessionCommands::List { limit, user: _ } => {
@@ -298,23 +298,26 @@ async fn execute_session_command(
             for (i, session) in sessions.iter().take(limit).enumerate() {
                 println!(
                     "{}. ID: {} | Model: {} | Messages: {}",
-                    i, session.id, session.current_model, session.message_count
+                    i,
+                    session.context.session_id,
+                    session.config.llm.model,
+                    session.state.message_count
                 );
             }
         }
         SessionCommands::Info { session_id } => {
             let session = client.get_session(&session_id).await?;
             println!("Session Info:");
-            println!("  ID: {}", session.id);
-            println!("  Model: {}", session.current_model);
-            println!("  Messages: {}", session.message_count);
+            println!("  ID: {}", session.context.session_id);
+            println!("  Model: {}", session.config.llm.model);
+            println!("  Messages: {}", session.state.message_count);
         }
         SessionCommands::SetModel { session_id, model } => {
             client.update_session_model(&session_id, &model).await?;
             let session = client.get_session(&session_id).await?;
             println!("Session model updated:");
-            println!("  ID: {}", session.id);
-            println!("  Model: {}", session.current_model);
+            println!("  ID: {}", session.context.session_id);
+            println!("  Model: {}", session.config.llm.model);
         }
         SessionCommands::Interactive {
             session_id,

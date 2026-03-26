@@ -33,7 +33,7 @@ create_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
   -d "${create_payload}")"
 log_case_json "messages_create_session" "${create_payload}" "${create_json}"
-session_id="$(json_get "${create_json}" "id")"
+session_id="$(session_id_from_json "${create_json}")"
 if [[ -z "${session_id}" ]]; then
   echo "CASE messages_create_session FAIL response=${create_json}"
   exit 1
@@ -74,12 +74,23 @@ log_case_json "messages_non_stream" "${msg_payload}" "${msg_json}"
 output_text="$(extract_output_text "${msg_json}")"
 message_id="$(json_get "${msg_json}" "message_id")"
 stop_reason="$(json_get "${msg_json}" "stop_reason")"
-if [[ -z "${output_text}" || -z "${message_id}" || "${stop_reason}" == "error" || "${output_text}" == Error:* ]]; then
+message_usage_total="$(usage_total_from_json "${msg_json}")"
+if [[ -z "${output_text}" || -z "${message_id}" || "${stop_reason}" == "error" || "${output_text}" == Error:* || -z "${message_usage_total}" || "${message_usage_total}" -le 0 ]]; then
   echo "CASE messages_non_stream FAIL response=${msg_json}"
   exit 1
 fi
 echo "CASE messages_non_stream PASS message_id=${message_id} session_id=${session_id}"
 echo "DETAIL messages_non_stream_output=${output_text}"
+echo "DETAIL messages_non_stream_usage_total=${message_usage_total}"
+
+session_after_msg_json="$(curl -sS -H "Authorization: Bearer ${AUTH_TOKEN}" "${GATEWAY_URL}/v1/sessions/${session_id}")"
+log_case_json "messages_session_usage_after_non_stream" "{\"session_id\":\"${session_id}\"}" "${session_after_msg_json}"
+session_usage_total="$(usage_total_from_json "${session_after_msg_json}")"
+if [[ -z "${session_usage_total}" || "${session_usage_total}" -le 0 ]]; then
+  echo "CASE messages_session_usage_after_non_stream FAIL response=${session_after_msg_json}"
+  exit 1
+fi
+echo "CASE messages_session_usage_after_non_stream PASS total_tokens=${session_usage_total}"
 
 sse_log="${ROOT_DIR}/tests/integration/reports/sse_events.log"
 sse_payload='{
@@ -95,11 +106,35 @@ log_case_json "messages_sse_stream" "${sse_payload}" "$(cat "${sse_log}")"
 
 started_count="$(grep -c '^event: message.started' "${sse_log}" || true)"
 completed_count="$(grep -c '^event: message.completed' "${sse_log}" || true)"
+stream_usage_total="$(python3 - "${sse_log}" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+usage = 0
+with open(path, "r", encoding="utf-8") as handle:
+    for line in handle:
+        if not line.startswith("data: "):
+            continue
+        try:
+            event = json.loads(line[6:])
+        except Exception:
+            continue
+        if event.get("event_type") != "message_completed":
+            continue
+        usage = (
+            event.get("data", {})
+            .get("usage", {})
+            .get("total_tokens", 0)
+        )
+print(usage)
+PY
+)"
 if [[ "${started_count}" -lt 1 || "${completed_count}" -lt 1 ]]; then
   echo "CASE messages_sse_stream FAIL started=${started_count} completed=${completed_count}"
   exit 1
 fi
-echo "CASE messages_sse_stream PASS started=${started_count} completed=${completed_count}"
+echo "CASE messages_sse_stream PASS started=${started_count} completed=${completed_count} usage_total=${stream_usage_total}"
 echo "DETAIL messages_sse_events_begin"
 head -n 40 "${sse_log}"
 echo "DETAIL messages_sse_events_end"

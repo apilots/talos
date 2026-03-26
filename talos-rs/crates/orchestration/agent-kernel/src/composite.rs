@@ -332,6 +332,7 @@ mod tests {
                     status: TaskStatus::Success,
                     output: self.output.clone(),
                     output_items: Vec::new(),
+                    usage: TalosUsage::default(),
                     tool_traces: Vec::new(),
                     state_delta: HashMap::new(),
                     error: None,

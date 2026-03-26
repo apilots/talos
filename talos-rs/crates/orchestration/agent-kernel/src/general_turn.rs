@@ -9,9 +9,9 @@ use talos_llm_provider::{
     ChatMessage, ChatRequest, FunctionCall, LlmProvider, ToolChoice, ToolStreamEvent,
 };
 use talos_memory::{
-    Memory, MemoryGetResult, MemorySearchResponse, MemoryStore, RecordHeader,
-    RetrievedMemoryItem, TalosMessage, TalosMessageRole, TalosTurn,
-    SessionPromptContextConfig, SummaryRecord, ToolCallRecord, ToolResultRecord,
+    Memory, MemoryGetResult, MemorySearchResponse, MemoryStore, RecordHeader, RetrievedMemoryItem,
+    SessionPromptContextConfig, SummaryRecord, TalosMessage, TalosMessageRole, TalosTurn,
+    ToolCallRecord, ToolResultRecord,
 };
 use talos_prompt::{PromptBudget, PromptBuildConfig, PromptBuilder, PromptLoadPolicy, PromptPhase};
 use talos_tools::ToolRegistry;
@@ -187,6 +187,7 @@ struct StreamRound {
     tool_calls: Vec<FunctionCall>,
     finish_reason: Option<String>,
     saw_output_delta: bool,
+    usage: TalosUsage,
 }
 
 #[derive(Debug, Clone)]
@@ -377,6 +378,7 @@ async fn stream_round(
     let mut finish_reason = None;
     let mut pending_calls: BTreeMap<usize, PendingToolCall> = BTreeMap::new();
     let mut saw_output_delta = false;
+    let mut usage = TalosUsage::default();
 
     while let Some(event) = stream.next().await {
         match event? {
@@ -452,8 +454,16 @@ async fn stream_round(
             }
             ToolStreamEvent::Done {
                 finish_reason: final_reason,
+                usage: final_usage,
             } => {
                 finish_reason = final_reason;
+                if let Some(final_usage) = final_usage {
+                    usage = TalosUsage {
+                        input_tokens: final_usage.prompt_tokens,
+                        output_tokens: final_usage.completion_tokens,
+                        total_tokens: final_usage.total_tokens,
+                    };
+                }
                 break;
             }
         }
@@ -465,6 +475,27 @@ async fn stream_round(
         tool_calls: finalize_tool_calls(round, pending_calls),
         finish_reason,
         saw_output_delta,
+        usage,
+    })
+}
+
+async fn chat_round(
+    llm_provider: Arc<dyn LlmProvider>,
+    request: ChatRequest,
+) -> TalosResult<StreamRound> {
+    let response = llm_provider.chat_with_tools(request).await?;
+    let tool_calls = response.get_tool_calls().to_vec();
+    Ok(StreamRound {
+        content: response.content,
+        reasoning: String::new(),
+        tool_calls,
+        finish_reason: response.finish_reason,
+        saw_output_delta: false,
+        usage: TalosUsage {
+            input_tokens: response.usage.prompt_tokens,
+            output_tokens: response.usage.completion_tokens,
+            total_tokens: response.usage.total_tokens,
+        },
     })
 }
 
@@ -522,7 +553,7 @@ pub async fn run_general_turn(
 
     let mut round = 0_u32;
     let mut output_items: Vec<TalosOutputItem> = Vec::new();
-    let usage = TalosUsage::default();
+    let mut usage = TalosUsage::default();
     let mut tool_call_count = 0_usize;
     let mut tool_error_count = 0_usize;
     let mut reasoning_log: Vec<String> = Vec::new();
@@ -543,14 +574,28 @@ pub async fn run_general_turn(
                 .parallel_tool_calls(true);
         }
 
-        let round_response = stream_round(
-            llm_provider.clone(),
-            builder.build(),
-            round,
-            stream_tx.as_ref(),
-        )
-        .await?;
+        let round_request = builder.build();
+        let round_response = if stream_tx.is_some() {
+            stream_round(
+                llm_provider.clone(),
+                round_request,
+                round,
+                stream_tx.as_ref(),
+            )
+            .await?
+        } else {
+            chat_round(llm_provider.clone(), round_request).await?
+        };
         saw_output_delta = saw_output_delta || round_response.saw_output_delta;
+        usage.input_tokens = usage
+            .input_tokens
+            .saturating_add(round_response.usage.input_tokens);
+        usage.output_tokens = usage
+            .output_tokens
+            .saturating_add(round_response.usage.output_tokens);
+        usage.total_tokens = usage
+            .total_tokens
+            .saturating_add(round_response.usage.total_tokens);
 
         if !round_response.reasoning.trim().is_empty() {
             let reasoning = round_response.reasoning.trim().to_string();

@@ -56,7 +56,8 @@ impl Gateway for GatewayImpl {
 }
 
 fn text_input_len(input: &[TalosInputItem]) -> usize {
-    input.iter()
+    input
+        .iter()
         .map(|item| match item {
             TalosInputItem::Text { text } => text.len(),
             _ => 0,

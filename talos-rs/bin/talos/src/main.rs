@@ -19,7 +19,7 @@ use talos_storage::{create_storage, StorageConfig};
 use talos_tools::{
     EditTool, ExecTool, MemoryGetTool, MemorySearchTool, ReadTool, ToolRegistry, WriteTool,
 };
-use talos_types::{RequestHandler, SessionService};
+use talos_types::{ModelInfo, RequestHandler, SessionService};
 use tracing::{error, info};
 
 use crate::host::TalosHost;
@@ -106,16 +106,14 @@ async fn main() {
     channel_server.register(Box::new(TelegramChannel::new()));
 
     let default_model = config.llm.model.clone();
-    let model_provider = resolve_model_provider(&config);
-    let supported_models = resolve_supported_models(&config, &default_model);
+    let model_catalog = resolve_model_catalog(&config, &default_model);
     let mut http_server = HttpServer::new(
         gateway,
         session_service,
         config.gateway.host.clone(),
         config.gateway.port,
         default_model,
-        model_provider,
-        supported_models,
+        model_catalog,
     );
     if config.gateway.auth {
         http_server = http_server.with_jwt_secret(
@@ -221,29 +219,65 @@ async fn create_llm_provider(
     )))
 }
 
-fn resolve_model_provider(config: &Config) -> String {
-    config.llm.provider.clone()
-}
-
-fn resolve_provider_models(config: &Config) -> Vec<String> {
+fn resolve_provider_models(config: &Config) -> Vec<ModelInfo> {
+    let provider = config.llm.provider.clone();
     let provider_models = match config.llm.provider.as_str() {
-        "anthropic" => config.llm.anthropic.supported_models.clone(),
-        "openai" => config.llm.openai.supported_models.clone(),
-        "bailian" => config.llm.bailian.supported_models.clone(),
-        "ollama" => config.llm.ollama.supported_models.clone(),
+        "anthropic" => config.llm.anthropic.models.clone(),
+        "openai" => config.llm.openai.models.clone(),
+        "bailian" => config.llm.bailian.models.clone(),
+        "ollama" => config.llm.ollama.models.clone(),
         _ => Vec::new(),
     };
     provider_models
+        .into_iter()
+        .filter(|model| !model.id.trim().is_empty())
+        .map(|model| ModelInfo {
+            id: model.id.clone(),
+            name: model.display_name().to_string(),
+            provider: provider.clone(),
+            context_window: model.context_window,
+            max_tokens: model.max_tokens,
+            reasoning: model.reasoning,
+            input: model.input.clone(),
+            cost: model.cost.clone(),
+            compat: model.compat.clone(),
+        })
+        .collect()
 }
 
-fn resolve_supported_models(config: &Config, default_model: &str) -> Vec<String> {
-    let mut models = vec![default_model.to_string()];
-    models.extend(resolve_provider_models(config));
-    if config.llm.model != default_model {
-        models.push(config.llm.model.clone());
+fn resolve_model_catalog(config: &Config, default_model: &str) -> Vec<ModelInfo> {
+    let mut models = resolve_provider_models(config);
+    if !models.iter().any(|model| model.id == default_model) {
+        models.push(ModelInfo {
+            id: default_model.to_string(),
+            name: default_model.to_string(),
+            provider: config.llm.provider.clone(),
+            context_window: 0,
+            max_tokens: 0,
+            reasoning: false,
+            input: Vec::new(),
+            cost: Default::default(),
+            compat: Default::default(),
+        });
     }
-    models.sort();
-    models.dedup();
+    if config.llm.model != default_model {
+        let model_id = config.llm.model.clone();
+        if !models.iter().any(|model| model.id == model_id) {
+            models.push(ModelInfo {
+                id: model_id.clone(),
+                name: model_id,
+                provider: config.llm.provider.clone(),
+                context_window: 0,
+                max_tokens: 0,
+                reasoning: false,
+                input: Vec::new(),
+                cost: Default::default(),
+                compat: Default::default(),
+            });
+        }
+    }
+    models.sort_by(|left, right| left.id.cmp(&right.id));
+    models.dedup_by(|left, right| left.id == right.id);
     models
 }
 

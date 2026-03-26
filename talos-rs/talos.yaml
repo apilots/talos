@@ -114,10 +114,43 @@ llm:
     api_key: ${BAILIAN_API_KEY}
     enabled: true
     base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    supported_models:
-      - "qwen-max"
-      - "qwen-plus"
-      - "qwen-turbo"
+    models:
+      - id: "qwen-max"
+        name: "qwen-max"
+        context_window: 32768
+        max_tokens: 8192
+        reasoning: false
+        input: ["text"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
+      - id: "qwen-plus"
+        name: "qwen-plus"
+        context_window: 32768
+        max_tokens: 8192
+        reasoning: false
+        input: ["text"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
+      - id: "qwen-turbo"
+        name: "qwen-turbo"
+        context_window: 32768
+        max_tokens: 8192
+        reasoning: false
+        input: ["text"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
   ollama:
     api_key: null
     enabled: false

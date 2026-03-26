@@ -39,7 +39,7 @@ create_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
   -d "${create_payload}")"
 log_case_json "create_session" "${create_payload}" "${create_json}"
-session_id="$(json_get "${create_json}" "id")"
+session_id="$(session_id_from_json "${create_json}")"
 if [[ -z "${session_id}" ]]; then
   echo "CASE create_session FAIL response=${create_json}"
   exit 1
@@ -48,7 +48,7 @@ echo "CASE create_session PASS session_id=${session_id}"
 
 detail_json="$(curl -sS -H "Authorization: Bearer ${AUTH_TOKEN}" "${GATEWAY_URL}/v1/sessions/${session_id}")"
 log_case_json "get_session" "{\"session_id\":\"${session_id}\"}" "${detail_json}"
-detail_id="$(json_get "${detail_json}" "id")"
+detail_id="$(session_id_from_json "${detail_json}")"
 if [[ "${detail_id}" != "${session_id}" ]]; then
   echo "CASE get_session FAIL expected=${session_id} actual=${detail_id}"
   exit 1

@@ -45,7 +45,7 @@ create_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
   -d "${create_payload}")"
 log_case_json "create_session_for_close_flush" "${create_payload}" "${create_json}"
-session_id="$(json_get "${create_json}" "id")"
+session_id="$(session_id_from_json "${create_json}")"
 if [[ -z "${session_id}" ]]; then
   echo "CASE create_session_for_close_flush FAIL response=${create_json}"
   exit 1

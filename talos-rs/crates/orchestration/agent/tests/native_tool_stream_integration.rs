@@ -213,6 +213,7 @@ impl LlmProvider for IntegrationMockProvider {
                 let _ = tx
                     .send(Ok(ToolStreamEvent::Done {
                         finish_reason: Some("stop".to_string()),
+                        usage: None,
                     }))
                     .await;
                 return;
@@ -231,6 +232,7 @@ impl LlmProvider for IntegrationMockProvider {
             let _ = tx
                 .send(Ok(ToolStreamEvent::Done {
                     finish_reason: Some("stop".to_string()),
+                    usage: None,
                 }))
                 .await;
         });

@@ -84,7 +84,7 @@ en_session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
   -d "${en_session_payload}")"
-en_session_id="$(json_get "${en_session_json}" "id")"
+en_session_id="$(session_id_from_json "${en_session_json}")"
 if [[ -z "${en_session_id}" ]]; then
   echo "CASE messages_english_create_session FAIL response=${en_session_json}"
   exit 1
@@ -116,7 +116,7 @@ zh_session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
   -d "${zh_session_payload}")"
-zh_session_id="$(json_get "${zh_session_json}" "id")"
+zh_session_id="$(session_id_from_json "${zh_session_json}")"
 if [[ -z "${zh_session_id}" ]]; then
   echo "CASE messages_chinese_create_session FAIL response=${zh_session_json}"
   exit 1
@@ -148,7 +148,7 @@ tool_session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
   -d "${tool_session_payload}")"
-tool_session_id="$(json_get "${tool_session_json}" "id")"
+tool_session_id="$(session_id_from_json "${tool_session_json}")"
 if [[ -z "${tool_session_id}" ]]; then
   echo "CASE messages_tool_exec_create_session FAIL response=${tool_session_json}"
   exit 1
@@ -206,7 +206,7 @@ stream_tool_session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
   -d "${stream_tool_session_payload}")"
-stream_tool_session_id="$(json_get "${stream_tool_session_json}" "id")"
+stream_tool_session_id="$(session_id_from_json "${stream_tool_session_json}")"
 if [[ -z "${stream_tool_session_id}" ]]; then
   echo "CASE messages_tool_exec_stream_create_session FAIL response=${stream_tool_session_json}"
   exit 1

@@ -11,10 +11,10 @@ use crate::{
 };
 use serde_json::{json, Value};
 use talos_agent_kernel::{
-    flush_session_memory, Agent as KernelAgent, AgentRunResult, BuiltInPlanner,
-    InvocationContext, KernelRuntime, KernelStreamEvent, LlmKernelAgent, LoopKernelAgent,
-    ParallelKernelAgent, PlanReActPlanner, Planner, RoutingKernelAgent, RunRequest,
-    SequentialKernelAgent, TaskKind, TaskResult, TaskStatus,
+    flush_session_memory, Agent as KernelAgent, AgentRunResult, BuiltInPlanner, InvocationContext,
+    KernelRuntime, KernelStreamEvent, LlmKernelAgent, LoopKernelAgent, ParallelKernelAgent,
+    PlanReActPlanner, Planner, RoutingKernelAgent, RunRequest, SequentialKernelAgent, TaskKind,
+    TaskResult, TaskStatus,
 };
 use talos_config::AgentKernelConfig;
 use talos_error::TalosResult;
@@ -140,7 +140,10 @@ impl AgentImpl {
             .collect()
     }
 
-    async fn finalize_session_memory(&self, session: &talos_types::TalosSession) -> TalosResult<()> {
+    async fn finalize_session_memory(
+        &self,
+        session: &talos_types::TalosSession,
+    ) -> TalosResult<()> {
         let selected_model = if session.config.llm.model.trim().is_empty() {
             self.model.as_str()
         } else {
@@ -914,6 +917,7 @@ impl KernelAgent for MockAgent {
                 output_items: vec![TalosOutputItem::OutputText {
                     text: "Mock response".to_string(),
                 }],
+                usage: TalosUsage::default(),
                 tool_traces: Vec::new(),
                 state_delta: HashMap::new(),
                 error: None,
@@ -1006,17 +1010,15 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::sync::Arc;
-    use tempfile::TempDir;
     use talos_agent_kernel::TurnPhase;
     use talos_config::AgentKernelConfig;
     use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Role, Usage};
-    use talos_memory::{
-        Memory, RecordHeader, TalosMessage, TalosMessageRole, TalosTurn,
-    };
+    use talos_memory::{Memory, RecordHeader, TalosMessage, TalosMessageRole, TalosTurn};
     use talos_tools::{ReadTool, ToolRegistry, WebSearchTool};
     use talos_tools_policy::ToolPolicy;
     use talos_types::talos::{TalosProvider, TalosSourceType};
     use talos_types::{SessionContext, SessionState, TalosSession};
+    use tempfile::TempDir;
     use tokio;
 
     fn build_test_agent() -> AgentImpl {

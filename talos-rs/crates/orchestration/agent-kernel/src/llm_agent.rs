@@ -58,6 +58,7 @@ impl LlmKernelAgent {
         let mut error = None;
         let mut status = TaskStatus::Success;
         let mut output_items: Vec<TalosOutputItem> = Vec::new();
+        let mut usage = TalosUsage::default();
 
         let output = match run_general_turn(
             ctx,
@@ -69,9 +70,11 @@ impl LlmKernelAgent {
             self.memory_store.clone(),
             &self.kernel_config,
         )
-        .await {
+        .await
+        {
             Ok(general_result) => {
                 output_items = general_result.output_items;
+                usage = general_result.usage;
                 general_result.output_text
             }
             Err(e) => {
@@ -104,6 +107,7 @@ impl LlmKernelAgent {
             status,
             output,
             output_items,
+            usage,
             tool_traces,
             state_delta,
             error,
@@ -147,6 +151,7 @@ impl Agent for LlmKernelAgent {
         let plan = self.planner.plan(ctx).await?;
         let mut task_results = Vec::new();
         let mut merged_state_delta = HashMap::new();
+        let mut usage = TalosUsage::default();
 
         for task in plan
             .tasks
@@ -157,6 +162,11 @@ impl Agent for LlmKernelAgent {
             for (k, v) in &result.state_delta {
                 merged_state_delta.insert(k.clone(), v.clone());
             }
+            usage.input_tokens = usage.input_tokens.saturating_add(result.usage.input_tokens);
+            usage.output_tokens = usage
+                .output_tokens
+                .saturating_add(result.usage.output_tokens);
+            usage.total_tokens = usage.total_tokens.saturating_add(result.usage.total_tokens);
             task_results.push(result);
         }
 
@@ -177,7 +187,7 @@ impl Agent for LlmKernelAgent {
             output_text,
             output_items,
             stop_reason: "end_turn".to_string(),
-            usage: TalosUsage::default(),
+            usage,
             task_results,
             state_delta: merged_state_delta,
             continue_loop: false,
@@ -194,7 +204,8 @@ mod tests {
     use std::collections::HashMap;
     use talos_error::TalosResult;
     use talos_llm_provider::{
-        ChatChunk, ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage,
+        ChatChunk, ChatRequest, ChatResponse, ChatStream, LlmProvider, ToolStream, ToolStreamEvent,
+        Usage,
     };
     use talos_tools::ToolRegistry;
     use tokio::sync::mpsc;
@@ -227,6 +238,60 @@ mod tests {
         }
     }
 
+    struct UsageStreamProvider;
+
+    #[async_trait]
+    impl LlmProvider for UsageStreamProvider {
+        fn name(&self) -> &str {
+            "usage-stream"
+        }
+
+        async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
+            Ok(ChatResponse {
+                content: "ok".to_string(),
+                model: "usage-stream".to_string(),
+                usage: Usage {
+                    prompt_tokens: 11,
+                    completion_tokens: 7,
+                    total_tokens: 18,
+                },
+                finish_reason: Some("stop".to_string()),
+                tool_calls: None,
+            })
+        }
+
+        async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
+            let (_tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(1);
+            Ok(ChatStream::new(rx))
+        }
+
+        async fn stream_with_tools(&self, _request: ChatRequest) -> TalosResult<ToolStream> {
+            let (tx, rx) = mpsc::channel::<TalosResult<ToolStreamEvent>>(4);
+            tokio::spawn(async move {
+                let _ = tx
+                    .send(Ok(ToolStreamEvent::TextDelta {
+                        delta: "ok".to_string(),
+                    }))
+                    .await;
+                let _ = tx
+                    .send(Ok(ToolStreamEvent::Done {
+                        finish_reason: Some("stop".to_string()),
+                        usage: Some(Usage {
+                            prompt_tokens: 11,
+                            completion_tokens: 7,
+                            total_tokens: 18,
+                        }),
+                    }))
+                    .await;
+            });
+            Ok(ToolStream::new(rx))
+        }
+
+        fn default_model(&self) -> &str {
+            "usage-stream"
+        }
+    }
+
     struct AssertingPlanner;
 
     #[async_trait]
@@ -254,12 +319,49 @@ mod tests {
         }
     }
 
+    struct SingleTaskPlanner;
+
+    #[async_trait]
+    impl Planner for SingleTaskPlanner {
+        async fn plan(&self, _ctx: &InvocationContext) -> TalosResult<TaskPlan> {
+            Ok(TaskPlan {
+                tasks: vec![TaskSpec {
+                    id: "task-1".to_string(),
+                    kind: crate::TaskKind::General,
+                    goal: "reply once".to_string(),
+                    input: json!({}),
+                    constraints: crate::TaskConstraints::default(),
+                    tool_candidates: Vec::new(),
+                    expected_output: None,
+                }],
+            })
+        }
+    }
+
     fn build_agent(planner: Arc<dyn Planner>) -> LlmKernelAgent {
         LlmKernelAgent::new(
             "agent-1",
             "Test Agent",
             "Test kernel agent",
             Arc::new(NoopLlmProvider),
+            Arc::new(MemoryStore::new(
+                std::env::temp_dir().join("talos-llm-agent-tests"),
+            )),
+            AgentKernelConfig::default(),
+            Arc::new(ToolRegistry::new()),
+            planner,
+        )
+    }
+
+    fn build_agent_with_provider(
+        planner: Arc<dyn Planner>,
+        provider: Arc<dyn LlmProvider>,
+    ) -> LlmKernelAgent {
+        LlmKernelAgent::new(
+            "agent-1",
+            "Test Agent",
+            "Test kernel agent",
+            provider,
             Arc::new(MemoryStore::new(
                 std::env::temp_dir().join("talos-llm-agent-tests"),
             )),
@@ -324,5 +426,25 @@ mod tests {
         let result = agent.run(&mut ctx).await.expect("run should succeed");
 
         assert_eq!(result.requested_transfer.as_deref(), Some("agent-b"));
+    }
+
+    #[tokio::test]
+    async fn test_run_accumulates_usage_from_general_turn() {
+        let agent =
+            build_agent_with_provider(Arc::new(SingleTaskPlanner), Arc::new(UsageStreamProvider));
+        let mut ctx = build_ctx();
+
+        let result = agent.run(&mut ctx).await.expect("run should succeed");
+
+        assert!(result.usage.total_tokens > 0);
+        assert_eq!(
+            result.usage.total_tokens,
+            result.usage.input_tokens + result.usage.output_tokens
+        );
+        assert_eq!(result.task_results.len(), 1);
+        assert_eq!(
+            result.task_results[0].usage.total_tokens,
+            result.usage.total_tokens
+        );
     }
 }

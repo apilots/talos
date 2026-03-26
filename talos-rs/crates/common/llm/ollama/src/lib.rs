@@ -127,6 +127,13 @@ struct OpenAICompatRequest {
     parallel_tool_calls: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     stream: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream_options: Option<OpenAICompatStreamOptions>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct OpenAICompatStreamOptions {
+    include_usage: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -464,6 +471,7 @@ impl OllamaProvider {
             tool_choice: Self::convert_openai_tool_choice(request.tool_choice),
             parallel_tool_calls: request.parallel_tool_calls,
             stream: Some(false),
+            stream_options: None,
         };
 
         let url = self.openai_compat_url();
@@ -570,6 +578,9 @@ impl OllamaProvider {
             tool_choice: Self::convert_openai_tool_choice(request.tool_choice),
             parallel_tool_calls: request.parallel_tool_calls,
             stream: Some(true),
+            stream_options: Some(OpenAICompatStreamOptions {
+                include_usage: true,
+            }),
         };
 
         let response = self
@@ -751,6 +762,7 @@ impl LlmProvider for OllamaProvider {
                                 let _ = tx
                                     .send(Ok(ToolStreamEvent::Done {
                                         finish_reason: chunk.finish_reason,
+                                        usage: None,
                                     }))
                                     .await;
                                 return;
@@ -780,6 +792,8 @@ impl LlmProvider for OllamaProvider {
 
             let mut stream = response.bytes_stream();
             let mut accumulators: HashMap<usize, Acc> = HashMap::new();
+            let mut final_finish_reason: Option<String> = None;
+            let mut final_usage: Option<Usage> = None;
 
             while let Some(chunk_result) = stream.next().await {
                 match chunk_result {
@@ -794,7 +808,10 @@ impl LlmProvider for OllamaProvider {
                             if data == "[DONE]" {
                                 let _ = tx
                                     .send(Ok(ToolStreamEvent::Done {
-                                        finish_reason: Some("stop".to_string()),
+                                        finish_reason: final_finish_reason
+                                            .clone()
+                                            .or_else(|| Some("stop".to_string())),
+                                        usage: final_usage.clone(),
                                     }))
                                     .await;
                                 return;
@@ -803,6 +820,16 @@ impl LlmProvider for OllamaProvider {
                             let Ok(event) = serde_json::from_str::<Value>(data) else {
                                 continue;
                             };
+
+                            if let Some(usage) = event.get("usage").and_then(|value| {
+                                serde_json::from_value::<OpenAICompatUsage>(value.clone()).ok()
+                            }) {
+                                final_usage = Some(Usage {
+                                    prompt_tokens: usage.prompt_tokens,
+                                    completion_tokens: usage.completion_tokens,
+                                    total_tokens: usage.total_tokens,
+                                });
+                            }
 
                             let choice = event
                                 .get("choices")
@@ -907,6 +934,7 @@ impl LlmProvider for OllamaProvider {
                                 .and_then(|c| c.get("finish_reason"))
                                 .and_then(|r| r.as_str())
                             {
+                                final_finish_reason = Some(reason.to_string());
                                 for (index, acc) in accumulators.drain() {
                                     let arguments = serde_json::from_str::<Value>(&acc.arguments)
                                         .unwrap_or_else(|_| Value::String(acc.arguments.clone()));
@@ -923,13 +951,6 @@ impl LlmProvider for OllamaProvider {
                                         return;
                                     }
                                 }
-
-                                let _ = tx
-                                    .send(Ok(ToolStreamEvent::Done {
-                                        finish_reason: Some(reason.to_string()),
-                                    }))
-                                    .await;
-                                return;
                             }
                         }
                     }

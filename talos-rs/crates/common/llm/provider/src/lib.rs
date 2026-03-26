@@ -169,6 +169,7 @@ pub trait LlmProvider: Send + Sync {
                             let _ = tx
                                 .send(Ok(ToolStreamEvent::Done {
                                     finish_reason: chunk.finish_reason,
+                                    usage: None,
                                 }))
                                 .await;
                             return;
@@ -385,6 +386,8 @@ pub enum ToolStreamEvent {
     },
     Done {
         finish_reason: Option<String>,
+        #[serde(default)]
+        usage: Option<Usage>,
     },
 }
 

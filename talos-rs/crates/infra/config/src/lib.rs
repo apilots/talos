@@ -826,9 +826,9 @@ pub struct ProviderConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
 
-    /// Provider-specific supported model list
+    /// Provider-specific model metadata
     #[serde(default)]
-    pub supported_models: Vec<String>,
+    pub models: Vec<ProviderModelConfig>,
 }
 
 impl Default for ProviderConfig {
@@ -837,12 +837,108 @@ impl Default for ProviderConfig {
             api_key: None,
             base_url: None,
             enabled: true,
-            supported_models: Vec::new(),
+            models: Vec::new(),
         }
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProviderModelConfig {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub context_window: u32,
+    #[serde(default)]
+    pub max_tokens: u32,
+    #[serde(default)]
+    pub reasoning: bool,
+    #[serde(default)]
+    pub input: Vec<ModelInputKind>,
+    #[serde(default)]
+    pub cost: ModelCostConfig,
+    #[serde(default)]
+    pub compat: ModelCompatConfig,
+}
+
+impl ProviderModelConfig {
+    pub fn display_name(&self) -> &str {
+        if self.name.trim().is_empty() {
+            self.id.as_str()
+        } else {
+            self.name.as_str()
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelInputKind {
+    Text,
+    Image,
+    Audio,
+    Video,
+    File,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ModelCostConfig {
+    #[serde(default)]
+    pub input: f64,
+    #[serde(default)]
+    pub output: f64,
+    #[serde(default)]
+    pub cache_read: f64,
+    #[serde(default)]
+    pub cache_write: f64,
+}
+
+impl Default for ModelCostConfig {
+    fn default() -> Self {
+        Self {
+            input: 0.0,
+            output: 0.0,
+            cache_read: 0.0,
+            cache_write: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct ModelCompatConfig {
+    #[serde(default)]
+    pub thinking_format: Option<ThinkingFormat>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ThinkingFormat {
+    OpenAi,
+    Anthropic,
+    Qwen,
+}
+
 impl Config {
+    pub fn current_provider_config(&self) -> Option<&ProviderConfig> {
+        match self.llm.provider.trim().to_ascii_lowercase().as_str() {
+            "anthropic" => Some(&self.llm.anthropic),
+            "openai" => Some(&self.llm.openai),
+            "bailian" => Some(&self.llm.bailian),
+            "ollama" => Some(&self.llm.ollama),
+            _ => None,
+        }
+    }
+
+    pub fn provider_config(&self, provider: &str) -> Option<&ProviderConfig> {
+        match provider.trim().to_ascii_lowercase().as_str() {
+            "anthropic" => Some(&self.llm.anthropic),
+            "openai" => Some(&self.llm.openai),
+            "bailian" => Some(&self.llm.bailian),
+            "ollama" => Some(&self.llm.ollama),
+            _ => None,
+        }
+    }
+
     /// Load configuration.
     ///
     /// Lookup order:
@@ -1247,6 +1343,19 @@ impl Config {
             ));
         }
 
+        if !provider.1.models.is_empty()
+            && !provider
+                .1
+                .models
+                .iter()
+                .any(|model| model.id == self.llm.model)
+        {
+            return Err(TalosError::InvalidConfiguration(format!(
+                "llm.model '{}' is not configured under llm.{}.models",
+                self.llm.model, provider.0
+            )));
+        }
+
         Ok(())
     }
 }
@@ -1429,10 +1538,43 @@ llm:
     api_key: ${BAILIAN_API_KEY}
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
     enabled: true
-    supported_models:
-      - qwen-max
-      - qwen-plus
-      - qwen-turbo
+    models:
+      - id: qwen-max
+        name: qwen-max
+        context_window: 32768
+        max_tokens: 8192
+        reasoning: false
+        input: [text]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
+      - id: qwen-plus
+        name: qwen-plus
+        context_window: 32768
+        max_tokens: 8192
+        reasoning: false
+        input: [text]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
+      - id: qwen-turbo
+        name: qwen-turbo
+        context_window: 32768
+        max_tokens: 8192
+        reasoning: false
+        input: [text]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
   
   ollama:
     base_url: http://localhost:11434
@@ -1551,6 +1693,41 @@ mod tests {
 
         config.llm.openai.api_key = Some("sk-test".to_string());
         assert!(config.validate_runtime().is_ok());
+    }
+
+    #[test]
+    fn test_provider_models_are_strongly_typed() {
+        let yaml = r#"
+enabled: true
+api_key: sk-test
+base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+models:
+  - id: qwen-max
+    name: qwen-max
+    context_window: 32768
+    max_tokens: 8192
+    reasoning: false
+    input: [text, image]
+    cost:
+      input: 0.1
+      output: 0.2
+      cache_read: 0.01
+      cache_write: 0.02
+    compat:
+      thinking_format: qwen
+"#;
+
+        let provider: ProviderConfig =
+            serde_yaml::from_str(yaml).expect("provider config should parse");
+        let model = &provider.models[0];
+        assert_eq!(model.id, "qwen-max");
+        assert_eq!(model.context_window, 32_768);
+        assert_eq!(
+            model.input,
+            vec![ModelInputKind::Text, ModelInputKind::Image]
+        );
+        assert_eq!(model.compat.thinking_format, Some(ThinkingFormat::Qwen));
+        assert!(provider.enabled);
     }
 
     #[test]

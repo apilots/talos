@@ -214,6 +214,7 @@ mod tests {
                     status: crate::TaskStatus::Success,
                     output: "done".to_string(),
                     output_items: vec![],
+                    usage: TalosUsage::default(),
                     tool_traces: vec![],
                     state_delta: HashMap::new(),
                     error: None,

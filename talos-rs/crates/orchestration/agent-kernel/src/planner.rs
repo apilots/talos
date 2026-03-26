@@ -18,9 +18,7 @@ fn build_single_task_plan(ctx: &InvocationContext) -> TaskPlan {
         expected_output: None,
     };
 
-    TaskPlan {
-        tasks: vec![task],
-    }
+    TaskPlan { tasks: vec![task] }
 }
 
 pub struct BuiltInPlanner;

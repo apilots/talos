@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use talos_config::Config;
 use talos_error::TalosResult;
-use talos_types::talos::{TalosContext, TalosInputItem, TalosProvider};
 use talos_types::gateway::GatewayRequest;
+use talos_types::talos::{TalosContext, TalosInputItem, TalosProvider};
 use talos_types::RequestHandler;
 use tokio::sync::mpsc;
 use tracing::{error, info};
@@ -193,7 +193,8 @@ fn build_gateway_request(
     };
 
     let context = {
-        let context = TalosContext::im(provider, user_id.to_string()).with_channel_id(chat_id.to_string());
+        let context =
+            TalosContext::im(provider, user_id.to_string()).with_channel_id(chat_id.to_string());
         if let Some(thread_id) = thread_id {
             context.with_thread_id(thread_id)
         } else {
@@ -223,8 +224,8 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use std::sync::Mutex;
-    use talos_types::talos::{TalosReasoning, TalosUsage};
     use talos_types::gateway::{GatewayRequest, GatewayResponse};
+    use talos_types::talos::{TalosReasoning, TalosUsage};
 
     use crate::traits::{ChannelCapabilities, ChannelDefinition, DeliveryResult, OutboundAdapter};
 
@@ -450,7 +451,8 @@ mod tests {
     }
 
     fn extract_text_input(input: &[TalosInputItem]) -> String {
-        input.iter()
+        input
+            .iter()
             .filter_map(|item| match item {
                 TalosInputItem::Text { text } => Some(text.as_str()),
                 _ => None,

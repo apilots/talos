@@ -23,8 +23,14 @@ echo "CASE health_check PASS status=${status}"
 models_json="$(curl -sS -H "Authorization: Bearer ${AUTH_TOKEN}" "${GATEWAY_URL}/v1/models")"
 log_case_json "models_list" "{}" "${models_json}"
 model_count="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("data", [])))' <<< "${models_json}")"
+first_model_name="$(python3 -c 'import json,sys; data=json.load(sys.stdin).get("data", []); print((data[0].get("name") if data else ""))' <<< "${models_json}")"
+first_model_context_window="$(python3 -c 'import json,sys; data=json.load(sys.stdin).get("data", []); print((data[0].get("context_window") if data else 0))' <<< "${models_json}")"
 if [[ "${model_count}" -lt 1 ]]; then
   echo "CASE models_list FAIL expected=>=1 actual=${model_count}"
+  exit 1
+fi
+if [[ -z "${first_model_name}" || "${first_model_context_window}" -le 0 ]]; then
+  echo "CASE models_list FAIL missing_model_metadata response=${models_json}"
   exit 1
 fi
 echo "CASE models_list PASS count=${model_count}"

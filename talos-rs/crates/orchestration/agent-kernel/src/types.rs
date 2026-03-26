@@ -59,6 +59,8 @@ pub struct TaskResult {
     pub output: String,
     #[serde(default)]
     pub output_items: Vec<TalosOutputItem>,
+    #[serde(default)]
+    pub usage: TalosUsage,
     pub tool_traces: Vec<Value>,
     pub state_delta: HashMap<String, Value>,
     pub error: Option<String>,

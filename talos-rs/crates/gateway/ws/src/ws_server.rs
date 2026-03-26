@@ -218,9 +218,7 @@ impl WsServer {
                                     let request = GatewayRequest {
                                         session_id: format!("ws-session-{}", conn_id_clone),
                                         workspace_id: None,
-                                        input: vec![TalosInputItem::Text {
-                                            text: text.clone(),
-                                        }],
+                                        input: vec![TalosInputItem::Text { text: text.clone() }],
                                         context: TalosContext::ws(conn_id_clone.clone())
                                             .with_channel_id(format!("ws_{}", conn_id_clone)),
                                     };
@@ -248,9 +246,7 @@ impl WsServer {
                                     let request = GatewayRequest {
                                         session_id: format!("ws-binary-session-{}", conn_id_clone),
                                         workspace_id: None,
-                                        input: vec![TalosInputItem::Text {
-                                            text: text_content,
-                                        }],
+                                        input: vec![TalosInputItem::Text { text: text_content }],
                                         context: TalosContext::ws(conn_id_clone.clone())
                                             .with_channel_id(format!(
                                                 "ws_{}_binary",
@@ -420,7 +416,8 @@ mod tests {
     }
 
     fn extract_text_input(input: &[TalosInputItem]) -> String {
-        input.iter()
+        input
+            .iter()
             .filter_map(|item| match item {
                 TalosInputItem::Text { text } => Some(text.as_str()),
                 _ => None,

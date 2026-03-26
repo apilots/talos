@@ -6,16 +6,15 @@ use talos_agent::{AgentOrchestrator, OrchestratorRequest};
 use talos_error::TalosResult;
 use talos_router::Router;
 use talos_session_store::SessionStore;
-use talos_types::talos::{
-    TalosContext, TalosEvent, TalosEventType, TalosInputItem, TalosProvider,
-};
 use talos_types::gateway::{GatewayRequest, GatewayResponse};
+use talos_types::talos::TalosUsage;
+use talos_types::talos::{TalosContext, TalosEvent, TalosEventType, TalosInputItem, TalosProvider};
 use talos_types::{
     RequestHandler, SessionPatch, SessionPatchAck, SessionQuery, SessionRecord, SessionService,
     TalosConfig, TalosSession,
 };
 use tokio::sync::{mpsc, RwLock};
-use tracing::info;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -111,6 +110,7 @@ impl SessionManager {
         assistant_output: &str,
         assistant_model: &str,
         message_delta: u64,
+        usage: &TalosUsage,
     ) -> TalosResult<()> {
         self.session_store
             .append_message_by_session_id(session_id, "user", user_input)
@@ -118,7 +118,10 @@ impl SessionManager {
         self.session_store
             .append_message_by_session_id(session_id, "assistant", assistant_output)
             .await?;
-        self.update_cached_session_after_turn(session_id, assistant_model, message_delta)
+        self.session_store
+            .record_session_progress(session_id, message_delta, usage, Some(assistant_model))
+            .await?;
+        self.update_cached_session_after_turn(session_id, assistant_model, message_delta, usage)
             .await;
         Ok(())
     }
@@ -129,6 +132,7 @@ impl SessionManager {
         user_input: &str,
         assistant_output: &str,
         assistant_model: &str,
+        usage: &TalosUsage,
     ) {
         let _ = self
             .session_store
@@ -140,7 +144,11 @@ impl SessionManager {
                 .append_message_by_session_id(session_id, "assistant", assistant_output)
                 .await;
         }
-        self.update_cached_session_after_turn(session_id, assistant_model, 2)
+        let _ = self
+            .session_store
+            .record_session_progress(session_id, 2, usage, Some(assistant_model))
+            .await;
+        self.update_cached_session_after_turn(session_id, assistant_model, 2, usage)
             .await;
     }
 
@@ -149,12 +157,28 @@ impl SessionManager {
         session_id: &str,
         assistant_model: &str,
         message_delta: u64,
+        usage: &TalosUsage,
     ) {
         let mut cache = self.session_cache.write().await;
         if let Some(session) = cache.get_mut(session_id) {
             let now = talos_types::now();
             session.state.last_activity = now;
             session.state.message_count = session.state.message_count.saturating_add(message_delta);
+            session.state.usage.input_tokens = session
+                .state
+                .usage
+                .input_tokens
+                .saturating_add(usage.input_tokens);
+            session.state.usage.output_tokens = session
+                .state
+                .usage
+                .output_tokens
+                .saturating_add(usage.output_tokens);
+            session.state.usage.total_tokens = session
+                .state
+                .usage
+                .total_tokens
+                .saturating_add(usage.total_tokens);
             session.config.agent.model = assistant_model.to_string();
             session.config.llm.model = assistant_model.to_string();
         }
@@ -165,7 +189,7 @@ impl SessionManager {
         context: TalosContext,
         target_agent: &str,
         model: Option<String>,
-    ) -> TalosResult<SessionRecord> {
+    ) -> TalosResult<TalosSession> {
         let record = self
             .session_store
             .create_session(
@@ -177,19 +201,23 @@ impl SessionManager {
             )
             .await?;
         let session = self.build_session(&record, Some(self.default_workspace_id.clone()))?;
-        self.cache_session(session).await;
-        Ok(record)
+        Ok(self.cache_session(session).await)
     }
 
-    async fn list_sessions(&self, query: SessionQuery) -> TalosResult<Vec<SessionRecord>> {
-        self.session_store.list_session_records(&query).await
+    async fn list_sessions(&self, query: SessionQuery) -> TalosResult<Vec<TalosSession>> {
+        let records = self.session_store.list_session_records(&query).await?;
+        records
+            .iter()
+            .map(|record| self.build_session(record, Some(self.default_workspace_id.clone())))
+            .collect()
     }
 
-    async fn get_session(&self, session_id: &str) -> TalosResult<Option<SessionRecord>> {
+    async fn get_session(&self, session_id: &str) -> TalosResult<Option<TalosSession>> {
         if let Some(session) = self.get_cached_session(session_id).await {
-            return Ok(Some(SessionRecord::from_session(&session, self.base_model())));
+            return Ok(Some(session));
         }
-        self.session_store.get_session_record(session_id).await
+        self.load_session(session_id, Some(self.default_workspace_id.clone()))
+            .await
     }
 
     async fn load_session(
@@ -338,10 +366,7 @@ impl RequestHandler for CoordinatorImpl {
             .await?
             .unwrap_or_else(|| "default".to_string());
 
-        let session = self
-            .sessions
-            .resolve_session(&request)
-            .await?;
+        let session = self.sessions.resolve_session(&request).await?;
         let model_for_turn = session.config.llm.model.clone();
 
         let agents = self.agents.read().await;
@@ -365,6 +390,7 @@ impl RequestHandler for CoordinatorImpl {
                 &agent_response.output_text,
                 &model_for_turn,
                 2,
+                &agent_response.usage,
             )
             .await?;
 
@@ -394,10 +420,7 @@ impl RequestHandler for CoordinatorImpl {
             .await?
             .unwrap_or_else(|| "default".to_string());
 
-        let session = self
-            .sessions
-            .resolve_session(&request)
-            .await?;
+        let session = self.sessions.resolve_session(&request).await?;
         let model_for_turn = session.config.llm.model.clone();
 
         let agents = self.agents.read().await;
@@ -424,6 +447,7 @@ impl RequestHandler for CoordinatorImpl {
         tokio::spawn(async move {
             let mut sequence: u64 = 0;
             let mut assistant_output = String::new();
+            let mut final_usage = TalosUsage::default();
 
             while let Some(event) = orchestrator_stream.recv().await {
                 let Some(event_type) =
@@ -435,6 +459,24 @@ impl RequestHandler for CoordinatorImpl {
                 if event_type == TalosEventType::MessageOutputDelta {
                     if let Some(delta) = event.data.get("delta").and_then(|value| value.as_str()) {
                         assistant_output.push_str(delta);
+                    }
+                }
+                if event_type == TalosEventType::MessageCompleted {
+                    if let Some(usage) = event.data.get("usage") {
+                        match serde_json::from_value::<TalosUsage>(usage.clone()) {
+                            Ok(parsed) => {
+                                final_usage = parsed;
+                            }
+                            Err(err) => {
+                                warn!(
+                                    session_id = %session_id,
+                                    event_type = %event.event_type,
+                                    error = %err,
+                                    usage = %usage,
+                                    "failed to parse usage from message completed event"
+                                );
+                            }
+                        }
                     }
                 }
 
@@ -460,6 +502,7 @@ impl RequestHandler for CoordinatorImpl {
                     &user_content,
                     &assistant_output,
                     &response_model,
+                    &final_usage,
                 )
                 .await;
         });
@@ -495,7 +538,7 @@ impl SessionService for CoordinatorImpl {
         &self,
         context: TalosContext,
         model: Option<String>,
-    ) -> TalosResult<SessionRecord> {
+    ) -> TalosResult<TalosSession> {
         let channel = Self::route_channel(&context);
         let target_agent = self
             .router
@@ -510,11 +553,11 @@ impl SessionService for CoordinatorImpl {
         Ok(record)
     }
 
-    async fn list_sessions(&self, query: SessionQuery) -> TalosResult<Vec<SessionRecord>> {
+    async fn list_sessions(&self, query: SessionQuery) -> TalosResult<Vec<TalosSession>> {
         self.sessions.list_sessions(query).await
     }
 
-    async fn get_session(&self, session_id: &str) -> TalosResult<Option<SessionRecord>> {
+    async fn get_session(&self, session_id: &str) -> TalosResult<Option<TalosSession>> {
         self.sessions.get_session(session_id).await
     }
 

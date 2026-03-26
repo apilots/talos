@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use talos_llm_provider::{ChatMessage, ChatRequest, LlmProvider};
 use talos_memory::{
-    Memory, MemoryStore, RecordHeader, SessionPromptContextConfig, TalosMessage,
-    TalosMessageRole, TalosTurn,
+    Memory, MemoryStore, RecordHeader, SessionPromptContextConfig, TalosMessage, TalosMessageRole,
+    TalosTurn,
 };
 use talos_prompt::{PromptManager, PromptTemplate};
 use talos_tools::{Tool, ToolRegistry};

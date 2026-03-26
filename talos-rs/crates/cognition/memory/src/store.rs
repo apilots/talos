@@ -240,8 +240,8 @@ mod tests {
     use crate::Memory;
 
     use super::{
-        MemorySearchQuery, MemoryStore, TalosMessage, TalosMessageRole, TalosTurn,
-        RecordHeader, SessionPromptContextConfig, SummaryRecord, WorkspaceMemoryRecord,
+        MemorySearchQuery, MemoryStore, RecordHeader, SessionPromptContextConfig, SummaryRecord,
+        TalosMessage, TalosMessageRole, TalosTurn, WorkspaceMemoryRecord,
     };
 
     fn new_temp_store() -> (TempDir, MemoryStore) {
@@ -600,7 +600,9 @@ mod tests {
             .await
             .expect("root memory should load");
 
-        let content = root.content.expect("default root memory content should exist");
+        let content = root
+            .content
+            .expect("default root memory content should exist");
         assert!(content.contains("# MEMORY"));
         assert!(store.root_memory_path().exists());
     }

@@ -741,7 +741,9 @@ mod tests {
     use chrono::Utc;
     use serde_json::Value;
     use talos_llm_provider::Role;
-    use talos_memory::{Memory, MemoryStore, RecordHeader, TalosMessage, TalosMessageRole, TalosTurn};
+    use talos_memory::{
+        Memory, MemoryStore, RecordHeader, TalosMessage, TalosMessageRole, TalosTurn,
+    };
     use talos_tools::{Tool, ToolContext, ToolOutput};
     use uuid::Uuid;
 

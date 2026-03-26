@@ -25,7 +25,7 @@ use talos_types::talos::{
     TalosContext, TalosEventType, TalosInputItem, TalosMessageRequest, TalosMessageResponse,
     TalosOutputItem,
 };
-use talos_types::{SessionPatch, SessionQuery, SessionService};
+use talos_types::{ModelInfo, SessionPatch, SessionQuery, SessionService};
 
 const DEFAULT_SCOPE_MESSAGES_WRITE: &str = "messages:write";
 const DEFAULT_SCOPE_SESSIONS_WRITE: &str = "sessions:write";
@@ -67,9 +67,8 @@ struct HttpApiState {
     auth: Arc<JwtAuth>,
     static_token: Option<String>,
     auth_disabled: bool,
-    model_provider: String,
     idempotency_cache: Arc<RwLock<HashMap<String, TalosMessageResponse>>>,
-    models: Arc<Vec<String>>,
+    models: Arc<Vec<ModelInfo>>,
 }
 
 impl HttpApiState {
@@ -79,8 +78,7 @@ impl HttpApiState {
         jwt_secret: String,
         static_token: Option<String>,
         auth_disabled: bool,
-        model_provider: String,
-        models: Vec<String>,
+        models: Vec<ModelInfo>,
     ) -> Self {
         Self {
             gateway,
@@ -88,7 +86,6 @@ impl HttpApiState {
             auth: Arc::new(JwtAuth::new(&jwt_secret)),
             static_token,
             auth_disabled,
-            model_provider,
             idempotency_cache: Arc::new(RwLock::new(HashMap::new())),
             models: Arc::new(models),
         }
@@ -104,8 +101,7 @@ pub struct HttpServer {
     jwt_secret: String,
     static_token: Option<String>,
     auth_disabled: bool,
-    model_provider: String,
-    models: Vec<String>,
+    models: Vec<ModelInfo>,
 }
 
 impl HttpServer {
@@ -116,8 +112,7 @@ impl HttpServer {
         host: impl Into<String>,
         port: u16,
         _default_model: impl Into<String>,
-        model_provider: impl Into<String>,
-        models: Vec<String>,
+        models: Vec<ModelInfo>,
     ) -> Self {
         Self {
             gateway,
@@ -127,7 +122,6 @@ impl HttpServer {
             jwt_secret: String::new(),
             static_token: None,
             auth_disabled: false,
-            model_provider: model_provider.into(),
             models,
         }
     }
@@ -160,7 +154,6 @@ impl HttpServer {
             self.jwt_secret.clone(),
             self.static_token.clone(),
             self.auth_disabled,
-            self.model_provider.clone(),
             self.models.clone(),
         ));
 
@@ -277,11 +270,7 @@ async fn health_handler() -> Json<Value> {
 async fn list_models_handler(
     State(state): State<Arc<HttpApiState>>,
 ) -> Result<Json<Value>, ApiError> {
-    let data: Vec<Value> = state
-        .models
-        .iter()
-        .map(|id| json!({ "id": id, "provider": state.model_provider }))
-        .collect();
+    let data: Vec<Value> = state.models.iter().map(|model| json!(model)).collect();
     Ok(Json(json!({ "data": data })))
 }
 
@@ -319,12 +308,7 @@ async fn create_session_handler(
             )
         })?;
 
-    Ok(Json(json!({
-        "id": session.id,
-        "model": session.model,
-        "created_at": session.created_at,
-        "context": session.context,
-    })))
+    Ok(Json(json!(session)))
 }
 
 async fn list_sessions_handler(
@@ -343,18 +327,7 @@ async fn list_sessions_handler(
                 e.to_string(),
             )
         })?;
-    let data: Vec<Value> = sessions
-        .into_iter()
-        .map(|s| {
-            json!({
-                "id": s.id,
-                "model": s.model,
-                "message_count": s.message_count,
-                "last_activity": s.last_activity,
-                "context": s.context,
-            })
-        })
-        .collect();
+    let data: Vec<Value> = sessions.into_iter().map(|s| json!(s)).collect();
 
     Ok(Json(json!({ "data": data })))
 }
@@ -383,13 +356,7 @@ async fn get_session_handler(
         ));
     };
 
-    Ok(Json(json!({
-        "id": session.id,
-        "model": session.model,
-        "message_count": session.message_count,
-        "last_activity": session.last_activity,
-        "context": session.context,
-    })))
+    Ok(Json(json!(session)))
 }
 
 async fn patch_session_handler(
@@ -438,9 +405,11 @@ async fn close_session_handler(
         .close_session(&session_id)
         .await
         .map_err(|err| match err {
-            talos_error::TalosError::ResourceNotFound(_) => {
-                ApiError::new(StatusCode::NOT_FOUND, "invalid_request", "session not found")
-            }
+            talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
+                StatusCode::NOT_FOUND,
+                "invalid_request",
+                "session not found",
+            ),
             other => ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",
@@ -492,9 +461,17 @@ async fn stream_session_message(
         ));
     };
 
-    validate_auth_context(&auth, &session.context, DEFAULT_SCOPE_MESSAGES_WRITE)?;
+    let context = TalosContext {
+        source_type: session.context.source_type.clone(),
+        provider: session.context.provider.clone(),
+        user_id: session.context.user_id.clone(),
+        message_id: session.context.message_id.clone(),
+        trace_id: session.context.trace_id.clone(),
+        channel_id: session.context.channel_id.clone(),
+        thread_id: session.context.thread_id.clone(),
+    };
+    validate_auth_context(&auth, &context, DEFAULT_SCOPE_MESSAGES_WRITE)?;
     validate_text_input(&request.input)?;
-    let context = session.context.clone();
     let gateway_request = GatewayRequest {
         session_id: session_id.clone(),
         workspace_id: request.workspace_id.clone(),
@@ -548,7 +525,16 @@ async fn process_session_message(
         ));
     };
 
-    validate_auth_context(&auth, &session.context, DEFAULT_SCOPE_MESSAGES_WRITE)?;
+    let context = TalosContext {
+        source_type: session.context.source_type.clone(),
+        provider: session.context.provider.clone(),
+        user_id: session.context.user_id.clone(),
+        message_id: session.context.message_id.clone(),
+        trace_id: session.context.trace_id.clone(),
+        channel_id: session.context.channel_id.clone(),
+        thread_id: session.context.thread_id.clone(),
+    };
+    validate_auth_context(&auth, &context, DEFAULT_SCOPE_MESSAGES_WRITE)?;
     let idempotency_key = headers
         .get("Idempotency-Key")
         .and_then(|v| v.to_str().ok())
@@ -561,7 +547,6 @@ async fn process_session_message(
     }
 
     validate_text_input(&request.input)?;
-    let context = session.context.clone();
 
     let gateway_request = GatewayRequest {
         session_id: session_id.clone(),
@@ -639,7 +624,7 @@ fn validate_text_input(input: &[TalosInputItem]) -> Result<(), ApiError> {
 }
 
 fn validate_model_supported(state: &HttpApiState, model: &str) -> Result<(), ApiError> {
-    if state.models.iter().any(|v| v == model) {
+    if state.models.iter().any(|entry| entry.id == model) {
         return Ok(());
     }
 
@@ -761,6 +746,20 @@ mod tests {
     struct MockGateway;
     struct MockSessionService;
 
+    fn test_model_info() -> ModelInfo {
+        ModelInfo {
+            id: "qwen-max".to_string(),
+            name: "Qwen Max".to_string(),
+            provider: "bailian".to_string(),
+            context_window: 32_768,
+            max_tokens: 8_192,
+            reasoning: false,
+            input: vec![talos_types::ModelInputKind::Text],
+            cost: talos_types::ModelCostConfig::default(),
+            compat: talos_types::ModelCompatConfig::default(),
+        }
+    }
+
     #[async_trait::async_trait]
     impl Gateway for MockGateway {
         async fn handle_request(
@@ -844,57 +843,74 @@ mod tests {
         }
     }
 
-    fn mock_context() -> TalosContext {
-        TalosContext::new(
-            TalosSourceType::Http,
-            TalosProvider::Http,
-            "static-token",
-            "message-1",
-            "trace-1",
-        )
-        .with_channel_id("test-channel")
-    }
-
     #[async_trait::async_trait]
     impl SessionService for MockSessionService {
         async fn create_session(
             &self,
             context: TalosContext,
             model: Option<String>,
-        ) -> TalosResult<talos_types::SessionRecord> {
-            Ok(talos_types::SessionRecord {
-                id: "mock-session".to_string(),
-                context,
-                model: model.unwrap_or_else(|| "qwen-max".to_string()),
-                created_at: 0,
-                last_activity: 0,
-                message_count: 0,
-                conf: std::collections::HashMap::new(),
+        ) -> TalosResult<talos_types::TalosSession> {
+            Ok(talos_types::TalosSession {
+                context: talos_types::SessionContext {
+                    session_id: "mock-session".to_string(),
+                    workspace_id: None,
+                    source_type: context.source_type,
+                    provider: context.provider,
+                    user_id: context.user_id,
+                    message_id: context.message_id,
+                    trace_id: context.trace_id,
+                    channel_id: context.channel_id,
+                    thread_id: context.thread_id,
+                },
+                config: {
+                    let mut config = talos_types::TalosConfig::default();
+                    let resolved = model.unwrap_or_else(|| "qwen-max".to_string());
+                    config.agent.model = resolved.clone();
+                    config.llm.model = resolved;
+                    config
+                },
+                state: talos_types::SessionState::default(),
             })
         }
 
         async fn list_sessions(
             &self,
             _query: talos_types::SessionQuery,
-        ) -> TalosResult<Vec<talos_types::SessionRecord>> {
+        ) -> TalosResult<Vec<talos_types::TalosSession>> {
             Ok(Vec::new())
         }
 
         async fn get_session(
             &self,
             session_id: &str,
-        ) -> TalosResult<Option<talos_types::SessionRecord>> {
+        ) -> TalosResult<Option<talos_types::TalosSession>> {
             if session_id != "mock-session" {
                 return Ok(None);
             }
-            Ok(Some(talos_types::SessionRecord {
-                id: "mock-session".to_string(),
-                context: mock_context(),
-                model: "qwen-max".to_string(),
-                created_at: 0,
-                last_activity: 0,
-                message_count: 1,
-                conf: std::collections::HashMap::new(),
+            Ok(Some(talos_types::TalosSession {
+                context: talos_types::SessionContext {
+                    session_id: "mock-session".to_string(),
+                    workspace_id: None,
+                    source_type: TalosSourceType::Http,
+                    provider: TalosProvider::Http,
+                    user_id: "static-token".to_string(),
+                    message_id: "message-1".to_string(),
+                    trace_id: "trace-1".to_string(),
+                    channel_id: Some("test-channel".to_string()),
+                    thread_id: None,
+                },
+                config: {
+                    let mut config = talos_types::TalosConfig::default();
+                    config.agent.model = "qwen-max".to_string();
+                    config.llm.model = "qwen-max".to_string();
+                    config
+                },
+                state: talos_types::SessionState {
+                    created_at: 0,
+                    last_activity: 0,
+                    message_count: 1,
+                    usage: talos_types::talos::TalosUsage::default(),
+                },
             }))
         }
 
@@ -947,8 +963,7 @@ mod tests {
             "test-secret".to_string(),
             None,
             false,
-            "bailian".to_string(),
-            vec!["qwen-max".to_string()],
+            vec![test_model_info()],
         ));
         let app = Router::new()
             .route("/v1/models", get(list_models_handler))
@@ -964,6 +979,13 @@ mod tests {
             .await
             .expect("request should succeed");
         assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .expect("body should be readable");
+        let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
+        assert_eq!(payload["data"][0]["id"], "qwen-max");
+        assert_eq!(payload["data"][0]["provider"], "bailian");
+        assert_eq!(payload["data"][0]["context_window"], 32_768);
     }
 
     #[test]
@@ -974,8 +996,7 @@ mod tests {
             "127.0.0.1",
             8080,
             "qwen-max",
-            "mock-provider",
-            vec!["qwen-max".to_string()],
+            vec![test_model_info()],
         );
 
         assert_eq!(server.listen_addr(), "127.0.0.1:8080");
@@ -989,8 +1010,7 @@ mod tests {
             "test-secret".to_string(),
             None,
             false,
-            "bailian".to_string(),
-            vec!["qwen-max".to_string()],
+            vec![test_model_info()],
         ));
         let app = Router::new()
             .route("/v1/models", get(list_models_handler))
@@ -1017,8 +1037,7 @@ mod tests {
             "test-secret".to_string(),
             None,
             true,
-            "bailian".to_string(),
-            vec!["qwen-max".to_string()],
+            vec![test_model_info()],
         ));
         let app = Router::new()
             .route("/v1/models", get(list_models_handler))
@@ -1045,8 +1064,7 @@ mod tests {
             "test-secret".to_string(),
             Some("test-token".to_string()),
             false,
-            "bailian".to_string(),
-            vec!["qwen-max".to_string()],
+            vec![test_model_info()],
         ));
 
         let request = TalosMessageRequest {
@@ -1084,8 +1102,7 @@ mod tests {
             "test-secret".to_string(),
             Some("test-token".to_string()),
             false,
-            "bailian".to_string(),
-            vec!["qwen-max".to_string()],
+            vec![test_model_info()],
         ));
 
         let request = TalosMessageRequest {

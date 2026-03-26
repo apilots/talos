@@ -3,15 +3,36 @@
 //! Defines common types and ID structures
 
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::collections::HashMap;
+use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 // Re-export key types for convenience
 pub use async_trait::async_trait;
+pub use talos_config::{ModelCompatConfig, ModelCostConfig, ModelInputKind};
 pub use talos_error::{TalosError, TalosResult};
 pub type TalosConfig = talos_config::Config;
+
+/// Public model metadata exposed by the gateway.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ModelInfo {
+    pub id: String,
+    pub name: String,
+    pub provider: String,
+    #[serde(default)]
+    pub context_window: u32,
+    #[serde(default)]
+    pub max_tokens: u32,
+    #[serde(default)]
+    pub reasoning: bool,
+    #[serde(default)]
+    pub input: Vec<ModelInputKind>,
+    #[serde(default)]
+    pub cost: ModelCostConfig,
+    #[serde(default)]
+    pub compat: ModelCompatConfig,
+}
 
 /// Agent ID
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -87,9 +108,7 @@ impl Default for MessageId {
 
 /// Gateway module
 pub mod gateway {
-    use crate::talos::{
-        TalosContext, TalosInputItem, TalosOutputItem, TalosReasoning, TalosUsage,
-    };
+    use crate::talos::{TalosContext, TalosInputItem, TalosOutputItem, TalosReasoning, TalosUsage};
     use serde::{Deserialize, Serialize};
 
     /// Request coming into the gateway
@@ -381,7 +400,7 @@ pub mod talos {
     }
 
     /// Token usage values.
-    #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
     pub struct TalosUsage {
         pub input_tokens: u32,
         pub output_tokens: u32,
@@ -435,6 +454,8 @@ pub struct SessionRecord {
     pub last_activity: u64,
     pub message_count: u64,
     #[serde(default)]
+    pub usage: talos::TalosUsage,
+    #[serde(default)]
     pub conf: HashMap<String, serde_json::Value>,
 }
 
@@ -458,6 +479,7 @@ impl SessionRecord {
             created_at: session.state.created_at,
             last_activity: session.state.last_activity,
             message_count: session.state.message_count,
+            usage: session.state.usage.clone(),
             conf,
         }
     }
@@ -500,6 +522,8 @@ pub struct SessionState {
     pub created_at: u64,
     pub last_activity: u64,
     pub message_count: u64,
+    #[serde(default)]
+    pub usage: talos::TalosUsage,
 }
 
 impl SessionState {
@@ -508,6 +532,7 @@ impl SessionState {
             created_at: record.created_at,
             last_activity: record.last_activity,
             message_count: record.message_count,
+            usage: record.usage.clone(),
         }
     }
 }
@@ -586,8 +611,7 @@ impl SessionConfigOverridePolicy {
         conf: &HashMap<String, serde_json::Value>,
     ) -> TalosResult<TalosConfig> {
         let mut config = base_config.clone();
-        let model = Self::extract_agent_model(conf)?
-            .unwrap_or_else(|| record_model.to_string());
+        let model = Self::extract_agent_model(conf)?.unwrap_or_else(|| record_model.to_string());
         config.agent.model = model.clone();
         config.llm.model = model;
         Ok(config)
@@ -600,11 +624,8 @@ impl TalosSession {
         base_config: &TalosConfig,
         workspace_id: Option<String>,
     ) -> TalosResult<Self> {
-        let config = SessionConfigOverridePolicy::apply_to_config(
-            base_config,
-            &record.model,
-            &record.conf,
-        )?;
+        let config =
+            SessionConfigOverridePolicy::apply_to_config(base_config, &record.model, &record.conf)?;
 
         Ok(Self {
             context: SessionContext::from_record(record, workspace_id),
@@ -652,11 +673,11 @@ pub trait SessionService: Send + Sync {
         &self,
         context: talos::TalosContext,
         model: Option<String>,
-    ) -> TalosResult<SessionRecord>;
+    ) -> TalosResult<TalosSession>;
 
-    async fn list_sessions(&self, query: SessionQuery) -> TalosResult<Vec<SessionRecord>>;
+    async fn list_sessions(&self, query: SessionQuery) -> TalosResult<Vec<TalosSession>>;
 
-    async fn get_session(&self, session_id: &str) -> TalosResult<Option<SessionRecord>>;
+    async fn get_session(&self, session_id: &str) -> TalosResult<Option<TalosSession>>;
 
     async fn patch_session(
         &self,
@@ -956,6 +977,7 @@ mod tests {
             created_at: 100,
             last_activity: 200,
             message_count: 3,
+            usage: talos::TalosUsage::default(),
             conf: HashMap::new(),
         };
 
@@ -968,6 +990,7 @@ mod tests {
         assert_eq!(state.created_at, 100);
         assert_eq!(state.last_activity, 200);
         assert_eq!(state.message_count, 3);
+        assert_eq!(state.usage.total_tokens, 0);
     }
 
     #[test]
@@ -987,6 +1010,7 @@ mod tests {
             created_at: 100,
             last_activity: 200,
             message_count: 3,
+            usage: talos::TalosUsage::default(),
             conf: HashMap::new(),
         };
         record.conf.insert(

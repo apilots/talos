@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::sync::Arc;
 use talos_error::TalosResult;
 use talos_storage::{Row, Storage};
+use talos_types::talos::TalosUsage;
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType};
 use talos_types::{
     SessionConfigOverridePolicy, SessionPatch, SessionPatchAck, SessionQuery, SessionRecord,
@@ -43,6 +44,14 @@ pub trait SessionStore: Send + Sync {
         session_id: &str,
         role: &str,
         content: &str,
+    ) -> TalosResult<()>;
+
+    async fn record_session_progress(
+        &self,
+        session_id: &str,
+        message_delta: u64,
+        usage: &TalosUsage,
+        model: Option<&str>,
     ) -> TalosResult<()>;
 }
 
@@ -94,7 +103,7 @@ impl DatabaseSessionStore {
     }
 
     async fn fetch_session_row(&self, session_key: &str) -> TalosResult<Option<Row>> {
-        let sql = "SELECT session_key, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, conf_json FROM sessions WHERE session_key = ?";
+        let sql = "SELECT session_key, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, usage_json, conf_json FROM sessions WHERE session_key = ?";
         let rows = self.storage.query(sql, &[session_key]).await?;
         Ok(rows.into_iter().next())
     }
@@ -104,8 +113,7 @@ impl DatabaseSessionStore {
             .get_string("context_json")
             .and_then(|m| serde_json::from_str::<TalosContext>(&m).ok())
             .unwrap_or_else(|| {
-                let context =
-                    TalosContext::system(row.get_string("user_id").unwrap_or_default());
+                let context = TalosContext::system(row.get_string("user_id").unwrap_or_default());
                 let context = match row.get_string("channel") {
                     Some(channel_id) => context.with_channel_id(channel_id),
                     None => context,
@@ -124,6 +132,10 @@ impl DatabaseSessionStore {
             .unwrap_or_default()
             .try_into()
             .unwrap_or_default();
+        let usage = row
+            .get_string("usage_json")
+            .and_then(|raw| serde_json::from_str::<TalosUsage>(&raw).ok())
+            .unwrap_or_default();
 
         SessionRecord {
             id: row.get_string("session_key").unwrap_or_default(),
@@ -140,6 +152,7 @@ impl DatabaseSessionStore {
                 .try_into()
                 .unwrap_or_default(),
             message_count,
+            usage,
             conf: Self::parse_conf_json(row.get_string("conf_json"))
                 .into_iter()
                 .collect::<std::collections::HashMap<_, _>>(),
@@ -160,6 +173,11 @@ impl DatabaseSessionStore {
 
     fn build_context_json(context: &TalosContext) -> TalosResult<String> {
         serde_json::to_string(context)
+            .map_err(|e| talos_error::TalosError::SerializationError(e.to_string()))
+    }
+
+    fn build_usage_json(usage: &TalosUsage) -> TalosResult<String> {
+        serde_json::to_string(usage)
             .map_err(|e| talos_error::TalosError::SerializationError(e.to_string()))
     }
 }
@@ -192,10 +210,15 @@ impl SessionStore for DatabaseSessionStore {
             created_at: now.try_into().unwrap_or_default(),
             last_activity: now.try_into().unwrap_or_default(),
             message_count: 0,
-            conf: conf.clone().into_iter().collect::<std::collections::HashMap<_, _>>(),
+            usage: TalosUsage::default(),
+            conf: conf
+                .clone()
+                .into_iter()
+                .collect::<std::collections::HashMap<_, _>>(),
         };
 
         let context_json = Self::build_context_json(context)?;
+        let usage_json = Self::build_usage_json(&record.usage)?;
         let conf_json = Self::build_conf_json(conf)?;
 
         let row = Row::new(
@@ -213,6 +236,7 @@ impl SessionStore for DatabaseSessionStore {
                 "context_json".to_string(),
                 "model".to_string(),
                 "message_count".to_string(),
+                "usage_json".to_string(),
                 "conf_json".to_string(),
             ],
             vec![
@@ -237,6 +261,7 @@ impl SessionStore for DatabaseSessionStore {
                 Value::String(context_json),
                 Value::String(model),
                 Value::Number(0.into()),
+                Value::String(usage_json),
                 Value::String(conf_json),
             ],
         );
@@ -266,7 +291,10 @@ impl SessionStore for DatabaseSessionStore {
                     .into_iter()
                     .collect();
             }
-            record.conf = conf.clone().into_iter().collect::<std::collections::HashMap<_, _>>();
+            record.conf = conf
+                .clone()
+                .into_iter()
+                .collect::<std::collections::HashMap<_, _>>();
             record.last_activity = now.try_into().unwrap_or_default();
 
             let context_json = Self::build_context_json(&record.context)?;
@@ -278,6 +306,7 @@ impl SessionStore for DatabaseSessionStore {
                     "context_json".to_string(),
                     "model".to_string(),
                     "message_count".to_string(),
+                    "usage_json".to_string(),
                     "conf_json".to_string(),
                 ],
                 vec![
@@ -285,6 +314,7 @@ impl SessionStore for DatabaseSessionStore {
                     Value::String(context_json),
                     Value::String(record.model.clone()),
                     Value::Number(serde_json::Number::from(record.message_count)),
+                    Value::String(Self::build_usage_json(&record.usage)?),
                     Value::String(conf_json),
                 ],
             );
@@ -315,10 +345,15 @@ impl SessionStore for DatabaseSessionStore {
             created_at: now.try_into().unwrap_or_default(),
             last_activity: now.try_into().unwrap_or_default(),
             message_count: 0,
-            conf: conf.clone().into_iter().collect::<std::collections::HashMap<_, _>>(),
+            usage: TalosUsage::default(),
+            conf: conf
+                .clone()
+                .into_iter()
+                .collect::<std::collections::HashMap<_, _>>(),
         };
 
         let context_json = Self::build_context_json(context)?;
+        let usage_json = Self::build_usage_json(&record.usage)?;
         let conf_json = Self::build_conf_json(conf)?;
 
         let row = Row::new(
@@ -336,6 +371,7 @@ impl SessionStore for DatabaseSessionStore {
                 "context_json".to_string(),
                 "model".to_string(),
                 "message_count".to_string(),
+                "usage_json".to_string(),
                 "conf_json".to_string(),
             ],
             vec![
@@ -360,6 +396,7 @@ impl SessionStore for DatabaseSessionStore {
                 Value::String(context_json),
                 Value::String(model),
                 Value::Number(0.into()),
+                Value::String(usage_json),
                 Value::String(conf_json),
             ],
         );
@@ -373,7 +410,7 @@ impl SessionStore for DatabaseSessionStore {
     }
 
     async fn list_session_records(&self, query: &SessionQuery) -> TalosResult<Vec<SessionRecord>> {
-        let sql = "SELECT session_key, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, conf_json FROM sessions ORDER BY last_activity DESC";
+        let sql = "SELECT session_key, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, usage_json, conf_json FROM sessions ORDER BY last_activity DESC";
         let rows = self.storage.query(sql, &[]).await?;
         let mut records = Vec::new();
         for row in rows {
@@ -435,6 +472,7 @@ impl SessionStore for DatabaseSessionStore {
                 "context_json".to_string(),
                 "model".to_string(),
                 "message_count".to_string(),
+                "usage_json".to_string(),
                 "conf_json".to_string(),
             ],
             vec![
@@ -442,6 +480,7 @@ impl SessionStore for DatabaseSessionStore {
                 Value::String(context_json),
                 Value::String(record.model.clone()),
                 Value::Number(serde_json::Number::from(record.message_count)),
+                Value::String(Self::build_usage_json(&record.usage)?),
                 Value::String(conf_json),
             ],
         );
@@ -474,36 +513,63 @@ impl SessionStore for DatabaseSessionStore {
         );
         self.storage.insert("messages", &msg_row).await?;
 
-        if let Some(mut record) = self.get_session_record(session_id).await? {
-            record.message_count += 1;
-            record.last_activity = now.try_into().unwrap_or_default();
+        Ok(())
+    }
 
-            let row = self.fetch_session_row(session_id).await?;
-            let conf_json = Self::build_conf_json(Self::parse_conf_json(
-                row.and_then(|stored| stored.get_string("conf_json")),
-            ))?;
-            let context_json = Self::build_context_json(&record.context)?;
+    async fn record_session_progress(
+        &self,
+        session_id: &str,
+        message_delta: u64,
+        usage: &TalosUsage,
+        model: Option<&str>,
+    ) -> TalosResult<()> {
+        let now = chrono::Utc::now().timestamp_millis();
+        let Some(mut record) = self.get_session_record(session_id).await? else {
+            return Err(talos_error::TalosError::ResourceNotFound(format!(
+                "session {}",
+                session_id
+            )));
+        };
 
-            let update_row = Row::new(
-                vec![
-                    "last_activity".to_string(),
-                    "context_json".to_string(),
-                    "model".to_string(),
-                    "message_count".to_string(),
-                    "conf_json".to_string(),
-                ],
-                vec![
-                    Value::Number(now.into()),
-                    Value::String(context_json),
-                    Value::String(record.model.clone()),
-                    Value::Number(serde_json::Number::from(record.message_count)),
-                    Value::String(conf_json),
-                ],
-            );
-            self.storage
-                .update("sessions", &update_row, "session_key = ?", &[session_id])
-                .await?;
+        record.last_activity = now.try_into().unwrap_or_default();
+        record.message_count = record.message_count.saturating_add(message_delta);
+        record.usage.input_tokens = record.usage.input_tokens.saturating_add(usage.input_tokens);
+        record.usage.output_tokens = record
+            .usage
+            .output_tokens
+            .saturating_add(usage.output_tokens);
+        record.usage.total_tokens = record.usage.total_tokens.saturating_add(usage.total_tokens);
+        if let Some(model) = model {
+            record.model = model.to_string();
         }
+
+        let row = self.fetch_session_row(session_id).await?;
+        let conf_json = Self::build_conf_json(Self::parse_conf_json(
+            row.and_then(|stored| stored.get_string("conf_json")),
+        ))?;
+        let context_json = Self::build_context_json(&record.context)?;
+
+        let update_row = Row::new(
+            vec![
+                "last_activity".to_string(),
+                "context_json".to_string(),
+                "model".to_string(),
+                "message_count".to_string(),
+                "usage_json".to_string(),
+                "conf_json".to_string(),
+            ],
+            vec![
+                Value::Number(now.into()),
+                Value::String(context_json),
+                Value::String(record.model.clone()),
+                Value::Number(serde_json::Number::from(record.message_count)),
+                Value::String(Self::build_usage_json(&record.usage)?),
+                Value::String(conf_json),
+            ],
+        );
+        self.storage
+            .update("sessions", &update_row, "session_key = ?", &[session_id])
+            .await?;
 
         Ok(())
     }
@@ -535,6 +601,7 @@ impl SessionStore for MockSessionStore {
             created_at: 0,
             last_activity: 0,
             message_count: 0,
+            usage: TalosUsage::default(),
             conf: requested_model
                 .map(|model| {
                     let mut conf = std::collections::HashMap::new();
@@ -561,6 +628,7 @@ impl SessionStore for MockSessionStore {
             created_at: 0,
             last_activity: 0,
             message_count: 0,
+            usage: TalosUsage::default(),
             conf: requested_model
                 .map(|model| {
                     let mut conf = std::collections::HashMap::new();
@@ -587,6 +655,7 @@ impl SessionStore for MockSessionStore {
             created_at: 0,
             last_activity: 0,
             message_count: 0,
+            usage: TalosUsage::default(),
             conf: std::collections::HashMap::new(),
         }))
     }
@@ -613,11 +682,23 @@ impl SessionStore for MockSessionStore {
     ) -> TalosResult<()> {
         Ok(())
     }
+
+    async fn record_session_progress(
+        &self,
+        _session_id: &str,
+        _message_delta: u64,
+        _usage: &TalosUsage,
+        _model: Option<&str>,
+    ) -> TalosResult<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod scope_tests {
     use super::*;
+    use std::sync::Arc;
+    use talos_storage::SqliteStorage;
 
     fn sample_context() -> TalosContext {
         TalosContext {
@@ -673,5 +754,21 @@ mod scope_tests {
         let id1 = DatabaseSessionStore::new_session_id();
         let id2 = DatabaseSessionStore::new_session_id();
         assert_ne!(id1, id2);
+    }
+
+    #[tokio::test]
+    async fn test_record_session_progress_returns_not_found_for_missing_session() {
+        let storage = Arc::new(SqliteStorage::new("sqlite::memory:").await.unwrap());
+        let store = DatabaseSessionStore::new(storage).await.unwrap();
+
+        let result = store
+            .record_session_progress("missing-session", 1, &TalosUsage::default(), None)
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(talos_error::TalosError::ResourceNotFound(message))
+            if message == "session missing-session"
+        ));
     }
 }

@@ -194,7 +194,13 @@ impl Storage for SqliteStorage {
                 }
             }
 
-            let required = ["context_json", "model", "message_count", "conf_json"];
+            let required = [
+                "context_json",
+                "model",
+                "message_count",
+                "usage_json",
+                "conf_json",
+            ];
             let needs_rebuild = required.iter().any(|name| !existing.contains(*name));
             if needs_rebuild {
                 info!("Rebuilding legacy sessions schema");
@@ -220,6 +226,7 @@ impl Storage for SqliteStorage {
                 context_json TEXT,
                 model TEXT,
                 message_count INTEGER NOT NULL DEFAULT 0,
+                usage_json TEXT,
                 conf_json TEXT
             )
         "#;

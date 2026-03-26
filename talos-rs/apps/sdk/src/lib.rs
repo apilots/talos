@@ -11,9 +11,10 @@ use tokio::sync::mpsc;
 
 use talos_error::{TalosError, TalosResult};
 pub use talos_types::talos::{
-    TalosContext, TalosEvent, TalosEventType, TalosMessageRequest, TalosMessageResponse,
-    TalosInputItem, TalosOutputItem, TalosProvider, TalosSourceType,
+    TalosContext, TalosEvent, TalosEventType, TalosInputItem, TalosMessageRequest,
+    TalosMessageResponse, TalosOutputItem, TalosProvider, TalosSourceType,
 };
+pub use talos_types::{ModelInfo, TalosSession};
 
 #[derive(Clone, Debug)]
 pub struct ClientConfig {
@@ -39,27 +40,6 @@ pub struct SessionCreateParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionHandle {
-    pub id: String,
-    pub current_model: String,
-    pub created_at: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionInfo {
-    pub id: String,
-    pub current_model: String,
-    pub message_count: u64,
-    pub last_activity: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModelInfo {
-    pub id: String,
-    pub provider: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionUpdate {
     pub conf: HashMap<String, serde_json::Value>,
 }
@@ -71,30 +51,13 @@ struct CreateSessionRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct CreateSessionResponse {
-    id: String,
-    model: String,
-    created_at: u64,
-    context: TalosContext,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct SessionEnvelope {
-    id: String,
-    model: String,
-    message_count: u64,
-    last_activity: u64,
-    context: TalosContext,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ListModelsResponse {
     data: Vec<ModelInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ListSessionsResponse {
-    data: Vec<SessionEnvelope>,
+    data: Vec<TalosSession>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,15 +100,13 @@ impl TalosClient {
             .authorized(self.http_client.get(&url))
             .send()
             .await
-            .map_err(|e| TalosError::ClientError(e.to_string()))?;
-        let payload: ListModelsResponse = Self::decode_json(response).await?;
+            .map_err(|e| Self::request_error("GET", &url, e))?;
+        let payload: ListModelsResponse = Self::decode_json(response, "GET", &url).await?;
         Ok(payload.data)
     }
 
-    pub async fn create_session(
-        &self,
-        params: &SessionCreateParams,
-    ) -> TalosResult<SessionHandle> {
+    /// Create a session and return the full `TalosSession` snapshot from the gateway.
+    pub async fn create_session(&self, params: &SessionCreateParams) -> TalosResult<TalosSession> {
         let request = CreateSessionRequest {
             context: params
                 .context
@@ -159,40 +120,29 @@ impl TalosClient {
             .authorized(self.http_client.post(&url).json(&request))
             .send()
             .await
-            .map_err(|e| TalosError::ClientError(e.to_string()))?;
-        let payload: CreateSessionResponse = Self::decode_json(response).await?;
-
-        Ok(SessionHandle {
-            id: payload.id,
-            current_model: payload.model,
-            created_at: payload.created_at,
-        })
+            .map_err(|e| Self::request_error("POST", &url, e))?;
+        Self::decode_json(response, "POST", &url).await
     }
 
-    pub async fn get_session(&self, session_id: &str) -> TalosResult<SessionInfo> {
+    pub async fn get_session(&self, session_id: &str) -> TalosResult<TalosSession> {
         let url = format!("{}/v1/sessions/{}", self.config.gateway_url, session_id);
         let response = self
             .authorized(self.http_client.get(&url))
             .send()
             .await
-            .map_err(|e| TalosError::ClientError(e.to_string()))?;
-        let payload: SessionEnvelope = Self::decode_json(response).await?;
-        Ok(Self::to_session_info(payload))
+            .map_err(|e| Self::request_error("GET", &url, e))?;
+        Self::decode_json(response, "GET", &url).await
     }
 
-    pub async fn list_sessions(&self) -> TalosResult<Vec<SessionInfo>> {
+    pub async fn list_sessions(&self) -> TalosResult<Vec<TalosSession>> {
         let url = format!("{}/v1/sessions", self.config.gateway_url);
         let response = self
             .authorized(self.http_client.get(&url))
             .send()
             .await
-            .map_err(|e| TalosError::ClientError(e.to_string()))?;
-        let payload: ListSessionsResponse = Self::decode_json(response).await?;
-        Ok(payload
-            .data
-            .into_iter()
-            .map(Self::to_session_info)
-            .collect())
+            .map_err(|e| Self::request_error("GET", &url, e))?;
+        let payload: ListSessionsResponse = Self::decode_json(response, "GET", &url).await?;
+        Ok(payload.data)
     }
 
     pub async fn update_session(
@@ -205,8 +155,8 @@ impl TalosClient {
             .authorized(self.http_client.patch(&url).json(update))
             .send()
             .await
-            .map_err(|e| TalosError::ClientError(e.to_string()))?;
-        let payload: SessionPatchResponse = Self::decode_json(response).await?;
+            .map_err(|e| Self::request_error("PATCH", &url, e))?;
+        let payload: SessionPatchResponse = Self::decode_json(response, "PATCH", &url).await?;
         if payload.success {
             return Ok(());
         }
@@ -231,8 +181,8 @@ impl TalosClient {
             .authorized(self.http_client.delete(&url))
             .send()
             .await
-            .map_err(|e| TalosError::ClientError(e.to_string()))?;
-        let payload: SessionPatchResponse = Self::decode_json(response).await?;
+            .map_err(|e| Self::request_error("DELETE", &url, e))?;
+        let payload: SessionPatchResponse = Self::decode_json(response, "DELETE", &url).await?;
         if payload.success {
             return Ok(());
         }
@@ -254,8 +204,8 @@ impl TalosClient {
             .authorized(self.http_client.post(&url).json(request))
             .send()
             .await
-            .map_err(|e| TalosError::ClientError(e.to_string()))?;
-        Self::decode_json(response).await
+            .map_err(|e| Self::request_error("POST", &url, e))?;
+        Self::decode_json(response, "POST", &url).await
     }
 
     pub async fn send_message_stream(
@@ -274,14 +224,10 @@ impl TalosClient {
             .authorized(self.http_client.post(&url).json(&stream_request))
             .send()
             .await
-            .map_err(|e| TalosError::ClientError(e.to_string()))?;
+            .map_err(|e| Self::request_error("POST", &url, e))?;
 
         if !response.status().is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(TalosError::ClientError(error_text));
+            return Err(Self::http_error(response, "POST", &url).await);
         }
 
         let (tx, rx) = mpsc::channel(256);
@@ -325,28 +271,34 @@ impl TalosClient {
         builder
     }
 
-    async fn decode_json<T: DeserializeOwned>(response: Response) -> TalosResult<T> {
-        if !response.status().is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(TalosError::ClientError(error_text));
-        }
-
-        response
-            .json::<T>()
-            .await
-            .map_err(|e| TalosError::ClientError(e.to_string()))
+    fn request_error(method: &str, url: &str, error: impl std::fmt::Display) -> TalosError {
+        TalosError::ClientError(format!("{} {} request failed: {}", method, url, error))
     }
 
-    fn to_session_info(session: SessionEnvelope) -> SessionInfo {
-        SessionInfo {
-            id: session.id,
-            current_model: session.model,
-            message_count: session.message_count,
-            last_activity: session.last_activity,
+    async fn http_error(response: Response, method: &str, url: &str) -> TalosError {
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        TalosError::ClientError(format!(
+            "{} {} failed with status {}: {}",
+            method, url, status, body
+        ))
+    }
+
+    async fn decode_json<T: DeserializeOwned>(
+        response: Response,
+        method: &str,
+        url: &str,
+    ) -> TalosResult<T> {
+        if !response.status().is_success() {
+            return Err(Self::http_error(response, method, url).await);
         }
+
+        response.json::<T>().await.map_err(|e| {
+            TalosError::ClientError(format!("{} {} returned invalid JSON: {}", method, url, e))
+        })
     }
 }
 
@@ -402,19 +354,45 @@ mod tests {
     }
 
     #[test]
-    fn test_to_session_info_mapping() {
-        let envelope = SessionEnvelope {
-            id: "sess_1".to_string(),
-            model: "gpt-4o-mini".to_string(),
-            message_count: 7,
-            last_activity: 123,
-            context: default_context("u"),
+    fn test_talos_session_roundtrip_shape() {
+        let mut config = talos_types::TalosConfig::default();
+        config.agent.model = "gpt-4o-mini".to_string();
+        config.llm.model = "gpt-4o-mini".to_string();
+
+        let session = TalosSession {
+            context: talos_types::SessionContext {
+                session_id: "sess_1".to_string(),
+                workspace_id: None,
+                source_type: TalosSourceType::Http,
+                provider: TalosProvider::Sdk,
+                user_id: "u".to_string(),
+                message_id: "m1".to_string(),
+                trace_id: "t1".to_string(),
+                channel_id: Some("default".to_string()),
+                thread_id: None,
+            },
+            config,
+            state: talos_types::SessionState {
+                created_at: 1,
+                last_activity: 123,
+                message_count: 7,
+                usage: talos_types::talos::TalosUsage::default(),
+            },
         };
 
-        let info = TalosClient::to_session_info(envelope);
-        assert_eq!(info.id, "sess_1");
-        assert_eq!(info.current_model, "gpt-4o-mini");
-        assert_eq!(info.message_count, 7);
-        assert_eq!(info.last_activity, 123);
+        assert_eq!(session.context.session_id, "sess_1");
+        assert_eq!(session.config.llm.model, "gpt-4o-mini");
+        assert_eq!(session.state.message_count, 7);
+        assert_eq!(session.state.last_activity, 123);
+    }
+
+    #[test]
+    fn test_request_error_includes_method_and_url() {
+        let error = TalosClient::request_error("GET", "http://localhost:8080/v1/models", "boom");
+
+        let TalosError::ClientError(message) = error else {
+            panic!("expected client error");
+        };
+        assert!(message.contains("GET http://localhost:8080/v1/models request failed"));
     }
 }
