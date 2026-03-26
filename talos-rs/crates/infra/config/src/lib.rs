@@ -272,6 +272,94 @@ fn default_kernel_execution_loop_iters() -> u32 {
 }
 
 /// Prompt defaults under agent.kernel
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BootstrapPromptWarningMode {
+    Off,
+    Once,
+    Always,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentKernelBootstrapPromptConfig {
+    /// Enable workspace bootstrap prompt injection.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /// Auto-create missing bootstrap files before reading them.
+    #[serde(default = "default_true")]
+    pub auto_create_missing_files: bool,
+
+    /// Maximum characters injected per bootstrap file.
+    #[serde(default = "default_prompt_bootstrap_max_chars_per_file")]
+    pub max_chars_per_file: usize,
+
+    /// Maximum total characters injected across bootstrap files.
+    #[serde(default = "default_prompt_bootstrap_max_chars_total")]
+    pub max_chars_total: usize,
+
+    /// Whether truncation warnings should be surfaced in diagnostics.
+    #[serde(default = "default_bootstrap_prompt_warning_mode")]
+    pub warning_mode: BootstrapPromptWarningMode,
+
+    #[serde(default = "default_true")]
+    pub include_agents: bool,
+
+    #[serde(default = "default_true")]
+    pub include_soul: bool,
+
+    #[serde(default = "default_true")]
+    pub include_tools: bool,
+
+    #[serde(default = "default_true")]
+    pub include_identity: bool,
+
+    #[serde(default = "default_true")]
+    pub include_user: bool,
+
+    #[serde(default = "default_true")]
+    pub include_heartbeat: bool,
+
+    #[serde(default = "default_true")]
+    pub include_bootstrap: bool,
+
+    #[serde(default = "default_true")]
+    pub include_memory: bool,
+}
+
+fn default_prompt_bootstrap_max_chars_per_file() -> usize {
+    8_000
+}
+
+fn default_prompt_bootstrap_max_chars_total() -> usize {
+    24_000
+}
+
+fn default_bootstrap_prompt_warning_mode() -> BootstrapPromptWarningMode {
+    BootstrapPromptWarningMode::Once
+}
+
+impl Default for AgentKernelBootstrapPromptConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            auto_create_missing_files: true,
+            max_chars_per_file: default_prompt_bootstrap_max_chars_per_file(),
+            max_chars_total: default_prompt_bootstrap_max_chars_total(),
+            warning_mode: default_bootstrap_prompt_warning_mode(),
+            include_agents: true,
+            include_soul: true,
+            include_tools: true,
+            include_identity: true,
+            include_user: true,
+            include_heartbeat: true,
+            include_bootstrap: true,
+            include_memory: true,
+        }
+    }
+}
+
+/// Prompt defaults under agent.kernel
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentKernelPromptConfig {
     /// Static prompt token budget
@@ -305,6 +393,10 @@ pub struct AgentKernelPromptConfig {
     /// Maximum total chars retained for retrieved memories
     #[serde(default = "default_prompt_retrieved_memory_max_chars")]
     pub retrieved_memory_max_chars: usize,
+
+    /// Workspace bootstrap prompt policy.
+    #[serde(default)]
+    pub bootstrap: AgentKernelBootstrapPromptConfig,
 }
 
 fn default_prompt_max_static_tokens() -> usize {
@@ -326,6 +418,7 @@ impl Default for AgentKernelPromptConfig {
             include_retrieved_memories: true,
             retrieved_memory_max_items: default_prompt_retrieved_memory_max_items(),
             retrieved_memory_max_chars: default_prompt_retrieved_memory_max_chars(),
+            bootstrap: AgentKernelBootstrapPromptConfig::default(),
         }
     }
 }
@@ -1198,6 +1291,28 @@ impl Config {
         if self
             .agent
             .kernel
+            .memory
+            .root_memory_filename
+            .trim()
+            != "MEMORY.md"
+        {
+            return Err(TalosError::InvalidConfiguration(
+                "agent.kernel.memory.root_memory_filename must be MEMORY.md".to_string(),
+            ));
+        }
+        if self.agent.kernel.prompt.bootstrap.max_chars_per_file == 0 {
+            return Err(TalosError::InvalidConfiguration(
+                "agent.kernel.prompt.bootstrap.max_chars_per_file must be > 0".to_string(),
+            ));
+        }
+        if self.agent.kernel.prompt.bootstrap.max_chars_total == 0 {
+            return Err(TalosError::InvalidConfiguration(
+                "agent.kernel.prompt.bootstrap.max_chars_total must be > 0".to_string(),
+            ));
+        }
+        if self
+            .agent
+            .kernel
             .binding
             .default_agent_kind
             .trim()
@@ -1637,6 +1752,10 @@ mod tests {
         assert!(config.agent.kernel.prompt.include_recent_messages);
         assert!(config.agent.kernel.prompt.include_root_memory);
         assert!(config.agent.kernel.prompt.include_retrieved_memories);
+        assert!(config.agent.kernel.prompt.bootstrap.enabled);
+        assert!(config.agent.kernel.prompt.bootstrap.auto_create_missing_files);
+        assert_eq!(config.agent.kernel.prompt.bootstrap.max_chars_per_file, 8_000);
+        assert_eq!(config.agent.kernel.prompt.bootstrap.max_chars_total, 24_000);
         assert_eq!(
             config.agent.kernel.memory.workspace_dir,
             "~/.talos/workspace"
@@ -1650,6 +1769,7 @@ mod tests {
             config.agent.kernel.memory.compaction_threshold_bytes,
             256 * 1024
         );
+        assert_eq!(config.agent.kernel.memory.root_memory_filename, "MEMORY.md");
         assert!(config.agent.kernel.memory.workspace_memory_flush_enabled);
         assert!((config.agent.kernel.memory.search_min_score - 0.35).abs() < f32::EPSILON);
         assert_eq!(config.agent.kernel.binding.default_agent_kind, "llm");

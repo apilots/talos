@@ -113,6 +113,22 @@ fn test_boundary_validation() {
         config.prompt.max_dynamic_tokens, 3200,
         "prompt.max_dynamic_tokens should default to 3200"
     );
+    assert!(
+        config.prompt.bootstrap.enabled,
+        "prompt.bootstrap.enabled should default to true"
+    );
+    assert!(
+        config.prompt.bootstrap.auto_create_missing_files,
+        "prompt.bootstrap.auto_create_missing_files should default to true"
+    );
+    assert_eq!(
+        config.prompt.bootstrap.max_chars_per_file, 8_000,
+        "prompt.bootstrap.max_chars_per_file should default to 8000"
+    );
+    assert_eq!(
+        config.prompt.bootstrap.max_chars_total, 24_000,
+        "prompt.bootstrap.max_chars_total should default to 24000"
+    );
 
     assert!(
         !config.memory.workspace_dir.trim().is_empty(),
@@ -129,6 +145,10 @@ fn test_boundary_validation() {
     assert!(
         (0.0..=1.0).contains(&config.memory.search_min_score),
         "memory.search_min_score must be in [0.0, 1.0]"
+    );
+    assert_eq!(
+        config.memory.root_memory_filename, "MEMORY.md",
+        "memory.root_memory_filename should be fixed to MEMORY.md"
     );
 
     assert!(

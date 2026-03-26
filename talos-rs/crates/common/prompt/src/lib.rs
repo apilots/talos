@@ -6,16 +6,27 @@
 //! - Predefined prompt templates for common use cases
 //! - Dynamic prompt assembly based on context
 
+mod assembler;
+mod bootstrap;
+mod budget;
+mod diagnostics;
+mod renderer;
+mod types;
+
+pub use types::{
+    BootstrapFileDiagnostic, BudgetTier, PlannerMode, PromptAssembly, PromptBuildConfig,
+    PromptBudget, PromptDiagnostics, PromptLoadPolicy, PromptMode, PromptPhase, PromptSection,
+    PromptSectionKind, TruncationMode, WorkspaceBootstrapFile, WorkspaceBootstrapFileKind,
+};
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use talos_config::{AgentKernelMemoryConfig, AgentKernelPromptConfig};
 use talos_error::TalosResult;
 use talos_llm_provider::ChatMessage;
-use talos_memory::{
-    Memory, MemoryStore, RetrievedMemoryItem, SessionPromptContextConfig, TalosMessageRole,
-};
+use talos_memory::{MemoryStore, RetrievedMemoryItem};
 use talos_tools::ToolRegistry;
+use tokio::fs;
 
 /// A prompt template that can be rendered with context variables
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -294,81 +305,20 @@ impl Default for PromptContext {
     }
 }
 
-/// Prompt build phase.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum PromptPhase {
-    Planning,
-    #[default]
-    Execution,
-}
-
-/// Prompt budget controls.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PromptBudget {
-    pub max_static_tokens: usize,
-    pub max_dynamic_tokens: usize,
-}
-
-impl Default for PromptBudget {
-    fn default() -> Self {
-        Self {
-            max_static_tokens: 1200,
-            max_dynamic_tokens: 3200,
-        }
-    }
-}
-
-/// Prompt context loading policy.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PromptLoadPolicy {
-    pub include_session_summary: bool,
-    pub include_recent_messages: bool,
-    pub include_root_memory: bool,
-    pub include_retrieved_memories: bool,
-    pub session_recent_limit: usize,
-    pub retrieved_memory_max_items: usize,
-    pub retrieved_memory_max_chars: usize,
-    pub unified_recent_limit: usize,
-}
-
-impl Default for PromptLoadPolicy {
-    fn default() -> Self {
-        Self {
-            include_session_summary: true,
-            include_recent_messages: true,
-            include_root_memory: true,
-            include_retrieved_memories: true,
-            session_recent_limit: 16,
-            retrieved_memory_max_items: 4,
-            retrieved_memory_max_chars: 2000,
-            unified_recent_limit: 10,
-        }
-    }
-}
-
-/// Prompt build configuration.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct PromptBuildConfig {
-    pub budget: PromptBudget,
-    pub load_policy: PromptLoadPolicy,
-    pub prompt: AgentKernelPromptConfig,
-    pub memory: AgentKernelMemoryConfig,
-}
-
 /// Unified prompt builder for kernel turns.
 pub struct PromptBuilder<'a> {
-    agent_name: String,
-    agent_description: String,
-    phase: PromptPhase,
-    planner_mode: String,
-    planning_instruction: Option<String>,
-    user_input: Option<String>,
-    tool_registry: Option<&'a ToolRegistry>,
-    memory_store: Option<&'a MemoryStore>,
-    session_id: Option<&'a str>,
-    retrieved_memories: Vec<RetrievedMemoryItem>,
-    config: PromptBuildConfig,
+    pub(crate) agent_name: String,
+    pub(crate) agent_description: String,
+    pub(crate) mode: PromptMode,
+    pub(crate) phase: PromptPhase,
+    pub(crate) planner_mode: PlannerMode,
+    pub(crate) planning_instruction: Option<String>,
+    pub(crate) user_input: Option<String>,
+    pub(crate) tool_registry: Option<&'a ToolRegistry>,
+    pub(crate) memory_store: Option<&'a MemoryStore>,
+    pub(crate) session_id: Option<&'a str>,
+    pub(crate) retrieved_memories: Vec<RetrievedMemoryItem>,
+    pub(crate) config: PromptBuildConfig,
 }
 
 impl<'a> Default for PromptBuilder<'a> {
@@ -382,8 +332,9 @@ impl<'a> PromptBuilder<'a> {
         Self {
             agent_name: "talos".to_string(),
             agent_description: "AI assistant".to_string(),
+            mode: PromptMode::Full,
             phase: PromptPhase::Execution,
-            planner_mode: "built_in".to_string(),
+            planner_mode: PlannerMode::BuiltIn,
             planning_instruction: None,
             user_input: None,
             tool_registry: None,
@@ -405,8 +356,13 @@ impl<'a> PromptBuilder<'a> {
         self
     }
 
+    pub fn mode(mut self, mode: PromptMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
     pub fn planner_mode(mut self, planner_mode: impl Into<String>) -> Self {
-        self.planner_mode = planner_mode.into();
+        self.planner_mode = PlannerMode::parse(&planner_mode.into());
         self
     }
 
@@ -458,69 +414,12 @@ impl<'a> PromptBuilder<'a> {
     }
 
     pub async fn build(self) -> TalosResult<Vec<ChatMessage>> {
-        let user_input = self.user_input.clone().ok_or_else(|| {
-            talos_error::TalosError::ValidationError(
-                "PromptBuilder requires user input".to_string(),
-            )
-        })?;
-
-        let mut static_messages = vec![ChatMessage::system(self.build_identity_prompt())];
-        if let Some(planning_instruction) = self.planning_instruction.as_deref() {
-            if !planning_instruction.trim().is_empty() {
-                static_messages.push(ChatMessage::system(format!(
-                    "Planning instruction:\n{}",
-                    planning_instruction.trim()
-                )));
-            }
-        }
-        self.enforce_static_budget(&mut static_messages);
-
-        let mut dynamic_messages = self.load_dynamic_messages().await?;
-        self.enforce_dynamic_budget(&mut dynamic_messages);
-
-        let mut messages = Vec::with_capacity(static_messages.len() + dynamic_messages.len() + 1);
-        messages.extend(static_messages);
-        messages.extend(dynamic_messages);
-        messages.push(ChatMessage::user(user_input));
-        Ok(messages)
+        let assembly = self.assemble().await?;
+        Ok(renderer::render_assembly(&assembly))
     }
 
-    fn build_identity_prompt(&self) -> String {
-        let phase_label = match self.phase {
-            PromptPhase::Planning => "planning",
-            PromptPhase::Execution => "execution",
-        };
-        let phase_instruction = match self.phase {
-            PromptPhase::Planning => {
-                "Focus on clear decomposition, constraints, and an executable next-step plan."
-            }
-            PromptPhase::Execution => {
-                "Use native tool calling when needed, then produce the final response."
-            }
-        };
-        let planner_mode = self.planner_mode.trim().to_ascii_lowercase();
-
-        let tool_summary = self
-            .tool_registry
-            .map(Self::render_tool_summary)
-            .unwrap_or_else(|| "none".to_string());
-
-        format!(
-            r#"You are {}, {}
-
-Phase: {}
-Planner mode: {}
-{}
-
-Available tools:
-{}"#,
-            self.agent_name,
-            self.agent_description,
-            phase_label,
-            planner_mode,
-            phase_instruction,
-            tool_summary
-        )
+    pub async fn assemble(self) -> TalosResult<PromptAssembly> {
+        assembler::assemble(&self).await
     }
 
     fn render_tool_summary(tool_registry: &ToolRegistry) -> String {
@@ -544,194 +443,55 @@ Available tools:
             .join("\n")
     }
 
-    async fn load_dynamic_messages(&self) -> TalosResult<Vec<ChatMessage>> {
-        let mut messages = Vec::new();
-        let include_summary = self.config.load_policy.include_session_summary;
-        let include_recent = self.config.load_policy.include_recent_messages;
-        let include_root_memory = self.config.load_policy.include_root_memory;
-        let include_retrieved_memories = self.config.load_policy.include_retrieved_memories;
-        let summary_recent_count = self.config.memory.session_summary_recent_count;
-        let summary_max_chars = self.config.memory.session_summary_max_chars;
-        let context_target_messages = self.config.load_policy.session_recent_limit;
-        let memory_enable_summary = self.config.memory.session_summary_enabled;
-        let retrieved_memory_max_items = self.config.load_policy.retrieved_memory_max_items;
-        let retrieved_memory_max_chars = self.config.load_policy.retrieved_memory_max_chars;
-
-        if let (Some(memory_store), Some(session_id)) = (self.memory_store, self.session_id) {
-            let context = memory_store
-                .build_session_prompt_context(
-                    session_id,
-                    &SessionPromptContextConfig {
-                        recent_messages_limit: if include_recent {
-                            context_target_messages
-                        } else {
-                            0
-                        },
-                        include_summary: include_summary && memory_enable_summary,
-                        summary_recent_count,
-                        summary_max_chars,
-                    },
-                )
-                .await?;
-            if include_summary {
-                for summary in context.summaries {
-                    let content = summary.content.trim().to_string();
-                    if !content.is_empty() {
-                        messages.push(ChatMessage::system(format!(
-                            "Session memory summary (id={}):\n{}",
-                            summary.header.id, content
-                        )));
-                    }
-                }
-            }
-            if include_recent {
-                for message in context.recent_messages {
-                    messages.push(Self::talos_message_to_chat_message(
-                        message.role,
-                        message.text,
-                    ));
-                }
-            }
-            if include_root_memory {
-                let root_memory = memory_store.load_root_memory().await?;
-                if let Some(content) = root_memory.content {
-                    let trimmed = content.trim();
-                    if !trimmed.is_empty() {
-                        messages.push(ChatMessage::system(format!(
-                            "Root memory ({}):\n{}",
-                            root_memory
-                                .path
-                                .file_name()
-                                .and_then(|value| value.to_str())
-                                .unwrap_or("MEMORY.md"),
-                            trimmed
-                        )));
-                    }
-                }
-            }
-            if include_retrieved_memories && !self.retrieved_memories.is_empty() {
-                let mut combined = String::new();
-                for item in self
-                    .retrieved_memories
-                    .iter()
-                    .take(retrieved_memory_max_items.max(1))
-                {
-                    let line = format!(
-                        "- {}{}: {}",
-                        item.path,
-                        item.citation
-                            .as_ref()
-                            .map(|citation| format!(" ({citation})"))
-                            .unwrap_or_default(),
-                        item.snippet.trim()
-                    );
-                    if combined.len() + line.len() + 1 > retrieved_memory_max_chars.max(1) {
-                        break;
-                    }
-                    if !combined.is_empty() {
-                        combined.push('\n');
-                    }
-                    combined.push_str(&line);
-                }
-                if !combined.is_empty() {
-                    messages.push(ChatMessage::system(format!(
-                        "Retrieved memories:\n{}",
-                        combined
-                    )));
-                }
-            }
-            return Ok(messages);
+    pub(crate) async fn load_workspace_bootstrap_files(
+        &self,
+    ) -> TalosResult<Vec<WorkspaceBootstrapFile>> {
+        if !self.config.prompt.bootstrap.enabled {
+            return Ok(Vec::new());
         }
+        let workspace_dir = bootstrap::expand_workspace_dir(&self.config.memory.workspace_dir);
+        fs::create_dir_all(&workspace_dir).await.map_err(|err| {
+            talos_error::TalosError::StorageError(format!(
+                "create prompt workspace dir {}: {}",
+                workspace_dir.display(),
+                err
+            ))
+        })?;
 
-        Ok(messages)
-    }
-
-    fn talos_message_to_chat_message(role: TalosMessageRole, text: String) -> ChatMessage {
-        match role {
-            TalosMessageRole::User => ChatMessage::user(text),
-            TalosMessageRole::Assistant => ChatMessage::assistant(text),
-            TalosMessageRole::System => ChatMessage::system(text),
-        }
-    }
-
-    fn enforce_static_budget(&self, messages: &mut Vec<ChatMessage>) {
-        let budget = self.config.budget.max_static_tokens.max(1);
-        Self::truncate_messages_to_budget(messages, budget, true);
-    }
-
-    fn enforce_dynamic_budget(&self, messages: &mut Vec<ChatMessage>) {
-        let budget = self.config.budget.max_dynamic_tokens.max(1);
-        Self::truncate_messages_to_budget(messages, budget, false);
-    }
-
-    fn truncate_messages_to_budget(
-        messages: &mut Vec<ChatMessage>,
-        budget: usize,
-        preserve_first: bool,
-    ) {
-        if messages.is_empty() {
-            return;
-        }
-
-        while Self::estimate_messages_tokens(messages) > budget {
-            if preserve_first {
-                if messages.len() > 1 {
-                    let _ = messages.pop();
-                    continue;
-                }
-            } else if !messages.is_empty() {
-                messages.remove(0);
+        let mut files = Vec::new();
+        for kind in WorkspaceBootstrapFileKind::all() {
+            if !kind.should_load_in_mode(self.mode, &self.config.prompt) {
                 continue;
             }
-
-            let current = Self::estimate_messages_tokens(messages);
-            if current <= budget {
-                break;
+            let path = workspace_dir.join(kind.file_name());
+            if self.config.prompt.bootstrap.auto_create_missing_files {
+                bootstrap::ensure_bootstrap_file(&path, kind.default_template()).await?;
             }
-
-            let overflow = current.saturating_sub(budget);
-            if let Some(last) = messages.last_mut() {
-                let keep_tokens =
-                    Self::estimate_text_tokens(&last.content).saturating_sub(overflow);
-                last.content = Self::truncate_text_to_tokens(&last.content, keep_tokens.max(1));
-            } else {
-                break;
-            }
+            let content = match fs::read_to_string(&path).await {
+                Ok(content) => Some(content),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+                Err(err) => {
+                    return Err(talos_error::TalosError::StorageError(format!(
+                        "read bootstrap file {}: {}",
+                        path.display(),
+                        err
+                    )));
+                }
+            };
+            files.push(WorkspaceBootstrapFile {
+                kind: *kind,
+                path,
+                missing: content.is_none(),
+                content,
+            });
         }
+        Ok(files)
     }
 
-    fn estimate_messages_tokens(messages: &[ChatMessage]) -> usize {
-        messages
-            .iter()
-            .map(|message| Self::estimate_text_tokens(&message.content) + 4)
-            .sum()
-    }
+}
 
-    fn estimate_text_tokens(text: &str) -> usize {
-        let chars = text.chars().count();
-        if chars == 0 {
-            0
-        } else {
-            (chars + 3) / 4
-        }
-    }
-
-    fn truncate_text_to_tokens(text: &str, max_tokens: usize) -> String {
-        let max_chars = max_tokens.saturating_mul(4);
-        if text.chars().count() <= max_chars {
-            return text.to_string();
-        }
-
-        const SUFFIX: &str = "...[truncated]";
-        if max_chars <= SUFFIX.len() {
-            return SUFFIX.chars().take(max_chars).collect();
-        }
-
-        let keep_chars = max_chars - SUFFIX.len();
-        let mut out = text.chars().take(keep_chars).collect::<String>();
-        out.push_str(SUFFIX);
-        out
-    }
+pub fn render_prompt_assembly(assembly: &PromptAssembly) -> Vec<ChatMessage> {
+    renderer::render_assembly(assembly)
 }
 
 #[cfg(test)]
@@ -1016,5 +776,138 @@ mod tests {
             .find(|msg| msg.role == Role::User && msg.content != "next")
             .expect("should include user history message");
         assert_eq!(user_history.content, "hello world");
+    }
+
+    #[tokio::test]
+    async fn test_prompt_builder_creates_and_injects_bootstrap_files() {
+        let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let memory = MemoryStore::new(workspace_dir.clone());
+
+        let mut config = PromptBuildConfig::default();
+        config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+        config.load_policy.include_session_summary = false;
+        config.load_policy.include_recent_messages = false;
+        config.prompt.include_root_memory = true;
+
+        let messages = PromptBuilder::new()
+            .agent("talos", "assistant")
+            .memory_store("s1", &memory)
+            .config(config)
+            .user_input("bootstrap")
+            .build()
+            .await
+            .expect("prompt build should succeed");
+
+        for name in [
+            "AGENTS.md",
+            "SOUL.md",
+            "TOOLS.md",
+            "IDENTITY.md",
+            "USER.md",
+            "HEARTBEAT.md",
+            "BOOTSTRAP.md",
+            "MEMORY.md",
+        ] {
+            assert!(workspace_dir.join(name).exists(), "expected {} to exist", name);
+        }
+
+        let project_context = messages
+            .iter()
+            .find(|msg| msg.content.contains("# Project Context"))
+            .expect("should include project context");
+        assert!(project_context.content.contains("## AGENTS.md"));
+        assert!(project_context.content.contains("## SOUL.md"));
+
+        let durable_memory = messages
+            .iter()
+            .find(|msg| msg.content.contains("Durable memory (MEMORY.md):"))
+            .expect("should include durable memory");
+        assert!(durable_memory.content.contains("# MEMORY"));
+    }
+
+    #[tokio::test]
+    async fn test_prompt_builder_minimal_mode_filters_bootstrap_files() {
+        let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let memory = MemoryStore::new(workspace_dir.clone());
+
+        let mut config = PromptBuildConfig::default();
+        config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+        config.load_policy.include_session_summary = false;
+        config.load_policy.include_recent_messages = false;
+        config.prompt.include_root_memory = false;
+
+        let messages = PromptBuilder::new()
+            .mode(PromptMode::Minimal)
+            .memory_store("s1", &memory)
+            .config(config)
+            .user_input("bootstrap")
+            .build()
+            .await
+            .expect("prompt build should succeed");
+
+        let project_context = messages
+            .iter()
+            .find(|msg| msg.content.contains("# Project Context"))
+            .expect("should include project context");
+        assert!(project_context.content.contains("## AGENTS.md"));
+        assert!(project_context.content.contains("## SOUL.md"));
+        assert!(!project_context.content.contains("## HEARTBEAT.md"));
+        assert!(!project_context.content.contains("## BOOTSTRAP.md"));
+    }
+
+    #[tokio::test]
+    async fn test_prompt_builder_full_mode_includes_bootstrap_extensions() {
+        let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let memory = MemoryStore::new(workspace_dir.clone());
+
+        let mut config = PromptBuildConfig::default();
+        config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+        config.load_policy.include_session_summary = false;
+        config.load_policy.include_recent_messages = false;
+
+        let assembly = PromptBuilder::new()
+            .mode(PromptMode::Full)
+            .memory_store("s1", &memory)
+            .config(config)
+            .user_input("bootstrap")
+            .assemble()
+            .await
+            .expect("prompt assembly should succeed");
+
+        let project_context = assembly
+            .context_sections
+            .iter()
+            .find(|section| section.kind == PromptSectionKind::ProjectContext)
+            .expect("full mode should include project context");
+        assert!(project_context.content.contains("## HEARTBEAT.md"));
+        assert!(project_context.content.contains("## BOOTSTRAP.md"));
+    }
+
+    #[tokio::test]
+    async fn test_prompt_builder_none_mode_skips_bootstrap_context() {
+        let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let memory = MemoryStore::new(workspace_dir.clone());
+
+        let mut config = PromptBuildConfig::default();
+        config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+        config.load_policy.include_session_summary = false;
+        config.load_policy.include_recent_messages = false;
+
+        let assembly = PromptBuilder::new()
+            .mode(PromptMode::None)
+            .memory_store("s1", &memory)
+            .config(config)
+            .user_input("bootstrap")
+            .assemble()
+            .await
+            .expect("prompt assembly should succeed");
+
+        assert!(
+            assembly
+                .context_sections
+                .iter()
+                .all(|section| section.kind != PromptSectionKind::ProjectContext)
+        );
+        assert!(assembly.diagnostics.bootstrap_files.is_empty());
     }
 }

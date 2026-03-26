@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, Utc};
 use std::path::{Component, Path, PathBuf};
 use talos_error::{TalosError, TalosResult};
 use tokio::fs;
@@ -37,7 +37,10 @@ pub(crate) fn workspace_memory_dir(store: &MemoryStore) -> PathBuf {
 }
 
 pub(crate) fn workspace_memory_file_for(store: &MemoryStore, timestamp: DateTime<Utc>) -> PathBuf {
-    workspace_memory_dir(store).join(format!("{}.md", timestamp.format("%Y-%m-%d")))
+    workspace_memory_dir(store).join(format!(
+        "{}.md",
+        timestamp.with_timezone(&Local).format("%Y-%m-%d")
+    ))
 }
 
 pub(crate) async fn list_daily_files(

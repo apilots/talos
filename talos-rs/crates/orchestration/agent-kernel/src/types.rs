@@ -1,4 +1,5 @@
 use chrono::Utc;
+use crate::KernelWarning;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -61,6 +62,8 @@ pub struct TaskResult {
     pub output_items: Vec<TalosOutputItem>,
     #[serde(default)]
     pub usage: TalosUsage,
+    #[serde(default)]
+    pub warnings: Vec<KernelWarning>,
     pub tool_traces: Vec<Value>,
     pub state_delta: HashMap<String, Value>,
     pub error: Option<String>,
@@ -71,6 +74,7 @@ pub struct TaskResult {
 pub enum KernelEventType {
     UserInput,
     PlanCreated,
+    PromptWarning,
     TaskCompleted,
     Transfer,
     FinalResponse,
@@ -173,6 +177,8 @@ pub struct AgentRunResult {
     pub stop_reason: String,
     #[serde(default)]
     pub usage: TalosUsage,
+    #[serde(default)]
+    pub warnings: Vec<KernelWarning>,
     pub task_results: Vec<TaskResult>,
     pub state_delta: HashMap<String, Value>,
     pub continue_loop: bool,
@@ -251,6 +257,8 @@ pub struct RunResponse {
     pub stop_reason: String,
     #[serde(default)]
     pub usage: TalosUsage,
+    #[serde(default)]
+    pub warnings: Vec<KernelWarning>,
     pub model: String,
     pub task_results: Vec<TaskResult>,
     pub transfer_to: Option<String>,

@@ -908,6 +908,7 @@ impl KernelAgent for MockAgent {
             }],
             stop_reason: "end_turn".to_string(),
             usage: TalosUsage::default(),
+            warnings: Vec::new(),
             task_results: vec![TaskResult {
                 task_id: "mock-task".to_string(),
                 kind: TaskKind::General,
@@ -918,6 +919,7 @@ impl KernelAgent for MockAgent {
                     text: "Mock response".to_string(),
                 }],
                 usage: TalosUsage::default(),
+                warnings: Vec::new(),
                 tool_traces: Vec::new(),
                 state_delta: HashMap::new(),
                 error: None,
@@ -1087,6 +1089,7 @@ mod tests {
                 created_at: 1,
                 last_activity: 1,
                 message_count: 2,
+                usage: TalosUsage::default(),
             },
         }
     }

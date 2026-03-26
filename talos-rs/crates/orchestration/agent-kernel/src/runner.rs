@@ -75,6 +75,7 @@ impl Runner for DefaultRunner {
             last_output_items,
             last_stop_reason,
             last_usage,
+            last_warnings,
             last_task_results,
             transfer_to,
         ) = loop {
@@ -122,6 +123,7 @@ impl Runner for DefaultRunner {
             let output_items = run_result.output_items;
             let stop_reason = run_result.stop_reason;
             let usage = run_result.usage;
+            let warnings = run_result.warnings;
             let task_results = run_result.task_results;
             let requested_transfer = run_result.requested_transfer;
             let should_continue = run_result.continue_loop && iterations < ctx.limits.max_iters;
@@ -137,6 +139,7 @@ impl Runner for DefaultRunner {
                     output_items,
                     stop_reason,
                     usage,
+                    warnings,
                     task_results,
                     requested_transfer,
                 );
@@ -148,6 +151,7 @@ impl Runner for DefaultRunner {
                     output_items,
                     stop_reason,
                     usage,
+                    warnings,
                     task_results,
                     requested_transfer,
                 );
@@ -165,6 +169,7 @@ impl Runner for DefaultRunner {
             output_items: last_output_items,
             stop_reason: last_stop_reason,
             usage: last_usage,
+            warnings: last_warnings,
             model,
             task_results: last_task_results,
             transfer_to,
@@ -207,6 +212,7 @@ mod tests {
                 }],
                 stop_reason: "end_turn".to_string(),
                 usage: TalosUsage::default(),
+                warnings: Vec::new(),
                 task_results: vec![crate::TaskResult {
                     task_id: "t1".to_string(),
                     kind: crate::TaskKind::General,
@@ -215,6 +221,7 @@ mod tests {
                     output: "done".to_string(),
                     output_items: vec![],
                     usage: TalosUsage::default(),
+                    warnings: Vec::new(),
                     tool_traces: vec![],
                     state_delta: HashMap::new(),
                     error: None,

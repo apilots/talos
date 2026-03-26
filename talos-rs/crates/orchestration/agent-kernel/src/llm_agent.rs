@@ -50,7 +50,7 @@ impl LlmKernelAgent {
 
     async fn execute_planned_task(
         &self,
-        ctx: &InvocationContext,
+        ctx: &mut InvocationContext,
         task: &TaskSpec,
     ) -> TalosResult<TaskResult> {
         let tool_traces = Vec::new();
@@ -59,6 +59,7 @@ impl LlmKernelAgent {
         let mut status = TaskStatus::Success;
         let mut output_items: Vec<TalosOutputItem> = Vec::new();
         let mut usage = TalosUsage::default();
+        let mut warnings = Vec::new();
 
         let output = match run_general_turn(
             ctx,
@@ -75,6 +76,7 @@ impl LlmKernelAgent {
             Ok(general_result) => {
                 output_items = general_result.output_items;
                 usage = general_result.usage;
+                warnings = general_result.warnings;
                 general_result.output_text
             }
             Err(e) => {
@@ -108,6 +110,7 @@ impl LlmKernelAgent {
             output,
             output_items,
             usage,
+            warnings,
             tool_traces,
             state_delta,
             error,
@@ -168,6 +171,7 @@ impl Agent for LlmKernelAgent {
                 .saturating_add(result.usage.output_tokens);
             usage.total_tokens = usage.total_tokens.saturating_add(result.usage.total_tokens);
             task_results.push(result);
+            merged_state_delta.insert("last_task_kind".to_string(), json!(task.kind));
         }
 
         let output_text = task_results
@@ -177,6 +181,10 @@ impl Agent for LlmKernelAgent {
         let output_items = task_results
             .iter()
             .flat_map(|result| result.output_items.clone())
+            .collect::<Vec<_>>();
+        let warnings = task_results
+            .iter()
+            .flat_map(|result| result.warnings.clone())
             .collect::<Vec<_>>();
 
         if let Some(processed) = self.planner.process_planning_response(ctx, &output_text) {
@@ -188,6 +196,7 @@ impl Agent for LlmKernelAgent {
             output_items,
             stop_reason: "end_turn".to_string(),
             usage,
+            warnings,
             task_results,
             state_delta: merged_state_delta,
             continue_loop: false,
@@ -445,6 +454,23 @@ mod tests {
         assert_eq!(
             result.task_results[0].usage.total_tokens,
             result.usage.total_tokens
+        );
+    }
+
+    #[tokio::test]
+    async fn test_run_collects_prompt_warnings() {
+        let agent =
+            build_agent_with_provider(Arc::new(SingleTaskPlanner), Arc::new(UsageStreamProvider));
+        let mut ctx = build_ctx();
+
+        let result = agent.run(&mut ctx).await.expect("run should succeed");
+
+        assert_eq!(result.task_results.len(), 1);
+        assert_eq!(result.task_results[0].warnings, result.warnings);
+        assert!(
+            !ctx.state_bags
+                .request_state
+                .contains_key("last_prompt_diagnostics")
         );
     }
 }

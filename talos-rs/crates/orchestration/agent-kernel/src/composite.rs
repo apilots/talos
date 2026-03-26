@@ -49,6 +49,7 @@ impl Agent for SequentialKernelAgent {
         let mut usage = TalosUsage::default();
         let mut task_results: Vec<TaskResult> = Vec::new();
         let mut state_delta = HashMap::new();
+        let mut warnings = Vec::new();
         let mut requested_transfer = None;
         let mut continue_loop = false;
 
@@ -58,6 +59,7 @@ impl Agent for SequentialKernelAgent {
             output_items.extend(result.output_items.clone());
             stop_reason = result.stop_reason.clone();
             usage = merge_usage(usage, &result.usage);
+            warnings.extend(result.warnings.clone());
             task_results.extend(result.task_results.clone());
             merge_state_delta(&mut state_delta, &result.state_delta);
             continue_loop = continue_loop || result.continue_loop;
@@ -73,6 +75,7 @@ impl Agent for SequentialKernelAgent {
             output_items,
             stop_reason,
             usage,
+            warnings,
             task_results,
             state_delta,
             continue_loop,
@@ -130,6 +133,7 @@ impl Agent for ParallelKernelAgent {
         let mut usage = TalosUsage::default();
         let mut task_results: Vec<TaskResult> = Vec::new();
         let mut state_delta = HashMap::new();
+        let mut warnings = Vec::new();
         let mut requested_transfer = None;
         let mut continue_loop = false;
 
@@ -138,6 +142,7 @@ impl Agent for ParallelKernelAgent {
             output_items.extend(result.output_items);
             stop_reason = result.stop_reason.clone();
             usage = merge_usage(usage, &result.usage);
+            warnings.extend(result.warnings);
             task_results.extend(result.task_results);
             merge_state_delta(&mut state_delta, &result.state_delta);
             continue_loop = continue_loop || result.continue_loop;
@@ -151,6 +156,7 @@ impl Agent for ParallelKernelAgent {
             output_items,
             stop_reason,
             usage,
+            warnings,
             task_results,
             state_delta,
             continue_loop,
@@ -187,6 +193,7 @@ impl Agent for LoopKernelAgent {
             output_items: Vec::new(),
             stop_reason: "end_turn".to_string(),
             usage: TalosUsage::default(),
+            warnings: Vec::new(),
             task_results: Vec::new(),
             state_delta: HashMap::new(),
             continue_loop: false,
@@ -199,6 +206,7 @@ impl Agent for LoopKernelAgent {
             merged.output_items.extend(result.output_items.clone());
             merged.stop_reason = result.stop_reason.clone();
             merged.usage = merge_usage(merged.usage, &result.usage);
+            merged.warnings.extend(result.warnings.clone());
             merged.task_results.extend(result.task_results.clone());
             merge_state_delta(&mut merged.state_delta, &result.state_delta);
             merged.continue_loop = result.continue_loop;
@@ -259,6 +267,7 @@ impl Agent for RoutingKernelAgent {
             output_items: Vec::new(),
             stop_reason: "end_turn".to_string(),
             usage: TalosUsage::default(),
+            warnings: Vec::new(),
             task_results: Vec::new(),
             state_delta: HashMap::new(),
             continue_loop: false,
@@ -278,6 +287,7 @@ impl Agent for RoutingKernelAgent {
             merged.output_items.extend(result.output_items.clone());
             merged.stop_reason = result.stop_reason.clone();
             merged.usage = merge_usage(merged.usage, &result.usage);
+            merged.warnings.extend(result.warnings.clone());
             merged.task_results.extend(result.task_results.clone());
             merge_state_delta(&mut merged.state_delta, &result.state_delta);
             if let Some(next) = result.requested_transfer {
@@ -325,6 +335,7 @@ mod tests {
                 }],
                 stop_reason: "end_turn".to_string(),
                 usage: TalosUsage::default(),
+                warnings: Vec::new(),
                 task_results: vec![TaskResult {
                     task_id: format!("task-{}", self.id),
                     kind: TaskKind::General,
@@ -333,6 +344,7 @@ mod tests {
                     output: self.output.clone(),
                     output_items: Vec::new(),
                     usage: TalosUsage::default(),
+                    warnings: Vec::new(),
                     tool_traces: Vec::new(),
                     state_delta: HashMap::new(),
                     error: None,

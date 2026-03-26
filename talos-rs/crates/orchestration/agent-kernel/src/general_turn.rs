@@ -1,4 +1,7 @@
-use crate::{InvocationContext, KernelStreamEvent};
+use crate::{
+    warnings::derive_prompt_warnings, InvocationContext, KernelEvent, KernelEventType,
+    KernelStreamEvent, KernelWarning,
+};
 use chrono::Utc;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -13,7 +16,10 @@ use talos_memory::{
     SessionPromptContextConfig, SummaryRecord, TalosMessage, TalosMessageRole, TalosTurn,
     ToolCallRecord, ToolResultRecord,
 };
-use talos_prompt::{PromptBudget, PromptBuildConfig, PromptBuilder, PromptLoadPolicy, PromptPhase};
+use talos_prompt::{
+    render_prompt_assembly, PromptBudget, PromptBuildConfig, PromptBuilder, PromptDiagnostics,
+    PromptLoadPolicy, PromptPhase,
+};
 use talos_tools::ToolRegistry;
 use talos_types::talos::{TalosContentItem, TalosOutputItem, TalosUsage};
 use tokio::sync::mpsc;
@@ -26,6 +32,8 @@ pub struct GeneralTurnResult {
     pub output_items: Vec<TalosOutputItem>,
     pub stop_reason: String,
     pub usage: TalosUsage,
+    pub prompt_diagnostics: PromptDiagnostics,
+    pub warnings: Vec<KernelWarning>,
 }
 
 pub async fn flush_session_memory(
@@ -276,6 +284,97 @@ fn build_retrieved_memories_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{ContextStateBags, InvocationLimits, TurnPhase};
+    use async_trait::async_trait;
+    use std::collections::HashMap;
+    use talos_llm_provider::{
+        ChatChunk, ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage,
+    };
+    use talos_tools::ToolRegistry;
+    use tokio::sync::mpsc;
+    use uuid::Uuid;
+
+    struct NoopLlmProvider;
+
+    #[async_trait]
+    impl LlmProvider for NoopLlmProvider {
+        fn name(&self) -> &str {
+            "noop"
+        }
+
+        async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
+            Ok(ChatResponse {
+                content: "ok".to_string(),
+                model: "noop".to_string(),
+                usage: Usage {
+                    prompt_tokens: 1,
+                    completion_tokens: 1,
+                    total_tokens: 2,
+                },
+                finish_reason: Some("stop".to_string()),
+                tool_calls: None,
+            })
+        }
+
+        async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
+            let (_tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(1);
+            Ok(ChatStream::new(rx))
+        }
+
+        fn default_model(&self) -> &str {
+            "noop"
+        }
+    }
+
+    fn build_ctx_with_stream(
+        stream_tx: Option<mpsc::Sender<crate::KernelStreamEvent>>,
+    ) -> InvocationContext {
+        InvocationContext {
+            session_id: "s1".to_string(),
+            invocation_id: "i1".to_string(),
+            agent_id: "a1".to_string(),
+            workspace_id: "w1".to_string(),
+            input: "hello".to_string(),
+            model: "m1".to_string(),
+            phase: TurnPhase::Execution,
+            planning_instruction: None,
+            transfer_to: None,
+            state: HashMap::new(),
+            state_bags: ContextStateBags::default(),
+            limits: InvocationLimits::default(),
+            events: Vec::new(),
+            stream_tx,
+        }
+    }
+
+    async fn seed_recent_user_message(memory_store: &MemoryStore) {
+        let timestamp = Utc::now();
+        memory_store
+            .append_turn(&TalosTurn {
+                turn_id: "turn-1".to_string(),
+                session_id: "s1".to_string(),
+                seq: memory_store
+                    .next_turn_seq("s1")
+                    .await
+                    .expect("seq should load"),
+                timestamp,
+                messages: vec![TalosMessage {
+                    header: RecordHeader {
+                        id: "turn-1:u".to_string(),
+                        session_id: "s1".to_string(),
+                        turn_id: Some("turn-1".to_string()),
+                        timestamp,
+                    },
+                    role: TalosMessageRole::User,
+                    text: "history that should be dropped".to_string(),
+                }],
+                reasoning: Vec::new(),
+                tool_calls: Vec::new(),
+                tool_results: Vec::new(),
+            })
+            .await
+            .expect("append should succeed");
+    }
 
     #[test]
     fn test_parse_retrieved_memory_items_from_memory_search() {
@@ -324,6 +423,78 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].path, "MEMORY.md");
     }
+
+    #[tokio::test]
+    async fn test_run_general_turn_emits_prompt_warning_event() {
+        let provider = Arc::new(NoopLlmProvider);
+        let tool_registry = Arc::new(ToolRegistry::new());
+        let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+        seed_recent_user_message(memory_store.as_ref()).await;
+        let mut config = AgentKernelConfig::default();
+        config.prompt.bootstrap.enabled = false;
+        config.prompt.include_root_memory = false;
+        config.prompt.max_dynamic_tokens = 1;
+        config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+        let mut ctx = build_ctx_with_stream(None);
+
+        let result = run_general_turn(
+            &mut ctx,
+            "talos",
+            "assistant",
+            "hello",
+            provider,
+            tool_registry,
+            memory_store,
+            &config,
+        )
+        .await
+        .expect("general turn should succeed");
+
+        assert!(!result.warnings.is_empty());
+        assert!(ctx.events.iter().any(|event| {
+            matches!(event.event_type, KernelEventType::PromptWarning)
+                && event.message == "prompt_warning"
+        }));
+    }
+
+    #[tokio::test]
+    async fn test_run_general_turn_streams_prompt_warning_event() {
+        let provider = Arc::new(NoopLlmProvider);
+        let tool_registry = Arc::new(ToolRegistry::new());
+        let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+        seed_recent_user_message(memory_store.as_ref()).await;
+        let mut config = AgentKernelConfig::default();
+        config.prompt.bootstrap.enabled = false;
+        config.prompt.include_root_memory = false;
+        config.prompt.max_dynamic_tokens = 1;
+        config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+        let (tx, mut rx) = mpsc::channel(16);
+        let mut ctx = build_ctx_with_stream(Some(tx));
+
+        let _ = run_general_turn(
+            &mut ctx,
+            "talos",
+            "assistant",
+            "hello",
+            provider,
+            tool_registry,
+            memory_store,
+            &config,
+        )
+        .await
+        .expect("general turn should succeed");
+
+        let mut saw_prompt_warning = false;
+        while let Ok(event) = rx.try_recv() {
+            if event.event_type == "prompt.warning" {
+                saw_prompt_warning = true;
+                break;
+            }
+        }
+        assert!(saw_prompt_warning, "stream should include prompt.warning");
+    }
 }
 
 async fn emit_stream_event(
@@ -333,6 +504,23 @@ async fn emit_stream_event(
 ) {
     if let Some(tx) = stream_tx {
         let _ = tx.send(KernelStreamEvent::new(event_type, data)).await;
+    }
+}
+
+async fn emit_prompt_warning_events(ctx: &mut InvocationContext, warnings: &[KernelWarning]) {
+    for warning in warnings {
+        let payload = json!({
+            "warning": warning,
+            "agent_id": ctx.agent_id,
+            "session_id": ctx.session_id,
+            "phase": ctx.phase,
+        });
+        ctx.events.push(KernelEvent::new(
+            KernelEventType::PromptWarning,
+            "prompt_warning",
+            Some(payload.clone()),
+        ));
+        emit_stream_event(ctx.stream_tx.as_ref(), "prompt.warning", payload).await;
     }
 }
 
@@ -501,7 +689,7 @@ async fn chat_round(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run_general_turn(
-    ctx: &InvocationContext,
+    ctx: &mut InvocationContext,
     agent_name: &str,
     agent_description: &str,
     input: &str,
@@ -510,9 +698,9 @@ pub async fn run_general_turn(
     memory_store: Arc<MemoryStore>,
     kernel_config: &AgentKernelConfig,
 ) -> TalosResult<GeneralTurnResult> {
-    let session_id = &ctx.session_id;
-    let agent_id = &ctx.agent_id;
-    let selected_model = &ctx.model;
+    let session_id = ctx.session_id.clone();
+    let agent_id = ctx.agent_id.clone();
+    let selected_model = ctx.model.clone();
     let stream_tx = ctx.stream_tx.clone();
 
     let phase = match ctx.phase {
@@ -544,9 +732,34 @@ pub async fn run_general_turn(
             memory: kernel_config.memory.clone(),
         })
         .tools(tool_registry.as_ref())
-        .memory_store(session_id, memory_store.as_ref())
+        .memory_store(&session_id, memory_store.as_ref())
         .user_input(input.to_string());
-    let mut messages = prompt_builder.build().await?;
+    let prompt_assembly = prompt_builder.assemble().await?;
+    let prompt_diagnostics = prompt_assembly.diagnostics.clone();
+    let warnings = derive_prompt_warnings(&prompt_diagnostics, kernel_config);
+    tracing::debug!(
+        session_id = %session_id,
+        agent_id = %agent_id,
+        prompt_mode = ?prompt_diagnostics.mode,
+        included_sections = ?prompt_diagnostics.included_sections,
+        dropped_sections = ?prompt_diagnostics.dropped_sections,
+        truncated_sections = ?prompt_diagnostics.truncated_sections,
+        static_estimated_tokens = prompt_diagnostics.static_estimated_tokens,
+        dynamic_estimated_tokens = prompt_diagnostics.dynamic_estimated_tokens,
+        total_estimated_tokens = prompt_diagnostics.total_estimated_tokens,
+        bootstrap_files = ?prompt_diagnostics.bootstrap_files,
+        "prompt diagnostics"
+    );
+    if !warnings.is_empty() {
+        warn!(
+            session_id = %session_id,
+            agent_id = %agent_id,
+            warnings = ?warnings,
+            "prompt warnings emitted"
+        );
+    }
+    emit_prompt_warning_events(ctx, &warnings).await;
+    let mut messages = render_prompt_assembly(&prompt_assembly);
 
     let tool_definitions = tool_registry.get_tool_definitions();
     let max_tool_rounds = kernel_config.max_tool_rounds.max(1);
@@ -565,7 +778,7 @@ pub async fn run_general_turn(
     let (mut final_text, stop_reason) = loop {
         let mut builder = ChatRequest::builder()
             .messages(messages.clone())
-            .model(selected_model.to_string());
+            .model(selected_model.clone());
 
         if !tool_definitions.is_empty() {
             builder = builder
@@ -848,7 +1061,7 @@ pub async fn run_general_turn(
         text: final_text.clone(),
     });
 
-    let seq = memory_store.next_turn_seq(session_id).await?;
+    let seq = memory_store.next_turn_seq(&session_id).await?;
     let turn_id = Uuid::new_v4().to_string();
     let now = Utc::now();
     let talos_turn = TalosTurn {
@@ -911,8 +1124,8 @@ pub async fn run_general_turn(
     }
 
     if let Err(err) = compact_workspace_context_if_needed(
-        session_id,
-        selected_model,
+        &session_id,
+        &selected_model,
         llm_provider.clone(),
         memory_store.as_ref(),
         kernel_config,
@@ -931,5 +1144,7 @@ pub async fn run_general_turn(
         output_items,
         stop_reason,
         usage,
+        prompt_diagnostics,
+        warnings,
     })
 }

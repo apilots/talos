@@ -7,6 +7,7 @@ mod runner;
 mod runtime;
 mod traits;
 mod types;
+mod warnings;
 
 pub use composite::{
     LoopKernelAgent, ParallelKernelAgent, RoutingKernelAgent, SequentialKernelAgent,
@@ -22,4 +23,10 @@ pub use types::{
     AgentRunResult, ContextStateBags, InvocationContext, InvocationLimits, KernelEvent,
     KernelEventType, KernelStreamEvent, RunRequest, RunResponse, TaskConstraints, TaskKind,
     TaskPlan, TaskResult, TaskSpec, TaskStatus, TurnPhase,
+};
+pub use warnings::{
+    KernelWarning, PromptBootstrapDropReason, PromptBootstrapFileDroppedWarning,
+    PromptBootstrapFileMissingWarning, PromptBootstrapFileTruncatedWarning,
+    PromptDurableMemoryMissingWarning, PromptDynamicSectionDroppedWarning,
+    PromptDynamicSectionTruncatedWarning,
 };
