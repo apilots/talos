@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use talos_config::{AgentKernelMemoryConfig, AgentKernelPromptConfig};
+use talos_error::{TalosError, TalosResult};
 use talos_memory::TalosMessageRole;
 
 /// Prompt build phase.
@@ -30,10 +31,14 @@ pub enum PlannerMode {
 }
 
 impl PlannerMode {
-    pub(crate) fn parse(value: &str) -> Self {
+    pub(crate) fn parse(value: &str) -> TalosResult<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "plan_react" => Self::PlanReact,
-            _ => Self::BuiltIn,
+            "built_in" => Ok(Self::BuiltIn),
+            "plan_react" => Ok(Self::PlanReact),
+            other => Err(TalosError::ValidationError(format!(
+                "invalid planner mode: {}",
+                other
+            ))),
         }
     }
 
@@ -143,7 +148,7 @@ impl WorkspaceBootstrapFileKind {
     }
 
     pub(crate) fn is_project_context(self) -> bool {
-        !matches!(self, Self::Memory)
+        true
     }
 }
 
@@ -152,7 +157,6 @@ pub struct WorkspaceBootstrapFile {
     pub kind: WorkspaceBootstrapFileKind,
     pub path: PathBuf,
     pub content: Option<String>,
-    pub missing: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -163,7 +167,6 @@ pub enum PromptSectionKind {
     ProjectContext,
     SessionSummary,
     RecentMessages,
-    DurableMemory,
     RetrievedMemories,
 }
 
@@ -245,7 +248,6 @@ impl Default for PromptBudget {
 pub struct PromptLoadPolicy {
     pub include_session_summary: bool,
     pub include_recent_messages: bool,
-    pub include_root_memory: bool,
     pub include_retrieved_memories: bool,
     pub session_recent_limit: usize,
     pub retrieved_memory_max_items: usize,
@@ -258,7 +260,6 @@ impl Default for PromptLoadPolicy {
         Self {
             include_session_summary: true,
             include_recent_messages: true,
-            include_root_memory: true,
             include_retrieved_memories: true,
             session_recent_limit: 16,
             retrieved_memory_max_items: 4,

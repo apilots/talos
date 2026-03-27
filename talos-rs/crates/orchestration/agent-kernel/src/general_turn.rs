@@ -433,7 +433,6 @@ mod tests {
         seed_recent_user_message(memory_store.as_ref()).await;
         let mut config = AgentKernelConfig::default();
         config.prompt.bootstrap.enabled = false;
-        config.prompt.include_root_memory = false;
         config.prompt.max_dynamic_tokens = 1;
         config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
         let mut ctx = build_ctx_with_stream(None);
@@ -467,7 +466,6 @@ mod tests {
         seed_recent_user_message(memory_store.as_ref()).await;
         let mut config = AgentKernelConfig::default();
         config.prompt.bootstrap.enabled = false;
-        config.prompt.include_root_memory = false;
         config.prompt.max_dynamic_tokens = 1;
         config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
         let (tx, mut rx) = mpsc::channel(16);
@@ -711,7 +709,7 @@ pub async fn run_general_turn(
     let prompt_builder = PromptBuilder::new()
         .agent(agent_name.to_string(), agent_description.to_string())
         .phase(phase)
-        .planner_mode(kernel_config.planner_mode.clone())
+        .planner_mode(kernel_config.planner_mode.clone())?
         .planning_instruction(ctx.planning_instruction.clone())
         .config(PromptBuildConfig {
             budget: PromptBudget {
@@ -721,7 +719,6 @@ pub async fn run_general_turn(
             load_policy: PromptLoadPolicy {
                 include_session_summary: kernel_config.prompt.include_session_summary,
                 include_recent_messages: kernel_config.prompt.include_recent_messages,
-                include_root_memory: kernel_config.prompt.include_root_memory,
                 include_retrieved_memories: kernel_config.prompt.include_retrieved_memories,
                 session_recent_limit: kernel_config.memory.session_recent_messages_limit,
                 retrieved_memory_max_items: kernel_config.prompt.retrieved_memory_max_items,

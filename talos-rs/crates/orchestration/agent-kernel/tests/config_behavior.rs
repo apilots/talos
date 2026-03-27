@@ -2,7 +2,8 @@
 //!
 //! Tests verify default values and boundary conditions for kernel configuration.
 
-use talos_config::AgentKernelConfig;
+use talos_config::{AgentKernelConfig, Config};
+use talos_error::TalosError;
 
 /// Tests that AgentKernelConfig default values match the specification.
 ///
@@ -168,7 +169,7 @@ fn test_nested_config_defaults() {
 
     assert!(config.prompt.include_session_summary);
     assert!(config.prompt.include_recent_messages);
-    assert!(config.prompt.include_root_memory);
+    assert!(config.prompt.bootstrap.include_memory);
 
     assert!(config.memory.session_summary_enabled);
     assert!(config.memory.workspace_memory_flush_enabled);
@@ -186,4 +187,23 @@ fn test_config_clone() {
         original.allow_request_planner_override,
         cloned.allow_request_planner_override
     );
+}
+
+#[test]
+fn test_bootstrap_char_budget_relationship_validation() {
+    let mut config = AgentKernelConfig::default();
+    config.prompt.bootstrap.max_chars_per_file = 8_000;
+    config.prompt.bootstrap.max_chars_total = 4_000;
+
+    let err = Config {
+        agent: talos_config::AgentConfig {
+            kernel: config,
+            ..talos_config::AgentConfig::default()
+        },
+        ..Config::default()
+    }
+    .validate_runtime()
+    .expect_err("invalid bootstrap char budget should fail");
+
+    assert!(matches!(err, TalosError::InvalidConfiguration(_)));
 }

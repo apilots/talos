@@ -2,9 +2,8 @@ use async_trait::async_trait;
 use talos_error::TalosResult;
 
 use crate::store::{
-    MemoryGetResult, MemorySearchQuery, MemorySearchResult, RootMemoryContext,
-    SessionPromptContext, SessionPromptContextConfig, SummaryRecord, TalosTurn,
-    WorkspaceMemoryRecord,
+    MemoryGetResult, MemorySearchQuery, MemorySearchResult, SessionPromptContext,
+    SessionPromptContextConfig, SummaryRecord, TalosTurn, WorkspaceMemoryRecord,
 };
 
 /// Trait for memory implementations
@@ -25,7 +24,6 @@ pub trait Memory: Send + Sync {
     ) -> TalosResult<Vec<SummaryRecord>>;
     async fn latest_seq(&self, session_id: &str) -> TalosResult<u64>;
     async fn session_size_bytes(&self, session_id: &str) -> TalosResult<u64>;
-    async fn load_root_memory(&self) -> TalosResult<RootMemoryContext>;
     async fn search_memory(
         &self,
         query: &MemorySearchQuery,

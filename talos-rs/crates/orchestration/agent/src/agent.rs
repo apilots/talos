@@ -17,7 +17,7 @@ use talos_agent_kernel::{
     TaskResult, TaskStatus,
 };
 use talos_config::AgentKernelConfig;
-use talos_error::TalosResult;
+use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{ChatMessage, FunctionCall, LlmProvider};
 use talos_memory::MemoryStore;
 use talos_tools::ToolRegistry;
@@ -46,11 +46,14 @@ impl PlannerMode {
         }
     }
 
-    fn parse(value: &str) -> Option<Self> {
-        match value.to_ascii_lowercase().as_str() {
-            "built_in" | "builtin" => Some(Self::BuiltIn),
-            "plan_react" | "planreact" => Some(Self::PlanReAct),
-            _ => None,
+    fn parse(value: &str) -> TalosResult<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "built_in" | "builtin" => Ok(Self::BuiltIn),
+            "plan_react" | "planreact" => Ok(Self::PlanReAct),
+            other => Err(TalosError::ValidationError(format!(
+                "invalid planner mode: {}",
+                other
+            ))),
         }
     }
 }
@@ -173,9 +176,6 @@ impl AgentImpl {
     }
 
     fn normalized_kernel_config(mut kernel_config: AgentKernelConfig) -> AgentKernelConfig {
-        if PlannerMode::parse(&kernel_config.planner_mode).is_none() {
-            kernel_config.planner_mode = PlannerMode::BuiltIn.as_str().to_string();
-        }
         if kernel_config.binding.default_agent_kind.trim().is_empty() {
             kernel_config.binding.default_agent_kind = "llm".to_string();
         }
@@ -263,10 +263,10 @@ impl AgentImpl {
         self.planner_override = Some(planner);
     }
 
-    pub fn set_default_planner_mode(&mut self, planner_mode: &str) {
-        if let Some(mode) = PlannerMode::parse(planner_mode.trim()) {
-            self.kernel_config.planner_mode = mode.as_str().to_string();
-        }
+    pub fn set_default_planner_mode(&mut self, planner_mode: &str) -> TalosResult<()> {
+        let mode = PlannerMode::parse(planner_mode.trim())?;
+        self.kernel_config.planner_mode = mode.as_str().to_string();
+        Ok(())
     }
 
     pub fn set_allow_request_planner_override(&mut self, allow: bool) {
@@ -430,18 +430,18 @@ After receiving tool outputs, continue reasoning and provide the final response.
         }
     }
 
-    fn resolve_planner_mode(&self) -> PlannerMode {
-        PlannerMode::parse(&self.kernel_config.planner_mode).unwrap_or(PlannerMode::BuiltIn)
+    fn resolve_planner_mode(&self) -> TalosResult<PlannerMode> {
+        PlannerMode::parse(&self.kernel_config.planner_mode)
     }
 
-    fn build_planner_for_request(&self) -> Arc<dyn Planner> {
+    fn build_planner_for_request(&self) -> TalosResult<Arc<dyn Planner>> {
         if let Some(planner) = self.planner_override.as_ref() {
-            return planner.clone();
+            return Ok(planner.clone());
         }
-        match self.resolve_planner_mode() {
+        Ok(match self.resolve_planner_mode()? {
             PlannerMode::BuiltIn => Arc::new(BuiltInPlanner::new()),
             PlannerMode::PlanReAct => Arc::new(PlanReActPlanner::new()),
-        }
+        })
     }
 
     fn resolve_kernel_agent_kind(&self) -> KernelAgentKind {
@@ -464,14 +464,14 @@ After receiving tool outputs, continue reasoning and provide the final response.
         }
     }
 
-    fn build_kernel_agent_for_request(&self) -> Arc<dyn KernelAgent> {
-        let planner = self.build_planner_for_request();
+    fn build_kernel_agent_for_request(&self) -> TalosResult<Arc<dyn KernelAgent>> {
+        let planner = self.build_planner_for_request()?;
         let agent_kind = self.resolve_kernel_agent_kind();
         let mode = self.resolve_kernel_mode();
         let child_count = self.kernel_config.execution_children.clamp(1, 4);
         let loop_iters = self.kernel_config.execution_loop_iters.clamp(1, 16);
 
-        match mode {
+        Ok(match mode {
             KernelExecutionMode::Single => self.build_kernel_agent_by_kind(
                 agent_kind,
                 self.id.clone(),
@@ -543,7 +543,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
                 );
                 Arc::new(router)
             }
-        }
+        })
     }
 
     fn map_kernel_stream_event(
@@ -709,7 +709,7 @@ impl AgentOrchestrator for AgentImpl {
         let phase = agent_request.phase.clone();
         let planning_instruction = agent_request.planning_instruction.clone();
         let transfer_to = agent_request.transfer_to.clone();
-        let kernel_agent = self.build_kernel_agent_for_request();
+        let kernel_agent = self.build_kernel_agent_for_request()?;
         let result = self
             .kernel_runtime
             .run_turn(
@@ -766,7 +766,21 @@ impl AgentOrchestrator for AgentImpl {
             let phase = agent_request.phase.clone();
             let planning_instruction = agent_request.planning_instruction.clone();
             let transfer_to = agent_request.transfer_to.clone();
-            let kernel_agent = this.build_kernel_agent_for_request();
+            let kernel_agent = match this.build_kernel_agent_for_request() {
+                Ok(agent) => agent,
+                Err(err) => {
+                    let _ = tx
+                        .send(OrchestratorEvent {
+                            event_type: "response.error".to_string(),
+                            data: json!({
+                                "request_id": request_id,
+                                "error": err.to_string(),
+                            }),
+                        })
+                        .await;
+                    return;
+                }
+            };
             let (kernel_tx, mut kernel_rx) = mpsc::channel(256);
             let runtime = this.kernel_runtime.clone();
             let kernel_input = RunRequest {
@@ -1277,8 +1291,12 @@ mod tests {
     #[test]
     fn test_planner_mode_comes_from_kernel_config() {
         let mut agent = build_test_agent();
-        agent.set_default_planner_mode("plan_react");
-        let planner = agent.build_planner_for_request();
+        agent
+            .set_default_planner_mode("plan_react")
+            .expect("planner mode should parse");
+        let planner = agent
+            .build_planner_for_request()
+            .expect("planner should build");
         let ctx = mock_invocation_ctx();
         assert!(planner.build_planning_instruction(&ctx).is_some());
     }

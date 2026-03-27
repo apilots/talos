@@ -45,7 +45,7 @@ impl Tool for MemorySearchTool {
     }
 
     fn description(&self) -> &str {
-        "Searches MEMORY.md and memory/*.md for prior work, decisions, dates, preferences, and todos. Use this before answering memory-dependent questions."
+        "Searches memory/*.md for prior work, decisions, dates, preferences, and todos. Use this before answering memory-dependent questions."
     }
 
     fn parameters_schema(&self) -> Option<Value> {
@@ -120,7 +120,7 @@ impl Tool for MemoryGetTool {
     }
 
     fn description(&self) -> &str {
-        "Reads a precise snippet from MEMORY.md or memory/*.md after memory_search returns a path."
+        "Reads a precise snippet from memory/*.md after memory_search returns a path."
     }
 
     fn parameters_schema(&self) -> Option<Value> {
@@ -274,6 +274,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_memory_search_expands_tilde_workspace_dir() {
+        let (year, month, day) = (2026, 3, 27);
+        let daily_file_name = format!("{year:04}-{month:02}-{day:02}.md");
+        let expected_memory_path = format!("memory/{daily_file_name}");
         let home = std::env::var("HOME").expect("HOME should be set");
         let home_path = std::path::PathBuf::from(&home);
         let workspace_dir = home_path.join(format!(
@@ -286,12 +289,15 @@ mod tests {
         tokio::fs::create_dir_all(&workspace_dir)
             .await
             .expect("workspace dir should create");
+        tokio::fs::create_dir_all(workspace_dir.join("memory"))
+            .await
+            .expect("memory dir should create");
         tokio::fs::write(
-            workspace_dir.join("MEMORY.md"),
-            "# MEMORY\n\nTea preference is durable.\n",
+            workspace_dir.join("memory").join(&daily_file_name),
+            "## Notes\nTea preference is durable.\n",
         )
         .await
-        .expect("root memory should write");
+        .expect("daily memory should write");
 
         let tool = MemorySearchTool;
         let mut config = AgentKernelConfig::default();
@@ -311,9 +317,8 @@ mod tests {
             serde_json::from_str(&output.output).expect("response should deserialize");
 
         assert_eq!(response.results.len(), 1);
-        assert_eq!(response.results[0].path, "MEMORY.md");
+        assert_eq!(response.results[0].path, expected_memory_path);
 
-        let _ = tokio::fs::remove_file(workspace_dir.join("MEMORY.md")).await;
         let _ = tokio::fs::remove_dir_all(workspace_dir).await;
     }
 }

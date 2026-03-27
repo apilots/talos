@@ -8,7 +8,6 @@ use crate::path_policy;
 use crate::store::{
     MemoryGetResult, MemorySearchQuery, MemorySearchResult, MemoryStore, RetrievedMemoryItem,
 };
-use crate::workspace_store;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MemorySearchResponse {
@@ -207,16 +206,6 @@ fn relative_source_path(workspace_dir: &Path, file: &PathBuf) -> String {
 async fn load_sources(store: &MemoryStore) -> TalosResult<Vec<RetrievalSource>> {
     let mut sources = Vec::new();
 
-    let root = workspace_store::load_root_memory(store).await?;
-    if let Some(content) = root.content {
-        if !content.trim().is_empty() {
-            sources.push(RetrievalSource {
-                path: "MEMORY.md".to_string(),
-                content,
-            });
-        }
-    }
-
     for file in path_policy::list_workspace_memory_files(store).await? {
         let content = fs::read_to_string(&file)
             .await
@@ -323,7 +312,6 @@ pub(crate) async fn get_memory(
 mod tests {
     use chrono::Utc;
     use tempfile::TempDir;
-    use tokio::fs;
 
     use crate::store::{MemorySearchQuery, MemoryStore};
     use crate::{Memory, WorkspaceMemoryRecord};
@@ -367,12 +355,15 @@ mod tests {
     #[tokio::test]
     async fn test_search_memory_returns_block_snippet() {
         let (_guard, store) = new_temp_store();
-        fs::write(
-            store.root_memory_path(),
-            "# Preferences\nTea only\nNo coffee\n\n# Decisions\nUse blue green\n",
-        )
-        .await
-        .expect("root memory should be written");
+        store
+            .append_workspace_memory(&WorkspaceMemoryRecord {
+                timestamp: Utc::now(),
+                title: Some("Daily".to_string()),
+                content: "# Preferences\nTea only\nNo coffee\n\n# Decisions\nUse blue green"
+                    .to_string(),
+            })
+            .await
+            .expect("workspace memory append should succeed");
 
         let results = store
             .search_memory(&MemorySearchQuery {
@@ -384,10 +375,11 @@ mod tests {
             .expect("search should succeed");
 
         assert!(!results.is_empty());
+        assert!(results[0].path.starts_with("memory/"));
         assert!(results[0].snippet.contains("Tea only"));
         assert!(results[0].snippet.contains("No coffee"));
-        assert_eq!(results[0].start_line, 1);
-        assert_eq!(results[0].end_line, 3);
+        assert_eq!(results[0].start_line, 2);
+        assert_eq!(results[0].end_line, 4);
     }
 
     #[tokio::test]

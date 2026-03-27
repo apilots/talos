@@ -3,12 +3,11 @@ use talos_error::TalosResult;
 
 use crate::retrieval;
 use crate::session_store;
-use crate::store::{
-    MemoryGetResult, MemorySearchQuery, MemorySearchResult, MemoryStore, RootMemoryContext,
-    SessionPromptContext, SessionPromptContextConfig, SummaryRecord, TalosTurn,
-    WorkspaceMemoryRecord,
-};
 use crate::workspace_store;
+use crate::store::{
+    MemoryGetResult, MemorySearchQuery, MemorySearchResult, MemoryStore, SessionPromptContext,
+    SessionPromptContextConfig, SummaryRecord, TalosTurn, WorkspaceMemoryRecord,
+};
 use crate::Memory;
 
 #[async_trait]
@@ -47,10 +46,6 @@ impl Memory for MemoryStore {
 
     async fn session_size_bytes(&self, session_id: &str) -> TalosResult<u64> {
         session_store::session_size_bytes(self, session_id).await
-    }
-
-    async fn load_root_memory(&self) -> TalosResult<RootMemoryContext> {
-        workspace_store::load_root_memory(self).await
     }
 
     async fn search_memory(

@@ -27,10 +27,23 @@ agent:
       max_dynamic_tokens: 3200
       include_session_summary: true
       include_recent_messages: true
-      include_root_memory: true
       include_retrieved_memories: true
       retrieved_memory_max_items: 4
       retrieved_memory_max_chars: 2000
+      bootstrap:
+        enabled: true
+        auto_create_missing_files: true
+        max_chars_per_file: 8000
+        max_chars_total: 24000
+        warning_mode: "once"
+        include_agents: true
+        include_soul: true
+        include_tools: true
+        include_identity: true
+        include_user: true
+        include_heartbeat: true
+        include_bootstrap: true
+        include_memory: true
     memory:
       workspace_dir: "~/.talos/workspace"
       hot_recent_messages: 64

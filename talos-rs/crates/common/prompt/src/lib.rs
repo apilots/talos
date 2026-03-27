@@ -361,9 +361,9 @@ impl<'a> PromptBuilder<'a> {
         self
     }
 
-    pub fn planner_mode(mut self, planner_mode: impl Into<String>) -> Self {
-        self.planner_mode = PlannerMode::parse(&planner_mode.into());
-        self
+    pub fn planner_mode(mut self, planner_mode: impl Into<String>) -> TalosResult<Self> {
+        self.planner_mode = PlannerMode::parse(&planner_mode.into())?;
+        Ok(self)
     }
 
     pub fn planning_instruction(mut self, planning_instruction: Option<String>) -> Self {
@@ -481,7 +481,6 @@ impl<'a> PromptBuilder<'a> {
             files.push(WorkspaceBootstrapFile {
                 kind: *kind,
                 path,
-                missing: content.is_none(),
                 content,
             });
         }
@@ -648,6 +647,7 @@ mod tests {
             .agent("talos", "assistant")
             .phase(PromptPhase::Planning)
             .planner_mode("plan_react")
+            .expect("planner mode should parse")
             .planning_instruction(Some("build a short plan first".to_string()))
             .tools(&registry)
             .user_input("help me")
@@ -787,7 +787,6 @@ mod tests {
         config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
         config.load_policy.include_session_summary = false;
         config.load_policy.include_recent_messages = false;
-        config.prompt.include_root_memory = true;
 
         let messages = PromptBuilder::new()
             .agent("talos", "assistant")
@@ -817,12 +816,7 @@ mod tests {
             .expect("should include project context");
         assert!(project_context.content.contains("## AGENTS.md"));
         assert!(project_context.content.contains("## SOUL.md"));
-
-        let durable_memory = messages
-            .iter()
-            .find(|msg| msg.content.contains("Durable memory (MEMORY.md):"))
-            .expect("should include durable memory");
-        assert!(durable_memory.content.contains("# MEMORY"));
+        assert!(project_context.content.contains("## MEMORY.md"));
     }
 
     #[tokio::test]
@@ -834,7 +828,6 @@ mod tests {
         config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
         config.load_policy.include_session_summary = false;
         config.load_policy.include_recent_messages = false;
-        config.prompt.include_root_memory = false;
 
         let messages = PromptBuilder::new()
             .mode(PromptMode::Minimal)

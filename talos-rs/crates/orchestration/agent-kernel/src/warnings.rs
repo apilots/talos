@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use talos_config::AgentKernelConfig;
+use talos_config::{AgentKernelConfig, BootstrapPromptWarningMode};
 use talos_prompt::{PromptDiagnostics, PromptSectionKind, WorkspaceBootstrapFileKind};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -10,7 +10,6 @@ pub enum KernelWarning {
     PromptBootstrapFileDropped(PromptBootstrapFileDroppedWarning),
     PromptDynamicSectionDropped(PromptDynamicSectionDroppedWarning),
     PromptDynamicSectionTruncated(PromptDynamicSectionTruncatedWarning),
-    PromptDurableMemoryMissing(PromptDurableMemoryMissingWarning),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -54,62 +53,81 @@ pub struct PromptDynamicSectionTruncatedWarning {
     pub dynamic_budget_tokens: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PromptDurableMemoryMissingWarning {
-    pub expected_file_name: String,
-    pub workspace_dir: String,
-}
-
 pub(crate) fn derive_prompt_warnings(
     diagnostics: &PromptDiagnostics,
     kernel_config: &AgentKernelConfig,
 ) -> Vec<KernelWarning> {
     let mut warnings = Vec::new();
+    let mut emitted_missing = false;
+    let mut emitted_truncated = false;
+    let mut emitted_dropped = false;
 
-    for file in &diagnostics.bootstrap_files {
-        if file.missing {
-            warnings.push(KernelWarning::PromptBootstrapFileMissing(
-                PromptBootstrapFileMissingWarning {
-                    file_kind: file.kind,
-                    path: file.path.display().to_string(),
-                },
-            ));
-            continue;
-        }
+    if kernel_config.prompt.bootstrap.warning_mode != BootstrapPromptWarningMode::Off {
+        for file in &diagnostics.bootstrap_files {
+            if file.missing {
+                if kernel_config.prompt.bootstrap.warning_mode == BootstrapPromptWarningMode::Always
+                    || !emitted_missing
+                {
+                    warnings.push(KernelWarning::PromptBootstrapFileMissing(
+                        PromptBootstrapFileMissingWarning {
+                            file_kind: file.kind,
+                            path: file.path.display().to_string(),
+                        },
+                    ));
+                    emitted_missing = true;
+                }
+                continue;
+            }
 
-        if file.raw_chars == 0 && file.injected_chars == 0 {
-            warnings.push(KernelWarning::PromptBootstrapFileDropped(
-                PromptBootstrapFileDroppedWarning {
-                    file_kind: file.kind,
-                    path: file.path.display().to_string(),
-                    raw_chars: file.raw_chars,
-                    reason: PromptBootstrapDropReason::EmptyContent,
-                },
-            ));
-            continue;
-        }
+            if file.raw_chars == 0 && file.injected_chars == 0 {
+                if kernel_config.prompt.bootstrap.warning_mode == BootstrapPromptWarningMode::Always
+                    || !emitted_dropped
+                {
+                    warnings.push(KernelWarning::PromptBootstrapFileDropped(
+                        PromptBootstrapFileDroppedWarning {
+                            file_kind: file.kind,
+                            path: file.path.display().to_string(),
+                            raw_chars: file.raw_chars,
+                            reason: PromptBootstrapDropReason::EmptyContent,
+                        },
+                    ));
+                    emitted_dropped = true;
+                }
+                continue;
+            }
 
-        if file.truncated && file.injected_chars == 0 {
-            warnings.push(KernelWarning::PromptBootstrapFileDropped(
-                PromptBootstrapFileDroppedWarning {
-                    file_kind: file.kind,
-                    path: file.path.display().to_string(),
-                    raw_chars: file.raw_chars,
-                    reason: PromptBootstrapDropReason::BudgetExceeded,
-                },
-            ));
-            continue;
-        }
+            if file.truncated && file.injected_chars == 0 {
+                if kernel_config.prompt.bootstrap.warning_mode == BootstrapPromptWarningMode::Always
+                    || !emitted_dropped
+                {
+                    warnings.push(KernelWarning::PromptBootstrapFileDropped(
+                        PromptBootstrapFileDroppedWarning {
+                            file_kind: file.kind,
+                            path: file.path.display().to_string(),
+                            raw_chars: file.raw_chars,
+                            reason: PromptBootstrapDropReason::BudgetExceeded,
+                        },
+                    ));
+                    emitted_dropped = true;
+                }
+                continue;
+            }
 
-        if file.truncated {
-            warnings.push(KernelWarning::PromptBootstrapFileTruncated(
-                PromptBootstrapFileTruncatedWarning {
-                    file_kind: file.kind,
-                    path: file.path.display().to_string(),
-                    raw_chars: file.raw_chars,
-                    injected_chars: file.injected_chars,
-                },
-            ));
+            if file.truncated
+                && (kernel_config.prompt.bootstrap.warning_mode
+                    == BootstrapPromptWarningMode::Always
+                    || !emitted_truncated)
+            {
+                warnings.push(KernelWarning::PromptBootstrapFileTruncated(
+                    PromptBootstrapFileTruncatedWarning {
+                        file_kind: file.kind,
+                        path: file.path.display().to_string(),
+                        raw_chars: file.raw_chars,
+                        injected_chars: file.injected_chars,
+                    },
+                ));
+                emitted_truncated = true;
+            }
         }
     }
 
@@ -127,19 +145,6 @@ pub(crate) fn derive_prompt_warnings(
             PromptDynamicSectionTruncatedWarning {
                 sections: diagnostics.truncated_sections.clone(),
                 dynamic_budget_tokens: kernel_config.prompt.max_dynamic_tokens,
-            },
-        ));
-    }
-
-    if kernel_config.prompt.include_root_memory
-        && !diagnostics
-            .included_sections
-            .contains(&PromptSectionKind::DurableMemory)
-    {
-        warnings.push(KernelWarning::PromptDurableMemoryMissing(
-            PromptDurableMemoryMissingWarning {
-                expected_file_name: "MEMORY.md".to_string(),
-                workspace_dir: kernel_config.memory.workspace_dir.clone(),
             },
         ));
     }
@@ -204,7 +209,7 @@ mod tests {
             },
         ];
         diagnostics.dropped_sections = vec![PromptSectionKind::RecentMessages];
-        diagnostics.truncated_sections = vec![PromptSectionKind::DurableMemory];
+        diagnostics.truncated_sections = vec![PromptSectionKind::ProjectContext];
 
         let config = AgentKernelConfig::default();
         let warnings = derive_prompt_warnings(&diagnostics, &config);
@@ -229,23 +234,94 @@ mod tests {
             warning,
             KernelWarning::PromptDynamicSectionTruncated(_)
         )));
-        assert!(warnings.iter().any(|warning| matches!(
-            warning,
-            KernelWarning::PromptDurableMemoryMissing(_)
-        )));
     }
 
     #[test]
-    fn test_derive_prompt_warnings_skips_durable_memory_warning_when_present() {
+    fn test_derive_prompt_warnings_respects_bootstrap_warning_mode_off() {
         let mut diagnostics = base_diagnostics();
-        diagnostics.included_sections.push(PromptSectionKind::DurableMemory);
+        diagnostics.bootstrap_files = vec![BootstrapFileDiagnostic {
+            kind: WorkspaceBootstrapFileKind::Agents,
+            path: PathBuf::from("/tmp/AGENTS.md"),
+            raw_chars: 100,
+            injected_chars: 20,
+            truncated: true,
+            missing: false,
+        }];
 
-        let config = AgentKernelConfig::default();
+        let mut config = AgentKernelConfig::default();
+        config.prompt.bootstrap.warning_mode = BootstrapPromptWarningMode::Off;
         let warnings = derive_prompt_warnings(&diagnostics, &config);
 
-        assert!(!warnings.iter().any(|warning| matches!(
-            warning,
-            KernelWarning::PromptDurableMemoryMissing(_)
-        )));
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_derive_prompt_warnings_respects_bootstrap_warning_mode_once() {
+        let mut diagnostics = base_diagnostics();
+        diagnostics.bootstrap_files = vec![
+            BootstrapFileDiagnostic {
+                kind: WorkspaceBootstrapFileKind::Agents,
+                path: PathBuf::from("/tmp/AGENTS.md"),
+                raw_chars: 100,
+                injected_chars: 10,
+                truncated: true,
+                missing: false,
+            },
+            BootstrapFileDiagnostic {
+                kind: WorkspaceBootstrapFileKind::Soul,
+                path: PathBuf::from("/tmp/SOUL.md"),
+                raw_chars: 120,
+                injected_chars: 20,
+                truncated: true,
+                missing: false,
+            },
+        ];
+
+        let mut config = AgentKernelConfig::default();
+        config.prompt.bootstrap.warning_mode = BootstrapPromptWarningMode::Once;
+        let warnings = derive_prompt_warnings(&diagnostics, &config);
+
+        assert_eq!(
+            warnings
+                .iter()
+                .filter(|warning| matches!(warning, KernelWarning::PromptBootstrapFileTruncated(_)))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_derive_prompt_warnings_respects_bootstrap_warning_mode_always() {
+        let mut diagnostics = base_diagnostics();
+        diagnostics.bootstrap_files = vec![
+            BootstrapFileDiagnostic {
+                kind: WorkspaceBootstrapFileKind::Agents,
+                path: PathBuf::from("/tmp/AGENTS.md"),
+                raw_chars: 100,
+                injected_chars: 10,
+                truncated: true,
+                missing: false,
+            },
+            BootstrapFileDiagnostic {
+                kind: WorkspaceBootstrapFileKind::Soul,
+                path: PathBuf::from("/tmp/SOUL.md"),
+                raw_chars: 120,
+                injected_chars: 20,
+                truncated: true,
+                missing: false,
+            },
+        ];
+
+        let mut config = AgentKernelConfig::default();
+        config.prompt.bootstrap.warning_mode = BootstrapPromptWarningMode::Always;
+        let warnings = derive_prompt_warnings(&diagnostics, &config);
+
+        assert_eq!(
+            warnings
+                .iter()
+                .filter(|warning| matches!(warning, KernelWarning::PromptBootstrapFileTruncated(_)))
+                .count(),
+            2
+        );
     }
 }

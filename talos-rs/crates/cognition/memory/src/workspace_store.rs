@@ -3,59 +3,7 @@ use tokio::fs::{self, OpenOptions};
 use tokio::io::AsyncWriteExt;
 
 use crate::path_policy;
-use crate::store::{MemoryStore, RootMemoryContext, WorkspaceMemoryRecord};
-
-const DEFAULT_ROOT_MEMORY_TEMPLATE: &str = r#"# MEMORY
-
-Use this file for durable user-written memory.
-
-## Preferences
-- Add long-term user preferences here.
-
-## Constraints
-- Add important constraints and rules here.
-
-## Ongoing Goals
-- Track current long-running goals here.
-
-## Notes
-- Keep stable facts and project context here.
-"#;
-
-async fn ensure_root_memory_file(store: &MemoryStore) -> TalosResult<()> {
-    let path = store.root_memory_path();
-    if fs::try_exists(&path)
-        .await
-        .map_err(|err| TalosError::StorageError(format!("check root memory file: {}", err)))?
-    {
-        return Ok(());
-    }
-
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).await.map_err(|err| {
-            TalosError::StorageError(format!("create root memory parent dir: {}", err))
-        })?;
-    }
-
-    fs::write(&path, DEFAULT_ROOT_MEMORY_TEMPLATE)
-        .await
-        .map_err(|err| TalosError::StorageError(format!("write default root memory file: {}", err)))
-}
-
-pub(crate) async fn load_root_memory(store: &MemoryStore) -> TalosResult<RootMemoryContext> {
-    let path = store.root_memory_path();
-    ensure_root_memory_file(store).await?;
-    let content = match fs::read_to_string(&path).await {
-        Ok(content) => Some(content),
-        Err(err) => {
-            return Err(TalosError::StorageError(format!(
-                "read root memory file: {}",
-                err
-            )));
-        }
-    };
-    Ok(RootMemoryContext { path, content })
-}
+use crate::store::{MemoryStore, WorkspaceMemoryRecord};
 
 fn normalize_body(input: &str) -> String {
     input

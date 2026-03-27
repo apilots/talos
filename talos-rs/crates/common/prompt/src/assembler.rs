@@ -1,7 +1,7 @@
 use crate::{
     bootstrap, budget, diagnostics, BootstrapFileDiagnostic, BudgetTier, PromptAssembly,
     PromptBuilder, PromptDiagnostics, PromptMode, PromptPhase, PromptSection, PromptSectionKind,
-    TruncationMode, WorkspaceBootstrapFile, WorkspaceBootstrapFileKind,
+    TruncationMode, WorkspaceBootstrapFile,
 };
 use talos_error::{TalosError, TalosResult};
 use talos_memory::{Memory, SessionPromptContextConfig};
@@ -141,7 +141,7 @@ pub(crate) fn build_project_context_section(
                 raw_chars: 0,
                 injected_chars: 0,
                 truncated: false,
-                missing: file.missing,
+                missing: true,
             });
             continue;
         };
@@ -203,7 +203,6 @@ pub(crate) async fn load_dynamic_sections(
     let mut sections = Vec::new();
     let include_summary = builder.config.load_policy.include_session_summary;
     let include_recent = builder.config.load_policy.include_recent_messages;
-    let include_root_memory = builder.config.load_policy.include_root_memory;
     let include_retrieved_memories = builder.config.load_policy.include_retrieved_memories;
     let summary_recent_count = builder.config.memory.session_summary_recent_count;
     let summary_max_chars = builder.config.memory.session_summary_max_chars;
@@ -273,32 +272,6 @@ pub(crate) async fn load_dynamic_sections(
                     estimated_tokens: 0,
                     truncation_mode: TruncationMode::DropWhole,
                 });
-            }
-        }
-        if include_root_memory {
-            let bootstrap_memory = bootstrap_files
-                .iter()
-                .find(|file| file.kind == WorkspaceBootstrapFileKind::Memory)
-                .and_then(|file| file.content.as_ref())
-                .cloned();
-            let root_memory_content = match bootstrap_memory {
-                Some(content) => Some(content),
-                None => memory_store.load_root_memory().await?.content,
-            };
-            if let Some(content) = root_memory_content {
-                let trimmed = content.trim();
-                if !trimmed.is_empty() {
-                    sections.push(PromptSection {
-                        kind: PromptSectionKind::DurableMemory,
-                        title: Some("Durable memory".to_string()),
-                        content: format!("Durable memory (MEMORY.md):\n{}", trimmed),
-                        role: None,
-                        tier: BudgetTier::Important,
-                        required: false,
-                        estimated_tokens: 0,
-                        truncation_mode: TruncationMode::TrimTail,
-                    });
-                }
             }
         }
         if include_retrieved_memories && !builder.retrieved_memories.is_empty() {

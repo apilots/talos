@@ -27,6 +27,5 @@ pub use types::{
 pub use warnings::{
     KernelWarning, PromptBootstrapDropReason, PromptBootstrapFileDroppedWarning,
     PromptBootstrapFileMissingWarning, PromptBootstrapFileTruncatedWarning,
-    PromptDurableMemoryMissingWarning, PromptDynamicSectionDroppedWarning,
-    PromptDynamicSectionTruncatedWarning,
+    PromptDynamicSectionDroppedWarning, PromptDynamicSectionTruncatedWarning,
 };

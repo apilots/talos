@@ -107,12 +107,6 @@ impl Default for SessionPromptContextConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RootMemoryContext {
-    pub path: PathBuf,
-    pub content: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemorySearchQuery {
     pub query: String,
     pub max_results: usize,
@@ -211,10 +205,6 @@ impl MemoryStore {
 
     pub(crate) fn session_dir(&self, session_id: &str) -> PathBuf {
         path_policy::session_dir(self, session_id)
-    }
-
-    pub(crate) fn root_memory_path(&self) -> PathBuf {
-        path_policy::root_memory_path(self)
     }
 
     pub(crate) fn workspace_memory_dir(&self) -> PathBuf {
@@ -504,9 +494,6 @@ mod tests {
     #[tokio::test]
     async fn test_root_memory_and_workspace_memory_search() {
         let (_guard, store) = new_temp_store();
-        fs::write(store.root_memory_path(), "user preference: tea\n")
-            .await
-            .expect("root memory should be written");
         store
             .append_workspace_memory(&WorkspaceMemoryRecord {
                 timestamp: Utc::now(),
@@ -515,12 +502,6 @@ mod tests {
             })
             .await
             .expect("workspace memory append should succeed");
-
-        let root = store
-            .load_root_memory()
-            .await
-            .expect("root memory should load");
-        assert!(root.content.unwrap_or_default().contains("tea"));
 
         let results = store
             .search_memory(&MemorySearchQuery {
@@ -544,12 +525,14 @@ mod tests {
     #[tokio::test]
     async fn test_memory_search_scores_are_normalized() {
         let (_guard, store) = new_temp_store();
-        fs::write(
-            store.root_memory_path(),
-            "apollo apollo\nmission apollo timeline\n",
-        )
-        .await
-        .expect("root memory should be written");
+        store
+            .append_workspace_memory(&WorkspaceMemoryRecord {
+                timestamp: Utc::now(),
+                title: Some("Daily".to_string()),
+                content: "apollo apollo\nmission apollo timeline".to_string(),
+            })
+            .await
+            .expect("workspace memory append should succeed");
 
         let results = store
             .search_memory(&MemorySearchQuery {
@@ -564,6 +547,29 @@ mod tests {
         assert!(results
             .iter()
             .all(|item| item.score >= 0.0 && item.score <= 1.0));
+    }
+
+    #[tokio::test]
+    async fn test_append_workspace_memory_creates_daily_file_on_first_write() {
+        let (_guard, store) = new_temp_store();
+        let timestamp = Utc::now();
+        let record = WorkspaceMemoryRecord {
+            timestamp,
+            title: Some("Daily Memory".to_string()),
+            content: "first memory entry".to_string(),
+        };
+
+        store
+            .append_workspace_memory(&record)
+            .await
+            .expect("first append should succeed");
+
+        let file_path = store.workspace_memory_file_for(timestamp);
+        let content = fs::read_to_string(file_path)
+            .await
+            .expect("workspace memory file should exist after first append");
+
+        assert!(content.contains("first memory entry"));
     }
 
     #[tokio::test]
@@ -589,22 +595,6 @@ mod tests {
             .await
             .expect("workspace memory file should exist");
         assert_eq!(content.matches("user prefers tea over coffee").count(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_load_root_memory_bootstraps_default_file() {
-        let (_guard, store) = new_temp_store();
-
-        let root = store
-            .load_root_memory()
-            .await
-            .expect("root memory should load");
-
-        let content = root
-            .content
-            .expect("default root memory content should exist");
-        assert!(content.contains("# MEMORY"));
-        assert!(store.root_memory_path().exists());
     }
 
     #[test]

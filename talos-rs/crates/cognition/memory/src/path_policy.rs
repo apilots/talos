@@ -28,10 +28,6 @@ pub(crate) fn session_dir(store: &MemoryStore, session_id: &str) -> PathBuf {
         .join(sanitize_segment(session_id))
 }
 
-pub(crate) fn root_memory_path(store: &MemoryStore) -> PathBuf {
-    store.workspace_dir().join("MEMORY.md")
-}
-
 pub(crate) fn workspace_memory_dir(store: &MemoryStore) -> PathBuf {
     store.workspace_dir().join("memory")
 }

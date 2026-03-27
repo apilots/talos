@@ -378,10 +378,6 @@ pub struct AgentKernelPromptConfig {
     #[serde(default = "default_true")]
     pub include_recent_messages: bool,
 
-    /// Include root memory in prompt context
-    #[serde(default = "default_true")]
-    pub include_root_memory: bool,
-
     /// Include retrieved memories in prompt context
     #[serde(default = "default_true")]
     pub include_retrieved_memories: bool,
@@ -414,7 +410,6 @@ impl Default for AgentKernelPromptConfig {
             max_dynamic_tokens: default_prompt_max_dynamic_tokens(),
             include_session_summary: true,
             include_recent_messages: true,
-            include_root_memory: true,
             include_retrieved_memories: true,
             retrieved_memory_max_items: default_prompt_retrieved_memory_max_items(),
             retrieved_memory_max_chars: default_prompt_retrieved_memory_max_chars(),
@@ -1310,6 +1305,13 @@ impl Config {
                 "agent.kernel.prompt.bootstrap.max_chars_total must be > 0".to_string(),
             ));
         }
+        if self.agent.kernel.prompt.bootstrap.max_chars_total
+            < self.agent.kernel.prompt.bootstrap.max_chars_per_file
+        {
+            return Err(TalosError::InvalidConfiguration(
+                "agent.kernel.prompt.bootstrap.max_chars_total must be >= agent.kernel.prompt.bootstrap.max_chars_per_file".to_string(),
+            ));
+        }
         if self
             .agent
             .kernel
@@ -1750,12 +1752,12 @@ mod tests {
         assert_eq!(config.agent.kernel.prompt.max_dynamic_tokens, 3200);
         assert!(config.agent.kernel.prompt.include_session_summary);
         assert!(config.agent.kernel.prompt.include_recent_messages);
-        assert!(config.agent.kernel.prompt.include_root_memory);
         assert!(config.agent.kernel.prompt.include_retrieved_memories);
         assert!(config.agent.kernel.prompt.bootstrap.enabled);
         assert!(config.agent.kernel.prompt.bootstrap.auto_create_missing_files);
         assert_eq!(config.agent.kernel.prompt.bootstrap.max_chars_per_file, 8_000);
         assert_eq!(config.agent.kernel.prompt.bootstrap.max_chars_total, 24_000);
+        assert!(config.agent.kernel.prompt.bootstrap.include_memory);
         assert_eq!(
             config.agent.kernel.memory.workspace_dir,
             "~/.talos/workspace"
