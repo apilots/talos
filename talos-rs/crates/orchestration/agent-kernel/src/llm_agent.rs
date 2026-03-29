@@ -1,6 +1,6 @@
 use crate::{
-    Agent, AgentRunResult, FlowFactory, InvocationContext, Planner, TaskResult, TaskSpec,
-    TaskStatus, StopReason,
+    Agent, AgentRunResult, FlowFactory, InvocationContext, Planner, StopReason, TaskResult,
+    TaskSpec, TaskStatus,
 };
 use async_trait::async_trait;
 use serde_json::json;
@@ -71,10 +71,7 @@ impl LlmKernelAgent {
             self.planner.clone(),
         );
 
-        let output = match flow.run(
-            ctx,
-            &task.goal,
-        ).await {
+        let output = match flow.run(ctx, &task.goal).await {
             Ok(flow_result) => {
                 output_items = flow_result.output_items;
                 usage = flow_result.usage;
@@ -450,10 +447,9 @@ mod tests {
 
         assert_eq!(result.task_results.len(), 1);
         assert_eq!(result.task_results[0].warnings, result.warnings);
-        assert!(
-            !ctx.state_bags
-                .request_state
-                .contains_key("last_prompt_diagnostics")
-        );
+        assert!(!ctx
+            .state_bags
+            .request_state
+            .contains_key("last_prompt_diagnostics"));
     }
 }

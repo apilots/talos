@@ -27,7 +27,11 @@ pub(crate) async fn ensure_bootstrap_file(path: &Path, template: &str) -> TalosR
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).await.map_err(|err| {
-            TalosError::StorageError(format!("create bootstrap dir {}: {}", parent.display(), err))
+            TalosError::StorageError(format!(
+                "create bootstrap dir {}: {}",
+                parent.display(),
+                err
+            ))
         })?;
     }
 

@@ -1,12 +1,12 @@
+use crate::tool_execution::ToolExecutionContext;
 use crate::{
-    warnings::derive_prompt_warnings, InvocationContext, KernelEvent, KernelEventLabel,
-    KernelEventData, KernelEventType, KernelOutputDeltaSource, KernelReasoningSource,
+    warnings::derive_prompt_warnings, InvocationContext, KernelEvent, KernelEventData,
+    KernelEventLabel, KernelEventType, KernelOutputDeltaSource, KernelReasoningSource,
     KernelStreamEvent, KernelStreamEventData, KernelStreamEventType, KernelWarning,
     OutputDeltaStreamData, PromptWarningEventData, ReasoningDeltaStreamData, StopReason,
     ToolCallStartStreamData, ToolExecutionInput, ToolExecutionOutput, ToolExecutor,
     ToolResultStreamData,
 };
-use crate::tool_execution::ToolExecutionContext;
 use chrono::Utc;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -924,17 +924,20 @@ pub async fn execute_general_turn_step(
     })
 }
 
-pub fn apply_general_turn_step(
-    state: &mut GeneralTurnLoopState,
-    step: &GeneralTurnStepResult,
-) {
+pub fn apply_general_turn_step(state: &mut GeneralTurnLoopState, step: &GeneralTurnStepResult) {
     state.saw_output_delta = state.saw_output_delta || step.saw_output_delta;
-    state.usage.input_tokens = state.usage.input_tokens.saturating_add(step.usage.input_tokens);
+    state.usage.input_tokens = state
+        .usage
+        .input_tokens
+        .saturating_add(step.usage.input_tokens);
     state.usage.output_tokens = state
         .usage
         .output_tokens
         .saturating_add(step.usage.output_tokens);
-    state.usage.total_tokens = state.usage.total_tokens.saturating_add(step.usage.total_tokens);
+    state.usage.total_tokens = state
+        .usage
+        .total_tokens
+        .saturating_add(step.usage.total_tokens);
     state.messages.push(ChatMessage::assistant_with_tool_calls(
         step.text.clone(),
         step.tool_calls.clone(),
@@ -951,10 +954,7 @@ pub fn apply_general_turn_step(
     }
 }
 
-fn build_tool_result_payload(
-    tool_name: &str,
-    output: ToolExecutionOutput,
-) -> (Value, bool) {
+fn build_tool_result_payload(tool_name: &str, output: ToolExecutionOutput) -> (Value, bool) {
     if output.is_error {
         let error = output
             .payload
@@ -1093,7 +1093,9 @@ pub fn apply_general_turn_tool_batch(
     state.output_items.extend(batch.output_items.clone());
     state.tool_result_log.extend(batch.logs.clone());
     state.tool_error_count += batch.error_count;
-    state.retrieved_memories.extend(batch.retrieved_memories.clone());
+    state
+        .retrieved_memories
+        .extend(batch.retrieved_memories.clone());
     state.messages.extend(batch.tool_messages.clone());
 
     if kernel_config.prompt.include_retrieved_memories {
@@ -1293,7 +1295,9 @@ pub async fn execute_general_turn_loop(
         apply_general_turn_step(&mut state, &step);
 
         if matches!(step_disposition, GeneralTurnStepDisposition::FinalResponse) {
-            state.messages.push(ChatMessage::assistant(step_text.clone()));
+            state
+                .messages
+                .push(ChatMessage::assistant(step_text.clone()));
             break (step_text, StopReason::EndTurn);
         }
 

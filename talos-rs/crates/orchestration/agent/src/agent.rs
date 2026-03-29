@@ -596,22 +596,21 @@ After receiving tool outputs, continue reasoning and provide the final response.
                     }),
                 })
             }
-            (
-                KernelStreamEventType::ToolCallStart,
-                KernelStreamEventData::ToolCallStart(data),
-            ) => Some(OrchestratorEvent {
-                event_type: "message.tool_call.started".to_string(),
-                data: json!({
-                    "request_id": request_id,
-                    "call_id": data.call_id,
-                    "name": data.tool_name,
-                    "arguments": data.arguments,
-                    "item_index": current_index,
-                    "iteration": iteration,
-                    "step_id": step_id,
-                    "timing_ms": Value::Null,
-                }),
-            }),
+            (KernelStreamEventType::ToolCallStart, KernelStreamEventData::ToolCallStart(data)) => {
+                Some(OrchestratorEvent {
+                    event_type: "message.tool_call.started".to_string(),
+                    data: json!({
+                        "request_id": request_id,
+                        "call_id": data.call_id,
+                        "name": data.tool_name,
+                        "arguments": data.arguments,
+                        "item_index": current_index,
+                        "iteration": iteration,
+                        "step_id": step_id,
+                        "timing_ms": Value::Null,
+                    }),
+                })
+            }
             (KernelStreamEventType::ToolResult, KernelStreamEventData::ToolResult(data)) => {
                 let payload = serde_json::to_value(&data.content).unwrap_or_else(|_| json!([]));
                 Some(OrchestratorEvent {

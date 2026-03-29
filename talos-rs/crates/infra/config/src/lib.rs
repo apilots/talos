@@ -1283,14 +1283,7 @@ impl Config {
                 "agent.kernel.memory.search_min_score must be >= 0.0".to_string(),
             ));
         }
-        if self
-            .agent
-            .kernel
-            .memory
-            .root_memory_filename
-            .trim()
-            != "MEMORY.md"
-        {
+        if self.agent.kernel.memory.root_memory_filename.trim() != "MEMORY.md" {
             return Err(TalosError::InvalidConfiguration(
                 "agent.kernel.memory.root_memory_filename must be MEMORY.md".to_string(),
             ));
@@ -1754,8 +1747,18 @@ mod tests {
         assert!(config.agent.kernel.prompt.include_recent_messages);
         assert!(config.agent.kernel.prompt.include_retrieved_memories);
         assert!(config.agent.kernel.prompt.bootstrap.enabled);
-        assert!(config.agent.kernel.prompt.bootstrap.auto_create_missing_files);
-        assert_eq!(config.agent.kernel.prompt.bootstrap.max_chars_per_file, 8_000);
+        assert!(
+            config
+                .agent
+                .kernel
+                .prompt
+                .bootstrap
+                .auto_create_missing_files
+        );
+        assert_eq!(
+            config.agent.kernel.prompt.bootstrap.max_chars_per_file,
+            8_000
+        );
         assert_eq!(config.agent.kernel.prompt.bootstrap.max_chars_total, 24_000);
         assert!(config.agent.kernel.prompt.bootstrap.include_memory);
         assert_eq!(

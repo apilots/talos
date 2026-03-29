@@ -14,8 +14,8 @@ mod renderer;
 mod types;
 
 pub use types::{
-    BootstrapFileDiagnostic, BudgetTier, PlannerMode, PromptAssembly, PromptBuildConfig,
-    PromptBudget, PromptDiagnostics, PromptLoadPolicy, PromptMode, PromptPhase, PromptSection,
+    BootstrapFileDiagnostic, BudgetTier, PlannerMode, PromptAssembly, PromptBudget,
+    PromptBuildConfig, PromptDiagnostics, PromptLoadPolicy, PromptMode, PromptPhase, PromptSection,
     PromptSectionKind, TruncationMode, WorkspaceBootstrapFile, WorkspaceBootstrapFileKind,
 };
 
@@ -486,7 +486,6 @@ impl<'a> PromptBuilder<'a> {
         }
         Ok(files)
     }
-
 }
 
 pub fn render_prompt_assembly(assembly: &PromptAssembly) -> Vec<ChatMessage> {
@@ -807,7 +806,11 @@ mod tests {
             "BOOTSTRAP.md",
             "MEMORY.md",
         ] {
-            assert!(workspace_dir.join(name).exists(), "expected {} to exist", name);
+            assert!(
+                workspace_dir.join(name).exists(),
+                "expected {} to exist",
+                name
+            );
         }
 
         let project_context = messages
@@ -895,12 +898,10 @@ mod tests {
             .await
             .expect("prompt assembly should succeed");
 
-        assert!(
-            assembly
-                .context_sections
-                .iter()
-                .all(|section| section.kind != PromptSectionKind::ProjectContext)
-        );
+        assert!(assembly
+            .context_sections
+            .iter()
+            .all(|section| section.kind != PromptSectionKind::ProjectContext));
         assert!(assembly.diagnostics.bootstrap_files.is_empty());
     }
 }

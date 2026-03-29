@@ -1,5 +1,5 @@
-use chrono::Utc;
 use crate::{ExecutionBranch, InvocationSession, KernelWarning};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -638,6 +638,9 @@ mod tests {
             plan_react_settings.thinking_mode,
             ThinkingMode::PlanningProcessor
         );
-        assert_eq!(plan_react_settings.default_path, ExecutionPath::ReactiveLoop);
+        assert_eq!(
+            plan_react_settings.default_path,
+            ExecutionPath::ReactiveLoop
+        );
     }
 }

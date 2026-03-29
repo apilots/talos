@@ -432,8 +432,8 @@ impl ResponseProcessorPipeline {
 mod tests {
     use super::*;
     use crate::{
-        ContextStateBags, ExecutionBranch, InvocationLimits, PlanningResponseEffect,
-        PlannerKind, TurnPhase, VecEventSink,
+        ContextStateBags, ExecutionBranch, InvocationLimits, PlannerKind, PlanningResponseEffect,
+        TurnPhase, VecEventSink,
     };
     use async_trait::async_trait;
     use serde_json::json;
@@ -504,12 +504,21 @@ mod tests {
         };
         let mut sink = VecEventSink::default();
 
-        let disposition = processor.run(&mut ctx, &mut response, &mut sink).await.unwrap();
+        let disposition = processor
+            .run(&mut ctx, &mut response, &mut sink)
+            .await
+            .unwrap();
         let events = sink.into_events();
 
         assert_eq!(disposition, ResponseDisposition::Continue);
-        assert_eq!(ctx.execution_state.planning_response.as_deref(), Some("answer"));
-        assert!(!ctx.state_bags.request_state.contains_key("execution_branch"));
+        assert_eq!(
+            ctx.execution_state.planning_response.as_deref(),
+            Some("answer")
+        );
+        assert!(!ctx
+            .state_bags
+            .request_state
+            .contains_key("execution_branch"));
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].branch, ExecutionBranch::DirectAnswer);
         assert_eq!(

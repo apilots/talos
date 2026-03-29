@@ -200,7 +200,10 @@ impl ExecutionEvent {
     pub fn is_final_response(&self) -> bool {
         matches!(self.kind, ExecutionEventKind::FinalResponse)
             && !self.partial
-            && !matches!(self.payload, EventPayload::ToolCall { .. } | EventPayload::ToolResult { .. })
+            && !matches!(
+                self.payload,
+                EventPayload::ToolCall { .. } | EventPayload::ToolResult { .. }
+            )
     }
 }
 

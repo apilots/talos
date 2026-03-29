@@ -214,26 +214,21 @@ mod tests {
         let config = AgentKernelConfig::default();
         let warnings = derive_prompt_warnings(&diagnostics, &config);
 
-        assert!(warnings.iter().any(|warning| matches!(
-            warning,
-            KernelWarning::PromptBootstrapFileMissing(_)
-        )));
-        assert!(warnings.iter().any(|warning| matches!(
-            warning,
-            KernelWarning::PromptBootstrapFileTruncated(_)
-        )));
-        assert!(warnings.iter().any(|warning| matches!(
-            warning,
-            KernelWarning::PromptBootstrapFileDropped(_)
-        )));
-        assert!(warnings.iter().any(|warning| matches!(
-            warning,
-            KernelWarning::PromptDynamicSectionDropped(_)
-        )));
-        assert!(warnings.iter().any(|warning| matches!(
-            warning,
-            KernelWarning::PromptDynamicSectionTruncated(_)
-        )));
+        assert!(warnings
+            .iter()
+            .any(|warning| matches!(warning, KernelWarning::PromptBootstrapFileMissing(_))));
+        assert!(warnings
+            .iter()
+            .any(|warning| matches!(warning, KernelWarning::PromptBootstrapFileTruncated(_))));
+        assert!(warnings
+            .iter()
+            .any(|warning| matches!(warning, KernelWarning::PromptBootstrapFileDropped(_))));
+        assert!(warnings
+            .iter()
+            .any(|warning| matches!(warning, KernelWarning::PromptDynamicSectionDropped(_))));
+        assert!(warnings
+            .iter()
+            .any(|warning| matches!(warning, KernelWarning::PromptDynamicSectionTruncated(_))));
     }
 
     #[test]

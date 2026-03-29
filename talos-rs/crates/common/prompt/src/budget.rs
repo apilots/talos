@@ -19,7 +19,9 @@ pub(crate) fn truncate_sections_to_budget(
 
     while estimate_sections_tokens(sections) > budget {
         let removal_index = if preserve_first {
-            (1..sections.len()).rev().find(|&index| !sections[index].required)
+            (1..sections.len())
+                .rev()
+                .find(|&index| !sections[index].required)
         } else {
             (0..sections.len()).find(|&index| !sections[index].required)
         };

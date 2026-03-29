@@ -99,7 +99,9 @@ impl Runner for DefaultRunner {
             ctx.events.push(KernelEvent::new(
                 KernelEventType::PlanCreated,
                 KernelEventLabel::Iteration,
-                KernelEventData::Iteration(IterationEventData { iteration: iterations }),
+                KernelEventData::Iteration(IterationEventData {
+                    iteration: iterations,
+                }),
             ));
 
             let mut run_result = agent.run(&mut ctx).await?;

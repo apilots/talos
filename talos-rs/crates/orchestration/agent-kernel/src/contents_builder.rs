@@ -13,7 +13,10 @@ impl ContentsBuilder {
         let events = Self::filter_context_events(events);
         let events = Self::rearrange_latest_tool_results(events);
         let events = Self::rearrange_tool_results_in_history(events);
-        events.into_iter().filter_map(|event| event.message).collect()
+        events
+            .into_iter()
+            .filter_map(|event| event.message)
+            .collect()
     }
 
     fn filter_context_events(events: Vec<SessionEvent>) -> Vec<SessionEvent> {
@@ -199,7 +202,10 @@ mod tests {
 
         assert_eq!(messages.len(), 3);
         assert_eq!(messages[0].role, talos_llm_provider::Role::User);
-        assert!(messages[1].tool_calls.as_ref().is_some_and(|calls| calls.len() == 1));
+        assert!(messages[1]
+            .tool_calls
+            .as_ref()
+            .is_some_and(|calls| calls.len() == 1));
         assert_eq!(messages[2].tool_call_id.as_deref(), Some("call_1"));
     }
 
@@ -242,7 +248,10 @@ mod tests {
             ContentsBuilder::build_messages(&session, "i1", ExecutionBranch::ReactiveLoop);
 
         assert_eq!(messages.len(), 4);
-        assert!(messages[1].tool_calls.as_ref().is_some_and(|calls| calls.len() == 2));
+        assert!(messages[1]
+            .tool_calls
+            .as_ref()
+            .is_some_and(|calls| calls.len() == 2));
         assert_eq!(messages[2].tool_call_id.as_deref(), Some("call_1"));
         assert_eq!(messages[3].tool_call_id.as_deref(), Some("call_2"));
     }
