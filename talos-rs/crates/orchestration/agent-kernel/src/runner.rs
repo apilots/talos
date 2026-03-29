@@ -1,4 +1,8 @@
-use crate::{Agent, KernelEvent, KernelEventType, PluginRegistry, RunRequest, RunResponse, Runner};
+use crate::{
+    Agent, FinalResponseEventData, IterationEventData, KernelEvent, KernelEventData,
+    KernelEventLabel, KernelEventType, PluginRegistry, RunRequest, RunResponse, Runner,
+    TaskCompletedEventData, TransferRequestedEventData, UserInputEventData,
+};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -47,6 +51,9 @@ impl Runner for DefaultRunner {
             .as_ref()
             .map(|c| c.clone())
             .unwrap_or_default();
+        let ctx_session_id = session_id.clone();
+        let user_input_session_id = session_id.clone();
+        let user_input_agent_id = agent_id.clone();
 
         let mut ctx = crate::InvocationContext {
             session_id,
@@ -58,13 +65,21 @@ impl Runner for DefaultRunner {
             phase,
             planning_instruction,
             transfer_to,
+            execution_state: crate::InvocationExecutionState::default(),
+            session: crate::InvocationSession {
+                session_id: ctx_session_id,
+                ..crate::InvocationSession::default()
+            },
             state: HashMap::new(),
             state_bags: initial_state_bags.unwrap_or_default(),
             limits: crate::InvocationLimits::from(&config),
             events: vec![KernelEvent::new(
                 KernelEventType::UserInput,
-                "user_input_received",
-                None,
+                KernelEventLabel::UserInputReceived,
+                KernelEventData::UserInput(UserInputEventData {
+                    session_id: user_input_session_id,
+                    agent_id: user_input_agent_id,
+                }),
             )],
             stream_tx,
         };
@@ -83,8 +98,8 @@ impl Runner for DefaultRunner {
             self.plugins.before_plan(&mut ctx).await?;
             ctx.events.push(KernelEvent::new(
                 KernelEventType::PlanCreated,
-                format!("iteration_{}", iterations),
-                None,
+                KernelEventLabel::Iteration,
+                KernelEventData::Iteration(IterationEventData { iteration: iterations }),
             ));
 
             let mut run_result = agent.run(&mut ctx).await?;
@@ -106,8 +121,11 @@ impl Runner for DefaultRunner {
                 self.plugins.after_task(&mut ctx, task_result).await?;
                 ctx.events.push(KernelEvent::new(
                     KernelEventType::TaskCompleted,
-                    format!("task_{}_{:?}", task_result.task_id, task_result.status),
-                    None,
+                    KernelEventLabel::TaskCompleted,
+                    KernelEventData::TaskCompleted(TaskCompletedEventData {
+                        task_id: task_result.task_id.clone(),
+                        status: task_result.status.clone(),
+                    }),
                 ));
             }
             self.plugins
@@ -131,8 +149,10 @@ impl Runner for DefaultRunner {
             if requested_transfer.is_some() {
                 ctx.events.push(KernelEvent::new(
                     KernelEventType::Transfer,
-                    "transfer_requested",
-                    None,
+                    KernelEventLabel::TransferRequested,
+                    KernelEventData::TransferRequested(TransferRequestedEventData {
+                        target_agent: requested_transfer.clone(),
+                    }),
                 ));
                 break (
                     output,
@@ -160,8 +180,11 @@ impl Runner for DefaultRunner {
 
         ctx.events.push(KernelEvent::new(
             KernelEventType::FinalResponse,
-            "run_completed",
-            None,
+            KernelEventLabel::FinalResponse,
+            KernelEventData::FinalResponse(FinalResponseEventData {
+                iterations,
+                stop_reason: last_stop_reason.clone(),
+            }),
         ));
 
         Ok(RunResponse {
@@ -210,7 +233,7 @@ mod tests {
                 output_items: vec![TalosOutputItem::OutputText {
                     text: "ok".to_string(),
                 }],
-                stop_reason: "end_turn".to_string(),
+                stop_reason: crate::StopReason::EndTurn,
                 usage: TalosUsage::default(),
                 warnings: Vec::new(),
                 task_results: vec![crate::TaskResult {

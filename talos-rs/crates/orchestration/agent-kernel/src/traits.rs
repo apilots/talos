@@ -1,5 +1,6 @@
 use crate::{
-    AgentRunResult, InvocationContext, RunRequest, RunResponse, TaskPlan, TaskResult, TaskSpec,
+    AgentRunResult, ExecutionPath, PlannerKind, PlanningResponseEffect, InvocationContext,
+    RunRequest, RunResponse, TaskPlan, TaskResult, TaskSpec, ThinkingMode,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -17,8 +18,32 @@ impl<T: Agent + ?Sized> BaseKernelAgent for T {}
 
 #[async_trait]
 pub trait Planner: Send + Sync {
+    fn kind(&self) -> PlannerKind {
+        PlannerKind::BuiltIn
+    }
+
+    fn thinking_mode(&self) -> ThinkingMode {
+        ThinkingMode::Disabled
+    }
+
+    fn default_execution_path(&self) -> ExecutionPath {
+        ExecutionPath::ReactiveLoop
+    }
+
     fn build_planning_instruction(&self, _ctx: &InvocationContext) -> Option<String> {
         None
+    }
+
+    fn process_planning_response_effect(
+        &self,
+        ctx: &InvocationContext,
+        response_text: &str,
+    ) -> PlanningResponseEffect {
+        PlanningResponseEffect {
+            normalized_text: self.process_planning_response(ctx, response_text),
+            state_delta: Vec::new(),
+            branch_override: None,
+        }
     }
 
     fn process_planning_response(

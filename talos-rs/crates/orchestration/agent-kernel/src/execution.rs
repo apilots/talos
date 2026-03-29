@@ -1,0 +1,386 @@
+use crate::InvocationContext;
+use async_trait::async_trait;
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use talos_error::TalosResult;
+use talos_llm_provider::ChatMessage;
+use talos_types::talos::TalosOutputItem;
+use uuid::Uuid;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EventAuthor {
+    User,
+    Agent,
+    Tool,
+    System,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionEventKind {
+    UserInput,
+    Planning,
+    Reasoning,
+    ToolCall,
+    ToolResult,
+    FinalResponse,
+    System,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StateNamespace {
+    App,
+    User,
+    Temp,
+    Session,
+    Workspace,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateDelta {
+    pub namespace: StateNamespace,
+    pub key: String,
+    pub value: Value,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PlanningResponseEffect {
+    pub normalized_text: Option<String>,
+    #[serde(default)]
+    pub state_delta: Vec<StateDelta>,
+    pub branch_override: Option<ExecutionBranch>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct EventActions {
+    #[serde(default)]
+    pub state_delta: Vec<StateDelta>,
+    #[serde(default)]
+    pub end_turn: bool,
+    pub transfer_to: Option<String>,
+    pub branch_override: Option<ExecutionBranch>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum EventPayload {
+    Text {
+        text: String,
+    },
+    ToolCall {
+        call_id: String,
+        name: String,
+        arguments: Value,
+    },
+    ToolResult {
+        call_id: String,
+        content: Value,
+        #[serde(default)]
+        is_error: bool,
+    },
+    Empty,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionEvent {
+    pub id: String,
+    pub invocation_id: String,
+    pub author: EventAuthor,
+    pub branch: ExecutionBranch,
+    pub kind: ExecutionEventKind,
+    pub payload: EventPayload,
+    #[serde(default)]
+    pub actions: EventActions,
+    pub timestamp_ms: i64,
+    #[serde(default)]
+    pub partial: bool,
+}
+
+impl ExecutionEvent {
+    pub fn new(
+        ctx: &InvocationContext,
+        author: EventAuthor,
+        branch: ExecutionBranch,
+        kind: ExecutionEventKind,
+        payload: EventPayload,
+        partial: bool,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            invocation_id: ctx.invocation_id.clone(),
+            author,
+            branch,
+            kind,
+            payload,
+            actions: EventActions::default(),
+            timestamp_ms: Utc::now().timestamp_millis(),
+            partial,
+        }
+    }
+
+    pub fn text(
+        ctx: &InvocationContext,
+        author: EventAuthor,
+        branch: ExecutionBranch,
+        kind: ExecutionEventKind,
+        text: impl Into<String>,
+        partial: bool,
+    ) -> Self {
+        Self::new(
+            ctx,
+            author,
+            branch,
+            kind,
+            EventPayload::Text { text: text.into() },
+            partial,
+        )
+    }
+
+    pub fn final_response(
+        ctx: &InvocationContext,
+        branch: ExecutionBranch,
+        text: impl Into<String>,
+    ) -> Self {
+        Self::text(
+            ctx,
+            EventAuthor::Agent,
+            branch,
+            ExecutionEventKind::FinalResponse,
+            text,
+            false,
+        )
+    }
+
+    pub fn tool_call(
+        ctx: &InvocationContext,
+        branch: ExecutionBranch,
+        call_id: impl Into<String>,
+        name: impl Into<String>,
+        arguments: Value,
+    ) -> Self {
+        Self::new(
+            ctx,
+            EventAuthor::Agent,
+            branch,
+            ExecutionEventKind::ToolCall,
+            EventPayload::ToolCall {
+                call_id: call_id.into(),
+                name: name.into(),
+                arguments,
+            },
+            false,
+        )
+    }
+
+    pub fn tool_result(
+        ctx: &InvocationContext,
+        branch: ExecutionBranch,
+        call_id: impl Into<String>,
+        content: Value,
+        is_error: bool,
+    ) -> Self {
+        Self::new(
+            ctx,
+            EventAuthor::Tool,
+            branch,
+            ExecutionEventKind::ToolResult,
+            EventPayload::ToolResult {
+                call_id: call_id.into(),
+                content,
+                is_error,
+            },
+            false,
+        )
+    }
+
+    pub fn is_final_response(&self) -> bool {
+        matches!(self.kind, ExecutionEventKind::FinalResponse)
+            && !self.partial
+            && !matches!(self.payload, EventPayload::ToolCall { .. } | EventPayload::ToolResult { .. })
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct LlmRequestEnvelope {
+    pub messages: Vec<ChatMessage>,
+    pub planning_instruction: Option<String>,
+    pub branch: ExecutionBranch,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct LlmResponseEnvelope {
+    pub output_text: String,
+    pub output_items: Vec<TalosOutputItem>,
+    pub branch: ExecutionBranch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResponseDisposition {
+    Continue,
+    Final,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionBranch {
+    DirectAnswer,
+    #[default]
+    ReactiveLoop,
+    ModelThinking,
+}
+
+#[async_trait]
+pub trait EventSink: Send {
+    async fn push(&mut self, event: ExecutionEvent) -> TalosResult<()>;
+}
+
+#[derive(Debug, Default)]
+pub struct VecEventSink {
+    events: Vec<ExecutionEvent>,
+}
+
+impl VecEventSink {
+    pub fn into_events(self) -> Vec<ExecutionEvent> {
+        self.events
+    }
+}
+
+#[async_trait]
+impl EventSink for VecEventSink {
+    async fn push(&mut self, event: ExecutionEvent) -> TalosResult<()> {
+        self.events.push(event);
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct ExecutionEventBuffer {
+    events: Vec<ExecutionEvent>,
+}
+
+impl ExecutionEventBuffer {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn events(&self) -> &[ExecutionEvent] {
+        &self.events
+    }
+
+    pub fn into_events(self) -> Vec<ExecutionEvent> {
+        self.events
+    }
+
+    pub fn last_event(&self) -> Option<&ExecutionEvent> {
+        self.events.last()
+    }
+
+    pub fn last_non_partial_event(&self) -> Option<&ExecutionEvent> {
+        self.events.iter().rev().find(|event| !event.partial)
+    }
+
+    pub fn branch_events(&self, branch: ExecutionBranch) -> Vec<&ExecutionEvent> {
+        self.events
+            .iter()
+            .filter(|event| event.branch == branch)
+            .collect()
+    }
+
+    pub fn has_final_response(&self, branch: ExecutionBranch) -> bool {
+        self.events
+            .iter()
+            .rev()
+            .any(|event| event.branch == branch && event.is_final_response())
+    }
+}
+
+#[async_trait]
+impl EventSink for ExecutionEventBuffer {
+    async fn push(&mut self, event: ExecutionEvent) -> TalosResult<()> {
+        self.events.push(event);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ContextStateBags, InvocationExecutionState, InvocationLimits, TurnPhase};
+    use std::collections::HashMap;
+
+    fn mock_ctx() -> InvocationContext {
+        InvocationContext {
+            session_id: "s1".to_string(),
+            invocation_id: "i1".to_string(),
+            agent_id: "a1".to_string(),
+            workspace_id: "w1".to_string(),
+            input: "hello".to_string(),
+            model: "m1".to_string(),
+            phase: TurnPhase::Execution,
+            planning_instruction: None,
+            transfer_to: None,
+            execution_state: InvocationExecutionState::default(),
+            session: crate::InvocationSession {
+                session_id: "s1".to_string(),
+                ..crate::InvocationSession::default()
+            },
+            state: HashMap::new(),
+            state_bags: ContextStateBags::default(),
+            limits: InvocationLimits::default(),
+            events: Vec::new(),
+            stream_tx: None,
+        }
+    }
+
+    #[test]
+    fn test_final_response_event_matches_adk_style_predicate() {
+        let ctx = mock_ctx();
+        let final_event =
+            ExecutionEvent::final_response(&ctx, ExecutionBranch::ReactiveLoop, "done");
+        let tool_event = ExecutionEvent::tool_call(
+            &ctx,
+            ExecutionBranch::ReactiveLoop,
+            "call-1",
+            "search",
+            serde_json::json!({"q": "talos"}),
+        );
+
+        assert!(final_event.is_final_response());
+        assert!(!tool_event.is_final_response());
+        assert!(!final_event.id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_execution_event_buffer_supports_branch_and_final_queries() {
+        let ctx = mock_ctx();
+        let mut buffer = ExecutionEventBuffer::new();
+        buffer
+            .push(ExecutionEvent::text(
+                &ctx,
+                EventAuthor::User,
+                ExecutionBranch::ReactiveLoop,
+                ExecutionEventKind::UserInput,
+                "hello",
+                false,
+            ))
+            .await
+            .unwrap();
+        buffer
+            .push(ExecutionEvent::final_response(
+                &ctx,
+                ExecutionBranch::DirectAnswer,
+                "done",
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(buffer.branch_events(ExecutionBranch::ReactiveLoop).len(), 1);
+        assert!(buffer.has_final_response(ExecutionBranch::DirectAnswer));
+        assert!(!buffer.has_final_response(ExecutionBranch::ReactiveLoop));
+        assert!(buffer.last_non_partial_event().is_some());
+    }
+}

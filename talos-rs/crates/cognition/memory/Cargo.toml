@@ -15,6 +15,7 @@ tracing.workspace = true
 tokio.workspace = true
 talos-error.workspace = true
 talos-config.workspace = true
+talos-llm-provider.workspace = true
 talos-types.workspace = true
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }

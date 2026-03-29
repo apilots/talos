@@ -1,4 +1,4 @@
-use crate::{Agent, AgentRunResult, InvocationContext, TaskResult};
+use crate::{Agent, AgentRunResult, InvocationContext, StopReason, TaskResult};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -45,7 +45,7 @@ impl Agent for SequentialKernelAgent {
     async fn run(&self, ctx: &mut InvocationContext) -> TalosResult<AgentRunResult> {
         let mut output_text = String::new();
         let mut output_items = Vec::new();
-        let mut stop_reason = "end_turn".to_string();
+        let mut stop_reason = StopReason::EndTurn;
         let mut usage = TalosUsage::default();
         let mut task_results: Vec<TaskResult> = Vec::new();
         let mut state_delta = HashMap::new();
@@ -129,7 +129,7 @@ impl Agent for ParallelKernelAgent {
 
         let mut output_text = String::new();
         let mut output_items = Vec::new();
-        let mut stop_reason = "end_turn".to_string();
+        let mut stop_reason = StopReason::EndTurn;
         let mut usage = TalosUsage::default();
         let mut task_results: Vec<TaskResult> = Vec::new();
         let mut state_delta = HashMap::new();
@@ -191,7 +191,7 @@ impl Agent for LoopKernelAgent {
         let mut merged = AgentRunResult {
             output_text: String::new(),
             output_items: Vec::new(),
-            stop_reason: "end_turn".to_string(),
+            stop_reason: StopReason::EndTurn,
             usage: TalosUsage::default(),
             warnings: Vec::new(),
             task_results: Vec::new(),
@@ -265,7 +265,7 @@ impl Agent for RoutingKernelAgent {
         let mut merged = AgentRunResult {
             output_text: String::new(),
             output_items: Vec::new(),
-            stop_reason: "end_turn".to_string(),
+            stop_reason: StopReason::EndTurn,
             usage: TalosUsage::default(),
             warnings: Vec::new(),
             task_results: Vec::new(),
@@ -278,7 +278,7 @@ impl Agent for RoutingKernelAgent {
             hops += 1;
             let Some(agent) = self.nodes.get(&current) else {
                 merged.requested_transfer = Some(current);
-                merged.stop_reason = "transfer_unresolved".to_string();
+                merged.stop_reason = StopReason::TransferUnresolved;
                 break;
             };
 
@@ -333,7 +333,7 @@ mod tests {
                 output_items: vec![TalosOutputItem::OutputText {
                     text: self.output.clone(),
                 }],
-                stop_reason: "end_turn".to_string(),
+                stop_reason: StopReason::EndTurn,
                 usage: TalosUsage::default(),
                 warnings: Vec::new(),
                 task_results: vec![TaskResult {
@@ -367,6 +367,11 @@ mod tests {
             phase: crate::TurnPhase::Execution,
             planning_instruction: None,
             transfer_to: None,
+            execution_state: crate::InvocationExecutionState::default(),
+            session: crate::InvocationSession {
+                session_id: "s1".to_string(),
+                ..crate::InvocationSession::default()
+            },
             state: HashMap::new(),
             state_bags: crate::ContextStateBags::default(),
             limits: crate::InvocationLimits::default(),

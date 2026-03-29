@@ -3,11 +3,12 @@ use talos_error::TalosResult;
 
 use crate::retrieval;
 use crate::session_store;
-use crate::workspace_store;
 use crate::store::{
     MemoryGetResult, MemorySearchQuery, MemorySearchResult, MemoryStore, SessionPromptContext,
-    SessionPromptContextConfig, SummaryRecord, TalosTurn, WorkspaceMemoryRecord,
+    SessionPromptContextConfig, SessionTranscriptBranch, SessionTranscriptRecord, SummaryRecord,
+    TalosTurn, WorkspaceMemoryRecord,
 };
+use crate::workspace_store;
 use crate::Memory;
 
 #[async_trait]
@@ -18,6 +19,19 @@ impl Memory for MemoryStore {
 
     async fn append_turn(&self, turn: &TalosTurn) -> TalosResult<()> {
         session_store::append_turn(self, turn).await
+    }
+
+    async fn append_transcript_record(&self, record: &SessionTranscriptRecord) -> TalosResult<()> {
+        session_store::append_transcript_record(self, record).await
+    }
+
+    async fn load_transcript_records(
+        &self,
+        session_id: &str,
+        invocation_id: Option<&str>,
+        branch: SessionTranscriptBranch,
+    ) -> TalosResult<Vec<SessionTranscriptRecord>> {
+        session_store::load_transcript_records(self, session_id, invocation_id, branch).await
     }
 
     async fn build_session_prompt_context(

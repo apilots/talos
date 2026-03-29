@@ -6,12 +6,13 @@ use tokio::io::AsyncWriteExt;
 
 use crate::path_policy;
 use crate::store::{
-    MemoryStore, SessionPromptContext, SessionPromptContextConfig, SummaryRecord, TalosMessage,
-    TalosTurn,
+    MemoryStore, SessionPromptContext, SessionPromptContextConfig, SessionTranscriptBranch,
+    SessionTranscriptRecord, SummaryRecord, TalosMessage, TalosTurn,
 };
 
 const TURN_V2_MARKER: &str = "```json turn_v2";
 const SUMMARY_V2_MARKER: &str = "```json summary_v2";
+const TRANSCRIPT_V1_MARKER: &str = "```json transcript_v1";
 
 pub(crate) fn render_turn_block(turn: &TalosTurn) -> TalosResult<String> {
     let payload = serde_json::to_string_pretty(turn)
@@ -28,6 +29,16 @@ pub(crate) fn render_summary_block(record: &SummaryRecord) -> TalosResult<String
     Ok(format!(
         "## Summary {}\n{}\n{}\n```\n\n",
         record.header.id, SUMMARY_V2_MARKER, payload
+    ))
+}
+
+pub(crate) fn render_transcript_block(record: &SessionTranscriptRecord) -> TalosResult<String> {
+    let payload = serde_json::to_string_pretty(record).map_err(|e| {
+        TalosError::SerializationError(format!("serialize transcript record: {}", e))
+    })?;
+    Ok(format!(
+        "## Transcript {}\n{}\n{}\n```\n\n",
+        record.header.id, TRANSCRIPT_V1_MARKER, payload
     ))
 }
 
@@ -84,6 +95,38 @@ pub(crate) async fn load_turns(
 
     turns.sort_by(|a, b| a.seq.cmp(&b.seq).then(a.timestamp.cmp(&b.timestamp)));
     Ok(turns)
+}
+
+pub(crate) async fn load_transcript_records(
+    store: &MemoryStore,
+    session_id: &str,
+    invocation_id: Option<&str>,
+    branch: SessionTranscriptBranch,
+) -> TalosResult<Vec<SessionTranscriptRecord>> {
+    let mut files = path_policy::list_daily_files(store, session_id).await?;
+    files.sort();
+
+    let mut records = Vec::new();
+    for path in files {
+        let content = fs::read_to_string(path)
+            .await
+            .map_err(|e| TalosError::StorageError(format!("read daily transcript file: {}", e)))?;
+        for block in parse_json_blocks(&content, TRANSCRIPT_V1_MARKER) {
+            if let Ok(record) = serde_json::from_str::<SessionTranscriptRecord>(&block) {
+                if record.header.session_id == session_id
+                    && invocation_id
+                        .map(|expected| record.header.invocation_id == expected)
+                        .unwrap_or(true)
+                    && record.header.branch == branch
+                {
+                    records.push(record);
+                }
+            }
+        }
+    }
+
+    records.sort_by(|a, b| a.header.timestamp.cmp(&b.header.timestamp));
+    Ok(records)
 }
 
 fn dedupe_keep_latest(messages: Vec<TalosMessage>) -> Vec<TalosMessage> {
@@ -177,6 +220,56 @@ pub(crate) async fn append_turn(store: &MemoryStore, turn: &TalosTurn) -> TalosR
         if *entry < next {
             *entry = next;
         }
+    }
+
+    Ok(())
+}
+
+pub(crate) async fn append_transcript_record(
+    store: &MemoryStore,
+    record: &SessionTranscriptRecord,
+) -> TalosResult<()> {
+    if record.header.id.trim().is_empty() {
+        return Err(TalosError::ValidationError(
+            "transcript record id cannot be empty".to_string(),
+        ));
+    }
+    if record.header.session_id.trim().is_empty() {
+        return Err(TalosError::ValidationError(
+            "transcript record session_id cannot be empty".to_string(),
+        ));
+    }
+    if record.header.invocation_id.trim().is_empty() {
+        return Err(TalosError::ValidationError(
+            "transcript record invocation_id cannot be empty".to_string(),
+        ));
+    }
+
+    let session_dir = path_policy::session_dir(store, &record.header.session_id);
+    fs::create_dir_all(&session_dir)
+        .await
+        .map_err(|e| TalosError::StorageError(format!("create session memory dir: {}", e)))?;
+
+    let day_file = session_dir.join(format!("{}.md", record.header.timestamp.format("%Y-%m-%d")));
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(day_file)
+        .await
+        .map_err(|e| TalosError::StorageError(format!("open daily memory file: {}", e)))?;
+
+    let payload = render_transcript_block(record)?;
+    file.write_all(payload.as_bytes())
+        .await
+        .map_err(|e| TalosError::StorageError(format!("append daily memory file: {}", e)))?;
+
+    let mut cache = store.transcript_cache.write().await;
+    let entry = cache
+        .entry(record.header.session_id.clone())
+        .or_insert_with(VecDeque::new);
+    entry.push_back(record.clone());
+    while entry.len() > store.hot_recent_messages.saturating_mul(4) {
+        entry.pop_front();
     }
 
     Ok(())

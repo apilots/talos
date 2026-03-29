@@ -1,4 +1,7 @@
-use crate::{InvocationContext, Planner, TaskConstraints, TaskKind, TaskPlan, TaskSpec};
+use crate::{
+    ExecutionPath, InvocationContext, Planner, PlannerKind, TaskConstraints, TaskKind, TaskPlan,
+    TaskSpec, ThinkingMode,
+};
 use async_trait::async_trait;
 use serde_json::json;
 use talos_error::TalosResult;
@@ -31,6 +34,18 @@ impl BuiltInPlanner {
 
 #[async_trait]
 impl Planner for BuiltInPlanner {
+    fn kind(&self) -> PlannerKind {
+        PlannerKind::BuiltIn
+    }
+
+    fn thinking_mode(&self) -> ThinkingMode {
+        ThinkingMode::ModelNative
+    }
+
+    fn default_execution_path(&self) -> ExecutionPath {
+        ExecutionPath::DirectAnswer
+    }
+
     async fn plan(&self, ctx: &InvocationContext) -> TalosResult<TaskPlan> {
         Ok(build_single_task_plan(ctx))
     }
@@ -46,6 +61,18 @@ impl PlanReActPlanner {
 
 #[async_trait]
 impl Planner for PlanReActPlanner {
+    fn kind(&self) -> PlannerKind {
+        PlannerKind::PlanReact
+    }
+
+    fn thinking_mode(&self) -> ThinkingMode {
+        ThinkingMode::PlanningProcessor
+    }
+
+    fn default_execution_path(&self) -> ExecutionPath {
+        ExecutionPath::ReactiveLoop
+    }
+
     fn build_planning_instruction(&self, _ctx: &InvocationContext) -> Option<String> {
         Some(PLAN_REACT_INSTRUCTION.to_string())
     }
@@ -71,7 +98,7 @@ impl Planner for PlanReActPlanner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ContextStateBags, InvocationLimits, TurnPhase};
+    use crate::{ContextStateBags, InvocationExecutionState, InvocationLimits, TurnPhase};
     use std::collections::HashMap;
 
     fn mock_ctx(input: &str, _context_hint: Option<serde_json::Value>) -> InvocationContext {
@@ -85,6 +112,11 @@ mod tests {
             phase: TurnPhase::Execution,
             planning_instruction: None,
             transfer_to: None,
+            execution_state: InvocationExecutionState::default(),
+            session: crate::InvocationSession {
+                session_id: "s1".to_string(),
+                ..crate::InvocationSession::default()
+            },
             state: HashMap::new(),
             state_bags: ContextStateBags::default(),
             limits: InvocationLimits::default(),

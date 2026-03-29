@@ -1,4 +1,4 @@
-use crate::{Agent, DefaultRunner, KernelWarning, RunRequest, Runner, TaskResult};
+use crate::{Agent, DefaultRunner, KernelWarning, RunRequest, Runner, StopReason, TaskResult};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
@@ -9,7 +9,7 @@ use talos_types::talos::{TalosOutputItem, TalosUsage};
 pub struct KernelOutput {
     pub output_text: String,
     pub output_items: Vec<TalosOutputItem>,
-    pub stop_reason: String,
+    pub stop_reason: StopReason,
     pub usage: TalosUsage,
     pub warnings: Vec<KernelWarning>,
     pub model: String,
@@ -116,7 +116,7 @@ mod tests {
                 output_items: vec![TalosOutputItem::OutputText {
                     text: "ok".to_string(),
                 }],
-                stop_reason: "end_turn".to_string(),
+                stop_reason: StopReason::EndTurn,
                 usage: TalosUsage::default(),
                 warnings: Vec::new(),
                 task_results: vec![crate::TaskResult {

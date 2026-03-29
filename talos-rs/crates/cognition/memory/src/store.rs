@@ -5,6 +5,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use talos_config::AgentKernelMemoryConfig;
+use talos_llm_provider::ChatMessage;
 
 use crate::path_policy;
 
@@ -68,6 +69,29 @@ pub struct TalosTurn {
     pub tool_calls: Vec<ToolCallRecord>,
     #[serde(default)]
     pub tool_results: Vec<ToolResultRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionTranscriptBranch {
+    DirectAnswer,
+    ReactiveLoop,
+    ModelThinking,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionTranscriptHeader {
+    pub id: String,
+    pub session_id: String,
+    pub invocation_id: String,
+    pub branch: SessionTranscriptBranch,
+    pub timestamp: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SessionTranscriptRecord {
+    pub header: SessionTranscriptHeader,
+    pub message: ChatMessage,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,6 +185,8 @@ pub struct MemoryStore {
     pub(crate) workspace_dir: PathBuf,
     pub(crate) hot_recent_messages: usize,
     pub(crate) hot_cache: Arc<tokio::sync::RwLock<HashMap<String, VecDeque<TalosMessage>>>>,
+    pub(crate) transcript_cache:
+        Arc<tokio::sync::RwLock<HashMap<String, VecDeque<SessionTranscriptRecord>>>>,
     pub(crate) seq_cache: Arc<tokio::sync::RwLock<HashMap<String, u64>>>,
 }
 
@@ -174,6 +200,7 @@ impl MemoryStore {
             },
             hot_recent_messages: 64,
             hot_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            transcript_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             seq_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         }
     }
@@ -183,6 +210,7 @@ impl MemoryStore {
             workspace_dir: Self::resolve_workspace_dir(&config.workspace_dir),
             hot_recent_messages: config.hot_recent_messages.max(1),
             hot_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            transcript_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             seq_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         }
     }

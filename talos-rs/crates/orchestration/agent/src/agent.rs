@@ -12,9 +12,10 @@ use crate::{
 use serde_json::{json, Value};
 use talos_agent_kernel::{
     flush_session_memory, Agent as KernelAgent, AgentRunResult, BuiltInPlanner, InvocationContext,
-    KernelRuntime, KernelStreamEvent, LlmKernelAgent, LoopKernelAgent, ParallelKernelAgent,
-    PlanReActPlanner, Planner, RoutingKernelAgent, RunRequest, SequentialKernelAgent, TaskKind,
-    TaskResult, TaskStatus,
+    KernelOutputDeltaSource, KernelReasoningSource, KernelRuntime, KernelStreamEvent,
+    KernelStreamEventData, KernelStreamEventType, LlmKernelAgent, LoopKernelAgent,
+    ParallelKernelAgent, PlanReActPlanner, Planner, RoutingKernelAgent, RunRequest,
+    SequentialKernelAgent, StopReason, TaskKind, TaskResult, TaskStatus,
 };
 use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult};
@@ -115,6 +116,16 @@ pub struct AgentImpl {
 }
 
 impl AgentImpl {
+    fn map_stop_reason(stop_reason: StopReason) -> &'static str {
+        match stop_reason {
+            StopReason::EndTurn => "end_turn",
+            StopReason::ToolRoundLimit => "tool_round_limit",
+            StopReason::TransferUnresolved => "transfer_unresolved",
+            StopReason::BeforeModelCallbackStopped => "before_model_callback_stopped",
+            StopReason::AfterModelCallbackStopped => "after_model_callback_stopped",
+        }
+    }
+
     fn extract_text_input(input: &[TalosInputItem]) -> String {
         input
             .iter()
@@ -369,14 +380,6 @@ impl AgentImpl {
         trimmed.to_string()
     }
 
-    fn infer_reasoning_source(text: &str) -> &'static str {
-        if text.trim_start().starts_with("Kernel summary:") {
-            "kernel"
-        } else {
-            "provider"
-        }
-    }
-
     /// Generate a system prompt that includes tool information
     pub fn generate_system_prompt(&self) -> String {
         let available_tools = self.tool_registry.list_tool_names();
@@ -554,25 +557,20 @@ After receiving tool outputs, continue reasoning and provide the final response.
         let current_index = *item_index;
         let iteration = current_index.saturating_add(1);
         let step_id = format!("step-{}", iteration);
-        let mapped = match event.event_type.as_str() {
-            "reasoning_delta" => {
-                let delta = event
-                    .data
-                    .get("delta")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                let source = event
-                    .data
-                    .get("source")
-                    .and_then(|v| v.as_str())
-                    .map(ToString::to_string)
-                    .unwrap_or_else(|| Self::infer_reasoning_source(&delta).to_string());
+        let mapped = match (event.event_type, event.data) {
+            (
+                KernelStreamEventType::ReasoningDelta,
+                KernelStreamEventData::ReasoningDelta(data),
+            ) => {
+                let source = match data.source {
+                    KernelReasoningSource::Provider => "provider".to_string(),
+                    KernelReasoningSource::Kernel => "kernel".to_string(),
+                };
                 Some(OrchestratorEvent {
                     event_type: "message.reasoning.delta".to_string(),
                     data: json!({
                         "request_id": request_id,
-                        "delta": delta,
+                        "delta": data.delta,
                         "reasoning_source": source,
                         "item_index": current_index,
                         "iteration": iteration,
@@ -580,58 +578,69 @@ After receiving tool outputs, continue reasoning and provide the final response.
                     }),
                 })
             }
-            "output_delta" => {
-                let delta = event
-                    .data
-                    .get("delta")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string();
+            (KernelStreamEventType::OutputDelta, KernelStreamEventData::OutputDelta(data)) => {
+                let output_source = match data.source {
+                    Some(KernelOutputDeltaSource::Provider) => "provider",
+                    Some(KernelOutputDeltaSource::KernelFallback) => "kernel_fallback",
+                    None => "unknown",
+                };
                 Some(OrchestratorEvent {
                     event_type: "message.output.delta".to_string(),
                     data: json!({
                         "request_id": request_id,
-                        "delta": delta,
+                        "delta": data.delta,
+                        "output_source": output_source,
                         "item_index": current_index,
                         "iteration": iteration,
                         "step_id": step_id,
                     }),
                 })
             }
-            "tool_call_start" => Some(OrchestratorEvent {
+            (
+                KernelStreamEventType::ToolCallStart,
+                KernelStreamEventData::ToolCallStart(data),
+            ) => Some(OrchestratorEvent {
                 event_type: "message.tool_call.started".to_string(),
                 data: json!({
                     "request_id": request_id,
-                    "call_id": event.data.get("id").cloned().unwrap_or(Value::Null),
-                    "name": event.data.get("name").cloned().unwrap_or(Value::Null),
-                    "arguments": event.data.get("arguments").cloned().unwrap_or(json!({})),
+                    "call_id": data.call_id,
+                    "name": data.tool_name,
+                    "arguments": data.arguments,
                     "item_index": current_index,
                     "iteration": iteration,
                     "step_id": step_id,
                     "timing_ms": Value::Null,
                 }),
             }),
-            "tool_result" => {
-                let payload = event
-                    .data
-                    .get("payload")
-                    .cloned()
-                    .unwrap_or_else(|| json!({}));
+            (KernelStreamEventType::ToolResult, KernelStreamEventData::ToolResult(data)) => {
+                let payload = serde_json::to_value(&data.content).unwrap_or_else(|_| json!([]));
                 Some(OrchestratorEvent {
                     event_type: "message.tool_call.completed".to_string(),
                     data: json!({
                         "request_id": request_id,
-                        "call_id": event.data.get("call_id").cloned().unwrap_or(Value::Null),
-                        "tool": event.data.get("tool").cloned().unwrap_or(Value::Null),
+                        "call_id": data.call_id,
+                        "tool": data.tool_name,
                         "content": [{
                             "type": "json",
                             "value": payload,
                         }],
-                        "is_error": event.data.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false),
+                        "is_error": data.is_error,
                         "item_index": current_index,
                         "iteration": iteration,
                         "step_id": step_id,
                         "timing_ms": Value::Null,
+                    }),
+                })
+            }
+            (KernelStreamEventType::PromptWarning, KernelStreamEventData::PromptWarning(data)) => {
+                Some(OrchestratorEvent {
+                    event_type: "message.warning".to_string(),
+                    data: json!({
+                        "request_id": request_id,
+                        "warning": data.warning,
+                        "item_index": current_index,
+                        "iteration": iteration,
+                        "step_id": step_id,
                     }),
                 })
             }
@@ -740,7 +749,7 @@ impl AgentOrchestrator for AgentImpl {
             output_text: result.output_text,
             output_items: result.output_items,
             reasoning,
-            stop_reason: result.stop_reason,
+            stop_reason: Self::map_stop_reason(result.stop_reason).to_string(),
             usage: result.usage,
             task_count: result.task_results.len() as u32,
             session_id: agent_request.session.context.session_id,
@@ -920,7 +929,7 @@ impl KernelAgent for MockAgent {
             output_items: vec![TalosOutputItem::OutputText {
                 text: "Mock response".to_string(),
             }],
-            stop_reason: "end_turn".to_string(),
+            stop_reason: StopReason::EndTurn,
             usage: TalosUsage::default(),
             warnings: Vec::new(),
             task_results: vec![TaskResult {
@@ -1077,6 +1086,11 @@ mod tests {
             phase: TurnPhase::Execution,
             planning_instruction: None,
             transfer_to: None,
+            execution_state: talos_agent_kernel::InvocationExecutionState::default(),
+            session: talos_agent_kernel::InvocationSession {
+                session_id: "s1".to_string(),
+                ..talos_agent_kernel::InvocationSession::default()
+            },
             state: HashMap::new(),
             state_bags: Default::default(),
             limits: Default::default(),

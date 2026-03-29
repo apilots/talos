@@ -10,7 +10,8 @@ pub use r#trait::Memory;
 pub use retrieval::MemorySearchResponse;
 pub use store::{
     MemoryGetResult, MemorySearchQuery, MemorySearchResult, MemoryStore, RecordHeader,
-    RetrievedMemoryItem, SessionPromptContext, SessionPromptContextConfig, SummaryRecord,
+    RetrievedMemoryItem, SessionPromptContext, SessionPromptContextConfig,
+    SessionTranscriptBranch, SessionTranscriptHeader, SessionTranscriptRecord, SummaryRecord,
     TalosMessage, TalosMessageRole, TalosTurn, ToolCallRecord, ToolResultRecord,
     WorkspaceMemoryRecord,
 };
