@@ -1,4 +1,7 @@
-use crate::{Agent, AgentRunResult, InvocationContext, StopReason, TaskResult};
+use crate::{
+    Agent, AgentRunResult, ExecutionEvent, ExecutionEventHandler, InvocationContext, StopReason,
+    TaskResult,
+};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -22,6 +25,23 @@ fn merge_state_delta(
     }
 }
 
+#[derive(Default)]
+struct BufferedExecutionEventHandler {
+    events: Vec<ExecutionEvent>,
+}
+
+#[async_trait]
+impl ExecutionEventHandler for BufferedExecutionEventHandler {
+    async fn handle(
+        &mut self,
+        _ctx: &mut InvocationContext,
+        event: ExecutionEvent,
+    ) -> TalosResult<Option<ExecutionEvent>> {
+        self.events.push(event.clone());
+        Ok(Some(event))
+    }
+}
+
 pub struct SequentialKernelAgent {
     id: String,
     children: Vec<Arc<dyn Agent>>,
@@ -42,7 +62,11 @@ impl Agent for SequentialKernelAgent {
         &self.id
     }
 
-    async fn run(&self, ctx: &mut InvocationContext) -> TalosResult<AgentRunResult> {
+    async fn run(
+        &self,
+        ctx: &mut InvocationContext,
+        mut event_handler: Option<&mut dyn ExecutionEventHandler>,
+    ) -> TalosResult<AgentRunResult> {
         let mut output_text = String::new();
         let mut output_items = Vec::new();
         let mut stop_reason = StopReason::EndTurn;
@@ -54,7 +78,11 @@ impl Agent for SequentialKernelAgent {
         let mut continue_loop = false;
 
         for child in &self.children {
-            let result = child.run(ctx).await?;
+            let result = if let Some(handler) = event_handler.as_mut() {
+                child.run(ctx, Some(*handler)).await?
+            } else {
+                child.run(ctx, None).await?
+            };
             output_text = result.output_text.clone();
             output_items.extend(result.output_items.clone());
             stop_reason = result.stop_reason.clone();
@@ -104,18 +132,23 @@ impl Agent for ParallelKernelAgent {
         &self.id
     }
 
-    async fn run(&self, ctx: &mut InvocationContext) -> TalosResult<AgentRunResult> {
+    async fn run(
+        &self,
+        ctx: &mut InvocationContext,
+        mut event_handler: Option<&mut dyn ExecutionEventHandler>,
+    ) -> TalosResult<AgentRunResult> {
         let mut set = JoinSet::new();
         for (index, child) in self.children.iter().enumerate() {
             let child = child.clone();
             let mut child_ctx = ctx.clone();
             set.spawn(async move {
-                let result = child.run(&mut child_ctx).await?;
-                Ok::<_, talos_error::TalosError>((index, result))
+                let mut buffered_handler = BufferedExecutionEventHandler::default();
+                let result = child.run(&mut child_ctx, Some(&mut buffered_handler)).await?;
+                Ok::<_, talos_error::TalosError>((index, result, buffered_handler.events))
             });
         }
 
-        let mut ordered: Vec<(usize, AgentRunResult)> = Vec::new();
+        let mut ordered: Vec<(usize, AgentRunResult, Vec<ExecutionEvent>)> = Vec::new();
         while let Some(joined) = set.join_next().await {
             let pair = joined.map_err(|e| {
                 talos_error::TalosError::InternalError(format!(
@@ -125,7 +158,7 @@ impl Agent for ParallelKernelAgent {
             })??;
             ordered.push(pair);
         }
-        ordered.sort_by_key(|(index, _)| *index);
+        ordered.sort_by_key(|(index, _, _)| *index);
 
         let mut output_text = String::new();
         let mut output_items = Vec::new();
@@ -137,7 +170,12 @@ impl Agent for ParallelKernelAgent {
         let mut requested_transfer = None;
         let mut continue_loop = false;
 
-        for (_, result) in ordered {
+        for (_, result, buffered_events) in ordered {
+            if let Some(handler) = event_handler.as_deref_mut() {
+                for event in buffered_events {
+                    let _ = handler.handle(ctx, event).await?;
+                }
+            }
             output_text = result.output_text.clone();
             output_items.extend(result.output_items);
             stop_reason = result.stop_reason.clone();
@@ -187,7 +225,11 @@ impl Agent for LoopKernelAgent {
         &self.id
     }
 
-    async fn run(&self, ctx: &mut InvocationContext) -> TalosResult<AgentRunResult> {
+    async fn run(
+        &self,
+        ctx: &mut InvocationContext,
+        mut event_handler: Option<&mut dyn ExecutionEventHandler>,
+    ) -> TalosResult<AgentRunResult> {
         let mut merged = AgentRunResult {
             output_text: String::new(),
             output_items: Vec::new(),
@@ -201,7 +243,11 @@ impl Agent for LoopKernelAgent {
         };
 
         for _ in 0..self.max_iterations {
-            let result = self.child.run(ctx).await?;
+            let result = if let Some(handler) = event_handler.as_mut() {
+                self.child.run(ctx, Some(*handler)).await?
+            } else {
+                self.child.run(ctx, None).await?
+            };
             merged.output_text = result.output_text.clone();
             merged.output_items.extend(result.output_items.clone());
             merged.stop_reason = result.stop_reason.clone();
@@ -258,7 +304,11 @@ impl Agent for RoutingKernelAgent {
         &self.id
     }
 
-    async fn run(&self, ctx: &mut InvocationContext) -> TalosResult<AgentRunResult> {
+    async fn run(
+        &self,
+        ctx: &mut InvocationContext,
+        mut event_handler: Option<&mut dyn ExecutionEventHandler>,
+    ) -> TalosResult<AgentRunResult> {
         let mut current = self.start_agent.clone();
         let mut hops = 0_u32;
 
@@ -282,7 +332,11 @@ impl Agent for RoutingKernelAgent {
                 break;
             };
 
-            let result = agent.run(ctx).await?;
+            let result = if let Some(handler) = event_handler.as_mut() {
+                agent.run(ctx, Some(*handler)).await?
+            } else {
+                agent.run(ctx, None).await?
+            };
             merged.output_text = result.output_text.clone();
             merged.output_items.extend(result.output_items.clone());
             merged.stop_reason = result.stop_reason.clone();
@@ -310,7 +364,7 @@ impl Agent for RoutingKernelAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{TaskKind, TaskStatus};
+    use crate::{EventAuthor, ExecutionBranch, ExecutionEvent, ExecutionEventKind, TaskKind, TaskStatus};
     use talos_types::talos::TalosOutputItem;
 
     #[derive(Clone)]
@@ -321,13 +375,39 @@ mod tests {
         continue_loop: bool,
     }
 
+    struct EventEmittingAgent {
+        id: String,
+        output: String,
+    }
+
+    #[derive(Default)]
+    struct RecordingEventHandler {
+        events: Vec<ExecutionEvent>,
+    }
+
+    #[async_trait]
+    impl ExecutionEventHandler for RecordingEventHandler {
+        async fn handle(
+            &mut self,
+            _ctx: &mut InvocationContext,
+            event: ExecutionEvent,
+        ) -> TalosResult<Option<ExecutionEvent>> {
+            self.events.push(event.clone());
+            Ok(Some(event))
+        }
+    }
+
     #[async_trait]
     impl Agent for StaticAgent {
         fn id(&self) -> &str {
             &self.id
         }
 
-        async fn run(&self, _ctx: &mut InvocationContext) -> TalosResult<AgentRunResult> {
+        async fn run(
+            &self,
+            _ctx: &mut InvocationContext,
+            _event_handler: Option<&mut dyn ExecutionEventHandler>,
+        ) -> TalosResult<AgentRunResult> {
             Ok(AgentRunResult {
                 output_text: self.output.clone(),
                 output_items: vec![TalosOutputItem::OutputText {
@@ -356,6 +436,61 @@ mod tests {
         }
     }
 
+    #[async_trait]
+    impl Agent for EventEmittingAgent {
+        fn id(&self) -> &str {
+            &self.id
+        }
+
+        async fn run(
+            &self,
+            ctx: &mut InvocationContext,
+            mut event_handler: Option<&mut dyn ExecutionEventHandler>,
+        ) -> TalosResult<AgentRunResult> {
+            if let Some(handler) = event_handler.as_deref_mut() {
+                let _ = handler
+                    .handle(
+                        ctx,
+                        ExecutionEvent::text(
+                            ctx,
+                            EventAuthor::Agent,
+                            ExecutionBranch::ReactiveLoop,
+                            ExecutionEventKind::FinalResponse,
+                            self.output.clone(),
+                            false,
+                        ),
+                    )
+                    .await?;
+            }
+
+            Ok(AgentRunResult {
+                output_text: self.output.clone(),
+                output_items: vec![TalosOutputItem::OutputText {
+                    text: self.output.clone(),
+                }],
+                stop_reason: StopReason::EndTurn,
+                usage: TalosUsage::default(),
+                warnings: Vec::new(),
+                task_results: vec![TaskResult {
+                    task_id: format!("task-{}", self.id),
+                    kind: TaskKind::General,
+                    goal: self.output.clone(),
+                    status: TaskStatus::Success,
+                    output: self.output.clone(),
+                    output_items: Vec::new(),
+                    usage: TalosUsage::default(),
+                    warnings: Vec::new(),
+                    tool_traces: Vec::new(),
+                    state_delta: HashMap::new(),
+                    error: None,
+                }],
+                state_delta: HashMap::new(),
+                continue_loop: false,
+                requested_transfer: None,
+            })
+        }
+    }
+
     fn mock_ctx() -> InvocationContext {
         InvocationContext {
             session_id: "s1".to_string(),
@@ -376,6 +511,8 @@ mod tests {
             state_bags: crate::ContextStateBags::default(),
             limits: crate::InvocationLimits::default(),
             events: Vec::new(),
+            plugin_manager: crate::default_plugin_manager(),
+            session_service: None,
             stream_tx: None,
         }
     }
@@ -400,7 +537,7 @@ mod tests {
             ],
         );
         let mut ctx = mock_ctx();
-        let result = seq.run(&mut ctx).await.expect("sequential should succeed");
+        let result = seq.run(&mut ctx, None).await.expect("sequential should succeed");
         assert_eq!(result.output_text, "b-out");
         assert_eq!(result.task_results.len(), 2);
     }
@@ -425,9 +562,57 @@ mod tests {
             ],
         );
         let mut ctx = mock_ctx();
-        let result = par.run(&mut ctx).await.expect("parallel should succeed");
+        let result = par.run(&mut ctx, None).await.expect("parallel should succeed");
         assert_eq!(result.task_results.len(), 2);
         assert_eq!(result.output_text, "b-out");
+    }
+
+    #[tokio::test]
+    async fn test_sequential_agent_forwards_event_handler_to_children() {
+        let seq = SequentialKernelAgent::new(
+            "seq",
+            vec![Arc::new(EventEmittingAgent {
+                id: "a".to_string(),
+                output: "a-out".to_string(),
+            })],
+        );
+        let mut ctx = mock_ctx();
+        let mut handler = RecordingEventHandler::default();
+
+        let result = seq
+            .run(&mut ctx, Some(&mut handler))
+            .await
+            .expect("sequential should succeed");
+
+        assert_eq!(result.output_text, "a-out");
+        assert_eq!(handler.events.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_parallel_agent_replays_child_events_into_parent_handler() {
+        let par = ParallelKernelAgent::new(
+            "par",
+            vec![
+                Arc::new(EventEmittingAgent {
+                    id: "a".to_string(),
+                    output: "a-out".to_string(),
+                }),
+                Arc::new(EventEmittingAgent {
+                    id: "b".to_string(),
+                    output: "b-out".to_string(),
+                }),
+            ],
+        );
+        let mut ctx = mock_ctx();
+        let mut handler = RecordingEventHandler::default();
+
+        let result = par
+            .run(&mut ctx, Some(&mut handler))
+            .await
+            .expect("parallel should succeed");
+
+        assert_eq!(result.task_results.len(), 2);
+        assert_eq!(handler.events.len(), 2);
     }
 
     #[tokio::test]
@@ -444,7 +629,7 @@ mod tests {
         );
         let mut ctx = mock_ctx();
         let result = loop_agent
-            .run(&mut ctx)
+            .run(&mut ctx, None)
             .await
             .expect("loop agent should succeed");
         assert_eq!(result.task_results.len(), 1);
@@ -473,8 +658,39 @@ mod tests {
         );
 
         let mut ctx = mock_ctx();
-        let result = router.run(&mut ctx).await.expect("router should succeed");
+        let result = router.run(&mut ctx, None).await.expect("router should succeed");
         assert_eq!(result.output_text, "from-b");
         assert!(result.requested_transfer.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_routing_agent_forwards_event_handler_across_hops() {
+        let mut router = RoutingKernelAgent::new("router", "a");
+        router.register_node(
+            "a",
+            Arc::new(StaticAgent {
+                id: "a".to_string(),
+                output: "from-a".to_string(),
+                transfer: Some("b".to_string()),
+                continue_loop: false,
+            }),
+        );
+        router.register_node(
+            "b",
+            Arc::new(EventEmittingAgent {
+                id: "b".to_string(),
+                output: "from-b".to_string(),
+            }),
+        );
+
+        let mut ctx = mock_ctx();
+        let mut handler = RecordingEventHandler::default();
+        let result = router
+            .run(&mut ctx, Some(&mut handler))
+            .await
+            .expect("router should succeed");
+
+        assert_eq!(result.output_text, "from-b");
+        assert_eq!(handler.events.len(), 1);
     }
 }

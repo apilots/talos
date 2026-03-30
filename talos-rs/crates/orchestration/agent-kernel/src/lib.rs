@@ -16,6 +16,8 @@ mod traits;
 mod types;
 mod warnings;
 
+use std::sync::Arc;
+
 pub use callbacks::{
     AfterModelCallback, AfterToolCallback, BeforeModelCallback, BeforeToolCallback,
     CallbackControl, CallbackKind, CallbackRegistry, ToolCallbackPayload,
@@ -25,11 +27,14 @@ pub use composite::{
 };
 pub use contents_builder::ContentsBuilder;
 pub use execution::{
-    EventActions, EventAuthor, EventPayload, EventSink, ExecutionBranch, ExecutionEvent,
-    ExecutionEventBuffer, ExecutionEventKind, LlmRequestEnvelope, LlmResponseEnvelope,
-    PlanningResponseEffect, ResponseDisposition, StateDelta, StateNamespace, VecEventSink,
+    AuthRequestPayload, CompactionSummaryPayload, ConfirmationRequestPayload, EventActions,
+    EventAuthor, EventPayload, EventSink, ExecutionBranch, ExecutionEvent,
+    ExecutionEventBuffer, ExecutionEventHandler, ExecutionEventKind, LlmRequestEnvelope,
+    LlmResponseEnvelope, PlanningResponseEffect, RequestCacheContext,
+    PlanningResponseSegment, PlanningResponseSegmentKind, RequestInteractionContext,
+    RequestOutputContract, ResponseDisposition, StateDelta, StateNamespace, VecEventSink,
 };
-pub use flow::{AutoFlow, BaseLlmFlow, FlowFactory, FlowRunResult, SingleFlow};
+pub use flow::{AutoFlow, BaseLlmFlow, FlowExecution, FlowFactory, FlowRunSummary, SingleFlow};
 pub use general_turn::{
     apply_general_turn_step, apply_general_turn_tool_batch, build_general_turn_step_request,
     emit_general_turn_finalization_stream, execute_general_turn_loop, execute_general_turn_step,
@@ -40,35 +45,42 @@ pub use general_turn::{
 };
 pub use llm_agent::LlmKernelAgent;
 pub use planner::{BuiltInPlanner, PlanReActPlanner};
-pub use plugin::PluginRegistry;
+pub use plugin::{InvocationPluginManager, PluginRegistry};
 pub use processor::{
-    NoopRequestProcessor, NoopResponseProcessor, RequestProcessor, RequestProcessorKind,
+    AgentTransferRequestProcessor, BasicRequestProcessor, ContentsRequestProcessor,
+    EventProjectionProcessor, FinalAnswerExtractionProcessor, InstructionsRequestProcessor,
+    PlanningRequestProcessor, PlanningResponseProcessor, RequestProcessor, RequestProcessorKind,
     RequestProcessorPipeline, ResponseProcessor, ResponseProcessorKind, ResponseProcessorPipeline,
+    StateDeltaResponseProcessor, ToolCallExtractionProcessor, ToolContextRequestProcessor,
 };
 pub use runner::DefaultRunner;
 pub use runtime::{KernelBuilder, KernelOutput, KernelRuntime};
 pub use session::{
     InvocationSession, MemoryBackedSessionService, SessionEvent, SessionEventFilter,
-    SessionEventKind, SessionService, SessionState,
+    SessionEventKind, SessionEventPayload, SessionService, SessionState,
 };
 pub use tool_execution::{
     ParallelToolExecutor, SequentialToolExecutor, ToolExecutionContext, ToolExecutionInput,
     ToolExecutionOutput, ToolExecutor, ToolExecutorFactory,
 };
-pub use traits::{Agent, BaseKernelAgent, Planner, Plugin, Runner, TaskHandler};
+pub use traits::{Agent, BaseKernelAgent, Planner, Plugin, Runner};
 pub use types::{
     AgentRunResult, ContextStateBags, ExecutionPath, FinalResponseEventData, FlowKind,
-    InvocationContext, InvocationExecutionState, InvocationLimits, IterationEventData, KernelEvent,
-    KernelEventData, KernelEventLabel, KernelEventType, KernelExecutionKind,
-    KernelExecutionSettings, KernelOutputDeltaSource, KernelReasoningSource, KernelStreamEvent,
-    KernelStreamEventData, KernelStreamEventType, OutputDeltaStreamData, PlannerKind,
-    PromptWarningEventData, ReasoningDeltaStreamData, RunRequest, RunResponse, StopReason,
-    TaskCompletedEventData, TaskConstraints, TaskKind, TaskPlan, TaskResult, TaskSpec, TaskStatus,
-    ThinkingMode, ToolCallStartStreamData, ToolExecutionMode, ToolResultStreamData,
-    TransferRequestedEventData, TurnPhase, UserInputEventData,
+    FlowProfile, InvocationContext, InvocationExecutionState, InvocationLimits,
+    IterationEventData, KernelEvent, KernelEventData, KernelEventLabel, KernelEventType,
+    KernelExecutionKind, KernelExecutionSettings, KernelOutputDeltaSource,
+    KernelReasoningSource, KernelStreamEvent, KernelStreamEventData, KernelStreamEventType,
+    OutputDeltaStreamData, PlannerKind, PromptWarningEventData, ReasoningDeltaStreamData,
+    RunRequest, RunResponse, StopReason, TaskCompletedEventData, TaskKind, TaskResult,
+    TaskStatus, ThinkingMode, ToolCallStartStreamData, ToolExecutionMode,
+    ToolResultStreamData, TransferRequestedEventData, TurnPhase, UserInputEventData,
 };
 pub use warnings::{
     KernelWarning, PromptBootstrapDropReason, PromptBootstrapFileDroppedWarning,
     PromptBootstrapFileMissingWarning, PromptBootstrapFileTruncatedWarning,
     PromptDynamicSectionDroppedWarning, PromptDynamicSectionTruncatedWarning,
 };
+
+pub fn default_plugin_manager() -> Arc<InvocationPluginManager> {
+    Arc::new(InvocationPluginManager::new())
+}

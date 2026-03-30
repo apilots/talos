@@ -14,8 +14,8 @@ use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 use talos_error::TalosResult;
 use talos_llm_provider::{
-    ChatMessage, ChatRequest, FunctionCall, LlmProvider, ToolChoice, ToolDefinition,
-    ToolStreamEvent,
+    ChatMessage, ChatRequest, FunctionCall, LlmProvider, NativeThinkingConfig, ToolChoice,
+    ToolDefinition, ToolStreamEvent,
 };
 use talos_memory::{
     Memory, MemoryGetResult, MemorySearchResponse, MemoryStore, RecordHeader, RetrievedMemoryItem,
@@ -112,9 +112,9 @@ pub struct GeneralTurnLoopState {
 }
 
 impl GeneralTurnLoopState {
-    pub fn new(prepared: &PreparedGeneralTurn) -> Self {
+    pub fn new(_prepared: &PreparedGeneralTurn) -> Self {
         Self {
-            messages: prepared.messages.clone(),
+            messages: Vec::new(),
             round: 0,
             output_items: Vec::new(),
             usage: TalosUsage::default(),
@@ -136,6 +136,7 @@ pub struct GeneralTurnStepRequest {
     pub messages: Vec<ChatMessage>,
     pub tool_definitions: Vec<ToolDefinition>,
     pub parallel_tool_calls: bool,
+    pub native_thinking: Option<NativeThinkingConfig>,
     pub stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
 }
 
@@ -150,6 +151,10 @@ impl GeneralTurnStepRequest {
                 .tools(self.tool_definitions)
                 .tool_choice(ToolChoice::Auto)
                 .parallel_tool_calls(self.parallel_tool_calls);
+        }
+
+        if let Some(native_thinking) = self.native_thinking {
+            builder = builder.native_thinking(native_thinking);
         }
 
         builder.build()
@@ -502,6 +507,8 @@ mod tests {
             state_bags: ContextStateBags::default(),
             limits: InvocationLimits::default(),
             events: Vec::new(),
+            plugin_manager: crate::default_plugin_manager(),
+            session_service: None,
             stream_tx,
         }
     }
@@ -863,6 +870,7 @@ pub fn build_general_turn_step_request(
         messages: state.messages.clone(),
         tool_definitions: prepared.tool_definitions.clone(),
         parallel_tool_calls: true,
+        native_thinking: None,
         stream_tx: prepared.stream_tx.clone(),
     }
 }
@@ -938,10 +946,6 @@ pub fn apply_general_turn_step(state: &mut GeneralTurnLoopState, step: &GeneralT
         .usage
         .total_tokens
         .saturating_add(step.usage.total_tokens);
-    state.messages.push(ChatMessage::assistant_with_tool_calls(
-        step.text.clone(),
-        step.tool_calls.clone(),
-    ));
     state.output_items.extend(step.output_items.clone());
     state.reasoning_log.extend(step.reasoning.clone());
     for call in &step.tool_calls {
@@ -1096,7 +1100,6 @@ pub fn apply_general_turn_tool_batch(
     state
         .retrieved_memories
         .extend(batch.retrieved_memories.clone());
-    state.messages.extend(batch.tool_messages.clone());
 
     if kernel_config.prompt.include_retrieved_memories {
         if let Some(message) = build_retrieved_memories_message(

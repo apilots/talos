@@ -1,3 +1,4 @@
+use crate::execution::ContentsMode;
 use crate::general_turn::{
     apply_general_turn_step, apply_general_turn_tool_batch, build_general_turn_step_request,
     emit_general_turn_finalization_stream, execute_general_turn_step,
@@ -6,11 +7,12 @@ use crate::general_turn::{
     GeneralTurnStepDisposition,
 };
 use crate::{
-    CallbackControl, CallbackRegistry, EventAuthor, EventSink, ExecutionBranch, ExecutionEvent,
-    ExecutionEventBuffer, ExecutionEventKind, FlowKind, InvocationContext, KernelExecutionSettings,
-    KernelWarning, LlmRequestEnvelope, LlmResponseEnvelope, MemoryBackedSessionService, Planner,
-    RequestProcessorPipeline, ResponseProcessorPipeline, SessionEvent, SessionEventKind,
-    SessionService, StopReason, ToolCallbackPayload, ToolExecutor, ToolExecutorFactory,
+    CallbackControl, CallbackRegistry, EventAuthor, ExecutionBranch, ExecutionEvent,
+    ExecutionEventKind, FlowKind, FlowProfile, InvocationContext, InvocationPluginManager,
+    KernelExecutionSettings, KernelWarning, LlmRequestEnvelope, LlmResponseEnvelope,
+    MemoryBackedSessionService, Planner, RequestProcessorPipeline, ResponseProcessorPipeline,
+    SessionEvent, SessionEventKind, SessionEventPayload, SessionService, StopReason,
+    ToolCallbackPayload, ToolExecutor, ToolExecutorFactory,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -22,18 +24,26 @@ use talos_tools::ToolRegistry;
 use talos_types::talos::{TalosContentItem, TalosOutputItem, TalosUsage};
 
 #[derive(Debug, Clone)]
-pub struct FlowRunResult {
+pub struct FlowRunSummary {
     pub output_text: String,
     pub output_items: Vec<TalosOutputItem>,
     pub stop_reason: StopReason,
     pub usage: TalosUsage,
     pub warnings: Vec<KernelWarning>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FlowExecution {
     pub events: Vec<ExecutionEvent>,
+    pub summary: FlowRunSummary,
 }
 
 #[async_trait]
 pub trait BaseLlmFlow: Send + Sync {
-    async fn run(&self, ctx: &mut InvocationContext, input: &str) -> TalosResult<FlowRunResult>;
+    fn settings(&self) -> &KernelExecutionSettings;
+    fn profile(&self) -> FlowProfile;
+    async fn run_events(&self, ctx: &mut InvocationContext, input: &str)
+    -> TalosResult<FlowExecution>;
 }
 
 pub struct SingleFlow {
@@ -46,9 +56,11 @@ pub struct SingleFlow {
     #[allow(dead_code)]
     planner: Arc<dyn Planner>,
     settings: KernelExecutionSettings,
+    flow_profile: FlowProfile,
+    allow_transfer: bool,
     request_pipeline: RequestProcessorPipeline,
     response_pipeline: ResponseProcessorPipeline,
-    callbacks: Arc<CallbackRegistry>,
+    plugin_manager: Arc<InvocationPluginManager>,
     tool_executor: Arc<dyn ToolExecutor>,
     session_service: Arc<dyn SessionService>,
 }
@@ -64,20 +76,31 @@ impl SingleFlow {
         kernel_config: AgentKernelConfig,
         planner: Arc<dyn Planner>,
     ) -> Self {
+        let agent_name = agent_name.into();
+        let agent_description = agent_description.into();
         let settings = KernelExecutionSettings::try_from(&kernel_config).unwrap_or_default();
+        let flow_profile = select_flow_profile(&settings, tool_registry.as_ref());
         let tool_executor = ToolExecutorFactory::build(settings.tool_execution_mode);
         Self {
-            agent_name: agent_name.into(),
-            agent_description: agent_description.into(),
+            agent_name: agent_name.clone(),
+            agent_description: agent_description.clone(),
             llm_provider,
             tool_registry,
             memory_store: memory_store.clone(),
             kernel_config,
             planner: planner.clone(),
             settings,
-            request_pipeline: RequestProcessorPipeline::default_single(planner.clone()),
-            response_pipeline: ResponseProcessorPipeline::default_single(planner),
-            callbacks: Arc::new(CallbackRegistry::default()),
+            flow_profile,
+            allow_transfer: false,
+            request_pipeline: RequestProcessorPipeline::for_profile(
+                flow_profile,
+                planner.clone(),
+                agent_name,
+                agent_description,
+                false,
+            ),
+            response_pipeline: ResponseProcessorPipeline::for_profile(flow_profile, planner),
+            plugin_manager: Arc::new(InvocationPluginManager::new()),
             tool_executor,
             session_service: Arc::new(MemoryBackedSessionService::new(memory_store.clone())),
         }
@@ -92,16 +115,20 @@ impl SingleFlow {
     }
 
     pub fn current_branch(&self) -> ExecutionBranch {
-        match self.settings.thinking_mode {
-            crate::ThinkingMode::ModelNative => ExecutionBranch::ModelThinking,
-            crate::ThinkingMode::PlanningProcessor | crate::ThinkingMode::Disabled => {
-                self.settings.default_path.into()
-            }
+        match self.flow_profile {
+            FlowProfile::BuiltInDirect => ExecutionBranch::DirectAnswer,
+            FlowProfile::BuiltInModelThinking => ExecutionBranch::ModelThinking,
+            FlowProfile::PlanReactLoop => ExecutionBranch::ReactiveLoop,
         }
     }
 
     pub fn with_callbacks(mut self, callbacks: Arc<CallbackRegistry>) -> Self {
-        self.callbacks = callbacks;
+        self.plugin_manager = Arc::new(InvocationPluginManager::new().with_callbacks(callbacks));
+        self
+    }
+
+    pub fn with_plugin_manager(mut self, plugin_manager: Arc<InvocationPluginManager>) -> Self {
+        self.plugin_manager = plugin_manager;
         self
     }
 
@@ -113,6 +140,18 @@ impl SingleFlow {
     pub fn with_session_service(mut self, session_service: Arc<dyn SessionService>) -> Self {
         self.session_service = session_service;
         self
+    }
+
+    fn rebuild_pipelines(&mut self) {
+        self.request_pipeline = RequestProcessorPipeline::for_profile(
+            self.flow_profile,
+            self.planner.clone(),
+            self.agent_name.clone(),
+            self.agent_description.clone(),
+            self.allow_transfer,
+        );
+        self.response_pipeline =
+            ResponseProcessorPipeline::for_profile(self.flow_profile, self.planner.clone());
     }
 
     async fn observe_tool_callbacks(
@@ -127,8 +166,9 @@ impl SingleFlow {
                         tool_name: name.clone(),
                         call_id: call_id.clone(),
                     };
+                    let plugin_manager = ctx.plugin_manager.clone();
                     if matches!(
-                        self.callbacks.run_before_tool(ctx, &payload).await?,
+                        plugin_manager.before_tool(ctx, &payload).await?,
                         CallbackControl::Stop
                     ) {
                         break;
@@ -161,8 +201,9 @@ impl SingleFlow {
                             tool_name,
                             call_id: call_id.clone(),
                         };
+                        let plugin_manager = ctx.plugin_manager.clone();
                         if matches!(
-                            self.callbacks.run_after_tool(ctx, &payload).await?,
+                            plugin_manager.after_tool(ctx, &payload).await?,
                             CallbackControl::Stop
                         ) {
                             break;
@@ -178,58 +219,133 @@ impl SingleFlow {
 
 fn build_flow_step_model_request(
     planning_instruction: Option<String>,
+    native_thinking: Option<talos_llm_provider::NativeThinkingConfig>,
+    native_thinking_support: talos_llm_provider::NativeThinkingSupport,
     branch: ExecutionBranch,
+    prepared: &crate::general_turn::PreparedGeneralTurn,
     state: &GeneralTurnLoopState,
+    settings: &KernelExecutionSettings,
 ) -> LlmRequestEnvelope {
     LlmRequestEnvelope {
+        prompt_prefix_messages: prepared.prompt_prefix_messages.clone(),
+        transient_messages: state.messages.clone(),
         planning_instruction,
-        messages: state.messages.clone(),
+        tool_definitions: prepared.tool_definitions.clone(),
+        parallel_tool_calls: settings.tool_execution_mode == crate::ToolExecutionMode::Parallel,
+        contents_mode: ContentsMode::FullSession,
         branch,
+        native_thinking,
+        native_thinking_support,
+        ..LlmRequestEnvelope::default()
     }
+}
+
+fn stage_session_event(ctx: &mut InvocationContext, event: SessionEvent) {
+    for delta in &event.actions.state_delta {
+        match delta.namespace {
+            crate::StateNamespace::App => {
+                ctx.session
+                    .state
+                    .app_state
+                    .insert(delta.key.clone(), delta.value.clone());
+            }
+            crate::StateNamespace::User => {
+                ctx.session
+                    .state
+                    .user_state
+                    .insert(delta.key.clone(), delta.value.clone());
+            }
+            crate::StateNamespace::Temp => {
+                ctx.session
+                    .state
+                    .temp_state
+                    .insert(delta.key.clone(), delta.value.clone());
+            }
+            crate::StateNamespace::Session => {
+                ctx.session
+                    .state
+                    .session_state
+                    .insert(delta.key.clone(), delta.value.clone());
+            }
+            crate::StateNamespace::Workspace => {
+                ctx.session
+                    .state
+                    .workspace_state
+                    .insert(delta.key.clone(), delta.value.clone());
+            }
+        }
+    }
+    ctx.session.events.push(event);
+}
+
+fn has_final_response(events: &[ExecutionEvent], branch: ExecutionBranch) -> bool {
+    events
+        .iter()
+        .rev()
+        .any(|event| event.branch == branch && event.is_final_response())
 }
 
 #[async_trait]
 impl BaseLlmFlow for SingleFlow {
-    async fn run(&self, ctx: &mut InvocationContext, input: &str) -> TalosResult<FlowRunResult> {
-        let mut sink = ExecutionEventBuffer::new();
+    fn settings(&self) -> &KernelExecutionSettings {
+        &self.settings
+    }
+
+    fn profile(&self) -> FlowProfile {
+        self.flow_profile
+    }
+
+    async fn run_events(
+        &self,
+        ctx: &mut InvocationContext,
+        input: &str,
+    ) -> TalosResult<FlowExecution> {
+        ctx.plugin_manager = Arc::new(ctx.plugin_manager.merged_with(&self.plugin_manager));
+        let mut events = Vec::new();
         let branch = self.current_branch();
-        ctx.session = self
+        let native_thinking_support = self.llm_provider.native_thinking_support(&ctx.model);
+        let session_service = ctx
             .session_service
+            .clone()
+            .unwrap_or_else(|| self.session_service.clone());
+        ctx.session = session_service
             .load_session(&ctx.session_id, None, Some(branch))
             .await?;
-        sink.push(ExecutionEvent::text(
+        events.push(ExecutionEvent::text(
             ctx,
             EventAuthor::User,
             branch,
             ExecutionEventKind::UserInput,
             ctx.input.clone(),
             false,
-        ))
-        .await?;
+        ));
         let mut request = LlmRequestEnvelope {
             planning_instruction: ctx.planning_instruction.clone(),
+            contents_mode: ContentsMode::FullSession,
             branch,
+            native_thinking_support,
             ..LlmRequestEnvelope::default()
         };
-        self.request_pipeline
-            .run(ctx, &mut request, &mut sink)
-            .await?;
+        events.extend(self.request_pipeline.run(ctx, &mut request).await?);
+        let plugin_manager = ctx.plugin_manager.clone();
         if matches!(
-            self.callbacks.run_before_model(ctx, &mut request).await?,
+            plugin_manager.before_model(ctx, &mut request).await?,
             CallbackControl::Stop
         ) {
-            let stop_reason = if sink.has_final_response(branch) {
+            let stop_reason = if has_final_response(&events, branch) {
                 StopReason::EndTurn
             } else {
                 StopReason::BeforeModelCallbackStopped
             };
-            return Ok(FlowRunResult {
-                output_text: String::new(),
-                output_items: Vec::new(),
-                stop_reason,
-                usage: TalosUsage::default(),
-                warnings: Vec::new(),
-                events: sink.into_events(),
+            return Ok(FlowExecution {
+                events,
+                summary: FlowRunSummary {
+                    output_text: String::new(),
+                    output_items: Vec::new(),
+                    stop_reason,
+                    usage: TalosUsage::default(),
+                    warnings: Vec::new(),
+                },
             });
         }
 
@@ -244,20 +360,19 @@ impl BaseLlmFlow for SingleFlow {
         )
         .await?;
         let warnings = prepared.warnings.clone();
-        let _ = self
-            .session_service
-            .append_event(
-                &mut ctx.session,
-                SessionEvent::new(
-                    prepared.session_id.clone(),
-                    prepared.invocation_id.clone(),
-                    request.branch,
-                    EventAuthor::User,
-                    SessionEventKind::UserMessage,
-                    Some(talos_llm_provider::ChatMessage::user(input)),
-                ),
-            )
-            .await?;
+        stage_session_event(
+            ctx,
+            SessionEvent::new(
+                prepared.session_id.clone(),
+                prepared.invocation_id.clone(),
+                request.branch,
+                EventAuthor::User,
+                SessionEventKind::UserMessage,
+                SessionEventPayload::Message {
+                    message: talos_llm_provider::ChatMessage::user(input),
+                },
+            ),
+        );
         let max_tool_rounds = self.kernel_config.max_tool_rounds.max(1);
         let mut state = GeneralTurnLoopState::new(&prepared);
         let mut final_text = String::new();
@@ -265,55 +380,69 @@ impl BaseLlmFlow for SingleFlow {
             let mut step_request = build_general_turn_step_request(&prepared, &state);
             let mut step_model_request = build_flow_step_model_request(
                 request.planning_instruction.clone(),
+                request.native_thinking.clone(),
+                request.native_thinking_support,
                 request.branch,
+                &prepared,
                 &state,
+                &self.settings,
             );
+            events.extend(self.request_pipeline.run(ctx, &mut step_model_request).await?);
+            let plugin_manager = ctx.plugin_manager.clone();
             if matches!(
-                self.callbacks
-                    .run_before_model(ctx, &mut step_model_request)
+                plugin_manager
+                    .before_model(ctx, &mut step_model_request)
                     .await?,
                 CallbackControl::Stop
             ) {
-                let stop_reason = if sink.has_final_response(branch) {
+                let stop_reason = if has_final_response(&events, branch) {
                     StopReason::EndTurn
                 } else {
                     StopReason::BeforeModelCallbackStopped
                 };
-                return Ok(FlowRunResult {
-                    output_text: final_text,
-                    output_items: state.output_items.clone(),
-                    stop_reason,
-                    usage: state.usage,
-                    warnings,
-                    events: sink.into_events(),
+                return Ok(FlowExecution {
+                    events,
+                    summary: FlowRunSummary {
+                        output_text: final_text,
+                        output_items: state.output_items.clone(),
+                        stop_reason,
+                        usage: state.usage,
+                        warnings,
+                    },
                 });
             }
             step_request.messages = step_model_request.messages;
+            step_request.tool_definitions = step_model_request.tool_definitions.clone();
+            step_request.parallel_tool_calls = step_model_request.parallel_tool_calls;
+            step_request.native_thinking = step_model_request.native_thinking.clone();
             let mut step =
                 execute_general_turn_step(step_request, self.llm_provider.clone()).await?;
             let mut step_response = LlmResponseEnvelope {
                 output_text: step.text.clone(),
                 output_items: step.output_items.clone(),
                 branch: request.branch,
+                actions: crate::EventActions::default(),
+                allow_final_projection: true,
             };
+            let plugin_manager = ctx.plugin_manager.clone();
             if matches!(
-                self.callbacks
-                    .run_after_model(ctx, &mut step_response)
-                    .await?,
+                plugin_manager.after_model(ctx, &mut step_response).await?,
                 CallbackControl::Stop
             ) {
-                let stop_reason = if sink.has_final_response(branch) {
+                let stop_reason = if has_final_response(&events, branch) {
                     StopReason::EndTurn
                 } else {
                     StopReason::AfterModelCallbackStopped
                 };
-                return Ok(FlowRunResult {
-                    output_text: step_response.output_text,
-                    output_items: step_response.output_items,
-                    stop_reason,
-                    usage: state.usage,
-                    warnings,
-                    events: sink.into_events(),
+                return Ok(FlowExecution {
+                    events,
+                    summary: FlowRunSummary {
+                        output_text: step_response.output_text,
+                        output_items: step_response.output_items,
+                        stop_reason,
+                        usage: state.usage,
+                        warnings,
+                    },
                 });
             }
             step.text = step_response.output_text.clone();
@@ -321,57 +450,68 @@ impl BaseLlmFlow for SingleFlow {
 
             let mut projected_step_response = step_response;
             if matches!(step.disposition, GeneralTurnStepDisposition::FinalResponse) {
-                projected_step_response.output_text.clear();
+                projected_step_response.allow_final_projection = false;
             }
-            let _ = self
+            let response_output = self
                 .response_pipeline
-                .run(ctx, &mut projected_step_response, &mut sink)
+                .run(ctx, &mut projected_step_response)
                 .await?;
+            events.extend(response_output.events);
+            step.text = projected_step_response.output_text.clone();
+            step.output_items = projected_step_response.output_items.clone();
+            if !projected_step_response.actions.state_delta.is_empty()
+                || projected_step_response.actions.branch_override.is_some()
+            {
+                let mut planning_event = SessionEvent::new(
+                    prepared.session_id.clone(),
+                    prepared.invocation_id.clone(),
+                    projected_step_response.branch,
+                    EventAuthor::Agent,
+                    SessionEventKind::Planning,
+                    SessionEventPayload::StateOnly,
+                );
+                planning_event.actions = projected_step_response.actions.clone();
+                stage_session_event(ctx, planning_event);
+                request.branch = projected_step_response.branch;
+            }
             self.observe_tool_callbacks(ctx, &step.output_items).await?;
             apply_general_turn_step(&mut state, &step);
 
             if matches!(step.disposition, GeneralTurnStepDisposition::FinalResponse) {
                 final_text = step.text.clone();
-                let _ = self
-                    .session_service
-                    .append_event(
-                        &mut ctx.session,
-                        SessionEvent::new(
-                            prepared.session_id.clone(),
-                            prepared.invocation_id.clone(),
-                            request.branch,
-                            EventAuthor::Agent,
-                            SessionEventKind::AgentMessage,
-                            Some(talos_llm_provider::ChatMessage::assistant(
-                                final_text.clone(),
-                            )),
-                        ),
-                    )
-                    .await?;
-                state
-                    .messages
-                    .push(talos_llm_provider::ChatMessage::assistant(
-                        final_text.clone(),
-                    ));
-                break StopReason::EndTurn;
-            }
-            let _ = self
-                .session_service
-                .append_event(
-                    &mut ctx.session,
+                stage_session_event(
+                    ctx,
                     SessionEvent::new(
                         prepared.session_id.clone(),
                         prepared.invocation_id.clone(),
                         request.branch,
                         EventAuthor::Agent,
-                        SessionEventKind::ToolCall,
-                        Some(talos_llm_provider::ChatMessage::assistant_with_tool_calls(
+                        SessionEventKind::AgentMessage,
+                        SessionEventPayload::Message {
+                            message: talos_llm_provider::ChatMessage::assistant(
+                                final_text.clone(),
+                            ),
+                        },
+                    ),
+                );
+                break StopReason::EndTurn;
+            }
+            stage_session_event(
+                ctx,
+                SessionEvent::new(
+                    prepared.session_id.clone(),
+                    prepared.invocation_id.clone(),
+                    request.branch,
+                    EventAuthor::Agent,
+                    SessionEventKind::ToolCall,
+                    SessionEventPayload::Message {
+                        message: talos_llm_provider::ChatMessage::assistant_with_tool_calls(
                             step.text.clone(),
                             step.tool_calls.clone(),
-                        )),
-                    ),
-                )
-                .await?;
+                        ),
+                    },
+                ),
+            );
 
             let tool_batch = execute_general_turn_tool_batch(
                 &prepared,
@@ -387,11 +527,11 @@ impl BaseLlmFlow for SingleFlow {
                 output_text: String::new(),
                 output_items: tool_batch.output_items.clone(),
                 branch: request.branch,
+                actions: crate::EventActions::default(),
+                allow_final_projection: true,
             };
-            let _ = self
-                .response_pipeline
-                .run(ctx, &mut tool_response, &mut sink)
-                .await?;
+            let response_output = self.response_pipeline.run(ctx, &mut tool_response).await?;
+            events.extend(response_output.events);
             self.observe_tool_callbacks(ctx, &tool_response.output_items)
                 .await?;
             for output_item in &tool_response.output_items {
@@ -414,24 +554,23 @@ impl BaseLlmFlow for SingleFlow {
                                 TalosContentItem::Text { text } => Some(text.clone()),
                             })
                             .unwrap_or_else(|| "{}".to_string());
-                        let _ = self
-                            .session_service
-                            .append_event(
-                                &mut ctx.session,
-                                SessionEvent::new(
-                                    prepared.session_id.clone(),
-                                    prepared.invocation_id.clone(),
-                                    request.branch,
-                                    EventAuthor::Tool,
-                                    SessionEventKind::ToolResult,
-                                    Some(talos_llm_provider::ChatMessage::tool(
+                        stage_session_event(
+                            ctx,
+                            SessionEvent::new(
+                                prepared.session_id.clone(),
+                                prepared.invocation_id.clone(),
+                                request.branch,
+                                EventAuthor::Tool,
+                                SessionEventKind::ToolResult,
+                                SessionEventPayload::Message {
+                                    message: talos_llm_provider::ChatMessage::tool(
                                         call_id.clone(),
                                         tool_name,
                                         payload,
-                                    )),
-                                ),
-                            )
-                            .await?;
+                                    ),
+                                },
+                            ),
+                        );
                     }
                 }
             }
@@ -458,11 +597,11 @@ impl BaseLlmFlow for SingleFlow {
                 .rev()
                 .collect(),
             branch: request.branch,
+            actions: crate::EventActions::default(),
+            allow_final_projection: true,
         };
-        let _ = self
-            .response_pipeline
-            .run(ctx, &mut final_response, &mut sink)
-            .await?;
+        let response_output = self.response_pipeline.run(ctx, &mut final_response).await?;
+        events.extend(response_output.events);
         persist_general_turn_artifacts(
             &prepared,
             input,
@@ -473,15 +612,15 @@ impl BaseLlmFlow for SingleFlow {
         )
         .await;
 
-        let events = sink.into_events();
-
-        Ok(FlowRunResult {
-            output_text: final_response.output_text,
-            output_items: executed.output_items,
-            stop_reason,
-            usage: executed.usage,
-            warnings,
+        Ok(FlowExecution {
             events,
+            summary: FlowRunSummary {
+                output_text: final_response.output_text,
+                output_items: executed.output_items,
+                stop_reason,
+                usage: executed.usage,
+                warnings,
+            },
         })
     }
 }
@@ -492,8 +631,8 @@ pub struct AutoFlow {
 
 impl AutoFlow {
     pub fn new(mut inner: SingleFlow) -> Self {
-        inner.request_pipeline = RequestProcessorPipeline::default_auto(inner.planner.clone());
-        inner.response_pipeline = ResponseProcessorPipeline::default_auto(inner.planner.clone());
+        inner.allow_transfer = true;
+        inner.rebuild_pipelines();
         Self { inner }
     }
 
@@ -504,8 +643,20 @@ impl AutoFlow {
 
 #[async_trait]
 impl BaseLlmFlow for AutoFlow {
-    async fn run(&self, ctx: &mut InvocationContext, input: &str) -> TalosResult<FlowRunResult> {
-        self.inner.run(ctx, input).await
+    fn settings(&self) -> &KernelExecutionSettings {
+        self.inner.settings()
+    }
+
+    fn profile(&self) -> FlowProfile {
+        self.inner.profile()
+    }
+
+    async fn run_events(
+        &self,
+        ctx: &mut InvocationContext,
+        input: &str,
+    ) -> TalosResult<FlowExecution> {
+        self.inner.run_events(ctx, input).await
     }
 }
 
@@ -519,6 +670,22 @@ impl From<crate::ExecutionPath> for ExecutionBranch {
 }
 
 pub struct FlowFactory;
+
+fn select_flow_profile(
+    settings: &KernelExecutionSettings,
+    tool_registry: &ToolRegistry,
+) -> FlowProfile {
+    match settings.planner_kind {
+        crate::PlannerKind::BuiltIn => {
+            if tool_registry.get_tool_definitions().is_empty() {
+                FlowProfile::BuiltInDirect
+            } else {
+                FlowProfile::BuiltInModelThinking
+            }
+        }
+        crate::PlannerKind::PlanReact => FlowProfile::PlanReactLoop,
+    }
+}
 
 impl FlowFactory {
     #[allow(clippy::too_many_arguments)]
@@ -553,8 +720,8 @@ impl FlowFactory {
 mod tests {
     use super::*;
     use crate::{
-        BeforeModelCallback, BuiltInPlanner, ContextStateBags, ExecutionEventBuffer,
-        InvocationExecutionState, InvocationLimits, ResponseDisposition, TurnPhase,
+        BeforeModelCallback, BuiltInPlanner, ContextStateBags, InvocationExecutionState,
+        InvocationLimits, PlanReActPlanner, ResponseDisposition, TurnPhase,
     };
     use async_trait::async_trait;
     use serde_json::{json, Value};
@@ -743,6 +910,8 @@ mod tests {
             state_bags: ContextStateBags::default(),
             limits: InvocationLimits::default(),
             events: Vec::new(),
+            plugin_manager: crate::default_plugin_manager(),
+            session_service: None,
             stream_tx: None,
         }
     }
@@ -800,14 +969,94 @@ mod tests {
             "Retrieved memories:\n- MEMORY.md: prefer tea",
         ));
 
-        let request = build_flow_step_model_request(None, ExecutionBranch::ReactiveLoop, &state);
+        let request = build_flow_step_model_request(
+            None,
+            None,
+            talos_llm_provider::NativeThinkingSupport::Unsupported,
+            ExecutionBranch::ReactiveLoop,
+            &prepared,
+            &state,
+            &KernelExecutionSettings::default(),
+        );
 
-        assert_eq!(request.messages.len(), 3);
+        assert_eq!(request.prompt_prefix_messages.len(), 1);
         assert!(request
-            .messages
+            .transient_messages
             .iter()
             .any(|message| message.role == Role::System
                 && message.content.contains("Retrieved memories:")));
+    }
+
+    #[test]
+    fn test_build_flow_step_model_request_preserves_native_thinking() {
+        let prepared = crate::general_turn::PreparedGeneralTurn {
+            session_id: "s1".to_string(),
+            invocation_id: "i1".to_string(),
+            agent_id: "a1".to_string(),
+            selected_model: "m1".to_string(),
+            prompt_prefix_messages: Vec::new(),
+            messages: Vec::new(),
+            tool_definitions: Vec::new(),
+            prompt_diagnostics: talos_prompt::PromptDiagnostics {
+                mode: talos_prompt::PromptMode::Full,
+                included_sections: Vec::new(),
+                dropped_sections: Vec::new(),
+                truncated_sections: Vec::new(),
+                bootstrap_files: Vec::new(),
+                total_estimated_tokens: 0,
+                static_estimated_tokens: 0,
+                dynamic_estimated_tokens: 0,
+            },
+            warnings: Vec::new(),
+            stream_tx: None,
+        };
+        let state = GeneralTurnLoopState::new(&prepared);
+        let request = build_flow_step_model_request(
+            None,
+            Some(talos_llm_provider::NativeThinkingConfig {
+                effort: talos_llm_provider::NativeThinkingEffort::High,
+                budget_tokens: Some(1024),
+            }),
+            talos_llm_provider::NativeThinkingSupport::Supported,
+            ExecutionBranch::ModelThinking,
+            &prepared,
+            &state,
+            &KernelExecutionSettings::default(),
+        );
+
+        assert_eq!(
+            request.native_thinking.as_ref().and_then(|config| config.budget_tokens),
+            Some(1024)
+        );
+    }
+
+    #[test]
+    fn test_select_flow_profile_follows_planner_and_tooling() {
+        let built_in_settings = KernelExecutionSettings {
+            planner_kind: crate::PlannerKind::BuiltIn,
+            ..KernelExecutionSettings::default()
+        };
+        let empty_tools = ToolRegistry::new();
+        assert_eq!(
+            select_flow_profile(&built_in_settings, &empty_tools),
+            FlowProfile::BuiltInDirect
+        );
+
+        let tool_registry = Arc::new(ToolRegistry::new());
+        tool_registry.register(Arc::new(EchoTool));
+        assert_eq!(
+            select_flow_profile(&built_in_settings, tool_registry.as_ref()),
+            FlowProfile::BuiltInModelThinking
+        );
+
+        let plan_react_settings = KernelExecutionSettings {
+            planner_kind: crate::PlannerKind::PlanReact,
+            ..KernelExecutionSettings::default()
+        };
+        assert_eq!(
+            select_flow_profile(&plan_react_settings, tool_registry.as_ref()),
+            FlowProfile::PlanReactLoop
+        );
     }
 
     #[tokio::test]
@@ -815,12 +1064,12 @@ mod tests {
         let pipeline = ResponseProcessorPipeline::new();
         let mut ctx = build_ctx();
         let mut response = LlmResponseEnvelope::default();
-        let mut sink = ExecutionEventBuffer::new();
-        let disposition = pipeline
-            .run(&mut ctx, &mut response, &mut sink)
+        let output = pipeline
+            .run(&mut ctx, &mut response)
             .await
             .expect("pipeline should succeed");
-        assert_eq!(disposition, ResponseDisposition::Continue);
+        assert_eq!(output.disposition, ResponseDisposition::Continue);
+        assert!(output.events.is_empty());
     }
 
     #[tokio::test]
@@ -842,16 +1091,16 @@ mod tests {
         .with_callbacks(callbacks);
 
         let result = flow
-            .run(&mut ctx, "hello")
+            .run_events(&mut ctx, "hello")
             .await
             .expect("flow should succeed");
 
         assert_eq!(
-            result.stop_reason,
+            result.summary.stop_reason,
             crate::StopReason::BeforeModelCallbackStopped
         );
-        assert!(result.output_text.is_empty());
-        assert!(result.output_items.is_empty());
+        assert!(result.summary.output_text.is_empty());
+        assert!(result.summary.output_items.is_empty());
     }
 
     #[tokio::test]
@@ -874,7 +1123,7 @@ mod tests {
         );
 
         let result = flow
-            .run(&mut ctx, "hello")
+            .run_events(&mut ctx, "hello")
             .await
             .expect("flow should succeed");
 
@@ -902,7 +1151,7 @@ mod tests {
             .events
             .iter()
             .any(|event| matches!(event.kind, ExecutionEventKind::Reasoning)));
-        assert_eq!(result.output_text, "Final answer after tool.");
+        assert_eq!(result.summary.output_text, "Final answer after tool.");
         assert_eq!(state.chat_round.load(Ordering::SeqCst), 2);
         let payload = state
             .tool_payload
@@ -911,5 +1160,52 @@ mod tests {
             .clone()
             .unwrap_or_default();
         assert!(payload.contains("\"ok\":true"));
+    }
+
+    #[test]
+    fn test_single_flow_current_branch_uses_profile() {
+        let built_in_direct = SingleFlow::new(
+            "agent-1",
+            "test agent",
+            Arc::new(NoopLlmProvider),
+            Arc::new(ToolRegistry::new()),
+            Arc::new(MemoryStore::new(std::env::temp_dir().join(Uuid::new_v4().to_string()))),
+            AgentKernelConfig {
+                planner_mode: "built_in".to_string(),
+                ..AgentKernelConfig::default()
+            },
+            Arc::new(BuiltInPlanner::new()),
+        );
+        assert_eq!(built_in_direct.current_branch(), ExecutionBranch::DirectAnswer);
+
+        let tool_registry = Arc::new(ToolRegistry::new());
+        tool_registry.register(Arc::new(EchoTool));
+        let built_in_model = SingleFlow::new(
+            "agent-1",
+            "test agent",
+            Arc::new(NoopLlmProvider),
+            tool_registry.clone(),
+            Arc::new(MemoryStore::new(std::env::temp_dir().join(Uuid::new_v4().to_string()))),
+            AgentKernelConfig {
+                planner_mode: "built_in".to_string(),
+                ..AgentKernelConfig::default()
+            },
+            Arc::new(BuiltInPlanner::new()),
+        );
+        assert_eq!(built_in_model.current_branch(), ExecutionBranch::ModelThinking);
+
+        let plan_react = SingleFlow::new(
+            "agent-1",
+            "test agent",
+            Arc::new(NoopLlmProvider),
+            tool_registry,
+            Arc::new(MemoryStore::new(std::env::temp_dir().join(Uuid::new_v4().to_string()))),
+            AgentKernelConfig {
+                planner_mode: "plan_react".to_string(),
+                ..AgentKernelConfig::default()
+            },
+            Arc::new(PlanReActPlanner::new()),
+        );
+        assert_eq!(plan_react.current_branch(), ExecutionBranch::ReactiveLoop);
     }
 }

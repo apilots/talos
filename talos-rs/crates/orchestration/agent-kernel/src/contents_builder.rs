@@ -1,4 +1,7 @@
-use crate::{ExecutionBranch, InvocationSession, SessionEvent, SessionEventKind};
+use crate::execution::ContentsMode;
+use crate::{
+    ExecutionBranch, InvocationSession, SessionEvent, SessionEventKind, SessionEventPayload,
+};
 use talos_llm_provider::ChatMessage;
 
 pub struct ContentsBuilder;
@@ -8,14 +11,28 @@ impl ContentsBuilder {
         session: &InvocationSession,
         invocation_id: &str,
         branch: ExecutionBranch,
+        mode: ContentsMode,
     ) -> Vec<ChatMessage> {
-        let events = session.filter_events(Some(invocation_id), Some(branch));
+        let invocation_filter = match mode {
+            ContentsMode::CurrentInvocation => Some(invocation_id),
+            ContentsMode::FullSession => None,
+        };
+        let events = session.filter_events(invocation_filter, Some(branch));
+        let events = Self::apply_rewind(events);
         let events = Self::filter_context_events(events);
+        let events = Self::apply_compaction_ranges(events);
         let events = Self::rearrange_latest_tool_results(events);
         let events = Self::rearrange_tool_results_in_history(events);
         events
             .into_iter()
-            .filter_map(|event| event.message)
+            .filter_map(|event| match event.payload {
+                SessionEventPayload::Message { message } => Some(message),
+                SessionEventPayload::Compaction { payload } => Some(payload.summary_message),
+                SessionEventPayload::StateOnly
+                | SessionEventPayload::Transfer { .. }
+                | SessionEventPayload::Auth { .. }
+                | SessionEventPayload::Confirmation { .. } => None,
+            })
             .collect()
     }
 
@@ -23,8 +40,100 @@ impl ContentsBuilder {
         events
             .into_iter()
             .filter(|event| !event.partial)
-            .filter(|event| event.message.is_some())
+            .filter(|event| !Self::is_framework_event(event))
+            .filter(|event| !Self::is_auth_event(event))
+            .filter(|event| !Self::is_confirmation_event(event))
+            .filter(|event| !Self::contains_empty_content(event))
             .collect()
+    }
+
+    fn apply_rewind(events: Vec<SessionEvent>) -> Vec<SessionEvent> {
+        let mut filtered = Vec::new();
+        let mut index = events.len();
+        while index > 0 {
+            index -= 1;
+            let event = &events[index];
+            if let Some(rewind_invocation_id) = &event.actions.rewind_before_invocation_id {
+                if let Some(target_index) = events
+                    .iter()
+                    .position(|candidate| &candidate.invocation_id == rewind_invocation_id)
+                {
+                    index = target_index;
+                }
+                continue;
+            }
+            filtered.push(event.clone());
+        }
+        filtered.reverse();
+        filtered
+    }
+
+    fn apply_compaction_ranges(events: Vec<SessionEvent>) -> Vec<SessionEvent> {
+        let mut compaction_ranges = Vec::new();
+
+        for event in &events {
+            if let Some(compaction) = &event.actions.compaction {
+                let Some(start_index) = events
+                    .iter()
+                    .position(|candidate| candidate.id == compaction.start_event_id)
+                else {
+                    continue;
+                };
+                let Some(end_index) = events
+                    .iter()
+                    .position(|candidate| candidate.id == compaction.end_event_id)
+                else {
+                    continue;
+                };
+                compaction_ranges.push((start_index.min(end_index), start_index.max(end_index)));
+            }
+        }
+
+        if compaction_ranges.is_empty() {
+            return events;
+        }
+
+        events
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, event)| {
+                if event.actions.compaction.is_some() {
+                    return Some(event);
+                }
+                let is_compacted = compaction_ranges
+                    .iter()
+                    .any(|(start, end)| *start <= index && index <= *end);
+                (!is_compacted).then_some(event)
+            })
+            .collect()
+    }
+
+    fn contains_empty_content(event: &SessionEvent) -> bool {
+        let Some(message) = event.payload.message() else {
+            return true;
+        };
+        let has_text = !message.content.trim().is_empty();
+        let has_tool_calls = message
+            .tool_calls
+            .as_ref()
+            .is_some_and(|tool_calls| !tool_calls.is_empty());
+        let has_tool_response = message.tool_call_id.is_some();
+        !has_text && !has_tool_calls && !has_tool_response
+    }
+
+    fn is_framework_event(event: &SessionEvent) -> bool {
+        matches!(
+            event.payload,
+            SessionEventPayload::StateOnly | SessionEventPayload::Transfer { .. }
+        )
+    }
+
+    fn is_auth_event(event: &SessionEvent) -> bool {
+        matches!(event.payload, SessionEventPayload::Auth { .. })
+    }
+
+    fn is_confirmation_event(event: &SessionEvent) -> bool {
+        matches!(event.payload, SessionEventPayload::Confirmation { .. })
     }
 
     fn rearrange_latest_tool_results(events: Vec<SessionEvent>) -> Vec<SessionEvent> {
@@ -107,8 +216,8 @@ impl ContentsBuilder {
             return Vec::new();
         }
         event
-            .message
-            .as_ref()
+            .payload
+            .message()
             .and_then(|message| message.tool_calls.as_ref())
             .map(|tool_calls| {
                 tool_calls
@@ -123,13 +232,18 @@ impl ContentsBuilder {
         if event.kind != SessionEventKind::ToolResult {
             return None;
         }
-        event.message.as_ref()?.tool_call_id.clone()
+        event.payload.message()?.tool_call_id.clone()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::execution::EventCompaction;
+    use crate::session::{
+        SessionAuthPayload, SessionCompactionPayload, SessionConfirmationPayload,
+        SessionTransferPayload,
+    };
     use crate::{EventAuthor, SessionState};
     use talos_llm_provider::FunctionCall;
 
@@ -147,10 +261,13 @@ mod tests {
                 SessionEventKind::UserMessage => EventAuthor::User,
                 SessionEventKind::ToolResult => EventAuthor::Tool,
                 SessionEventKind::SystemMessage => EventAuthor::System,
-                SessionEventKind::AgentMessage | SessionEventKind::ToolCall => EventAuthor::Agent,
+                SessionEventKind::AgentMessage
+                | SessionEventKind::ToolCall
+                | SessionEventKind::Planning
+                | SessionEventKind::StateUpdate => EventAuthor::Agent,
             },
             kind,
-            message: Some(message),
+            payload: SessionEventPayload::Message { message },
             actions: crate::EventActions::default(),
             partial: false,
             timestamp: chrono::Utc::now(),
@@ -166,6 +283,21 @@ mod tests {
 
     fn tool_result(id: &str, name: &str, content: &str) -> ChatMessage {
         ChatMessage::tool(id, name, content)
+    }
+
+    fn state_only_event() -> SessionEvent {
+        SessionEvent {
+            id: format!("evt-{}", uuid::Uuid::new_v4()),
+            session_id: "s1".to_string(),
+            invocation_id: "i1".to_string(),
+            branch: ExecutionBranch::ReactiveLoop,
+            author: EventAuthor::Agent,
+            kind: SessionEventKind::Planning,
+            payload: SessionEventPayload::StateOnly,
+            actions: crate::EventActions::default(),
+            partial: false,
+            timestamp: chrono::Utc::now(),
+        }
     }
 
     #[test]
@@ -197,8 +329,12 @@ mod tests {
             state: SessionState::default(),
         };
 
-        let messages =
-            ContentsBuilder::build_messages(&session, "i1", ExecutionBranch::ReactiveLoop);
+        let messages = ContentsBuilder::build_messages(
+            &session,
+            "i1",
+            ExecutionBranch::ReactiveLoop,
+            ContentsMode::CurrentInvocation,
+        );
 
         assert_eq!(messages.len(), 3);
         assert_eq!(messages[0].role, talos_llm_provider::Role::User);
@@ -244,8 +380,12 @@ mod tests {
             state: SessionState::default(),
         };
 
-        let messages =
-            ContentsBuilder::build_messages(&session, "i1", ExecutionBranch::ReactiveLoop);
+        let messages = ContentsBuilder::build_messages(
+            &session,
+            "i1",
+            ExecutionBranch::ReactiveLoop,
+            ContentsMode::CurrentInvocation,
+        );
 
         assert_eq!(messages.len(), 4);
         assert!(messages[1]
@@ -283,10 +423,329 @@ mod tests {
             state: SessionState::default(),
         };
 
-        let messages =
-            ContentsBuilder::build_messages(&session, "i1", ExecutionBranch::ReactiveLoop);
+        let messages = ContentsBuilder::build_messages(
+            &session,
+            "i1",
+            ExecutionBranch::ReactiveLoop,
+            ContentsMode::CurrentInvocation,
+        );
 
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].content, "visible");
+    }
+
+    #[test]
+    fn test_build_messages_filters_framework_and_control_payloads() {
+        let now = chrono::Utc::now();
+        let session = InvocationSession {
+            session_id: "s1".to_string(),
+            events: vec![
+                session_event(
+                    SessionEventKind::UserMessage,
+                    ChatMessage::user("hello"),
+                    ExecutionBranch::ReactiveLoop,
+                ),
+                SessionEvent {
+                    id: "transfer".to_string(),
+                    session_id: "s1".to_string(),
+                    invocation_id: "i1".to_string(),
+                    branch: ExecutionBranch::ReactiveLoop,
+                    author: EventAuthor::Agent,
+                    kind: SessionEventKind::StateUpdate,
+                    payload: SessionEventPayload::Transfer {
+                        payload: SessionTransferPayload {
+                            target_agent: "agent-b".to_string(),
+                        },
+                    },
+                    actions: crate::EventActions::default(),
+                    partial: false,
+                    timestamp: now,
+                },
+                SessionEvent {
+                    id: "auth".to_string(),
+                    session_id: "s1".to_string(),
+                    invocation_id: "i1".to_string(),
+                    branch: ExecutionBranch::ReactiveLoop,
+                    author: EventAuthor::System,
+                    kind: SessionEventKind::SystemMessage,
+                    payload: SessionEventPayload::Auth {
+                        payload: SessionAuthPayload {
+                            provider: "github".to_string(),
+                            prompt: "auth required".to_string(),
+                        },
+                    },
+                    actions: crate::EventActions::default(),
+                    partial: false,
+                    timestamp: now,
+                },
+                SessionEvent {
+                    id: "confirm".to_string(),
+                    session_id: "s1".to_string(),
+                    invocation_id: "i1".to_string(),
+                    branch: ExecutionBranch::ReactiveLoop,
+                    author: EventAuthor::System,
+                    kind: SessionEventKind::SystemMessage,
+                    payload: SessionEventPayload::Confirmation {
+                        payload: SessionConfirmationPayload {
+                            tool_name: "rm".to_string(),
+                            call_id: "call_1".to_string(),
+                            prompt: "confirm".to_string(),
+                        },
+                    },
+                    actions: crate::EventActions::default(),
+                    partial: false,
+                    timestamp: now,
+                },
+                state_only_event(),
+            ],
+            state: SessionState::default(),
+        };
+
+        let messages = ContentsBuilder::build_messages(
+            &session,
+            "i1",
+            ExecutionBranch::ReactiveLoop,
+            ContentsMode::CurrentInvocation,
+        );
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, "hello");
+    }
+
+    #[test]
+    fn test_build_messages_applies_rewind_before_invocation() {
+        let now = chrono::Utc::now();
+        let mut rewind_event = state_only_event();
+        rewind_event.id = "rewind".to_string();
+        rewind_event.invocation_id = "i2".to_string();
+        rewind_event.actions.rewind_before_invocation_id = Some("i1".to_string());
+        rewind_event.timestamp = now;
+
+        let session = InvocationSession {
+            session_id: "s1".to_string(),
+            events: vec![
+                session_event(
+                    SessionEventKind::UserMessage,
+                    ChatMessage::user("old"),
+                    ExecutionBranch::ReactiveLoop,
+                ),
+                SessionEvent {
+                    id: "new-user".to_string(),
+                    session_id: "s1".to_string(),
+                    invocation_id: "i2".to_string(),
+                    branch: ExecutionBranch::ReactiveLoop,
+                    author: EventAuthor::User,
+                    kind: SessionEventKind::UserMessage,
+                    payload: SessionEventPayload::Message {
+                        message: ChatMessage::user("new"),
+                    },
+                    actions: crate::EventActions::default(),
+                    partial: false,
+                    timestamp: now,
+                },
+                rewind_event,
+                SessionEvent {
+                    id: "post-rewind".to_string(),
+                    session_id: "s1".to_string(),
+                    invocation_id: "i3".to_string(),
+                    branch: ExecutionBranch::ReactiveLoop,
+                    author: EventAuthor::User,
+                    kind: SessionEventKind::UserMessage,
+                    payload: SessionEventPayload::Message {
+                        message: ChatMessage::user("after rewind"),
+                    },
+                    actions: crate::EventActions::default(),
+                    partial: false,
+                    timestamp: now + chrono::Duration::milliseconds(5),
+                },
+            ],
+            state: SessionState::default(),
+        };
+
+        let messages = ContentsBuilder::build_messages(
+            &session,
+            "i2",
+            ExecutionBranch::ReactiveLoop,
+            ContentsMode::FullSession,
+        );
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, "after rewind");
+    }
+
+    #[test]
+    fn test_build_messages_applies_compaction_summary_and_skips_raw_range() {
+        let start = chrono::Utc::now();
+        let middle = start + chrono::Duration::milliseconds(10);
+        let end = start + chrono::Duration::milliseconds(20);
+
+        let mut compaction_event = SessionEvent {
+            id: "compact".to_string(),
+            session_id: "s1".to_string(),
+            invocation_id: "i2".to_string(),
+            branch: ExecutionBranch::ReactiveLoop,
+            author: EventAuthor::Agent,
+            kind: SessionEventKind::StateUpdate,
+            payload: SessionEventPayload::Compaction {
+                payload: SessionCompactionPayload {
+                    summary_message: ChatMessage::assistant("summary"),
+                },
+            },
+            actions: crate::EventActions::default(),
+            partial: false,
+            timestamp: end,
+        };
+        compaction_event.actions.compaction = Some(EventCompaction {
+            start_event_id: "u1".to_string(),
+            end_event_id: "a1".to_string(),
+        });
+
+        let session = InvocationSession {
+            session_id: "s1".to_string(),
+            events: vec![
+                SessionEvent {
+                    id: "u1".to_string(),
+                    session_id: "s1".to_string(),
+                    invocation_id: "i1".to_string(),
+                    branch: ExecutionBranch::ReactiveLoop,
+                    author: EventAuthor::User,
+                    kind: SessionEventKind::UserMessage,
+                    payload: SessionEventPayload::Message {
+                        message: ChatMessage::user("hello"),
+                    },
+                    actions: crate::EventActions::default(),
+                    partial: false,
+                    timestamp: start,
+                },
+                SessionEvent {
+                    id: "a1".to_string(),
+                    session_id: "s1".to_string(),
+                    invocation_id: "i1".to_string(),
+                    branch: ExecutionBranch::ReactiveLoop,
+                    author: EventAuthor::Agent,
+                    kind: SessionEventKind::AgentMessage,
+                    payload: SessionEventPayload::Message {
+                        message: ChatMessage::assistant("detail"),
+                    },
+                    actions: crate::EventActions::default(),
+                    partial: false,
+                    timestamp: middle,
+                },
+                compaction_event,
+                SessionEvent {
+                    id: "u2".to_string(),
+                    session_id: "s1".to_string(),
+                    invocation_id: "i2".to_string(),
+                    branch: ExecutionBranch::ReactiveLoop,
+                    author: EventAuthor::User,
+                    kind: SessionEventKind::UserMessage,
+                    payload: SessionEventPayload::Message {
+                        message: ChatMessage::user("fresh"),
+                    },
+                    actions: crate::EventActions::default(),
+                    partial: false,
+                    timestamp: end + chrono::Duration::milliseconds(10),
+                },
+            ],
+            state: SessionState::default(),
+        };
+
+        let messages = ContentsBuilder::build_messages(
+            &session,
+            "i2",
+            ExecutionBranch::ReactiveLoop,
+            ContentsMode::FullSession,
+        );
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].content, "summary");
+        assert_eq!(messages[1].content, "fresh");
+    }
+
+    #[test]
+    fn test_build_messages_compaction_uses_event_id_boundaries_not_timestamp_ranges() {
+        let timestamp = chrono::Utc::now();
+
+        let mut compaction_event = SessionEvent {
+            id: "compact".to_string(),
+            session_id: "s1".to_string(),
+            invocation_id: "i2".to_string(),
+            branch: ExecutionBranch::ReactiveLoop,
+            author: EventAuthor::Agent,
+            kind: SessionEventKind::StateUpdate,
+            payload: SessionEventPayload::Compaction {
+                payload: SessionCompactionPayload {
+                    summary_message: ChatMessage::assistant("summary"),
+                },
+            },
+            actions: crate::EventActions::default(),
+            partial: false,
+            timestamp,
+        };
+        compaction_event.actions.compaction = Some(EventCompaction {
+            start_event_id: "u1".to_string(),
+            end_event_id: "a1".to_string(),
+        });
+
+        let session = InvocationSession {
+            session_id: "s1".to_string(),
+            events: vec![
+                SessionEvent {
+                    id: "u1".to_string(),
+                    session_id: "s1".to_string(),
+                    invocation_id: "i1".to_string(),
+                    branch: ExecutionBranch::ReactiveLoop,
+                    author: EventAuthor::User,
+                    kind: SessionEventKind::UserMessage,
+                    payload: SessionEventPayload::Message {
+                        message: ChatMessage::user("hello"),
+                    },
+                    actions: crate::EventActions::default(),
+                    partial: false,
+                    timestamp,
+                },
+                SessionEvent {
+                    id: "a1".to_string(),
+                    session_id: "s1".to_string(),
+                    invocation_id: "i1".to_string(),
+                    branch: ExecutionBranch::ReactiveLoop,
+                    author: EventAuthor::Agent,
+                    kind: SessionEventKind::AgentMessage,
+                    payload: SessionEventPayload::Message {
+                        message: ChatMessage::assistant("detail"),
+                    },
+                    actions: crate::EventActions::default(),
+                    partial: false,
+                    timestamp,
+                },
+                compaction_event,
+                SessionEvent {
+                    id: "u2".to_string(),
+                    session_id: "s1".to_string(),
+                    invocation_id: "i2".to_string(),
+                    branch: ExecutionBranch::ReactiveLoop,
+                    author: EventAuthor::User,
+                    kind: SessionEventKind::UserMessage,
+                    payload: SessionEventPayload::Message {
+                        message: ChatMessage::user("fresh"),
+                    },
+                    actions: crate::EventActions::default(),
+                    partial: false,
+                    timestamp,
+                },
+            ],
+            state: SessionState::default(),
+        };
+
+        let messages = ContentsBuilder::build_messages(
+            &session,
+            "i2",
+            ExecutionBranch::ReactiveLoop,
+            ContentsMode::FullSession,
+        );
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].content, "summary");
+        assert_eq!(messages[1].content, "fresh");
     }
 }

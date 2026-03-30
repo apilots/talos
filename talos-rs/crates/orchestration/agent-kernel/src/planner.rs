@@ -1,28 +1,24 @@
 use crate::{
-    ExecutionPath, InvocationContext, Planner, PlannerKind, TaskConstraints, TaskKind, TaskPlan,
-    TaskSpec, ThinkingMode,
+    execution::{PlanningResponseSegment, PlanningResponseSegmentKind},
+    ExecutionPath, InvocationContext, LlmRequestEnvelope, LlmResponseEnvelope, Planner,
+    PlannerKind, PlanningResponseEffect, ThinkingMode,
 };
-use async_trait::async_trait;
-use serde_json::json;
-use talos_error::TalosResult;
-use uuid::Uuid;
+use talos_llm_provider::{NativeThinkingConfig, NativeThinkingEffort};
 
-const PLAN_REACT_INSTRUCTION: &str = "Follow a Plan->Reason->Act loop. First produce a concise \
-plan, then use tools when needed, then return the final answer.";
+const PLAN_REACT_PLANNING_TAG: &str = "/*PLANNING*/";
+const PLAN_REACT_REPLANNING_TAG: &str = "/*REPLANNING*/";
+const PLAN_REACT_REASONING_TAG: &str = "/*REASONING*/";
+const PLAN_REACT_ACTION_TAG: &str = "/*ACTION*/";
+const PLAN_REACT_FINAL_ANSWER_TAG: &str = "/*FINAL_ANSWER*/";
 
-fn build_single_task_plan(ctx: &InvocationContext) -> TaskPlan {
-    let task = TaskSpec {
-        id: Uuid::new_v4().to_string(),
-        kind: TaskKind::General,
-        goal: ctx.input.clone(),
-        input: json!({ "raw_input": ctx.input }),
-        constraints: TaskConstraints::default(),
-        tool_candidates: Vec::new(),
-        expected_output: None,
-    };
-
-    TaskPlan { tasks: vec![task] }
-}
+const PLAN_REACT_INSTRUCTION: &str = "When answering, prefer available tools over memorized \
+knowledge.\n\nFollow this process:\n1. Start with a natural-language plan.\n2. Use tools to \
+execute the plan and interleave tool use with reasoning updates.\n3. End with one final answer.\n\n\
+Use this format:\n- planning under /*PLANNING*/\n- replanning under /*REPLANNING*/ when needed\n\
+- reasoning under /*REASONING*/\n- tool actions under /*ACTION*/\n- final answer under \
+/*FINAL_ANSWER*/.\n\nThe plan should be coherent, tool-grounded, and decomposed into numbered \
+steps. If execution fails, revise the plan under /*REPLANNING*/. The final answer must be precise \
+and explicitly state when the task cannot be completed with the available context.";
 
 pub struct BuiltInPlanner;
 
@@ -32,7 +28,6 @@ impl BuiltInPlanner {
     }
 }
 
-#[async_trait]
 impl Planner for BuiltInPlanner {
     fn kind(&self) -> PlannerKind {
         PlannerKind::BuiltIn
@@ -46,8 +41,18 @@ impl Planner for BuiltInPlanner {
         ExecutionPath::DirectAnswer
     }
 
-    async fn plan(&self, ctx: &InvocationContext) -> TalosResult<TaskPlan> {
-        Ok(build_single_task_plan(ctx))
+    fn native_thinking_config(
+        &self,
+        _ctx: &InvocationContext,
+        request: &LlmRequestEnvelope,
+    ) -> Option<NativeThinkingConfig> {
+        if !request.native_thinking_support.is_supported() {
+            return None;
+        }
+        Some(NativeThinkingConfig {
+            effort: NativeThinkingEffort::Medium,
+            budget_tokens: Some(2048),
+        })
     }
 }
 
@@ -59,7 +64,6 @@ impl PlanReActPlanner {
     }
 }
 
-#[async_trait]
 impl Planner for PlanReActPlanner {
     fn kind(&self) -> PlannerKind {
         PlannerKind::PlanReact
@@ -73,26 +77,81 @@ impl Planner for PlanReActPlanner {
         ExecutionPath::ReactiveLoop
     }
 
-    fn build_planning_instruction(&self, _ctx: &InvocationContext) -> Option<String> {
+    fn build_planning_instruction(
+        &self,
+        _ctx: &InvocationContext,
+        _request: &LlmRequestEnvelope,
+    ) -> Option<String> {
         Some(PLAN_REACT_INSTRUCTION.to_string())
     }
 
-    fn process_planning_response(
+    fn process_planning_response_effect(
         &self,
         _ctx: &InvocationContext,
-        response_text: &str,
-    ) -> Option<String> {
-        let normalized = response_text.trim();
+        response: &LlmResponseEnvelope,
+    ) -> PlanningResponseEffect {
+        let normalized = response.output_text.trim();
         if normalized.is_empty() {
-            None
-        } else {
-            Some(normalized.to_string())
+            return PlanningResponseEffect::default();
+        }
+
+        let mut segments = Vec::new();
+        let mut final_output_text = None;
+        let mut saw_tagged_thought = false;
+
+        if let Some((reasoning_text, final_answer_text)) =
+            split_by_last_pattern(normalized, PLAN_REACT_FINAL_ANSWER_TAG)
+        {
+            if !reasoning_text.trim().is_empty() {
+                segments.push(PlanningResponseSegment {
+                    kind: PlanningResponseSegmentKind::Thought,
+                    text: reasoning_text.trim().to_string(),
+                });
+                saw_tagged_thought = true;
+            }
+            if !final_answer_text.trim().is_empty() {
+                segments.push(PlanningResponseSegment {
+                    kind: PlanningResponseSegmentKind::FinalAnswer,
+                    text: final_answer_text.trim().to_string(),
+                });
+                final_output_text = Some(final_answer_text.trim().to_string());
+            }
+        } else if starts_with_tagged_thought(normalized) {
+            segments.push(PlanningResponseSegment {
+                kind: PlanningResponseSegmentKind::Thought,
+                text: normalized.to_string(),
+            });
+            saw_tagged_thought = true;
+        }
+
+        PlanningResponseEffect {
+            normalized_text: Some(normalized.to_string()),
+            segments,
+            output_text_override: final_output_text,
+            clear_output_text: saw_tagged_thought,
+            state_delta: Vec::new(),
+            branch_override: None,
         }
     }
+}
 
-    async fn plan(&self, ctx: &InvocationContext) -> TalosResult<TaskPlan> {
-        Ok(build_single_task_plan(ctx))
-    }
+fn split_by_last_pattern<'a>(text: &'a str, separator: &str) -> Option<(&'a str, &'a str)> {
+    let index = text.rfind(separator)?;
+    Some((
+        &text[..index + separator.len()],
+        &text[index + separator.len()..],
+    ))
+}
+
+fn starts_with_tagged_thought(text: &str) -> bool {
+    [
+        PLAN_REACT_PLANNING_TAG,
+        PLAN_REACT_REPLANNING_TAG,
+        PLAN_REACT_REASONING_TAG,
+        PLAN_REACT_ACTION_TAG,
+    ]
+    .iter()
+    .any(|tag| text.starts_with(tag))
 }
 
 #[cfg(test)]
@@ -121,43 +180,73 @@ mod tests {
             state_bags: ContextStateBags::default(),
             limits: InvocationLimits::default(),
             events: Vec::new(),
+            plugin_manager: crate::default_plugin_manager(),
+            session_service: None,
             stream_tx: None,
         }
     }
 
-    #[tokio::test]
-    async fn test_built_in_planner_defaults_to_general_without_direct_tool_mode() {
+    #[test]
+    fn test_built_in_planner_defaults_to_direct_answer_model_thinking() {
         let planner = BuiltInPlanner::new();
-        let ctx = mock_ctx("run ls", None);
-        let plan = planner.plan(&ctx).await.expect("plan should succeed");
-        assert_eq!(plan.tasks.len(), 1);
-        assert_eq!(plan.tasks[0].kind, TaskKind::General);
-        assert!(plan.tasks[0].tool_candidates.is_empty());
+        assert_eq!(planner.kind(), PlannerKind::BuiltIn);
+        assert_eq!(planner.thinking_mode(), ThinkingMode::ModelNative);
+        assert_eq!(
+            planner.default_execution_path(),
+            ExecutionPath::DirectAnswer
+        );
     }
 
-    #[tokio::test]
-    async fn test_built_in_planner_ignores_direct_tool_mode_context_hint() {
+    #[test]
+    fn test_built_in_planner_gates_native_thinking_by_request_support() {
         let planner = BuiltInPlanner::new();
-        let ctx = mock_ctx("run ls", Some(json!({"direct_tool_mode": true})));
-        let plan = planner.plan(&ctx).await.expect("plan should succeed");
-        assert_eq!(plan.tasks.len(), 1);
-        assert_eq!(plan.tasks[0].kind, TaskKind::General);
-        assert!(plan.tasks[0].tool_candidates.is_empty());
+        let ctx = mock_ctx("hello", None);
+
+        let mut supported_request = crate::LlmRequestEnvelope::default();
+        supported_request.native_thinking_support =
+            talos_llm_provider::NativeThinkingSupport::Supported;
+        assert!(planner
+            .native_thinking_config(&ctx, &supported_request)
+            .is_some());
+
+        let unsupported_request = crate::LlmRequestEnvelope::default();
+        assert!(planner
+            .native_thinking_config(&ctx, &unsupported_request)
+            .is_none());
     }
 
     #[test]
     fn test_plan_react_planner_instruction_and_response_processing() {
         let planner = PlanReActPlanner::new();
         let ctx = mock_ctx("hello", None);
+        let request = crate::LlmRequestEnvelope::default();
         let instruction = planner
-            .build_planning_instruction(&ctx)
+            .build_planning_instruction(&ctx, &request)
             .expect("instruction should exist");
-        assert!(instruction.contains("Plan->Reason->Act"));
+        assert!(instruction.contains("/*PLANNING*/"));
+        assert!(instruction.contains("/*FINAL_ANSWER*/"));
 
-        assert_eq!(planner.process_planning_response(&ctx, "   "), None);
-        assert_eq!(
-            planner.process_planning_response(&ctx, "  final answer "),
-            Some("final answer".to_string())
-        );
+        let empty_response = crate::LlmResponseEnvelope {
+            output_text: "   ".to_string(),
+            ..crate::LlmResponseEnvelope::default()
+        };
+        assert_eq!(planner.process_planning_response(&ctx, &empty_response), None);
+
+        let final_response = crate::LlmResponseEnvelope {
+            output_text: "/*REASONING*/ think\n/*FINAL_ANSWER*/done".to_string(),
+            ..crate::LlmResponseEnvelope::default()
+        };
+        let effect = planner.process_planning_response_effect(&ctx, &final_response);
+        assert_eq!(effect.output_text_override.as_deref(), Some("done"));
+        assert!(effect.clear_output_text);
+        assert_eq!(effect.segments.len(), 2);
+        assert!(matches!(
+            effect.segments[0].kind,
+            PlanningResponseSegmentKind::Thought
+        ));
+        assert!(matches!(
+            effect.segments[1].kind,
+            PlanningResponseSegmentKind::FinalAnswer
+        ));
     }
 }

@@ -80,6 +80,76 @@ pub enum SessionTranscriptBranch {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionTranscriptAuthor {
+    User,
+    Agent,
+    Tool,
+    System,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionTranscriptEventKind {
+    UserMessage,
+    AgentMessage,
+    ToolCall,
+    ToolResult,
+    SystemMessage,
+    Planning,
+    StateUpdate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionTranscriptStateNamespace {
+    App,
+    User,
+    Temp,
+    Session,
+    Workspace,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SessionTranscriptStateDelta {
+    pub namespace: SessionTranscriptStateNamespace,
+    pub key: String,
+    #[serde(default)]
+    pub value: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SessionTranscriptActions {
+    #[serde(default)]
+    pub state_delta: Vec<SessionTranscriptStateDelta>,
+    #[serde(default)]
+    pub end_turn: bool,
+    pub transfer_to: Option<String>,
+    pub branch_override: Option<SessionTranscriptBranch>,
+    pub rewind_before_invocation_id: Option<String>,
+    pub compaction: Option<SessionTranscriptCompaction>,
+}
+
+impl Default for SessionTranscriptActions {
+    fn default() -> Self {
+        Self {
+            state_delta: Vec::new(),
+            end_turn: false,
+            transfer_to: None,
+            branch_override: None,
+            rewind_before_invocation_id: None,
+            compaction: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionTranscriptCompaction {
+    pub start_event_id: String,
+    pub end_event_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionTranscriptHeader {
     pub id: String,
     pub session_id: String,
@@ -89,9 +159,49 @@ pub struct SessionTranscriptHeader {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SessionTranscriptPayload {
+    Message { message: ChatMessage },
+    StateOnly,
+    Transfer { payload: SessionTranscriptTransferPayload },
+    Auth { payload: SessionTranscriptAuthPayload },
+    Confirmation { payload: SessionTranscriptConfirmationPayload },
+    Compaction { payload: SessionTranscriptCompactionPayload },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionTranscriptTransferPayload {
+    pub target_agent: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionTranscriptAuthPayload {
+    pub provider: String,
+    pub prompt: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionTranscriptConfirmationPayload {
+    pub tool_name: String,
+    pub call_id: String,
+    pub prompt: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SessionTranscriptCompactionPayload {
+    pub summary_message: ChatMessage,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionTranscriptRecord {
     pub header: SessionTranscriptHeader,
-    pub message: ChatMessage,
+    pub author: SessionTranscriptAuthor,
+    pub kind: SessionTranscriptEventKind,
+    pub payload: SessionTranscriptPayload,
+    #[serde(default)]
+    pub actions: SessionTranscriptActions,
+    #[serde(default)]
+    pub partial: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

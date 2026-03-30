@@ -1,4 +1,7 @@
-use crate::{EventActions, EventAuthor, ExecutionBranch, StateNamespace};
+use crate::{
+    execution::EventCompaction, EventActions, EventAuthor, EventPayload, ExecutionBranch,
+    ExecutionEvent, ExecutionEventKind, StateNamespace,
+};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -6,10 +9,15 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use talos_error::TalosResult;
-use talos_llm_provider::{ChatMessage, Role};
+use talos_llm_provider::{ChatMessage, FunctionCall};
 use talos_memory::{
-    Memory, MemoryStore, SessionTranscriptBranch, SessionTranscriptHeader, SessionTranscriptRecord,
+    Memory, MemoryStore, SessionTranscriptActions, SessionTranscriptAuthPayload,
+    SessionTranscriptAuthor, SessionTranscriptBranch, SessionTranscriptCompaction,
+    SessionTranscriptCompactionPayload, SessionTranscriptConfirmationPayload,
+    SessionTranscriptEventKind, SessionTranscriptHeader, SessionTranscriptRecord,
+    SessionTranscriptStateDelta, SessionTranscriptStateNamespace, SessionTranscriptTransferPayload,
 };
+use talos_memory::SessionTranscriptPayload;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -20,6 +28,55 @@ pub enum SessionEventKind {
     ToolCall,
     ToolResult,
     SystemMessage,
+    Planning,
+    StateUpdate,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SessionEventPayload {
+    Message { message: ChatMessage },
+    StateOnly,
+    Transfer { payload: SessionTransferPayload },
+    Auth { payload: SessionAuthPayload },
+    Confirmation { payload: SessionConfirmationPayload },
+    Compaction { payload: SessionCompactionPayload },
+}
+
+impl SessionEventPayload {
+    pub fn message(&self) -> Option<&ChatMessage> {
+        match self {
+            Self::Message { message } => Some(message),
+            Self::Compaction { payload } => Some(&payload.summary_message),
+            Self::Transfer { .. }
+            | Self::Auth { .. }
+            | Self::Confirmation { .. }
+            | Self::StateOnly => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionTransferPayload {
+    pub target_agent: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionAuthPayload {
+    pub provider: String,
+    pub prompt: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionConfirmationPayload {
+    pub tool_name: String,
+    pub call_id: String,
+    pub prompt: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SessionCompactionPayload {
+    pub summary_message: ChatMessage,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,7 +87,7 @@ pub struct SessionEvent {
     pub branch: ExecutionBranch,
     pub author: EventAuthor,
     pub kind: SessionEventKind,
-    pub message: Option<ChatMessage>,
+    pub payload: SessionEventPayload,
     #[serde(default)]
     pub actions: EventActions,
     #[serde(default)]
@@ -45,7 +102,7 @@ impl SessionEvent {
         branch: ExecutionBranch,
         author: EventAuthor,
         kind: SessionEventKind,
-        message: Option<ChatMessage>,
+        payload: SessionEventPayload,
     ) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
@@ -54,10 +111,116 @@ impl SessionEvent {
             branch,
             author,
             kind,
-            message,
+            payload,
             actions: EventActions::default(),
             partial: false,
             timestamp: Utc::now(),
+        }
+    }
+
+    pub fn from_execution_event(session_id: impl Into<String>, event: ExecutionEvent) -> Self {
+        let payload = match &event.payload {
+            EventPayload::Text { text } => match event.kind {
+                ExecutionEventKind::UserInput => SessionEventPayload::Message {
+                    message: ChatMessage::user(text.clone()),
+                },
+                ExecutionEventKind::System | ExecutionEventKind::Error => {
+                    SessionEventPayload::Message {
+                        message: ChatMessage::system(text.clone()),
+                    }
+                }
+                ExecutionEventKind::FinalResponse | ExecutionEventKind::Reasoning => {
+                    SessionEventPayload::Message {
+                        message: ChatMessage::assistant(text.clone()),
+                    }
+                }
+                ExecutionEventKind::Planning => SessionEventPayload::StateOnly,
+                ExecutionEventKind::ToolCall | ExecutionEventKind::ToolResult => {
+                    SessionEventPayload::StateOnly
+                }
+            },
+            EventPayload::ToolCall {
+                call_id,
+                name,
+                arguments,
+            } => SessionEventPayload::Message {
+                message: ChatMessage::assistant_with_tool_calls(
+                    "",
+                    vec![FunctionCall::new(
+                        call_id.clone(),
+                        name.clone(),
+                        arguments.clone(),
+                    )],
+                ),
+            },
+            EventPayload::ToolResult {
+                call_id,
+                tool_name,
+                content,
+                ..
+            } => SessionEventPayload::Message {
+                message: ChatMessage::tool(call_id.clone(), tool_name.clone(), content.to_string()),
+            },
+            EventPayload::AuthRequest { payload } => SessionEventPayload::Auth {
+                payload: SessionAuthPayload {
+                    provider: payload.provider.clone(),
+                    prompt: payload.prompt.clone(),
+                },
+            },
+            EventPayload::ConfirmationRequest { payload } => SessionEventPayload::Confirmation {
+                payload: SessionConfirmationPayload {
+                    tool_name: payload.tool_name.clone(),
+                    call_id: payload.call_id.clone(),
+                    prompt: payload.prompt.clone(),
+                },
+            },
+            EventPayload::CompactionSummary { payload } => SessionEventPayload::Compaction {
+                payload: SessionCompactionPayload {
+                    summary_message: ChatMessage::assistant(payload.summary.clone()),
+                },
+            },
+            EventPayload::Empty => {
+                if let Some(target_agent) = &event.actions.transfer_to {
+                    SessionEventPayload::Transfer {
+                        payload: SessionTransferPayload {
+                            target_agent: target_agent.clone(),
+                        },
+                    }
+                } else if event.actions.compaction.is_some() {
+                    SessionEventPayload::Compaction {
+                        payload: SessionCompactionPayload {
+                            summary_message: ChatMessage::assistant(""),
+                        },
+                    }
+                } else {
+                    SessionEventPayload::StateOnly
+                }
+            }
+        };
+
+        let kind = match event.kind {
+            ExecutionEventKind::UserInput => SessionEventKind::UserMessage,
+            ExecutionEventKind::FinalResponse | ExecutionEventKind::Reasoning => {
+                SessionEventKind::AgentMessage
+            }
+            ExecutionEventKind::ToolCall => SessionEventKind::ToolCall,
+            ExecutionEventKind::ToolResult => SessionEventKind::ToolResult,
+            ExecutionEventKind::Planning => SessionEventKind::Planning,
+            ExecutionEventKind::System | ExecutionEventKind::Error => SessionEventKind::SystemMessage,
+        };
+
+        Self {
+            id: event.id,
+            session_id: session_id.into(),
+            invocation_id: event.invocation_id,
+            branch: event.branch,
+            author: event.author,
+            kind,
+            payload,
+            actions: event.actions,
+            partial: event.partial,
+            timestamp: DateTime::<Utc>::from_timestamp_millis(event.timestamp_ms)
+                .unwrap_or_else(Utc::now),
         }
     }
 }
@@ -159,22 +322,103 @@ impl MemoryBackedSessionService {
         }
     }
 
-    fn infer_kind(message: &ChatMessage) -> SessionEventKind {
-        match message.role {
-            Role::User => SessionEventKind::UserMessage,
-            Role::System => SessionEventKind::SystemMessage,
-            Role::Tool => SessionEventKind::ToolResult,
-            Role::Assistant => {
-                if message
-                    .tool_calls
-                    .as_ref()
-                    .is_some_and(|calls| !calls.is_empty())
-                {
-                    SessionEventKind::ToolCall
-                } else {
-                    SessionEventKind::AgentMessage
-                }
-            }
+    fn map_author_to_transcript(author: EventAuthor) -> SessionTranscriptAuthor {
+        match author {
+            EventAuthor::User => SessionTranscriptAuthor::User,
+            EventAuthor::Agent => SessionTranscriptAuthor::Agent,
+            EventAuthor::Tool => SessionTranscriptAuthor::Tool,
+            EventAuthor::System => SessionTranscriptAuthor::System,
+        }
+    }
+
+    fn map_author_from_transcript(author: SessionTranscriptAuthor) -> EventAuthor {
+        match author {
+            SessionTranscriptAuthor::User => EventAuthor::User,
+            SessionTranscriptAuthor::Agent => EventAuthor::Agent,
+            SessionTranscriptAuthor::Tool => EventAuthor::Tool,
+            SessionTranscriptAuthor::System => EventAuthor::System,
+        }
+    }
+
+    fn map_kind_to_transcript(kind: SessionEventKind) -> SessionTranscriptEventKind {
+        match kind {
+            SessionEventKind::UserMessage => SessionTranscriptEventKind::UserMessage,
+            SessionEventKind::AgentMessage => SessionTranscriptEventKind::AgentMessage,
+            SessionEventKind::ToolCall => SessionTranscriptEventKind::ToolCall,
+            SessionEventKind::ToolResult => SessionTranscriptEventKind::ToolResult,
+            SessionEventKind::SystemMessage => SessionTranscriptEventKind::SystemMessage,
+            SessionEventKind::Planning => SessionTranscriptEventKind::Planning,
+            SessionEventKind::StateUpdate => SessionTranscriptEventKind::StateUpdate,
+        }
+    }
+
+    fn map_kind_from_transcript(kind: SessionTranscriptEventKind) -> SessionEventKind {
+        match kind {
+            SessionTranscriptEventKind::UserMessage => SessionEventKind::UserMessage,
+            SessionTranscriptEventKind::AgentMessage => SessionEventKind::AgentMessage,
+            SessionTranscriptEventKind::ToolCall => SessionEventKind::ToolCall,
+            SessionTranscriptEventKind::ToolResult => SessionEventKind::ToolResult,
+            SessionTranscriptEventKind::SystemMessage => SessionEventKind::SystemMessage,
+            SessionTranscriptEventKind::Planning => SessionEventKind::Planning,
+            SessionTranscriptEventKind::StateUpdate => SessionEventKind::StateUpdate,
+        }
+    }
+
+    fn map_actions_to_transcript(actions: &EventActions) -> SessionTranscriptActions {
+        SessionTranscriptActions {
+            state_delta: actions
+                .state_delta
+                .iter()
+                .map(|delta| SessionTranscriptStateDelta {
+                    namespace: match delta.namespace {
+                        StateNamespace::App => SessionTranscriptStateNamespace::App,
+                        StateNamespace::User => SessionTranscriptStateNamespace::User,
+                        StateNamespace::Temp => SessionTranscriptStateNamespace::Temp,
+                        StateNamespace::Session => SessionTranscriptStateNamespace::Session,
+                        StateNamespace::Workspace => SessionTranscriptStateNamespace::Workspace,
+                    },
+                    key: delta.key.clone(),
+                    value: delta.value.clone(),
+                })
+                .collect(),
+            end_turn: actions.end_turn,
+            transfer_to: actions.transfer_to.clone(),
+            branch_override: actions.branch_override.map(Self::map_branch_to_transcript),
+            rewind_before_invocation_id: actions.rewind_before_invocation_id.clone(),
+            compaction: actions.compaction.as_ref().map(|compaction| SessionTranscriptCompaction {
+                start_event_id: compaction.start_event_id.clone(),
+                end_event_id: compaction.end_event_id.clone(),
+            }),
+        }
+    }
+
+    fn map_actions_from_transcript(actions: SessionTranscriptActions) -> EventActions {
+        EventActions {
+            state_delta: actions
+                .state_delta
+                .into_iter()
+                .map(|delta| crate::StateDelta {
+                    namespace: match delta.namespace {
+                        SessionTranscriptStateNamespace::App => StateNamespace::App,
+                        SessionTranscriptStateNamespace::User => StateNamespace::User,
+                        SessionTranscriptStateNamespace::Temp => StateNamespace::Temp,
+                        SessionTranscriptStateNamespace::Session => StateNamespace::Session,
+                        SessionTranscriptStateNamespace::Workspace => StateNamespace::Workspace,
+                    },
+                    key: delta.key,
+                    value: delta.value,
+                })
+                .collect(),
+            end_turn: actions.end_turn,
+            transfer_to: actions.transfer_to,
+            branch_override: actions
+                .branch_override
+                .map(Self::map_branch_from_transcript),
+            rewind_before_invocation_id: actions.rewind_before_invocation_id,
+            compaction: actions.compaction.map(|compaction| EventCompaction {
+                start_event_id: compaction.start_event_id,
+                end_event_id: compaction.end_event_id,
+            }),
         }
     }
 
@@ -214,6 +458,72 @@ impl MemoryBackedSessionService {
             }
         }
     }
+
+    fn map_payload_to_transcript(payload: &SessionEventPayload) -> SessionTranscriptPayload {
+        match payload {
+            SessionEventPayload::Message { message } => SessionTranscriptPayload::Message {
+                message: message.clone(),
+            },
+            SessionEventPayload::StateOnly => SessionTranscriptPayload::StateOnly,
+            SessionEventPayload::Transfer { payload } => SessionTranscriptPayload::Transfer {
+                payload: SessionTranscriptTransferPayload {
+                    target_agent: payload.target_agent.clone(),
+                },
+            },
+            SessionEventPayload::Auth { payload } => SessionTranscriptPayload::Auth {
+                payload: SessionTranscriptAuthPayload {
+                    provider: payload.provider.clone(),
+                    prompt: payload.prompt.clone(),
+                },
+            },
+            SessionEventPayload::Confirmation { payload } => {
+                SessionTranscriptPayload::Confirmation {
+                    payload: SessionTranscriptConfirmationPayload {
+                        tool_name: payload.tool_name.clone(),
+                        call_id: payload.call_id.clone(),
+                        prompt: payload.prompt.clone(),
+                    },
+                }
+            }
+            SessionEventPayload::Compaction { payload } => SessionTranscriptPayload::Compaction {
+                payload: SessionTranscriptCompactionPayload {
+                    summary_message: payload.summary_message.clone(),
+                },
+            },
+        }
+    }
+
+    fn map_payload_from_transcript(payload: SessionTranscriptPayload) -> SessionEventPayload {
+        match payload {
+            SessionTranscriptPayload::Message { message } => SessionEventPayload::Message { message },
+            SessionTranscriptPayload::StateOnly => SessionEventPayload::StateOnly,
+            SessionTranscriptPayload::Transfer { payload } => SessionEventPayload::Transfer {
+                payload: SessionTransferPayload {
+                    target_agent: payload.target_agent,
+                },
+            },
+            SessionTranscriptPayload::Auth { payload } => SessionEventPayload::Auth {
+                payload: SessionAuthPayload {
+                    provider: payload.provider,
+                    prompt: payload.prompt,
+                },
+            },
+            SessionTranscriptPayload::Confirmation { payload } => {
+                SessionEventPayload::Confirmation {
+                    payload: SessionConfirmationPayload {
+                        tool_name: payload.tool_name,
+                        call_id: payload.call_id,
+                        prompt: payload.prompt,
+                    },
+                }
+            }
+            SessionTranscriptPayload::Compaction { payload } => SessionEventPayload::Compaction {
+                payload: SessionCompactionPayload {
+                    summary_message: payload.summary_message,
+                },
+            },
+        }
+    }
 }
 
 #[async_trait]
@@ -228,20 +538,22 @@ impl SessionService for MemoryBackedSessionService {
         }
 
         Self::apply_state_delta(session, &event);
-        if let Some(message) = &event.message {
-            self.memory_store
-                .append_transcript_record(&SessionTranscriptRecord {
-                    header: SessionTranscriptHeader {
-                        id: event.id.clone(),
-                        session_id: event.session_id.clone(),
-                        invocation_id: event.invocation_id.clone(),
-                        branch: Self::map_branch_to_transcript(event.branch),
-                        timestamp: event.timestamp,
-                    },
-                    message: message.clone(),
-                })
-                .await?;
-        }
+        self.memory_store
+            .append_transcript_record(&SessionTranscriptRecord {
+                header: SessionTranscriptHeader {
+                    id: event.id.clone(),
+                    session_id: event.session_id.clone(),
+                    invocation_id: event.invocation_id.clone(),
+                    branch: Self::map_branch_to_transcript(event.branch),
+                    timestamp: event.timestamp,
+                },
+                author: Self::map_author_to_transcript(event.author.clone()),
+                kind: Self::map_kind_to_transcript(event.kind.clone()),
+                payload: Self::map_payload_to_transcript(&event.payload),
+                actions: Self::map_actions_to_transcript(&event.actions),
+                partial: event.partial,
+            })
+            .await?;
         session.events.push(event.clone());
         Ok(event)
     }
@@ -266,16 +578,11 @@ impl SessionService for MemoryBackedSessionService {
                     session_id: record.header.session_id,
                     invocation_id: record.header.invocation_id,
                     branch: Self::map_branch_from_transcript(record.header.branch),
-                    author: match record.message.role {
-                        Role::User => EventAuthor::User,
-                        Role::Tool => EventAuthor::Tool,
-                        Role::System => EventAuthor::System,
-                        Role::Assistant => EventAuthor::Agent,
-                    },
-                    kind: Self::infer_kind(&record.message),
-                    message: Some(record.message),
-                    actions: EventActions::default(),
-                    partial: false,
+                    author: Self::map_author_from_transcript(record.author),
+                    kind: Self::map_kind_from_transcript(record.kind),
+                    payload: Self::map_payload_from_transcript(record.payload),
+                    actions: Self::map_actions_from_transcript(record.actions),
+                    partial: record.partial,
                     timestamp: record.header.timestamp,
                 })
                 .collect()
@@ -293,16 +600,11 @@ impl SessionService for MemoryBackedSessionService {
                     session_id: record.header.session_id,
                     invocation_id: record.header.invocation_id,
                     branch: Self::map_branch_from_transcript(record.header.branch),
-                    author: match record.message.role {
-                        Role::User => EventAuthor::User,
-                        Role::Tool => EventAuthor::Tool,
-                        Role::System => EventAuthor::System,
-                        Role::Assistant => EventAuthor::Agent,
-                    },
-                    kind: Self::infer_kind(&record.message),
-                    message: Some(record.message),
-                    actions: EventActions::default(),
-                    partial: false,
+                    author: Self::map_author_from_transcript(record.author),
+                    kind: Self::map_kind_from_transcript(record.kind),
+                    payload: Self::map_payload_from_transcript(record.payload),
+                    actions: Self::map_actions_from_transcript(record.actions),
+                    partial: record.partial,
                     timestamp: record.header.timestamp,
                 })
                 .collect()
@@ -310,11 +612,15 @@ impl SessionService for MemoryBackedSessionService {
             Vec::new()
         };
 
-        Ok(InvocationSession {
+        let mut session = InvocationSession {
             session_id: session_id.to_string(),
             events,
             state: SessionState::default(),
-        })
+        };
+        for event in session.events.clone() {
+            Self::apply_state_delta(&mut session, &event);
+        }
+        Ok(session)
     }
 
     async fn list_events(
@@ -355,7 +661,9 @@ mod tests {
                     ExecutionBranch::ReactiveLoop,
                     EventAuthor::User,
                     SessionEventKind::UserMessage,
-                    Some(ChatMessage::user("hello")),
+                    SessionEventPayload::Message {
+                        message: ChatMessage::user("hello"),
+                    },
                 ),
             )
             .await
@@ -369,7 +677,9 @@ mod tests {
                     ExecutionBranch::ReactiveLoop,
                     EventAuthor::Agent,
                     SessionEventKind::AgentMessage,
-                    Some(ChatMessage::assistant("hi again")),
+                    SessionEventPayload::Message {
+                        message: ChatMessage::assistant("hi again"),
+                    },
                 ),
             )
             .await
@@ -383,5 +693,45 @@ mod tests {
         assert_eq!(loaded.events.len(), 2);
         assert_eq!(loaded.events[0].invocation_id, "invocation-1");
         assert_eq!(loaded.events[1].invocation_id, "invocation-2");
+    }
+
+    #[tokio::test]
+    async fn test_load_session_replays_state_delta_into_session_state() {
+        let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let memory_store = Arc::new(MemoryStore::new(workspace_dir));
+        let service = MemoryBackedSessionService::new(memory_store);
+        let mut session = InvocationSession {
+            session_id: "session-1".to_string(),
+            ..InvocationSession::default()
+        };
+
+        let mut event = SessionEvent::new(
+            "session-1",
+            "invocation-1",
+            ExecutionBranch::ReactiveLoop,
+            EventAuthor::Agent,
+            SessionEventKind::Planning,
+            SessionEventPayload::StateOnly,
+        );
+        event.actions.state_delta.push(crate::StateDelta {
+            namespace: StateNamespace::Session,
+            key: "plan_seen".to_string(),
+            value: serde_json::json!(true),
+        });
+
+        service
+            .append_event(&mut session, event)
+            .await
+            .expect("append should succeed");
+
+        let loaded = service
+            .load_session("session-1", None, Some(ExecutionBranch::ReactiveLoop))
+            .await
+            .expect("load should succeed");
+
+        assert_eq!(
+            loaded.state.session_state.get("plan_seen"),
+            Some(&serde_json::json!(true))
+        );
     }
 }

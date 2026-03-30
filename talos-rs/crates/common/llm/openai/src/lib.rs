@@ -9,8 +9,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
-    ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, Role,
-    ToolChoice, ToolDefinition, ToolStream, ToolStreamEvent, Usage,
+    ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider,
+    NativeThinkingConfig, NativeThinkingEffort, NativeThinkingSupport, Role, ToolChoice,
+    ToolDefinition, ToolStream, ToolStreamEvent, Usage,
 };
 use tokio::sync::mpsc;
 use tracing::{debug, error, info};
@@ -115,6 +116,8 @@ struct OpenAIRequest {
     tool_choice: Option<OpenAIToolChoice>,
     #[serde(skip_serializing_if = "Option::is_none")]
     parallel_tool_calls: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     stream: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -321,6 +324,10 @@ impl OpenAIProvider {
             tools: Self::convert_tools(request.tools),
             tool_choice: Self::convert_tool_choice(request.tool_choice),
             parallel_tool_calls: request.parallel_tool_calls,
+            reasoning_effort: request
+                .native_thinking
+                .as_ref()
+                .map(Self::convert_native_thinking_effort),
             stream: Some(stream),
             stream_options: if stream {
                 Some(OpenAIStreamOptions {
@@ -330,6 +337,23 @@ impl OpenAIProvider {
                 None
             },
         }
+    }
+
+    fn convert_native_thinking_effort(config: &NativeThinkingConfig) -> String {
+        match config.effort {
+            NativeThinkingEffort::Low => "low",
+            NativeThinkingEffort::Medium => "medium",
+            NativeThinkingEffort::High => "high",
+        }
+        .to_string()
+    }
+
+    fn supports_native_thinking_model(model: &str) -> bool {
+        let normalized = model.trim().to_ascii_lowercase();
+        normalized.starts_with("o1")
+            || normalized.starts_with("o3")
+            || normalized.starts_with("o4")
+            || normalized.starts_with("gpt-5")
     }
 
     async fn send_chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
@@ -429,6 +453,14 @@ impl LlmProvider for OpenAIProvider {
 
     fn default_model(&self) -> &str {
         "gpt-4o"
+    }
+
+    fn native_thinking_support(&self, model: &str) -> NativeThinkingSupport {
+        if Self::supports_native_thinking_model(model) {
+            NativeThinkingSupport::Supported
+        } else {
+            NativeThinkingSupport::Unsupported
+        }
     }
 
     async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
@@ -771,6 +803,7 @@ mod tests {
             }]),
             tool_choice: Some(OpenAIToolChoice::Simple("auto".to_string())),
             parallel_tool_calls: Some(true),
+            reasoning_effort: None,
             stream: None,
             stream_options: None,
         };
@@ -779,6 +812,22 @@ mod tests {
         assert!(json.contains("\"model\":\"gpt-4o\""));
         assert!(json.contains("\"tools\""));
         assert!(json.contains("\"tool_choice\":\"auto\""));
+    }
+
+    #[test]
+    fn test_build_request_maps_native_thinking_effort() {
+        let request = ChatRequest::builder()
+            .model("gpt-4o")
+            .messages(vec![ChatMessage::user("hello")])
+            .native_thinking(NativeThinkingConfig {
+                effort: NativeThinkingEffort::High,
+                budget_tokens: Some(2048),
+            })
+            .build();
+
+        let built = OpenAIProvider::build_request(request, false);
+
+        assert_eq!(built.reasoning_effort.as_deref(), Some("high"));
     }
 
     #[test]
@@ -804,6 +853,24 @@ mod tests {
         let provider = OpenAIProvider::new(config);
         assert_eq!(provider.name(), "openai");
         assert_eq!(provider.default_model(), "gpt-4o");
+    }
+
+    #[test]
+    fn test_native_thinking_support_is_model_gated() {
+        let provider = OpenAIProvider::new(OpenAIConfig::new("test-key"));
+
+        assert_eq!(
+            provider.native_thinking_support("o3-mini"),
+            NativeThinkingSupport::Supported
+        );
+        assert_eq!(
+            provider.native_thinking_support("gpt-5"),
+            NativeThinkingSupport::Supported
+        );
+        assert_eq!(
+            provider.native_thinking_support("gpt-4o"),
+            NativeThinkingSupport::Unsupported
+        );
     }
 
     #[test]

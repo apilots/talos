@@ -4,7 +4,9 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use talos_error::TalosResult;
-use talos_llm_provider::ChatMessage;
+use talos_llm_provider::{
+    ChatMessage, NativeThinkingConfig, NativeThinkingSupport, ToolDefinition,
+};
 use talos_types::talos::TalosOutputItem;
 use uuid::Uuid;
 
@@ -51,8 +53,26 @@ pub struct StateDelta {
 pub struct PlanningResponseEffect {
     pub normalized_text: Option<String>,
     #[serde(default)]
+    pub segments: Vec<PlanningResponseSegment>,
+    pub output_text_override: Option<String>,
+    #[serde(default)]
+    pub clear_output_text: bool,
+    #[serde(default)]
     pub state_delta: Vec<StateDelta>,
     pub branch_override: Option<ExecutionBranch>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanningResponseSegment {
+    pub kind: PlanningResponseSegmentKind,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanningResponseSegmentKind {
+    Thought,
+    FinalAnswer,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -63,6 +83,32 @@ pub struct EventActions {
     pub end_turn: bool,
     pub transfer_to: Option<String>,
     pub branch_override: Option<ExecutionBranch>,
+    pub rewind_before_invocation_id: Option<String>,
+    pub compaction: Option<EventCompaction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EventCompaction {
+    pub start_event_id: String,
+    pub end_event_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AuthRequestPayload {
+    pub provider: String,
+    pub prompt: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConfirmationRequestPayload {
+    pub tool_name: String,
+    pub call_id: String,
+    pub prompt: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CompactionSummaryPayload {
+    pub summary: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,9 +124,19 @@ pub enum EventPayload {
     },
     ToolResult {
         call_id: String,
+        tool_name: String,
         content: Value,
         #[serde(default)]
         is_error: bool,
+    },
+    AuthRequest {
+        payload: AuthRequestPayload,
+    },
+    ConfirmationRequest {
+        payload: ConfirmationRequestPayload,
+    },
+    CompactionSummary {
+        payload: CompactionSummaryPayload,
     },
     Empty,
 }
@@ -180,6 +236,7 @@ impl ExecutionEvent {
         ctx: &InvocationContext,
         branch: ExecutionBranch,
         call_id: impl Into<String>,
+        tool_name: impl Into<String>,
         content: Value,
         is_error: bool,
     ) -> Self {
@@ -190,6 +247,7 @@ impl ExecutionEvent {
             ExecutionEventKind::ToolResult,
             EventPayload::ToolResult {
                 call_id: call_id.into(),
+                tool_name: tool_name.into(),
                 content,
                 is_error,
             },
@@ -210,15 +268,65 @@ impl ExecutionEvent {
 #[derive(Debug, Clone, Default)]
 pub struct LlmRequestEnvelope {
     pub messages: Vec<ChatMessage>,
+    pub prompt_prefix_messages: Vec<ChatMessage>,
+    pub transient_messages: Vec<ChatMessage>,
     pub planning_instruction: Option<String>,
+    pub tool_definitions: Vec<ToolDefinition>,
+    pub parallel_tool_calls: bool,
+    pub contents_mode: ContentsMode,
     pub branch: ExecutionBranch,
+    pub native_thinking: Option<NativeThinkingConfig>,
+    pub native_thinking_support: NativeThinkingSupport,
+    pub cache_context: Option<RequestCacheContext>,
+    pub interaction_context: Option<RequestInteractionContext>,
+    pub output_contract: RequestOutputContract,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ContentsMode {
+    CurrentInvocation,
+    #[default]
+    FullSession,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestCacheContext {
+    pub checkpoint_invocation_id: String,
+    pub visible_message_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestInteractionContext {
+    pub previous_invocation_id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RequestOutputContract {
+    #[default]
+    None,
+    ToolMediated,
+}
+
+#[derive(Debug, Clone)]
 pub struct LlmResponseEnvelope {
     pub output_text: String,
     pub output_items: Vec<TalosOutputItem>,
     pub branch: ExecutionBranch,
+    pub actions: EventActions,
+    pub allow_final_projection: bool,
+}
+
+impl Default for LlmResponseEnvelope {
+    fn default() -> Self {
+        Self {
+            output_text: String::new(),
+            output_items: Vec::new(),
+            branch: ExecutionBranch::default(),
+            actions: EventActions::default(),
+            allow_final_projection: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -239,6 +347,15 @@ pub enum ExecutionBranch {
 #[async_trait]
 pub trait EventSink: Send {
     async fn push(&mut self, event: ExecutionEvent) -> TalosResult<()>;
+}
+
+#[async_trait]
+pub trait ExecutionEventHandler: Send {
+    async fn handle(
+        &mut self,
+        ctx: &mut InvocationContext,
+        event: ExecutionEvent,
+    ) -> TalosResult<Option<ExecutionEvent>>;
 }
 
 #[derive(Debug, Default)]
@@ -335,6 +452,8 @@ mod tests {
             state_bags: ContextStateBags::default(),
             limits: InvocationLimits::default(),
             events: Vec::new(),
+            plugin_manager: crate::default_plugin_manager(),
+            session_service: None,
             stream_tx: None,
         }
     }

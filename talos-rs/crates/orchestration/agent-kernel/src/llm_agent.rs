@@ -1,6 +1,6 @@
 use crate::{
-    Agent, AgentRunResult, FlowFactory, InvocationContext, Planner, StopReason, TaskResult,
-    TaskSpec, TaskStatus,
+    Agent, AgentRunResult, ExecutionBranch, ExecutionEventHandler, FlowFactory, FlowProfile,
+    InvocationContext, MemoryBackedSessionService, Planner, StopReason, TaskResult, TaskStatus,
 };
 use async_trait::async_trait;
 use serde_json::json;
@@ -12,6 +12,7 @@ use talos_llm_provider::LlmProvider;
 use talos_memory::MemoryStore;
 use talos_tools::ToolRegistry;
 use talos_types::talos::{TalosOutputItem, TalosUsage};
+use uuid::Uuid;
 
 pub struct LlmKernelAgent {
     id: String,
@@ -48,11 +49,37 @@ impl LlmKernelAgent {
         }
     }
 
-    async fn execute_planned_task(
+    fn branch_for_profile(profile: FlowProfile) -> ExecutionBranch {
+        match profile {
+            FlowProfile::BuiltInDirect => ExecutionBranch::DirectAnswer,
+            FlowProfile::BuiltInModelThinking => ExecutionBranch::ModelThinking,
+            FlowProfile::PlanReactLoop => ExecutionBranch::ReactiveLoop,
+        }
+    }
+
+    async fn persist_staged_session_events(
+        ctx: &mut InvocationContext,
+        persisted_event_count: usize,
+    ) -> TalosResult<()> {
+        if ctx.session.events.len() <= persisted_event_count {
+            return Ok(());
+        }
+
+        let staged_events = ctx.session.events.split_off(persisted_event_count);
+        let session_service = ctx.session_service()?;
+        for event in staged_events {
+            let _ = session_service.append_event(&mut ctx.session, event).await?;
+        }
+        Ok(())
+    }
+
+    async fn execute_general_task(
         &self,
         ctx: &mut InvocationContext,
-        task: &TaskSpec,
+        mut event_handler: Option<&mut dyn ExecutionEventHandler>,
     ) -> TalosResult<TaskResult> {
+        let task_id = Uuid::new_v4().to_string();
+        let goal = ctx.input.clone();
         let tool_traces = Vec::new();
         let mut state_delta = HashMap::new();
         let mut error = None;
@@ -70,15 +97,38 @@ impl LlmKernelAgent {
             self.kernel_config.clone(),
             self.planner.clone(),
         );
+        if ctx.session_service.is_none() {
+            ctx.session_service = Some(Arc::new(MemoryBackedSessionService::new(
+                self.memory_store.clone(),
+            )));
+        }
+        let session_service = ctx.session_service()?;
+        let plugin_manager = ctx.plugin_manager.clone();
+        plugin_manager.before_flow(ctx, flow.settings()).await?;
+        let persisted_event_count = session_service
+            .load_session(
+                &ctx.session_id,
+                None,
+                Some(Self::branch_for_profile(flow.profile())),
+            )
+            .await?
+            .events
+            .len();
 
-        let output = match flow.run(ctx, &task.goal).await {
-            Ok(flow_result) => {
-                output_items = flow_result.output_items;
-                usage = flow_result.usage;
-                warnings = flow_result.warnings;
-                flow_result.output_text
+        let output = match flow.run_events(ctx, &goal).await {
+            Ok(flow_execution) => {
+                if let Some(handler) = event_handler.as_deref_mut() {
+                    for event in flow_execution.events.clone() {
+                        let _ = handler.handle(ctx, event).await?;
+                    }
+                }
+                output_items = flow_execution.summary.output_items;
+                usage = flow_execution.summary.usage;
+                warnings = flow_execution.summary.warnings;
+                flow_execution.summary.output_text
             }
             Err(e) => {
+                Self::persist_staged_session_events(ctx, persisted_event_count).await?;
                 status = TaskStatus::Failed;
                 error = Some(e.to_string());
                 output_items.push(TalosOutputItem::Reasoning {
@@ -98,13 +148,16 @@ impl LlmKernelAgent {
             });
         }
 
-        state_delta.insert("last_task_kind".to_string(), json!(task.kind));
-        state_delta.insert("last_task_id".to_string(), json!(task.id));
+        state_delta.insert(
+            "last_task_kind".to_string(),
+            json!(crate::TaskKind::General),
+        );
+        state_delta.insert("last_task_id".to_string(), json!(task_id));
 
         Ok(TaskResult {
-            task_id: task.id.clone(),
-            kind: task.kind.clone(),
-            goal: task.goal.clone(),
+            task_id,
+            kind: crate::TaskKind::General,
+            goal,
             status,
             output,
             output_items,
@@ -135,42 +188,25 @@ impl Agent for LlmKernelAgent {
         &self.id
     }
 
-    async fn run(&self, ctx: &mut InvocationContext) -> TalosResult<AgentRunResult> {
-        let plan = self.planner.plan(ctx).await?;
-        let mut task_results = Vec::new();
+    async fn run(
+        &self,
+        ctx: &mut InvocationContext,
+        event_handler: Option<&mut dyn ExecutionEventHandler>,
+    ) -> TalosResult<AgentRunResult> {
+        let result = self.execute_general_task(ctx, event_handler).await?;
         let mut merged_state_delta = HashMap::new();
-        let mut usage = TalosUsage::default();
-
-        for task in plan
-            .tasks
-            .iter()
-            .take(self.kernel_config.max_task_per_turn.max(1))
-        {
-            let result = self.execute_planned_task(ctx, task).await?;
-            for (k, v) in &result.state_delta {
-                merged_state_delta.insert(k.clone(), v.clone());
-            }
-            usage.input_tokens = usage.input_tokens.saturating_add(result.usage.input_tokens);
-            usage.output_tokens = usage
-                .output_tokens
-                .saturating_add(result.usage.output_tokens);
-            usage.total_tokens = usage.total_tokens.saturating_add(result.usage.total_tokens);
-            task_results.push(result);
-            merged_state_delta.insert("last_task_kind".to_string(), json!(task.kind));
+        for (k, v) in &result.state_delta {
+            merged_state_delta.insert(k.clone(), v.clone());
         }
-
-        let output_text = task_results
-            .last()
-            .map(|result| result.output.clone())
-            .unwrap_or_else(|| "No task produced output".to_string());
-        let output_items = task_results
-            .iter()
-            .flat_map(|result| result.output_items.clone())
-            .collect::<Vec<_>>();
-        let warnings = task_results
-            .iter()
-            .flat_map(|result| result.warnings.clone())
-            .collect::<Vec<_>>();
+        merged_state_delta.insert(
+            "last_task_kind".to_string(),
+            json!(crate::TaskKind::General),
+        );
+        let usage = result.usage.clone();
+        let warnings = result.warnings.clone();
+        let output_text = result.output.clone();
+        let output_items = result.output_items.clone();
+        let task_results = vec![result];
 
         Ok(AgentRunResult {
             output_text,
@@ -189,9 +225,14 @@ impl Agent for LlmKernelAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ContextStateBags, InvocationLimits, TaskPlan, TurnPhase};
+    use crate::{
+        ContextStateBags, EventAuthor, ExecutionBranch, InvocationLimits, SessionEvent,
+        SessionEventFilter, SessionEventKind, SessionEventPayload, SessionService, TurnPhase,
+    };
     use async_trait::async_trait;
     use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use talos_error::TalosResult;
     use talos_llm_provider::{
         ChatChunk, ChatRequest, ChatResponse, ChatStream, LlmProvider, ToolStream, ToolStreamEvent,
@@ -284,44 +325,102 @@ mod tests {
 
     struct PhaseAssertingPlanner;
 
-    #[async_trait]
     impl Planner for PhaseAssertingPlanner {
-        fn build_planning_instruction(&self, _ctx: &InvocationContext) -> Option<String> {
-            Some("build a short plan first".to_string())
-        }
-
-        async fn plan(&self, ctx: &InvocationContext) -> TalosResult<TaskPlan> {
+        fn build_planning_instruction(
+            &self,
+            ctx: &InvocationContext,
+            _request: &crate::LlmRequestEnvelope,
+        ) -> Option<String> {
             assert_eq!(ctx.phase, TurnPhase::Execution);
-            assert!(ctx.planning_instruction.is_none());
-            Ok(TaskPlan::default())
+            Some("build a short plan first".to_string())
         }
     }
 
     struct EmptyPlanner;
+    struct RecordingSessionService {
+        recorded: Arc<Mutex<Vec<SessionEvent>>>,
+    }
+    struct ToolCallingFailureProvider {
+        call_count: AtomicUsize,
+    }
 
-    #[async_trait]
-    impl Planner for EmptyPlanner {
-        async fn plan(&self, _ctx: &InvocationContext) -> TalosResult<TaskPlan> {
-            Ok(TaskPlan::default())
+    impl Planner for EmptyPlanner {}
+
+    impl RecordingSessionService {
+        fn new() -> Self {
+            Self {
+                recorded: Arc::new(Mutex::new(Vec::new())),
+            }
         }
     }
 
-    struct SingleTaskPlanner;
+    #[async_trait]
+    impl SessionService for RecordingSessionService {
+        async fn append_event(
+            &self,
+            session: &mut crate::InvocationSession,
+            event: SessionEvent,
+        ) -> TalosResult<SessionEvent> {
+            session.events.push(event.clone());
+            self.recorded.lock().unwrap().push(event.clone());
+            Ok(event)
+        }
+
+        async fn load_session(
+            &self,
+            session_id: &str,
+            _invocation_id: Option<&str>,
+            _branch: Option<ExecutionBranch>,
+        ) -> TalosResult<crate::InvocationSession> {
+            Ok(crate::InvocationSession {
+                session_id: session_id.to_string(),
+                ..crate::InvocationSession::default()
+            })
+        }
+
+        async fn list_events(
+            &self,
+            _session_id: &str,
+            _filter: &SessionEventFilter,
+        ) -> TalosResult<Vec<SessionEvent>> {
+            Ok(self.recorded.lock().unwrap().clone())
+        }
+    }
 
     #[async_trait]
-    impl Planner for SingleTaskPlanner {
-        async fn plan(&self, _ctx: &InvocationContext) -> TalosResult<TaskPlan> {
-            Ok(TaskPlan {
-                tasks: vec![TaskSpec {
-                    id: "task-1".to_string(),
-                    kind: crate::TaskKind::General,
-                    goal: "reply once".to_string(),
-                    input: json!({}),
-                    constraints: crate::TaskConstraints::default(),
-                    tool_candidates: Vec::new(),
-                    expected_output: None,
-                }],
-            })
+    impl LlmProvider for ToolCallingFailureProvider {
+        fn name(&self) -> &str {
+            "tool-calling-failure"
+        }
+
+        async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
+            let call_index = self.call_count.fetch_add(1, Ordering::SeqCst);
+            if call_index == 0 {
+                Ok(ChatResponse {
+                    content: String::new(),
+                    model: "tool-calling-failure".to_string(),
+                    usage: Usage::default(),
+                    finish_reason: Some("tool_calls".to_string()),
+                    tool_calls: Some(vec![talos_llm_provider::FunctionCall::new(
+                        "call-1",
+                        "missing_tool",
+                        serde_json::json!({"path":"/tmp/a"}),
+                    )]),
+                })
+            } else {
+                Err(talos_error::TalosError::InternalError(
+                    "provider failed on follow-up round".to_string(),
+                ))
+            }
+        }
+
+        async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
+            let (_tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(1);
+            Ok(ChatStream::new(rx))
+        }
+
+        fn default_model(&self) -> &str {
+            "tool-calling-failure"
         }
     }
 
@@ -358,6 +457,25 @@ mod tests {
         )
     }
 
+    fn build_agent_with_provider_and_registry(
+        planner: Arc<dyn Planner>,
+        provider: Arc<dyn LlmProvider>,
+        tool_registry: Arc<ToolRegistry>,
+    ) -> LlmKernelAgent {
+        LlmKernelAgent::new(
+            "agent-1",
+            "Test Agent",
+            "Test kernel agent",
+            provider,
+            Arc::new(MemoryStore::new(
+                std::env::temp_dir().join("talos-llm-agent-tests"),
+            )),
+            AgentKernelConfig::default(),
+            tool_registry,
+            planner,
+        )
+    }
+
     fn build_ctx() -> InvocationContext {
         InvocationContext {
             session_id: "s1".to_string(),
@@ -378,6 +496,8 @@ mod tests {
             state_bags: ContextStateBags::default(),
             limits: InvocationLimits::default(),
             events: Vec::new(),
+            plugin_manager: crate::default_plugin_manager(),
+            session_service: None,
             stream_tx: None,
         }
     }
@@ -387,11 +507,14 @@ mod tests {
         let agent = build_agent(Arc::new(PhaseAssertingPlanner));
         let mut ctx = build_ctx();
 
-        let result = agent.run(&mut ctx).await.expect("run should succeed");
+        let result = agent.run(&mut ctx, None).await.expect("run should succeed");
 
         assert_eq!(ctx.phase, TurnPhase::Execution);
-        assert!(ctx.planning_instruction.is_none());
-        assert_eq!(result.output_text, "No task produced output");
+        assert_eq!(
+            ctx.planning_instruction.as_deref(),
+            Some("build a short plan first")
+        );
+        assert_eq!(result.task_results.len(), 1);
     }
 
     #[test]
@@ -412,7 +535,7 @@ mod tests {
         let mut ctx = build_ctx();
         ctx.transfer_to = Some("agent-b".to_string());
 
-        let result = agent.run(&mut ctx).await.expect("run should succeed");
+        let result = agent.run(&mut ctx, None).await.expect("run should succeed");
 
         assert_eq!(result.requested_transfer.as_deref(), Some("agent-b"));
     }
@@ -420,10 +543,10 @@ mod tests {
     #[tokio::test]
     async fn test_run_accumulates_usage_from_general_turn() {
         let agent =
-            build_agent_with_provider(Arc::new(SingleTaskPlanner), Arc::new(UsageStreamProvider));
+            build_agent_with_provider(Arc::new(EmptyPlanner), Arc::new(UsageStreamProvider));
         let mut ctx = build_ctx();
 
-        let result = agent.run(&mut ctx).await.expect("run should succeed");
+        let result = agent.run(&mut ctx, None).await.expect("run should succeed");
 
         assert!(result.usage.total_tokens > 0);
         assert_eq!(
@@ -440,10 +563,10 @@ mod tests {
     #[tokio::test]
     async fn test_run_collects_prompt_warnings() {
         let agent =
-            build_agent_with_provider(Arc::new(SingleTaskPlanner), Arc::new(UsageStreamProvider));
+            build_agent_with_provider(Arc::new(EmptyPlanner), Arc::new(UsageStreamProvider));
         let mut ctx = build_ctx();
 
-        let result = agent.run(&mut ctx).await.expect("run should succeed");
+        let result = agent.run(&mut ctx, None).await.expect("run should succeed");
 
         assert_eq!(result.task_results.len(), 1);
         assert_eq!(result.task_results[0].warnings, result.warnings);
@@ -451,5 +574,41 @@ mod tests {
             .state_bags
             .request_state
             .contains_key("last_prompt_diagnostics"));
+    }
+
+    #[tokio::test]
+    async fn test_run_persists_staged_session_events_on_flow_error() {
+        let agent = build_agent_with_provider_and_registry(
+            Arc::new(EmptyPlanner),
+            Arc::new(ToolCallingFailureProvider {
+                call_count: AtomicUsize::new(0),
+            }),
+            Arc::new(ToolRegistry::new()),
+        );
+        let session_service = Arc::new(RecordingSessionService::new());
+        let mut ctx = build_ctx();
+        ctx.session_service = Some(session_service.clone());
+
+        let result = agent.run(&mut ctx, None).await.expect("run should return task result");
+
+        assert_eq!(result.task_results.len(), 1);
+        assert_eq!(result.task_results[0].status, TaskStatus::Failed);
+        let recorded = session_service.recorded.lock().unwrap().clone();
+        assert_eq!(recorded.len(), 3);
+        assert!(recorded.iter().any(|event| {
+            event.kind == SessionEventKind::UserMessage
+                && matches!(
+                    &event.payload,
+                    SessionEventPayload::Message { message } if message.content == "hello"
+                )
+        }));
+        assert!(recorded.iter().any(|event| {
+            event.kind == SessionEventKind::ToolCall
+                && event.author == EventAuthor::Agent
+        }));
+        assert!(recorded.iter().any(|event| {
+            event.kind == SessionEventKind::ToolResult
+                && event.author == EventAuthor::Tool
+        }));
     }
 }

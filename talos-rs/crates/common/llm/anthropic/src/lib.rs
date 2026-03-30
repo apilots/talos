@@ -9,8 +9,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
-    ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, Role,
-    ToolChoice, ToolDefinition, ToolStream, ToolStreamEvent, Usage,
+    ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider,
+    NativeThinkingConfig, NativeThinkingSupport, Role, ToolChoice, ToolDefinition, ToolStream,
+    ToolStreamEvent, Usage,
 };
 use tokio::sync::mpsc;
 use tracing::{debug, error, info};
@@ -83,7 +84,15 @@ struct AnthropicRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_choice: Option<AnthropicToolChoice>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<AnthropicThinkingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     stream: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AnthropicThinkingConfig {
+    r#type: String,
+    budget_tokens: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -281,8 +290,27 @@ impl AnthropicProvider {
             stop_sequences: request.stop,
             tools: Self::convert_tools(request.tools),
             tool_choice: Self::convert_tool_choice(request.tool_choice),
+            thinking: request
+                .native_thinking
+                .as_ref()
+                .map(Self::convert_native_thinking),
             stream: Some(stream),
         }
+    }
+
+    fn convert_native_thinking(config: &NativeThinkingConfig) -> AnthropicThinkingConfig {
+        AnthropicThinkingConfig {
+            r#type: "enabled".to_string(),
+            budget_tokens: config.budget_tokens.unwrap_or(2048),
+        }
+    }
+
+    fn supports_native_thinking_model(model: &str) -> bool {
+        let normalized = model.trim().to_ascii_lowercase();
+        normalized.starts_with("claude-3-7-sonnet")
+            || normalized.starts_with("claude-sonnet-4")
+            || normalized.starts_with("claude-opus-4")
+            || normalized.starts_with("claude-4")
     }
 
     async fn send_chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
@@ -375,6 +403,14 @@ impl LlmProvider for AnthropicProvider {
 
     fn default_model(&self) -> &str {
         "claude-3-5-sonnet-20241022"
+    }
+
+    fn native_thinking_support(&self, model: &str) -> NativeThinkingSupport {
+        if Self::supports_native_thinking_model(model) {
+            NativeThinkingSupport::Supported
+        } else {
+            NativeThinkingSupport::Unsupported
+        }
     }
 
     async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
@@ -645,6 +681,7 @@ impl LlmProvider for AnthropicProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use talos_llm_provider::NativeThinkingEffort;
 
     #[test]
     fn test_anthropic_config_builder() {
@@ -699,6 +736,20 @@ mod tests {
     }
 
     #[test]
+    fn test_native_thinking_support_is_model_gated() {
+        let provider = AnthropicProvider::new(AnthropicConfig::new("test-key"));
+
+        assert_eq!(
+            provider.native_thinking_support("claude-3-5-sonnet-20241022"),
+            NativeThinkingSupport::Unsupported
+        );
+        assert_eq!(
+            provider.native_thinking_support("claude-3-7-sonnet-20250219"),
+            NativeThinkingSupport::Supported
+        );
+    }
+
+    #[test]
     fn test_build_headers() {
         let config = AnthropicConfig::new("test-api-key");
         let provider = AnthropicProvider::new(config);
@@ -719,5 +770,24 @@ mod tests {
         let converted = AnthropicProvider::convert_tools(Some(tools)).unwrap();
         assert_eq!(converted.len(), 1);
         assert_eq!(converted[0].name, "search");
+    }
+
+    #[test]
+    fn test_build_request_maps_native_thinking_budget() {
+        let request = ChatRequest::builder()
+            .model("claude-3-5-sonnet-20241022")
+            .messages(vec![ChatMessage::user("hello")])
+            .native_thinking(NativeThinkingConfig {
+                effort: NativeThinkingEffort::Medium,
+                budget_tokens: Some(4096),
+            })
+            .build();
+
+        let built = AnthropicProvider::build_request(request, false);
+
+        assert_eq!(
+            built.thinking.as_ref().map(|thinking| thinking.budget_tokens),
+            Some(4096)
+        );
     }
 }

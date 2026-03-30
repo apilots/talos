@@ -1,15 +1,22 @@
 use crate::{
-    AgentRunResult, ExecutionPath, InvocationContext, PlannerKind, PlanningResponseEffect,
-    RunRequest, RunResponse, TaskPlan, TaskResult, TaskSpec, ThinkingMode,
+    AgentRunResult, CallbackControl, ExecutionEvent, ExecutionEventHandler, ExecutionPath,
+    InvocationContext, KernelExecutionSettings, LlmRequestEnvelope, LlmResponseEnvelope,
+    PlannerKind, PlanningResponseEffect, RunRequest, RunResponse, TaskResult, ThinkingMode,
+    ToolCallbackPayload,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
 use talos_error::TalosResult;
+use talos_llm_provider::NativeThinkingConfig;
 
 #[async_trait]
 pub trait Agent: Send + Sync {
     fn id(&self) -> &str;
-    async fn run(&self, ctx: &mut InvocationContext) -> TalosResult<AgentRunResult>;
+    async fn run(
+        &self,
+        ctx: &mut InvocationContext,
+        event_handler: Option<&mut dyn ExecutionEventHandler>,
+    ) -> TalosResult<AgentRunResult>;
 }
 
 pub trait BaseKernelAgent: Agent {}
@@ -30,17 +37,32 @@ pub trait Planner: Send + Sync {
         ExecutionPath::ReactiveLoop
     }
 
-    fn build_planning_instruction(&self, _ctx: &InvocationContext) -> Option<String> {
+    fn native_thinking_config(
+        &self,
+        _ctx: &InvocationContext,
+        _request: &LlmRequestEnvelope,
+    ) -> Option<NativeThinkingConfig> {
+        None
+    }
+
+    fn build_planning_instruction(
+        &self,
+        _ctx: &InvocationContext,
+        _request: &LlmRequestEnvelope,
+    ) -> Option<String> {
         None
     }
 
     fn process_planning_response_effect(
         &self,
         ctx: &InvocationContext,
-        response_text: &str,
+        response: &LlmResponseEnvelope,
     ) -> PlanningResponseEffect {
         PlanningResponseEffect {
-            normalized_text: self.process_planning_response(ctx, response_text),
+            normalized_text: self.process_planning_response(ctx, response),
+            segments: Vec::new(),
+            output_text_override: None,
+            clear_output_text: false,
             state_delta: Vec::new(),
             branch_override: None,
         }
@@ -49,38 +71,53 @@ pub trait Planner: Send + Sync {
     fn process_planning_response(
         &self,
         _ctx: &InvocationContext,
-        _response_text: &str,
+        _response: &LlmResponseEnvelope,
     ) -> Option<String> {
         None
     }
-
-    async fn plan(&self, ctx: &InvocationContext) -> TalosResult<TaskPlan>;
-}
-
-#[async_trait]
-pub trait TaskHandler: Send + Sync {
-    fn supports(&self, task: &TaskSpec) -> bool;
-    async fn handle(&self, ctx: &mut InvocationContext, task: &TaskSpec)
-        -> TalosResult<TaskResult>;
 }
 
 #[async_trait]
 pub trait Plugin: Send + Sync {
     fn name(&self) -> &str;
 
-    async fn before_plan(&self, _ctx: &mut InvocationContext) -> TalosResult<()> {
+    async fn before_agent_run(&self, _ctx: &mut InvocationContext) -> TalosResult<()> {
         Ok(())
     }
 
-    async fn after_plan(&self, _ctx: &mut InvocationContext, _plan: &TaskPlan) -> TalosResult<()> {
+    async fn before_run(&self, _ctx: &mut InvocationContext) -> TalosResult<()> {
         Ok(())
     }
 
-    async fn before_task(&self, _ctx: &mut InvocationContext, _task: &TaskSpec) -> TalosResult<()> {
+    async fn after_agent_run(
+        &self,
+        _ctx: &mut InvocationContext,
+        _result: &mut AgentRunResult,
+    ) -> TalosResult<()> {
         Ok(())
     }
 
-    async fn after_task(
+    async fn on_event(
+        &self,
+        _ctx: &mut InvocationContext,
+        _event: &mut ExecutionEvent,
+    ) -> TalosResult<bool> {
+        Ok(true)
+    }
+
+    async fn after_run(&self, _ctx: &mut InvocationContext) -> TalosResult<()> {
+        Ok(())
+    }
+
+    async fn before_flow(
+        &self,
+        _ctx: &mut InvocationContext,
+        _settings: &KernelExecutionSettings,
+    ) -> TalosResult<()> {
+        Ok(())
+    }
+
+    async fn after_flow(
         &self,
         _ctx: &mut InvocationContext,
         _result: &TaskResult,
@@ -88,12 +125,36 @@ pub trait Plugin: Send + Sync {
         Ok(())
     }
 
-    async fn after_finalize(
+    async fn before_model(
         &self,
         _ctx: &mut InvocationContext,
-        _result: &mut AgentRunResult,
-    ) -> TalosResult<()> {
-        Ok(())
+        _request: &mut LlmRequestEnvelope,
+    ) -> TalosResult<CallbackControl> {
+        Ok(CallbackControl::Continue)
+    }
+
+    async fn after_model(
+        &self,
+        _ctx: &mut InvocationContext,
+        _response: &mut LlmResponseEnvelope,
+    ) -> TalosResult<CallbackControl> {
+        Ok(CallbackControl::Continue)
+    }
+
+    async fn before_tool(
+        &self,
+        _ctx: &mut InvocationContext,
+        _payload: &ToolCallbackPayload,
+    ) -> TalosResult<CallbackControl> {
+        Ok(CallbackControl::Continue)
+    }
+
+    async fn after_tool(
+        &self,
+        _ctx: &mut InvocationContext,
+        _payload: &ToolCallbackPayload,
+    ) -> TalosResult<CallbackControl> {
+        Ok(CallbackControl::Continue)
     }
 }
 

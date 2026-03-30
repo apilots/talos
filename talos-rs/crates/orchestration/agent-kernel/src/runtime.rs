@@ -110,6 +110,7 @@ mod tests {
         async fn run(
             &self,
             _ctx: &mut crate::InvocationContext,
+            _event_handler: Option<&mut dyn crate::ExecutionEventHandler>,
         ) -> TalosResult<crate::AgentRunResult> {
             Ok(crate::AgentRunResult {
                 output_text: "ok".to_string(),

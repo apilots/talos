@@ -140,6 +140,9 @@ pub trait LlmProvider: Send + Sync {
     async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse>;
     async fn stream(&self, request: ChatRequest) -> TalosResult<ChatStream>;
     fn default_model(&self) -> &str;
+    fn native_thinking_support(&self, _model: &str) -> NativeThinkingSupport {
+        NativeThinkingSupport::Unsupported
+    }
 
     /// Native tool-calling request. Default implementation falls back to plain chat.
     async fn chat_with_tools(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
@@ -200,6 +203,7 @@ pub struct ChatRequest {
     pub tools: Option<Vec<ToolDefinition>>,
     pub tool_choice: Option<ToolChoice>,
     pub parallel_tool_calls: Option<bool>,
+    pub native_thinking: Option<NativeThinkingConfig>,
 }
 
 impl ChatRequest {
@@ -219,7 +223,37 @@ impl ChatRequest {
             tools: None,
             tool_choice: None,
             parallel_tool_calls: None,
+            native_thinking: None,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeThinkingEffort {
+    Low,
+    Medium,
+    High,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NativeThinkingConfig {
+    pub effort: NativeThinkingEffort,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_tokens: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeThinkingSupport {
+    #[default]
+    Unsupported,
+    Supported,
+}
+
+impl NativeThinkingSupport {
+    pub fn is_supported(self) -> bool {
+        matches!(self, Self::Supported)
     }
 }
 
@@ -502,6 +536,7 @@ pub struct ChatRequestBuilder {
     tools: Option<Vec<ToolDefinition>>,
     tool_choice: Option<ToolChoice>,
     parallel_tool_calls: Option<bool>,
+    native_thinking: Option<NativeThinkingConfig>,
 }
 
 impl ChatRequestBuilder {
@@ -561,6 +596,11 @@ impl ChatRequestBuilder {
         self
     }
 
+    pub fn native_thinking(mut self, config: NativeThinkingConfig) -> Self {
+        self.native_thinking = Some(config);
+        self
+    }
+
     pub fn build(self) -> ChatRequest {
         ChatRequest {
             messages: self.messages.unwrap_or_default(),
@@ -573,6 +613,7 @@ impl ChatRequestBuilder {
             tools: self.tools,
             tool_choice: self.tool_choice,
             parallel_tool_calls: self.parallel_tool_calls,
+            native_thinking: self.native_thinking,
         }
     }
 }

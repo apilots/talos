@@ -1,4 +1,6 @@
-use crate::{ExecutionBranch, InvocationSession, KernelWarning};
+use crate::{
+    ExecutionBranch, InvocationPluginManager, InvocationSession, KernelWarning, SessionService,
+};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -42,6 +44,15 @@ pub enum FlowKind {
     #[default]
     Single,
     Auto,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FlowProfile {
+    BuiltInDirect,
+    BuiltInModelThinking,
+    #[default]
+    PlanReactLoop,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -100,28 +111,6 @@ impl KernelExecutionKind {
 #[serde(rename_all = "snake_case")]
 pub enum TaskKind {
     General,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct TaskConstraints {
-    pub timeout_ms: Option<u64>,
-    pub max_tool_calls: Option<u32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskSpec {
-    pub id: String,
-    pub kind: TaskKind,
-    pub goal: String,
-    pub input: Value,
-    pub constraints: TaskConstraints,
-    pub tool_candidates: Vec<String>,
-    pub expected_output: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct TaskPlan {
-    pub tasks: Vec<TaskSpec>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -339,7 +328,7 @@ pub enum StopReason {
     AfterModelCallbackStopped,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct InvocationContext {
     pub session_id: String,
     pub invocation_id: String,
@@ -361,6 +350,10 @@ pub struct InvocationContext {
     #[serde(default)]
     pub limits: InvocationLimits,
     pub events: Vec<KernelEvent>,
+    #[serde(skip, default = "crate::default_plugin_manager")]
+    pub plugin_manager: std::sync::Arc<InvocationPluginManager>,
+    #[serde(skip, default)]
+    pub session_service: Option<std::sync::Arc<dyn SessionService>>,
     #[serde(skip)]
     pub stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
 }
@@ -413,6 +406,14 @@ impl InvocationContext {
             current_branch.then_some(branch),
         )
     }
+
+    pub fn session_service(&self) -> TalosResult<std::sync::Arc<dyn SessionService>> {
+        self.session_service.clone().ok_or_else(|| {
+            TalosError::ValidationError(
+                "session_service is not configured in InvocationContext".to_string(),
+            )
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -459,6 +460,7 @@ pub struct InvocationLimits {
     pub max_task_per_turn: u32,
     pub tool_parallelism: usize,
     pub max_llm_calls: u32,
+    pub context_compaction_max_bytes: usize,
 }
 
 impl Default for InvocationLimits {
@@ -469,6 +471,7 @@ impl Default for InvocationLimits {
             max_task_per_turn: config.max_task_per_turn as u32,
             tool_parallelism: config.tool_parallelism,
             max_llm_calls: config.max_llm_calls,
+            context_compaction_max_bytes: config.context_compaction_max_bytes,
         }
     }
 }
@@ -538,6 +541,7 @@ impl From<&talos_config::AgentKernelConfig> for InvocationLimits {
             max_task_per_turn: config.max_task_per_turn as u32,
             tool_parallelism: config.tool_parallelism,
             max_llm_calls: config.max_llm_calls,
+            context_compaction_max_bytes: config.context_compaction_max_bytes,
         }
     }
 }
@@ -603,6 +607,8 @@ mod tests {
             state_bags: ContextStateBags::default(),
             limits: InvocationLimits::default(),
             events: Vec::new(),
+            plugin_manager: crate::default_plugin_manager(),
+            session_service: None,
             stream_tx: None,
         };
 

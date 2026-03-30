@@ -922,7 +922,11 @@ impl KernelAgent for MockAgent {
         "mock"
     }
 
-    async fn run(&self, _ctx: &mut InvocationContext) -> TalosResult<AgentRunResult> {
+    async fn run(
+        &self,
+        _ctx: &mut InvocationContext,
+        _event_handler: Option<&mut dyn talos_agent_kernel::ExecutionEventHandler>,
+    ) -> TalosResult<AgentRunResult> {
         Ok(AgentRunResult {
             output_text: "Mock response".to_string(),
             output_items: vec![TalosOutputItem::OutputText {
@@ -1094,6 +1098,8 @@ mod tests {
             state_bags: Default::default(),
             limits: Default::default(),
             events: Vec::new(),
+            plugin_manager: talos_agent_kernel::default_plugin_manager(),
+            session_service: None,
             stream_tx: None,
         }
     }
@@ -1311,7 +1317,9 @@ mod tests {
             .build_planner_for_request()
             .expect("planner should build");
         let ctx = mock_invocation_ctx();
-        assert!(planner.build_planning_instruction(&ctx).is_some());
+        assert!(planner
+            .build_planning_instruction(&ctx, &talos_agent_kernel::LlmRequestEnvelope::default())
+            .is_some());
     }
 
     #[test]
