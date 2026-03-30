@@ -880,6 +880,16 @@ impl ResponseProcessor for EventProjectionProcessor {
                         true,
                     ));
                 }
+                TalosOutputItem::ExecutionSummary { text } => {
+                    events.push(ExecutionEvent::text(
+                        ctx,
+                        EventAuthor::Agent,
+                        response.branch,
+                        ExecutionEventKind::Reasoning,
+                        text.clone(),
+                        true,
+                    ));
+                }
                 TalosOutputItem::ToolResult {
                     call_id,
                     content,

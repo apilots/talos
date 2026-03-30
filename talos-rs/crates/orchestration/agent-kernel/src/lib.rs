@@ -69,11 +69,12 @@ pub use types::{
     FlowProfile, InvocationContext, InvocationExecutionState, InvocationLimits,
     IterationEventData, KernelEvent, KernelEventData, KernelEventLabel, KernelEventType,
     KernelExecutionKind, KernelExecutionSettings, KernelOutputDeltaSource,
-    KernelReasoningSource, KernelStreamEvent, KernelStreamEventData, KernelStreamEventType,
-    OutputDeltaStreamData, PlannerKind, PromptWarningEventData, ReasoningDeltaStreamData,
+    KernelStreamEvent, KernelStreamEventData, KernelStreamEventType, KernelThinkingSource,
+    KernelThinkingStage, OutputDeltaStreamData, PlannerKind, PromptWarningEventData,
     RunRequest, RunResponse, StopReason, TaskCompletedEventData, TaskKind, TaskResult,
-    TaskStatus, ThinkingMode, ToolCallStartStreamData, ToolExecutionMode,
-    ToolResultStreamData, TransferRequestedEventData, TurnPhase, UserInputEventData,
+    TaskStatus, ThinkingMode, ThinkingDeltaStreamData, ToolCallStartStreamData,
+    ToolExecutionMode, ToolResultStreamData, TransferRequestedEventData, TurnPhase,
+    UserInputEventData, ExecutionSummaryStreamData,
 };
 pub use warnings::{
     KernelWarning, PromptBootstrapDropReason, PromptBootstrapFileDroppedWarning,

@@ -4,13 +4,16 @@
 
 use async_trait::async_trait;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+        KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
     backend::{Backend, CrosstermBackend},
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
@@ -28,18 +31,18 @@ use std::{
 };
 use talos_agent::Agent;
 use talos_client::{
-    ModelInfo, SessionCreateParams, TalosClient, TalosContext, TalosEvent, TalosInputItem,
-    TalosMessageRequest, TalosSession,
+    ModelInfo, SessionCreateParams, TalosClient, TalosContext, TalosEvent, TalosEventPayload,
+    TalosInputItem, TalosMessageRequest, TalosSession,
 };
 use talos_error::{TalosError, TalosResult};
 use talos_types::talos::{TalosEventType, TalosUsage};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
-use tracing::{error, warn};
+use tracing::error;
 use unicode_width::UnicodeWidthChar;
 
 const APP_VERSION: &str = "v0.1.0";
-const DEFAULT_MODEL: &str = "gpt-5.3 high";
+const DEFAULT_MODEL: &str = "qwen-plus";
 const MAX_RIGHT_EVENTS: usize = 120;
 const MAX_QUEUE_LEN: usize = 3;
 const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(20);
@@ -96,6 +99,30 @@ impl ChatBlock {
     fn new(role: ChatRole, content: String) -> Self {
         Self { role, content }
     }
+}
+
+#[derive(Debug, Clone)]
+struct CopyProjection {
+    text: String,
+    display_start_col: usize,
+}
+
+#[derive(Debug, Clone)]
+struct RenderedChatLine {
+    display: Line<'static>,
+    copy_projection: Option<CopyProjection>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SelectionPoint {
+    line_index: usize,
+    column: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ChatSelection {
+    anchor: SelectionPoint,
+    focus: SelectionPoint,
 }
 
 #[derive(Debug, Clone)]
@@ -193,6 +220,10 @@ pub struct TuiApp {
     chat_history: Vec<String>,
     right_panel_events: Vec<String>,
     tool_events: Vec<String>,
+    rendered_chat_lines: Vec<RenderedChatLine>,
+    chat_content_rect: Option<Rect>,
+    chat_viewport_height: usize,
+    chat_selection: Option<ChatSelection>,
     message_queue: VecDeque<QueuedMessage>,
     chat_scroll: u16,
     chat_manual_scroll: bool,
@@ -252,6 +283,10 @@ impl TuiApp {
             chat_history: vec![],
             right_panel_events: vec![],
             tool_events: vec![],
+            rendered_chat_lines: vec![],
+            chat_content_rect: None,
+            chat_viewport_height: 0,
+            chat_selection: None,
             message_queue: VecDeque::new(),
             chat_scroll: 0,
             chat_manual_scroll: false,
@@ -383,6 +418,10 @@ impl TuiApp {
         }
 
         match key_event.code {
+            KeyCode::Esc => {
+                self.chat_selection = None;
+                Ok(false)
+            }
             KeyCode::Enter => {
                 let should_quit = self.submit_input().await?;
                 Ok(should_quit)
@@ -494,7 +533,6 @@ impl TuiApp {
             Some(Ok(receiver)) => {
                 self.pending_stream = Some(receiver);
                 self.last_stream_event_at = Some(Instant::now());
-                self.append_thinking_line("- stream opened");
                 self.push_right_event("stream channel connected".to_string());
             }
             Some(Err(err)) => {
@@ -1111,10 +1149,7 @@ impl TuiApp {
                     self.active_user_idx = Some(user_idx);
                 }
 
-                let thinking_idx = self.push_block(
-                    ChatRole::Thinking,
-                    "- waiting for model response...".to_string(),
-                );
+                let thinking_idx = self.push_block(ChatRole::Thinking, String::new());
                 let assistant_idx = self.push_block(ChatRole::Assistant, String::new());
                 self.active_thinking_idx = Some(thinking_idx);
                 self.active_assistant_idx = Some(assistant_idx);
@@ -1196,112 +1231,79 @@ impl TuiApp {
             ));
         }
 
-        match event.event_type {
-            TalosEventType::MessageStarted => {
-                self.append_thinking_line("- message started");
-            }
-            TalosEventType::MessageReasoningDelta => {
-                if let Some(delta) = event.data.get("delta").and_then(|v| v.as_str()) {
-                    if !delta.trim().is_empty() {
-                        let source = event
-                            .data
-                            .get("reasoning_source")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("provider");
-                        let step_id = event
-                            .data
-                            .get("step_id")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("-");
-                        let iteration = event
-                            .data
-                            .get("iteration")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0);
-                        let label = match source {
-                            "kernel" => "summary",
-                            "provider" => "thinking",
-                            _ => source,
-                        };
-                        self.append_thinking_line(&format!(
-                            "- {} [{} #{}]: {}",
-                            label, step_id, iteration, delta
-                        ));
-                    }
+        match (&event.event_type, &event.payload) {
+            (TalosEventType::MessageStarted, TalosEventPayload::MessageStarted(_)) => {}
+            (
+                TalosEventType::MessageReasoningDelta,
+                TalosEventPayload::MessageReasoningDelta(payload),
+            ) => {
+                if !payload.delta.is_empty() {
+                    self.append_thinking(&payload.delta);
                 }
             }
-            TalosEventType::MessageOutputDelta => {
-                if let Some(delta) = event.data.get("delta").and_then(|v| v.as_str()) {
-                    self.append_assistant(delta);
-                    if !self.received_output_delta {
-                        self.append_thinking_line("- generating response content");
-                        self.received_output_delta = true;
-                    }
+            (
+                TalosEventType::MessageExecutionSummary,
+                TalosEventPayload::MessageExecutionSummary(payload),
+            ) => {
+                if !payload.text.trim().is_empty() {
+                    self.push_block(
+                        ChatRole::System,
+                        format!(
+                            "Execution summary [{} #{}]: {}",
+                            payload.step_id, payload.iteration, payload.text
+                        ),
+                    );
                 }
             }
-            TalosEventType::MessageToolCallStarted => {
-                let name = event
-                    .data
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                let step_id = event
-                    .data
-                    .get("step_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("-");
-                self.append_thinking_line(&format!("- tool started [{}]: {}", step_id, name));
-                self.push_right_event(format!("tool started [{}]: {}", step_id, name));
+            (
+                TalosEventType::MessageOutputDelta,
+                TalosEventPayload::MessageOutputDelta(payload),
+            ) => {
+                self.append_assistant(&payload.delta);
+                self.received_output_delta = true;
+            }
+            (
+                TalosEventType::MessageToolCallStarted,
+                TalosEventPayload::MessageToolCallStarted(payload),
+            ) => {
+                self.push_right_event(format!(
+                    "tool started [{}]: {}",
+                    payload.step_id, payload.name
+                ));
                 self.tool_events
-                    .push(format!("started [{}]: {}", step_id, name));
+                    .push(format!("started [{}]: {}", payload.step_id, payload.name));
             }
-            TalosEventType::MessageToolCallCompleted => {
-                let call_id = event
-                    .data
-                    .get("call_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                let tool = event
-                    .data
-                    .get("tool")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                self.append_thinking_line(&format!("- tool completed: {} ({})", call_id, tool));
-                self.push_right_event(format!("tool completed: {} ({})", call_id, tool));
+            (
+                TalosEventType::MessageToolCallCompleted,
+                TalosEventPayload::MessageToolCallCompleted(payload),
+            ) => {
+                self.push_right_event(format!(
+                    "tool completed: {} ({})",
+                    payload.call_id, payload.tool
+                ));
                 self.tool_events
-                    .push(format!("completed: {} ({})", call_id, tool));
+                    .push(format!("completed: {} ({})", payload.call_id, payload.tool));
             }
-            TalosEventType::MessageCompleted => {
-                if !self.received_output_delta {
-                    if let Some(text) = extract_text_from_completed_event(&event.data) {
-                        if !text.trim().is_empty() {
-                            self.append_assistant(&text);
-                            self.received_output_delta = true;
-                        }
-                    }
-                }
-                if let Some(usage) = extract_usage_from_completed_event(&event.data) {
-                    self.session_usage.input_tokens = self
-                        .session_usage
-                        .input_tokens
-                        .saturating_add(usage.input_tokens);
-                    self.session_usage.output_tokens = self
-                        .session_usage
-                        .output_tokens
-                        .saturating_add(usage.output_tokens);
-                    self.session_usage.total_tokens = self
-                        .session_usage
-                        .total_tokens
-                        .saturating_add(usage.total_tokens);
-                }
-                self.append_thinking_line("- stream completed");
+            (TalosEventType::MessageCompleted, TalosEventPayload::MessageCompleted(payload)) => {
+                self.session_usage.input_tokens = self
+                    .session_usage
+                    .input_tokens
+                    .saturating_add(payload.usage.input_tokens);
+                self.session_usage.output_tokens = self
+                    .session_usage
+                    .output_tokens
+                    .saturating_add(payload.usage.output_tokens);
+                self.session_usage.total_tokens = self
+                    .session_usage
+                    .total_tokens
+                    .saturating_add(payload.usage.total_tokens);
                 self.finish_active_stream("stream completed", false, false);
             }
-            TalosEventType::MessageError => {
-                self.append_thinking_line("- stream error");
-                self.push_block(ChatRole::System, format!("Stream error: {}", event.data));
+            (TalosEventType::MessageError, TalosEventPayload::MessageError(payload)) => {
+                self.push_block(ChatRole::System, format!("Stream error: {}", payload.error));
                 self.finish_active_stream("stream error", true, false);
             }
+            _ => {}
         }
     }
 
@@ -1436,7 +1438,7 @@ impl TuiApp {
         self.closing_session_id = Some(session_id.clone());
         self.connection_status = "closing".to_string();
         self.show_status_hint(
-            "Closing session and flushing memory...",
+            "Closing session. Memory flush continues in background.",
             Duration::from_secs(2),
         );
         self.push_right_event(format!("session close started: {}", session_id));
@@ -1624,6 +1626,166 @@ impl TuiApp {
         };
     }
 
+    fn copy_selection_to_clipboard(&mut self) {
+        let Some(text) = self.selected_chat_text() else {
+            self.show_status_hint("Nothing to copy.", Duration::from_secs(2));
+            self.chat_selection = None;
+            return;
+        };
+
+        match copy_to_system_clipboard(&text) {
+            Ok(()) => {
+                self.show_status_hint("Copied selection to clipboard.", Duration::from_secs(2))
+            }
+            Err(err) => {
+                self.show_status_hint(
+                    format!("Clipboard copy failed: {}", err),
+                    Duration::from_secs(3),
+                );
+            }
+        }
+        self.chat_selection = None;
+    }
+
+    fn selected_chat_text(&self) -> Option<String> {
+        let (start, end) = self.normalized_selection_points()?;
+        let mut copied_lines = Vec::new();
+
+        for line_index in start.line_index..=end.line_index {
+            let Some(line) = self.rendered_chat_lines.get(line_index) else {
+                continue;
+            };
+            let Some(projection) = &line.copy_projection else {
+                continue;
+            };
+            let line_width = line_display_width(&line.display);
+            let Some((selection_start, selection_end)) =
+                self.selection_display_range_for_line(line_index, line_width)
+            else {
+                continue;
+            };
+            let projection_end =
+                projection.display_start_col + text_display_width(&projection.text);
+            let copy_start = selection_start.max(projection.display_start_col);
+            let copy_end = selection_end.min(projection_end);
+            if copy_start >= copy_end {
+                copied_lines.push(String::new());
+                continue;
+            }
+            copied_lines.push(slice_text_by_display_columns(
+                &projection.text,
+                copy_start.saturating_sub(projection.display_start_col),
+                copy_end.saturating_sub(projection.display_start_col),
+            ));
+        }
+
+        if copied_lines.iter().all(|line| line.is_empty()) {
+            None
+        } else {
+            Some(copied_lines.join("\n"))
+        }
+    }
+
+    fn normalized_selection_points(&self) -> Option<(SelectionPoint, SelectionPoint)> {
+        let selection = self.chat_selection?;
+        if (selection.anchor.line_index, selection.anchor.column)
+            <= (selection.focus.line_index, selection.focus.column)
+        {
+            Some((selection.anchor, selection.focus))
+        } else {
+            Some((selection.focus, selection.anchor))
+        }
+    }
+
+    fn selection_display_range_for_line(
+        &self,
+        line_index: usize,
+        line_width: usize,
+    ) -> Option<(usize, usize)> {
+        let (start, end) = self.normalized_selection_points()?;
+        if line_index < start.line_index || line_index > end.line_index {
+            return None;
+        }
+
+        let width = line_width.max(1);
+        let range = if start.line_index == end.line_index {
+            (
+                start.column.min(end.column),
+                start.column.max(end.column).saturating_add(1),
+            )
+        } else if line_index == start.line_index {
+            (start.column, width)
+        } else if line_index == end.line_index {
+            (0, end.column.saturating_add(1))
+        } else {
+            (0, width)
+        };
+
+        Some((range.0.min(width), range.1.min(width)))
+    }
+
+    fn handle_mouse(&mut self, mouse_event: MouseEvent) {
+        match mouse_event.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let Some(point) = self.selection_point_from_mouse(mouse_event) {
+                    self.chat_selection = Some(ChatSelection {
+                        anchor: point,
+                        focus: point,
+                    });
+                } else {
+                    self.chat_selection = None;
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let (Some(point), Some(selection)) = (
+                    self.selection_point_from_mouse(mouse_event),
+                    self.chat_selection.as_mut(),
+                ) {
+                    selection.focus = point;
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                if let (Some(point), Some(selection)) = (
+                    self.selection_point_from_mouse(mouse_event),
+                    self.chat_selection.as_mut(),
+                ) {
+                    selection.focus = point;
+                }
+                if self.chat_selection.is_some() {
+                    self.copy_selection_to_clipboard();
+                }
+            }
+            MouseEventKind::ScrollUp => self.scroll_chat_up(3),
+            MouseEventKind::ScrollDown => self.scroll_chat_down(3),
+            _ => {}
+        }
+    }
+
+    fn selection_point_from_mouse(&self, mouse_event: MouseEvent) -> Option<SelectionPoint> {
+        let rect = self.chat_content_rect?;
+        if rect.width == 0 || rect.height == 0 {
+            return None;
+        }
+        if mouse_event.column < rect.x
+            || mouse_event.column >= rect.x.saturating_add(rect.width)
+            || mouse_event.row < rect.y
+            || mouse_event.row >= rect.y.saturating_add(rect.height)
+        {
+            return None;
+        }
+
+        let row_offset = mouse_event.row.saturating_sub(rect.y) as usize;
+        let line_index = self.chat_scroll as usize + row_offset;
+        if line_index >= self.rendered_chat_lines.len() {
+            return None;
+        }
+
+        Some(SelectionPoint {
+            line_index,
+            column: mouse_event.column.saturating_sub(rect.x) as usize,
+        })
+    }
+
     fn push_block(&mut self, role: ChatRole, content: String) -> usize {
         self.chat_blocks.push(ChatBlock::new(role, content));
         let idx = self.chat_blocks.len() - 1;
@@ -1678,7 +1840,7 @@ impl TuiApp {
         self.request_follow_bottom();
     }
 
-    fn append_thinking_line(&mut self, line: &str) {
+    fn append_thinking(&mut self, text: &str) {
         let idx = if let Some(idx) = self.active_thinking_idx {
             idx
         } else {
@@ -1688,12 +1850,7 @@ impl TuiApp {
         };
 
         if let Some(block) = self.chat_blocks.get_mut(idx) {
-            if block.content.is_empty() {
-                block.content.push_str(line);
-            } else {
-                block.content.push('\n');
-                block.content.push_str(line);
-            }
+            block.content.push_str(text);
         }
         self.sync_history_entry(idx);
         self.request_follow_bottom();
@@ -1782,19 +1939,10 @@ impl TuiApp {
         let chat_content_rect = chat_columns[0];
         let chat_scrollbar_rect = chat_columns[1];
 
-        let mut lines: Vec<Line> = vec![];
-        let content_width = chat_content_rect.width.saturating_sub(2).max(1) as usize;
-        for block in &self.chat_blocks {
-            lines.extend(self.chat_card_lines(block, content_width));
-            lines.push(Line::from(""));
-        }
-
-        if lines.is_empty() {
-            lines.push(Line::from("No messages yet."));
-        }
-
-        let viewport_height = chat_content_rect.height as usize;
-        let total_lines = lines.len();
+        self.rebuild_chat_render_state(chat_content_rect);
+        let visible_lines = self.visible_chat_lines();
+        let viewport_height = self.chat_viewport_height;
+        let total_lines = self.rendered_chat_lines.len();
         let max_scroll = total_lines.saturating_sub(viewport_height);
         if !self.chat_manual_scroll {
             self.chat_scroll = max_scroll as u16;
@@ -1806,7 +1954,7 @@ impl TuiApp {
             }
         }
 
-        let conversation = Paragraph::new(lines)
+        let conversation = Paragraph::new(visible_lines)
             .scroll((self.chat_scroll, 0))
             .style(Style::default().fg(Color::White));
         f.render_widget(conversation, chat_content_rect);
@@ -1994,6 +2142,64 @@ impl TuiApp {
         f.render_widget(right, right_inner);
     }
 
+    fn rebuild_chat_render_state(&mut self, chat_content_rect: Rect) {
+        self.chat_content_rect = Some(chat_content_rect);
+        self.chat_viewport_height = chat_content_rect.height as usize;
+        self.rendered_chat_lines.clear();
+
+        let content_width = chat_content_rect.width.saturating_sub(2).max(1) as usize;
+        for block in &self.chat_blocks {
+            self.rendered_chat_lines
+                .extend(self.chat_card_lines(block, content_width));
+            self.rendered_chat_lines.push(RenderedChatLine {
+                display: Line::from(""),
+                copy_projection: Some(CopyProjection {
+                    text: String::new(),
+                    display_start_col: 0,
+                }),
+            });
+        }
+
+        if self.rendered_chat_lines.is_empty() {
+            self.rendered_chat_lines.push(RenderedChatLine {
+                display: Line::from("No messages yet."),
+                copy_projection: Some(CopyProjection {
+                    text: "No messages yet.".to_string(),
+                    display_start_col: 0,
+                }),
+            });
+        }
+    }
+
+    fn visible_chat_lines(&self) -> Vec<Line<'static>> {
+        self.rendered_chat_lines
+            .iter()
+            .enumerate()
+            .map(|(line_index, line)| self.decorate_selection(line_index, line))
+            .collect()
+    }
+
+    fn decorate_selection(&self, line_index: usize, line: &RenderedChatLine) -> Line<'static> {
+        let mut display = line.display.clone();
+        let Some(projection) = &line.copy_projection else {
+            return display;
+        };
+        let line_width = line_display_width(&display);
+        let Some((selection_start, selection_end)) =
+            self.selection_display_range_for_line(line_index, line_width)
+        else {
+            return display;
+        };
+        let projection_end = projection.display_start_col + text_display_width(&projection.text);
+        let highlight_start = selection_start.max(projection.display_start_col);
+        let highlight_end = selection_end.min(projection_end);
+        if highlight_start >= highlight_end {
+            return display;
+        }
+        highlight_line_columns(&mut display, highlight_start, highlight_end);
+        display
+    }
+
     fn input_line(&self) -> Line<'static> {
         let chars: Vec<char> = self.input_buffer.chars().collect();
         let mut spans = vec![Span::styled(
@@ -2153,12 +2359,18 @@ impl TuiApp {
         }
     }
 
-    fn chat_card_lines(&self, block: &ChatBlock, content_width: usize) -> Vec<Line<'static>> {
+    fn chat_card_lines(&self, block: &ChatBlock, content_width: usize) -> Vec<RenderedChatLine> {
         let (label, label_style, body_style, border_style) = self.chat_role_styles(&block.role);
-        let mut lines = vec![Line::from(vec![
-            Span::styled("┌ ", border_style),
-            Span::styled(format!("{} ", label), label_style),
-        ])];
+        let mut lines = vec![RenderedChatLine {
+            display: Line::from(vec![
+                Span::styled("┌ ", border_style),
+                Span::styled(format!("{} ", label), label_style),
+            ]),
+            copy_projection: Some(CopyProjection {
+                text: label.to_string(),
+                display_start_col: 2,
+            }),
+        }];
 
         let mut content_lines = self.block_content_lines(block);
         if content_lines.is_empty() {
@@ -2171,7 +2383,10 @@ impl TuiApp {
             }
         }
 
-        lines.push(Line::from(Span::styled("└", border_style)));
+        lines.push(RenderedChatLine {
+            display: Line::from(Span::styled("└", border_style)),
+            copy_projection: None,
+        });
         lines
     }
 
@@ -2180,20 +2395,33 @@ impl TuiApp {
         line: Line<'static>,
         body_style: Style,
         border_style: Style,
-    ) -> Line<'static> {
+    ) -> RenderedChatLine {
         let mut spans: Vec<Span<'static>> = vec![Span::styled("│ ", border_style)];
         if line.spans.is_empty() {
             spans.push(Span::styled(" ", body_style));
-            return Line::from(spans);
+            return RenderedChatLine {
+                display: Line::from(spans),
+                copy_projection: Some(CopyProjection {
+                    text: String::new(),
+                    display_start_col: 2,
+                }),
+            };
         }
 
+        let copy_text = line_plain_text(&line);
         for span in line.spans {
             spans.push(Span::styled(
                 span.content.to_string(),
                 span.style.patch(body_style),
             ));
         }
-        Line::from(spans)
+        RenderedChatLine {
+            display: Line::from(spans),
+            copy_projection: Some(CopyProjection {
+                text: copy_text,
+                display_start_col: 2,
+            }),
+        }
     }
 
     fn chat_role_styles(&self, role: &ChatRole) -> (&'static str, Style, Style, Style) {
@@ -2273,56 +2501,12 @@ fn canonical_event_label(event_type: &TalosEventType) -> &'static str {
     match event_type {
         TalosEventType::MessageStarted => "message.started",
         TalosEventType::MessageReasoningDelta => "message.reasoning.delta",
+        TalosEventType::MessageExecutionSummary => "message.execution.summary",
         TalosEventType::MessageOutputDelta => "message.output.delta",
         TalosEventType::MessageToolCallStarted => "message.tool_call.started",
         TalosEventType::MessageToolCallCompleted => "message.tool_call.completed",
         TalosEventType::MessageCompleted => "message.completed",
         TalosEventType::MessageError => "message.error",
-    }
-}
-
-fn extract_text_from_completed_event(data: &serde_json::Value) -> Option<String> {
-    for key in ["output_text", "text", "final_text", "delta"] {
-        if let Some(text) = data.get(key).and_then(|v| v.as_str()) {
-            if !text.is_empty() {
-                return Some(text.to_string());
-            }
-        }
-    }
-
-    let mut chunks = Vec::new();
-    if let Some(items) = data.get("output").and_then(|v| v.as_array()) {
-        for item in items {
-            let item_type = item
-                .get("type")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            if item_type != "output_text" {
-                continue;
-            }
-            if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
-                if !text.is_empty() {
-                    chunks.push(text);
-                }
-            }
-        }
-    }
-
-    if chunks.is_empty() {
-        None
-    } else {
-        Some(chunks.join(""))
-    }
-}
-
-fn extract_usage_from_completed_event(data: &serde_json::Value) -> Option<TalosUsage> {
-    let usage = data.get("usage")?;
-    match serde_json::from_value::<TalosUsage>(usage.clone()) {
-        Ok(parsed) => Some(parsed),
-        Err(err) => {
-            warn!(error = %err, usage = %usage, "failed to parse usage payload from completed event");
-            None
-        }
     }
 }
 
@@ -2368,6 +2552,81 @@ fn wrap_line_visual(line: Line<'static>, max_width: usize) -> Vec<Line<'static>>
         wrapped_lines.push(Line::from(current_spans));
     }
     wrapped_lines
+}
+
+fn text_display_width(text: &str) -> usize {
+    text.chars().map(char_display_width).sum()
+}
+
+fn line_plain_text(line: &Line<'_>) -> String {
+    line.spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect::<String>()
+}
+
+fn line_display_width(line: &Line<'_>) -> usize {
+    line.spans
+        .iter()
+        .flat_map(|span| span.content.chars())
+        .map(char_display_width)
+        .sum()
+}
+
+fn slice_text_by_display_columns(text: &str, start_col: usize, end_col: usize) -> String {
+    if start_col >= end_col {
+        return String::new();
+    }
+
+    let mut current_col = 0usize;
+    let mut selected = String::new();
+    for ch in text.chars() {
+        let ch_width = char_display_width(ch);
+        let next_col = current_col + ch_width;
+        if next_col > start_col && current_col < end_col {
+            selected.push(ch);
+        }
+        current_col = next_col;
+        if current_col >= end_col {
+            break;
+        }
+    }
+    selected
+}
+
+fn highlight_line_columns(line: &mut Line<'static>, start_col: usize, end_col: usize) {
+    let highlight_style = Style::default()
+        .bg(Color::Rgb(108, 117, 160))
+        .fg(Color::White);
+    let mut current_col = 0usize;
+    let mut spans = Vec::new();
+
+    for span in &line.spans {
+        for ch in span.content.chars() {
+            let ch_width = char_display_width(ch);
+            let next_col = current_col + ch_width;
+            let selected = next_col > start_col && current_col < end_col;
+            let style = if selected {
+                span.style.patch(highlight_style)
+            } else {
+                span.style
+            };
+            push_styled_char(&mut spans, ch, style);
+            current_col = next_col;
+        }
+    }
+
+    line.spans = spans;
+}
+
+fn push_styled_char(spans: &mut Vec<Span<'static>>, ch: char, style: Style) {
+    if let Some(last) = spans.last_mut() {
+        if last.style == style {
+            last.content.to_mut().push(ch);
+            return;
+        }
+    }
+    spans.push(Span::styled(ch.to_string(), style));
 }
 
 fn char_display_width(ch: char) -> usize {
@@ -2549,7 +2808,7 @@ fn byte_index_at_char(text: &str, char_index: usize) -> usize {
 pub async fn run_tui_app(agent: Arc<dyn Agent>) -> Result<(), Box<dyn Error>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     terminal.hide_cursor()?;
@@ -2558,7 +2817,11 @@ pub async fn run_tui_app(agent: Arc<dyn Agent>) -> Result<(), Box<dyn Error>> {
     let run_result = run_event_loop(&mut terminal, &mut app).await;
 
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        DisableMouseCapture,
+        LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
 
     run_result
@@ -2568,7 +2831,7 @@ pub async fn run_tui_app(agent: Arc<dyn Agent>) -> Result<(), Box<dyn Error>> {
 pub async fn run_tui_app_with_client(client: Arc<TalosClient>) -> Result<(), Box<dyn Error>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     terminal.hide_cursor()?;
@@ -2578,7 +2841,11 @@ pub async fn run_tui_app_with_client(client: Arc<TalosClient>) -> Result<(), Box
     let run_result = run_event_loop(&mut terminal, &mut app).await;
 
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        DisableMouseCapture,
+        LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
 
     run_result
@@ -2596,12 +2863,16 @@ async fn run_event_loop<B: Backend>(
         terminal.draw(|frame| app.render_ui(frame))?;
 
         if event::poll(Duration::from_millis(50))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    if app.handle_input(key).await? {
-                        return Ok(());
+            match event::read()? {
+                Event::Key(key) => {
+                    if key.kind == KeyEventKind::Press {
+                        if app.handle_input(key).await? {
+                            return Ok(());
+                        }
                     }
                 }
+                Event::Mouse(mouse) => app.handle_mouse(mouse),
+                _ => {}
             }
         }
     }
@@ -2610,9 +2881,13 @@ async fn run_event_loop<B: Backend>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     use std::sync::Mutex;
     use talos_agent::MockAgent;
+    use talos_client::{
+        TalosEventPayload, TalosMessageCompletedEvent, TalosMessageOutputDeltaEvent,
+        TalosMessageReasoningDeltaEvent, TalosMessageStartedEvent, TalosThinkingSource,
+        TalosThinkingStage,
+    };
 
     #[derive(Default)]
     struct MockGatewayState {
@@ -2645,16 +2920,99 @@ mod tests {
         }
     }
 
+    fn started_event(message_id: impl Into<String>, sequence: u64) -> TalosEvent {
+        TalosEvent {
+            event_type: TalosEventType::MessageStarted,
+            message_id: message_id.into(),
+            session_id: "sess-test".to_string(),
+            sequence,
+            payload: TalosEventPayload::MessageStarted(TalosMessageStartedEvent {
+                request_id: "req-test".to_string(),
+                model: "qwen-plus".to_string(),
+                usage: TalosUsage::default(),
+                iteration: 0,
+                step_id: "start".to_string(),
+            }),
+        }
+    }
+
+    fn output_delta_event(
+        message_id: impl Into<String>,
+        session_id: impl Into<String>,
+        sequence: u64,
+        delta: impl Into<String>,
+    ) -> TalosEvent {
+        TalosEvent {
+            event_type: TalosEventType::MessageOutputDelta,
+            message_id: message_id.into(),
+            session_id: session_id.into(),
+            sequence,
+            payload: TalosEventPayload::MessageOutputDelta(TalosMessageOutputDeltaEvent {
+                request_id: "req-test".to_string(),
+                delta: delta.into(),
+                item_index: sequence,
+                iteration: sequence,
+                step_id: format!("step-{}", sequence),
+            }),
+        }
+    }
+
+    fn reasoning_delta_event(
+        message_id: impl Into<String>,
+        session_id: impl Into<String>,
+        sequence: u64,
+        delta: impl Into<String>,
+    ) -> TalosEvent {
+        TalosEvent {
+            event_type: TalosEventType::MessageReasoningDelta,
+            message_id: message_id.into(),
+            session_id: session_id.into(),
+            sequence,
+            payload: TalosEventPayload::MessageReasoningDelta(TalosMessageReasoningDeltaEvent {
+                request_id: "req-test".to_string(),
+                delta: delta.into(),
+                source: TalosThinkingSource::Provider,
+                stage: TalosThinkingStage::ModelReasoning,
+                item_index: sequence,
+                iteration: sequence,
+                step_id: format!("step-{}", sequence),
+            }),
+        }
+    }
+
+    fn completed_event(
+        message_id: impl Into<String>,
+        session_id: impl Into<String>,
+        sequence: u64,
+        usage: TalosUsage,
+    ) -> TalosEvent {
+        TalosEvent {
+            event_type: TalosEventType::MessageCompleted,
+            message_id: message_id.into(),
+            session_id: session_id.into(),
+            sequence,
+            payload: TalosEventPayload::MessageCompleted(TalosMessageCompletedEvent {
+                request_id: "req-test".to_string(),
+                stop_reason: "end_turn".to_string(),
+                usage,
+                total_output_items: sequence.max(1),
+                iteration: sequence,
+                step_id: "completed".to_string(),
+                task_count: 1,
+            }),
+        }
+    }
+
     impl MockGatewayClient {
         fn new() -> Self {
             Self {
                 state: Arc::new(Mutex::new(MockGatewayState {
                     models: vec![
-                        mock_model_info("gpt-5.3 high", 128_000),
+                        mock_model_info("qwen-plus", 128_000),
                         mock_model_info("gpt-5.3 medium", 128_000),
                     ],
                     session_id: "sess-test".to_string(),
-                    current_model: "gpt-5.3 high".to_string(),
+                    current_model: "qwen-plus".to_string(),
                     updated_model: None,
                     stream_counter: 0,
                     connect_delay_ms: 0,
@@ -2841,53 +3199,41 @@ mod tests {
                 format!("msg-{}", state.stream_counter)
             };
 
-            tx.send(TalosEvent {
-                event_type: TalosEventType::MessageStarted,
-                message_id: message_id.clone(),
-                session_id: session_id.to_string(),
-                sequence: 0,
-                data: json!({"model":"gpt-5.3 high"}),
-            })
+            tx.send(started_event(message_id.clone(), 0)).await.unwrap();
+
+            tx.send(output_delta_event(
+                message_id.clone(),
+                session_id.to_string(),
+                1,
+                "# Title\n",
+            ))
             .await
             .unwrap();
 
-            tx.send(TalosEvent {
-                event_type: TalosEventType::MessageOutputDelta,
-                message_id: message_id.clone(),
-                session_id: session_id.to_string(),
-                sequence: 1,
-                data: json!({"delta":"# Title\n"}),
-            })
+            tx.send(output_delta_event(
+                message_id.clone(),
+                session_id.to_string(),
+                2,
+                "- item\n",
+            ))
             .await
             .unwrap();
 
-            tx.send(TalosEvent {
-                event_type: TalosEventType::MessageOutputDelta,
-                message_id: message_id.clone(),
-                session_id: session_id.to_string(),
-                sequence: 2,
-                data: json!({"delta":"- item\n"}),
-            })
+            tx.send(output_delta_event(
+                message_id.clone(),
+                session_id.to_string(),
+                3,
+                format!("reply({})", prompt),
+            ))
             .await
             .unwrap();
 
-            tx.send(TalosEvent {
-                event_type: TalosEventType::MessageOutputDelta,
-                message_id: message_id.clone(),
-                session_id: session_id.to_string(),
-                sequence: 3,
-                data: json!({"delta":format!("reply({})", prompt)}),
-            })
-            .await
-            .unwrap();
-
-            tx.send(TalosEvent {
-                event_type: TalosEventType::MessageCompleted,
+            tx.send(completed_event(
                 message_id,
-                session_id: session_id.to_string(),
-                sequence: 4,
-                data: json!({"stop_reason":"end_turn"}),
-            })
+                session_id.to_string(),
+                4,
+                TalosUsage::default(),
+            ))
             .await
             .unwrap();
 
@@ -2951,7 +3297,7 @@ mod tests {
         let mut app = create_remote_app();
         app.initialize_remote().await;
         assert_eq!(app.session_id.as_deref(), Some("sess-test"));
-        assert!(app.available_models.iter().any(|m| m == "gpt-5.3 high"));
+        assert!(app.available_models.iter().any(|m| m == "qwen-plus"));
         assert_eq!(app.connection_status, "connected");
     }
 
@@ -3005,7 +3351,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_waiting_hint_is_visible_before_first_delta() {
+    async fn test_thinking_block_is_initialized_before_first_delta() {
         let mut app = create_remote_app();
         app.initialize_remote().await;
         assert!(app.send_user_message("hello".to_string()).await.unwrap());
@@ -3018,7 +3364,40 @@ mod tests {
             .find(|b| b.role == ChatRole::Thinking)
             .map(|b| b.content.clone())
             .unwrap_or_default();
-        assert!(thinking.contains("waiting for model response"));
+        assert!(thinking.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_reasoning_delta_renders_plain_text_and_preserves_paragraphs() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+        app.session_id = Some("sess-test".to_string());
+
+        app.handle_stream_event(reasoning_delta_event(
+            "msg-think",
+            "sess-test",
+            1,
+            "First line",
+        ));
+        app.handle_stream_event(reasoning_delta_event("msg-think", "sess-test", 2, "\n\n"));
+        app.handle_stream_event(reasoning_delta_event(
+            "msg-think",
+            "sess-test",
+            3,
+            "Second paragraph",
+        ));
+
+        let thinking = app
+            .chat_blocks
+            .iter()
+            .find(|b| b.role == ChatRole::Thinking)
+            .map(|b| b.content.clone())
+            .unwrap_or_default();
+
+        assert_eq!(thinking, "First line\n\nSecond paragraph");
+        assert!(!thinking.contains("model"));
+        assert!(!thinking.contains("step-"));
+        assert!(!thinking.contains("#1"));
     }
 
     #[tokio::test]
@@ -3177,13 +3556,12 @@ mod tests {
                 .as_deref()
                 .expect("active stream message id should exist")
         );
-        app.handle_stream_event(TalosEvent {
-            event_type: TalosEventType::MessageOutputDelta,
-            message_id: stale_message_id,
-            session_id: "sess-test".to_string(),
-            sequence: 4,
-            data: json!({"delta":"stale"}),
-        });
+        app.handle_stream_event(output_delta_event(
+            stale_message_id,
+            "sess-test",
+            4,
+            "stale",
+        ));
 
         let assistant = app
             .chat_blocks
@@ -3199,7 +3577,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_message_completed_can_fill_assistant_without_output_delta() {
+    async fn test_message_completed_finishes_stream_without_output_delta() {
         let mut app = create_remote_app();
         app.initialize_remote().await;
         app.in_flight = true;
@@ -3207,22 +3585,14 @@ mod tests {
         app.active_assistant_idx = Some(app.push_block(ChatRole::Assistant, String::new()));
         app.session_id = Some("sess-test".to_string());
 
-        app.handle_stream_event(TalosEvent {
-            event_type: TalosEventType::MessageCompleted,
-            message_id: "msg-new".to_string(),
-            session_id: "sess-test".to_string(),
-            sequence: 1,
-            data: json!({"output_text":"final answer from completed"}),
-        });
+        app.handle_stream_event(completed_event(
+            "msg-new",
+            "sess-test",
+            1,
+            TalosUsage::default(),
+        ));
 
-        let assistant = app
-            .chat_blocks
-            .iter()
-            .filter(|b| b.role == ChatRole::Assistant)
-            .map(|b| b.content.clone())
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(assistant.contains("final answer from completed"));
+        assert!(!app.in_flight);
     }
 
     #[tokio::test]
@@ -3233,13 +3603,7 @@ mod tests {
         app.chat_manual_scroll = true;
         app.session_id = Some("sess-test".to_string());
 
-        app.handle_stream_event(TalosEvent {
-            event_type: TalosEventType::MessageOutputDelta,
-            message_id: "msg-follow".to_string(),
-            session_id: "sess-test".to_string(),
-            sequence: 1,
-            data: json!({"delta":"hello"}),
-        });
+        app.handle_stream_event(output_delta_event("msg-follow", "sess-test", 1, "hello"));
 
         assert!(!app.chat_manual_scroll);
     }
@@ -3272,20 +3636,16 @@ mod tests {
         app.active_assistant_idx = Some(app.push_block(ChatRole::Assistant, String::new()));
         app.session_id = Some("sess-test".to_string());
 
-        app.handle_stream_event(TalosEvent {
-            event_type: TalosEventType::MessageCompleted,
-            message_id: "msg-usage".to_string(),
-            session_id: "sess-test".to_string(),
-            sequence: 1,
-            data: json!({
-                "output_text":"done",
-                "usage":{
-                    "input_tokens":964,
-                    "output_tokens":16,
-                    "total_tokens":980
-                }
-            }),
-        });
+        app.handle_stream_event(completed_event(
+            "msg-usage",
+            "sess-test",
+            1,
+            TalosUsage {
+                input_tokens: 964,
+                output_tokens: 16,
+                total_tokens: 980,
+            },
+        ));
 
         assert_eq!(app.session_usage.total_tokens, 980);
         assert_eq!(app.token_left_percent(), Some(97));
@@ -3303,7 +3663,7 @@ mod tests {
             .iter()
             .skip(1)
             .take(lines.len().saturating_sub(2))
-            .map(line_plain_text)
+            .map(|line| line_plain_text(&line.display))
             .collect();
         assert!(!content_lines.is_empty());
         assert!(content_lines.iter().all(|line| line.starts_with("│ ")));
@@ -3322,7 +3682,7 @@ mod tests {
 
         let max_line_width = body_width + 2;
         for line in lines.iter().skip(1).take(lines.len().saturating_sub(2)) {
-            let width = line_display_width(line);
+            let width = line_display_width(&line.display);
             assert!(
                 width <= max_line_width,
                 "line width {} exceeds max {}",
@@ -3330,6 +3690,92 @@ mod tests {
                 max_line_width
             );
         }
+    }
+
+    #[test]
+    fn test_selected_chat_text_excludes_border_glyphs() {
+        let mut app = create_embedded_app();
+        app.chat_blocks = vec![ChatBlock::new(
+            ChatRole::Assistant,
+            "Alpha Beta".to_string(),
+        )];
+        app.rebuild_chat_render_state(Rect::new(0, 0, 20, 8));
+        app.chat_selection = Some(ChatSelection {
+            anchor: SelectionPoint {
+                line_index: 1,
+                column: 0,
+            },
+            focus: SelectionPoint {
+                line_index: 1,
+                column: 11,
+            },
+        });
+
+        assert_eq!(app.selected_chat_text().as_deref(), Some("Alpha Beta"));
+    }
+
+    #[test]
+    fn test_selected_chat_text_across_wrapped_lines_preserves_newlines() {
+        let mut app = create_embedded_app();
+        app.chat_blocks = vec![ChatBlock::new(
+            ChatRole::Assistant,
+            "abcdefghij".to_string(),
+        )];
+        app.rebuild_chat_render_state(Rect::new(0, 0, 8, 8));
+        app.chat_selection = Some(ChatSelection {
+            anchor: SelectionPoint {
+                line_index: 1,
+                column: 0,
+            },
+            focus: SelectionPoint {
+                line_index: 3,
+                column: 4,
+            },
+        });
+
+        assert_eq!(app.selected_chat_text().as_deref(), Some("abcdef\nghij"));
+    }
+
+    #[test]
+    fn test_mouse_drag_selection_stays_inside_chat_rect() {
+        let mut app = create_embedded_app();
+        app.chat_blocks = vec![ChatBlock::new(ChatRole::Assistant, "Alpha".to_string())];
+        app.rebuild_chat_render_state(Rect::new(4, 3, 20, 8));
+
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::empty(),
+        });
+        assert!(app.chat_selection.is_none());
+
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 6,
+            row: 4,
+            modifiers: KeyModifiers::empty(),
+        });
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            column: 10,
+            row: 4,
+            modifiers: KeyModifiers::empty(),
+        });
+
+        assert_eq!(
+            app.chat_selection,
+            Some(ChatSelection {
+                anchor: SelectionPoint {
+                    line_index: 1,
+                    column: 2,
+                },
+                focus: SelectionPoint {
+                    line_index: 1,
+                    column: 6,
+                },
+            })
+        );
     }
 
     #[test]

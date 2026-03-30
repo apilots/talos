@@ -239,7 +239,8 @@ pub struct PromptWarningEventData {
 #[serde(rename_all = "snake_case")]
 pub enum KernelStreamEventType {
     OutputDelta,
-    ReasoningDelta,
+    ThinkingDelta,
+    ExecutionSummary,
     ToolCallStart,
     ToolResult,
     PromptWarning,
@@ -266,7 +267,8 @@ impl KernelStreamEvent {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum KernelStreamEventData {
     OutputDelta(OutputDeltaStreamData),
-    ReasoningDelta(ReasoningDeltaStreamData),
+    ThinkingDelta(ThinkingDeltaStreamData),
+    ExecutionSummary(ExecutionSummaryStreamData),
     ToolCallStart(ToolCallStartStreamData),
     ToolResult(ToolResultStreamData),
     PromptWarning(PromptWarningEventData),
@@ -280,9 +282,16 @@ pub struct OutputDeltaStreamData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReasoningDeltaStreamData {
+pub struct ThinkingDeltaStreamData {
     pub delta: String,
-    pub source: KernelReasoningSource,
+    pub source: KernelThinkingSource,
+    pub stage: KernelThinkingStage,
+    pub round: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionSummaryStreamData {
+    pub text: String,
     pub round: Option<u32>,
 }
 
@@ -313,9 +322,19 @@ pub enum KernelOutputDeltaSource {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum KernelReasoningSource {
+pub enum KernelThinkingSource {
     Provider,
-    Kernel,
+    Framework,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum KernelThinkingStage {
+    ModelReasoning,
+    FrameworkPlan,
+    FrameworkAct,
+    FrameworkObserve,
+    FrameworkReflect,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

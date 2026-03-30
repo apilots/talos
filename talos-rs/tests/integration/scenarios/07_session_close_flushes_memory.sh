@@ -83,12 +83,22 @@ if [[ "${close_success}" != "true" && "${close_success}" != "True" ]]; then
   exit 1
 fi
 
+post_size="${pre_size}"
+for _ in $(seq 1 40); do
+  if [[ -f "${DAY_FILE}" ]]; then
+    post_size="$(wc -c < "${DAY_FILE}" | tr -d ' ')"
+    if [[ "${post_size}" -gt "${pre_size}" ]]; then
+      break
+    fi
+  fi
+  sleep 0.25
+done
+
 if [[ ! -f "${DAY_FILE}" ]]; then
   echo "CASE close_session_for_memory_flush FAIL missing_day_file=${DAY_FILE}"
   exit 1
 fi
 
-post_size="$(wc -c < "${DAY_FILE}" | tr -d ' ')"
 if [[ "${post_size}" -le "${pre_size}" ]]; then
   echo "CASE close_session_for_memory_flush FAIL pre_size=${pre_size} post_size=${post_size}"
   exit 1

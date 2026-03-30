@@ -1,9 +1,11 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use talos_agent_kernel::TurnPhase;
 use talos_error::TalosResult;
-use talos_types::talos::{TalosInputItem, TalosOutputItem, TalosReasoning, TalosUsage};
+use talos_types::talos::{
+    TalosInputItem, TalosOutputItem, TalosReasoning, TalosUsage, TalosThinkingSource,
+    TalosThinkingStage,
+};
 use talos_types::TalosSession;
 use tokio::sync::mpsc;
 
@@ -38,9 +40,95 @@ pub struct AgentRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OrchestratorEvent {
-    pub event_type: String,
-    pub data: Value,
+pub enum OrchestratorEvent {
+    MessageStarted(OrchestratorMessageStartedEvent),
+    MessageReasoningDelta(OrchestratorMessageReasoningDeltaEvent),
+    MessageExecutionSummary(OrchestratorMessageExecutionSummaryEvent),
+    MessageOutputDelta(OrchestratorMessageOutputDeltaEvent),
+    MessageToolCallStarted(OrchestratorMessageToolCallStartedEvent),
+    MessageToolCallCompleted(OrchestratorMessageToolCallCompletedEvent),
+    MessageCompleted(OrchestratorMessageCompletedEvent),
+    MessageError(OrchestratorMessageErrorEvent),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrchestratorMessageStartedEvent {
+    pub request_id: String,
+    pub model: String,
+    pub usage: TalosUsage,
+    pub iteration: u64,
+    pub step_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrchestratorMessageReasoningDeltaEvent {
+    pub request_id: String,
+    pub delta: String,
+    pub source: TalosThinkingSource,
+    pub stage: TalosThinkingStage,
+    pub item_index: u64,
+    pub iteration: u64,
+    pub step_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrchestratorMessageExecutionSummaryEvent {
+    pub request_id: String,
+    pub text: String,
+    pub item_index: u64,
+    pub iteration: u64,
+    pub step_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrchestratorMessageOutputDeltaEvent {
+    pub request_id: String,
+    pub delta: String,
+    pub item_index: u64,
+    pub iteration: u64,
+    pub step_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrchestratorMessageToolCallStartedEvent {
+    pub request_id: String,
+    pub call_id: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
+    pub item_index: u64,
+    pub iteration: u64,
+    pub step_id: String,
+    pub timing_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrchestratorMessageToolCallCompletedEvent {
+    pub request_id: String,
+    pub call_id: String,
+    pub tool: String,
+    pub content: Vec<talos_types::talos::TalosContentItem>,
+    pub is_error: bool,
+    pub item_index: u64,
+    pub iteration: u64,
+    pub step_id: String,
+    pub timing_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrchestratorMessageCompletedEvent {
+    pub request_id: String,
+    pub stop_reason: String,
+    pub usage: TalosUsage,
+    pub total_output_items: u64,
+    pub iteration: u64,
+    pub step_id: String,
+    pub task_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrchestratorMessageErrorEvent {
+    pub request_id: String,
+    pub error: String,
 }
 
 #[async_trait]

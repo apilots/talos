@@ -12,7 +12,9 @@ use talos_error::TalosResult;
 use talos_gateway::{Gateway, GatewayImpl};
 use talos_gateway_http::HttpServer;
 use talos_llm_anthropic::AnthropicProvider;
+use talos_llm_bailian::BailianProvider;
 use talos_llm_openai::OpenAIProvider;
+use talos_logging::LogGuard;
 use talos_router::{Binding, MatchRule, Router, RouterImpl};
 use talos_session_store::{DatabaseSessionStore, SessionStore};
 use talos_storage::{create_storage, StorageConfig};
@@ -30,7 +32,7 @@ async fn main() {
     let config_source = resolve_default_config_path();
     let config = Config::load().expect("failed to load config");
     config.validate_runtime().expect("invalid runtime config");
-    init_logging(&config).expect("failed to initialize logging");
+    let _log_guard = init_logging(&config).expect("failed to initialize logging");
     if let Some(path) = config_source {
         info!("Config loaded from {}", path.display());
     }
@@ -195,9 +197,9 @@ async fn create_llm_provider(
                 let base_url = config.llm.bailian.base_url.clone().ok_or_else(|| {
                     TalosError::InvalidConfiguration("llm.bailian.base_url is required".to_string())
                 })?;
-                let openai_cfg =
-                    talos_llm_openai::OpenAIConfig::new(&api_key).with_base_url(&base_url);
-                return Ok(Arc::new(OpenAIProvider::new(openai_cfg)));
+                let bailian_cfg =
+                    talos_llm_bailian::BailianConfig::new(&api_key).with_base_url(&base_url);
+                return Ok(Arc::new(BailianProvider::new(bailian_cfg)));
             }
         }
         "ollama" => {
@@ -281,7 +283,6 @@ fn resolve_model_catalog(config: &Config, default_model: &str) -> Vec<ModelInfo>
     models
 }
 
-fn init_logging(config: &Config) -> TalosResult<()> {
-    talos_logging::init_with_config(config.logging.clone())?;
-    Ok(())
+fn init_logging(config: &Config) -> TalosResult<LogGuard> {
+    talos_logging::init_with_config(config.logging.clone())
 }

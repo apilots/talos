@@ -4,6 +4,7 @@ members = [
     # Common
     "crates/common/llm/provider",
     "crates/common/llm/anthropic",
+    "crates/common/llm/bailian",
     "crates/common/llm/openai",
     "crates/common/llm/ollama",
     "crates/common/prompt",
@@ -120,6 +121,7 @@ talos-agent-kernel = { path = "crates/orchestration/agent-kernel" }
 talos-llm-provider = { path = "crates/common/llm/provider" }
 talos-prompt = { path = "crates/common/prompt" }
 talos-llm-anthropic = { path = "crates/common/llm/anthropic" }
+talos-llm-bailian = { path = "crates/common/llm/bailian" }
 talos-llm-openai = { path = "crates/common/llm/openai" }
 talos-llm-ollama = { path = "crates/common/llm/ollama" }
 talos-config = { path = "crates/infra/config" }

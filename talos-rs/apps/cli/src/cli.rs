@@ -8,8 +8,9 @@ use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use talos_client::{
-    ClientConfig, SessionCreateParams, TalosClient, TalosContext, TalosEventType, TalosInputItem,
-    TalosMessageRequest, TalosMessageResponse, TalosOutputItem,
+    ClientConfig, SessionCreateParams, TalosClient, TalosContext, TalosEventPayload,
+    TalosEventType, TalosInputItem, TalosMessageRequest, TalosMessageResponse, TalosOutputItem,
+    TalosThinkingSource, TalosThinkingStage,
 };
 
 /// Command-line interface for Talos AI system - Full-featured command set for system access
@@ -428,6 +429,12 @@ async fn send_and_render_message(
                         eprintln!("REASONING {}", trimmed);
                     }
                 }
+                TalosOutputItem::ExecutionSummary { text } => {
+                    let trimmed = text.trim();
+                    if !trimmed.is_empty() {
+                        eprintln!("SUMMARY {}", trimmed);
+                    }
+                }
                 TalosOutputItem::ToolCall { call_id, name, .. } => {
                     eprintln!("TOOL_CALL name={} call_id={}", name, call_id);
                 }
@@ -449,88 +456,62 @@ async fn send_and_render_message(
     let mut events = client.send_message_stream(session_id, request).await?;
 
     while let Some(event) = events.recv().await {
-        match event.event_type {
-            TalosEventType::MessageReasoningDelta => {
-                let delta = event
-                    .data
-                    .get("delta")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or("");
-                if !delta.trim().is_empty() {
-                    let source = event
-                        .data
-                        .get("reasoning_source")
-                        .and_then(|value| value.as_str())
-                        .unwrap_or("provider");
-                    let step_id = event
-                        .data
-                        .get("step_id")
-                        .and_then(|value| value.as_str())
-                        .unwrap_or("-");
-                    let iteration = event
-                        .data
-                        .get("iteration")
-                        .and_then(|value| value.as_u64())
-                        .unwrap_or(0);
+        match (&event.event_type, &event.payload) {
+            (
+                TalosEventType::MessageReasoningDelta,
+                TalosEventPayload::MessageReasoningDelta(payload),
+            ) => {
+                if !payload.delta.trim().is_empty() {
                     eprintln!(
-                        "REASONING[{}][iter={}][{}] {}",
-                        source, iteration, step_id, delta
+                        "THINKING[{}:{}][iter={}][{}] {}",
+                        format_thinking_source(payload.source),
+                        format_thinking_stage(payload.stage),
+                        payload.iteration,
+                        payload.step_id,
+                        payload.delta
                     );
                 }
             }
-            TalosEventType::MessageOutputDelta => {
-                if let Some(delta) = event.data.get("delta").and_then(|value| value.as_str()) {
-                    output_text.push_str(delta);
-                    write!(output_stream, "{}", delta)?;
-                    output_stream.flush()?;
+            (
+                TalosEventType::MessageExecutionSummary,
+                TalosEventPayload::MessageExecutionSummary(payload),
+            ) => {
+                if !payload.text.trim().is_empty() {
+                    eprintln!(
+                        "SUMMARY[iter={}][{}] {}",
+                        payload.iteration, payload.step_id, payload.text
+                    );
                 }
             }
-            TalosEventType::MessageToolCallStarted => {
-                let name = event
-                    .data
-                    .get("name")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or("unknown");
-                let call_id = event
-                    .data
-                    .get("call_id")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or("unknown");
-                let step_id = event
-                    .data
-                    .get("step_id")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or("-");
+            (TalosEventType::MessageOutputDelta, TalosEventPayload::MessageOutputDelta(payload)) => {
+                output_text.push_str(&payload.delta);
+                write!(output_stream, "{}", payload.delta)?;
+                output_stream.flush()?;
+            }
+            (
+                TalosEventType::MessageToolCallStarted,
+                TalosEventPayload::MessageToolCallStarted(payload),
+            ) => {
                 eprintln!(
                     "TOOL_CALL_STARTED name={} call_id={} step={}",
-                    name, call_id, step_id
+                    payload.name, payload.call_id, payload.step_id
                 );
             }
-            TalosEventType::MessageToolCallCompleted => {
-                let call_id = event
-                    .data
-                    .get("call_id")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or("unknown");
-                let tool = event
-                    .data
-                    .get("tool")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or("unknown");
-                let is_error = event
-                    .data
-                    .get("is_error")
-                    .and_then(|value| value.as_bool())
-                    .unwrap_or(false);
+            (
+                TalosEventType::MessageToolCallCompleted,
+                TalosEventPayload::MessageToolCallCompleted(payload),
+            ) => {
                 eprintln!(
                     "TOOL_CALL_COMPLETED call_id={} tool={} is_error={}",
-                    call_id, tool, is_error
+                    payload.call_id, payload.tool, payload.is_error
                 );
             }
-            TalosEventType::MessageError => {
-                eprintln!("MESSAGE_ERROR {}", event.data);
+            (TalosEventType::MessageError, TalosEventPayload::MessageError(payload)) => {
+                eprintln!("MESSAGE_ERROR {}", payload.error);
             }
-            TalosEventType::MessageStarted | TalosEventType::MessageCompleted => {}
+            (TalosEventType::MessageStarted, TalosEventPayload::MessageStarted(_))
+            | (TalosEventType::MessageCompleted, TalosEventPayload::MessageCompleted(_)) => {}
+            _ => {}
         }
     }
 
@@ -560,6 +541,23 @@ fn extract_output_text(response: &TalosMessageResponse) -> String {
 
 fn default_chat_context(user_id: &str) -> TalosContext {
     TalosContext::cli(user_id).with_channel_id("cli")
+}
+
+fn format_thinking_source(source: TalosThinkingSource) -> &'static str {
+    match source {
+        TalosThinkingSource::Provider => "provider",
+        TalosThinkingSource::Framework => "framework",
+    }
+}
+
+fn format_thinking_stage(stage: TalosThinkingStage) -> &'static str {
+    match stage {
+        TalosThinkingStage::ModelReasoning => "model_reasoning",
+        TalosThinkingStage::FrameworkPlan => "framework_plan",
+        TalosThinkingStage::FrameworkAct => "framework_act",
+        TalosThinkingStage::FrameworkObserve => "framework_observe",
+        TalosThinkingStage::FrameworkReflect => "framework_reflect",
+    }
 }
 
 #[cfg(test)]

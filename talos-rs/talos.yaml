@@ -7,7 +7,7 @@ gateway:
 
 agent:
   name: "talos"
-  model: "qwen-max"
+  model: "qwen-plus"
   kernel:
     max_iters: 1
     max_task_per_turn: 3
@@ -115,7 +115,7 @@ channels:
 
 llm:
   provider: "bailian"
-  model: "qwen-max"
+  model: "qwen-plus"
   anthropic:
     api_key: ${ANTHROPIC_API_KEY}
     enabled: false
@@ -144,14 +144,15 @@ llm:
         name: "qwen-plus"
         context_window: 32768
         max_tokens: 8192
-        reasoning: false
+        reasoning: true
         input: ["text"]
         cost:
           input: 0
           output: 0
           cache_read: 0
           cache_write: 0
-        compat: {}
+        compat:
+          thinking_format: "qwen"
       - id: "qwen-turbo"
         name: "qwen-turbo"
         context_window: 32768

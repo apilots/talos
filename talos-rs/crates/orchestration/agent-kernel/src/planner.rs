@@ -20,6 +20,10 @@ Use this format:\n- planning under /*PLANNING*/\n- replanning under /*REPLANNING
 steps. If execution fails, revise the plan under /*REPLANNING*/. The final answer must be precise \
 and explicitly state when the task cannot be completed with the available context.";
 
+const BUILT_IN_TOOL_GUIDANCE: &str = "Use available tools whenever they can verify facts, inspect \
+the workspace, execute commands, or fetch concrete results. Do not answer from memory when a tool \
+can check the answer. Use a direct answer only when no tool is needed.";
+
 pub struct BuiltInPlanner;
 
 impl BuiltInPlanner {
@@ -39,6 +43,14 @@ impl Planner for BuiltInPlanner {
 
     fn default_execution_path(&self) -> ExecutionPath {
         ExecutionPath::DirectAnswer
+    }
+
+    fn build_planning_instruction(
+        &self,
+        _ctx: &InvocationContext,
+        request: &LlmRequestEnvelope,
+    ) -> Option<String> {
+        (!request.tool_definitions.is_empty()).then(|| BUILT_IN_TOOL_GUIDANCE.to_string())
     }
 
     fn native_thinking_config(
@@ -213,6 +225,27 @@ mod tests {
         assert!(planner
             .native_thinking_config(&ctx, &unsupported_request)
             .is_none());
+    }
+
+    #[test]
+    fn test_built_in_planner_adds_tool_guidance_only_when_tools_exist() {
+        let planner = BuiltInPlanner::new();
+        let ctx = mock_ctx("hello", None);
+        let request = crate::LlmRequestEnvelope::default();
+        assert!(planner.build_planning_instruction(&ctx, &request).is_none());
+
+        let request_with_tools = crate::LlmRequestEnvelope {
+            tool_definitions: vec![talos_llm_provider::ToolDefinition::new(
+                "shell",
+                "run shell",
+                Some(serde_json::json!({"type":"object"})),
+            )],
+            ..crate::LlmRequestEnvelope::default()
+        };
+        let instruction = planner
+            .build_planning_instruction(&ctx, &request_with_tools)
+            .expect("instruction should exist");
+        assert!(instruction.contains("Use available tools"));
     }
 
     #[test]

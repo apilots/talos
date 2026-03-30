@@ -700,6 +700,7 @@ fn talos_event_name(event_type: &TalosEventType) -> &'static str {
     match event_type {
         TalosEventType::MessageStarted => "message.started",
         TalosEventType::MessageReasoningDelta => "message.reasoning.delta",
+        TalosEventType::MessageExecutionSummary => "message.execution.summary",
         TalosEventType::MessageOutputDelta => "message.output.delta",
         TalosEventType::MessageToolCallStarted => "message.tool_call.started",
         TalosEventType::MessageToolCallCompleted => "message.tool_call.completed",
@@ -739,7 +740,8 @@ mod tests {
     use axum::body::Body;
     use axum::http::Request;
     use talos_types::talos::{
-        TalosEvent, TalosProvider, TalosReasoning, TalosSourceType, TalosUsage,
+        TalosEvent, TalosEventPayload, TalosMessageCompletedEvent, TalosMessageOutputDeltaEvent,
+        TalosMessageStartedEvent, TalosProvider, TalosReasoning, TalosSourceType, TalosUsage,
     };
     use tower::util::ServiceExt;
 
@@ -748,12 +750,12 @@ mod tests {
 
     fn test_model_info() -> ModelInfo {
         ModelInfo {
-            id: "qwen-max".to_string(),
-            name: "Qwen Max".to_string(),
+            id: "qwen-plus".to_string(),
+            name: "Qwen Plus".to_string(),
             provider: "bailian".to_string(),
             context_window: 32_768,
             max_tokens: 8_192,
-            reasoning: false,
+            reasoning: true,
             input: vec![talos_types::ModelInputKind::Text],
             cost: talos_types::ModelCostConfig::default(),
             compat: talos_types::ModelCompatConfig::default(),
@@ -777,7 +779,7 @@ mod tests {
                 stop_reason: "end_turn".to_string(),
                 usage: TalosUsage::default(),
                 success: true,
-                model: "qwen-max".to_string(),
+                model: "qwen-plus".to_string(),
                 session_id: "mock-session".to_string(),
             })
         }
@@ -788,52 +790,52 @@ mod tests {
         ) -> TalosResult<tokio::sync::mpsc::Receiver<TalosEvent>> {
             let (tx, rx) = tokio::sync::mpsc::channel(8);
             tokio::spawn(async move {
-                let _ = tx
-                    .send(TalosEvent {
-                        event_type: TalosEventType::MessageStarted,
-                        message_id: "msg_mock".to_string(),
-                        session_id: "mock-session".to_string(),
-                        sequence: 0,
-                        data: json!({
-                            "request_id": "req_mock",
-                            "model": "qwen-max",
-                            "usage": TalosUsage::default(),
-                            "iteration": 0_u64,
-                            "step_id": "start",
-                        }),
-                    })
-                    .await;
-                let _ = tx
-                    .send(TalosEvent {
-                        event_type: TalosEventType::MessageOutputDelta,
-                        message_id: "msg_mock".to_string(),
-                        session_id: "mock-session".to_string(),
-                        sequence: 1,
-                        data: json!({
-                            "request_id": "req_mock",
-                            "delta": "stream only content",
-                            "item_index": 0_u64,
-                            "iteration": 1_u64,
-                            "step_id": "step-1",
-                        }),
-                    })
-                    .await;
-                let _ = tx
-                    .send(TalosEvent {
-                        event_type: TalosEventType::MessageCompleted,
-                        message_id: "msg_mock".to_string(),
-                        session_id: "mock-session".to_string(),
-                        sequence: 2,
-                        data: json!({
-                            "request_id": "req_mock",
-                            "stop_reason": "end_turn",
-                            "usage": TalosUsage::default(),
-                            "total_output_items": 1_u64,
-                            "iteration": 2_u64,
-                            "step_id": "completed",
-                        }),
-                    })
-                    .await;
+                let started = TalosEvent {
+                    event_type: TalosEventType::MessageStarted,
+                    message_id: "msg_mock".to_string(),
+                    session_id: "mock-session".to_string(),
+                    sequence: 0,
+                    payload: TalosEventPayload::MessageStarted(TalosMessageStartedEvent {
+                        request_id: "req_mock".to_string(),
+                        model: "qwen-plus".to_string(),
+                        usage: TalosUsage::default(),
+                        iteration: 0,
+                        step_id: "start".to_string(),
+                    }),
+                };
+                let _ = tx.send(started).await;
+
+                let output = TalosEvent {
+                    event_type: TalosEventType::MessageOutputDelta,
+                    message_id: "msg_mock".to_string(),
+                    session_id: "mock-session".to_string(),
+                    sequence: 1,
+                    payload: TalosEventPayload::MessageOutputDelta(TalosMessageOutputDeltaEvent {
+                        request_id: "req_mock".to_string(),
+                        delta: "stream only content".to_string(),
+                        item_index: 0,
+                        iteration: 1,
+                        step_id: "step-1".to_string(),
+                    }),
+                };
+                let _ = tx.send(output).await;
+
+                let completed = TalosEvent {
+                    event_type: TalosEventType::MessageCompleted,
+                    message_id: "msg_mock".to_string(),
+                    session_id: "mock-session".to_string(),
+                    sequence: 2,
+                    payload: TalosEventPayload::MessageCompleted(TalosMessageCompletedEvent {
+                        request_id: "req_mock".to_string(),
+                        stop_reason: "end_turn".to_string(),
+                        usage: TalosUsage::default(),
+                        total_output_items: 1,
+                        iteration: 2,
+                        step_id: "completed".to_string(),
+                        task_count: 1,
+                    }),
+                };
+                let _ = tx.send(completed).await;
             });
             Ok(rx)
         }
@@ -864,7 +866,7 @@ mod tests {
                 },
                 config: {
                     let mut config = talos_types::TalosConfig::default();
-                    let resolved = model.unwrap_or_else(|| "qwen-max".to_string());
+                    let resolved = model.unwrap_or_else(|| "qwen-plus".to_string());
                     config.agent.model = resolved.clone();
                     config.llm.model = resolved;
                     config
@@ -901,8 +903,8 @@ mod tests {
                 },
                 config: {
                     let mut config = talos_types::TalosConfig::default();
-                    config.agent.model = "qwen-max".to_string();
-                    config.llm.model = "qwen-max".to_string();
+                    config.agent.model = "qwen-plus".to_string();
+                    config.llm.model = "qwen-plus".to_string();
                     config
                 },
                 state: talos_types::SessionState {
@@ -983,9 +985,10 @@ mod tests {
             .await
             .expect("body should be readable");
         let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
-        assert_eq!(payload["data"][0]["id"], "qwen-max");
+        assert_eq!(payload["data"][0]["id"], "qwen-plus");
         assert_eq!(payload["data"][0]["provider"], "bailian");
         assert_eq!(payload["data"][0]["context_window"], 32_768);
+        assert_eq!(payload["data"][0]["reasoning"], true);
     }
 
     #[test]
@@ -995,7 +998,7 @@ mod tests {
             Arc::new(MockSessionService),
             "127.0.0.1",
             8080,
-            "qwen-max",
+            "qwen-plus",
             vec![test_model_info()],
         );
 

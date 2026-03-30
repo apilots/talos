@@ -19,6 +19,7 @@ talos-agent-kernel = { path = "../../crates/orchestration/agent-kernel" }
 talos-types = { path = "../../crates/common/types" }
 talos-llm-provider = { path = "../../crates/common/llm/provider" }
 talos-llm-anthropic = { path = "../../crates/common/llm/anthropic" }
+talos-llm-bailian = { path = "../../crates/common/llm/bailian" }
 talos-llm-openai = { path = "../../crates/common/llm/openai" }
 talos-storage = { path = "../../crates/infra/storage" }
 talos-config = { path = "../../crates/infra/config" }

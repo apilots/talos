@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use talos_agent::{AgentImpl, AgentOrchestrator, OrchestratorRequest};
+use talos_agent::{AgentImpl, AgentOrchestrator, OrchestratorEvent, OrchestratorRequest};
 use talos_error::TalosResult;
 use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, Role, ToolStream,
@@ -295,7 +295,11 @@ async fn integration_tool_call_loop_executes_tool_and_returns_final_output() {
         .expect("agent should return a response");
 
     assert!(response.output_text.contains("echo:ping"));
-    assert!(!response.reasoning.is_empty());
+    assert!(response.reasoning.is_empty());
+    assert!(response.output_items.iter().any(|item| matches!(
+        item,
+        talos_types::talos::TalosOutputItem::ExecutionSummary { .. }
+    )));
     assert!(state.saw_tool_result_message.load(Ordering::SeqCst));
     assert_eq!(state.tool_executions.load(Ordering::SeqCst), 1);
     assert!(state.chat_round.load(Ordering::SeqCst) >= 2);
@@ -313,7 +317,7 @@ async fn integration_stream_exposes_reasoning_output_and_tool_events() {
 
     let mut events = Vec::new();
     while let Some(event) = stream.recv().await {
-        let is_completion = event.event_type == "message.completed";
+        let is_completion = matches!(event, OrchestratorEvent::MessageCompleted(_));
         events.push(event);
         if is_completion {
             break;
@@ -321,34 +325,35 @@ async fn integration_stream_exposes_reasoning_output_and_tool_events() {
     }
 
     assert!(events.iter().any(|event| {
-        event.event_type == "message.started"
-            && event
-                .data
-                .get("request_id")
-                .and_then(|v| v.as_str())
-                .is_some()
+        matches!(
+            event,
+            OrchestratorEvent::MessageStarted(payload) if !payload.request_id.is_empty()
+        )
     }));
     assert!(events.iter().any(|event| {
-        event.event_type == "message.reasoning.delta"
-            && event.data.get("delta").and_then(|v| v.as_str()) == Some("Need tool context first.")
+        matches!(
+            event,
+            OrchestratorEvent::MessageReasoningDelta(payload)
+                if payload.delta == "Need tool context first."
+        )
     }));
     assert!(events.iter().any(|event| {
-        event.event_type == "message.output.delta"
-            && event
-                .data
-                .get("delta")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .contains("Final answer after tool execution")
+        matches!(
+            event,
+            OrchestratorEvent::MessageOutputDelta(payload)
+                if payload.delta.contains("Final answer after tool execution")
+        )
     }));
     assert!(events
         .iter()
-        .any(|event| event.event_type == "message.tool_call.started"));
+        .any(|event| matches!(event, OrchestratorEvent::MessageToolCallStarted(_))));
     assert!(events
         .iter()
-        .any(|event| event.event_type == "message.tool_call.completed"));
+        .any(|event| matches!(event, OrchestratorEvent::MessageToolCallCompleted(_))));
     assert!(events.iter().any(|event| {
-        event.event_type == "message.completed"
-            && event.data.get("stop_reason").and_then(|v| v.as_str()) == Some("end_turn")
+        matches!(
+            event,
+            OrchestratorEvent::MessageCompleted(payload) if payload.stop_reason == "end_turn"
+        )
     }));
 }

@@ -368,6 +368,9 @@ pub mod talos {
         Reasoning {
             text: String,
         },
+        ExecutionSummary {
+            text: String,
+        },
         OutputText {
             text: String,
         },
@@ -427,11 +430,122 @@ pub mod talos {
     pub enum TalosEventType {
         MessageStarted,
         MessageReasoningDelta,
+        MessageExecutionSummary,
         MessageOutputDelta,
         MessageToolCallStarted,
         MessageToolCallCompleted,
         MessageCompleted,
         MessageError,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum TalosThinkingSource {
+        Provider,
+        Framework,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum TalosThinkingStage {
+        ModelReasoning,
+        FrameworkPlan,
+        FrameworkAct,
+        FrameworkObserve,
+        FrameworkReflect,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct TalosMessageStartedEvent {
+        pub request_id: String,
+        pub model: String,
+        pub usage: TalosUsage,
+        pub iteration: u64,
+        pub step_id: String,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct TalosMessageReasoningDeltaEvent {
+        pub request_id: String,
+        pub delta: String,
+        pub source: TalosThinkingSource,
+        pub stage: TalosThinkingStage,
+        pub item_index: u64,
+        pub iteration: u64,
+        pub step_id: String,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct TalosMessageExecutionSummaryEvent {
+        pub request_id: String,
+        pub text: String,
+        pub item_index: u64,
+        pub iteration: u64,
+        pub step_id: String,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct TalosMessageOutputDeltaEvent {
+        pub request_id: String,
+        pub delta: String,
+        pub item_index: u64,
+        pub iteration: u64,
+        pub step_id: String,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct TalosMessageToolCallStartedEvent {
+        pub request_id: String,
+        pub call_id: String,
+        pub name: String,
+        pub arguments: serde_json::Value,
+        pub item_index: u64,
+        pub iteration: u64,
+        pub step_id: String,
+        pub timing_ms: Option<u64>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct TalosMessageToolCallCompletedEvent {
+        pub request_id: String,
+        pub call_id: String,
+        pub tool: String,
+        pub content: Vec<TalosContentItem>,
+        pub is_error: bool,
+        pub item_index: u64,
+        pub iteration: u64,
+        pub step_id: String,
+        pub timing_ms: Option<u64>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct TalosMessageCompletedEvent {
+        pub request_id: String,
+        pub stop_reason: String,
+        pub usage: TalosUsage,
+        pub total_output_items: u64,
+        pub iteration: u64,
+        pub step_id: String,
+        pub task_count: u32,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct TalosMessageErrorEvent {
+        pub request_id: String,
+        pub error: String,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    pub enum TalosEventPayload {
+        MessageStarted(TalosMessageStartedEvent),
+        MessageReasoningDelta(TalosMessageReasoningDeltaEvent),
+        MessageExecutionSummary(TalosMessageExecutionSummaryEvent),
+        MessageOutputDelta(TalosMessageOutputDeltaEvent),
+        MessageToolCallStarted(TalosMessageToolCallStartedEvent),
+        MessageToolCallCompleted(TalosMessageToolCallCompletedEvent),
+        MessageCompleted(TalosMessageCompletedEvent),
+        MessageError(TalosMessageErrorEvent),
     }
 
     /// Canonical stream event payload.
@@ -441,7 +555,7 @@ pub mod talos {
         pub message_id: String,
         pub session_id: String,
         pub sequence: u64,
-        pub data: serde_json::Value,
+        pub payload: TalosEventPayload,
     }
 }
 
@@ -772,153 +886,10 @@ pub trait RequestHandler: Send + Sync {
         request: gateway::GatewayRequest,
     ) -> TalosResult<gateway::GatewayResponse>;
 
-    /// Handle a gateway request and return Talos stream events.
-    ///
-    /// Default implementation falls back to non-stream `handle` and converts
-    /// output items to canonical events in process order.
     async fn handle_stream(
         &self,
         request: gateway::GatewayRequest,
-    ) -> TalosResult<tokio::sync::mpsc::Receiver<talos::TalosEvent>> {
-        let response = self.handle(request.clone()).await?;
-        let request_id = format!("req_{}", uuid::Uuid::new_v4().simple());
-        let message_id = format!("msg_{}", uuid::Uuid::new_v4().simple());
-        let session_id = response.session_id.clone();
-
-        let output = if response.output_items.is_empty() {
-            vec![talos::TalosOutputItem::OutputText {
-                text: response.content.clone(),
-            }]
-        } else {
-            response.output_items.clone()
-        };
-
-        let mut events = Vec::new();
-        let mut sequence: u64 = 0;
-        events.push(talos::TalosEvent {
-            event_type: talos::TalosEventType::MessageStarted,
-            message_id: message_id.clone(),
-            session_id: session_id.clone(),
-            sequence,
-            data: serde_json::json!({
-                "request_id": request_id,
-                "model": response.model,
-                "usage": response.usage,
-                "iteration": 0_u64,
-                "step_id": "start",
-            }),
-        });
-        sequence += 1;
-
-        for (item_index, item) in output.iter().enumerate() {
-            let iteration = item_index as u64 + 1;
-            let step_id = format!("step-{}", iteration);
-            match item {
-                talos::TalosOutputItem::Reasoning { text } => {
-                    events.push(talos::TalosEvent {
-                        event_type: talos::TalosEventType::MessageReasoningDelta,
-                        message_id: message_id.clone(),
-                        session_id: session_id.clone(),
-                        sequence,
-                        data: serde_json::json!({
-                            "request_id": request_id,
-                            "delta": text,
-                            "reasoning_source": if text.trim_start().starts_with("Kernel summary:") { "kernel" } else { "provider" },
-                            "item_index": item_index,
-                            "iteration": iteration,
-                            "step_id": step_id,
-                        }),
-                    });
-                }
-                talos::TalosOutputItem::OutputText { text } => {
-                    events.push(talos::TalosEvent {
-                        event_type: talos::TalosEventType::MessageOutputDelta,
-                        message_id: message_id.clone(),
-                        session_id: session_id.clone(),
-                        sequence,
-                        data: serde_json::json!({
-                            "request_id": request_id,
-                            "delta": text,
-                            "item_index": item_index,
-                            "iteration": iteration,
-                            "step_id": step_id,
-                        }),
-                    });
-                }
-                talos::TalosOutputItem::ToolCall {
-                    call_id,
-                    name,
-                    arguments,
-                } => {
-                    events.push(talos::TalosEvent {
-                        event_type: talos::TalosEventType::MessageToolCallStarted,
-                        message_id: message_id.clone(),
-                        session_id: session_id.clone(),
-                        sequence,
-                        data: serde_json::json!({
-                            "request_id": request_id,
-                            "call_id": call_id,
-                            "name": name,
-                            "arguments": arguments,
-                            "item_index": item_index,
-                            "iteration": iteration,
-                            "step_id": step_id,
-                            "timing_ms": serde_json::Value::Null,
-                        }),
-                    });
-                }
-                talos::TalosOutputItem::ToolResult {
-                    call_id,
-                    content,
-                    is_error,
-                } => {
-                    events.push(talos::TalosEvent {
-                        event_type: talos::TalosEventType::MessageToolCallCompleted,
-                        message_id: message_id.clone(),
-                        session_id: session_id.clone(),
-                        sequence,
-                        data: serde_json::json!({
-                            "request_id": request_id,
-                            "call_id": call_id,
-                            "tool": serde_json::Value::Null,
-                            "content": content,
-                            "is_error": is_error,
-                            "item_index": item_index,
-                            "iteration": iteration,
-                            "step_id": step_id,
-                            "timing_ms": serde_json::Value::Null,
-                        }),
-                    });
-                }
-            }
-            sequence = sequence.saturating_add(1);
-        }
-
-        events.push(talos::TalosEvent {
-            event_type: talos::TalosEventType::MessageCompleted,
-            message_id: message_id.clone(),
-            session_id: session_id.clone(),
-            sequence,
-            data: serde_json::json!({
-                "request_id": request_id,
-                "stop_reason": response.stop_reason,
-                "usage": response.usage,
-                "total_output_items": output.len(),
-                "iteration": output.len() as u64 + 1,
-                "step_id": "completed",
-            }),
-        });
-
-        let (tx, rx) = tokio::sync::mpsc::channel(events.len().max(1));
-        tokio::spawn(async move {
-            for event in events {
-                if tx.send(event).await.is_err() {
-                    break;
-                }
-            }
-        });
-        Ok(rx)
-    }
+    ) -> TalosResult<tokio::sync::mpsc::Receiver<talos::TalosEvent>>;
 }
 
 #[cfg(test)]

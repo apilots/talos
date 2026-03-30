@@ -2,19 +2,24 @@ use crate::Coordinator;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
-use talos_agent::{AgentOrchestrator, OrchestratorRequest};
+use talos_agent::{AgentOrchestrator, OrchestratorEvent, OrchestratorRequest};
 use talos_error::TalosResult;
 use talos_router::Router;
 use talos_session_store::SessionStore;
 use talos_types::gateway::{GatewayRequest, GatewayResponse};
-use talos_types::talos::TalosUsage;
-use talos_types::talos::{TalosContext, TalosEvent, TalosEventType, TalosInputItem, TalosProvider};
+use talos_types::talos::{
+    TalosContext, TalosEvent, TalosEventPayload, TalosEventType,
+    TalosMessageCompletedEvent, TalosMessageErrorEvent, TalosMessageExecutionSummaryEvent,
+    TalosMessageOutputDeltaEvent, TalosMessageReasoningDeltaEvent, TalosMessageStartedEvent,
+    TalosMessageToolCallCompletedEvent, TalosMessageToolCallStartedEvent, TalosProvider,
+    TalosUsage,
+};
 use talos_types::{
     RequestHandler, SessionPatch, SessionPatchAck, SessionQuery, SessionRecord, SessionService,
     TalosConfig, TalosSession,
 };
 use tokio::sync::{mpsc, RwLock};
-use tracing::{info, warn};
+use tracing::info;
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -106,18 +111,10 @@ impl SessionManager {
     async fn record_turn_completion(
         &self,
         session_id: &str,
-        user_input: &str,
-        assistant_output: &str,
         assistant_model: &str,
         message_delta: u64,
         usage: &TalosUsage,
     ) -> TalosResult<()> {
-        self.session_store
-            .append_message_by_session_id(session_id, "user", user_input)
-            .await?;
-        self.session_store
-            .append_message_by_session_id(session_id, "assistant", assistant_output)
-            .await?;
         self.session_store
             .record_session_progress(session_id, message_delta, usage, Some(assistant_model))
             .await?;
@@ -129,26 +126,15 @@ impl SessionManager {
     async fn record_stream_completion(
         &self,
         session_id: &str,
-        user_input: &str,
-        assistant_output: &str,
         assistant_model: &str,
+        message_delta: u64,
         usage: &TalosUsage,
     ) {
         let _ = self
             .session_store
-            .append_message_by_session_id(session_id, "user", user_input)
+            .record_session_progress(session_id, message_delta, usage, Some(assistant_model))
             .await;
-        if !assistant_output.trim().is_empty() {
-            let _ = self
-                .session_store
-                .append_message_by_session_id(session_id, "assistant", assistant_output)
-                .await;
-        }
-        let _ = self
-            .session_store
-            .record_session_progress(session_id, 2, usage, Some(assistant_model))
-            .await;
-        self.update_cached_session_after_turn(session_id, assistant_model, 2, usage)
+        self.update_cached_session_after_turn(session_id, assistant_model, message_delta, usage)
             .await;
     }
 
@@ -322,19 +308,6 @@ impl CoordinatorImpl {
     pub fn agents(&self) -> Arc<RwLock<HashMap<String, Arc<dyn AgentOrchestrator>>>> {
         self.agents.clone()
     }
-
-    fn map_orchestrator_event_type(event_type: &str) -> Option<TalosEventType> {
-        match event_type {
-            "message.started" => Some(TalosEventType::MessageStarted),
-            "message.reasoning.delta" => Some(TalosEventType::MessageReasoningDelta),
-            "message.output.delta" => Some(TalosEventType::MessageOutputDelta),
-            "message.tool_call.started" => Some(TalosEventType::MessageToolCallStarted),
-            "message.tool_call.completed" => Some(TalosEventType::MessageToolCallCompleted),
-            "message.completed" => Some(TalosEventType::MessageCompleted),
-            "message.error" => Some(TalosEventType::MessageError),
-            _ => None,
-        }
-    }
 }
 
 #[async_trait]
@@ -356,7 +329,6 @@ impl Coordinator for CoordinatorImpl {
 #[async_trait]
 impl RequestHandler for CoordinatorImpl {
     async fn handle(&self, request: GatewayRequest) -> TalosResult<GatewayResponse> {
-        let user_input = extract_text_input(&request.input)?;
         let context = request.context.clone();
         let route_channel = Self::route_channel(&context);
 
@@ -386,8 +358,6 @@ impl RequestHandler for CoordinatorImpl {
         self.sessions
             .record_turn_completion(
                 &session.context.session_id,
-                &user_input,
-                &agent_response.output_text,
                 &model_for_turn,
                 2,
                 &agent_response.usage,
@@ -410,7 +380,6 @@ impl RequestHandler for CoordinatorImpl {
         &self,
         request: GatewayRequest,
     ) -> TalosResult<mpsc::Receiver<TalosEvent>> {
-        let user_input = extract_text_input(&request.input)?;
         let context = request.context.clone();
         let route_channel = Self::route_channel(&context);
 
@@ -439,45 +408,20 @@ impl RequestHandler for CoordinatorImpl {
 
         let sessions = self.sessions.clone();
         let session_id = session.context.session_id.clone();
-        let user_content = user_input.clone();
         let message_id = format!("msg_{}", Uuid::new_v4().simple());
         let stream_session_id = session.context.session_id.clone();
         let response_model = model_for_turn.clone();
         let (tx, rx) = mpsc::channel(256);
         tokio::spawn(async move {
             let mut sequence: u64 = 0;
-            let mut assistant_output = String::new();
             let mut final_usage = TalosUsage::default();
+            let mut final_message_delta = 2;
 
             while let Some(event) = orchestrator_stream.recv().await {
-                let Some(event_type) =
-                    CoordinatorImpl::map_orchestrator_event_type(event.event_type.as_str())
-                else {
-                    continue;
-                };
-
-                if event_type == TalosEventType::MessageOutputDelta {
-                    if let Some(delta) = event.data.get("delta").and_then(|value| value.as_str()) {
-                        assistant_output.push_str(delta);
-                    }
-                }
-                if event_type == TalosEventType::MessageCompleted {
-                    if let Some(usage) = event.data.get("usage") {
-                        match serde_json::from_value::<TalosUsage>(usage.clone()) {
-                            Ok(parsed) => {
-                                final_usage = parsed;
-                            }
-                            Err(err) => {
-                                warn!(
-                                    session_id = %session_id,
-                                    event_type = %event.event_type,
-                                    error = %err,
-                                    usage = %usage,
-                                    "failed to parse usage from message completed event"
-                                );
-                            }
-                        }
-                    }
+                let (event_type, payload) = map_orchestrator_event(event.clone());
+                if let OrchestratorEvent::MessageCompleted(completed) = &event {
+                    final_usage = completed.usage.clone();
+                    final_message_delta = completed.total_output_items.max(1);
                 }
 
                 if tx
@@ -486,7 +430,7 @@ impl RequestHandler for CoordinatorImpl {
                         message_id: message_id.clone(),
                         session_id: stream_session_id.clone(),
                         sequence,
-                        data: event.data,
+                        payload,
                     })
                     .await
                     .is_err()
@@ -499,9 +443,8 @@ impl RequestHandler for CoordinatorImpl {
             sessions
                 .record_stream_completion(
                     &session_id,
-                    &user_content,
-                    &assistant_output,
                     &response_model,
+                    final_message_delta,
                     &final_usage,
                 )
                 .await;
@@ -511,26 +454,99 @@ impl RequestHandler for CoordinatorImpl {
     }
 }
 
-fn extract_text_input(input: &[TalosInputItem]) -> TalosResult<String> {
-    let texts: Vec<&str> = input
-        .iter()
-        .filter_map(|item| match item {
-            TalosInputItem::Text { text } => {
-                let normalized = text.trim();
-                (!normalized.is_empty()).then_some(normalized)
-            }
-            _ => None,
-        })
-        .collect();
-
-    if texts.is_empty() {
-        return Err(talos_error::TalosError::ValidationError(
-            "gateway request must include at least one non-empty text input item".to_string(),
-        ));
+fn map_orchestrator_event(event: OrchestratorEvent) -> (TalosEventType, TalosEventPayload) {
+    match event {
+        OrchestratorEvent::MessageStarted(payload) => (
+            TalosEventType::MessageStarted,
+            TalosEventPayload::MessageStarted(TalosMessageStartedEvent {
+                request_id: payload.request_id,
+                model: payload.model,
+                usage: payload.usage,
+                iteration: payload.iteration,
+                step_id: payload.step_id,
+            }),
+        ),
+        OrchestratorEvent::MessageReasoningDelta(payload) => (
+            TalosEventType::MessageReasoningDelta,
+            TalosEventPayload::MessageReasoningDelta(TalosMessageReasoningDeltaEvent {
+                request_id: payload.request_id,
+                delta: payload.delta,
+                source: payload.source,
+                stage: payload.stage,
+                item_index: payload.item_index,
+                iteration: payload.iteration,
+                step_id: payload.step_id,
+            }),
+        ),
+        OrchestratorEvent::MessageExecutionSummary(payload) => (
+            TalosEventType::MessageExecutionSummary,
+            TalosEventPayload::MessageExecutionSummary(TalosMessageExecutionSummaryEvent {
+                request_id: payload.request_id,
+                text: payload.text,
+                item_index: payload.item_index,
+                iteration: payload.iteration,
+                step_id: payload.step_id,
+            }),
+        ),
+        OrchestratorEvent::MessageOutputDelta(payload) => (
+            TalosEventType::MessageOutputDelta,
+            TalosEventPayload::MessageOutputDelta(TalosMessageOutputDeltaEvent {
+                request_id: payload.request_id,
+                delta: payload.delta,
+                item_index: payload.item_index,
+                iteration: payload.iteration,
+                step_id: payload.step_id,
+            }),
+        ),
+        OrchestratorEvent::MessageToolCallStarted(payload) => (
+            TalosEventType::MessageToolCallStarted,
+            TalosEventPayload::MessageToolCallStarted(TalosMessageToolCallStartedEvent {
+                request_id: payload.request_id,
+                call_id: payload.call_id,
+                name: payload.name,
+                arguments: payload.arguments,
+                item_index: payload.item_index,
+                iteration: payload.iteration,
+                step_id: payload.step_id,
+                timing_ms: payload.timing_ms,
+            }),
+        ),
+        OrchestratorEvent::MessageToolCallCompleted(payload) => (
+            TalosEventType::MessageToolCallCompleted,
+            TalosEventPayload::MessageToolCallCompleted(TalosMessageToolCallCompletedEvent {
+                request_id: payload.request_id,
+                call_id: payload.call_id,
+                tool: payload.tool,
+                content: payload.content,
+                is_error: payload.is_error,
+                item_index: payload.item_index,
+                iteration: payload.iteration,
+                step_id: payload.step_id,
+                timing_ms: payload.timing_ms,
+            }),
+        ),
+        OrchestratorEvent::MessageCompleted(payload) => (
+            TalosEventType::MessageCompleted,
+            TalosEventPayload::MessageCompleted(TalosMessageCompletedEvent {
+                request_id: payload.request_id,
+                stop_reason: payload.stop_reason,
+                usage: payload.usage,
+                total_output_items: payload.total_output_items,
+                iteration: payload.iteration,
+                step_id: payload.step_id,
+                task_count: payload.task_count,
+            }),
+        ),
+        OrchestratorEvent::MessageError(payload) => (
+            TalosEventType::MessageError,
+            TalosEventPayload::MessageError(TalosMessageErrorEvent {
+                request_id: payload.request_id,
+                error: payload.error,
+            }),
+        ),
     }
-
-    Ok(texts.join("\n"))
 }
+
 
 #[async_trait]
 impl SessionService for CoordinatorImpl {
@@ -607,7 +623,7 @@ impl SessionService for CoordinatorImpl {
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use talos_types::talos::TalosSourceType;
+    use talos_types::talos::{TalosInputItem, TalosSourceType};
     use tokio;
 
     // Define mock implementations for testing

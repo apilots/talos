@@ -63,8 +63,8 @@ if ! echo "${stdout_text}" | grep -q "Cargo.toml"; then
   echo "CASE cli_chat_stream_tool_exec FAIL missing=Cargo.toml stdout=${stdout_text}"
   exit 1
 fi
-if ! echo "${stderr_text}" | grep -q "REASONING\\["; then
-  echo "CASE cli_chat_stream_tool_exec FAIL missing_reasoning_event stderr=${stderr_text}"
+if ! echo "${stderr_text}" | grep -Eq "THINKING\\[|SUMMARY\\["; then
+  echo "CASE cli_chat_stream_tool_exec FAIL missing_thinking_or_summary_event stderr=${stderr_text}"
   exit 1
 fi
 if ! echo "${stderr_text}" | grep -q "TOOL_CALL_STARTED name=exec"; then

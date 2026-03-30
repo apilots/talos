@@ -275,7 +275,7 @@ impl OpenAIProvider {
     }
 
     fn extract_reasoning_delta(delta: &Value) -> Option<String> {
-        for key in ["reasoning", "reasoning_content", "thinking"] {
+        for key in ["reasoning"] {
             if let Some(value) = delta.get(key) {
                 match value {
                     Value::String(text) if !text.is_empty() => return Some(text.clone()),
@@ -871,6 +871,14 @@ mod tests {
             provider.native_thinking_support("gpt-4o"),
             NativeThinkingSupport::Unsupported
         );
+    }
+
+    #[test]
+    fn test_extract_reasoning_delta_ignores_bailian_reasoning_content() {
+        let delta = serde_json::json!({
+            "reasoning_content": "bailian-only"
+        });
+        assert!(OpenAIProvider::extract_reasoning_delta(&delta).is_none());
     }
 
     #[test]

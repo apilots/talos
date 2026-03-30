@@ -1,11 +1,11 @@
 use crate::tool_execution::ToolExecutionContext;
 use crate::{
-    warnings::derive_prompt_warnings, InvocationContext, KernelEvent, KernelEventData,
-    KernelEventLabel, KernelEventType, KernelOutputDeltaSource, KernelReasoningSource,
-    KernelStreamEvent, KernelStreamEventData, KernelStreamEventType, KernelWarning,
-    OutputDeltaStreamData, PromptWarningEventData, ReasoningDeltaStreamData, StopReason,
-    ToolCallStartStreamData, ToolExecutionInput, ToolExecutionOutput, ToolExecutor,
-    ToolResultStreamData,
+    warnings::derive_prompt_warnings, ExecutionSummaryStreamData, InvocationContext, KernelEvent,
+    KernelEventData, KernelEventLabel, KernelEventType, KernelOutputDeltaSource,
+    KernelStreamEvent, KernelStreamEventData, KernelStreamEventType, KernelThinkingSource,
+    KernelThinkingStage, KernelWarning, OutputDeltaStreamData, PromptWarningEventData,
+    StopReason, ThinkingDeltaStreamData, ToolCallStartStreamData, ToolExecutionInput,
+    ToolExecutionOutput, ToolExecutor, ToolResultStreamData,
 };
 use chrono::Utc;
 use serde_json::Value;
@@ -309,7 +309,7 @@ async fn compact_workspace_context_if_needed(
     .await
 }
 
-fn build_reasoning_summary(tool_call_count: usize, tool_error_count: usize) -> String {
+fn build_execution_summary(tool_call_count: usize, tool_error_count: usize) -> String {
     if tool_call_count == 0 {
         "Kernel summary: answered directly without invoking tools.".to_string()
     } else if tool_error_count == 0 {
@@ -760,10 +760,11 @@ async fn stream_round(
                 reasoning.push_str(&delta);
                 emit_stream_event(
                     stream_tx,
-                    KernelStreamEventType::ReasoningDelta,
-                    KernelStreamEventData::ReasoningDelta(ReasoningDeltaStreamData {
+                    KernelStreamEventType::ThinkingDelta,
+                    KernelStreamEventData::ThinkingDelta(ThinkingDeltaStreamData {
                         delta,
-                        source: KernelReasoningSource::Provider,
+                        source: KernelThinkingSource::Provider,
+                        stage: KernelThinkingStage::ModelReasoning,
                         round: Some(round),
                     }),
                 )
@@ -1135,14 +1136,14 @@ pub fn finalize_general_turn_artifacts(
         };
     }
 
-    let reasoning_summary = build_reasoning_summary(state.tool_call_count, state.tool_error_count);
-    output_items.push(TalosOutputItem::Reasoning {
-        text: reasoning_summary.clone(),
+    let execution_summary = build_execution_summary(state.tool_call_count, state.tool_error_count);
+    output_items.push(TalosOutputItem::ExecutionSummary {
+        text: execution_summary.clone(),
     });
     output_items.push(TalosOutputItem::OutputText {
         text: final_output.clone(),
     });
-    reasoning_log.push(reasoning_summary);
+    reasoning_log.push(execution_summary);
 
     ExecutedTurnArtifacts {
         output_text: final_output,
@@ -1173,13 +1174,12 @@ pub async fn emit_general_turn_finalization_stream(
         .await;
     }
 
-    if let Some(reasoning_summary) = executed.reasoning_log.last() {
+    if let Some(execution_summary) = executed.reasoning_log.last() {
         emit_stream_event(
             prepared.stream_tx.as_ref(),
-            KernelStreamEventType::ReasoningDelta,
-            KernelStreamEventData::ReasoningDelta(ReasoningDeltaStreamData {
-                delta: reasoning_summary.clone(),
-                source: KernelReasoningSource::Kernel,
+            KernelStreamEventType::ExecutionSummary,
+            KernelStreamEventData::ExecutionSummary(ExecutionSummaryStreamData {
+                text: execution_summary.clone(),
                 round: None,
             }),
         )

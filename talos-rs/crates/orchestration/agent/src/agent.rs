@@ -6,14 +6,20 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::{
+    service::{
+        OrchestratorMessageCompletedEvent, OrchestratorMessageErrorEvent,
+        OrchestratorMessageExecutionSummaryEvent, OrchestratorMessageOutputDeltaEvent,
+        OrchestratorMessageReasoningDeltaEvent, OrchestratorMessageStartedEvent,
+        OrchestratorMessageToolCallCompletedEvent, OrchestratorMessageToolCallStartedEvent,
+    },
     Agent, AgentOrchestrator, AgentRequest, AgentResponse, OrchestratorEvent,
     OrchestratorExecution, OrchestratorRequest,
 };
-use serde_json::{json, Value};
+use serde_json::Value;
 use talos_agent_kernel::{
     flush_session_memory, Agent as KernelAgent, AgentRunResult, BuiltInPlanner, InvocationContext,
-    KernelOutputDeltaSource, KernelReasoningSource, KernelRuntime, KernelStreamEvent,
-    KernelStreamEventData, KernelStreamEventType, LlmKernelAgent, LoopKernelAgent,
+    KernelRuntime, KernelStreamEvent, KernelStreamEventData, KernelStreamEventType,
+    KernelThinkingSource, KernelThinkingStage, LlmKernelAgent, LoopKernelAgent,
     ParallelKernelAgent, PlanReActPlanner, Planner, RoutingKernelAgent, RunRequest,
     SequentialKernelAgent, StopReason, TaskKind, TaskResult, TaskStatus,
 };
@@ -22,7 +28,10 @@ use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{ChatMessage, FunctionCall, LlmProvider};
 use talos_memory::MemoryStore;
 use talos_tools::ToolRegistry;
-use talos_types::talos::{TalosInputItem, TalosOutputItem, TalosReasoning, TalosUsage};
+use talos_types::talos::{
+    TalosContentItem, TalosInputItem, TalosOutputItem, TalosReasoning, TalosThinkingSource,
+    TalosThinkingStage, TalosUsage,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum KernelExecutionMode {
@@ -49,54 +58,13 @@ impl PlannerMode {
 
     fn parse(value: &str) -> TalosResult<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "built_in" | "builtin" => Ok(Self::BuiltIn),
-            "plan_react" | "planreact" => Ok(Self::PlanReAct),
+            "built_in" => Ok(Self::BuiltIn),
+            "plan_react" => Ok(Self::PlanReAct),
             other => Err(TalosError::ValidationError(format!(
                 "invalid planner mode: {}",
                 other
             ))),
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum KernelAgentKind {
-    Llm,
-}
-
-#[derive(Clone)]
-struct KernelAgentRegistry {
-    kind_map: HashMap<String, KernelAgentKind>,
-    default_kind: String,
-}
-
-impl KernelAgentRegistry {
-    fn new(default_kind: impl Into<String>) -> Self {
-        let mut kind_map = HashMap::new();
-        kind_map.insert("llm".to_string(), KernelAgentKind::Llm);
-        Self {
-            kind_map,
-            default_kind: default_kind.into().to_ascii_lowercase(),
-        }
-    }
-
-    fn default_kind(&self) -> &str {
-        &self.default_kind
-    }
-
-    fn set_default_kind(&mut self, kind: impl Into<String>) {
-        self.default_kind = kind.into().to_ascii_lowercase();
-    }
-
-    fn resolve(&self, requested: Option<&str>) -> KernelAgentKind {
-        let requested = requested
-            .map(|value| value.to_ascii_lowercase())
-            .unwrap_or_else(|| self.default_kind.clone());
-        self.kind_map
-            .get(&requested)
-            .copied()
-            .or_else(|| self.kind_map.get(self.default_kind.as_str()).copied())
-            .unwrap_or(KernelAgentKind::Llm)
     }
 }
 
@@ -112,7 +80,6 @@ pub struct AgentImpl {
     planner_override: Option<Arc<dyn Planner>>,
     kernel_config: AgentKernelConfig,
     pub kernel_runtime: Arc<KernelRuntime>,
-    kernel_agent_registry: KernelAgentRegistry,
 }
 
 impl AgentImpl {
@@ -154,26 +121,38 @@ impl AgentImpl {
             .collect()
     }
 
-    async fn finalize_session_memory(
-        &self,
-        session: &talos_types::TalosSession,
-    ) -> TalosResult<()> {
+    fn spawn_session_memory_flush(&self, session: talos_types::TalosSession) {
         let selected_model = if session.config.llm.model.trim().is_empty() {
-            self.model.as_str()
+            self.model.clone()
         } else {
-            session.config.llm.model.as_str()
+            session.config.llm.model.clone()
         };
-        flush_session_memory(
-            &session.context.session_id,
-            selected_model,
-            self.llm_provider.clone(),
-            &self.memory_store,
-            &self.kernel_config,
-            false,
-            false,
-            self.kernel_config.memory.workspace_memory_flush_enabled,
-        )
-        .await
+        let session_id = session.context.session_id.clone();
+        let llm_provider = self.llm_provider.clone();
+        let memory_store = self.memory_store.clone();
+        let kernel_config = self.kernel_config.clone();
+
+        tokio::spawn(async move {
+            // TODO: Investigate flush latency further; session close must stay non-blocking for TUI exit.
+            if let Err(err) = flush_session_memory(
+                &session_id,
+                &selected_model,
+                llm_provider,
+                &memory_store,
+                &kernel_config,
+                false,
+                false,
+                kernel_config.memory.workspace_memory_flush_enabled,
+            )
+            .await
+            {
+                tracing::warn!(
+                    session_id = %session_id,
+                    error = %err,
+                    "background session memory flush failed"
+                );
+            }
+        });
     }
 
     fn to_agent_request(&self, request: OrchestratorRequest) -> AgentRequest {
@@ -188,6 +167,9 @@ impl AgentImpl {
 
     fn normalized_kernel_config(mut kernel_config: AgentKernelConfig) -> AgentKernelConfig {
         if kernel_config.binding.default_agent_kind.trim().is_empty() {
+            kernel_config.binding.default_agent_kind = "llm".to_string();
+        }
+        if kernel_config.binding.default_agent_kind.trim() != "llm" {
             kernel_config.binding.default_agent_kind = "llm".to_string();
         }
         if kernel_config.memory.workspace_dir.trim().is_empty() {
@@ -240,9 +222,6 @@ impl AgentImpl {
     ) -> Self {
         let kernel_config = Self::normalized_kernel_config(kernel_config);
         let memory_store = Arc::new(Self::build_memory_store_from_kernel_config(&kernel_config));
-        let mut kernel_agent_registry =
-            KernelAgentRegistry::new(kernel_config.binding.default_agent_kind.clone());
-        kernel_agent_registry.set_default_kind(kernel_config.binding.default_agent_kind.clone());
 
         Self {
             id,
@@ -255,7 +234,6 @@ impl AgentImpl {
             planner_override: None,
             kernel_config,
             kernel_runtime: Arc::new(KernelRuntime::new_default()),
-            kernel_agent_registry,
         }
     }
 
@@ -416,21 +394,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
     }
 
     fn kernel_config_snapshot(&self) -> AgentKernelConfig {
-        let mut kernel = self.kernel_config.clone();
-        kernel.binding.default_agent_kind = self.kernel_agent_registry.default_kind().to_string();
-        kernel
-    }
-
-    fn build_kernel_agent_by_kind(
-        &self,
-        kind: KernelAgentKind,
-        id: impl Into<String>,
-        name: impl Into<String>,
-        planner: Arc<dyn Planner>,
-    ) -> Arc<dyn KernelAgent> {
-        match kind {
-            KernelAgentKind::Llm => self.build_llm_kernel_agent(id, name, planner),
-        }
+        self.kernel_config.clone()
     }
 
     fn resolve_planner_mode(&self) -> TalosResult<PlannerMode> {
@@ -447,45 +411,41 @@ After receiving tool outputs, continue reasoning and provide the final response.
         })
     }
 
-    fn resolve_kernel_agent_kind(&self) -> KernelAgentKind {
-        self.kernel_agent_registry
-            .resolve(Some(self.kernel_agent_registry.default_kind()))
-    }
-
-    fn resolve_kernel_mode(&self) -> KernelExecutionMode {
+    fn resolve_kernel_mode(&self) -> TalosResult<KernelExecutionMode> {
         let mode = self
             .kernel_config
             .execution_mode
             .trim()
             .to_ascii_lowercase();
-        match mode.as_str() {
+        Ok(match mode.as_str() {
+            "single" => KernelExecutionMode::Single,
             "sequential" => KernelExecutionMode::Sequential,
             "parallel" => KernelExecutionMode::Parallel,
             "loop" => KernelExecutionMode::Loop,
-            "a2a" | "route" | "routing" => KernelExecutionMode::A2A,
-            _ => KernelExecutionMode::Single,
-        }
+            "a2a" => KernelExecutionMode::A2A,
+            other => {
+                return Err(TalosError::ValidationError(format!(
+                    "invalid execution mode: {}",
+                    other
+                )))
+            }
+        })
     }
 
     fn build_kernel_agent_for_request(&self) -> TalosResult<Arc<dyn KernelAgent>> {
         let planner = self.build_planner_for_request()?;
-        let agent_kind = self.resolve_kernel_agent_kind();
-        let mode = self.resolve_kernel_mode();
+        let mode = self.resolve_kernel_mode()?;
         let child_count = self.kernel_config.execution_children.clamp(1, 4);
         let loop_iters = self.kernel_config.execution_loop_iters.clamp(1, 16);
 
         Ok(match mode {
-            KernelExecutionMode::Single => self.build_kernel_agent_by_kind(
-                agent_kind,
-                self.id.clone(),
-                self.name.clone(),
-                planner.clone(),
-            ),
+            KernelExecutionMode::Single => {
+                self.build_llm_kernel_agent(self.id.clone(), self.name.clone(), planner.clone())
+            }
             KernelExecutionMode::Sequential => {
                 let children = (0..child_count)
                     .map(|idx| {
-                        self.build_kernel_agent_by_kind(
-                            agent_kind,
+                        self.build_llm_kernel_agent(
                             format!("{}-seq-{}", self.id, idx + 1),
                             format!("{} seq {}", self.name, idx + 1),
                             planner.clone(),
@@ -500,8 +460,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
             KernelExecutionMode::Parallel => {
                 let children = (0..child_count)
                     .map(|idx| {
-                        self.build_kernel_agent_by_kind(
-                            agent_kind,
+                        self.build_llm_kernel_agent(
                             format!("{}-par-{}", self.id, idx + 1),
                             format!("{} par {}", self.name, idx + 1),
                             planner.clone(),
@@ -515,8 +474,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
             }
             KernelExecutionMode::Loop => Arc::new(LoopKernelAgent::new(
                 format!("{}-loop", self.id),
-                self.build_kernel_agent_by_kind(
-                    agent_kind,
+                self.build_llm_kernel_agent(
                     format!("{}-loop-body", self.id),
                     format!("{} loop body", self.name),
                     planner.clone(),
@@ -528,8 +486,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
                     .with_max_hops(loop_iters);
                 router.register_node(
                     "primary",
-                    self.build_kernel_agent_by_kind(
-                        agent_kind,
+                    self.build_llm_kernel_agent(
                         format!("{}-primary", self.id),
                         format!("{} primary", self.name),
                         planner.clone(),
@@ -537,8 +494,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
                 );
                 router.register_node(
                     "peer",
-                    self.build_kernel_agent_by_kind(
-                        agent_kind,
+                    self.build_llm_kernel_agent(
                         format!("{}-peer", self.id),
                         format!("{} peer", self.name),
                         planner,
@@ -559,89 +515,87 @@ After receiving tool outputs, continue reasoning and provide the final response.
         let step_id = format!("step-{}", iteration);
         let mapped = match (event.event_type, event.data) {
             (
-                KernelStreamEventType::ReasoningDelta,
-                KernelStreamEventData::ReasoningDelta(data),
-            ) => {
-                let source = match data.source {
-                    KernelReasoningSource::Provider => "provider".to_string(),
-                    KernelReasoningSource::Kernel => "kernel".to_string(),
-                };
-                Some(OrchestratorEvent {
-                    event_type: "message.reasoning.delta".to_string(),
-                    data: json!({
-                        "request_id": request_id,
-                        "delta": data.delta,
-                        "reasoning_source": source,
-                        "item_index": current_index,
-                        "iteration": iteration,
-                        "step_id": step_id,
-                    }),
-                })
-            }
+                KernelStreamEventType::ThinkingDelta,
+                KernelStreamEventData::ThinkingDelta(data),
+            ) => Some(OrchestratorEvent::MessageReasoningDelta(
+                OrchestratorMessageReasoningDeltaEvent {
+                    request_id: request_id.to_string(),
+                    delta: data.delta,
+                    source: map_thinking_source(data.source),
+                    stage: map_thinking_stage(data.stage),
+                    item_index: current_index,
+                    iteration,
+                    step_id,
+                },
+            )),
+            (
+                KernelStreamEventType::ExecutionSummary,
+                KernelStreamEventData::ExecutionSummary(data),
+            ) => Some(OrchestratorEvent::MessageExecutionSummary(
+                OrchestratorMessageExecutionSummaryEvent {
+                    request_id: request_id.to_string(),
+                    text: data.text,
+                    item_index: current_index,
+                    iteration,
+                    step_id,
+                },
+            )),
             (KernelStreamEventType::OutputDelta, KernelStreamEventData::OutputDelta(data)) => {
-                let output_source = match data.source {
-                    Some(KernelOutputDeltaSource::Provider) => "provider",
-                    Some(KernelOutputDeltaSource::KernelFallback) => "kernel_fallback",
-                    None => "unknown",
-                };
-                Some(OrchestratorEvent {
-                    event_type: "message.output.delta".to_string(),
-                    data: json!({
-                        "request_id": request_id,
-                        "delta": data.delta,
-                        "output_source": output_source,
-                        "item_index": current_index,
-                        "iteration": iteration,
-                        "step_id": step_id,
-                    }),
-                })
+                Some(OrchestratorEvent::MessageOutputDelta(
+                    OrchestratorMessageOutputDeltaEvent {
+                        request_id: request_id.to_string(),
+                        delta: data.delta,
+                        item_index: current_index,
+                        iteration,
+                        step_id,
+                    },
+                ))
             }
             (KernelStreamEventType::ToolCallStart, KernelStreamEventData::ToolCallStart(data)) => {
-                Some(OrchestratorEvent {
-                    event_type: "message.tool_call.started".to_string(),
-                    data: json!({
-                        "request_id": request_id,
-                        "call_id": data.call_id,
-                        "name": data.tool_name,
-                        "arguments": data.arguments,
-                        "item_index": current_index,
-                        "iteration": iteration,
-                        "step_id": step_id,
-                        "timing_ms": Value::Null,
-                    }),
-                })
+                Some(OrchestratorEvent::MessageToolCallStarted(
+                    OrchestratorMessageToolCallStartedEvent {
+                        request_id: request_id.to_string(),
+                        call_id: data.call_id.unwrap_or_else(|| "unknown".to_string()),
+                        name: data.tool_name.unwrap_or_else(|| "unknown".to_string()),
+                        arguments: data.arguments,
+                        item_index: current_index,
+                        iteration,
+                        step_id,
+                        timing_ms: None,
+                    },
+                ))
             }
             (KernelStreamEventType::ToolResult, KernelStreamEventData::ToolResult(data)) => {
-                let payload = serde_json::to_value(&data.content).unwrap_or_else(|_| json!([]));
-                Some(OrchestratorEvent {
-                    event_type: "message.tool_call.completed".to_string(),
-                    data: json!({
-                        "request_id": request_id,
-                        "call_id": data.call_id,
-                        "tool": data.tool_name,
-                        "content": [{
-                            "type": "json",
-                            "value": payload,
-                        }],
-                        "is_error": data.is_error,
-                        "item_index": current_index,
-                        "iteration": iteration,
-                        "step_id": step_id,
-                        "timing_ms": Value::Null,
-                    }),
-                })
+                Some(OrchestratorEvent::MessageToolCallCompleted(
+                    OrchestratorMessageToolCallCompletedEvent {
+                        request_id: request_id.to_string(),
+                        call_id: data.call_id,
+                        tool: data.tool_name,
+                        content: if data.content.is_empty() {
+                            vec![TalosContentItem::Json {
+                                value: Value::Array(Vec::new()),
+                            }]
+                        } else {
+                            data.content
+                        },
+                        is_error: data.is_error,
+                        item_index: current_index,
+                        iteration,
+                        step_id,
+                        timing_ms: None,
+                    },
+                ))
             }
             (KernelStreamEventType::PromptWarning, KernelStreamEventData::PromptWarning(data)) => {
-                Some(OrchestratorEvent {
-                    event_type: "message.warning".to_string(),
-                    data: json!({
-                        "request_id": request_id,
-                        "warning": data.warning,
-                        "item_index": current_index,
-                        "iteration": iteration,
-                        "step_id": step_id,
-                    }),
-                })
+                Some(OrchestratorEvent::MessageExecutionSummary(
+                    OrchestratorMessageExecutionSummaryEvent {
+                        request_id: request_id.to_string(),
+                        text: format!("Prompt warning: {:?}", data.warning),
+                        item_index: current_index,
+                        iteration,
+                        step_id,
+                    },
+                ))
             }
             _ => None,
         };
@@ -649,6 +603,23 @@ After receiving tool outputs, continue reasoning and provide the final response.
             *item_index = (*item_index).saturating_add(1);
         }
         mapped
+    }
+}
+
+fn map_thinking_source(source: KernelThinkingSource) -> TalosThinkingSource {
+    match source {
+        KernelThinkingSource::Provider => TalosThinkingSource::Provider,
+        KernelThinkingSource::Framework => TalosThinkingSource::Framework,
+    }
+}
+
+fn map_thinking_stage(stage: KernelThinkingStage) -> TalosThinkingStage {
+    match stage {
+        KernelThinkingStage::ModelReasoning => TalosThinkingStage::ModelReasoning,
+        KernelThinkingStage::FrameworkPlan => TalosThinkingStage::FrameworkPlan,
+        KernelThinkingStage::FrameworkAct => TalosThinkingStage::FrameworkAct,
+        KernelThinkingStage::FrameworkObserve => TalosThinkingStage::FrameworkObserve,
+        KernelThinkingStage::FrameworkReflect => TalosThinkingStage::FrameworkReflect,
     }
 }
 
@@ -778,13 +749,10 @@ impl AgentOrchestrator for AgentImpl {
                 Ok(agent) => agent,
                 Err(err) => {
                     let _ = tx
-                        .send(OrchestratorEvent {
-                            event_type: "response.error".to_string(),
-                            data: json!({
-                                "request_id": request_id,
-                                "error": err.to_string(),
-                            }),
-                        })
+                        .send(OrchestratorEvent::MessageError(OrchestratorMessageErrorEvent {
+                            request_id: request_id.clone(),
+                            error: err.to_string(),
+                        }))
                         .await;
                     return;
                 }
@@ -812,16 +780,15 @@ impl AgentOrchestrator for AgentImpl {
             };
 
             let _ = tx
-                .send(OrchestratorEvent {
-                    event_type: "message.started".to_string(),
-                    data: json!({
-                        "request_id": request_id,
-                        "model": model,
-                        "usage": TalosUsage::default(),
-                        "iteration": 0_u64,
-                        "step_id": "start",
-                    }),
-                })
+                .send(OrchestratorEvent::MessageStarted(
+                    OrchestratorMessageStartedEvent {
+                        request_id: request_id.clone(),
+                        model,
+                        usage: TalosUsage::default(),
+                        iteration: 0,
+                        step_id: "start".to_string(),
+                    },
+                ))
                 .await;
 
             let run_handle =
@@ -839,40 +806,38 @@ impl AgentOrchestrator for AgentImpl {
             match run_handle.await {
                 Ok(Ok(result)) => {
                     let _ = tx
-                        .send(OrchestratorEvent {
-                            event_type: "message.completed".to_string(),
-                            data: json!({
-                                "stop_reason": result.stop_reason,
-                                "request_id": request_id,
-                                "usage": result.usage,
-                                "total_output_items": item_index,
-                                "iteration": item_index.saturating_add(1),
-                                "step_id": "completed",
-                                "task_count": result.task_results.len(),
-                            }),
-                        })
+                        .send(OrchestratorEvent::MessageCompleted(
+                            OrchestratorMessageCompletedEvent {
+                                request_id: request_id.clone(),
+                                stop_reason: Self::map_stop_reason(result.stop_reason)
+                                    .to_string(),
+                                usage: result.usage,
+                                total_output_items: item_index,
+                                iteration: item_index.saturating_add(1),
+                                step_id: "completed".to_string(),
+                                task_count: result.task_results.len() as u32,
+                            },
+                        ))
                         .await;
                 }
                 Ok(Err(err)) => {
                     let _ = tx
-                        .send(OrchestratorEvent {
-                            event_type: "message.error".to_string(),
-                            data: json!({
-                                "request_id": request_id,
-                                "error": err.to_string(),
-                            }),
-                        })
+                        .send(OrchestratorEvent::MessageError(
+                            OrchestratorMessageErrorEvent {
+                                request_id: request_id.clone(),
+                                error: err.to_string(),
+                            },
+                        ))
                         .await;
                 }
                 Err(err) => {
                     let _ = tx
-                        .send(OrchestratorEvent {
-                            event_type: "message.error".to_string(),
-                            data: json!({
-                                "request_id": request_id,
-                                "error": format!("kernel stream task join failed: {}", err),
-                            }),
-                        })
+                        .send(OrchestratorEvent::MessageError(
+                            OrchestratorMessageErrorEvent {
+                                request_id: request_id.clone(),
+                                error: format!("kernel stream task join failed: {}", err),
+                            },
+                        ))
                         .await;
                 }
             }
@@ -881,7 +846,8 @@ impl AgentOrchestrator for AgentImpl {
     }
 
     async fn close_session(&self, session: talos_types::TalosSession) -> TalosResult<()> {
-        self.finalize_session_memory(&session).await
+        self.spawn_session_memory_flush(session);
+        Ok(())
     }
 }
 
@@ -988,41 +954,39 @@ impl AgentOrchestrator for MockAgent {
         let (tx, rx) = mpsc::channel(8);
         tokio::spawn(async move {
             let _ = tx
-                .send(OrchestratorEvent {
-                    event_type: "message.started".to_string(),
-                    data: json!({
-                        "request_id": request_id,
-                        "model": "mock-model",
-                        "usage": TalosUsage::default(),
-                        "iteration": 0_u64,
-                        "step_id": "start",
-                    }),
-                })
+                .send(OrchestratorEvent::MessageStarted(
+                    OrchestratorMessageStartedEvent {
+                        request_id: request_id.clone(),
+                        model: "mock-model".to_string(),
+                        usage: TalosUsage::default(),
+                        iteration: 0,
+                        step_id: "start".to_string(),
+                    },
+                ))
                 .await;
             let _ = tx
-                .send(OrchestratorEvent {
-                    event_type: "message.output.delta".to_string(),
-                    data: json!({
-                        "request_id": request_id,
-                        "delta": execution.output_text,
-                        "item_index": 0_u64,
-                        "iteration": 1_u64,
-                        "step_id": "step-1",
-                    }),
-                })
+                .send(OrchestratorEvent::MessageOutputDelta(
+                    OrchestratorMessageOutputDeltaEvent {
+                        request_id: request_id.clone(),
+                        delta: execution.output_text,
+                        item_index: 0,
+                        iteration: 1,
+                        step_id: "step-1".to_string(),
+                    },
+                ))
                 .await;
             let _ = tx
-                .send(OrchestratorEvent {
-                    event_type: "message.completed".to_string(),
-                    data: json!({
-                        "request_id": request_id,
-                        "stop_reason": execution.stop_reason,
-                        "usage": execution.usage,
-                        "total_output_items": 1_u64,
-                        "iteration": 2_u64,
-                        "step_id": "completed",
-                    }),
-                })
+                .send(OrchestratorEvent::MessageCompleted(
+                    OrchestratorMessageCompletedEvent {
+                        request_id,
+                        stop_reason: execution.stop_reason,
+                        usage: execution.usage,
+                        total_output_items: 1,
+                        iteration: 2,
+                        step_id: "completed".to_string(),
+                        task_count: execution.task_count,
+                    },
+                ))
                 .await;
         });
         Ok(rx)
@@ -1292,9 +1256,17 @@ mod tests {
             .path()
             .join("memory")
             .join(format!("{}.md", Utc::now().format("%Y-%m-%d")));
-        let content = tokio::fs::read_to_string(file_path)
-            .await
-            .expect("workspace daily memory file should exist");
+        let mut content = None;
+        for _ in 0..20 {
+            match tokio::fs::read_to_string(&file_path).await {
+                Ok(value) => {
+                    content = Some(value);
+                    break;
+                }
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(25)).await,
+            }
+        }
+        let content = content.expect("workspace daily memory file should exist");
         assert!(content.contains("## Durable Memory"));
         assert!(!content.trim().is_empty());
     }
@@ -1323,10 +1295,9 @@ mod tests {
     }
 
     #[test]
-    fn test_kernel_agent_kind_comes_from_binding_default() {
+    fn test_kernel_binding_default_is_llm() {
         let agent = build_test_agent();
-        let kind = agent.resolve_kernel_agent_kind();
-        assert_eq!(kind, KernelAgentKind::Llm);
+        assert_eq!(agent.kernel_config.binding.default_agent_kind, "llm");
     }
 
     // Mock LLM provider for testing

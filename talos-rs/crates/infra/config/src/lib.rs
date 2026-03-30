@@ -1665,14 +1665,15 @@ llm:
         name: qwen-plus
         context_window: 32768
         max_tokens: 8192
-        reasoning: false
+        reasoning: true
         input: [text]
         cost:
           input: 0
           output: 0
           cache_read: 0
           cache_write: 0
-        compat: {}
+        compat:
+          thinking_format: qwen
       - id: qwen-turbo
         name: qwen-turbo
         context_window: 32768

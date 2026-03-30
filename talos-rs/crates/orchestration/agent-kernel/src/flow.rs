@@ -9,10 +9,12 @@ use crate::general_turn::{
 use crate::{
     CallbackControl, CallbackRegistry, EventAuthor, ExecutionBranch, ExecutionEvent,
     ExecutionEventKind, FlowKind, FlowProfile, InvocationContext, InvocationPluginManager,
-    KernelExecutionSettings, KernelWarning, LlmRequestEnvelope, LlmResponseEnvelope,
-    MemoryBackedSessionService, Planner, RequestProcessorPipeline, ResponseProcessorPipeline,
-    SessionEvent, SessionEventKind, SessionEventPayload, SessionService, StopReason,
-    ToolCallbackPayload, ToolExecutor, ToolExecutorFactory,
+    KernelExecutionSettings, KernelStreamEvent, KernelStreamEventData, KernelStreamEventType,
+    KernelThinkingSource, KernelThinkingStage, KernelWarning, LlmRequestEnvelope,
+    LlmResponseEnvelope, MemoryBackedSessionService, Planner, RequestProcessorPipeline,
+    ResponseProcessorPipeline, SessionEvent, SessionEventKind, SessionEventPayload,
+    SessionService, StopReason, ThinkingDeltaStreamData, ToolCallbackPayload, ToolExecutor,
+    ToolExecutorFactory,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -22,6 +24,7 @@ use talos_llm_provider::LlmProvider;
 use talos_memory::MemoryStore;
 use talos_tools::ToolRegistry;
 use talos_types::talos::{TalosContentItem, TalosOutputItem, TalosUsage};
+use tokio::sync::mpsc;
 
 #[derive(Debug, Clone)]
 pub struct FlowRunSummary {
@@ -278,6 +281,46 @@ fn stage_session_event(ctx: &mut InvocationContext, event: SessionEvent) {
     ctx.session.events.push(event);
 }
 
+async fn emit_framework_thinking(
+    stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
+    stage: KernelThinkingStage,
+    round: u32,
+    delta: impl Into<String>,
+) {
+    let Some(tx) = stream_tx else {
+        return;
+    };
+    let _ = tx
+        .send(KernelStreamEvent::new(
+            KernelStreamEventType::ThinkingDelta,
+            KernelStreamEventData::ThinkingDelta(ThinkingDeltaStreamData {
+                delta: delta.into(),
+                source: KernelThinkingSource::Framework,
+                stage,
+                round: Some(round),
+            }),
+        ))
+        .await;
+}
+
+fn tool_names_for_thinking(output_items: &[TalosOutputItem]) -> Vec<String> {
+    output_items
+        .iter()
+        .filter_map(|item| match item {
+            TalosOutputItem::ToolCall { name, .. } => Some(name.clone()),
+            TalosOutputItem::ToolResult { content, .. } => content.iter().find_map(|entry| match entry
+            {
+                TalosContentItem::Json { value } => value
+                    .get("tool")
+                    .and_then(|item| item.as_str())
+                    .map(str::to_string),
+                TalosContentItem::Text { .. } => None,
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
 fn has_final_response(events: &[ExecutionEvent], branch: ExecutionBranch) -> bool {
     events
         .iter()
@@ -377,6 +420,19 @@ impl BaseLlmFlow for SingleFlow {
         let mut state = GeneralTurnLoopState::new(&prepared);
         let mut final_text = String::new();
         let stop_reason = loop {
+            if matches!(self.flow_profile, FlowProfile::PlanReactLoop) {
+                let stage = if state.round == 0 {
+                    KernelThinkingStage::FrameworkPlan
+                } else {
+                    KernelThinkingStage::FrameworkReflect
+                };
+                let text = if state.round == 0 {
+                    "Planning the next step from the current user request and available tools."
+                } else {
+                    "Re-evaluating the plan with the latest tool observations before the next model step."
+                };
+                emit_framework_thinking(prepared.stream_tx.as_ref(), stage, state.round, text).await;
+            }
             let mut step_request = build_general_turn_step_request(&prepared, &state);
             let mut step_model_request = build_flow_step_model_request(
                 request.planning_instruction.clone(),
@@ -496,6 +552,21 @@ impl BaseLlmFlow for SingleFlow {
                 );
                 break StopReason::EndTurn;
             }
+            if matches!(self.flow_profile, FlowProfile::PlanReactLoop) {
+                let tool_names = tool_names_for_thinking(&step.output_items);
+                let tool_list = if tool_names.is_empty() {
+                    "available tools".to_string()
+                } else {
+                    tool_names.join(", ")
+                };
+                emit_framework_thinking(
+                    prepared.stream_tx.as_ref(),
+                    KernelThinkingStage::FrameworkAct,
+                    state.round,
+                    format!("Executing the next action with tool calls: {}", tool_list),
+                )
+                .await;
+            }
             stage_session_event(
                 ctx,
                 SessionEvent::new(
@@ -575,6 +646,26 @@ impl BaseLlmFlow for SingleFlow {
                 }
             }
             apply_general_turn_tool_batch(&mut state, &tool_batch, &self.kernel_config);
+            if matches!(self.flow_profile, FlowProfile::PlanReactLoop) {
+                let tool_names = tool_names_for_thinking(&tool_response.output_items);
+                let observed = tool_names.len();
+                let tool_list = if tool_names.is_empty() {
+                    "tool outputs".to_string()
+                } else {
+                    tool_names.join(", ")
+                };
+                emit_framework_thinking(
+                    prepared.stream_tx.as_ref(),
+                    KernelThinkingStage::FrameworkObserve,
+                    state.round,
+                    format!(
+                        "Observed {} result(s) from {} and feeding them back into the planner.",
+                        observed.max(1),
+                        tool_list
+                    ),
+                )
+                .await;
+            }
 
             if state.round >= max_tool_rounds {
                 final_text = "[tool-call rounds exceeded]".to_string();

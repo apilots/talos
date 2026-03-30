@@ -11,8 +11,12 @@ use tokio::sync::mpsc;
 
 use talos_error::{TalosError, TalosResult};
 pub use talos_types::talos::{
-    TalosContext, TalosEvent, TalosEventType, TalosInputItem, TalosMessageRequest,
-    TalosMessageResponse, TalosOutputItem, TalosProvider, TalosSourceType,
+    TalosContext, TalosEvent, TalosEventPayload, TalosEventType, TalosInputItem,
+    TalosMessageCompletedEvent, TalosMessageErrorEvent, TalosMessageExecutionSummaryEvent,
+    TalosMessageOutputDeltaEvent, TalosMessageReasoningDeltaEvent, TalosMessageRequest,
+    TalosMessageResponse, TalosMessageStartedEvent, TalosMessageToolCallCompletedEvent,
+    TalosMessageToolCallStartedEvent, TalosOutputItem, TalosProvider, TalosSourceType,
+    TalosThinkingSource, TalosThinkingStage,
 };
 pub use talos_types::{ModelInfo, TalosSession};
 
