@@ -180,7 +180,9 @@ impl SingleFlow {
                         break;
                     }
                 }
-                TalosOutputItem::ToolResult { call_id, tool_name, .. } => {
+                TalosOutputItem::ToolResult {
+                    call_id, tool_name, ..
+                } => {
                     let payload = ToolCallbackPayload {
                         tool_name: tool_name.clone(),
                         call_id: call_id.clone(),

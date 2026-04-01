@@ -37,14 +37,16 @@ impl McpTransport for HttpTransport {
             req = req.bearer_auth(token);
         }
 
-        let response = req.send().await.map_err(|e| {
-            TalosError::ToolError(format!("MCP HTTP transport error: {e}"))
-        })?;
+        let response = req
+            .send()
+            .await
+            .map_err(|e| TalosError::ToolError(format!("MCP HTTP transport error: {e}")))?;
 
         let status = response.status();
-        let text = response.text().await.map_err(|e| {
-            TalosError::ToolError(format!("MCP HTTP read error: {e}"))
-        })?;
+        let text = response
+            .text()
+            .await
+            .map_err(|e| TalosError::ToolError(format!("MCP HTTP read error: {e}")))?;
 
         if !status.is_success() {
             return Err(TalosError::ToolError(format!(

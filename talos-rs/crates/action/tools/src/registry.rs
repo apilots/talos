@@ -211,7 +211,11 @@ impl ToolRegistry {
         let handler = Arc::new(McpToolHandler::new(Arc::clone(&manager)));
         for spec in manager.all_tool_specs() {
             let tool_name = spec.definition.name.clone();
-            self.register_handler(tool_name, spec, Arc::clone(&handler) as Arc<dyn ToolHandler>);
+            self.register_handler(
+                tool_name,
+                spec,
+                Arc::clone(&handler) as Arc<dyn ToolHandler>,
+            );
         }
     }
 
@@ -613,7 +617,9 @@ mod tests {
         // The tool is registered in the catalog even if the default policy doesn't list it.
         let defs = registry.get_tool_definitions();
         assert!(defs.iter().any(|d| d.name == "skill_greet"));
-        assert!(registry.list_tool_names().contains(&"skill_greet".to_string()));
+        assert!(registry
+            .list_tool_names()
+            .contains(&"skill_greet".to_string()));
     }
 
     #[tokio::test]

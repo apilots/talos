@@ -226,8 +226,8 @@ mod tests {
     use std::sync::Mutex;
     use talos_types::gateway::{GatewayRequest, GatewayResponse};
     use talos_types::talos::{
-        TalosEvent, TalosEventPayload, TalosEventType, TalosMessageStartedEvent,
-        TalosReasoning, TalosUsage,
+        TalosEvent, TalosEventPayload, TalosEventType, TalosMessageStartedEvent, TalosReasoning,
+        TalosUsage,
     };
 
     use crate::traits::{ChannelCapabilities, ChannelDefinition, DeliveryResult, OutboundAdapter};

@@ -12,7 +12,10 @@ use crate::output::ToolOutputPayload;
 use crate::spec::ToolSource;
 
 pub type DynamicToolFn = Arc<
-    dyn Fn(Value, ToolDispatchContext) -> Pin<Box<dyn Future<Output = TalosResult<ToolOutputPayload>> + Send>>
+    dyn Fn(
+            Value,
+            ToolDispatchContext,
+        ) -> Pin<Box<dyn Future<Output = TalosResult<ToolOutputPayload>> + Send>>
         + Send
         + Sync,
 >;

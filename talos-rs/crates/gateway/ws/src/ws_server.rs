@@ -364,8 +364,8 @@ mod tests {
     use super::*;
     use talos_gateway::{Gateway, GatewayResponse};
     use talos_types::talos::{
-        TalosEvent, TalosEventPayload, TalosEventType, TalosInputItem,
-        TalosMessageStartedEvent, TalosOutputItem, TalosReasoning, TalosUsage,
+        TalosEvent, TalosEventPayload, TalosEventType, TalosInputItem, TalosMessageStartedEvent,
+        TalosOutputItem, TalosReasoning, TalosUsage,
     };
 
     struct MockGateway;

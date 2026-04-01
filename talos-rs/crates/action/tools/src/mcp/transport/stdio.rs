@@ -37,18 +37,17 @@ impl StdioTransport {
             .stderr(std::process::Stdio::inherit());
 
         let mut child = cmd.spawn().map_err(|e| {
-            TalosError::ToolError(format!(
-                "failed to spawn MCP server `{}`: {e}",
-                command
-            ))
+            TalosError::ToolError(format!("failed to spawn MCP server `{}`: {e}", command))
         })?;
 
-        let stdin = child.stdin.take().ok_or_else(|| {
-            TalosError::ToolError("MCP child stdin unavailable".to_string())
-        })?;
-        let stdout = child.stdout.take().ok_or_else(|| {
-            TalosError::ToolError("MCP child stdout unavailable".to_string())
-        })?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| TalosError::ToolError("MCP child stdin unavailable".to_string()))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| TalosError::ToolError("MCP child stdout unavailable".to_string()))?;
 
         Ok(Self {
             inner: Arc::new(Mutex::new(StdioInner {

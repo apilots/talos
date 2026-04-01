@@ -13,7 +13,7 @@ pub mod trait_impl;
 pub use context::ToolContext;
 pub use handlers::{DynamicToolHandler, LocalToolHandler, McpToolHandler, ToolHandler};
 pub use invocation::{ToolCallPayload, ToolDispatchContext, ToolInvocation};
-pub use mcp::{McpConnectionManager, mcp_tool_name, split_mcp_tool_name};
+pub use mcp::{mcp_tool_name, split_mcp_tool_name, McpConnectionManager};
 pub use output::ToolOutputPayload;
 pub use r#trait::{Tool, ToolOutput};
 pub use registry::ToolRegistry;

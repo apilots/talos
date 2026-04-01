@@ -46,6 +46,8 @@ impl ToolHandler for McpToolHandler {
                 invocation.tool_name
             )));
         };
-        self.manager.call_tool(&server, &tool, Some(arguments)).await
+        self.manager
+            .call_tool(&server, &tool, Some(arguments))
+            .await
     }
 }

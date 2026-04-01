@@ -90,16 +90,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 5. Demonstrate Security Policy Enforcement
     println!("5. Security Policy Enforcement:");
-    println!(
-        "   Attempting to execute 'exec_command' tool (should be blocked by policy)..."
-    );
+    println!("   Attempting to execute 'exec_command' tool (should be blocked by policy)...");
 
     let exec_result = registry
         .execute("exec_command", json!({"cmd": "ls -la"}))
         .await;
     match exec_result {
         Ok(_) => println!("   exec_command tool executed successfully (unexpected!)"),
-        Err(e) => println!("   exec_command tool execution blocked: {} (as expected)", e),
+        Err(e) => println!(
+            "   exec_command tool execution blocked: {} (as expected)",
+            e
+        ),
     }
     println!();
 

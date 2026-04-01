@@ -71,12 +71,11 @@ impl McpClient {
                 err.code, err.message
             )));
         }
-        let result: ListToolsResult = serde_json::from_value(
-            response
-                .result
-                .ok_or_else(|| TalosError::ToolError("MCP tools/list: empty result".to_string()))?,
-        )
-        .map_err(|e| TalosError::ToolError(format!("MCP tools/list parse: {e}")))?;
+        let result: ListToolsResult =
+            serde_json::from_value(response.result.ok_or_else(|| {
+                TalosError::ToolError("MCP tools/list: empty result".to_string())
+            })?)
+            .map_err(|e| TalosError::ToolError(format!("MCP tools/list parse: {e}")))?;
         Ok(result.tools)
     }
 
@@ -90,13 +89,14 @@ impl McpClient {
             name: tool_name.to_string(),
             arguments,
         };
-        let req = JsonRpcRequest::new(
-            self.next_id(),
-            "tools/call",
-            Some(serde_json::to_value(params).map_err(|e| {
-                TalosError::ToolError(format!("MCP serialize call params: {e}"))
-            })?),
-        );
+        let req =
+            JsonRpcRequest::new(
+                self.next_id(),
+                "tools/call",
+                Some(serde_json::to_value(params).map_err(|e| {
+                    TalosError::ToolError(format!("MCP serialize call params: {e}"))
+                })?),
+            );
         let body = serde_json::to_string(&req)
             .map_err(|e| TalosError::ToolError(format!("MCP serialize request: {e}")))?;
         let response = self.transport.send(body).await?;
@@ -106,12 +106,11 @@ impl McpClient {
                 err.code, err.message
             )));
         }
-        let result: CallToolResult = serde_json::from_value(
-            response
-                .result
-                .ok_or_else(|| TalosError::ToolError("MCP tools/call: empty result".to_string()))?,
-        )
-        .map_err(|e| TalosError::ToolError(format!("MCP tools/call parse: {e}")))?;
+        let result: CallToolResult =
+            serde_json::from_value(response.result.ok_or_else(|| {
+                TalosError::ToolError("MCP tools/call: empty result".to_string())
+            })?)
+            .map_err(|e| TalosError::ToolError(format!("MCP tools/call parse: {e}")))?;
         Ok(result)
     }
 
