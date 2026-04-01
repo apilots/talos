@@ -303,6 +303,32 @@ impl CoordinatorImpl {
         }
     }
 
+    async fn resolve_session_agent(
+        &self,
+        session: &TalosSession,
+    ) -> TalosResult<(String, Arc<dyn AgentOrchestrator>)> {
+        let route_channel = Self::route_channel(&TalosContext {
+            source_type: session.context.source_type.clone(),
+            provider: session.context.provider.clone(),
+            user_id: session.context.user_id.clone(),
+            message_id: session.context.message_id.clone(),
+            trace_id: session.context.trace_id.clone(),
+            channel_id: session.context.channel_id.clone(),
+            thread_id: session.context.thread_id.clone(),
+        });
+        let target_agent = self
+            .router
+            .route(&route_channel, &session.context.user_id)
+            .await?
+            .unwrap_or_else(|| "default".to_string());
+        let agents = self.agents.read().await;
+        let agent = agents
+            .get(&target_agent)
+            .cloned()
+            .ok_or_else(|| talos_error::TalosError::AgentNotFound(target_agent.clone()))?;
+        Ok((target_agent, agent))
+    }
+
     /// Get reference to registered agents
     pub fn agents(&self) -> Arc<RwLock<HashMap<String, Arc<dyn AgentOrchestrator>>>> {
         self.agents.clone()
@@ -591,26 +617,7 @@ impl SessionService for CoordinatorImpl {
             )));
         };
 
-        let route_channel = Self::route_channel(&TalosContext {
-            source_type: session.context.source_type.clone(),
-            provider: session.context.provider.clone(),
-            user_id: session.context.user_id.clone(),
-            message_id: session.context.message_id.clone(),
-            trace_id: session.context.trace_id.clone(),
-            channel_id: session.context.channel_id.clone(),
-            thread_id: session.context.thread_id.clone(),
-        });
-        let target_agent = self
-            .router
-            .route(&route_channel, &session.context.user_id)
-            .await?
-            .unwrap_or_else(|| "default".to_string());
-        let agents = self.agents.read().await;
-        let agent = agents
-            .get(&target_agent)
-            .cloned()
-            .ok_or_else(|| talos_error::TalosError::AgentNotFound(target_agent.clone()))?;
-        drop(agents);
+        let (_target_agent, agent) = self.resolve_session_agent(&session).await?;
         agent.close_session(session).await?;
         self.sessions.invalidate_cached_session(session_id).await;
         Ok(())
@@ -628,30 +635,30 @@ impl SessionService for CoordinatorImpl {
             .sessions
             .get_session(session_id)
             .await?
-            .ok_or_else(|| talos_error::TalosError::ResourceNotFound(format!("session {}", session_id)))?;
-        let route_channel = Self::route_channel(&TalosContext {
-            source_type: session.context.source_type.clone(),
-            provider: session.context.provider.clone(),
-            user_id: session.context.user_id.clone(),
-            message_id: session.context.message_id.clone(),
-            trace_id: session.context.trace_id.clone(),
-            channel_id: session.context.channel_id.clone(),
-            thread_id: session.context.thread_id.clone(),
-        });
-        let target_agent = self
-            .router
-            .route(&route_channel, &session.context.user_id)
-            .await?
-            .unwrap_or_else(|| "default".to_string());
-        let agents = self.agents.read().await;
-        let agent = agents
-            .get(&target_agent)
-            .cloned()
-            .ok_or_else(|| talos_error::TalosError::AgentNotFound(target_agent.clone()))?;
-        drop(agents);
+            .ok_or_else(|| {
+                talos_error::TalosError::ResourceNotFound(format!("session {}", session_id))
+            })?;
+        let (_target_agent, agent) = self.resolve_session_agent(&session).await?;
         agent
             .submit_tool_approval(session_id, call_id, tool_name, approved, reason)
-            .await
+            .await?;
+
+        let response = agent
+            .run(OrchestratorRequest {
+                session: session.clone(),
+                input: Vec::new(),
+            })
+            .await?;
+        let model_for_turn = session.config.llm.model.clone();
+        self.sessions
+            .record_turn_completion(
+                &session.context.session_id,
+                &model_for_turn,
+                1,
+                &response.usage,
+            )
+            .await?;
+        Ok(())
     }
 }
 
@@ -674,12 +681,14 @@ mod tests {
 
     struct RecordingApprovalAgent {
         approvals: Arc<Mutex<Vec<(String, String, String, bool, Option<String>)>>>,
+        resumed_inputs: Arc<Mutex<Vec<Vec<TalosInputItem>>>>,
     }
 
     impl RecordingApprovalAgent {
         fn new() -> Self {
             Self {
                 approvals: Arc::new(Mutex::new(Vec::new())),
+                resumed_inputs: Arc::new(Mutex::new(Vec::new())),
             }
         }
     }
@@ -710,6 +719,10 @@ mod tests {
         }
 
         async fn run(&self, request: OrchestratorRequest) -> TalosResult<OrchestratorExecution> {
+            self.resumed_inputs
+                .lock()
+                .unwrap()
+                .push(request.input.clone());
             Ok(OrchestratorExecution {
                 output_text: "ok".to_string(),
                 output_items: Vec::new(),
@@ -830,6 +843,7 @@ mod tests {
             CoordinatorImpl::new(mock_router, mock_session_store, TalosConfig::default());
         let agent = Arc::new(RecordingApprovalAgent::new());
         let approvals = agent.approvals.clone();
+        let resumed_inputs = agent.resumed_inputs.clone();
         coordinator
             .register_agent("test_agent", agent)
             .await
@@ -858,5 +872,10 @@ mod tests {
                 Some("deny".to_string()),
             )
         );
+        drop(approvals);
+
+        let resumed_inputs = resumed_inputs.lock().unwrap();
+        assert_eq!(resumed_inputs.len(), 1);
+        assert!(resumed_inputs[0].is_empty());
     }
 }

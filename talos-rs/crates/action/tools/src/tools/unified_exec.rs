@@ -2,7 +2,9 @@ use async_trait::async_trait;
 use serde_json::Value;
 use talos_error::TalosResult;
 
-use crate::runtimes::exec::{exec_command, write_stdin, ExecCommandRequest, WriteStdinRequest};
+use crate::runtimes::exec::{
+    exec_command, write_stdin_with_context, ExecCommandRequest, WriteStdinRequest,
+};
 use crate::{Tool, ToolContext, ToolOutput};
 
 pub struct ExecCommandTool;
@@ -80,11 +82,11 @@ impl Tool for WriteStdinTool {
         }))
     }
 
-    async fn execute(&self, input: Value, _context: ToolContext) -> TalosResult<ToolOutput> {
+    async fn execute(&self, input: Value, context: ToolContext) -> TalosResult<ToolOutput> {
         let request: WriteStdinRequest = serde_json::from_value(input).map_err(|err| {
             talos_error::TalosError::ToolError(format!("invalid write_stdin arguments: {}", err))
         })?;
-        let response = write_stdin(&request).await?;
+        let response = write_stdin_with_context(&request, &context).await?;
         let output = serde_json::to_string(&response).map_err(|err| {
             talos_error::TalosError::ToolError(format!("serialize write_stdin response: {}", err))
         })?;

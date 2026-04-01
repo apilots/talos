@@ -8,9 +8,8 @@ pub use protocol::McpToolDefinition;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use talos_config::McpServerConfig;
-use talos_config::McpTransportConfig;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::ToolDefinition;
 
@@ -21,6 +20,29 @@ use crate::spec::{RegisteredToolSpec, ToolParallelism, ToolPayloadKind, ToolSour
 /// Prefix used in tool names for MCP tools: `mcp__<server>__<tool>`.
 pub const MCP_TOOL_NAME_PREFIX: &str = "mcp__";
 const MCP_DELIMITER: &str = "__";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct McpServerConfig {
+    pub name: String,
+    pub transport: McpTransportConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum McpTransportConfig {
+    Stdio {
+        command: String,
+        #[serde(default)]
+        args: Vec<String>,
+        #[serde(default)]
+        env: HashMap<String, String>,
+    },
+    Http {
+        url: String,
+        #[serde(default)]
+        bearer_token: Option<String>,
+    },
+}
 
 /// Build the qualified tool name for an MCP tool.
 pub fn mcp_tool_name(server: &str, tool: &str) -> String {
@@ -84,7 +106,10 @@ impl McpConnectionManager {
                 let definition = ToolDefinition {
                     name: qualified_name,
                     description: t.description.unwrap_or_default(),
-                    parameters: Some(t.input_schema.unwrap_or(serde_json::json!({"type":"object","properties":{}}))),
+                    parameters: Some(
+                        t.input_schema
+                            .unwrap_or(serde_json::json!({"type":"object","properties":{}})),
+                    ),
                 };
                 RegisteredToolSpec::new(
                     definition,
@@ -187,7 +212,10 @@ mod tests {
             .await
             .expect_err("connect_all should fail when a configured server cannot start");
 
-        assert!(!manager.all_tool_specs().iter().any(|spec| spec.definition.name.starts_with("mcp__broken__")));
+        assert!(!manager
+            .all_tool_specs()
+            .iter()
+            .any(|spec| spec.definition.name.starts_with("mcp__broken__")));
         assert!(error.to_string().contains("__talos_missing_mcp_binary__"));
     }
 }

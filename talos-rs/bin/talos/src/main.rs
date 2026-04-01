@@ -18,7 +18,7 @@ use talos_logging::LogGuard;
 use talos_router::{Binding, MatchRule, Router, RouterImpl};
 use talos_session_store::{DatabaseSessionStore, SessionStore};
 use talos_storage::{create_storage, StorageConfig};
-use talos_tools::{register_core_local_tools, register_network_tools, McpConnectionManager, ToolRegistry};
+use talos_tools::{register_core_local_tools, register_network_tools, ToolRegistry};
 use talos_types::{ModelInfo, RequestHandler, SessionService};
 use tracing::{error, info};
 
@@ -72,15 +72,6 @@ async fn main() {
     let tool_registry = Arc::new(ToolRegistry::new());
     register_core_local_tools(tool_registry.as_ref());
     register_network_tools(tool_registry.as_ref());
-
-    if !config.agent.kernel.mcp.servers.is_empty() {
-        let mut mcp_manager = McpConnectionManager::new();
-        mcp_manager
-            .connect_all(&config.agent.kernel.mcp.servers)
-            .await
-            .expect("failed to connect MCP servers");
-        tool_registry.register_mcp_server(Arc::new(mcp_manager));
-    }
 
     let agent = AgentImpl::new(
         "default".to_string(),

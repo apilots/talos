@@ -131,6 +131,7 @@ impl SandboxAwareTool<ExecCommandRequest> for ExecCommandPlanner {
 
 struct ExecSession {
     session_id: i64,
+    owner_session_id: String,
     stdin: Mutex<Option<ChildStdin>>,
     state: Mutex<ExecSessionState>,
     notify: Notify,
@@ -186,6 +187,7 @@ impl ExecSessionManager {
 
         let session = Arc::new(ExecSession {
             session_id,
+            owner_session_id: context.session_id().to_string(),
             stdin: Mutex::new(stdin),
             state: Mutex::new(ExecSessionState::default()),
             notify: Notify::new(),
@@ -204,7 +206,11 @@ impl ExecSessionManager {
             .await
     }
 
-    async fn write_stdin(&self, request: &WriteStdinRequest) -> TalosResult<ExecResponse> {
+    async fn write_stdin(
+        &self,
+        request: &WriteStdinRequest,
+        context: &ToolContext,
+    ) -> TalosResult<ExecResponse> {
         let session = self
             .sessions
             .get(&request.session_id)
@@ -212,6 +218,14 @@ impl ExecSessionManager {
             .ok_or_else(|| {
                 TalosError::ToolError(format!("session {} not found", request.session_id))
             })?;
+
+        if session.owner_session_id != context.session_id() {
+            return Err(TalosError::ToolError(format!(
+                "session {} does not belong to Talos session {}",
+                request.session_id,
+                context.session_id()
+            )));
+        }
 
         if !request.chars.is_empty() {
             let mut stdin_guard = session.stdin.lock().await;
@@ -304,7 +318,18 @@ pub async fn exec_command(
 }
 
 pub async fn write_stdin(request: &WriteStdinRequest) -> TalosResult<ExecResponse> {
-    ExecSessionManager::global().write_stdin(request).await
+    ExecSessionManager::global()
+        .write_stdin(request, &ToolContext::default())
+        .await
+}
+
+pub async fn write_stdin_with_context(
+    request: &WriteStdinRequest,
+    context: &ToolContext,
+) -> TalosResult<ExecResponse> {
+    ExecSessionManager::global()
+        .write_stdin(request, context)
+        .await
 }
 
 fn enforce_exec_plan(request: &ExecCommandRequest, context: &ToolContext) -> TalosResult<()> {
@@ -416,12 +441,15 @@ mod tests {
         assert!(exec.output.contains("ready"));
 
         let session_id = exec.session_id.expect("session id should be present");
-        let output = write_stdin(&WriteStdinRequest {
-            session_id,
-            chars: "ok\n".to_string(),
-            yield_time_ms: 50,
-            max_output_tokens: None,
-        })
+        let output = write_stdin_with_context(
+            &WriteStdinRequest {
+                session_id,
+                chars: "ok\n".to_string(),
+                yield_time_ms: 50,
+                max_output_tokens: None,
+            },
+            &context,
+        )
         .await
         .expect("write_stdin should succeed");
 
@@ -477,5 +505,45 @@ mod tests {
         .expect("pre-approved context should bypass escalation check");
 
         assert!(result.output.contains("approved") || result.status == ExecStatus::Exited);
+    }
+
+    #[tokio::test]
+    async fn test_write_stdin_rejects_cross_session_access() {
+        let owner_context = crate::ToolContext::new("session-owner", "user-1");
+        let foreign_context = crate::ToolContext::new("session-foreign", "user-2");
+        let exec = exec_command(
+            &ExecCommandRequest {
+                cmd: "printf 'ready\\n'; sleep 1".to_string(),
+                workdir: None,
+                shell: Some("sh".to_string()),
+                login: false,
+                tty: false,
+                yield_time_ms: 50,
+                max_output_tokens: None,
+                sandbox_permissions: SandboxPermissions::UseDefault,
+                justification: None,
+                prefix_rule: None,
+            },
+            &owner_context,
+        )
+        .await
+        .expect("exec should succeed");
+
+        let session_id = exec.session_id.expect("session id should be present");
+        let error = write_stdin_with_context(
+            &WriteStdinRequest {
+                session_id,
+                chars: "noop".to_string(),
+                yield_time_ms: 0,
+                max_output_tokens: None,
+            },
+            &foreign_context,
+        )
+        .await
+        .expect_err("cross-session write_stdin should be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("does not belong to Talos session session-foreign"));
     }
 }
