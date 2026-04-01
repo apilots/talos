@@ -1,9 +1,10 @@
 use crate::execution::ContentsMode;
 use crate::{
-    execution::PlanningResponseSegmentKind, CompactionSummaryPayload, ContentsBuilder,
-    EventActions, EventAuthor, EventPayload, ExecutionEvent, ExecutionEventKind, FlowProfile,
-    InvocationContext, LlmRequestEnvelope, LlmResponseEnvelope, Planner, RequestOutputContract,
-    ResponseDisposition, SessionEvent, SessionEventPayload,
+    execution::{PlanningResponseSegmentKind, ReplayToolInvocation},
+    CompactionSummaryPayload, ContentsBuilder, EventActions, EventAuthor, EventPayload,
+    ExecutionEvent, ExecutionEventKind, FlowProfile, InvocationContext, LlmRequestEnvelope,
+    LlmResponseEnvelope, Planner, RequestOutputContract, ResponseDisposition, SessionEvent,
+    SessionEventPayload,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -164,10 +165,9 @@ fn is_context_visible_event(event: &SessionEvent) -> bool {
                 | SessionEventPayload::Auth { .. }
                 | SessionEventPayload::Confirmation { .. }
         )
-        && event
-            .payload
-            .message()
-            .is_some_and(|message| !message.content.trim().is_empty() || message.tool_calls.is_some())
+        && event.payload.message().is_some_and(|message| {
+            !message.content.trim().is_empty() || message.tool_calls.is_some()
+        })
 }
 
 fn message_size(message: &ChatMessage) -> usize {
@@ -182,7 +182,11 @@ fn message_size(message: &ChatMessage) -> usize {
 fn group_events_by_invocation(events: &[SessionEvent]) -> Vec<InvocationCompactionGroup> {
     let mut groups: Vec<InvocationCompactionGroup> = Vec::new();
     for (index, event) in events.iter().enumerate() {
-        let event_bytes = event.payload.message().map(message_size).unwrap_or_default();
+        let event_bytes = event
+            .payload
+            .message()
+            .map(message_size)
+            .unwrap_or_default();
         match groups.last_mut() {
             Some(group) if group.invocation_id == event.invocation_id => {
                 group.end_index = index;
@@ -324,23 +328,58 @@ impl RequestProcessor for RequestConfirmationRequestProcessor {
         let latest_confirmation = latest_branch_event(ctx, request.branch, |event| {
             matches!(event.payload, SessionEventPayload::Confirmation { .. })
         });
-        let latest_user = latest_branch_event(ctx, request.branch, |event| {
-            matches!(event.payload, SessionEventPayload::Message { .. })
-                && matches!(event.author, EventAuthor::User)
+
+        let Some(confirmation_event) = latest_confirmation else {
+            return Ok(RequestProcessorOutput::default());
+        };
+
+        let SessionEventPayload::Confirmation {
+            payload: confirmation,
+        } = &confirmation_event.payload
+        else {
+            return Ok(RequestProcessorOutput::default());
+        };
+
+        // Find the latest ApprovalResponse for this specific call_id.
+        let latest_approval = latest_branch_event(ctx, request.branch, |event| {
+            if let SessionEventPayload::ApprovalResponse { payload } = &event.payload {
+                payload.call_id == confirmation.call_id
+            } else {
+                false
+            }
         });
-        if let Some(event) = latest_confirmation {
-            let confirmation_is_pending = latest_user
-                .map(|user_event| user_event.timestamp <= event.timestamp)
-                .unwrap_or(true);
-            if confirmation_is_pending {
-                if let SessionEventPayload::Confirmation { payload } = &event.payload {
+
+        match latest_approval {
+            Some(approval_event) if approval_event.timestamp > confirmation_event.timestamp => {
+                let SessionEventPayload::ApprovalResponse { payload: approval } =
+                    &approval_event.payload
+                else {
+                    return Ok(RequestProcessorOutput::default());
+                };
+                if approval.approved {
+                    // Inject replay invocation so the flow executes the tool with approval bypass.
+                    request.replay_tool_invocations.push(ReplayToolInvocation {
+                        call_id: confirmation.call_id.clone(),
+                        tool_name: confirmation.tool_name.clone(),
+                        arguments: confirmation.arguments.clone(),
+                    });
+                } else {
+                    let reason = approval.reason.as_deref().unwrap_or("no reason given");
                     request.prompt_prefix_messages.push(ChatMessage::system(format!(
-                        "A tool confirmation is pending for `{}` (call `{}`). Wait for explicit user approval before continuing. Prompt: {}",
-                        payload.tool_name, payload.call_id, payload.prompt
+                        "Tool `{}` (call `{}`) was rejected by the user: {}. Inform the user and continue.",
+                        approval.tool_name, approval.call_id, reason
                     )));
                 }
             }
+            _ => {
+                // No approval response yet — still pending.
+                request.prompt_prefix_messages.push(ChatMessage::system(format!(
+                    "A tool confirmation is pending for `{}` (call `{}`). Wait for explicit user approval before continuing. Prompt: {}",
+                    confirmation.tool_name, confirmation.call_id, confirmation.prompt
+                )));
+            }
         }
+
         Ok(RequestProcessorOutput::default())
     }
 }
@@ -892,19 +931,10 @@ impl ResponseProcessor for EventProjectionProcessor {
                 }
                 TalosOutputItem::ToolResult {
                     call_id,
+                    tool_name,
                     content,
                     is_error,
                 } => {
-                    let tool_name = content
-                        .iter()
-                        .find_map(|entry| match entry {
-                            TalosContentItem::Json { value } => value
-                                .get("tool")
-                                .and_then(|item| item.as_str())
-                                .map(str::to_string),
-                            TalosContentItem::Text { .. } => None,
-                        })
-                        .unwrap_or_else(|| "unknown_tool".to_string());
                     let payload = serde_json::to_value(content).unwrap_or_else(|_| {
                         serde_json::json!({
                             "content": content.iter().map(|entry| match entry {
@@ -917,7 +947,7 @@ impl ResponseProcessor for EventProjectionProcessor {
                         ctx,
                         response.branch,
                         call_id.clone(),
-                        tool_name,
+                        tool_name.clone(),
                         payload,
                         *is_error,
                     ));
@@ -1076,7 +1106,10 @@ impl ResponseProcessorPipeline {
             }
             events.extend(current.events);
         }
-        Ok(ResponseProcessorOutput { disposition, events })
+        Ok(ResponseProcessorOutput {
+            disposition,
+            events,
+        })
     }
 }
 
@@ -1084,8 +1117,8 @@ impl ResponseProcessorPipeline {
 mod tests {
     use super::*;
     use crate::{
-        BuiltInPlanner, ContextStateBags, ExecutionBranch, InvocationLimits, PlannerKind,
-        PlanReActPlanner, PlanningResponseEffect, TurnPhase,
+        BuiltInPlanner, ContextStateBags, ExecutionBranch, InvocationLimits, PlanReActPlanner,
+        PlannerKind, PlanningResponseEffect, TurnPhase,
     };
     use serde_json::json;
     use std::collections::HashMap;
@@ -1155,10 +1188,7 @@ mod tests {
             actions: EventActions::default(),
             allow_final_projection: true,
         };
-        let output = processor
-            .run(&mut ctx, &mut response)
-            .await
-            .unwrap();
+        let output = processor.run(&mut ctx, &mut response).await.unwrap();
         let events = output.events;
 
         assert_eq!(output.disposition, ResponseDisposition::Continue);
@@ -1581,5 +1611,132 @@ mod tests {
             .unwrap();
 
         assert!(output.events.is_empty());
+    }
+
+    fn make_confirmation_event(
+        call_id: &str,
+        tool_name: &str,
+        ts_offset_ms: i64,
+    ) -> crate::SessionEvent {
+        let timestamp = chrono::Utc::now() + chrono::Duration::milliseconds(ts_offset_ms);
+        crate::SessionEvent {
+            id: format!("conf-{}", call_id),
+            session_id: "s1".to_string(),
+            invocation_id: "i0".to_string(),
+            branch: ExecutionBranch::ReactiveLoop,
+            author: crate::EventAuthor::System,
+            kind: crate::SessionEventKind::SystemMessage,
+            payload: crate::SessionEventPayload::Confirmation {
+                payload: crate::SessionConfirmationPayload {
+                    call_id: call_id.to_string(),
+                    tool_name: tool_name.to_string(),
+                    prompt: "Need approval.".to_string(),
+                    arguments: json!({"cmd": "echo hi"}),
+                },
+            },
+            actions: crate::EventActions::default(),
+            partial: false,
+            timestamp,
+        }
+    }
+
+    fn make_approval_event(
+        call_id: &str,
+        tool_name: &str,
+        approved: bool,
+        ts_offset_ms: i64,
+    ) -> crate::SessionEvent {
+        let timestamp = chrono::Utc::now() + chrono::Duration::milliseconds(ts_offset_ms);
+        crate::SessionEvent {
+            id: format!("approval-{}", call_id),
+            session_id: "s1".to_string(),
+            invocation_id: "i1".to_string(),
+            branch: ExecutionBranch::ReactiveLoop,
+            author: crate::EventAuthor::System,
+            kind: crate::SessionEventKind::SystemMessage,
+            payload: crate::SessionEventPayload::ApprovalResponse {
+                payload: crate::SessionApprovalResponsePayload {
+                    call_id: call_id.to_string(),
+                    tool_name: tool_name.to_string(),
+                    approved,
+                    reason: if approved {
+                        None
+                    } else {
+                        Some("user denied".to_string())
+                    },
+                },
+            },
+            actions: crate::EventActions::default(),
+            partial: false,
+            timestamp,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_confirmation_processor_injects_replay_when_approved() {
+        let mut ctx = mock_ctx();
+        ctx.session.events = vec![
+            make_confirmation_event("call-1", "exec_command", -100),
+            make_approval_event("call-1", "exec_command", true, 0),
+        ];
+        let mut request = LlmRequestEnvelope {
+            branch: ExecutionBranch::ReactiveLoop,
+            ..LlmRequestEnvelope::default()
+        };
+
+        RequestConfirmationRequestProcessor
+            .run(&mut ctx, &mut request)
+            .await
+            .unwrap();
+
+        assert_eq!(request.replay_tool_invocations.len(), 1);
+        assert_eq!(request.replay_tool_invocations[0].call_id, "call-1");
+        assert_eq!(request.replay_tool_invocations[0].tool_name, "exec_command");
+        assert!(request.prompt_prefix_messages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_confirmation_processor_still_blocks_when_no_response() {
+        let mut ctx = mock_ctx();
+        ctx.session.events = vec![make_confirmation_event("call-2", "exec_command", -100)];
+        let mut request = LlmRequestEnvelope {
+            branch: ExecutionBranch::ReactiveLoop,
+            ..LlmRequestEnvelope::default()
+        };
+
+        RequestConfirmationRequestProcessor
+            .run(&mut ctx, &mut request)
+            .await
+            .unwrap();
+
+        assert!(request.replay_tool_invocations.is_empty());
+        assert!(request
+            .prompt_prefix_messages
+            .iter()
+            .any(|m| { m.content.contains("call-2") && m.content.contains("pending") }));
+    }
+
+    #[tokio::test]
+    async fn test_confirmation_processor_handles_rejection() {
+        let mut ctx = mock_ctx();
+        ctx.session.events = vec![
+            make_confirmation_event("call-3", "exec_command", -100),
+            make_approval_event("call-3", "exec_command", false, 0),
+        ];
+        let mut request = LlmRequestEnvelope {
+            branch: ExecutionBranch::ReactiveLoop,
+            ..LlmRequestEnvelope::default()
+        };
+
+        RequestConfirmationRequestProcessor
+            .run(&mut ctx, &mut request)
+            .await
+            .unwrap();
+
+        assert!(request.replay_tool_invocations.is_empty());
+        assert!(request
+            .prompt_prefix_messages
+            .iter()
+            .any(|m| { m.content.contains("rejected") || m.content.contains("denied") }));
     }
 }

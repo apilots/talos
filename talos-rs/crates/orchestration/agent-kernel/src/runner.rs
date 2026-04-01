@@ -29,7 +29,8 @@ impl ExecutionEventHandler for RunnerEventHandler {
         }
         if !event.partial {
             let session_service = ctx.session_service()?;
-            let session_event = SessionEvent::from_execution_event(ctx.session_id.clone(), event.clone());
+            let session_event =
+                SessionEvent::from_execution_event(ctx.session_id.clone(), event.clone());
             let _ = session_service
                 .append_event(&mut ctx.session, session_event)
                 .await?;
@@ -428,7 +429,8 @@ mod tests {
         let mut ctx = mock_ctx(session_service.clone(), plugin_manager);
         let mut handler = RunnerEventHandler;
 
-        let event = ExecutionEvent::final_response(&ctx, crate::ExecutionBranch::ReactiveLoop, "secret");
+        let event =
+            ExecutionEvent::final_response(&ctx, crate::ExecutionBranch::ReactiveLoop, "secret");
         let handled = handler.handle(&mut ctx, event).await.unwrap().unwrap();
 
         match handled.payload {
@@ -438,7 +440,10 @@ mod tests {
         assert_eq!(ctx.session.events.len(), 1);
         let persisted = &ctx.session.events[0];
         assert_eq!(
-            persisted.payload.message().map(|message| message.content.as_str()),
+            persisted
+                .payload
+                .message()
+                .map(|message| message.content.as_str()),
             Some("redacted")
         );
         assert_eq!(session_service.recorded.lock().unwrap().len(), 1);
@@ -453,7 +458,8 @@ mod tests {
         let mut ctx = mock_ctx(session_service.clone(), plugin_manager);
         let mut handler = RunnerEventHandler;
 
-        let event = ExecutionEvent::final_response(&ctx, crate::ExecutionBranch::ReactiveLoop, "secret");
+        let event =
+            ExecutionEvent::final_response(&ctx, crate::ExecutionBranch::ReactiveLoop, "secret");
         let handled = handler.handle(&mut ctx, event).await.unwrap();
 
         assert!(handled.is_none());

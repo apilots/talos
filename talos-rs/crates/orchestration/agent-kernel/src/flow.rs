@@ -7,14 +7,14 @@ use crate::general_turn::{
     GeneralTurnStepDisposition,
 };
 use crate::{
-    CallbackControl, CallbackRegistry, EventAuthor, ExecutionBranch, ExecutionEvent,
-    ExecutionEventKind, FlowKind, FlowProfile, InvocationContext, InvocationPluginManager,
-    KernelExecutionSettings, KernelStreamEvent, KernelStreamEventData, KernelStreamEventType,
-    KernelThinkingSource, KernelThinkingStage, KernelWarning, LlmRequestEnvelope,
-    LlmResponseEnvelope, MemoryBackedSessionService, Planner, RequestProcessorPipeline,
-    ResponseProcessorPipeline, SessionEvent, SessionEventKind, SessionEventPayload,
-    SessionService, StopReason, ThinkingDeltaStreamData, ToolCallbackPayload, ToolExecutor,
-    ToolExecutorFactory,
+    CallbackControl, CallbackRegistry, ConfirmationRequestPayload, EventAuthor, EventPayload,
+    ExecutionBranch, ExecutionEvent, ExecutionEventKind, FlowKind, FlowProfile, InvocationContext,
+    InvocationPluginManager, KernelExecutionSettings, KernelStreamEvent, KernelStreamEventData,
+    KernelStreamEventType, KernelThinkingSource, KernelThinkingStage, KernelWarning,
+    LlmRequestEnvelope, LlmResponseEnvelope, MemoryBackedSessionService, Planner,
+    RequestProcessorPipeline, ResponseProcessorPipeline, SessionEvent, SessionEventKind,
+    SessionEventPayload, SessionService, StopReason, ThinkingDeltaStreamData, ToolCallbackPayload,
+    ToolExecutor, ToolExecutorFactory,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -23,7 +23,7 @@ use talos_error::TalosResult;
 use talos_llm_provider::LlmProvider;
 use talos_memory::MemoryStore;
 use talos_tools::ToolRegistry;
-use talos_types::talos::{TalosContentItem, TalosOutputItem, TalosUsage};
+use talos_types::talos::{TalosOutputItem, TalosUsage};
 use tokio::sync::mpsc;
 
 #[derive(Debug, Clone)]
@@ -45,8 +45,11 @@ pub struct FlowExecution {
 pub trait BaseLlmFlow: Send + Sync {
     fn settings(&self) -> &KernelExecutionSettings;
     fn profile(&self) -> FlowProfile;
-    async fn run_events(&self, ctx: &mut InvocationContext, input: &str)
-    -> TalosResult<FlowExecution>;
+    async fn run_events(
+        &self,
+        ctx: &mut InvocationContext,
+        input: &str,
+    ) -> TalosResult<FlowExecution>;
 }
 
 pub struct SingleFlow {
@@ -177,40 +180,17 @@ impl SingleFlow {
                         break;
                     }
                 }
-                TalosOutputItem::ToolResult { call_id, .. } => {
-                    let tool_name = output_items.iter().find_map(|candidate| match candidate {
-                        TalosOutputItem::ToolCall {
-                            call_id: candidate_call_id,
-                            name,
-                            ..
-                        } if candidate_call_id == call_id => Some(name.clone()),
-                        TalosOutputItem::ToolResult {
-                            call_id: candidate_call_id,
-                            content,
-                            ..
-                        } if candidate_call_id == call_id => {
-                            content.iter().find_map(|entry| match entry {
-                                TalosContentItem::Json { value } => value
-                                    .get("tool")
-                                    .and_then(|item| item.as_str())
-                                    .map(str::to_string),
-                                TalosContentItem::Text { .. } => None,
-                            })
-                        }
-                        _ => None,
-                    });
-                    if let Some(tool_name) = tool_name {
-                        let payload = ToolCallbackPayload {
-                            tool_name,
-                            call_id: call_id.clone(),
-                        };
-                        let plugin_manager = ctx.plugin_manager.clone();
-                        if matches!(
-                            plugin_manager.after_tool(ctx, &payload).await?,
-                            CallbackControl::Stop
-                        ) {
-                            break;
-                        }
+                TalosOutputItem::ToolResult { call_id, tool_name, .. } => {
+                    let payload = ToolCallbackPayload {
+                        tool_name: tool_name.clone(),
+                        call_id: call_id.clone(),
+                    };
+                    let plugin_manager = ctx.plugin_manager.clone();
+                    if matches!(
+                        plugin_manager.after_tool(ctx, &payload).await?,
+                        CallbackControl::Stop
+                    ) {
+                        break;
                     }
                 }
                 _ => {}
@@ -308,14 +288,7 @@ fn tool_names_for_thinking(output_items: &[TalosOutputItem]) -> Vec<String> {
         .iter()
         .filter_map(|item| match item {
             TalosOutputItem::ToolCall { name, .. } => Some(name.clone()),
-            TalosOutputItem::ToolResult { content, .. } => content.iter().find_map(|entry| match entry
-            {
-                TalosContentItem::Json { value } => value
-                    .get("tool")
-                    .and_then(|item| item.as_str())
-                    .map(str::to_string),
-                TalosContentItem::Text { .. } => None,
-            }),
+            TalosOutputItem::ToolResult { tool_name, .. } => Some(tool_name.clone()),
             _ => None,
         })
         .collect()
@@ -431,7 +404,8 @@ impl BaseLlmFlow for SingleFlow {
                 } else {
                     "Re-evaluating the plan with the latest tool observations before the next model step."
                 };
-                emit_framework_thinking(prepared.stream_tx.as_ref(), stage, state.round, text).await;
+                emit_framework_thinking(prepared.stream_tx.as_ref(), stage, state.round, text)
+                    .await;
             }
             let mut step_request = build_general_turn_step_request(&prepared, &state);
             let mut step_model_request = build_flow_step_model_request(
@@ -443,7 +417,53 @@ impl BaseLlmFlow for SingleFlow {
                 &state,
                 &self.settings,
             );
-            events.extend(self.request_pipeline.run(ctx, &mut step_model_request).await?);
+            events.extend(
+                self.request_pipeline
+                    .run(ctx, &mut step_model_request)
+                    .await?,
+            );
+
+            // Execute replay tool invocations injected by the confirmation processor when
+            // a user approval has been received for a previously blocked tool call.
+            if state.round == 0 && !step_model_request.replay_tool_invocations.is_empty() {
+                let replay_calls: Vec<talos_llm_provider::FunctionCall> = step_model_request
+                    .replay_tool_invocations
+                    .iter()
+                    .map(|r| {
+                        talos_llm_provider::FunctionCall::new(
+                            r.call_id.clone(),
+                            r.tool_name.clone(),
+                            r.arguments.clone(),
+                        )
+                    })
+                    .collect();
+                let pre_approved_call_ids: std::collections::HashSet<String> = step_model_request
+                    .replay_tool_invocations
+                    .iter()
+                    .map(|r| r.call_id.clone())
+                    .collect();
+                let replay_batch = execute_general_turn_tool_batch(
+                    &prepared,
+                    self.tool_executor.clone(),
+                    self.tool_registry.clone(),
+                    Arc::new(self.kernel_config.clone()),
+                    &self.agent_name,
+                    &replay_calls,
+                    pre_approved_call_ids,
+                    prepared.stream_tx.as_ref(),
+                )
+                .await?;
+                // Inject synthetic assistant message with tool calls followed by results so the
+                // LLM sees a coherent conversation on the next step.
+                state
+                    .messages
+                    .push(talos_llm_provider::ChatMessage::assistant_with_tool_calls(
+                        "",
+                        replay_calls,
+                    ));
+                apply_general_turn_tool_batch(&mut state, &replay_batch, &self.kernel_config);
+            }
+
             let plugin_manager = ctx.plugin_manager.clone();
             if matches!(
                 plugin_manager
@@ -544,9 +564,7 @@ impl BaseLlmFlow for SingleFlow {
                         EventAuthor::Agent,
                         SessionEventKind::AgentMessage,
                         SessionEventPayload::Message {
-                            message: talos_llm_provider::ChatMessage::assistant(
-                                final_text.clone(),
-                            ),
+                            message: talos_llm_provider::ChatMessage::assistant(final_text.clone()),
                         },
                     ),
                 );
@@ -591,6 +609,7 @@ impl BaseLlmFlow for SingleFlow {
                 Arc::new(self.kernel_config.clone()),
                 &self.agent_name,
                 &step.tool_calls,
+                std::collections::HashSet::new(),
                 prepared.stream_tx.as_ref(),
             )
             .await?;
@@ -605,47 +624,61 @@ impl BaseLlmFlow for SingleFlow {
             events.extend(response_output.events);
             self.observe_tool_callbacks(ctx, &tool_response.output_items)
                 .await?;
-            for output_item in &tool_response.output_items {
-                if let TalosOutputItem::ToolResult {
-                    call_id, content, ..
-                } = output_item
-                {
-                    let tool_name = content.iter().find_map(|entry| match entry {
-                        TalosContentItem::Json { value } => value
-                            .get("tool")
-                            .and_then(|item| item.as_str())
-                            .map(str::to_string),
-                        TalosContentItem::Text { .. } => None,
-                    });
-                    if let Some(tool_name) = tool_name {
-                        let payload = content
-                            .iter()
-                            .find_map(|entry| match entry {
-                                TalosContentItem::Json { value } => Some(value.to_string()),
-                                TalosContentItem::Text { text } => Some(text.clone()),
-                            })
-                            .unwrap_or_else(|| "{}".to_string());
-                        stage_session_event(
-                            ctx,
-                            SessionEvent::new(
-                                prepared.session_id.clone(),
-                                prepared.invocation_id.clone(),
-                                request.branch,
-                                EventAuthor::Tool,
-                                SessionEventKind::ToolResult,
-                                SessionEventPayload::Message {
-                                    message: talos_llm_provider::ChatMessage::tool(
-                                        call_id.clone(),
-                                        tool_name,
-                                        payload,
-                                    ),
-                                },
-                            ),
-                        );
-                    }
-                }
+            for tool_message in &tool_batch.tool_messages {
+                stage_session_event(
+                    ctx,
+                    SessionEvent::new(
+                        prepared.session_id.clone(),
+                        prepared.invocation_id.clone(),
+                        request.branch,
+                        EventAuthor::Tool,
+                        SessionEventKind::ToolResult,
+                        SessionEventPayload::Message {
+                            message: tool_message.clone(),
+                        },
+                    ),
+                );
+            }
+            for confirmation in &tool_batch.pending_confirmations {
+                events.push(ExecutionEvent::new(
+                    ctx,
+                    EventAuthor::System,
+                    request.branch,
+                    ExecutionEventKind::System,
+                    EventPayload::ConfirmationRequest {
+                        payload: ConfirmationRequestPayload {
+                            tool_name: confirmation.tool_name.clone(),
+                            call_id: confirmation.call_id.clone(),
+                            prompt: confirmation.prompt.clone(),
+                            arguments: confirmation.arguments.clone(),
+                        },
+                    },
+                    false,
+                ));
+                stage_session_event(
+                    ctx,
+                    SessionEvent::new(
+                        prepared.session_id.clone(),
+                        prepared.invocation_id.clone(),
+                        request.branch,
+                        EventAuthor::System,
+                        SessionEventKind::SystemMessage,
+                        SessionEventPayload::Confirmation {
+                            payload: crate::session::SessionConfirmationPayload {
+                                tool_name: confirmation.tool_name.clone(),
+                                call_id: confirmation.call_id.clone(),
+                                prompt: confirmation.prompt.clone(),
+                                arguments: confirmation.arguments.clone(),
+                            },
+                        },
+                    ),
+                );
             }
             apply_general_turn_tool_batch(&mut state, &tool_batch, &self.kernel_config);
+            if !tool_batch.pending_confirmations.is_empty() {
+                final_text = "Tool confirmation pending.".to_string();
+                break StopReason::EndTurn;
+            }
             if matches!(self.flow_profile, FlowProfile::PlanReactLoop) {
                 let tool_names = tool_names_for_thinking(&tool_response.output_items);
                 let observed = tool_names.len();
@@ -820,6 +853,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
     use talos_config::AgentKernelConfig;
+    use talos_error::TalosResult;
     use talos_llm_provider::{
         ChatChunk, ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, Role,
         ToolStream, ToolStreamEvent, Usage,
@@ -919,6 +953,15 @@ mod tests {
         state: Arc<StepEventTestState>,
     }
 
+    #[derive(Default)]
+    struct ApprovalFlowState {
+        chat_round: AtomicUsize,
+    }
+
+    struct ApprovalMockProvider {
+        state: Arc<ApprovalFlowState>,
+    }
+
     #[async_trait]
     impl LlmProvider for StepEventMockProvider {
         fn name(&self) -> &str {
@@ -968,6 +1011,55 @@ mod tests {
                 finish_reason: Some("stop".to_string()),
                 tool_calls: None,
             })
+        }
+
+        async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
+            let (_tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(1);
+            Ok(ChatStream::new(rx))
+        }
+
+        async fn stream_with_tools(&self, _request: ChatRequest) -> TalosResult<ToolStream> {
+            let (_tx, rx) = mpsc::channel::<TalosResult<ToolStreamEvent>>(1);
+            Ok(ToolStream::new(rx))
+        }
+    }
+
+    #[async_trait]
+    impl LlmProvider for ApprovalMockProvider {
+        fn name(&self) -> &str {
+            "approval-mock"
+        }
+
+        fn default_model(&self) -> &str {
+            "mock-model"
+        }
+
+        async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+            self.chat_with_tools(request).await
+        }
+
+        async fn chat_with_tools(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+            let round = self.state.chat_round.fetch_add(1, Ordering::SeqCst);
+            match round {
+                0 => Ok(ChatResponse {
+                    content: "Need approval first.".to_string(),
+                    model: request.model,
+                    usage: Usage::default(),
+                    finish_reason: Some("tool_calls".to_string()),
+                    tool_calls: Some(vec![FunctionCall::new(
+                        "call_approval",
+                        "exec_command",
+                        json!({
+                            "cmd": "echo hi",
+                            "shell": "/bin/sh",
+                            "login": false,
+                            "sandbox_permissions": "require_escalated",
+                            "justification": "Please confirm the risky command."
+                        }),
+                    )]),
+                }),
+                _ => panic!("approval flow should stop before another model round"),
+            }
         }
 
         async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
@@ -1116,7 +1208,10 @@ mod tests {
         );
 
         assert_eq!(
-            request.native_thinking.as_ref().and_then(|config| config.budget_tokens),
+            request
+                .native_thinking
+                .as_ref()
+                .and_then(|config| config.budget_tokens),
             Some(1024)
         );
     }
@@ -1253,6 +1348,49 @@ mod tests {
         assert!(payload.contains("\"ok\":true"));
     }
 
+    #[tokio::test]
+    async fn test_single_flow_stages_confirmation_event_for_pending_tool_approval() {
+        let state = Arc::new(ApprovalFlowState::default());
+        let tool_registry = Arc::new(ToolRegistry::new());
+        talos_tools::register_core_local_tools(tool_registry.as_ref());
+        let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+        let mut ctx = build_ctx();
+        let flow = SingleFlow::new(
+            "agent-1",
+            "test agent",
+            Arc::new(ApprovalMockProvider {
+                state: state.clone(),
+            }),
+            tool_registry,
+            Arc::new(MemoryStore::new(workspace_dir)),
+            AgentKernelConfig::default(),
+            Arc::new(BuiltInPlanner::new()),
+        );
+
+        let result = flow
+            .run_events(&mut ctx, "hello")
+            .await
+            .expect("flow should succeed");
+
+        assert_eq!(result.summary.output_text, "Tool confirmation pending.");
+        assert_eq!(state.chat_round.load(Ordering::SeqCst), 1);
+        assert!(result.events.iter().any(|event| matches!(
+            &event.payload,
+            EventPayload::ConfirmationRequest { payload }
+                if payload.tool_name == "exec_command"
+                    && payload.call_id == "call_approval"
+                    && payload.prompt == "tool approval is required: Please confirm the risky command."
+        )));
+        assert!(ctx.session.events.iter().any(|event| matches!(
+            &event.payload,
+            SessionEventPayload::Confirmation { payload }
+                if payload.tool_name == "exec_command"
+                    && payload.call_id == "call_approval"
+                    && payload.prompt == "tool approval is required: Please confirm the risky command."
+        )));
+    }
+
     #[test]
     fn test_single_flow_current_branch_uses_profile() {
         let built_in_direct = SingleFlow::new(
@@ -1260,14 +1398,19 @@ mod tests {
             "test agent",
             Arc::new(NoopLlmProvider),
             Arc::new(ToolRegistry::new()),
-            Arc::new(MemoryStore::new(std::env::temp_dir().join(Uuid::new_v4().to_string()))),
+            Arc::new(MemoryStore::new(
+                std::env::temp_dir().join(Uuid::new_v4().to_string()),
+            )),
             AgentKernelConfig {
                 planner_mode: "built_in".to_string(),
                 ..AgentKernelConfig::default()
             },
             Arc::new(BuiltInPlanner::new()),
         );
-        assert_eq!(built_in_direct.current_branch(), ExecutionBranch::DirectAnswer);
+        assert_eq!(
+            built_in_direct.current_branch(),
+            ExecutionBranch::DirectAnswer
+        );
 
         let tool_registry = Arc::new(ToolRegistry::new());
         tool_registry.register(Arc::new(EchoTool));
@@ -1276,21 +1419,28 @@ mod tests {
             "test agent",
             Arc::new(NoopLlmProvider),
             tool_registry.clone(),
-            Arc::new(MemoryStore::new(std::env::temp_dir().join(Uuid::new_v4().to_string()))),
+            Arc::new(MemoryStore::new(
+                std::env::temp_dir().join(Uuid::new_v4().to_string()),
+            )),
             AgentKernelConfig {
                 planner_mode: "built_in".to_string(),
                 ..AgentKernelConfig::default()
             },
             Arc::new(BuiltInPlanner::new()),
         );
-        assert_eq!(built_in_model.current_branch(), ExecutionBranch::ModelThinking);
+        assert_eq!(
+            built_in_model.current_branch(),
+            ExecutionBranch::ModelThinking
+        );
 
         let plan_react = SingleFlow::new(
             "agent-1",
             "test agent",
             Arc::new(NoopLlmProvider),
             tool_registry,
-            Arc::new(MemoryStore::new(std::env::temp_dir().join(Uuid::new_v4().to_string()))),
+            Arc::new(MemoryStore::new(
+                std::env::temp_dir().join(Uuid::new_v4().to_string()),
+            )),
             AgentKernelConfig {
                 planner_mode: "plan_react".to_string(),
                 ..AgentKernelConfig::default()

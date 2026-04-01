@@ -174,6 +174,10 @@ impl HttpServer {
                 "/v1/sessions/:session_id/messages",
                 post(session_message_handler),
             )
+            .route(
+                "/v1/sessions/:session_id/tool-approvals",
+                post(submit_tool_approval_handler),
+            )
             .with_state(state.clone())
             .layer(middleware::from_fn_with_state(state, auth_middleware))
             .layer(CorsLayer::permissive());
@@ -601,6 +605,40 @@ async fn process_session_message(
     Ok(response)
 }
 
+#[derive(Deserialize)]
+struct ToolApprovalRequest {
+    call_id: String,
+    tool_name: String,
+    approved: bool,
+    reason: Option<String>,
+}
+
+async fn submit_tool_approval_handler(
+    State(state): State<Arc<HttpApiState>>,
+    Path(session_id): Path<String>,
+    Json(body): Json<ToolApprovalRequest>,
+) -> impl IntoResponse {
+    match state
+        .session_service
+        .submit_tool_approval(
+            &session_id,
+            &body.call_id,
+            &body.tool_name,
+            body.approved,
+            body.reason,
+        )
+        .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "approval_failed",
+            e.to_string(),
+        )
+        .into_response(),
+    }
+}
+
 fn validate_text_input(input: &[TalosInputItem]) -> Result<(), ApiError> {
     let mut texts = Vec::new();
     for item in input {
@@ -927,6 +965,17 @@ mod tests {
         async fn close_session(&self, _session_id: &str) -> TalosResult<()> {
             Ok(())
         }
+
+        async fn submit_tool_approval(
+            &self,
+            _session_id: &str,
+            _call_id: &str,
+            _tool_name: &str,
+            _approved: bool,
+            _reason: Option<String>,
+        ) -> TalosResult<()> {
+            Ok(())
+        }
     }
 
     fn test_auth() -> AuthResult {
@@ -1126,5 +1175,45 @@ mod tests {
             .expect("stream body should be readable");
         let body_text = String::from_utf8_lossy(&body);
         assert!(body_text.contains("stream only content"));
+    }
+
+    #[tokio::test]
+    async fn test_submit_tool_approval_handler_returns_no_content() {
+        let state = Arc::new(HttpApiState::new(
+            Arc::new(MockGateway),
+            Arc::new(MockSessionService),
+            "test-secret".to_string(),
+            None,
+            false,
+            vec![test_model_info()],
+        ));
+        let app = Router::new()
+            .route(
+                "/v1/sessions/:session_id/tool-approvals",
+                post(submit_tool_approval_handler),
+            )
+            .with_state(state);
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/sessions/mock-session/tool-approvals")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "call_id": "call-1",
+                            "tool_name": "exec_command",
+                            "approved": false,
+                            "reason": "deny"
+                        })
+                        .to_string(),
+                    ))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
     }
 }

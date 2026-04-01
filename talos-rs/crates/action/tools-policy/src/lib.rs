@@ -25,15 +25,24 @@ impl Default for ToolPolicy {
         Self {
             policy_type: PolicyType::Allow,
             tools: vec![
-                "read".to_string(),
+                // File tools (runtime-based)
+                "read_file".to_string(),
                 "write".to_string(),
                 "edit".to_string(),
-                "exec".to_string(),
+                "list_dir".to_string(),
+                "grep_files".to_string(),
+                "apply_patch".to_string(),
+                // Exec tools
+                "exec_command".to_string(),
+                "write_stdin".to_string(),
+                // Memory tools
                 "memory_search".to_string(),
                 "memory_get".to_string(),
+                // Network tools
                 "web_search".to_string(),
                 "web_fetch".to_string(),
                 "http_request".to_string(),
+                // Test tool
                 "echo_test".to_string(),
             ]
             .into_iter()
@@ -210,5 +219,11 @@ mod tests {
 
         assert!(policy.is_allowed("memory_search"));
         assert!(policy.is_allowed("memory_get"));
+        assert!(policy.is_allowed("exec_command"));
+        assert!(policy.is_allowed("write_stdin"));
+        assert!(policy.is_allowed("read_file"));
+        assert!(policy.is_allowed("list_dir"));
+        assert!(policy.is_allowed("grep_files"));
+        assert!(policy.is_allowed("apply_patch"));
     }
 }

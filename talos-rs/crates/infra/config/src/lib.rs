@@ -217,6 +217,53 @@ pub struct AgentKernelConfig {
     /// Kernel agent binding defaults
     #[serde(default)]
     pub binding: AgentKernelBindingConfig,
+
+    /// MCP server connections available to this kernel
+    #[serde(default)]
+    pub mcp: AgentKernelMcpConfig,
+}
+
+/// MCP tool federation configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AgentKernelMcpConfig {
+    /// List of MCP servers to connect on agent startup
+    #[serde(default)]
+    pub servers: Vec<McpServerConfig>,
+}
+
+/// Configuration for a single MCP server connection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerConfig {
+    /// Logical name used to prefix tool names: `mcp__<name>__<tool>`
+    pub name: String,
+
+    /// Transport used to communicate with the server
+    pub transport: McpTransportConfig,
+}
+
+/// MCP transport configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum McpTransportConfig {
+    /// Launch an MCP server as a child process and communicate via stdin/stdout
+    Stdio {
+        /// Executable to run
+        command: String,
+        /// Arguments passed to the command
+        #[serde(default)]
+        args: Vec<String>,
+        /// Additional environment variables
+        #[serde(default)]
+        env: std::collections::HashMap<String, String>,
+    },
+    /// Connect to an MCP server over HTTP (streamable JSON-RPC)
+    Http {
+        /// Base URL of the MCP server (e.g. `http://localhost:3000`)
+        url: String,
+        /// Optional bearer token for authentication
+        #[serde(default)]
+        bearer_token: Option<String>,
+    },
 }
 
 fn default_kernel_max_iters() -> u32 {
@@ -615,6 +662,7 @@ impl Default for AgentKernelConfig {
             prompt: AgentKernelPromptConfig::default(),
             memory: AgentKernelMemoryConfig::default(),
             binding: AgentKernelBindingConfig::default(),
+            mcp: AgentKernelMcpConfig::default(),
         }
     }
 }

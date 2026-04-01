@@ -2,10 +2,11 @@ use crate::ToolExecutionMode;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashSet;
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 use talos_error::TalosResult;
-use talos_tools::ToolRegistry;
+use talos_tools::{ToolInvocation, ToolOutputPayload, ToolRegistry};
 use tokio::task::JoinSet;
 
 #[derive(Debug, Clone)]
@@ -13,6 +14,7 @@ pub struct ToolExecutionContext {
     pub session_id: String,
     pub user_id: String,
     pub kernel_config: Arc<AgentKernelConfig>,
+    pub pre_approved_call_ids: HashSet<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,8 +29,7 @@ pub struct ToolExecutionInput {
 pub struct ToolExecutionOutput {
     pub call_id: String,
     pub tool_name: String,
-    #[serde(default)]
-    pub payload: Value,
+    pub payload: ToolOutputPayload,
     #[serde(default)]
     pub is_error: bool,
 }
@@ -49,6 +50,55 @@ pub trait ToolExecutor: Send + Sync {
 
 pub struct SequentialToolExecutor;
 
+fn build_tool_context(
+    execution_context: &ToolExecutionContext,
+    registry: &ToolRegistry,
+    pre_approved: bool,
+) -> talos_tools::ToolContext {
+    let ctx = registry.build_context(
+        execution_context.session_id.clone(),
+        execution_context.user_id.clone(),
+        Some(execution_context.kernel_config.clone()),
+    );
+    if pre_approved {
+        ctx.with_pre_approved()
+    } else {
+        ctx
+    }
+}
+
+async fn execute_single_tool_call(
+    registry: Arc<ToolRegistry>,
+    execution_context: &ToolExecutionContext,
+    call: ToolExecutionInput,
+) -> ToolExecutionOutput {
+    let pre_approved = execution_context
+        .pre_approved_call_ids
+        .contains(&call.call_id);
+    let tool_context = build_tool_context(execution_context, registry.as_ref(), pre_approved);
+    let invocation = call.to_invocation();
+    let result = registry
+        .execute_invocation_with_context(invocation, tool_context)
+        .await;
+    match result {
+        Ok(payload) => ToolExecutionOutput {
+            call_id: call.call_id,
+            tool_name: call.tool_name,
+            is_error: payload.is_error(),
+            payload,
+        },
+        Err(error) => ToolExecutionOutput {
+            call_id: call.call_id,
+            tool_name: call.tool_name,
+            payload: ToolOutputPayload::Mcp {
+                content: error.to_string(),
+                is_error: true,
+            },
+            is_error: true,
+        },
+    }
+}
+
 #[async_trait]
 impl ToolExecutor for SequentialToolExecutor {
     fn mode(&self) -> ToolExecutionMode {
@@ -62,43 +112,26 @@ impl ToolExecutor for SequentialToolExecutor {
         calls: &[ToolExecutionInput],
     ) -> TalosResult<Vec<ToolExecutionOutput>> {
         let mut outputs = Vec::with_capacity(calls.len());
-        let tool_context = registry.build_context(
-            execution_context.session_id.clone(),
-            execution_context.user_id.clone(),
-            Some(execution_context.kernel_config.clone()),
-        );
         for call in calls {
-            let result = registry
-                .execute_with_context(
-                    &call.tool_name,
-                    call.arguments.clone(),
-                    tool_context.clone(),
-                )
-                .await;
-            match result {
-                Ok(payload) => outputs.push(ToolExecutionOutput {
-                    call_id: call.call_id.clone(),
-                    tool_name: call.tool_name.clone(),
-                    payload: serde_json::json!({
-                        "success": payload.success,
-                        "output": payload.output,
-                        "error": payload.error,
-                    }),
-                    is_error: !payload.success,
-                }),
-                Err(error) => outputs.push(ToolExecutionOutput {
-                    call_id: call.call_id.clone(),
-                    tool_name: call.tool_name.clone(),
-                    payload: serde_json::json!({ "error": error.to_string() }),
-                    is_error: true,
-                }),
-            }
+            outputs.push(
+                execute_single_tool_call(registry.clone(), execution_context, call.clone()).await,
+            );
         }
         Ok(outputs)
     }
 }
 
 pub struct ParallelToolExecutor;
+
+impl ParallelToolExecutor {
+    fn batch_allows_parallel(registry: &ToolRegistry, calls: &[ToolExecutionInput]) -> bool {
+        !calls.is_empty()
+            && calls.iter().all(|call| {
+                registry.tool_supports_parallel(&call.tool_name)
+                    && !registry.tool_is_mutating(&call.tool_name)
+            })
+    }
+}
 
 #[async_trait]
 impl ToolExecutor for ParallelToolExecutor {
@@ -112,33 +145,39 @@ impl ToolExecutor for ParallelToolExecutor {
         registry: Arc<ToolRegistry>,
         calls: &[ToolExecutionInput],
     ) -> TalosResult<Vec<ToolExecutionOutput>> {
+        if !Self::batch_allows_parallel(registry.as_ref(), calls) {
+            return SequentialToolExecutor
+                .execute(execution_context, registry, calls)
+                .await;
+        }
+
         let mut join_set = JoinSet::new();
         for (index, call) in calls.iter().cloned().enumerate() {
             let registry = registry.clone();
-            let tool_context = registry.build_context(
-                execution_context.session_id.clone(),
-                execution_context.user_id.clone(),
-                Some(execution_context.kernel_config.clone()),
-            );
+            let pre_approved = execution_context
+                .pre_approved_call_ids
+                .contains(&call.call_id);
+            let tool_context =
+                build_tool_context(execution_context, registry.as_ref(), pre_approved);
             join_set.spawn(async move {
+                let invocation = call.to_invocation();
                 let result = registry
-                    .execute_with_context(&call.tool_name, call.arguments.clone(), tool_context)
+                    .execute_invocation_with_context(invocation, tool_context)
                     .await;
                 let output = match result {
                     Ok(payload) => ToolExecutionOutput {
                         call_id: call.call_id,
                         tool_name: call.tool_name,
-                        payload: serde_json::json!({
-                            "success": payload.success,
-                            "output": payload.output,
-                            "error": payload.error,
-                        }),
-                        is_error: !payload.success,
+                        is_error: payload.is_error(),
+                        payload,
                     },
                     Err(error) => ToolExecutionOutput {
                         call_id: call.call_id,
                         tool_name: call.tool_name,
-                        payload: serde_json::json!({ "error": error.to_string() }),
+                        payload: ToolOutputPayload::Mcp {
+                            content: error.to_string(),
+                            is_error: true,
+                        },
                         is_error: true,
                     },
                 };
@@ -169,20 +208,36 @@ impl ToolExecutorFactory {
     }
 }
 
+impl ToolExecutionInput {
+    pub fn to_invocation(&self) -> ToolInvocation {
+        ToolInvocation::function(
+            self.call_id.clone(),
+            self.tool_name.clone(),
+            self.arguments.clone(),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use async_trait::async_trait;
     use serde_json::json;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
     use talos_tools::{Tool, ToolContext, ToolOutput};
     use tokio::time::{sleep, Duration};
 
-    struct DelayEchoTool;
+    struct ObservedDelayTool {
+        name: &'static str,
+        concurrent: Arc<AtomicUsize>,
+        max_concurrent: Arc<AtomicUsize>,
+    }
 
     #[async_trait]
-    impl Tool for DelayEchoTool {
+    impl Tool for ObservedDelayTool {
         fn name(&self) -> &str {
-            "delay_echo"
+            self.name
         }
 
         fn description(&self) -> &str {
@@ -210,7 +265,10 @@ mod tests {
                 .get("delay_ms")
                 .and_then(Value::as_u64)
                 .unwrap_or_default();
+            let active = self.concurrent.fetch_add(1, Ordering::SeqCst) + 1;
+            let _ = self.max_concurrent.fetch_max(active, Ordering::SeqCst);
             sleep(Duration::from_millis(delay_ms)).await;
+            self.concurrent.fetch_sub(1, Ordering::SeqCst);
             Ok(ToolOutput {
                 success: true,
                 output: label,
@@ -222,17 +280,24 @@ mod tests {
     #[tokio::test]
     async fn test_parallel_tool_executor_preserves_input_order() {
         let registry = Arc::new(ToolRegistry::new());
-        registry.register(Arc::new(DelayEchoTool));
+        let concurrent = Arc::new(AtomicUsize::new(0));
+        let max_concurrent = Arc::new(AtomicUsize::new(0));
+        registry.register(Arc::new(ObservedDelayTool {
+            name: "read_file",
+            concurrent: concurrent.clone(),
+            max_concurrent: max_concurrent.clone(),
+        }));
         let executor = ParallelToolExecutor;
         let execution_context = ToolExecutionContext {
             session_id: "s1".to_string(),
             user_id: "u1".to_string(),
             kernel_config: Arc::new(AgentKernelConfig::default()),
+            pre_approved_call_ids: HashSet::new(),
         };
         let calls = vec![
             ToolExecutionInput {
                 call_id: "call_1".to_string(),
-                tool_name: "delay_echo".to_string(),
+                tool_name: "read_file".to_string(),
                 arguments: json!({
                     "label": "first",
                     "delay_ms": 50
@@ -240,7 +305,7 @@ mod tests {
             },
             ToolExecutionInput {
                 call_id: "call_2".to_string(),
-                tool_name: "delay_echo".to_string(),
+                tool_name: "read_file".to_string(),
                 arguments: json!({
                     "label": "second",
                     "delay_ms": 1
@@ -256,7 +321,61 @@ mod tests {
         assert_eq!(outputs.len(), 2);
         assert_eq!(outputs[0].call_id, "call_1");
         assert_eq!(outputs[1].call_id, "call_2");
-        assert_eq!(outputs[0].tool_name, "delay_echo");
-        assert_eq!(outputs[1].tool_name, "delay_echo");
+        assert_eq!(outputs[0].tool_name, "read_file");
+        assert_eq!(outputs[1].tool_name, "read_file");
+        assert!(max_concurrent.load(Ordering::SeqCst) >= 2);
+    }
+
+    #[tokio::test]
+    async fn test_parallel_tool_executor_falls_back_for_mutating_batch() {
+        let registry = Arc::new(ToolRegistry::new());
+        let concurrent = Arc::new(AtomicUsize::new(0));
+        let max_concurrent = Arc::new(AtomicUsize::new(0));
+        registry.register(Arc::new(ObservedDelayTool {
+            name: "read_file",
+            concurrent: concurrent.clone(),
+            max_concurrent: max_concurrent.clone(),
+        }));
+        registry.register(Arc::new(ObservedDelayTool {
+            name: "apply_patch",
+            concurrent,
+            max_concurrent: max_concurrent.clone(),
+        }));
+
+        let executor = ParallelToolExecutor;
+        let execution_context = ToolExecutionContext {
+            session_id: "s1".to_string(),
+            user_id: "u1".to_string(),
+            kernel_config: Arc::new(AgentKernelConfig::default()),
+            pre_approved_call_ids: HashSet::new(),
+        };
+        let calls = vec![
+            ToolExecutionInput {
+                call_id: "call_1".to_string(),
+                tool_name: "read_file".to_string(),
+                arguments: json!({
+                    "label": "read",
+                    "delay_ms": 50
+                }),
+            },
+            ToolExecutionInput {
+                call_id: "call_2".to_string(),
+                tool_name: "apply_patch".to_string(),
+                arguments: json!({
+                    "label": "write",
+                    "delay_ms": 50
+                }),
+            },
+        ];
+
+        let outputs = executor
+            .execute(&execution_context, registry, &calls)
+            .await
+            .expect("mixed batch execution should succeed");
+
+        assert_eq!(outputs.len(), 2);
+        assert_eq!(outputs[0].call_id, "call_1");
+        assert_eq!(outputs[1].call_id, "call_2");
+        assert_eq!(max_concurrent.load(Ordering::SeqCst), 1);
     }
 }

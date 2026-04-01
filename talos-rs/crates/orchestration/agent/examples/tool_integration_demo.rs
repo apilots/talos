@@ -3,7 +3,8 @@
 use std::sync::Arc;
 use talos_agent::MockAgent;
 use talos_tools::{
-    ExecTool, HttpRequestTool, ReadTool, ToolRegistry, WebFetchTool, WebSearchTool, WriteTool,
+    ExecCommandTool, HttpRequestTool, ReadFileTool, ToolRegistry, WebFetchTool, WebSearchTool,
+    WriteTool,
 };
 use talos_tools_policy::ToolPolicy;
 
@@ -30,13 +31,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   - Better integration between agent and tool registry");
 
     // Demonstrate the tool registry with security policies
-    let policy = ToolPolicy::allow_list(vec!["web_search", "web_fetch", "read", "write"]);
+    let policy = ToolPolicy::allow_list(vec!["web_search", "web_fetch", "read_file", "write"]);
     let registry = Arc::new(ToolRegistry::new_with_policy(policy));
 
     // Register tools
-    registry.register(Arc::new(ReadTool));
+    registry.register(Arc::new(ReadFileTool));
     registry.register(Arc::new(WriteTool));
-    registry.register(Arc::new(ExecTool));
+    registry.register(Arc::new(ExecCommandTool));
     registry.register(Arc::new(WebSearchTool));
     registry.register(Arc::new(WebFetchTool));
     registry.register(Arc::new(HttpRequestTool));
@@ -62,13 +63,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Test security policy
-    println!("\n6. Testing security policy (exec should be blocked):");
+    println!("\n6. Testing security policy (exec_command should be blocked):");
     match registry
-        .execute("exec", serde_json::json!({"command": "ls"}))
+        .execute("exec_command", serde_json::json!({"cmd": "ls"}))
         .await
     {
-        Ok(_) => println!("   Exec tool executed (unexpected)"),
-        Err(e) => println!("   Exec tool blocked by policy: {} (expected)", e),
+        Ok(_) => println!("   exec_command tool executed (unexpected)"),
+        Err(e) => println!("   exec_command tool blocked by policy: {} (expected)", e),
     }
 
     println!("\n=== Agent Tool Integration Demo Completed ===");

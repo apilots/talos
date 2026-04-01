@@ -11,6 +11,7 @@ mod basic_tests {
     };
     use talos_types::RequestHandler;
     use tokio;
+    use tokio::sync::mpsc;
 
     struct MockHandler {
         should_error: bool,
@@ -40,6 +41,34 @@ mod basic_tests {
                     session_id: "test-session".to_string(),
                 })
             }
+        }
+
+        async fn handle_stream(
+            &self,
+            request: talos_types::gateway::GatewayRequest,
+        ) -> TalosResult<mpsc::Receiver<talos_types::talos::TalosEvent>> {
+            let response = self.handle(request).await?;
+            let (tx, rx) = mpsc::channel(1);
+            tokio::spawn(async move {
+                let _ = tx
+                    .send(talos_types::talos::TalosEvent {
+                        event_type: talos_types::talos::TalosEventType::MessageStarted,
+                        message_id: "msg-mock".to_string(),
+                        session_id: response.session_id,
+                        sequence: 0,
+                        payload: talos_types::talos::TalosEventPayload::MessageStarted(
+                            talos_types::talos::TalosMessageStartedEvent {
+                                request_id: "req-mock".to_string(),
+                                model: "test-model".to_string(),
+                                usage: TalosUsage::default(),
+                                iteration: 0,
+                                step_id: "start".to_string(),
+                            },
+                        ),
+                    })
+                    .await;
+            });
+            Ok(rx)
         }
     }
 

@@ -11,10 +11,11 @@ pub use retrieval::MemorySearchResponse;
 pub use store::{
     MemoryGetResult, MemorySearchQuery, MemorySearchResult, MemoryStore, RecordHeader,
     RetrievedMemoryItem, SessionPromptContext, SessionPromptContextConfig,
-    SessionTranscriptActions, SessionTranscriptAuthPayload, SessionTranscriptAuthor,
-    SessionTranscriptBranch, SessionTranscriptCompaction, SessionTranscriptCompactionPayload,
+    SessionTranscriptActions, SessionTranscriptApprovalResponsePayload,
+    SessionTranscriptAuthPayload, SessionTranscriptAuthor, SessionTranscriptBranch,
+    SessionTranscriptCompaction, SessionTranscriptCompactionPayload,
     SessionTranscriptConfirmationPayload, SessionTranscriptEventKind, SessionTranscriptHeader,
-    SessionTranscriptPayload, SessionTranscriptRecord, SessionTranscriptTransferPayload,
-    SessionTranscriptStateDelta, SessionTranscriptStateNamespace, SummaryRecord, TalosMessage,
+    SessionTranscriptPayload, SessionTranscriptRecord, SessionTranscriptStateDelta,
+    SessionTranscriptStateNamespace, SessionTranscriptTransferPayload, SummaryRecord, TalosMessage,
     TalosMessageRole, TalosTurn, ToolCallRecord, ToolResultRecord, WorkspaceMemoryRecord,
 };

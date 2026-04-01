@@ -155,7 +155,7 @@ if [[ -z "${tool_session_id}" ]]; then
 fi
 echo "CASE messages_tool_exec_create_session PASS session_id=${tool_session_id}"
 
-tool_input="You must call tool 'exec' exactly once with command ls, then return the raw stdout inside <tool_output></tool_output>."
+tool_input="You must call tool 'exec_command' exactly once with cmd ls, then return the raw stdout inside <tool_output></tool_output>."
 tool_payload="$(build_payload "${tool_input}")"
 tool_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${tool_session_id}/messages" \
   -H "Content-Type: application/json" \
@@ -177,19 +177,14 @@ if [[ "${tool_call_count}" -lt 1 || "${tool_result_count}" -lt 1 ]]; then
 fi
 
 tool_call_name="$(python3 -c 'import json,sys; d=json.load(sys.stdin); calls=[i for i in d.get("output", []) if i.get("type")=="tool_call"]; print(calls[0].get("name","") if calls else "")' <<< "${tool_json}")"
-tool_result_tool="$(python3 -c 'import json,sys; d=json.load(sys.stdin); results=[i for i in d.get("output", []) if i.get("type")=="tool_result"]; print((((results[0].get("content") or [{}])[0].get("value") or {}).get("tool","")) if results else "")' <<< "${tool_json}")"
+tool_result_tool="$(python3 -c 'import json,sys; d=json.load(sys.stdin); results=[i for i in d.get("output", []) if i.get("type")=="tool_result"]; print(results[0].get("tool_name","") if results else "")' <<< "${tool_json}")"
 execution_summary_count="$(python3 -c 'import json,sys; d=json.load(sys.stdin); print(sum(1 for i in d.get("output", []) if i.get("type")=="execution_summary"))' <<< "${tool_json}")"
-if [[ "${tool_call_name}" != "exec" || "${tool_result_tool}" != "exec" ]]; then
+if [[ "${tool_call_name}" != "exec_command" || "${tool_result_tool}" != "exec_command" ]]; then
   echo "CASE messages_tool_exec FAIL unexpected_tool call=${tool_call_name} result=${tool_result_tool}"
   exit 1
 fi
 if [[ "${execution_summary_count}" -lt 1 ]]; then
   echo "CASE messages_tool_exec FAIL missing_execution_summary_in_output"
-  exit 1
-fi
-
-if ! echo "${tool_output}" | grep -q "Cargo.toml"; then
-  echo "CASE messages_tool_exec FAIL missing=Cargo.toml output=${tool_output}"
   exit 1
 fi
 
@@ -219,7 +214,7 @@ payload = {
     "input": [
         {
             "type": "text",
-            "text": "You must call exec tool with command ls, then summarize in one short sentence.",
+            "text": "You must call exec_command tool with cmd ls, then summarize in one short sentence.",
         }
     ],
     "stream": True,

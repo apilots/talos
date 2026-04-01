@@ -143,7 +143,9 @@ impl Agent for ParallelKernelAgent {
             let mut child_ctx = ctx.clone();
             set.spawn(async move {
                 let mut buffered_handler = BufferedExecutionEventHandler::default();
-                let result = child.run(&mut child_ctx, Some(&mut buffered_handler)).await?;
+                let result = child
+                    .run(&mut child_ctx, Some(&mut buffered_handler))
+                    .await?;
                 Ok::<_, talos_error::TalosError>((index, result, buffered_handler.events))
             });
         }
@@ -364,7 +366,9 @@ impl Agent for RoutingKernelAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EventAuthor, ExecutionBranch, ExecutionEvent, ExecutionEventKind, TaskKind, TaskStatus};
+    use crate::{
+        EventAuthor, ExecutionBranch, ExecutionEvent, ExecutionEventKind, TaskKind, TaskStatus,
+    };
     use talos_types::talos::TalosOutputItem;
 
     #[derive(Clone)]
@@ -537,7 +541,10 @@ mod tests {
             ],
         );
         let mut ctx = mock_ctx();
-        let result = seq.run(&mut ctx, None).await.expect("sequential should succeed");
+        let result = seq
+            .run(&mut ctx, None)
+            .await
+            .expect("sequential should succeed");
         assert_eq!(result.output_text, "b-out");
         assert_eq!(result.task_results.len(), 2);
     }
@@ -562,7 +569,10 @@ mod tests {
             ],
         );
         let mut ctx = mock_ctx();
-        let result = par.run(&mut ctx, None).await.expect("parallel should succeed");
+        let result = par
+            .run(&mut ctx, None)
+            .await
+            .expect("parallel should succeed");
         assert_eq!(result.task_results.len(), 2);
         assert_eq!(result.output_text, "b-out");
     }
@@ -658,7 +668,10 @@ mod tests {
         );
 
         let mut ctx = mock_ctx();
-        let result = router.run(&mut ctx, None).await.expect("router should succeed");
+        let result = router
+            .run(&mut ctx, None)
+            .await
+            .expect("router should succeed");
         assert_eq!(result.output_text, "from-b");
         assert!(result.requested_transfer.is_none());
     }

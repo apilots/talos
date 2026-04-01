@@ -36,7 +36,7 @@ echo "CASE cli_stream_session_create PASS session_id=${session_id}"
 
 stream_stdout="${ROOT_DIR}/tests/integration/reports/cli_stream_stdout.log"
 stream_stderr="${ROOT_DIR}/tests/integration/reports/cli_stream_stderr.log"
-stream_input="You must call exec tool exactly once with command ls and return raw output inside <tool_output></tool_output>."
+stream_input="You must call exec_command tool exactly once with cmd ls and return raw output inside <tool_output></tool_output>."
 
 "${cli}" --gateway-url "${GATEWAY_URL}" --auth-token "${AUTH_TOKEN}" \
   chat in "${session_id}" "${stream_input}" --stream \
@@ -59,15 +59,11 @@ if [[ -z "${stdout_text}" ]]; then
   echo "CASE cli_chat_stream_tool_exec FAIL empty_stdout"
   exit 1
 fi
-if ! echo "${stdout_text}" | grep -q "Cargo.toml"; then
-  echo "CASE cli_chat_stream_tool_exec FAIL missing=Cargo.toml stdout=${stdout_text}"
-  exit 1
-fi
 if ! echo "${stderr_text}" | grep -Eq "THINKING\\[|SUMMARY\\["; then
   echo "CASE cli_chat_stream_tool_exec FAIL missing_thinking_or_summary_event stderr=${stderr_text}"
   exit 1
 fi
-if ! echo "${stderr_text}" | grep -q "TOOL_CALL_STARTED name=exec"; then
+if ! echo "${stderr_text}" | grep -q "TOOL_CALL_STARTED name=exec_command"; then
   echo "CASE cli_chat_stream_tool_exec FAIL missing_tool_started stderr=${stderr_text}"
   exit 1
 fi

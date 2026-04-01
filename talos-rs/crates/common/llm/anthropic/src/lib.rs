@@ -786,7 +786,10 @@ mod tests {
         let built = AnthropicProvider::build_request(request, false);
 
         assert_eq!(
-            built.thinking.as_ref().map(|thinking| thinking.budget_tokens),
+            built
+                .thinking
+                .as_ref()
+                .map(|thinking| thinking.budget_tokens),
             Some(4096)
         );
     }

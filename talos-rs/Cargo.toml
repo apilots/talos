@@ -113,6 +113,7 @@ talos-error = { path = "crates/infra/error" }
 talos-types = { path = "crates/common/types" }
 talos-tools = { path = "crates/action/tools" }
 talos-tools-policy = { path = "crates/action/tools-policy" }
+talos-tools-sandbox = { path = "crates/action/tools-sandbox" }
 talos-memory = { path = "crates/cognition/memory" }
 talos-auth = { path = "crates/infra/auth" }
 talos-gateway = { path = "crates/gateway/core" }

@@ -10,14 +10,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use talos_error::TalosResult;
 use talos_llm_provider::{ChatMessage, FunctionCall};
-use talos_memory::{
-    Memory, MemoryStore, SessionTranscriptActions, SessionTranscriptAuthPayload,
-    SessionTranscriptAuthor, SessionTranscriptBranch, SessionTranscriptCompaction,
-    SessionTranscriptCompactionPayload, SessionTranscriptConfirmationPayload,
-    SessionTranscriptEventKind, SessionTranscriptHeader, SessionTranscriptRecord,
-    SessionTranscriptStateDelta, SessionTranscriptStateNamespace, SessionTranscriptTransferPayload,
-};
 use talos_memory::SessionTranscriptPayload;
+use talos_memory::{
+    Memory, MemoryStore, SessionTranscriptActions, SessionTranscriptApprovalResponsePayload,
+    SessionTranscriptAuthPayload, SessionTranscriptAuthor, SessionTranscriptBranch,
+    SessionTranscriptCompaction, SessionTranscriptCompactionPayload,
+    SessionTranscriptConfirmationPayload, SessionTranscriptEventKind, SessionTranscriptHeader,
+    SessionTranscriptRecord, SessionTranscriptStateDelta, SessionTranscriptStateNamespace,
+    SessionTranscriptTransferPayload,
+};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -35,12 +36,25 @@ pub enum SessionEventKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionEventPayload {
-    Message { message: ChatMessage },
+    Message {
+        message: ChatMessage,
+    },
     StateOnly,
-    Transfer { payload: SessionTransferPayload },
-    Auth { payload: SessionAuthPayload },
-    Confirmation { payload: SessionConfirmationPayload },
-    Compaction { payload: SessionCompactionPayload },
+    Transfer {
+        payload: SessionTransferPayload,
+    },
+    Auth {
+        payload: SessionAuthPayload,
+    },
+    Confirmation {
+        payload: SessionConfirmationPayload,
+    },
+    ApprovalResponse {
+        payload: SessionApprovalResponsePayload,
+    },
+    Compaction {
+        payload: SessionCompactionPayload,
+    },
 }
 
 impl SessionEventPayload {
@@ -51,6 +65,7 @@ impl SessionEventPayload {
             Self::Transfer { .. }
             | Self::Auth { .. }
             | Self::Confirmation { .. }
+            | Self::ApprovalResponse { .. }
             | Self::StateOnly => None,
         }
     }
@@ -72,6 +87,15 @@ pub struct SessionConfirmationPayload {
     pub tool_name: String,
     pub call_id: String,
     pub prompt: String,
+    pub arguments: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionApprovalResponsePayload {
+    pub call_id: String,
+    pub tool_name: String,
+    pub approved: bool,
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -172,6 +196,15 @@ impl SessionEvent {
                     tool_name: payload.tool_name.clone(),
                     call_id: payload.call_id.clone(),
                     prompt: payload.prompt.clone(),
+                    arguments: payload.arguments.clone(),
+                },
+            },
+            EventPayload::ApprovalResponse { payload } => SessionEventPayload::ApprovalResponse {
+                payload: SessionApprovalResponsePayload {
+                    call_id: payload.call_id.clone(),
+                    tool_name: payload.tool_name.clone(),
+                    approved: payload.approved,
+                    reason: payload.reason.clone(),
                 },
             },
             EventPayload::CompactionSummary { payload } => SessionEventPayload::Compaction {
@@ -206,7 +239,9 @@ impl SessionEvent {
             ExecutionEventKind::ToolCall => SessionEventKind::ToolCall,
             ExecutionEventKind::ToolResult => SessionEventKind::ToolResult,
             ExecutionEventKind::Planning => SessionEventKind::Planning,
-            ExecutionEventKind::System | ExecutionEventKind::Error => SessionEventKind::SystemMessage,
+            ExecutionEventKind::System | ExecutionEventKind::Error => {
+                SessionEventKind::SystemMessage
+            }
         };
 
         Self {
@@ -385,10 +420,13 @@ impl MemoryBackedSessionService {
             transfer_to: actions.transfer_to.clone(),
             branch_override: actions.branch_override.map(Self::map_branch_to_transcript),
             rewind_before_invocation_id: actions.rewind_before_invocation_id.clone(),
-            compaction: actions.compaction.as_ref().map(|compaction| SessionTranscriptCompaction {
-                start_event_id: compaction.start_event_id.clone(),
-                end_event_id: compaction.end_event_id.clone(),
-            }),
+            compaction: actions
+                .compaction
+                .as_ref()
+                .map(|compaction| SessionTranscriptCompaction {
+                    start_event_id: compaction.start_event_id.clone(),
+                    end_event_id: compaction.end_event_id.clone(),
+                }),
         }
     }
 
@@ -482,6 +520,17 @@ impl MemoryBackedSessionService {
                         tool_name: payload.tool_name.clone(),
                         call_id: payload.call_id.clone(),
                         prompt: payload.prompt.clone(),
+                        arguments: payload.arguments.clone(),
+                    },
+                }
+            }
+            SessionEventPayload::ApprovalResponse { payload } => {
+                SessionTranscriptPayload::ApprovalResponse {
+                    payload: SessionTranscriptApprovalResponsePayload {
+                        call_id: payload.call_id.clone(),
+                        tool_name: payload.tool_name.clone(),
+                        approved: payload.approved,
+                        reason: payload.reason.clone(),
                     },
                 }
             }
@@ -495,7 +544,9 @@ impl MemoryBackedSessionService {
 
     fn map_payload_from_transcript(payload: SessionTranscriptPayload) -> SessionEventPayload {
         match payload {
-            SessionTranscriptPayload::Message { message } => SessionEventPayload::Message { message },
+            SessionTranscriptPayload::Message { message } => {
+                SessionEventPayload::Message { message }
+            }
             SessionTranscriptPayload::StateOnly => SessionEventPayload::StateOnly,
             SessionTranscriptPayload::Transfer { payload } => SessionEventPayload::Transfer {
                 payload: SessionTransferPayload {
@@ -514,6 +565,17 @@ impl MemoryBackedSessionService {
                         tool_name: payload.tool_name,
                         call_id: payload.call_id,
                         prompt: payload.prompt,
+                        arguments: payload.arguments,
+                    },
+                }
+            }
+            SessionTranscriptPayload::ApprovalResponse { payload } => {
+                SessionEventPayload::ApprovalResponse {
+                    payload: SessionApprovalResponsePayload {
+                        call_id: payload.call_id,
+                        tool_name: payload.tool_name,
+                        approved: payload.approved,
+                        reason: payload.reason,
                     },
                 }
             }

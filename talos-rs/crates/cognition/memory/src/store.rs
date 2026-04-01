@@ -161,12 +161,25 @@ pub struct SessionTranscriptHeader {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionTranscriptPayload {
-    Message { message: ChatMessage },
+    Message {
+        message: ChatMessage,
+    },
     StateOnly,
-    Transfer { payload: SessionTranscriptTransferPayload },
-    Auth { payload: SessionTranscriptAuthPayload },
-    Confirmation { payload: SessionTranscriptConfirmationPayload },
-    Compaction { payload: SessionTranscriptCompactionPayload },
+    Transfer {
+        payload: SessionTranscriptTransferPayload,
+    },
+    Auth {
+        payload: SessionTranscriptAuthPayload,
+    },
+    Confirmation {
+        payload: SessionTranscriptConfirmationPayload,
+    },
+    ApprovalResponse {
+        payload: SessionTranscriptApprovalResponsePayload,
+    },
+    Compaction {
+        payload: SessionTranscriptCompactionPayload,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -180,11 +193,20 @@ pub struct SessionTranscriptAuthPayload {
     pub prompt: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionTranscriptConfirmationPayload {
     pub tool_name: String,
     pub call_id: String,
     pub prompt: String,
+    pub arguments: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionTranscriptApprovalResponsePayload {
+    pub call_id: String,
+    pub tool_name: String,
+    pub approved: bool,
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

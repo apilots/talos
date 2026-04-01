@@ -1,11 +1,11 @@
 use crate::tool_execution::ToolExecutionContext;
 use crate::{
     warnings::derive_prompt_warnings, ExecutionSummaryStreamData, InvocationContext, KernelEvent,
-    KernelEventData, KernelEventLabel, KernelEventType, KernelOutputDeltaSource,
-    KernelStreamEvent, KernelStreamEventData, KernelStreamEventType, KernelThinkingSource,
-    KernelThinkingStage, KernelWarning, OutputDeltaStreamData, PromptWarningEventData,
-    StopReason, ThinkingDeltaStreamData, ToolCallStartStreamData, ToolExecutionInput,
-    ToolExecutionOutput, ToolExecutor, ToolResultStreamData,
+    KernelEventData, KernelEventLabel, KernelEventType, KernelOutputDeltaSource, KernelStreamEvent,
+    KernelStreamEventData, KernelStreamEventType, KernelThinkingSource, KernelThinkingStage,
+    KernelWarning, OutputDeltaStreamData, PromptWarningEventData, StopReason,
+    ThinkingDeltaStreamData, ToolCallStartStreamData, ToolExecutionInput, ToolExecutor,
+    ToolResultStreamData,
 };
 use chrono::Utc;
 use serde_json::Value;
@@ -26,7 +26,7 @@ use talos_prompt::{
     render_prompt_assembly, PromptBudget, PromptBuildConfig, PromptBuilder, PromptDiagnostics,
     PromptLoadPolicy, PromptPhase,
 };
-use talos_tools::ToolRegistry;
+use talos_tools::{ToolOutputPayload, ToolRegistry};
 use talos_types::talos::{TalosContentItem, TalosOutputItem, TalosUsage};
 use tokio::sync::mpsc;
 use tracing::warn;
@@ -176,9 +176,18 @@ pub struct GeneralTurnStepResult {
 pub struct GeneralTurnToolBatch {
     pub output_items: Vec<TalosOutputItem>,
     pub tool_messages: Vec<ChatMessage>,
+    pub pending_confirmations: Vec<PendingToolConfirmation>,
     pub retrieved_memories: Vec<RetrievedMemoryItem>,
     pub logs: Vec<ToolResultLog>,
     pub error_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingToolConfirmation {
+    pub tool_name: String,
+    pub call_id: String,
+    pub prompt: String,
+    pub arguments: Value,
 }
 
 pub async fn flush_session_memory(
@@ -446,14 +455,25 @@ mod tests {
     use async_trait::async_trait;
     use serde_json::json;
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use talos_llm_provider::{
-        ChatChunk, ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage,
+        ChatChunk, ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, Usage,
     };
-    use talos_tools::ToolRegistry;
+    use talos_tools::{register_core_local_tools, ToolRegistry};
     use tokio::sync::mpsc;
     use uuid::Uuid;
 
     struct NoopLlmProvider;
+
+    #[derive(Default)]
+    struct ExecLoopProvider {
+        round: AtomicUsize,
+    }
+
+    #[derive(Default)]
+    struct ApprovalLoopProvider {
+        round: AtomicUsize,
+    }
 
     #[async_trait]
     impl LlmProvider for NoopLlmProvider {
@@ -482,6 +502,156 @@ mod tests {
 
         fn default_model(&self) -> &str {
             "noop"
+        }
+    }
+
+    #[async_trait]
+    impl LlmProvider for ExecLoopProvider {
+        fn name(&self) -> &str {
+            "exec-loop"
+        }
+
+        async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+            self.chat_with_tools(request).await
+        }
+
+        async fn chat_with_tools(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+            let round = self.round.fetch_add(1, Ordering::SeqCst);
+            match round {
+                0 => Ok(ChatResponse {
+                    content: "Open a shell session first.".to_string(),
+                    model: request.model,
+                    usage: Usage::default(),
+                    finish_reason: Some("tool_calls".to_string()),
+                    tool_calls: Some(vec![FunctionCall::new(
+                        "call_exec",
+                        "exec_command",
+                        json!({
+                            "cmd": "printf 'ready\\n'; read line; printf 'done:%s\\n' \"$line\"",
+                            "shell": "/bin/sh",
+                            "login": false,
+                            "yield_time_ms": 50
+                        }),
+                    )]),
+                }),
+                1 => {
+                    let tool_message = request
+                        .messages
+                        .iter()
+                        .find(|msg| {
+                            msg.role == talos_llm_provider::Role::Tool
+                                && msg.tool_call_id.as_deref() == Some("call_exec")
+                        })
+                        .expect("exec_command tool message should exist");
+                    let payload: Value = serde_json::from_str(&tool_message.content)
+                        .expect("exec_command payload should parse");
+                    let session_id = payload
+                        .get("session_id")
+                        .and_then(Value::as_i64)
+                        .expect("session_id should exist");
+                    assert_eq!(
+                        payload.get("status").and_then(Value::as_str),
+                        Some("running")
+                    );
+                    assert!(payload
+                        .get("output")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .contains("ready"));
+                    Ok(ChatResponse {
+                        content: "Write stdin to finish.".to_string(),
+                        model: request.model,
+                        usage: Usage::default(),
+                        finish_reason: Some("tool_calls".to_string()),
+                        tool_calls: Some(vec![FunctionCall::new(
+                            "call_write",
+                            "write_stdin",
+                            json!({
+                                "session_id": session_id,
+                                "chars": "ok\n",
+                                "yield_time_ms": 50
+                            }),
+                        )]),
+                    })
+                }
+                _ => {
+                    let tool_message = request
+                        .messages
+                        .iter()
+                        .find(|msg| {
+                            msg.role == talos_llm_provider::Role::Tool
+                                && msg.tool_call_id.as_deref() == Some("call_write")
+                        })
+                        .expect("write_stdin tool message should exist");
+                    let payload: Value = serde_json::from_str(&tool_message.content)
+                        .expect("write_stdin payload should parse");
+                    let output = payload
+                        .get("output")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
+                    Ok(ChatResponse {
+                        content: format!("Final answer after stdin write: {}", output.trim()),
+                        model: request.model,
+                        usage: Usage::default(),
+                        finish_reason: Some("stop".to_string()),
+                        tool_calls: None,
+                    })
+                }
+            }
+        }
+
+        async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
+            let (_tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(1);
+            Ok(ChatStream::new(rx))
+        }
+
+        fn default_model(&self) -> &str {
+            "exec-loop"
+        }
+    }
+
+    #[async_trait]
+    impl LlmProvider for ApprovalLoopProvider {
+        fn name(&self) -> &str {
+            "approval-loop"
+        }
+
+        async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+            self.chat_with_tools(request).await
+        }
+
+        async fn chat_with_tools(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+            let round = self.round.fetch_add(1, Ordering::SeqCst);
+            match round {
+                0 => Ok(ChatResponse {
+                    content: "Request escalated shell access.".to_string(),
+                    model: request.model,
+                    usage: Usage::default(),
+                    finish_reason: Some("tool_calls".to_string()),
+                    tool_calls: Some(vec![FunctionCall::new(
+                        "call_exec",
+                        "exec_command",
+                        json!({
+                            "cmd": "echo hi",
+                            "shell": "/bin/sh",
+                            "login": false,
+                            "sandbox_permissions": "require_escalated",
+                            "justification": "Need unrestricted shell access."
+                        }),
+                    )]),
+                }),
+                _ => panic!("approval flow should stop before a second model round"),
+            }
+        }
+
+        async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
+            let (_tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(1);
+            Ok(ChatStream::new(rx))
+        }
+
+        fn default_model(&self) -> &str {
+            "approval-loop"
         }
     }
 
@@ -661,6 +831,76 @@ mod tests {
             }
         }
         assert!(saw_prompt_warning, "stream should include prompt.warning");
+    }
+
+    #[tokio::test]
+    async fn test_run_general_turn_exec_command_then_write_stdin() {
+        let provider = Arc::new(ExecLoopProvider::default());
+        let tool_registry = Arc::new(ToolRegistry::new());
+        register_core_local_tools(tool_registry.as_ref());
+
+        let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+        let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+        let mut config = AgentKernelConfig::default();
+        config.prompt.bootstrap.enabled = false;
+        config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+        let mut ctx = build_ctx_with_stream(None);
+
+        let result = run_general_turn(
+            &mut ctx,
+            "talos",
+            "assistant",
+            "Use exec_command, then continue with write_stdin.",
+            provider.clone(),
+            tool_registry,
+            memory_store,
+            &config,
+        )
+        .await
+        .expect("general turn should succeed");
+
+        assert!(result.output_text.contains("done:ok"));
+        assert!(result
+            .output_items
+            .iter()
+            .any(|item| matches!(item, talos_types::talos::TalosOutputItem::ToolResult { .. })));
+        assert!(provider.round.load(Ordering::SeqCst) >= 3);
+    }
+
+    #[tokio::test]
+    async fn test_run_general_turn_stops_on_pending_tool_confirmation() {
+        let tool_registry = Arc::new(ToolRegistry::new());
+        register_core_local_tools(tool_registry.as_ref());
+
+        let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+        let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+        let mut config = AgentKernelConfig::default();
+        config.prompt.bootstrap.enabled = false;
+        config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+        let mut ctx = build_ctx_with_stream(None);
+
+        let provider = Arc::new(ApprovalLoopProvider::default());
+        let result = run_general_turn(
+            &mut ctx,
+            "talos",
+            "assistant",
+            "Use exec_command with escalated permissions.",
+            provider.clone(),
+            tool_registry,
+            memory_store,
+            &config,
+        )
+        .await
+        .expect("general turn should succeed");
+
+        assert_eq!(result.output_text, "Tool confirmation pending.");
+        assert!(result.output_items.iter().any(|item| matches!(
+            item,
+            talos_types::talos::TalosOutputItem::ToolResult { is_error: true, .. }
+        )));
+        assert_eq!(provider.round.load(Ordering::SeqCst), 1);
     }
 }
 
@@ -949,6 +1189,12 @@ pub fn apply_general_turn_step(state: &mut GeneralTurnLoopState, step: &GeneralT
         .saturating_add(step.usage.total_tokens);
     state.output_items.extend(step.output_items.clone());
     state.reasoning_log.extend(step.reasoning.clone());
+    if !step.tool_calls.is_empty() {
+        state.messages.push(ChatMessage::assistant_with_tool_calls(
+            step.text.clone(),
+            step.tool_calls.clone(),
+        ));
+    }
     for call in &step.tool_calls {
         state.tool_call_count += 1;
         state.tool_call_log.push(ToolCallRecord {
@@ -959,48 +1205,123 @@ pub fn apply_general_turn_step(state: &mut GeneralTurnLoopState, step: &GeneralT
     }
 }
 
-fn build_tool_result_payload(tool_name: &str, output: ToolExecutionOutput) -> (Value, bool) {
-    if output.is_error {
-        let error = output
-            .payload
-            .get("error")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .or_else(|| {
-                output
-                    .payload
-                    .get("output")
+fn build_tool_result_payload(tool_name: &str, payload: &ToolOutputPayload) -> (Value, bool) {
+    match payload {
+        ToolOutputPayload::Function {
+            content,
+            success,
+            structured_content,
+        } => {
+            let truncated = content.contains("[truncated]");
+            if *success {
+                if let Some(structured) = structured_content {
+                    (structured.clone(), false)
+                } else {
+                    (
+                        serde_json::json!({
+                            "ok": true,
+                            "tool": tool_name,
+                            "result": content,
+                            "truncated": truncated,
+                        }),
+                        false,
+                    )
+                }
+            } else {
+                let error = structured_content
+                    .as_ref()
+                    .and_then(|value| value.get("error"))
                     .and_then(Value::as_str)
                     .map(str::to_string)
-            })
-            .unwrap_or_else(|| "unknown error".to_string());
-        (
-            serde_json::json!({
-                "ok": false,
-                "tool": tool_name,
-                "error": error,
-                "truncated": false,
-            }),
-            true,
-        )
-    } else {
-        let output_text = output
-            .payload
-            .get("output")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        let truncated = output_text.contains("[truncated]");
-        (
+                    .or_else(|| {
+                        if content.trim().is_empty() {
+                            None
+                        } else {
+                            Some(content.clone())
+                        }
+                    })
+                    .unwrap_or_else(|| "unknown error".to_string());
+                let mut value = serde_json::json!({
+                    "ok": false,
+                    "tool": tool_name,
+                    "error": error,
+                    "truncated": truncated,
+                });
+                if let Some(structured) = structured_content {
+                    if let Some(object) = value.as_object_mut() {
+                        object.insert("structured".to_string(), structured.clone());
+                    }
+                }
+                (value, true)
+            }
+        }
+        ToolOutputPayload::Resource {
+            uri,
+            mime_type,
+            content,
+        } => (
             serde_json::json!({
                 "ok": true,
                 "tool": tool_name,
-                "result": output_text,
-                "truncated": truncated,
+                "uri": uri,
+                "mime_type": mime_type,
+                "content": content,
+                "truncated": content.contains("[truncated]"),
             }),
             false,
-        )
+        ),
+        ToolOutputPayload::Mcp { content, is_error } => {
+            if *is_error {
+                (
+                    serde_json::json!({
+                        "ok": false,
+                        "tool": tool_name,
+                        "error": content,
+                        "truncated": content.contains("[truncated]"),
+                    }),
+                    true,
+                )
+            } else {
+                (
+                    serde_json::json!({
+                        "ok": true,
+                        "tool": tool_name,
+                        "result": content,
+                        "truncated": content.contains("[truncated]"),
+                    }),
+                    false,
+                )
+            }
+        }
     }
+}
+
+fn extract_pending_tool_confirmation(
+    tool_name: &str,
+    call_id: &str,
+    arguments: Value,
+    payload: &Value,
+    is_error: bool,
+) -> Option<PendingToolConfirmation> {
+    if !is_error {
+        return None;
+    }
+
+    let error = payload.get("error").and_then(Value::as_str)?;
+    let prompt = error
+        .strip_prefix("Tool error: ")
+        .unwrap_or(error)
+        .to_string();
+    if !prompt.starts_with("tool approval is required") {
+        return None;
+    }
+
+    Some(PendingToolConfirmation {
+        tool_name: tool_name.to_string(),
+        call_id: call_id.to_string(),
+        prompt,
+        arguments,
+    })
 }
 
 pub async fn execute_general_turn_tool_batch(
@@ -1010,12 +1331,14 @@ pub async fn execute_general_turn_tool_batch(
     kernel_config: Arc<AgentKernelConfig>,
     user_id: &str,
     tool_calls: &[FunctionCall],
+    pre_approved_call_ids: std::collections::HashSet<String>,
     stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
 ) -> TalosResult<GeneralTurnToolBatch> {
     let execution_context = ToolExecutionContext {
         session_id: format!("agent-{}", prepared.agent_id),
         user_id: user_id.to_string(),
         kernel_config,
+        pre_approved_call_ids,
     };
     let inputs = tool_calls
         .iter()
@@ -1025,23 +1348,34 @@ pub async fn execute_general_turn_tool_batch(
             arguments: call.arguments.clone(),
         })
         .collect::<Vec<_>>();
+    let call_arguments: std::collections::HashMap<String, Value> = tool_calls
+        .iter()
+        .map(|call| (call.id.clone(), call.arguments.clone()))
+        .collect();
     let outputs = tool_executor
         .execute(&execution_context, tool_registry, &inputs)
         .await?;
 
     let mut output_items = Vec::new();
     let mut tool_messages = Vec::new();
+    let mut pending_confirmations = Vec::new();
     let mut retrieved_memories = Vec::new();
     let mut logs = Vec::new();
     let mut error_count = 0_usize;
 
     for output in outputs {
-        let (payload, is_error) = build_tool_result_payload(&output.tool_name, output.clone());
+        let (payload, is_error) = build_tool_result_payload(&output.tool_name, &output.payload);
         if is_error {
             error_count += 1;
         }
+        let memory_payload = output
+            .payload
+            .structured_content()
+            .cloned()
+            .unwrap_or_else(|| payload.clone());
         output_items.push(TalosOutputItem::ToolResult {
             call_id: output.call_id.clone(),
+            tool_name: output.tool_name.clone(),
             content: vec![TalosContentItem::Json {
                 value: payload.clone(),
             }],
@@ -1073,7 +1407,23 @@ pub async fn execute_general_turn_tool_batch(
                 .map(|buf| buf.len())
                 .unwrap_or(0),
         });
-        retrieved_memories.extend(parse_retrieved_memory_items(&output.tool_name, &payload));
+        retrieved_memories.extend(parse_retrieved_memory_items(
+            &output.tool_name,
+            &memory_payload,
+        ));
+        let call_args = call_arguments
+            .get(&output.call_id)
+            .cloned()
+            .unwrap_or(Value::Null);
+        if let Some(confirmation) = extract_pending_tool_confirmation(
+            &output.tool_name,
+            &output.call_id,
+            call_args,
+            &payload,
+            is_error,
+        ) {
+            pending_confirmations.push(confirmation);
+        }
         tool_messages.push(ChatMessage::tool(
             output.call_id,
             output.tool_name,
@@ -1084,6 +1434,7 @@ pub async fn execute_general_turn_tool_batch(
     Ok(GeneralTurnToolBatch {
         output_items,
         tool_messages,
+        pending_confirmations,
         retrieved_memories,
         logs,
         error_count,
@@ -1095,6 +1446,7 @@ pub fn apply_general_turn_tool_batch(
     batch: &GeneralTurnToolBatch,
     kernel_config: &AgentKernelConfig,
 ) {
+    state.messages.extend(batch.tool_messages.clone());
     state.output_items.extend(batch.output_items.clone());
     state.tool_result_log.extend(batch.logs.clone());
     state.tool_error_count += batch.error_count;
@@ -1311,10 +1663,18 @@ pub async fn execute_general_turn_loop(
             kernel_config.clone(),
             agent_name,
             &step.tool_calls,
+            std::collections::HashSet::new(),
             prepared.stream_tx.as_ref(),
         )
         .await?;
         apply_general_turn_tool_batch(&mut state, &tool_batch, kernel_config.as_ref());
+
+        if !tool_batch.pending_confirmations.is_empty() {
+            break (
+                "Tool confirmation pending.".to_string(),
+                StopReason::EndTurn,
+            );
+        }
 
         if state.round >= max_tool_rounds {
             break (

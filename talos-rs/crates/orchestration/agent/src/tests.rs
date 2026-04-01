@@ -3,7 +3,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use tokio;
-    use talos_tools::{ReadTool, WriteTool, ExecTool, WebSearchTool, WebFetchTool, HttpRequestTool, ToolRegistry};
+    use talos_tools::{ReadFileTool, WriteTool, ExecCommandTool, WebSearchTool, WebFetchTool, HttpRequestTool, ToolRegistry};
     use talos_tools_policy::ToolPolicy;
     use serde_json::json;
 
@@ -52,7 +52,7 @@ mod tests {
 
         // Add some tools to the registry
         agent.add_tool(Arc::new(WebSearchTool));
-        agent.add_tool(Arc::new(ReadTool));
+        agent.add_tool(Arc::new(ReadFileTool));
 
         // Generate system prompt
         let prompt = agent.generate_system_prompt();
@@ -60,7 +60,7 @@ mod tests {
         assert!(prompt.contains("Test Agent"));
         assert!(prompt.contains("An agent for testing"));
         assert!(prompt.contains("web_search"));
-        assert!(prompt.contains("read"));
+        assert!(prompt.contains("read_file"));
     }
 
     #[tokio::test]

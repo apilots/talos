@@ -526,10 +526,14 @@ pub trait Tool: Send + Sync {
 }
 
 // 内置工具
-pub struct ReadTool;
-pub struct ExecTool;
+pub struct ReadFileTool;
+pub struct ExecCommandTool;
+pub struct WriteStdinTool;
 pub struct EditTool;
 pub struct WriteTool;
+pub struct ListDirTool;
+pub struct GrepFilesTool;
+pub struct ApplyPatchTool;
 ```
 
 **依赖**：`talos-error`, `talos-types`
@@ -967,15 +971,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### 2. 使用工具
 
 ```rust
-use talos_tools::{Tool, ToolRegistry};
-use talos_tools::builtin::{ReadTool, ExecTool};
+use talos_tools::{Tool, ToolRegistry, register_core_local_tools};
 
-let mut registry = ToolRegistry::new();
-registry.register(ReadTool);
-registry.register(ExecTool);
+let registry = ToolRegistry::new();
+register_core_local_tools(&registry);
 
-let result = registry.execute("read", "/path/to/file").await?;
-println!("{}", result);
+let result = registry.execute("read_file", serde_json::json!({"path": "/path/to/file"})).await?;
+println!("{}", result.output);
 ```
 
 ### 3. 使用会话

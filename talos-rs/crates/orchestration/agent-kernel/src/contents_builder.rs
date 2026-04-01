@@ -31,7 +31,8 @@ impl ContentsBuilder {
                 SessionEventPayload::StateOnly
                 | SessionEventPayload::Transfer { .. }
                 | SessionEventPayload::Auth { .. }
-                | SessionEventPayload::Confirmation { .. } => None,
+                | SessionEventPayload::Confirmation { .. }
+                | SessionEventPayload::ApprovalResponse { .. } => None,
             })
             .collect()
     }
@@ -490,6 +491,7 @@ mod tests {
                             tool_name: "rm".to_string(),
                             call_id: "call_1".to_string(),
                             prompt: "confirm".to_string(),
+                            arguments: serde_json::json!({}),
                         },
                     },
                     actions: crate::EventActions::default(),

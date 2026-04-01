@@ -26,13 +26,14 @@ pub use composite::{
     LoopKernelAgent, ParallelKernelAgent, RoutingKernelAgent, SequentialKernelAgent,
 };
 pub use contents_builder::ContentsBuilder;
+pub use execution::ReplayToolInvocation;
 pub use execution::{
     AuthRequestPayload, CompactionSummaryPayload, ConfirmationRequestPayload, EventActions,
-    EventAuthor, EventPayload, EventSink, ExecutionBranch, ExecutionEvent,
-    ExecutionEventBuffer, ExecutionEventHandler, ExecutionEventKind, LlmRequestEnvelope,
-    LlmResponseEnvelope, PlanningResponseEffect, RequestCacheContext,
-    PlanningResponseSegment, PlanningResponseSegmentKind, RequestInteractionContext,
-    RequestOutputContract, ResponseDisposition, StateDelta, StateNamespace, VecEventSink,
+    EventAuthor, EventPayload, EventSink, ExecutionBranch, ExecutionEvent, ExecutionEventBuffer,
+    ExecutionEventHandler, ExecutionEventKind, LlmRequestEnvelope, LlmResponseEnvelope,
+    PlanningResponseEffect, PlanningResponseSegment, PlanningResponseSegmentKind,
+    RequestCacheContext, RequestInteractionContext, RequestOutputContract, ResponseDisposition,
+    StateDelta, StateNamespace, VecEventSink,
 };
 pub use flow::{AutoFlow, BaseLlmFlow, FlowExecution, FlowFactory, FlowRunSummary, SingleFlow};
 pub use general_turn::{
@@ -56,8 +57,9 @@ pub use processor::{
 pub use runner::DefaultRunner;
 pub use runtime::{KernelBuilder, KernelOutput, KernelRuntime};
 pub use session::{
-    InvocationSession, MemoryBackedSessionService, SessionEvent, SessionEventFilter,
-    SessionEventKind, SessionEventPayload, SessionService, SessionState,
+    InvocationSession, MemoryBackedSessionService, SessionApprovalResponsePayload,
+    SessionConfirmationPayload, SessionEvent, SessionEventFilter, SessionEventKind,
+    SessionEventPayload, SessionService, SessionState,
 };
 pub use tool_execution::{
     ParallelToolExecutor, SequentialToolExecutor, ToolExecutionContext, ToolExecutionInput,
@@ -65,16 +67,15 @@ pub use tool_execution::{
 };
 pub use traits::{Agent, BaseKernelAgent, Planner, Plugin, Runner};
 pub use types::{
-    AgentRunResult, ContextStateBags, ExecutionPath, FinalResponseEventData, FlowKind,
-    FlowProfile, InvocationContext, InvocationExecutionState, InvocationLimits,
-    IterationEventData, KernelEvent, KernelEventData, KernelEventLabel, KernelEventType,
-    KernelExecutionKind, KernelExecutionSettings, KernelOutputDeltaSource,
+    AgentRunResult, ContextStateBags, ExecutionPath, ExecutionSummaryStreamData,
+    FinalResponseEventData, FlowKind, FlowProfile, InvocationContext, InvocationExecutionState,
+    InvocationLimits, IterationEventData, KernelEvent, KernelEventData, KernelEventLabel,
+    KernelEventType, KernelExecutionKind, KernelExecutionSettings, KernelOutputDeltaSource,
     KernelStreamEvent, KernelStreamEventData, KernelStreamEventType, KernelThinkingSource,
-    KernelThinkingStage, OutputDeltaStreamData, PlannerKind, PromptWarningEventData,
-    RunRequest, RunResponse, StopReason, TaskCompletedEventData, TaskKind, TaskResult,
-    TaskStatus, ThinkingMode, ThinkingDeltaStreamData, ToolCallStartStreamData,
-    ToolExecutionMode, ToolResultStreamData, TransferRequestedEventData, TurnPhase,
-    UserInputEventData, ExecutionSummaryStreamData,
+    KernelThinkingStage, OutputDeltaStreamData, PlannerKind, PromptWarningEventData, RunRequest,
+    RunResponse, StopReason, TaskCompletedEventData, TaskKind, TaskResult, TaskStatus,
+    ThinkingDeltaStreamData, ThinkingMode, ToolCallStartStreamData, ToolExecutionMode,
+    ToolResultStreamData, TransferRequestedEventData, TurnPhase, UserInputEventData,
 };
 pub use warnings::{
     KernelWarning, PromptBootstrapDropReason, PromptBootstrapFileDroppedWarning,

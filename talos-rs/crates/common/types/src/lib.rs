@@ -381,6 +381,7 @@ pub mod talos {
         },
         ToolResult {
             call_id: String,
+            tool_name: String,
             content: Vec<TalosContentItem>,
             #[serde(default)]
             is_error: bool,
@@ -800,6 +801,15 @@ pub trait SessionService: Send + Sync {
     ) -> TalosResult<SessionPatchAck>;
 
     async fn close_session(&self, session_id: &str) -> TalosResult<()>;
+
+    async fn submit_tool_approval(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        approved: bool,
+        reason: Option<String>,
+    ) -> TalosResult<()>;
 }
 
 pub fn now() -> u64 {

@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use talos_agent_kernel::TurnPhase;
 use talos_error::TalosResult;
 use talos_types::talos::{
-    TalosInputItem, TalosOutputItem, TalosReasoning, TalosUsage, TalosThinkingSource,
-    TalosThinkingStage,
+    TalosInputItem, TalosOutputItem, TalosReasoning, TalosThinkingSource, TalosThinkingStage,
+    TalosUsage,
 };
 use talos_types::TalosSession;
 use tokio::sync::mpsc;
@@ -140,4 +140,12 @@ pub trait AgentOrchestrator: Send + Sync {
         request: OrchestratorRequest,
     ) -> TalosResult<mpsc::Receiver<OrchestratorEvent>>;
     async fn close_session(&self, session: TalosSession) -> TalosResult<()>;
+    async fn submit_tool_approval(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        approved: bool,
+        reason: Option<String>,
+    ) -> TalosResult<()>;
 }

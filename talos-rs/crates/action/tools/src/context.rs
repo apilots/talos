@@ -11,6 +11,7 @@ pub struct ToolContext {
     user_id: String,
     state: Arc<DashMap<String, Value>>,
     kernel_config: Option<Arc<AgentKernelConfig>>,
+    pre_approved: bool,
 }
 
 impl ToolContext {
@@ -28,7 +29,17 @@ impl ToolContext {
             user_id: user_id.into(),
             state: Arc::new(DashMap::new()),
             kernel_config,
+            pre_approved: false,
         }
+    }
+
+    pub fn with_pre_approved(mut self) -> Self {
+        self.pre_approved = true;
+        self
+    }
+
+    pub fn pre_approved(&self) -> bool {
+        self.pre_approved
     }
 
     pub fn anonymous() -> Self {

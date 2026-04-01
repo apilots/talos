@@ -26,7 +26,11 @@ use talos_agent_kernel::{
 use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{ChatMessage, FunctionCall, LlmProvider};
-use talos_memory::MemoryStore;
+use talos_memory::{
+    Memory, MemoryStore, SessionTranscriptActions, SessionTranscriptApprovalResponsePayload,
+    SessionTranscriptAuthor, SessionTranscriptBranch, SessionTranscriptEventKind,
+    SessionTranscriptHeader, SessionTranscriptPayload, SessionTranscriptRecord,
+};
 use talos_tools::ToolRegistry;
 use talos_types::talos::{
     TalosContentItem, TalosInputItem, TalosOutputItem, TalosReasoning, TalosThinkingSource,
@@ -514,20 +518,19 @@ After receiving tool outputs, continue reasoning and provide the final response.
         let iteration = current_index.saturating_add(1);
         let step_id = format!("step-{}", iteration);
         let mapped = match (event.event_type, event.data) {
-            (
-                KernelStreamEventType::ThinkingDelta,
-                KernelStreamEventData::ThinkingDelta(data),
-            ) => Some(OrchestratorEvent::MessageReasoningDelta(
-                OrchestratorMessageReasoningDeltaEvent {
-                    request_id: request_id.to_string(),
-                    delta: data.delta,
-                    source: map_thinking_source(data.source),
-                    stage: map_thinking_stage(data.stage),
-                    item_index: current_index,
-                    iteration,
-                    step_id,
-                },
-            )),
+            (KernelStreamEventType::ThinkingDelta, KernelStreamEventData::ThinkingDelta(data)) => {
+                Some(OrchestratorEvent::MessageReasoningDelta(
+                    OrchestratorMessageReasoningDeltaEvent {
+                        request_id: request_id.to_string(),
+                        delta: data.delta,
+                        source: map_thinking_source(data.source),
+                        stage: map_thinking_stage(data.stage),
+                        item_index: current_index,
+                        iteration,
+                        step_id,
+                    },
+                ))
+            }
             (
                 KernelStreamEventType::ExecutionSummary,
                 KernelStreamEventData::ExecutionSummary(data),
@@ -540,17 +543,15 @@ After receiving tool outputs, continue reasoning and provide the final response.
                     step_id,
                 },
             )),
-            (KernelStreamEventType::OutputDelta, KernelStreamEventData::OutputDelta(data)) => {
-                Some(OrchestratorEvent::MessageOutputDelta(
-                    OrchestratorMessageOutputDeltaEvent {
-                        request_id: request_id.to_string(),
-                        delta: data.delta,
-                        item_index: current_index,
-                        iteration,
-                        step_id,
-                    },
-                ))
-            }
+            (KernelStreamEventType::OutputDelta, KernelStreamEventData::OutputDelta(data)) => Some(
+                OrchestratorEvent::MessageOutputDelta(OrchestratorMessageOutputDeltaEvent {
+                    request_id: request_id.to_string(),
+                    delta: data.delta,
+                    item_index: current_index,
+                    iteration,
+                    step_id,
+                }),
+            ),
             (KernelStreamEventType::ToolCallStart, KernelStreamEventData::ToolCallStart(data)) => {
                 Some(OrchestratorEvent::MessageToolCallStarted(
                     OrchestratorMessageToolCallStartedEvent {
@@ -603,6 +604,44 @@ After receiving tool outputs, continue reasoning and provide the final response.
             *item_index = (*item_index).saturating_add(1);
         }
         mapped
+    }
+
+    /// Submit a user's approval or rejection decision for a pending tool confirmation.
+    ///
+    /// Persists an `ApprovalResponse` event to the session transcript. On the next
+    /// invocation of this session the `RequestConfirmationRequestProcessor` will detect
+    /// the response and either replay the blocked tool call (if approved) or inject a
+    /// rejection message so the LLM can surface the outcome to the user.
+    pub async fn submit_tool_approval(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        approved: bool,
+        reason: Option<String>,
+    ) -> TalosResult<()> {
+        let record = SessionTranscriptRecord {
+            header: SessionTranscriptHeader {
+                id: Uuid::new_v4().to_string(),
+                session_id: session_id.to_string(),
+                invocation_id: Uuid::new_v4().to_string(),
+                branch: SessionTranscriptBranch::ReactiveLoop,
+                timestamp: Utc::now(),
+            },
+            author: SessionTranscriptAuthor::System,
+            kind: SessionTranscriptEventKind::SystemMessage,
+            payload: SessionTranscriptPayload::ApprovalResponse {
+                payload: SessionTranscriptApprovalResponsePayload {
+                    call_id: call_id.to_string(),
+                    tool_name: tool_name.to_string(),
+                    approved,
+                    reason,
+                },
+            },
+            actions: SessionTranscriptActions::default(),
+            partial: false,
+        };
+        self.memory_store.append_transcript_record(&record).await
     }
 }
 
@@ -749,10 +788,12 @@ impl AgentOrchestrator for AgentImpl {
                 Ok(agent) => agent,
                 Err(err) => {
                     let _ = tx
-                        .send(OrchestratorEvent::MessageError(OrchestratorMessageErrorEvent {
-                            request_id: request_id.clone(),
-                            error: err.to_string(),
-                        }))
+                        .send(OrchestratorEvent::MessageError(
+                            OrchestratorMessageErrorEvent {
+                                request_id: request_id.clone(),
+                                error: err.to_string(),
+                            },
+                        ))
                         .await;
                     return;
                 }
@@ -809,8 +850,7 @@ impl AgentOrchestrator for AgentImpl {
                         .send(OrchestratorEvent::MessageCompleted(
                             OrchestratorMessageCompletedEvent {
                                 request_id: request_id.clone(),
-                                stop_reason: Self::map_stop_reason(result.stop_reason)
-                                    .to_string(),
+                                stop_reason: Self::map_stop_reason(result.stop_reason).to_string(),
                                 usage: result.usage,
                                 total_output_items: item_index,
                                 iteration: item_index.saturating_add(1),
@@ -848,6 +888,18 @@ impl AgentOrchestrator for AgentImpl {
     async fn close_session(&self, session: talos_types::TalosSession) -> TalosResult<()> {
         self.spawn_session_memory_flush(session);
         Ok(())
+    }
+
+    async fn submit_tool_approval(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        approved: bool,
+        reason: Option<String>,
+    ) -> TalosResult<()> {
+        AgentImpl::submit_tool_approval(self, session_id, call_id, tool_name, approved, reason)
+            .await
     }
 }
 
@@ -995,6 +1047,17 @@ impl AgentOrchestrator for MockAgent {
     async fn close_session(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
         Ok(())
     }
+
+    async fn submit_tool_approval(
+        &self,
+        _session_id: &str,
+        _call_id: &str,
+        _tool_name: &str,
+        _approved: bool,
+        _reason: Option<String>,
+    ) -> TalosResult<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1006,7 +1069,7 @@ mod tests {
     use talos_config::AgentKernelConfig;
     use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Role, Usage};
     use talos_memory::{Memory, RecordHeader, TalosMessage, TalosMessageRole, TalosTurn};
-    use talos_tools::{ReadTool, ToolRegistry, WebSearchTool};
+    use talos_tools::{ReadFileTool, ToolRegistry, WebSearchTool};
     use talos_tools_policy::ToolPolicy;
     use talos_types::talos::{TalosProvider, TalosSourceType};
     use talos_types::{SessionContext, SessionState, TalosSession};
@@ -1140,7 +1203,7 @@ mod tests {
 
         // Add some tools to the registry
         agent.add_tool(Arc::new(WebSearchTool));
-        agent.add_tool(Arc::new(ReadTool));
+        agent.add_tool(Arc::new(ReadFileTool));
 
         // Generate system prompt
         let prompt = agent.generate_system_prompt();
@@ -1148,7 +1211,7 @@ mod tests {
         assert!(prompt.contains("Test Agent"));
         assert!(prompt.contains("An agent for testing"));
         assert!(prompt.contains("web_search"));
-        assert!(prompt.contains("read"));
+        assert!(prompt.contains("read_file"));
     }
 
     #[tokio::test]

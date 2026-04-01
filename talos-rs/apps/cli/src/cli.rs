@@ -148,6 +148,24 @@ enum SessionCommands {
         #[arg(long, default_value_t = false)]
         stream: bool,
     },
+
+    /// Submit approval or rejection for a pending tool call
+    ApproveTool {
+        /// Session ID
+        session_id: String,
+        /// Tool call ID (from the pending confirmation)
+        #[arg(long)]
+        call_id: String,
+        /// Tool name
+        #[arg(long)]
+        tool_name: String,
+        /// Whether to approve the tool call
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        approved: bool,
+        /// Rejection reason (used when --approved=false)
+        #[arg(long)]
+        reason: Option<String>,
+    },
 }
 
 // 4. Models Commands
@@ -356,6 +374,19 @@ async fn execute_session_command(
             }
             println!("Exited interactive mode");
         }
+        SessionCommands::ApproveTool {
+            session_id,
+            call_id,
+            tool_name,
+            approved,
+            reason,
+        } => {
+            client
+                .submit_tool_approval(&session_id, &call_id, &tool_name, approved, reason)
+                .await?;
+            let verdict = if approved { "approved" } else { "rejected" };
+            println!("Tool call {} {}: {}", tool_name, verdict, call_id);
+        }
     }
     Ok(())
 }
@@ -483,7 +514,10 @@ async fn send_and_render_message(
                     );
                 }
             }
-            (TalosEventType::MessageOutputDelta, TalosEventPayload::MessageOutputDelta(payload)) => {
+            (
+                TalosEventType::MessageOutputDelta,
+                TalosEventPayload::MessageOutputDelta(payload),
+            ) => {
                 output_text.push_str(&payload.delta);
                 write!(output_stream, "{}", payload.delta)?;
                 output_stream.flush()?;
@@ -576,5 +610,41 @@ mod tests {
         let args = vec!["talos", "chat", "in", "sess-1", "hello", "--stream"];
         let cli = Cli::try_parse_from(args);
         assert!(cli.is_ok());
+    }
+
+    #[test]
+    fn test_cli_approve_tool_can_parse_rejection() {
+        let args = vec![
+            "talos",
+            "session",
+            "approve-tool",
+            "sess-1",
+            "--call-id",
+            "call-1",
+            "--tool-name",
+            "exec_command",
+            "--approved",
+            "false",
+            "--reason",
+            "deny",
+        ];
+        let cli = Cli::try_parse_from(args).expect("CLI should parse approval rejection");
+
+        let Commands::Session(SessionCommands::ApproveTool {
+            session_id,
+            call_id,
+            tool_name,
+            approved,
+            reason,
+        }) = cli.command
+        else {
+            panic!("expected approve-tool command");
+        };
+
+        assert_eq!(session_id, "sess-1");
+        assert_eq!(call_id, "call-1");
+        assert_eq!(tool_name, "exec_command");
+        assert!(!approved);
+        assert_eq!(reason.as_deref(), Some("deny"));
     }
 }

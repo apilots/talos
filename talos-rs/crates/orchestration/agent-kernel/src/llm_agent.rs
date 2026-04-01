@@ -68,7 +68,9 @@ impl LlmKernelAgent {
         let staged_events = ctx.session.events.split_off(persisted_event_count);
         let session_service = ctx.session_service()?;
         for event in staged_events {
-            let _ = session_service.append_event(&mut ctx.session, event).await?;
+            let _ = session_service
+                .append_event(&mut ctx.session, event)
+                .await?;
         }
         Ok(())
     }
@@ -231,8 +233,8 @@ mod tests {
     };
     use async_trait::async_trait;
     use std::collections::HashMap;
-    use std::sync::{Arc, Mutex};
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
     use talos_error::TalosResult;
     use talos_llm_provider::{
         ChatChunk, ChatRequest, ChatResponse, ChatStream, LlmProvider, ToolStream, ToolStreamEvent,
@@ -589,7 +591,10 @@ mod tests {
         let mut ctx = build_ctx();
         ctx.session_service = Some(session_service.clone());
 
-        let result = agent.run(&mut ctx, None).await.expect("run should return task result");
+        let result = agent
+            .run(&mut ctx, None)
+            .await
+            .expect("run should return task result");
 
         assert_eq!(result.task_results.len(), 1);
         assert_eq!(result.task_results[0].status, TaskStatus::Failed);
@@ -603,12 +608,10 @@ mod tests {
                 )
         }));
         assert!(recorded.iter().any(|event| {
-            event.kind == SessionEventKind::ToolCall
-                && event.author == EventAuthor::Agent
+            event.kind == SessionEventKind::ToolCall && event.author == EventAuthor::Agent
         }));
         assert!(recorded.iter().any(|event| {
-            event.kind == SessionEventKind::ToolResult
-                && event.author == EventAuthor::Tool
+            event.kind == SessionEventKind::ToolResult && event.author == EventAuthor::Tool
         }));
     }
 }

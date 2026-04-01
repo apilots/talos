@@ -99,11 +99,20 @@ pub struct AuthRequestPayload {
     pub prompt: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ConfirmationRequestPayload {
     pub tool_name: String,
     pub call_id: String,
     pub prompt: String,
+    pub arguments: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ApprovalResponsePayload {
+    pub call_id: String,
+    pub tool_name: String,
+    pub approved: bool,
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -134,6 +143,9 @@ pub enum EventPayload {
     },
     ConfirmationRequest {
         payload: ConfirmationRequestPayload,
+    },
+    ApprovalResponse {
+        payload: ApprovalResponsePayload,
     },
     CompactionSummary {
         payload: CompactionSummaryPayload,
@@ -265,6 +277,13 @@ impl ExecutionEvent {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ReplayToolInvocation {
+    pub call_id: String,
+    pub tool_name: String,
+    pub arguments: Value,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct LlmRequestEnvelope {
     pub messages: Vec<ChatMessage>,
@@ -274,6 +293,8 @@ pub struct LlmRequestEnvelope {
     pub tool_definitions: Vec<ToolDefinition>,
     pub parallel_tool_calls: bool,
     pub contents_mode: ContentsMode,
+    #[allow(dead_code)]
+    pub replay_tool_invocations: Vec<ReplayToolInvocation>,
     pub branch: ExecutionBranch,
     pub native_thinking: Option<NativeThinkingConfig>,
     pub native_thinking_support: NativeThinkingSupport,

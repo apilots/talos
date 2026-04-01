@@ -2,20 +2,28 @@ use dashmap::DashMap;
 use serde_json::Value;
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
-use talos_error::TalosResult;
+use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::ToolDefinition;
+use talos_tools_policy::{ToolPolicy, ToolPolicyChecker};
 use tracing::warn;
 
-use crate::ToolOutput;
-use crate::{Tool, ToolContext};
-use talos_tools_policy::{ToolPolicy, ToolPolicyChecker};
+use crate::handlers::{DynamicToolHandler, LocalToolHandler, McpToolHandler, ToolHandler};
+use crate::invocation::{ToolDispatchContext, ToolInvocation};
+use crate::mcp::McpConnectionManager;
+use crate::output::ToolOutputPayload;
+use crate::r#trait::{Tool, ToolOutput};
+use crate::router::ToolRouter;
+use crate::spec::{RegisteredToolSpec, ToolCatalog, ToolParallelism};
+use crate::ToolContext;
 
 const DEFAULT_TOOL_OUTPUT_MAX_BYTES: usize = 64 * 1024;
 const TOOL_OUTPUT_TRUNCATED_SUFFIX: &str = "\n...[truncated]";
 
-/// Registry for managing tools with security policies
+/// Registry for managing tools with security policies.
 pub struct ToolRegistry {
-    tools: DashMap<String, Arc<dyn Tool>>,
+    specs: DashMap<String, RegisteredToolSpec>,
+    handlers: DashMap<String, Arc<dyn ToolHandler>>,
+    router: ToolRouter,
     policy_checker: ToolPolicyChecker,
 }
 
@@ -56,32 +64,71 @@ impl ToolRegistry {
         (output, true, raw_size, returned_size)
     }
 
+    fn truncate_structured_error(
+        value: &mut Option<Value>,
+        max_output_bytes: usize,
+    ) -> Option<(usize, usize)> {
+        let Some(payload) = value.as_mut() else {
+            return None;
+        };
+        let Some(object) = payload.as_object_mut() else {
+            return None;
+        };
+        let Some(error_value) = object.get_mut("error") else {
+            return None;
+        };
+        let Some(error_text) = error_value.as_str() else {
+            return None;
+        };
+
+        let (limited, truncated, raw_size, returned_size) =
+            Self::truncate_text(error_text, max_output_bytes);
+        if truncated {
+            *error_value = Value::String(limited);
+            Some((raw_size, returned_size))
+        } else {
+            None
+        }
+    }
+
     fn enforce_output_limits(
         tool_name: &str,
-        mut result: ToolOutput,
+        mut result: ToolOutputPayload,
         max_output_bytes: usize,
-    ) -> ToolOutput {
-        let (limited_output, output_truncated, output_raw_size, output_returned_size) =
-            Self::truncate_text(&result.output, max_output_bytes);
-        result.output = limited_output;
+    ) -> ToolOutputPayload {
+        let (content_truncated, content_raw_size, content_returned_size) = match &mut result {
+            ToolOutputPayload::Function { content, .. }
+            | ToolOutputPayload::Resource { content, .. }
+            | ToolOutputPayload::Mcp { content, .. } => {
+                let (limited, truncated, raw_size, returned_size) =
+                    Self::truncate_text(content, max_output_bytes);
+                *content = limited;
+                (truncated, raw_size, returned_size)
+            }
+        };
+        let mut error_raw_size = 0;
+        let mut error_returned_size = 0;
+        let mut error_truncated = false;
 
-        let (limited_error, error_truncated, error_raw_size, error_returned_size) =
-            match result.error.take() {
-                Some(error_text) => {
-                    let (text, truncated, raw_size, returned_size) =
-                        Self::truncate_text(&error_text, max_output_bytes);
-                    (Some(text), truncated, raw_size, returned_size)
-                }
-                None => (None, false, 0, 0),
-            };
-        result.error = limited_error;
+        if let ToolOutputPayload::Function {
+            structured_content, ..
+        } = &mut result
+        {
+            if let Some((raw_size, returned_size)) =
+                Self::truncate_structured_error(structured_content, max_output_bytes)
+            {
+                error_truncated = true;
+                error_raw_size = raw_size;
+                error_returned_size = returned_size;
+            }
+        }
 
-        if output_truncated || error_truncated {
+        if content_truncated || error_truncated {
             warn!(
                 tool_name = tool_name,
                 max_output_bytes = max_output_bytes,
-                output_raw_size = output_raw_size,
-                output_returned_size = output_returned_size,
+                output_raw_size = content_raw_size,
+                output_returned_size = content_returned_size,
                 error_raw_size = error_raw_size,
                 error_returned_size = error_returned_size,
                 "tool result exceeded size limit and was truncated"
@@ -91,34 +138,114 @@ impl ToolRegistry {
         result
     }
 
-    /// Create a new registry with default policy
+    fn register_local_tool(&self, tool: Arc<dyn Tool>) {
+        let tool_name = tool.name().to_string();
+        let mutating = Self::legacy_mutation(tool_name.as_str());
+        let spec = RegisteredToolSpec::local_function(
+            ToolDefinition::new(tool.name(), tool.description(), tool.parameters_schema()),
+            Self::legacy_parallelism(tool.name()),
+            mutating,
+        );
+        self.register_handler(
+            tool_name,
+            spec,
+            Arc::new(LocalToolHandler::new(tool, mutating)),
+        );
+    }
+
+    fn legacy_parallelism(name: &str) -> ToolParallelism {
+        match name {
+            "read" | "read_file" | "list_dir" | "grep_files" | "memory_search" | "memory_get"
+            | "web_search" | "web_fetch" | "http_request" => ToolParallelism::ParallelSafe,
+            _ => ToolParallelism::SerialOnly,
+        }
+    }
+
+    fn legacy_mutation(name: &str) -> bool {
+        matches!(
+            name,
+            "write" | "edit" | "exec" | "exec_command" | "write_stdin" | "apply_patch"
+        )
+    }
+
+    /// Create a new registry with default policy.
     pub fn new() -> Self {
-        let default_policy = ToolPolicy::default();
-        let policy_checker = ToolPolicyChecker::new(default_policy);
-
-        Self {
-            tools: DashMap::new(),
-            policy_checker,
-        }
+        Self::new_with_policy(ToolPolicy::default())
     }
 
-    /// Create a new registry with a custom policy
+    /// Create a new registry with a custom policy.
     pub fn new_with_policy(policy: ToolPolicy) -> Self {
-        let policy_checker = ToolPolicyChecker::new(policy);
-
         Self {
-            tools: DashMap::new(),
-            policy_checker,
+            specs: DashMap::new(),
+            handlers: DashMap::new(),
+            router: ToolRouter,
+            policy_checker: ToolPolicyChecker::new(policy),
         }
     }
 
-    /// Register a tool
+    /// Register a legacy local tool by wrapping it into the new handler path.
     pub fn register(&self, tool: Arc<dyn Tool>) {
-        let name = tool.name().to_string();
-        self.tools.insert(name, tool);
+        self.register_local_tool(tool);
     }
 
-    /// Execute a tool by name, checking security policy first
+    pub fn register_handler(
+        &self,
+        tool_name: impl Into<String>,
+        spec: RegisteredToolSpec,
+        handler: Arc<dyn ToolHandler>,
+    ) {
+        let tool_name = tool_name.into();
+        if self.specs.insert(tool_name.clone(), spec).is_some() {
+            warn!(tool_name = %tool_name, "overwriting tool spec");
+        }
+        if self.handlers.insert(tool_name.clone(), handler).is_some() {
+            warn!(tool_name = %tool_name, "overwriting tool handler");
+        }
+    }
+
+    /// Register all tools from a connected [`McpConnectionManager`].
+    ///
+    /// Each tool from the manager is registered with a [`McpToolHandler`] that
+    /// delegates execution back through the manager.
+    pub fn register_mcp_server(&self, manager: Arc<McpConnectionManager>) {
+        let handler = Arc::new(McpToolHandler::new(Arc::clone(&manager)));
+        for spec in manager.all_tool_specs() {
+            let tool_name = spec.definition.name.clone();
+            self.register_handler(tool_name, spec, Arc::clone(&handler) as Arc<dyn ToolHandler>);
+        }
+    }
+
+    /// Register a dynamic tool backed by an async callback.
+    pub fn register_dynamic_tool(
+        &self,
+        spec: RegisteredToolSpec,
+        func: crate::handlers::dynamic::DynamicToolFn,
+    ) {
+        let tool_name = spec.definition.name.clone();
+        let handler = Arc::new(DynamicToolHandler::new(spec.source.clone(), func));
+        self.register_handler(tool_name, spec, handler);
+    }
+
+    pub fn tool_catalog(&self) -> ToolCatalog {
+        ToolCatalog::new(
+            self.specs
+                .iter()
+                .map(|entry| entry.value().clone())
+                .collect(),
+        )
+    }
+
+    pub fn build_function_invocation(
+        &self,
+        call_id: impl Into<String>,
+        tool_name: impl Into<String>,
+        arguments: Value,
+    ) -> TalosResult<ToolInvocation> {
+        self.router
+            .build_function_invocation(call_id, tool_name, arguments, &self.tool_catalog())
+    }
+
+    /// Execute a tool by name, checking security policy first.
     pub async fn execute(&self, name: &str, input: Value) -> TalosResult<ToolOutput> {
         self.execute_with_context(name, input, ToolContext::default())
             .await
@@ -131,22 +258,15 @@ impl ToolRegistry {
         input: Value,
         context: ToolContext,
     ) -> TalosResult<ToolOutput> {
-        // Check if the tool is allowed by policy
         self.policy_checker.check_tool_access(name)?;
-        let max_output_bytes = Self::resolve_max_output_bytes(&context);
-
-        if let Some(tool) = self.tools.get(name) {
-            let result = tool.execute(input, context).await?;
-            Ok(Self::enforce_output_limits(name, result, max_output_bytes))
-        } else {
-            Err(talos_error::TalosError::ToolError(format!(
-                "Tool '{}' not found",
-                name
-            )))
-        }
+        let invocation = self.build_function_invocation(format!("legacy-{name}"), name, input)?;
+        let payload = self
+            .execute_invocation_unchecked_with_context(invocation, context)
+            .await?;
+        Ok(payload.into_legacy_output())
     }
 
-    /// Execute a tool without policy check (internal use only)
+    /// Execute a tool without policy check (internal use only).
     pub async fn execute_unchecked(&self, name: &str, input: Value) -> TalosResult<ToolOutput> {
         self.execute_unchecked_with_context(name, input, ToolContext::default())
             .await
@@ -159,46 +279,95 @@ impl ToolRegistry {
         input: Value,
         context: ToolContext,
     ) -> TalosResult<ToolOutput> {
+        let invocation = self.build_function_invocation(format!("legacy-{name}"), name, input)?;
+        let payload = self
+            .execute_invocation_unchecked_with_context(invocation, context)
+            .await?;
+        Ok(payload.into_legacy_output())
+    }
+
+    pub async fn execute_invocation_with_context(
+        &self,
+        invocation: ToolInvocation,
+        context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
+        self.policy_checker
+            .check_tool_access(invocation.tool_name.as_str())?;
+        self.execute_invocation_unchecked_with_context(invocation, context)
+            .await
+    }
+
+    pub async fn execute_invocation_unchecked_with_context(
+        &self,
+        invocation: ToolInvocation,
+        context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
         let max_output_bytes = Self::resolve_max_output_bytes(&context);
-        if let Some(tool) = self.tools.get(name) {
-            let result = tool.execute(input, context).await?;
-            Ok(Self::enforce_output_limits(name, result, max_output_bytes))
-        } else {
-            Err(talos_error::TalosError::ToolError(format!(
+        let tool_name = invocation.tool_name.clone();
+        let result = self
+            .dispatch(invocation, ToolDispatchContext::new(context))
+            .await?;
+        Ok(Self::enforce_output_limits(
+            tool_name.as_str(),
+            result,
+            max_output_bytes,
+        ))
+    }
+
+    pub async fn dispatch(
+        &self,
+        invocation: ToolInvocation,
+        context: ToolDispatchContext,
+    ) -> TalosResult<ToolOutputPayload> {
+        let invocation = self.router.normalize(invocation, &self.tool_catalog())?;
+        let Some(handler) = self.handlers.get(invocation.tool_name.as_str()) else {
+            return Err(TalosError::ToolError(format!(
                 "Tool '{}' not found",
-                name
-            )))
+                invocation.tool_name
+            )));
+        };
+        if !handler.matches(&invocation) {
+            return Err(TalosError::ToolError(format!(
+                "Tool '{}' invoked with incompatible payload",
+                invocation.tool_name
+            )));
         }
+        handler.handle(invocation, context).await
     }
 
-    /// Get a list of available tool names
+    /// Get a list of available tool names.
     pub fn list_tool_names(&self) -> Vec<String> {
-        self.tools.iter().map(|entry| entry.key().clone()).collect()
+        self.specs.iter().map(|entry| entry.key().clone()).collect()
     }
 
-    /// Get a list of available tool names that are allowed by policy
+    /// Get a list of available tool names that are allowed by policy.
     pub fn list_allowed_tool_names(&self) -> Vec<String> {
-        self.tools
+        self.specs
             .iter()
             .map(|entry| entry.key().clone())
             .filter(|name| self.policy_checker.policy.is_allowed(name))
             .collect()
     }
 
-    /// Check if a tool is available and allowed by policy
+    /// Check if a tool is available and allowed by policy.
     pub fn is_tool_available(&self, name: &str) -> bool {
-        self.tools.contains_key(name) && self.policy_checker.policy.is_allowed(name)
+        self.specs.contains_key(name) && self.policy_checker.policy.is_allowed(name)
     }
 
     /// Return all registered tools as model-friendly definitions.
     pub fn get_tool_definitions(&self) -> Vec<ToolDefinition> {
-        self.tools
-            .iter()
-            .map(|entry| {
-                let tool = entry.value();
-                ToolDefinition::new(tool.name(), tool.description(), tool.parameters_schema())
-            })
-            .collect()
+        self.tool_catalog().model_definitions()
+    }
+
+    pub fn tool_supports_parallel(&self, name: &str) -> bool {
+        self.tool_catalog().supports_parallel(name)
+    }
+
+    pub fn tool_is_mutating(&self, name: &str) -> bool {
+        self.tool_catalog()
+            .find(name)
+            .map(|spec| spec.mutating)
+            .unwrap_or(true)
     }
 
     /// Build a context from execution state.
@@ -211,12 +380,12 @@ impl ToolRegistry {
         ToolContext::new_with_kernel_config(session_id, user_id, kernel_config)
     }
 
-    /// Update the policy for the registry
+    /// Update the policy for the registry.
     pub fn update_policy(&mut self, policy: ToolPolicy) {
         self.policy_checker = ToolPolicyChecker::new(policy);
     }
 
-    /// Get current policy
+    /// Get current policy.
     pub fn get_policy(&self) -> &ToolPolicy {
         &self.policy_checker.policy
     }
@@ -288,28 +457,24 @@ mod tests {
 
     #[tokio::test]
     async fn test_registry_policy_enforcement() {
-        // Create a restrictive policy that only allows "read" tool
         let policy = ToolPolicy::allow_list(vec!["read"]);
         let registry = ToolRegistry::new_with_policy(policy);
 
         let echo_tool = Arc::new(EchoTestTool);
         registry.register(echo_tool);
 
-        // Attempt to execute "echo_test" tool, which should be denied
         let input = serde_json::json!("hello");
         let result = registry.execute("echo_test", input).await;
 
-        // This should fail because "echo_test" is not in the allow list
         assert!(result.is_err());
         match result.err().unwrap() {
-            talos_error::TalosError::AuthorizationDenied => {} // Expected error
+            talos_error::TalosError::AuthorizationDenied => {}
             _ => panic!("Expected AuthorizationDenied error"),
         }
     }
 
     #[tokio::test]
     async fn test_registry_policy_allowed_tool() {
-        // Create a policy that allows "echo_test" tool
         let policy = ToolPolicy::allow_list(vec!["echo_test"]);
         let registry = ToolRegistry::new_with_policy(policy);
 
@@ -319,22 +484,18 @@ mod tests {
         let input = serde_json::json!("hello");
         let result = registry.execute("echo_test", input).await.unwrap();
 
-        // This should succeed because "echo_test" is in the allow list
         assert!(result.success);
         assert_eq!(result.output, "hello");
     }
 
     #[tokio::test]
     async fn test_list_allowed_tools() {
-        // Create a policy that only allows "read" and "write" tools
         let policy = ToolPolicy::allow_list(vec!["read", "write"]);
         let registry = ToolRegistry::new_with_policy(policy);
 
-        // Register multiple tools
         registry.register(Arc::new(EchoTestTool));
 
         let allowed_tools = registry.list_allowed_tool_names();
-        // The "echo_test" tool is not in the allow list, so it shouldn't appear
         assert!(!allowed_tools.contains(&"echo_test".to_string()));
     }
 
@@ -344,16 +505,11 @@ mod tests {
         let registry = ToolRegistry::new_with_policy(policy);
 
         registry.register(Arc::new(EchoTestTool));
-
-        // The tool is registered but not allowed by policy
         assert!(!registry.is_tool_available("echo_test"));
 
-        // Register a tool that is allowed by policy
         let policy_allow_echo = ToolPolicy::allow_list(vec!["echo_test"]);
         let registry2 = ToolRegistry::new_with_policy(policy_allow_echo);
         registry2.register(Arc::new(EchoTestTool));
-
-        // Now the tool should be available
         assert!(registry2.is_tool_available("echo_test"));
     }
 
@@ -417,6 +573,65 @@ mod tests {
         let defs = registry.get_tool_definitions();
         assert_eq!(defs.len(), 1);
         assert_eq!(defs[0].name, "echo_test");
+    }
+
+    #[test]
+    fn test_tool_catalog_tracks_parallel_metadata() {
+        let registry = ToolRegistry::new();
+        registry.register(Arc::new(MemorySearchTool));
+
+        assert!(registry.tool_supports_parallel("memory_search"));
+        assert!(!registry.tool_supports_parallel("exec"));
+    }
+
+    #[test]
+    fn test_register_dynamic_tool_appears_in_catalog() {
+        use crate::handlers::dynamic::DynamicToolFn;
+        use crate::output::ToolOutputPayload;
+        use crate::spec::{RegisteredToolSpec, ToolParallelism, ToolPayloadKind, ToolSource};
+        use talos_llm_provider::ToolDefinition;
+
+        let registry = ToolRegistry::new();
+        let spec = RegisteredToolSpec::new(
+            ToolDefinition::new("skill_greet", "Greet the user", None),
+            ToolSource::Dynamic,
+            ToolPayloadKind::Function,
+            ToolParallelism::ParallelSafe,
+            false,
+        );
+        let func: DynamicToolFn = Arc::new(|_args, _ctx| {
+            Box::pin(async move {
+                Ok(ToolOutputPayload::Function {
+                    content: "Hello!".to_string(),
+                    success: true,
+                    structured_content: None,
+                })
+            })
+        });
+        registry.register_dynamic_tool(spec, func);
+
+        // The tool is registered in the catalog even if the default policy doesn't list it.
+        let defs = registry.get_tool_definitions();
+        assert!(defs.iter().any(|d| d.name == "skill_greet"));
+        assert!(registry.list_tool_names().contains(&"skill_greet".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_registry_dispatch_function_invocation() {
+        let registry = ToolRegistry::new();
+        registry.register(Arc::new(EchoTestTool));
+        let context = ToolContext::new("session", "user");
+        let invocation = registry
+            .build_function_invocation("call-1", "echo_test", serde_json::json!({"value": "hello"}))
+            .expect("invocation should build");
+
+        let output = registry
+            .execute_invocation_with_context(invocation, context)
+            .await
+            .expect("dispatch should succeed");
+
+        assert!(!output.is_error());
+        assert_eq!(output.content(), "{\"value\":\"hello\"}");
     }
 
     #[tokio::test]

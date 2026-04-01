@@ -195,6 +195,42 @@ impl TalosClient {
         ))
     }
 
+    pub async fn submit_tool_approval(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        approved: bool,
+        reason: Option<String>,
+    ) -> TalosResult<()> {
+        let url = format!(
+            "{}/v1/sessions/{}/tool-approvals",
+            self.config.gateway_url, session_id
+        );
+        #[derive(Serialize)]
+        struct ToolApprovalBody<'a> {
+            call_id: &'a str,
+            tool_name: &'a str,
+            approved: bool,
+            reason: Option<String>,
+        }
+        let body = ToolApprovalBody {
+            call_id,
+            tool_name,
+            approved,
+            reason,
+        };
+        let response = self
+            .authorized(self.http_client.post(&url).json(&body))
+            .send()
+            .await
+            .map_err(|e| Self::request_error("POST", &url, e))?;
+        if response.status().is_success() {
+            return Ok(());
+        }
+        Err(Self::http_error(response, "POST", &url).await)
+    }
+
     pub async fn send_message(
         &self,
         session_id: &str,

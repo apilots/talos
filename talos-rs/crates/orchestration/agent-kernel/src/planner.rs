@@ -263,7 +263,10 @@ mod tests {
             output_text: "   ".to_string(),
             ..crate::LlmResponseEnvelope::default()
         };
-        assert_eq!(planner.process_planning_response(&ctx, &empty_response), None);
+        assert_eq!(
+            planner.process_planning_response(&ctx, &empty_response),
+            None
+        );
 
         let final_response = crate::LlmResponseEnvelope {
             output_text: "/*REASONING*/ think\n/*FINAL_ANSWER*/done".to_string(),

@@ -364,7 +364,8 @@ mod tests {
     use super::*;
     use talos_gateway::{Gateway, GatewayResponse};
     use talos_types::talos::{
-        TalosEvent, TalosEventType, TalosInputItem, TalosOutputItem, TalosReasoning, TalosUsage,
+        TalosEvent, TalosEventPayload, TalosEventType, TalosInputItem,
+        TalosMessageStartedEvent, TalosOutputItem, TalosReasoning, TalosUsage,
     };
 
     struct MockGateway;
@@ -403,7 +404,13 @@ mod tests {
                         message_id: "msg_mock".to_string(),
                         session_id: response.session_id.clone(),
                         sequence: 0,
-                        data: serde_json::json!({"model": response.model}),
+                        payload: TalosEventPayload::MessageStarted(TalosMessageStartedEvent {
+                            request_id: "req-mock".to_string(),
+                            model: response.model,
+                            usage: TalosUsage::default(),
+                            iteration: 0,
+                            step_id: "start".to_string(),
+                        }),
                     })
                     .await;
             });

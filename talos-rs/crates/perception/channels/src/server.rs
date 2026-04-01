@@ -225,7 +225,10 @@ mod tests {
     use async_trait::async_trait;
     use std::sync::Mutex;
     use talos_types::gateway::{GatewayRequest, GatewayResponse};
-    use talos_types::talos::{TalosReasoning, TalosUsage};
+    use talos_types::talos::{
+        TalosEvent, TalosEventPayload, TalosEventType, TalosMessageStartedEvent,
+        TalosReasoning, TalosUsage,
+    };
 
     use crate::traits::{ChannelCapabilities, ChannelDefinition, DeliveryResult, OutboundAdapter};
 
@@ -333,6 +336,32 @@ mod tests {
                 model: "mock-model".to_string(),
                 session_id: request.session_id,
             })
+        }
+
+        async fn handle_stream(
+            &self,
+            request: GatewayRequest,
+        ) -> TalosResult<tokio::sync::mpsc::Receiver<TalosEvent>> {
+            let response = self.handle(request).await?;
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            tokio::spawn(async move {
+                let _ = tx
+                    .send(TalosEvent {
+                        event_type: TalosEventType::MessageStarted,
+                        message_id: "msg-mock".to_string(),
+                        session_id: response.session_id,
+                        sequence: 0,
+                        payload: TalosEventPayload::MessageStarted(TalosMessageStartedEvent {
+                            request_id: "req-mock".to_string(),
+                            model: "mock-model".to_string(),
+                            usage: TalosUsage::default(),
+                            iteration: 0,
+                            step_id: "start".to_string(),
+                        }),
+                    })
+                    .await;
+            });
+            Ok(rx)
         }
     }
 

@@ -8,11 +8,10 @@ use talos_router::Router;
 use talos_session_store::SessionStore;
 use talos_types::gateway::{GatewayRequest, GatewayResponse};
 use talos_types::talos::{
-    TalosContext, TalosEvent, TalosEventPayload, TalosEventType,
-    TalosMessageCompletedEvent, TalosMessageErrorEvent, TalosMessageExecutionSummaryEvent,
-    TalosMessageOutputDeltaEvent, TalosMessageReasoningDeltaEvent, TalosMessageStartedEvent,
-    TalosMessageToolCallCompletedEvent, TalosMessageToolCallStartedEvent, TalosProvider,
-    TalosUsage,
+    TalosContext, TalosEvent, TalosEventPayload, TalosEventType, TalosMessageCompletedEvent,
+    TalosMessageErrorEvent, TalosMessageExecutionSummaryEvent, TalosMessageOutputDeltaEvent,
+    TalosMessageReasoningDeltaEvent, TalosMessageStartedEvent, TalosMessageToolCallCompletedEvent,
+    TalosMessageToolCallStartedEvent, TalosProvider, TalosUsage,
 };
 use talos_types::{
     RequestHandler, SessionPatch, SessionPatchAck, SessionQuery, SessionRecord, SessionService,
@@ -547,7 +546,6 @@ fn map_orchestrator_event(event: OrchestratorEvent) -> (TalosEventType, TalosEve
     }
 }
 
-
 #[async_trait]
 impl SessionService for CoordinatorImpl {
     async fn create_session(
@@ -617,12 +615,51 @@ impl SessionService for CoordinatorImpl {
         self.sessions.invalidate_cached_session(session_id).await;
         Ok(())
     }
+
+    async fn submit_tool_approval(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        approved: bool,
+        reason: Option<String>,
+    ) -> TalosResult<()> {
+        let session = self
+            .sessions
+            .get_session(session_id)
+            .await?
+            .ok_or_else(|| talos_error::TalosError::ResourceNotFound(format!("session {}", session_id)))?;
+        let route_channel = Self::route_channel(&TalosContext {
+            source_type: session.context.source_type.clone(),
+            provider: session.context.provider.clone(),
+            user_id: session.context.user_id.clone(),
+            message_id: session.context.message_id.clone(),
+            trace_id: session.context.trace_id.clone(),
+            channel_id: session.context.channel_id.clone(),
+            thread_id: session.context.thread_id.clone(),
+        });
+        let target_agent = self
+            .router
+            .route(&route_channel, &session.context.user_id)
+            .await?
+            .unwrap_or_else(|| "default".to_string());
+        let agents = self.agents.read().await;
+        let agent = agents
+            .get(&target_agent)
+            .cloned()
+            .ok_or_else(|| talos_error::TalosError::AgentNotFound(target_agent.clone()))?;
+        drop(agents);
+        agent
+            .submit_tool_approval(session_id, call_id, tool_name, approved, reason)
+            .await
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
+    use talos_agent::{OrchestratorEvent, OrchestratorExecution, OrchestratorRequest};
     use talos_types::talos::{TalosInputItem, TalosSourceType};
     use tokio;
 
@@ -632,6 +669,18 @@ mod tests {
     impl MockRouter {
         fn new() -> Self {
             Self
+        }
+    }
+
+    struct RecordingApprovalAgent {
+        approvals: Arc<Mutex<Vec<(String, String, String, bool, Option<String>)>>>,
+    }
+
+    impl RecordingApprovalAgent {
+        fn new() -> Self {
+            Self {
+                approvals: Arc::new(Mutex::new(Vec::new())),
+            }
         }
     }
 
@@ -651,6 +700,55 @@ mod tests {
 
         async fn list_bindings(&self) -> TalosResult<Vec<talos_router::Binding>> {
             Ok(vec![])
+        }
+    }
+
+    #[async_trait]
+    impl AgentOrchestrator for RecordingApprovalAgent {
+        fn id(&self) -> &str {
+            "recording-approval"
+        }
+
+        async fn run(&self, request: OrchestratorRequest) -> TalosResult<OrchestratorExecution> {
+            Ok(OrchestratorExecution {
+                output_text: "ok".to_string(),
+                output_items: Vec::new(),
+                reasoning: Vec::new(),
+                stop_reason: "end_turn".to_string(),
+                usage: TalosUsage::default(),
+                task_count: 1,
+                session_id: request.session.context.session_id,
+            })
+        }
+
+        async fn run_stream(
+            &self,
+            _request: OrchestratorRequest,
+        ) -> TalosResult<mpsc::Receiver<OrchestratorEvent>> {
+            let (_tx, rx) = mpsc::channel(1);
+            Ok(rx)
+        }
+
+        async fn close_session(&self, _session: TalosSession) -> TalosResult<()> {
+            Ok(())
+        }
+
+        async fn submit_tool_approval(
+            &self,
+            session_id: &str,
+            call_id: &str,
+            tool_name: &str,
+            approved: bool,
+            reason: Option<String>,
+        ) -> TalosResult<()> {
+            self.approvals.lock().unwrap().push((
+                session_id.to_string(),
+                call_id.to_string(),
+                tool_name.to_string(),
+                approved,
+                reason,
+            ));
+            Ok(())
         }
     }
 
@@ -722,5 +820,43 @@ mod tests {
         assert!(event_types.contains(&TalosEventType::MessageStarted));
         assert!(event_types.contains(&TalosEventType::MessageOutputDelta));
         assert!(event_types.contains(&TalosEventType::MessageCompleted));
+    }
+
+    #[tokio::test]
+    async fn test_submit_tool_approval_routes_to_session_agent() {
+        let mock_router = Arc::new(MockRouter::new());
+        let mock_session_store = Arc::new(talos_session_store::MockSessionStore::new());
+        let coordinator =
+            CoordinatorImpl::new(mock_router, mock_session_store, TalosConfig::default());
+        let agent = Arc::new(RecordingApprovalAgent::new());
+        let approvals = agent.approvals.clone();
+        coordinator
+            .register_agent("test_agent", agent)
+            .await
+            .expect("agent registration should succeed");
+
+        coordinator
+            .submit_tool_approval(
+                "session-1",
+                "call-1",
+                "exec_command",
+                false,
+                Some("deny".to_string()),
+            )
+            .await
+            .expect("tool approval should route successfully");
+
+        let approvals = approvals.lock().unwrap();
+        assert_eq!(approvals.len(), 1);
+        assert_eq!(
+            approvals[0],
+            (
+                "session-1".to_string(),
+                "call-1".to_string(),
+                "exec_command".to_string(),
+                false,
+                Some("deny".to_string()),
+            )
+        );
     }
 }
