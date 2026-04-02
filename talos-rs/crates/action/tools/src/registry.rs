@@ -5,16 +5,22 @@ use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::ToolDefinition;
 use talos_tools_policy::{ToolPolicy, ToolPolicyChecker};
+use talos_tools_sandbox::{
+    ToolApprovalRequirement, ToolGovernanceArgumentOverride, ToolGovernanceSpec, ToolSandboxMode,
+};
 use tracing::warn;
 
+use crate::collaboration::CollaborationRuntime;
 use crate::handlers::{DynamicToolHandler, LocalToolHandler, McpToolHandler, ToolHandler};
 use crate::invocation::{ToolDispatchContext, ToolInvocation};
 use crate::mcp::McpConnectionManager;
 use crate::orchestrator::RegistryOrchestrator;
 use crate::output::{ToolDispatchOutcome, ToolOutputPayload};
-use crate::r#trait::{Tool, ToolOutput};
+use crate::r#trait::Tool;
 use crate::router::ToolRouter;
-use crate::spec::{RegisteredToolSpec, ToolCatalog, ToolParallelism};
+use crate::spec::{
+    default_governance_for_source, RegisteredToolSpec, ToolCatalog, ToolParallelism, ToolSource,
+};
 use crate::ToolContext;
 
 const DEFAULT_TOOL_OUTPUT_MAX_BYTES: usize = 64 * 1024;
@@ -26,6 +32,7 @@ pub struct ToolRegistry {
     handlers: DashMap<String, Arc<dyn ToolHandler>>,
     router: ToolRouter,
     policy_checker: ToolPolicyChecker,
+    collaboration_runtime: DashMap<&'static str, Arc<CollaborationRuntime>>,
 }
 
 impl ToolRegistry {
@@ -147,12 +154,13 @@ impl ToolRegistry {
 
     fn register_local_tool(&self, tool: Arc<dyn Tool>) {
         let tool_name = tool.name().to_string();
-        let mutating = Self::legacy_mutation(tool_name.as_str());
+        let mutating = Self::default_mutation(tool_name.as_str());
         let spec = RegisteredToolSpec::local_function(
             ToolDefinition::new(tool.name(), tool.description(), tool.parameters_schema()),
-            Self::legacy_parallelism(tool.name()),
+            Self::default_parallelism(tool.name()),
             mutating,
-        );
+        )
+        .with_governance(Self::default_governance(tool.name()));
         self.register_handler(
             tool_name,
             spec,
@@ -160,7 +168,7 @@ impl ToolRegistry {
         );
     }
 
-    fn legacy_parallelism(name: &str) -> ToolParallelism {
+    fn default_parallelism(name: &str) -> ToolParallelism {
         match name {
             "read" | "read_file" | "list_dir" | "grep_files" | "memory_search" | "memory_get"
             | "web_search" | "web_fetch" | "http_request" => ToolParallelism::ParallelSafe,
@@ -168,11 +176,29 @@ impl ToolRegistry {
         }
     }
 
-    fn legacy_mutation(name: &str) -> bool {
+    fn default_mutation(name: &str) -> bool {
         matches!(
             name,
             "write" | "edit" | "exec" | "exec_command" | "write_stdin" | "apply_patch"
         )
+    }
+
+    fn default_governance(name: &str) -> ToolGovernanceSpec {
+        match name {
+            "exec_command" => ToolGovernanceSpec {
+                default_approval: ToolApprovalRequirement::Skip,
+                preferred_sandbox: ToolSandboxMode::UseDefault,
+                argument_override: ToolGovernanceArgumentOverride::ExecCommandPermissions,
+                retry_without_sandbox: true,
+            },
+            "apply_patch" => ToolGovernanceSpec {
+                default_approval: ToolApprovalRequirement::Skip,
+                preferred_sandbox: ToolSandboxMode::WorkspaceWrite,
+                argument_override: ToolGovernanceArgumentOverride::None,
+                retry_without_sandbox: false,
+            },
+            _ => default_governance_for_source(ToolSource::Local),
+        }
     }
 
     /// Create a new registry with default policy.
@@ -187,6 +213,7 @@ impl ToolRegistry {
             handlers: DashMap::new(),
             router: ToolRouter,
             policy_checker: ToolPolicyChecker::new(policy),
+            collaboration_runtime: DashMap::new(),
         }
     }
 
@@ -262,47 +289,6 @@ impl ToolRegistry {
             .build_function_invocation(call_id, tool_name, arguments, &self.tool_catalog())
     }
 
-    /// Execute a tool by name, checking security policy first.
-    pub async fn execute(&self, name: &str, input: Value) -> TalosResult<ToolOutput> {
-        self.execute_with_context(name, input, ToolContext::default())
-            .await
-    }
-
-    /// Execute a tool by name with custom context.
-    pub async fn execute_with_context(
-        &self,
-        name: &str,
-        input: Value,
-        context: ToolContext,
-    ) -> TalosResult<ToolOutput> {
-        self.policy_checker.check_tool_access(name)?;
-        let invocation = self.build_function_invocation(format!("legacy-{name}"), name, input)?;
-        let payload = self
-            .execute_invocation_unchecked_with_context(invocation, context)
-            .await?;
-        Ok(payload.into_legacy_output())
-    }
-
-    /// Execute a tool without policy check (internal use only).
-    pub async fn execute_unchecked(&self, name: &str, input: Value) -> TalosResult<ToolOutput> {
-        self.execute_unchecked_with_context(name, input, ToolContext::default())
-            .await
-    }
-
-    /// Execute a tool without policy check with custom context.
-    pub async fn execute_unchecked_with_context(
-        &self,
-        name: &str,
-        input: Value,
-        context: ToolContext,
-    ) -> TalosResult<ToolOutput> {
-        let invocation = self.build_function_invocation(format!("legacy-{name}"), name, input)?;
-        let payload = self
-            .execute_invocation_unchecked_with_context(invocation, context)
-            .await?;
-        Ok(payload.into_legacy_output())
-    }
-
     pub async fn execute_invocation_with_context(
         &self,
         invocation: ToolInvocation,
@@ -336,9 +322,11 @@ impl ToolRegistry {
         invocation: ToolInvocation,
         context: ToolDispatchContext,
     ) -> TalosResult<ToolDispatchOutcome> {
-        let invocation = self.router.normalize(invocation, &self.tool_catalog())?;
+        let catalog = self.tool_catalog();
+        let invocation = self.router.normalize(invocation, &catalog)?;
+        let spec = catalog.find(invocation.tool_name.as_str()).cloned();
         let orchestrator = RegistryOrchestrator::from_context(context.tool_context());
-        if let Some(pending) = orchestrator.resolve_pending(&invocation, &context)? {
+        if let Some(pending) = orchestrator.resolve_pending(&invocation, &context, spec.as_ref())? {
             return Ok(pending);
         }
         let Some(handler) = self.handlers.get(invocation.tool_name.as_str()) else {
@@ -398,7 +386,20 @@ impl ToolRegistry {
         user_id: impl Into<String>,
         kernel_config: Option<Arc<AgentKernelConfig>>,
     ) -> ToolContext {
-        ToolContext::new_with_kernel_config(session_id, user_id, kernel_config)
+        let ctx = ToolContext::new_with_kernel_config(session_id, user_id, kernel_config);
+        if let Some(runtime) = self
+            .collaboration_runtime
+            .get("default")
+            .map(|entry| entry.value().clone())
+        {
+            ctx.with_collaboration_runtime(runtime)
+        } else {
+            ctx
+        }
+    }
+
+    pub fn set_collaboration_runtime(&self, runtime: Arc<CollaborationRuntime>) {
+        self.collaboration_runtime.insert("default", runtime);
     }
 
     /// Update the policy for the registry.
@@ -423,6 +424,7 @@ mod tests {
     use super::*;
     use crate::trait_impl::EchoTestTool;
     use crate::MemorySearchTool;
+    use crate::ToolOutput;
     use async_trait::async_trait;
     use talos_config::AgentKernelConfig;
     use talos_tools_policy::ToolPolicy;
@@ -461,17 +463,23 @@ mod tests {
         registry.register(echo_tool);
 
         let input = serde_json::json!("hello");
-        let result = registry.execute("echo_test", input).await.unwrap();
+        let invocation = registry
+            .build_function_invocation("call-register", "echo_test", input)
+            .unwrap();
+        let result = registry
+            .execute_invocation_with_context(invocation, ToolContext::default())
+            .await
+            .unwrap();
 
-        assert!(result.success);
-        assert_eq!(result.output, "hello");
+        assert!(!result.is_error());
+        assert_eq!(result.content(), "hello");
     }
 
     #[tokio::test]
     async fn test_registry_tool_not_found() {
         let registry = ToolRegistry::new();
         let input = serde_json::json!("test");
-        let result = registry.execute("nonexistent_tool", input).await;
+        let result = registry.build_function_invocation("call-missing", "nonexistent_tool", input);
 
         assert!(result.is_err());
     }
@@ -485,7 +493,12 @@ mod tests {
         registry.register(echo_tool);
 
         let input = serde_json::json!("hello");
-        let result = registry.execute("echo_test", input).await;
+        let invocation = registry
+            .build_function_invocation("call-policy", "echo_test", input)
+            .unwrap();
+        let result = registry
+            .execute_invocation_with_context(invocation, ToolContext::default())
+            .await;
 
         assert!(result.is_err());
         match result.err().unwrap() {
@@ -503,10 +516,16 @@ mod tests {
         registry.register(echo_tool);
 
         let input = serde_json::json!("hello");
-        let result = registry.execute("echo_test", input).await.unwrap();
+        let invocation = registry
+            .build_function_invocation("call-allowed", "echo_test", input)
+            .unwrap();
+        let result = registry
+            .execute_invocation_with_context(invocation, ToolContext::default())
+            .await
+            .unwrap();
 
-        assert!(result.success);
-        assert_eq!(result.output, "hello");
+        assert!(!result.is_error());
+        assert_eq!(result.content(), "hello");
     }
 
     #[tokio::test]
@@ -535,19 +554,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_registry_execute_with_context() {
+    async fn test_registry_execute_invocation_with_context() {
         let policy = ToolPolicy::allow_list(vec!["echo_test"]);
         let registry = ToolRegistry::new_with_policy(policy);
         registry.register(Arc::new(EchoTestTool));
 
         let context = ToolContext::new("session-ctx", "user-ctx");
+        let invocation = registry
+            .build_function_invocation("call-ctx", "echo_test", serde_json::json!("hello"))
+            .unwrap();
 
         let result = registry
-            .execute_with_context("echo_test", serde_json::json!("hello"), context)
+            .execute_invocation_with_context(invocation, context)
             .await
             .unwrap();
-        assert!(result.success);
-        assert_eq!(result.output, "hello");
+        assert!(!result.is_error());
+        assert_eq!(result.content(), "hello");
     }
 
     #[tokio::test]
@@ -574,17 +596,20 @@ mod tests {
         config.memory.search_min_score = 0.0;
         let context =
             ToolContext::new_with_kernel_config("session-ctx", "user-ctx", Some(Arc::new(config)));
-
-        let result = registry
-            .execute_with_context(
+        let invocation = registry
+            .build_function_invocation(
+                "call-memory",
                 "memory_search",
                 serde_json::json!({ "query": "target" }),
-                context,
             )
+            .unwrap();
+
+        let result = registry
+            .execute_invocation_with_context(invocation, context)
             .await
             .expect("default policy should allow memory_search");
 
-        assert!(result.success);
+        assert!(!result.is_error());
     }
 
     #[test]
@@ -609,7 +634,10 @@ mod tests {
     fn test_register_dynamic_tool_appears_in_catalog() {
         use crate::handlers::dynamic::DynamicToolFn;
         use crate::output::ToolOutputPayload;
-        use crate::spec::{RegisteredToolSpec, ToolParallelism, ToolPayloadKind, ToolSource};
+        use crate::spec::{
+            default_governance_for_source, RegisteredToolSpec, ToolParallelism, ToolPayloadKind,
+            ToolSource,
+        };
         use talos_llm_provider::ToolDefinition;
 
         let registry = ToolRegistry::new();
@@ -619,6 +647,7 @@ mod tests {
             ToolPayloadKind::Function,
             ToolParallelism::ParallelSafe,
             false,
+            default_governance_for_source(ToolSource::Dynamic),
         );
         let func: DynamicToolFn = Arc::new(|_args, _ctx| {
             Box::pin(async move {
@@ -669,14 +698,17 @@ mod tests {
         );
 
         let large_text = "a".repeat(256);
+        let invocation = registry
+            .build_function_invocation("call-large", "echo_test", serde_json::json!(large_text))
+            .unwrap();
         let result = registry
-            .execute_with_context("echo_test", serde_json::json!(large_text), context)
+            .execute_invocation_with_context(invocation, context)
             .await
             .unwrap();
 
-        assert!(result.success);
-        assert!(result.output.len() <= 64);
-        assert!(result.output.contains("[truncated]"));
+        assert!(!result.is_error());
+        assert!(result.content().len() <= 64);
+        assert!(result.content().contains("[truncated]"));
     }
 
     #[tokio::test]
@@ -690,13 +722,19 @@ mod tests {
             Some(test_kernel_config_with_output_limit(80)),
         );
 
+        let invocation = registry
+            .build_function_invocation("call-error", "large_error", serde_json::json!(null))
+            .unwrap();
         let result = registry
-            .execute_with_context("large_error", serde_json::json!(null), context)
+            .execute_invocation_with_context(invocation, context)
             .await
             .unwrap();
 
-        assert!(!result.success);
-        let err = result.error.unwrap_or_default();
+        assert!(result.is_error());
+        let err = result
+            .payload()
+            .and_then(|payload| payload.error_message())
+            .unwrap_or_default();
         assert!(err.len() <= 80);
         assert!(err.contains("[truncated]"));
     }

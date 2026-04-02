@@ -2,10 +2,22 @@
 
 use serde_json::json;
 use talos_tools::{
-    ExecCommandTool, HttpRequestTool, ReadFileTool, ToolRegistry, WebFetchTool, WebSearchTool,
-    WriteTool,
+    ExecCommandTool, HttpRequestTool, ReadFileTool, ToolContext, ToolDispatchOutcome, ToolRegistry,
+    WebFetchTool, WebSearchTool, WriteTool,
 };
 use talos_tools_policy::ToolPolicy;
+
+async fn dispatch(
+    registry: &ToolRegistry,
+    call_id: &str,
+    tool_name: &str,
+    arguments: serde_json::Value,
+) -> Result<ToolDispatchOutcome, Box<dyn std::error::Error>> {
+    let invocation = registry.build_function_invocation(call_id, tool_name, arguments)?;
+    Ok(registry
+        .execute_invocation_with_context(invocation, ToolContext::default())
+        .await?)
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -36,14 +48,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 2. Demonstrate Web Search Tool
     println!("2. Web Search Tool:");
-    let search_result = registry
-        .execute("web_search", json!({"query": "Rust programming language"}))
-        .await;
+    let search_result = dispatch(
+        &registry,
+        "call-web-search",
+        "web_search",
+        json!({"query": "Rust programming language"}),
+    )
+    .await;
     match search_result {
-        Ok(output) => {
+        Ok(ToolDispatchOutcome::Executed { payload }) => {
             println!(
                 "   Search result: {}",
-                output.output.lines().next().unwrap_or("No output")
+                payload.content().lines().next().unwrap_or("No output")
+            );
+        }
+        Ok(ToolDispatchOutcome::Pending { tool_name, .. }) => {
+            println!(
+                "   Search entered pending state unexpectedly: {}",
+                tool_name
             );
         }
         Err(e) => println!("   Search failed: {}", e),
@@ -52,15 +74,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 3. Demonstrate Web Fetch Tool
     println!("3. Web Fetch Tool:");
-    let fetch_result = registry
-        .execute("web_fetch", json!({"url": "https://httpbin.org/html"}))
-        .await;
+    let fetch_result = dispatch(
+        &registry,
+        "call-web-fetch",
+        "web_fetch",
+        json!({"url": "https://httpbin.org/html"}),
+    )
+    .await;
     match fetch_result {
-        Ok(output) => {
+        Ok(ToolDispatchOutcome::Executed { payload }) => {
             println!(
                 "   Fetch result: {}",
-                output.output.lines().next().unwrap_or("No output")
+                payload.content().lines().next().unwrap_or("No output")
             );
+        }
+        Ok(ToolDispatchOutcome::Pending { tool_name, .. }) => {
+            println!("   Fetch entered pending state unexpectedly: {}", tool_name);
         }
         Err(e) => println!("   Fetch failed: {}", e),
     }
@@ -68,20 +97,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 4. Demonstrate HTTP Request Tool
     println!("4. HTTP Request Tool:");
-    let http_result = registry
-        .execute(
-            "http_request",
-            json!({
-                "url": "https://httpbin.org/get",
-                "method": "GET"
-            }),
-        )
-        .await;
+    let http_result = dispatch(
+        &registry,
+        "call-http-request",
+        "http_request",
+        json!({
+            "url": "https://httpbin.org/get",
+            "method": "GET"
+        }),
+    )
+    .await;
     match http_result {
-        Ok(output) => {
+        Ok(ToolDispatchOutcome::Executed { payload }) => {
             println!(
                 "   HTTP result: {}",
-                output.output.lines().next().unwrap_or("No output")
+                payload.content().lines().next().unwrap_or("No output")
+            );
+        }
+        Ok(ToolDispatchOutcome::Pending { tool_name, .. }) => {
+            println!(
+                "   HTTP request entered pending state unexpectedly: {}",
+                tool_name
             );
         }
         Err(e) => println!("   HTTP request failed: {}", e),
@@ -92,9 +128,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("5. Security Policy Enforcement:");
     println!("   Attempting to execute 'exec_command' tool (should be blocked by policy)...");
 
-    let exec_result = registry
-        .execute("exec_command", json!({"cmd": "ls -la"}))
-        .await;
+    let exec_result = dispatch(
+        &registry,
+        "call-exec-command-blocked",
+        "exec_command",
+        json!({"cmd": "ls -la"}),
+    )
+    .await;
     match exec_result {
         Ok(_) => println!("   exec_command tool executed successfully (unexpected!)"),
         Err(e) => println!(
@@ -136,14 +176,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 7. Now exec_command should work with the updated policy
     println!("7. Verifying Updated Policy:");
-    let exec_result_after_update = new_registry
-        .execute(
-            "exec_command",
-            json!({"cmd": "echo 'Policy updated successfully'"}),
-        )
-        .await;
+    let exec_result_after_update = dispatch(
+        &new_registry,
+        "call-exec-command-allowed",
+        "exec_command",
+        json!({"cmd": "echo 'Policy updated successfully'"}),
+    )
+    .await;
     match exec_result_after_update {
-        Ok(output) => println!("   exec_command tool now works: {}", output.output.trim()),
+        Ok(ToolDispatchOutcome::Executed { payload }) => {
+            println!(
+                "   exec_command tool now works: {}",
+                payload.content().trim()
+            )
+        }
+        Ok(ToolDispatchOutcome::Pending { tool_name, .. }) => {
+            println!(
+                "   exec_command unexpectedly entered pending state: {}",
+                tool_name
+            )
+        }
         Err(e) => println!("   exec_command tool still blocked: {}", e),
     }
     println!();

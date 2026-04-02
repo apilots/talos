@@ -231,13 +231,15 @@ impl SessionEvent {
                     reason: payload.reason.clone(),
                 },
             },
-            EventPayload::DynamicToolRequest { payload } => SessionEventPayload::DynamicToolRequest {
-                payload: SessionDynamicToolRequestPayload {
-                    call_id: payload.call_id.clone(),
-                    tool_name: payload.tool_name.clone(),
-                    arguments: payload.arguments.clone(),
-                },
-            },
+            EventPayload::DynamicToolRequest { payload } => {
+                SessionEventPayload::DynamicToolRequest {
+                    payload: SessionDynamicToolRequestPayload {
+                        call_id: payload.call_id.clone(),
+                        tool_name: payload.tool_name.clone(),
+                        arguments: payload.arguments.clone(),
+                    },
+                }
+            }
             EventPayload::DynamicToolResponse { payload } => {
                 SessionEventPayload::DynamicToolResponse {
                     payload: SessionDynamicToolResponsePayload {

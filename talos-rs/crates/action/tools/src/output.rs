@@ -1,18 +1,12 @@
+use crate::r#trait::ToolOutput;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-
-use crate::r#trait::ToolOutput;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolPending {
-    Approval {
-        prompt: String,
-        arguments: Value,
-    },
-    Dynamic {
-        arguments: Value,
-    },
+    Approval { prompt: String, arguments: Value },
+    Dynamic { arguments: Value },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -99,38 +93,6 @@ impl ToolOutputPayload {
             }
         }
     }
-
-    pub fn into_legacy_output(self) -> ToolOutput {
-        match self {
-            Self::Function {
-                content,
-                success,
-                structured_content,
-            } => ToolOutput {
-                success,
-                output: content,
-                error: if success {
-                    None
-                } else {
-                    extract_error_message(structured_content.as_ref())
-                },
-            },
-            Self::Resource { content, .. } => ToolOutput {
-                success: true,
-                output: content,
-                error: None,
-            },
-            Self::Mcp { content, is_error } => ToolOutput {
-                success: !is_error,
-                output: if is_error {
-                    String::new()
-                } else {
-                    content.clone()
-                },
-                error: if is_error { Some(content) } else { None },
-            },
-        }
-    }
 }
 
 impl ToolDispatchOutcome {
@@ -174,29 +136,15 @@ impl ToolDispatchOutcome {
     }
 
     pub fn is_error(&self) -> bool {
-        self.payload().map(|payload| payload.is_error()).unwrap_or(false)
+        self.payload()
+            .map(|payload| payload.is_error())
+            .unwrap_or(false)
     }
 
     pub fn content(&self) -> &str {
-        self.payload().map(|payload| payload.content()).unwrap_or("")
-    }
-
-    pub fn into_legacy_output(self) -> ToolOutput {
-        match self {
-            Self::Executed { payload } => payload.into_legacy_output(),
-            Self::Pending { pending, .. } => match pending {
-                ToolPending::Approval { prompt, .. } => ToolOutput {
-                    success: false,
-                    output: String::new(),
-                    error: Some(prompt),
-                },
-                ToolPending::Dynamic { .. } => ToolOutput {
-                    success: false,
-                    output: String::new(),
-                    error: Some("dynamic tool response is pending".to_string()),
-                },
-            },
-        }
+        self.payload()
+            .map(|payload| payload.content())
+            .unwrap_or("")
     }
 }
 

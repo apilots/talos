@@ -7,19 +7,25 @@ pub use protocol::McpToolDefinition;
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::ToolDefinition;
+use tokio::sync::RwLock;
 
 use crate::mcp::transport::{HttpTransport, McpTransport, StdioTransport};
 use crate::output::ToolOutputPayload;
-use crate::spec::{RegisteredToolSpec, ToolParallelism, ToolPayloadKind, ToolSource};
+use crate::spec::{
+    default_governance_for_source, RegisteredToolSpec, ToolParallelism, ToolPayloadKind, ToolSource,
+};
 
 /// Prefix used in tool names for MCP tools: `mcp__<server>__<tool>`.
 pub const MCP_TOOL_NAME_PREFIX: &str = "mcp__";
 const MCP_DELIMITER: &str = "__";
+const DEFAULT_RESOURCE_TTL: Duration = Duration::from_secs(60);
+const DEFAULT_RESOURCE_TEMPLATE_TTL: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct McpServerConfig {
@@ -74,6 +80,39 @@ pub struct McpConnectionManager {
     /// server_name → cached tool definitions
     tool_specs: HashMap<String, Vec<RegisteredToolSpec>>,
     resource_specs: Vec<RegisteredToolSpec>,
+    resource_cache: RwLock<McpResourceCache>,
+}
+
+#[derive(Debug)]
+struct McpResourceCache {
+    resources: HashMap<String, CachedEntry<serde_json::Value>>,
+    templates: HashMap<String, CachedEntry<serde_json::Value>>,
+    resource_ttl: Duration,
+    template_ttl: Duration,
+}
+
+#[derive(Debug)]
+struct CachedEntry<T> {
+    value: T,
+    cached_at: Instant,
+    ttl: Duration,
+}
+
+impl<T> CachedEntry<T> {
+    fn is_fresh(&self) -> bool {
+        self.cached_at.elapsed() < self.ttl
+    }
+}
+
+impl Default for McpResourceCache {
+    fn default() -> Self {
+        Self {
+            resources: HashMap::new(),
+            templates: HashMap::new(),
+            resource_ttl: DEFAULT_RESOURCE_TTL,
+            template_ttl: DEFAULT_RESOURCE_TEMPLATE_TTL,
+        }
+    }
 }
 
 impl McpConnectionManager {
@@ -83,6 +122,7 @@ impl McpConnectionManager {
             clients: HashMap::new(),
             tool_specs: HashMap::new(),
             resource_specs: Self::resource_tool_specs(),
+            resource_cache: RwLock::new(McpResourceCache::default()),
         }
     }
 
@@ -121,12 +161,14 @@ impl McpConnectionManager {
                     // servers can override by declaring mutating tools.
                     ToolParallelism::ParallelSafe,
                     false,
+                    default_governance_for_source(ToolSource::Mcp),
                 )
             })
             .collect();
 
         self.tool_specs.insert(config.name.clone(), specs);
         self.clients.insert(config.name.clone(), client);
+        self.invalidate_server_cache(config.name.as_str()).await;
         Ok(())
     }
 
@@ -171,18 +213,29 @@ impl McpConnectionManager {
         server: Option<&str>,
         cursor: Option<String>,
     ) -> TalosResult<serde_json::Value> {
+        if server.is_none() && cursor.is_some() {
+            return Err(TalosError::ValidationError(
+                "cursor can only be used when a server is specified".to_string(),
+            ));
+        }
+        let cache_key = cache_key(server, cursor.as_deref());
+        if let Some(cached) = self.cached_resources(cache_key.as_str()).await {
+            return Ok(cached);
+        }
         match server {
             Some(server_name) => {
                 let client = self.clients.get(server_name).ok_or_else(|| {
                     TalosError::ToolError(format!("MCP server `{}` not connected", server_name))
                 })?;
                 let result = client.list_resources(cursor).await?;
-                serde_json::to_value(serde_json::json!({
+                let payload = serde_json::to_value(serde_json::json!({
                     "server": server_name,
                     "resources": result.resources,
                     "next_cursor": result.next_cursor,
                 }))
-                .map_err(|err| TalosError::ToolError(format!("serialize MCP resources: {err}")))
+                .map_err(|err| TalosError::ToolError(format!("serialize MCP resources: {err}")))?;
+                self.store_resources_cache(cache_key, payload.clone()).await;
+                Ok(payload)
             }
             None => {
                 let mut resources = Vec::new();
@@ -193,7 +246,9 @@ impl McpConnectionManager {
                         "resources": result.resources,
                     }));
                 }
-                Ok(serde_json::json!({ "servers": resources }))
+                let payload = serde_json::json!({ "servers": resources });
+                self.store_resources_cache(cache_key, payload.clone()).await;
+                Ok(payload)
             }
         }
     }
@@ -203,20 +258,31 @@ impl McpConnectionManager {
         server: Option<&str>,
         cursor: Option<String>,
     ) -> TalosResult<serde_json::Value> {
+        if server.is_none() && cursor.is_some() {
+            return Err(TalosError::ValidationError(
+                "cursor can only be used when a server is specified".to_string(),
+            ));
+        }
+        let cache_key = cache_key(server, cursor.as_deref());
+        if let Some(cached) = self.cached_templates(cache_key.as_str()).await {
+            return Ok(cached);
+        }
         match server {
             Some(server_name) => {
                 let client = self.clients.get(server_name).ok_or_else(|| {
                     TalosError::ToolError(format!("MCP server `{}` not connected", server_name))
                 })?;
                 let result = client.list_resource_templates(cursor).await?;
-                serde_json::to_value(serde_json::json!({
+                let payload = serde_json::to_value(serde_json::json!({
                     "server": server_name,
                     "resource_templates": result.resource_templates,
                     "next_cursor": result.next_cursor,
                 }))
                 .map_err(|err| {
                     TalosError::ToolError(format!("serialize MCP resource templates: {err}"))
-                })
+                })?;
+                self.store_templates_cache(cache_key, payload.clone()).await;
+                Ok(payload)
             }
             None => {
                 let mut templates = Vec::new();
@@ -227,16 +293,14 @@ impl McpConnectionManager {
                         "resource_templates": result.resource_templates,
                     }));
                 }
-                Ok(serde_json::json!({ "servers": templates }))
+                let payload = serde_json::json!({ "servers": templates });
+                self.store_templates_cache(cache_key, payload.clone()).await;
+                Ok(payload)
             }
         }
     }
 
-    pub async fn read_resource(
-        &self,
-        server: &str,
-        uri: &str,
-    ) -> TalosResult<ToolOutputPayload> {
+    pub async fn read_resource(&self, server: &str, uri: &str) -> TalosResult<ToolOutputPayload> {
         let client = self.clients.get(server).ok_or_else(|| {
             TalosError::ToolError(format!("MCP server `{}` not connected", server))
         })?;
@@ -293,6 +357,7 @@ impl McpConnectionManager {
                 ToolPayloadKind::Function,
                 ToolParallelism::ParallelSafe,
                 false,
+                default_governance_for_source(ToolSource::Mcp),
             ),
             RegisteredToolSpec::new(
                 ToolDefinition::new(
@@ -310,6 +375,7 @@ impl McpConnectionManager {
                 ToolPayloadKind::Function,
                 ToolParallelism::ParallelSafe,
                 false,
+                default_governance_for_source(ToolSource::Mcp),
             ),
             RegisteredToolSpec::new(
                 ToolDefinition::new(
@@ -328,14 +394,82 @@ impl McpConnectionManager {
                 ToolPayloadKind::Function,
                 ToolParallelism::ParallelSafe,
                 false,
+                default_governance_for_source(ToolSource::Mcp),
             ),
         ]
+    }
+
+    async fn cached_resources(&self, key: &str) -> Option<serde_json::Value> {
+        let cache = self.resource_cache.read().await;
+        cache.resources.get(key).and_then(|entry| {
+            if entry.is_fresh() {
+                Some(entry.value.clone())
+            } else {
+                None
+            }
+        })
+    }
+
+    async fn cached_templates(&self, key: &str) -> Option<serde_json::Value> {
+        let cache = self.resource_cache.read().await;
+        cache.templates.get(key).and_then(|entry| {
+            if entry.is_fresh() {
+                Some(entry.value.clone())
+            } else {
+                None
+            }
+        })
+    }
+
+    async fn store_resources_cache(&self, key: String, value: serde_json::Value) {
+        let mut cache = self.resource_cache.write().await;
+        let ttl = cache.resource_ttl;
+        cache.resources.insert(
+            key,
+            CachedEntry {
+                value,
+                cached_at: Instant::now(),
+                ttl,
+            },
+        );
+    }
+
+    async fn store_templates_cache(&self, key: String, value: serde_json::Value) {
+        let mut cache = self.resource_cache.write().await;
+        let ttl = cache.template_ttl;
+        cache.templates.insert(
+            key,
+            CachedEntry {
+                value,
+                cached_at: Instant::now(),
+                ttl,
+            },
+        );
+    }
+
+    async fn invalidate_server_cache(&self, server_name: &str) {
+        let mut cache = self.resource_cache.write().await;
+        cache
+            .resources
+            .retain(|key, _| !key.starts_with(format!("server:{server_name}|").as_str()));
+        cache
+            .templates
+            .retain(|key, _| !key.starts_with(format!("server:{server_name}|").as_str()));
+        cache.resources.remove("all|cursor:");
+        cache.templates.remove("all|cursor:");
     }
 }
 
 impl Default for McpConnectionManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn cache_key(server: Option<&str>, cursor: Option<&str>) -> String {
+    match server {
+        Some(server_name) => format!("server:{server_name}|cursor:{}", cursor.unwrap_or_default()),
+        None => "all|cursor:".to_string(),
     }
 }
 

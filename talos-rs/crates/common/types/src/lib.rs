@@ -435,6 +435,7 @@ pub mod talos {
         MessageOutputDelta,
         MessageToolCallStarted,
         MessageToolCallCompleted,
+        MessageToolCallPendingApproval,
         MessageCompleted,
         MessageError,
     }
@@ -520,6 +521,16 @@ pub mod talos {
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct TalosMessageToolCallPendingApprovalEvent {
+        pub request_id: String,
+        pub call_id: String,
+        pub tool_name: String,
+        pub prompt: String,
+        pub arguments: serde_json::Value,
+        pub step_id: String,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct TalosMessageCompletedEvent {
         pub request_id: String,
         pub stop_reason: String,
@@ -545,6 +556,7 @@ pub mod talos {
         MessageOutputDelta(TalosMessageOutputDeltaEvent),
         MessageToolCallStarted(TalosMessageToolCallStartedEvent),
         MessageToolCallCompleted(TalosMessageToolCallCompletedEvent),
+        MessageToolCallPendingApproval(TalosMessageToolCallPendingApprovalEvent),
         MessageCompleted(TalosMessageCompletedEvent),
         MessageError(TalosMessageErrorEvent),
     }

@@ -971,13 +971,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### 2. 使用工具
 
 ```rust
-use talos_tools::{Tool, ToolRegistry, register_core_local_tools};
+use talos_tools::{ToolContext, ToolRegistry, ToolDispatchOutcome, register_core_local_tools};
 
 let registry = ToolRegistry::new();
 register_core_local_tools(&registry);
 
-let result = registry.execute("read_file", serde_json::json!({"path": "/path/to/file"})).await?;
-println!("{}", result.output);
+let invocation = registry.build_function_invocation(
+    "call-read-file",
+    "read_file",
+    serde_json::json!({"path": "/path/to/file"}),
+)?;
+let result = registry
+    .execute_invocation_with_context(invocation, ToolContext::default())
+    .await?;
+if let ToolDispatchOutcome::Executed { payload } = result {
+    println!("{}", payload.content());
+}
 ```
 
 ### 3. 使用会话

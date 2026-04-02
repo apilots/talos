@@ -18,7 +18,10 @@ use talos_logging::LogGuard;
 use talos_router::{Binding, MatchRule, Router, RouterImpl};
 use talos_session_store::{DatabaseSessionStore, SessionStore};
 use talos_storage::{create_storage, StorageConfig};
-use talos_tools::{register_core_local_tools, register_network_tools, ToolRegistry};
+use talos_tools::{
+    register_collaboration_tools, register_core_local_tools, register_network_tools,
+    CollaborationRuntime, ToolRegistry,
+};
 use talos_types::{ModelInfo, RequestHandler, SessionService};
 use tracing::{error, info};
 
@@ -89,6 +92,13 @@ async fn main() {
             .with_channel_dm_scope("telegram", config.channels.telegram.dm_scope.clone())
             .with_default_workspace_id(config.agent.kernel.default_workspace_id.clone()),
     );
+    if config.agent.kernel.tools.enable_collaboration_tools {
+        register_collaboration_tools(tool_registry.as_ref());
+        tool_registry.set_collaboration_runtime(Arc::new(CollaborationRuntime::new(
+            coordinator.clone(),
+            coordinator.clone(),
+        )));
+    }
     coordinator
         .register_agent("default", agent)
         .await

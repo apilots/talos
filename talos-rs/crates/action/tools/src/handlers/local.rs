@@ -50,6 +50,8 @@ impl ToolHandler for LocalToolHandler {
             .tool
             .execute(arguments, context.into_tool_context())
             .await?;
-        Ok(ToolDispatchOutcome::executed(ToolOutputPayload::from(output)))
+        Ok(ToolDispatchOutcome::executed(ToolOutputPayload::from(
+            output,
+        )))
     }
 }

@@ -76,6 +76,7 @@ pub use types::{
     RunResponse, StopReason, TaskCompletedEventData, TaskKind, TaskResult, TaskStatus,
     ThinkingDeltaStreamData, ThinkingMode, ToolCallStartStreamData, ToolExecutionMode,
     ToolResultStreamData, TransferRequestedEventData, TurnPhase, UserInputEventData,
+    ConfirmationRequestStreamData,
 };
 pub use warnings::{
     KernelWarning, PromptBootstrapDropReason, PromptBootstrapFileDroppedWarning,

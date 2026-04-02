@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 
+use crate::collaboration::CollaborationRuntime;
+
 /// Execution context passed to tools.
 #[derive(Clone, Debug)]
 pub struct ToolContext {
@@ -12,6 +14,7 @@ pub struct ToolContext {
     state: Arc<DashMap<String, Value>>,
     kernel_config: Option<Arc<AgentKernelConfig>>,
     pre_approved: bool,
+    collaboration_runtime: Option<Arc<CollaborationRuntime>>,
 }
 
 impl ToolContext {
@@ -30,6 +33,7 @@ impl ToolContext {
             state: Arc::new(DashMap::new()),
             kernel_config,
             pre_approved: false,
+            collaboration_runtime: None,
         }
     }
 
@@ -40,6 +44,11 @@ impl ToolContext {
 
     pub fn pre_approved(&self) -> bool {
         self.pre_approved
+    }
+
+    pub fn with_collaboration_runtime(mut self, runtime: Arc<CollaborationRuntime>) -> Self {
+        self.collaboration_runtime = Some(runtime);
+        self
     }
 
     pub fn anonymous() -> Self {
@@ -68,6 +77,10 @@ impl ToolContext {
 
     pub fn kernel_config(&self) -> Option<&AgentKernelConfig> {
         self.kernel_config.as_deref()
+    }
+
+    pub fn collaboration_runtime(&self) -> Option<Arc<CollaborationRuntime>> {
+        self.collaboration_runtime.clone()
     }
 
     pub fn state_snapshot(&self) -> HashMap<String, Value> {

@@ -1241,96 +1241,96 @@ fn build_tool_result_payload(
             ),
         },
         ToolDispatchOutcome::Executed { payload } => match payload {
-        ToolOutputPayload::Function {
-            content,
-            success,
-            structured_content,
-        } => {
-            let truncated = content.contains("[truncated]");
-            if *success {
-                if let Some(structured) = structured_content {
-                    (structured.clone(), false, None)
+            ToolOutputPayload::Function {
+                content,
+                success,
+                structured_content,
+            } => {
+                let truncated = content.contains("[truncated]");
+                if *success {
+                    if let Some(structured) = structured_content {
+                        (structured.clone(), false, None)
+                    } else {
+                        (
+                            serde_json::json!({
+                                "ok": true,
+                                "tool": tool_name,
+                                "result": content,
+                                "truncated": truncated,
+                            }),
+                            false,
+                            None,
+                        )
+                    }
+                } else {
+                    let error = structured_content
+                        .as_ref()
+                        .and_then(|value| value.get("error"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                        .or_else(|| {
+                            if content.trim().is_empty() {
+                                None
+                            } else {
+                                Some(content.clone())
+                            }
+                        })
+                        .unwrap_or_else(|| "unknown error".to_string());
+                    let mut value = serde_json::json!({
+                        "ok": false,
+                        "tool": tool_name,
+                        "error": error,
+                        "truncated": truncated,
+                    });
+                    if let Some(structured) = structured_content {
+                        if let Some(object) = value.as_object_mut() {
+                            object.insert("structured".to_string(), structured.clone());
+                        }
+                    }
+                    (value, true, None)
+                }
+            }
+            ToolOutputPayload::Resource {
+                uri,
+                mime_type,
+                content,
+            } => (
+                serde_json::json!({
+                    "ok": true,
+                    "tool": tool_name,
+                    "uri": uri,
+                    "mime_type": mime_type,
+                    "content": content,
+                    "truncated": content.contains("[truncated]"),
+                }),
+                false,
+                None,
+            ),
+            ToolOutputPayload::Mcp { content, is_error } => {
+                if *is_error {
+                    (
+                        serde_json::json!({
+                            "ok": false,
+                            "tool": tool_name,
+                            "error": content,
+                            "truncated": content.contains("[truncated]"),
+                        }),
+                        true,
+                        None,
+                    )
                 } else {
                     (
                         serde_json::json!({
                             "ok": true,
                             "tool": tool_name,
                             "result": content,
-                            "truncated": truncated,
+                            "truncated": content.contains("[truncated]"),
                         }),
                         false,
                         None,
                     )
                 }
-            } else {
-                let error = structured_content
-                    .as_ref()
-                    .and_then(|value| value.get("error"))
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-                    .or_else(|| {
-                        if content.trim().is_empty() {
-                            None
-                        } else {
-                            Some(content.clone())
-                        }
-                    })
-                    .unwrap_or_else(|| "unknown error".to_string());
-                let mut value = serde_json::json!({
-                    "ok": false,
-                    "tool": tool_name,
-                    "error": error,
-                    "truncated": truncated,
-                });
-                if let Some(structured) = structured_content {
-                    if let Some(object) = value.as_object_mut() {
-                        object.insert("structured".to_string(), structured.clone());
-                    }
-                }
-                (value, true, None)
             }
-        }
-        ToolOutputPayload::Resource {
-            uri,
-            mime_type,
-            content,
-        } => (
-            serde_json::json!({
-                "ok": true,
-                "tool": tool_name,
-                "uri": uri,
-                "mime_type": mime_type,
-                "content": content,
-                "truncated": content.contains("[truncated]"),
-            }),
-            false,
-            None,
-        ),
-        ToolOutputPayload::Mcp { content, is_error } => {
-            if *is_error {
-                (
-                    serde_json::json!({
-                        "ok": false,
-                        "tool": tool_name,
-                        "error": content,
-                        "truncated": content.contains("[truncated]"),
-                    }),
-                    true,
-                    None,
-                )
-            } else {
-                (
-                    serde_json::json!({
-                        "ok": true,
-                        "tool": tool_name,
-                        "result": content,
-                        "truncated": content.contains("[truncated]"),
-                    }),
-                    false,
-                    None,
-                )
-            }
-        }
         },
     }
 }
@@ -1692,7 +1692,9 @@ pub async fn execute_general_turn_loop(
         .await?;
         apply_general_turn_tool_batch(&mut state, &tool_batch, kernel_config.as_ref());
 
-        if !tool_batch.pending_confirmations.is_empty() || !tool_batch.pending_dynamic_requests.is_empty() {
+        if !tool_batch.pending_confirmations.is_empty()
+            || !tool_batch.pending_dynamic_requests.is_empty()
+        {
             break (
                 if !tool_batch.pending_confirmations.is_empty() {
                     "Tool confirmation pending.".to_string()

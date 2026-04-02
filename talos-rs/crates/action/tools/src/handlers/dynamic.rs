@@ -77,10 +77,9 @@ impl ToolHandler for DynamicToolHandler {
                 Ok(ToolDispatchOutcome::executed(payload))
             }
             DynamicToolBackend::External => {
-                if let Some(result) = load_dynamic_tool_result(
-                    context.tool_context(),
-                    invocation.call_id.as_str(),
-                )? {
+                if let Some(result) =
+                    load_dynamic_tool_result(context.tool_context(), invocation.call_id.as_str())?
+                {
                     Ok(ToolDispatchOutcome::executed(ToolOutputPayload::Function {
                         content: result.output,
                         success: result.success,
@@ -111,7 +110,9 @@ fn load_dynamic_tool_result(
         return Ok(None);
     };
     let result = serde_json::from_value(value).map_err(|err| {
-        TalosError::ToolError(format!("invalid stored dynamic tool result for {call_id}: {err}"))
+        TalosError::ToolError(format!(
+            "invalid stored dynamic tool result for {call_id}: {err}"
+        ))
     })?;
     Ok(Some(result))
 }

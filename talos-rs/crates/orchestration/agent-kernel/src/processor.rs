@@ -7,6 +7,7 @@ use crate::{
     SessionEventPayload,
 };
 use async_trait::async_trait;
+use chrono::Utc;
 use std::sync::Arc;
 use talos_error::TalosResult;
 use talos_llm_provider::{ChatMessage, Role};
@@ -398,7 +399,10 @@ impl RequestProcessor for DynamicToolReplayRequestProcessor {
         request: &mut LlmRequestEnvelope,
     ) -> TalosResult<RequestProcessorOutput> {
         let latest_dynamic_request = latest_branch_event(ctx, request.branch, |event| {
-            matches!(event.payload, SessionEventPayload::DynamicToolRequest { .. })
+            matches!(
+                event.payload,
+                SessionEventPayload::DynamicToolRequest { .. }
+            )
         });
 
         let Some(dynamic_request_event) = latest_dynamic_request else {
@@ -440,10 +444,43 @@ impl RequestProcessor for DynamicToolReplayRequestProcessor {
                 );
             }
             _ => {
-                request.prompt_prefix_messages.push(ChatMessage::system(format!(
-                    "A dynamic tool response is pending for `{}` (call `{}`). Wait for the external tool result before continuing.",
-                    dynamic_request.tool_name, dynamic_request.call_id
-                )));
+                let timeout_ms = ctx.limits.dynamic_tool_timeout_ms;
+                let elapsed_ms = (Utc::now() - dynamic_request_event.timestamp)
+                    .num_milliseconds()
+                    .max(0) as u64;
+                if timeout_ms > 0 && elapsed_ms >= timeout_ms {
+                    let timeout_message = format!(
+                        "dynamic tool `{}` (call `{}`) timed out after {} ms",
+                        dynamic_request.tool_name, dynamic_request.call_id, timeout_ms
+                    );
+                    match ctx.limits.dynamic_tool_timeout_behavior {
+                        talos_config::DynamicToolTimeoutBehavior::ErrorToModel => {
+                            request.replay_tool_invocations.push(ReplayToolInvocation {
+                                call_id: dynamic_request.call_id.clone(),
+                                tool_name: dynamic_request.tool_name.clone(),
+                                arguments: dynamic_request.arguments.clone(),
+                            });
+                            request.replay_dynamic_tool_results.insert(
+                                dynamic_request.call_id.clone(),
+                                ReplayDynamicToolResult {
+                                    output: timeout_message,
+                                    success: false,
+                                },
+                            );
+                        }
+                        talos_config::DynamicToolTimeoutBehavior::AbortTurn => {
+                            request.prompt_prefix_messages.push(ChatMessage::system(format!(
+                                "Stop the turn and report that dynamic tool `{}` (call `{}`) timed out.",
+                                dynamic_request.tool_name, dynamic_request.call_id
+                            )));
+                        }
+                    }
+                } else {
+                    request.prompt_prefix_messages.push(ChatMessage::system(format!(
+                        "A dynamic tool response is pending for `{}` (call `{}`). Wait for the external tool result before continuing.",
+                        dynamic_request.tool_name, dynamic_request.call_id
+                    )));
+                }
             }
         }
 

@@ -2,50 +2,45 @@
 //!
 //! Gateway mode supports real session APIs and SSE streaming.
 
+mod markdown;
+mod utils;
+pub mod run;
+
+pub use run::run_tui_app_with_client;
+use markdown::*;
+use utils::*;
+
 use async_trait::async_trait;
-use crossterm::{
-    event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
-        KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
-    },
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
-    backend::{Backend, CrosstermBackend},
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
-    Frame, Terminal,
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
+    Frame,
 };
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     env,
     error::Error,
-    io::{self, Write},
-    path::{Path, PathBuf},
-    process::{Command, Stdio},
+    path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
 };
-use talos_agent::Agent;
 use talos_client::{
-    ModelInfo, SessionCreateParams, TalosClient, TalosContext, TalosEvent, TalosEventPayload,
-    TalosInputItem, TalosMessageRequest, TalosSession,
+    ModelInfo, SessionCreateParams, TalosClient, TalosContentItem, TalosContext, TalosEvent,
+    TalosEventPayload, TalosInputItem, TalosMessageRequest, TalosSession,
 };
 use talos_error::{TalosError, TalosResult};
 use talos_types::talos::{TalosEventType, TalosUsage};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
 use tracing::error;
-use unicode_width::UnicodeWidthChar;
 
-const APP_VERSION: &str = "v0.1.0";
 const DEFAULT_MODEL: &str = "qwen-plus";
 const MAX_RIGHT_EVENTS: usize = 120;
 const MAX_QUEUE_LEN: usize = 3;
-const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(20);
+const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 const SESSION_CLOSE_TIMEOUT: Duration = Duration::from_secs(4);
 const SPINNER_FRAMES: &[char] = &['|', '/', '-', '\\'];
 
@@ -53,22 +48,9 @@ const SPINNER_FRAMES: &[char] = &['|', '/', '-', '\\'];
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppState {
     Chat,
+    History,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum ConnectionMode {
-    Embedded,
-    Remote,
-}
-
-impl ConnectionMode {
-    fn as_str(&self) -> &'static str {
-        match self {
-            Self::Embedded => "Embedded",
-            Self::Remote => "Remote",
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ChatRole {
@@ -76,6 +58,7 @@ enum ChatRole {
     Thinking,
     Assistant,
     System,
+    Tool,
 }
 
 impl ChatRole {
@@ -85,19 +68,56 @@ impl ChatRole {
             Self::Thinking => "Thinking",
             Self::Assistant => "Assistant",
             Self::System => "System",
+            Self::Tool => "Tool",
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ToolCallStatus {
+    Running,
+    Completed { exit_ok: bool },
 }
 
 #[derive(Debug, Clone)]
 struct ChatBlock {
     role: ChatRole,
     content: String,
+    // Tool-specific (Some only when role == Tool)
+    #[allow(dead_code)]
+    tool_call_id: Option<String>,
+    tool_name: Option<String>,
+    tool_input: Option<serde_json::Value>,
+    tool_status: Option<ToolCallStatus>,
+    expanded: bool,
+    timing_ms: Option<u64>,
 }
 
 impl ChatBlock {
     fn new(role: ChatRole, content: String) -> Self {
-        Self { role, content }
+        Self {
+            role,
+            content,
+            tool_call_id: None,
+            tool_name: None,
+            tool_input: None,
+            tool_status: None,
+            expanded: false,
+            timing_ms: None,
+        }
+    }
+
+    fn new_tool_call(call_id: String, tool_name: String, tool_input: serde_json::Value, timing_ms: Option<u64>) -> Self {
+        Self {
+            role: ChatRole::Tool,
+            content: String::new(),
+            tool_call_id: Some(call_id),
+            tool_name: Some(tool_name),
+            tool_input: Some(tool_input),
+            tool_status: Some(ToolCallStatus::Running),
+            expanded: false,
+            timing_ms,
+        }
     }
 }
 
@@ -131,6 +151,15 @@ struct QueuedMessage {
     dispatch_attempts: u8,
 }
 
+#[derive(Debug, Clone)]
+struct PendingApprovalState {
+    call_id: String,
+    tool_name: String,
+    prompt: String,
+    #[allow(dead_code)]
+    arguments: serde_json::Value,
+}
+
 impl QueuedMessage {
     fn new(text: String) -> Self {
         Self {
@@ -147,11 +176,17 @@ enum RemoteCommandUpdate {
         requested: String,
         result: TalosResult<TalosSession>,
     },
+    HistoryLoaded(TalosResult<Vec<TalosSession>>),
+    ModelPickerSwitched {
+        requested: String,
+        result: TalosResult<TalosSession>,
+    },
 }
 
 #[async_trait]
 pub trait GatewayClient: Send + Sync {
     async fn list_models(&self) -> TalosResult<Vec<ModelInfo>>;
+    async fn list_sessions(&self) -> TalosResult<Vec<TalosSession>>;
     async fn create_session(&self, params: &SessionCreateParams) -> TalosResult<TalosSession>;
     async fn get_session(&self, session_id: &str) -> TalosResult<TalosSession>;
     async fn close_session(&self, session_id: &str) -> TalosResult<()>;
@@ -165,12 +200,24 @@ pub trait GatewayClient: Send + Sync {
         session_id: &str,
         request: &TalosMessageRequest,
     ) -> TalosResult<mpsc::Receiver<TalosEvent>>;
+    async fn submit_tool_approval(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        approved: bool,
+        reason: Option<String>,
+    ) -> TalosResult<()>;
 }
 
 #[async_trait]
 impl GatewayClient for TalosClient {
     async fn list_models(&self) -> TalosResult<Vec<ModelInfo>> {
         TalosClient::list_models(self).await
+    }
+
+    async fn list_sessions(&self) -> TalosResult<Vec<TalosSession>> {
+        TalosClient::list_sessions(self).await
     }
 
     async fn create_session(&self, params: &SessionCreateParams) -> TalosResult<TalosSession> {
@@ -201,6 +248,18 @@ impl GatewayClient for TalosClient {
     ) -> TalosResult<mpsc::Receiver<TalosEvent>> {
         TalosClient::send_message_stream(self, session_id, request).await
     }
+
+    async fn submit_tool_approval(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        approved: bool,
+        reason: Option<String>,
+    ) -> TalosResult<()> {
+        TalosClient::submit_tool_approval(self, session_id, call_id, tool_name, approved, reason)
+            .await
+    }
 }
 
 /// Main TUI app.
@@ -209,7 +268,6 @@ pub struct TuiApp {
     input_buffer: String,
     cursor_index: usize,
     startup_workspace: PathBuf,
-    connection_mode: ConnectionMode,
     current_model: String,
     session_usage: TalosUsage,
     available_model_info: Vec<ModelInfo>,
@@ -253,7 +311,12 @@ pub struct TuiApp {
     stream_started_at: Option<Instant>,
     last_stream_event_at: Option<Instant>,
     gateway_client: Option<Arc<dyn GatewayClient>>,
-    _agent: Option<Arc<dyn Agent>>,
+    pending_approval: Option<PendingApprovalState>,
+    active_tool_calls: HashMap<String, usize>,
+    history_sessions: Vec<TalosSession>,
+    history_selected: usize,
+    show_model_picker: bool,
+    model_picker_selected: usize,
     close_in_progress: bool,
     close_started_at: Option<Instant>,
     close_timeout_reported: bool,
@@ -262,17 +325,12 @@ pub struct TuiApp {
 }
 
 impl TuiApp {
-    fn build(
-        connection_mode: ConnectionMode,
-        agent: Option<Arc<dyn Agent>>,
-        gateway_client: Option<Arc<dyn GatewayClient>>,
-    ) -> Self {
+    fn build(gateway_client: Option<Arc<dyn GatewayClient>>) -> Self {
         let mut app = Self {
             current_state: AppState::Chat,
             input_buffer: String::new(),
             cursor_index: 0,
             startup_workspace: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            connection_mode,
             current_model: DEFAULT_MODEL.to_string(),
             session_usage: TalosUsage::default(),
             available_model_info: vec![],
@@ -316,7 +374,12 @@ impl TuiApp {
             stream_started_at: None,
             last_stream_event_at: None,
             gateway_client,
-            _agent: agent,
+            pending_approval: None,
+            active_tool_calls: HashMap::new(),
+            history_sessions: vec![],
+            history_selected: 0,
+            show_model_picker: false,
+            model_picker_selected: 0,
             close_in_progress: false,
             close_started_at: None,
             close_timeout_reported: false,
@@ -326,7 +389,7 @@ impl TuiApp {
 
         app.push_block(
             ChatRole::System,
-            build_welcome_card(&app.current_model, &app.startup_workspace),
+            build_welcome_card(APP_VERSION, &app.current_model, &app.startup_workspace),
         );
         app.push_block(
             ChatRole::System,
@@ -336,28 +399,16 @@ impl TuiApp {
         app
     }
 
-    pub fn new(agent: Arc<dyn Agent>) -> Self {
-        Self::build(ConnectionMode::Embedded, Some(agent), None)
-    }
-
-    pub fn new_with_agent(agent: Arc<dyn Agent>) -> Self {
-        Self::new(agent)
-    }
-
     pub fn new_with_client(client: Arc<TalosClient>) -> Self {
         let gateway_client: Arc<dyn GatewayClient> = client;
-        Self::build(ConnectionMode::Remote, None, Some(gateway_client))
+        Self::build(Some(gateway_client))
     }
 
     pub fn new_with_gateway_client(gateway_client: Arc<dyn GatewayClient>) -> Self {
-        Self::build(ConnectionMode::Remote, None, Some(gateway_client))
+        Self::build(Some(gateway_client))
     }
 
     pub async fn initialize_remote(&mut self) {
-        if self.connection_mode != ConnectionMode::Remote {
-            return;
-        }
-
         self.connection_status = "connecting".to_string();
         self.push_right_event("connecting to gateway".to_string());
 
@@ -402,6 +453,24 @@ impl TuiApp {
     }
 
     pub async fn handle_input(&mut self, key_event: KeyEvent) -> Result<bool, Box<dyn Error>> {
+        // Approval mode intercepts y/n/Enter/Esc
+        if self.pending_approval.is_some() {
+            match key_event.code {
+                KeyCode::Char('y') | KeyCode::Enter => {
+                    self.submit_approval(true).await;
+                    return Ok(false);
+                }
+                KeyCode::Char('n') | KeyCode::Esc => {
+                    self.submit_approval(false).await;
+                    return Ok(false);
+                }
+                KeyCode::Char('c') if key_event.modifiers.intersects(KeyModifiers::CONTROL) => {
+                    return Ok(true);
+                }
+                _ => return Ok(false),
+            }
+        }
+
         if key_event.modifiers.intersects(KeyModifiers::CONTROL) {
             match key_event.code {
                 KeyCode::Char('c') => return Ok(true),
@@ -413,8 +482,65 @@ impl TuiApp {
                     self.copy_chat_to_clipboard();
                     return Ok(false);
                 }
+                KeyCode::Char('h') => {
+                    self.open_history();
+                    return Ok(false);
+                }
+                KeyCode::Char('m') => {
+                    self.toggle_model_picker();
+                    return Ok(false);
+                }
                 _ => {}
             }
+        }
+
+        // History state navigation
+        if self.current_state == AppState::History {
+            match key_event.code {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    self.current_state = AppState::Chat;
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.history_selected = self.history_selected.saturating_sub(1);
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    let max = self.history_sessions.len().saturating_sub(1);
+                    if self.history_selected < max {
+                        self.history_selected += 1;
+                    }
+                }
+                KeyCode::Enter => {
+                    self.switch_to_history_session();
+                }
+                KeyCode::Char('d') => {
+                    self.delete_history_session();
+                }
+                _ => {}
+            }
+            return Ok(false);
+        }
+
+        // Model picker navigation
+        if self.show_model_picker {
+            match key_event.code {
+                KeyCode::Esc => {
+                    self.show_model_picker = false;
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.model_picker_selected = self.model_picker_selected.saturating_sub(1);
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    let max = self.available_models.len().saturating_sub(1);
+                    if self.model_picker_selected < max {
+                        self.model_picker_selected += 1;
+                    }
+                }
+                KeyCode::Enter => {
+                    self.confirm_model_picker();
+                }
+                _ => {}
+            }
+            return Ok(false);
         }
 
         match key_event.code {
@@ -463,6 +589,11 @@ impl TuiApp {
             }
             KeyCode::End => {
                 self.scroll_chat_bottom();
+                Ok(false)
+            }
+            KeyCode::Tab => {
+                self.toggle_last_tool_block();
+                self.rebuild_chat_render_state_if_rect();
                 Ok(false)
             }
             KeyCode::Char(c) => {
@@ -680,7 +811,7 @@ impl TuiApp {
             RemoteCommandUpdate::StatusLoaded(result) => match result {
                 Ok(session_info) => {
                     let mut lines = vec![
-                        format!("mode: {}", self.connection_mode.as_str()),
+                        "mode: Gateway".to_string(),
                         format!("model: {}", self.current_model),
                         format!("workspace: {}", self.startup_workspace.display()),
                         format!(
@@ -722,6 +853,33 @@ impl TuiApp {
                 Err(err) => {
                     self.push_block(ChatRole::System, format!("Failed to switch model: {}", err));
                     self.push_right_event("model switch failed".to_string());
+                }
+            },
+            RemoteCommandUpdate::HistoryLoaded(result) => match result {
+                Ok(sessions) => {
+                    self.history_sessions = sessions;
+                    self.history_selected = 0;
+                    self.push_right_event(format!("history loaded: {} sessions", self.history_sessions.len()));
+                }
+                Err(err) => {
+                    self.push_right_event(format!("history load failed: {err}"));
+                    self.current_state = AppState::Chat;
+                }
+            },
+            RemoteCommandUpdate::ModelPickerSwitched { requested, result } => match result {
+                Ok(info) => {
+                    self.apply_session_snapshot(&info);
+                    self.show_model_picker = false;
+                    self.push_block(
+                        ChatRole::System,
+                        format!("Model switched to `{}`.", self.current_model),
+                    );
+                    self.push_right_event(format!("model picker switched: {}", requested));
+                }
+                Err(err) => {
+                    self.show_model_picker = false;
+                    self.push_block(ChatRole::System, format!("Failed to switch model: {}", err));
+                    self.push_right_event("model picker switch failed".to_string());
                 }
             },
         }
@@ -857,12 +1015,22 @@ impl TuiApp {
     }
 
     pub fn render_ui(&mut self, f: &mut Frame) {
-        let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])
-            .split(f.area());
-        self.render_left_panel(f, chunks[0]);
-        self.render_right_panel(f, chunks[1]);
+        match self.current_state {
+            AppState::History => {
+                self.render_history_panel(f, f.area());
+            }
+            AppState::Chat => {
+                let chunks = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])
+                    .split(f.area());
+                self.render_left_panel(f, chunks[0]);
+                self.render_right_panel(f, chunks[1]);
+                if self.show_model_picker {
+                    self.render_model_picker(f, f.area());
+                }
+            }
+        }
     }
 
     async fn submit_input(&mut self) -> TalosResult<bool> {
@@ -949,15 +1117,7 @@ impl TuiApp {
                     return Ok(false);
                 }
 
-                if self.connection_mode == ConnectionMode::Remote {
-                    self.switch_remote_model_command(requested.to_string())?;
-                } else {
-                    self.current_model = requested.to_string();
-                    self.push_block(
-                        ChatRole::System,
-                        format!("Model switched locally to `{}`.", self.current_model),
-                    );
-                }
+                self.switch_remote_model_command(requested.to_string())?;
 
                 Ok(false)
             }
@@ -966,30 +1126,26 @@ impl TuiApp {
                 Ok(false)
             }
             "quit" => {
-                if self.connection_mode == ConnectionMode::Remote {
-                    if self.close_in_progress {
-                        if self.is_close_timed_out() {
-                            self.push_right_event("session force exit".to_string());
-                            self.push_block(
-                                ChatRole::System,
-                                "Forcing local exit while remote session closes in background."
-                                    .to_string(),
-                            );
-                            self.should_exit = true;
-                            return Ok(false);
-                        }
-
-                        self.show_status_hint(
-                            "Session is still closing. Wait or press /quit again after timeout.",
-                            Duration::from_secs(2),
+                if self.close_in_progress {
+                    if self.is_close_timed_out() {
+                        self.push_right_event("session force exit".to_string());
+                        self.push_block(
+                            ChatRole::System,
+                            "Forcing local exit while remote session closes in background."
+                                .to_string(),
                         );
+                        self.should_exit = true;
                         return Ok(false);
                     }
-                    self.close_remote_session_command()?;
+
+                    self.show_status_hint(
+                        "Session is still closing. Wait or press /quit again after timeout.",
+                        Duration::from_secs(2),
+                    );
                     return Ok(false);
                 }
-                self.push_block(ChatRole::System, "Shutting down TUI.".to_string());
-                Ok(true)
+                self.close_remote_session_command()?;
+                Ok(false)
             }
             unknown => {
                 self.push_block(
@@ -1056,7 +1212,7 @@ impl TuiApp {
             return;
         };
 
-        if self.connection_mode == ConnectionMode::Remote && self.session_id.is_none() {
+        if self.session_id.is_none() {
             self.start_remote_session_connect();
             return;
         }
@@ -1093,7 +1249,7 @@ impl TuiApp {
             return;
         }
 
-        if self.in_flight || self.connection_mode == ConnectionMode::Embedded {
+        if self.in_flight {
             self.message_queue.pop_front();
         }
     }
@@ -1108,78 +1264,64 @@ impl TuiApp {
         user_message: String,
         reset_retry_state: bool,
     ) -> TalosResult<()> {
-        match self.connection_mode {
-            ConnectionMode::Remote => {
-                let Some(client) = self.gateway_client.clone() else {
-                    self.push_block(ChatRole::System, "Gateway client unavailable.".to_string());
-                    return Ok(());
-                };
+        let Some(client) = self.gateway_client.clone() else {
+            self.push_block(ChatRole::System, "Gateway client unavailable.".to_string());
+            return Ok(());
+        };
 
-                let Some(session_id) = self.session_id.clone() else {
-                    return Err(TalosError::ClientError(
-                        "remote session is not ready".to_string(),
-                    ));
-                };
-                let active_summary = summarize_for_queue(&user_message);
-                let request = TalosMessageRequest {
-                    input: vec![TalosInputItem::Text {
-                        text: user_message.clone(),
-                    }],
-                    stream: Some(true),
-                    workspace_id: None,
-                };
+        let Some(session_id) = self.session_id.clone() else {
+            return Err(TalosError::ClientError(
+                "session is not ready".to_string(),
+            ));
+        };
+        let active_summary = summarize_for_queue(&user_message);
+        let request = TalosMessageRequest {
+            input: vec![TalosInputItem::Text {
+                text: user_message.clone(),
+            }],
+            stream: Some(true),
+            workspace_id: None,
+        };
 
-                self.abort_pending_stream_task();
-                self.in_flight = true;
-                self.received_output_delta = false;
-                self.active_message = Some(active_summary);
-                if reset_retry_state {
-                    self.active_retry_count = 0;
-                    self.active_message_raw = Some(user_message.clone());
-                }
-                self.stream_started_at = Some(Instant::now());
-                self.last_stream_event_at = Some(Instant::now());
-                self.pending_stream = None;
-                self.pending_stream_connect = None;
-                self.active_stream_message_id = None;
-                self.last_stream_sequence = None;
-
-                if reset_retry_state {
-                    let user_idx = self.push_block(ChatRole::User, user_message.clone());
-                    self.active_user_idx = Some(user_idx);
-                }
-
-                let thinking_idx = self.push_block(ChatRole::Thinking, String::new());
-                let assistant_idx = self.push_block(ChatRole::Assistant, String::new());
-                self.active_thinking_idx = Some(thinking_idx);
-                self.active_assistant_idx = Some(assistant_idx);
-
-                let (tx, rx) = mpsc::channel(1);
-                self.pending_stream_connect = Some(rx);
-                self.push_right_event(format!("message dispatched to session {}", session_id));
-
-                let handle = tokio::spawn(async move {
-                    let result = client.send_message_stream(&session_id, &request).await;
-                    if tx.send(result).await.is_err() {
-                        error!(
-                            session_id = %session_id,
-                            "failed to deliver stream connection result to TUI task"
-                        );
-                    }
-                });
-                self.pending_stream_task = Some(handle);
-            }
-            ConnectionMode::Embedded => {
-                self.push_block(
-                    ChatRole::Thinking,
-                    "- embedded mode runtime is not wired yet".to_string(),
-                );
-                self.push_block(
-                    ChatRole::Assistant,
-                    "_Embedded mode response placeholder._".to_string(),
-                );
-            }
+        self.abort_pending_stream_task();
+        self.in_flight = true;
+        self.received_output_delta = false;
+        self.active_message = Some(active_summary);
+        if reset_retry_state {
+            self.active_retry_count = 0;
+            self.active_message_raw = Some(user_message.clone());
         }
+        self.stream_started_at = Some(Instant::now());
+        self.last_stream_event_at = Some(Instant::now());
+        self.pending_stream = None;
+        self.pending_stream_connect = None;
+        self.active_stream_message_id = None;
+        self.last_stream_sequence = None;
+
+        if reset_retry_state {
+            let user_idx = self.push_block(ChatRole::User, user_message.clone());
+            self.active_user_idx = Some(user_idx);
+        }
+
+        let thinking_idx = self.push_block(ChatRole::Thinking, String::new());
+        let assistant_idx = self.push_block(ChatRole::Assistant, String::new());
+        self.active_thinking_idx = Some(thinking_idx);
+        self.active_assistant_idx = Some(assistant_idx);
+
+        let (tx, rx) = mpsc::channel(1);
+        self.pending_stream_connect = Some(rx);
+        self.push_right_event(format!("message dispatched to session {}", session_id));
+
+        let handle = tokio::spawn(async move {
+            let result = client.send_message_stream(&session_id, &request).await;
+            if tx.send(result).await.is_err() {
+                error!(
+                    session_id = %session_id,
+                    "failed to deliver stream connection result to TUI task"
+                );
+            }
+        });
+        self.pending_stream_task = Some(handle);
 
         Ok(())
     }
@@ -1272,6 +1414,12 @@ impl TuiApp {
                 ));
                 self.tool_events
                     .push(format!("started [{}]: {}", payload.step_id, payload.name));
+                self.push_tool_call_block(
+                    payload.call_id.clone(),
+                    payload.name.clone(),
+                    payload.arguments.clone(),
+                    payload.timing_ms,
+                );
             }
             (
                 TalosEventType::MessageToolCallCompleted,
@@ -1283,6 +1431,36 @@ impl TuiApp {
                 ));
                 self.tool_events
                     .push(format!("completed: {} ({})", payload.call_id, payload.tool));
+                let output = payload
+                    .content
+                    .iter()
+                    .filter_map(|item| match item {
+                        TalosContentItem::Text { text } => Some(text.clone()),
+                        TalosContentItem::Json { value } => Some(value.to_string()),
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                self.complete_tool_call_block(
+                    &payload.call_id,
+                    output,
+                    !payload.is_error,
+                    payload.timing_ms,
+                );
+            }
+            (
+                TalosEventType::MessageToolCallPendingApproval,
+                TalosEventPayload::MessageToolCallPendingApproval(payload),
+            ) => {
+                self.push_right_event(format!(
+                    "approval needed: {} ({})",
+                    payload.tool_name, payload.call_id
+                ));
+                self.pending_approval = Some(PendingApprovalState {
+                    call_id: payload.call_id.clone(),
+                    tool_name: payload.tool_name.clone(),
+                    prompt: payload.prompt.clone(),
+                    arguments: payload.arguments.clone(),
+                });
             }
             (TalosEventType::MessageCompleted, TalosEventPayload::MessageCompleted(payload)) => {
                 self.session_usage.input_tokens = self
@@ -1308,10 +1486,6 @@ impl TuiApp {
     }
 
     async fn refresh_models_from_gateway(&mut self) -> TalosResult<()> {
-        if self.connection_mode != ConnectionMode::Remote {
-            return Ok(());
-        }
-
         let Some(client) = self.gateway_client.clone() else {
             return Err(TalosError::ClientError(
                 "missing gateway client in remote mode".to_string(),
@@ -1343,10 +1517,6 @@ impl TuiApp {
     }
 
     fn refresh_models_command(&mut self) -> TalosResult<()> {
-        if self.connection_mode != ConnectionMode::Remote {
-            return Ok(());
-        }
-
         let Some(client) = self.gateway_client.clone() else {
             return Err(TalosError::ClientError(
                 "missing gateway client in remote mode".to_string(),
@@ -1360,20 +1530,6 @@ impl TuiApp {
     }
 
     fn status_command(&mut self) -> TalosResult<()> {
-        if self.connection_mode != ConnectionMode::Remote {
-            let lines = vec![
-                format!("mode: {}", self.connection_mode.as_str()),
-                format!("model: {}", self.current_model),
-                format!("workspace: {}", self.startup_workspace.display()),
-                "session: none".to_string(),
-                format!("connection: {}", self.connection_status),
-                format!("in_flight: {}", self.in_flight),
-                format!("events: {}", self.trace_event_count),
-            ];
-            self.push_block(ChatRole::System, lines.join("\n"));
-            return Ok(());
-        }
-
         let Some(client) = self.gateway_client.clone() else {
             return Err(TalosError::ClientError(
                 "missing gateway client in remote mode".to_string(),
@@ -1414,6 +1570,103 @@ impl TuiApp {
             };
             RemoteCommandUpdate::ModelSwitched { requested, result }
         })
+    }
+
+    fn open_history(&mut self) {
+        let Some(client) = self.gateway_client.clone() else {
+            self.push_block(ChatRole::System, "No gateway client connected.".to_string());
+            return;
+        };
+        self.current_state = AppState::History;
+        let _ = self.spawn_remote_command_task("loading history", async move {
+            RemoteCommandUpdate::HistoryLoaded(client.list_sessions().await)
+        });
+    }
+
+    fn toggle_model_picker(&mut self) {
+        if self.show_model_picker {
+            self.show_model_picker = false;
+            return;
+        }
+        if self.available_models.is_empty() {
+            self.push_block(ChatRole::System, "No models loaded. Run /models first.".to_string());
+            return;
+        }
+        // Pre-select current model
+        self.model_picker_selected = self
+            .available_models
+            .iter()
+            .position(|m| m == &self.current_model)
+            .unwrap_or(0);
+        self.show_model_picker = true;
+    }
+
+    fn switch_to_history_session(&mut self) {
+        let Some(session) = self.history_sessions.get(self.history_selected).cloned() else {
+            return;
+        };
+        let session_id = session.context.session_id.clone();
+        let model = session.config.llm.model.clone();
+        self.session_id = Some(session_id.clone());
+        self.current_model = model.clone();
+        self.session_usage = session.state.usage.clone();
+        self.current_state = AppState::Chat;
+        self.push_block(
+            ChatRole::System,
+            format!("Switched to session {} (model: {})", session_id, model),
+        );
+        self.push_right_event(format!("switched to history session: {}", session_id));
+    }
+
+    fn delete_history_session(&mut self) {
+        let Some(session) = self.history_sessions.get(self.history_selected).cloned() else {
+            return;
+        };
+        let session_id = session.context.session_id.clone();
+        let Some(client) = self.gateway_client.clone() else {
+            return;
+        };
+        self.history_sessions.remove(self.history_selected);
+        if self.history_selected > 0 && self.history_selected >= self.history_sessions.len() {
+            self.history_selected = self.history_sessions.len().saturating_sub(1);
+        }
+        let sid_log = session_id.clone();
+        tokio::spawn(async move {
+            let _ = client.close_session(&session_id).await;
+        });
+        self.push_right_event(format!("deleted session: {}", sid_log));
+    }
+
+    fn confirm_model_picker(&mut self) {
+        let Some(model) = self.available_models.get(self.model_picker_selected).cloned() else {
+            return;
+        };
+        let Some(client) = self.gateway_client.clone() else {
+            self.show_model_picker = false;
+            return;
+        };
+        let session_id = self.session_id.clone();
+        let requested = model.clone();
+        let _ = self.spawn_remote_command_task(
+            format!("model picker switching to: {}", model),
+            async move {
+                let result = if let Some(session_id) = session_id {
+                    client.update_session_model(&session_id, &requested).await
+                } else {
+                    let context = TalosContext::cli(
+                        env::var("USER").unwrap_or_else(|_| "local-user".to_string()),
+                    )
+                    .with_channel_id("terminal");
+                    client
+                        .create_session(&SessionCreateParams {
+                            context: Some(context),
+                            model: Some(requested.clone()),
+                        })
+                        .await
+                };
+                RemoteCommandUpdate::ModelPickerSwitched { requested, result }
+            },
+        );
     }
 
     fn close_remote_session_command(&mut self) -> TalosResult<()> {
@@ -1485,10 +1738,6 @@ impl TuiApp {
     }
 
     async fn ensure_remote_session(&mut self) -> TalosResult<String> {
-        if self.connection_mode != ConnectionMode::Remote {
-            return Ok("embedded-session".to_string());
-        }
-
         if let Some(session_id) = self.session_id.clone() {
             return Ok(session_id);
         }
@@ -1514,10 +1763,7 @@ impl TuiApp {
     }
 
     fn start_remote_session_connect(&mut self) {
-        if self.connection_mode != ConnectionMode::Remote
-            || self.session_id.is_some()
-            || self.pending_session_connect.is_some()
-        {
+        if self.session_id.is_some() || self.pending_session_connect.is_some() {
             return;
         }
 
@@ -1794,6 +2040,39 @@ impl TuiApp {
         idx
     }
 
+    fn push_tool_call_block(&mut self, call_id: String, tool_name: String, tool_input: serde_json::Value, timing_ms: Option<u64>) -> usize {
+        let block = ChatBlock::new_tool_call(call_id.clone(), tool_name, tool_input, timing_ms);
+        self.chat_blocks.push(block);
+        let idx = self.chat_blocks.len() - 1;
+        self.active_tool_calls.insert(call_id, idx);
+        self.request_follow_bottom();
+        idx
+    }
+
+    fn complete_tool_call_block(&mut self, call_id: &str, output: String, exit_ok: bool, timing_ms: Option<u64>) {
+        if let Some(&idx) = self.active_tool_calls.get(call_id) {
+            if let Some(block) = self.chat_blocks.get_mut(idx) {
+                block.content = output;
+                block.tool_status = Some(ToolCallStatus::Completed { exit_ok });
+                if timing_ms.is_some() {
+                    block.timing_ms = timing_ms;
+                }
+            }
+            self.active_tool_calls.remove(call_id);
+            self.request_follow_bottom();
+        }
+    }
+
+    fn toggle_last_tool_block(&mut self) {
+        let last_tool_idx = self.chat_blocks.iter().rposition(|b| b.role == ChatRole::Tool);
+        if let Some(idx) = last_tool_idx {
+            if let Some(block) = self.chat_blocks.get_mut(idx) {
+                block.expanded = !block.expanded;
+                self.request_follow_bottom();
+            }
+        }
+    }
+
     fn discard_active_pending_blocks(&mut self) {
         let mut remove_indices = vec![];
         if let Some(idx) = self.active_assistant_idx {
@@ -1887,6 +2166,7 @@ impl TuiApp {
         self.stream_started_at = None;
         self.last_stream_event_at = None;
         self.active_message = None;
+        self.active_tool_calls.clear();
         if !keep_active_payload {
             self.active_message_raw = None;
             self.active_retry_count = 0;
@@ -1996,23 +2276,27 @@ impl TuiApp {
         let input_inner = input_panel.inner(left_chunks[2]);
         f.render_widget(input_panel, left_chunks[2]);
 
-        let input_bg_style = Style::default().bg(Color::Rgb(66, 70, 78));
-        f.render_widget(Block::default().style(input_bg_style), input_inner);
+        if let Some(approval) = &self.pending_approval {
+            self.render_approval_card(f, input_inner, approval);
+        } else {
+            let input_bg_style = Style::default().bg(Color::Rgb(66, 70, 78));
+            f.render_widget(Block::default().style(input_bg_style), input_inner);
 
-        let input_rows = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Length(1),
-            ])
-            .split(input_inner);
+            let input_rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                ])
+                .split(input_inner);
 
-        let blank = Paragraph::new(Line::from("")).style(input_bg_style);
-        f.render_widget(blank, input_rows[0]);
+            let blank = Paragraph::new(Line::from("")).style(input_bg_style);
+            f.render_widget(blank, input_rows[0]);
 
-        let input_row = Paragraph::new(self.input_line()).style(input_bg_style);
-        f.render_widget(input_row, input_rows[1]);
+            let input_row = Paragraph::new(self.input_line()).style(input_bg_style);
+            f.render_widget(input_row, input_rows[1]);
+        }
 
         let wait_style = if self.in_flight {
             Style::default()
@@ -2031,6 +2315,86 @@ impl TuiApp {
             .style(wait_style)
             .wrap(Wrap { trim: false });
         f.render_widget(wait_row, left_chunks[3]);
+    }
+
+    async fn submit_approval(&mut self, approved: bool) {
+        let Some(approval) = self.pending_approval.take() else {
+            return;
+        };
+        let Some(client) = self.gateway_client.clone() else {
+            self.push_block(ChatRole::System, "Gateway client unavailable.".to_string());
+            return;
+        };
+        let Some(session_id) = self.session_id.clone() else {
+            self.push_block(ChatRole::System, "No active session.".to_string());
+            return;
+        };
+        let label = if approved { "approved" } else { "rejected" };
+        self.push_right_event(format!("tool approval {}: {}", label, approval.tool_name));
+
+        if let Err(err) = client
+            .submit_tool_approval(&session_id, &approval.call_id, &approval.tool_name, approved, None)
+            .await
+        {
+            self.push_block(
+                ChatRole::System,
+                format!("Failed to submit approval: {}", err),
+            );
+            return;
+        }
+
+        // Re-invoke session to continue execution after approval
+        let continuation = if approved {
+            String::new()
+        } else {
+            format!("[Tool `{}` was rejected by user.]", approval.tool_name)
+        };
+        if let Err(err) = self.start_stream_for_message(continuation).await {
+            self.push_block(
+                ChatRole::System,
+                format!("Failed to continue after approval: {}", err),
+            );
+        }
+    }
+
+    fn render_approval_card(
+        &self,
+        f: &mut Frame,
+        area: ratatui::layout::Rect,
+        approval: &PendingApprovalState,
+    ) {
+        let card_style = Style::default().bg(Color::Rgb(50, 35, 20)).fg(Color::White);
+        f.render_widget(Block::default().style(card_style), area);
+        let title = format!(" ⚠  {} — 需要确认 ", approval.tool_name);
+        let card = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow))
+            .title(Span::styled(title, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)))
+            .style(card_style);
+        let inner = card.inner(area);
+        f.render_widget(card, area);
+        let prompt_text = if approval.prompt.is_empty() {
+            format!("执行工具: {}", approval.tool_name)
+        } else {
+            approval.prompt.clone()
+        };
+        let lines = vec![
+            Line::from(Span::styled(prompt_text, Style::default().fg(Color::White))),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled(
+                    " [y / Enter: 批准] ",
+                    Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    " [n / Esc: 拒绝] ",
+                    Style::default().fg(Color::Black).bg(Color::Red).add_modifier(Modifier::BOLD),
+                ),
+            ]),
+        ];
+        let para = Paragraph::new(lines).style(card_style);
+        f.render_widget(para, inner);
     }
 
     fn render_right_panel(&self, f: &mut Frame, area: ratatui::layout::Rect) {
@@ -2053,10 +2417,7 @@ impl TuiApp {
             "status: {} {}",
             spinner, self.connection_status
         )));
-        lines.push(Line::from(format!(
-            "mode: {}",
-            self.connection_mode.as_str()
-        )));
+        lines.push(Line::from("mode: Gateway"));
         lines.push(Line::from(format!("model: {}", self.current_model)));
         lines.push(Line::from(format!(
             "session: {}",
@@ -2135,11 +2496,108 @@ impl TuiApp {
         }
         lines.push(Line::from(""));
         lines.push(Line::from("/help /model /models /status /quit"));
-        lines.push(Line::from("↑/↓/PgUp/PgDn scroll"));
+        lines.push(Line::from("↑/↓/PgUp/PgDn scroll  Tab expand tool"));
+        lines.push(Line::from("Ctrl+H history  Ctrl+M model picker"));
         lines.push(Line::from("Ctrl+Y copy  Ctrl+U clear"));
 
         let right = Paragraph::new(lines).wrap(Wrap { trim: false });
         f.render_widget(right, right_inner);
+    }
+
+    fn render_history_panel(&self, f: &mut Frame, area: Rect) {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Rgb(80, 130, 200)))
+            .title(" History  [Enter] switch  [d] delete  [Esc] back ");
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        if self.history_sessions.is_empty() {
+            let msg = Paragraph::new("No sessions found.  (loading...)")
+                .style(Style::default().fg(Color::DarkGray));
+            f.render_widget(msg, inner);
+            return;
+        }
+
+        let items: Vec<ListItem> = self
+            .history_sessions
+            .iter()
+            .map(|s| {
+                let sid = &s.context.session_id;
+                let model = &s.config.llm.model;
+                let msgs = s.state.message_count;
+                ListItem::new(format!(" {sid}  [{model}]  {msgs} msgs"))
+            })
+            .collect();
+
+        let mut list_state = ListState::default();
+        list_state.select(Some(self.history_selected));
+
+        let list = List::new(items)
+            .highlight_style(
+                Style::default()
+                    .bg(Color::Rgb(50, 80, 130))
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol("▶ ");
+
+        f.render_stateful_widget(list, inner, &mut list_state);
+    }
+
+    fn render_model_picker(&self, f: &mut Frame, area: Rect) {
+        // Center a popup of width=50, height=min(models+4, 20)
+        let popup_height = (self.available_models.len() as u16 + 4).min(20);
+        let popup_width = 52u16;
+        let x = area.x + area.width.saturating_sub(popup_width) / 2;
+        let y = area.y + area.height.saturating_sub(popup_height) / 2;
+        let popup_rect = Rect::new(
+            x.min(area.x + area.width.saturating_sub(popup_width)),
+            y.min(area.y + area.height.saturating_sub(popup_height)),
+            popup_width.min(area.width),
+            popup_height.min(area.height),
+        );
+
+        f.render_widget(Clear, popup_rect);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Rgb(100, 180, 240)))
+            .title(" Switch Model  [Enter] confirm  [Esc] cancel ");
+        let inner = block.inner(popup_rect);
+        f.render_widget(block, popup_rect);
+
+        let items: Vec<ListItem> = self
+            .available_models
+            .iter()
+            .map(|m| {
+                if m == &self.current_model {
+                    ListItem::new(format!(" {m}  ✓"))
+                } else {
+                    ListItem::new(format!(" {m}"))
+                }
+            })
+            .collect();
+
+        let mut list_state = ListState::default();
+        list_state.select(Some(self.model_picker_selected));
+
+        let list = List::new(items)
+            .highlight_style(
+                Style::default()
+                    .bg(Color::Rgb(40, 80, 140))
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol("▶ ");
+
+        f.render_stateful_widget(list, inner, &mut list_state);
+    }
+
+    fn rebuild_chat_render_state_if_rect(&mut self) {
+        if let Some(rect) = self.chat_content_rect {
+            self.rebuild_chat_render_state(rect);
+        }
     }
 
     fn rebuild_chat_render_state(&mut self, chat_content_rect: Rect) {
@@ -2351,6 +2809,7 @@ impl TuiApp {
                     ))
                 })
                 .collect(),
+            ChatRole::Tool => self.tool_block_content_lines(block),
             _ => block
                 .content
                 .lines()
@@ -2359,15 +2818,121 @@ impl TuiApp {
         }
     }
 
+    fn tool_block_content_lines(&self, block: &ChatBlock) -> Vec<Line<'static>> {
+        let tool_name = block.tool_name.as_deref().unwrap_or("unknown");
+        let status = block.tool_status.as_ref();
+        let timing = block.timing_ms.map(|ms| format!(" {ms}ms")).unwrap_or_default();
+
+        if !block.expanded {
+            // Folded: single-line summary
+            let (status_icon, status_text, status_style) = match status {
+                Some(ToolCallStatus::Running) => (
+                    "⏳",
+                    "running...".to_string(),
+                    Style::default().fg(Color::Yellow),
+                ),
+                Some(ToolCallStatus::Completed { exit_ok: true }) => (
+                    "✓",
+                    format!("completed{timing}"),
+                    Style::default().fg(Color::Green),
+                ),
+                Some(ToolCallStatus::Completed { exit_ok: false }) => (
+                    "✗",
+                    format!("error{timing}"),
+                    Style::default().fg(Color::Red),
+                ),
+                None => ("?", "unknown".to_string(), Style::default().fg(Color::Gray)),
+            };
+            return vec![Line::from(vec![
+                Span::styled(format!("{status_icon} "), status_style),
+                Span::styled(status_text, status_style),
+                Span::styled("  [Tab to expand]", Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)),
+            ])];
+        }
+
+        // Expanded: show input and output
+        let mut lines = vec![];
+
+        // Input section
+        if let Some(input) = &block.tool_input {
+            let input_str = serde_json::to_string_pretty(input).unwrap_or_else(|_| input.to_string());
+            lines.push(Line::from(Span::styled(
+                "Input:",
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            )));
+            for l in input_str.lines() {
+                lines.push(Line::from(Span::styled(
+                    format!("  {l}"),
+                    Style::default().fg(Color::Rgb(180, 190, 210)),
+                )));
+            }
+        }
+
+        // Output section
+        if !block.content.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "Output:",
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            )));
+            for l in block.content.lines() {
+                lines.push(Line::from(Span::styled(
+                    format!("  {l}"),
+                    Style::default().fg(Color::White),
+                )));
+            }
+        }
+
+        // Status line
+        let (status_icon, status_text, status_style) = match status {
+            Some(ToolCallStatus::Running) => (
+                "⏳",
+                format!("running{timing}..."),
+                Style::default().fg(Color::Yellow),
+            ),
+            Some(ToolCallStatus::Completed { exit_ok: true }) => (
+                "✓",
+                format!("completed{timing}"),
+                Style::default().fg(Color::Green),
+            ),
+            Some(ToolCallStatus::Completed { exit_ok: false }) => (
+                "✗",
+                format!("error{timing}"),
+                Style::default().fg(Color::Red),
+            ),
+            None => ("?", "unknown".to_string(), Style::default().fg(Color::Gray)),
+        };
+        lines.push(Line::from(vec![
+            Span::styled(format!("{status_icon} "), status_style),
+            Span::styled(status_text, status_style),
+            Span::styled("  [Tab to collapse]", Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)),
+        ]));
+
+        if lines.is_empty() {
+            lines.push(Line::from(format!("⚙ {tool_name}")));
+        }
+        lines
+    }
+
     fn chat_card_lines(&self, block: &ChatBlock, content_width: usize) -> Vec<RenderedChatLine> {
         let (label, label_style, body_style, border_style) = self.chat_role_styles(&block.role);
+        let header_text = if block.role == ChatRole::Tool {
+            let tool_name = block.tool_name.as_deref().unwrap_or("unknown");
+            format!("⚙ {tool_name} ")
+        } else {
+            format!("{label} ")
+        };
+        let header_copy = if block.role == ChatRole::Tool {
+            block.tool_name.as_deref().unwrap_or("unknown").to_string()
+        } else {
+            label.to_string()
+        };
         let mut lines = vec![RenderedChatLine {
             display: Line::from(vec![
                 Span::styled("┌ ", border_style),
-                Span::styled(format!("{} ", label), label_style),
+                Span::styled(header_text, label_style),
             ]),
             copy_projection: Some(CopyProjection {
-                text: label.to_string(),
+                text: header_copy,
                 display_start_col: 2,
             }),
         }];
@@ -2463,6 +3028,14 @@ impl TuiApp {
                 Style::default().bg(Color::Rgb(39, 40, 52)).fg(Color::Gray),
                 Style::default().fg(Color::Rgb(112, 115, 139)),
             ),
+            ChatRole::Tool => (
+                "Tool",
+                Style::default()
+                    .fg(Color::Rgb(97, 214, 180))
+                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Rgb(180, 220, 210)),
+                Style::default().fg(Color::Rgb(60, 140, 120)),
+            ),
         }
     }
 
@@ -2497,392 +3070,10 @@ impl TuiApp {
     }
 }
 
-fn canonical_event_label(event_type: &TalosEventType) -> &'static str {
-    match event_type {
-        TalosEventType::MessageStarted => "message.started",
-        TalosEventType::MessageReasoningDelta => "message.reasoning.delta",
-        TalosEventType::MessageExecutionSummary => "message.execution.summary",
-        TalosEventType::MessageOutputDelta => "message.output.delta",
-        TalosEventType::MessageToolCallStarted => "message.tool_call.started",
-        TalosEventType::MessageToolCallCompleted => "message.tool_call.completed",
-        TalosEventType::MessageCompleted => "message.completed",
-        TalosEventType::MessageError => "message.error",
-    }
-}
-
-fn wrap_line_visual(line: Line<'static>, max_width: usize) -> Vec<Line<'static>> {
-    let width_limit = max_width.max(1);
-    if line.spans.is_empty() {
-        return vec![Line::from(String::new())];
-    }
-
-    let mut wrapped_lines: Vec<Line<'static>> = Vec::new();
-    let mut current_spans: Vec<Span<'static>> = Vec::new();
-    let mut current_width = 0usize;
-
-    for span in line.spans {
-        let style = span.style;
-        let mut segment = String::new();
-        let mut segment_width = 0usize;
-
-        for ch in span.content.chars() {
-            let ch_width = char_display_width(ch);
-            let next_width = current_width + segment_width + ch_width;
-            if next_width > width_limit && (current_width + segment_width) > 0 {
-                if !segment.is_empty() {
-                    current_spans.push(Span::styled(std::mem::take(&mut segment), style));
-                    segment_width = 0;
-                }
-                wrapped_lines.push(Line::from(std::mem::take(&mut current_spans)));
-                current_width = 0;
-            }
-            segment.push(ch);
-            segment_width += ch_width;
-        }
-
-        if !segment.is_empty() {
-            current_spans.push(Span::styled(segment, style));
-            current_width += segment_width;
-        }
-    }
-
-    if current_spans.is_empty() {
-        wrapped_lines.push(Line::from(String::new()));
-    } else {
-        wrapped_lines.push(Line::from(current_spans));
-    }
-    wrapped_lines
-}
-
-fn text_display_width(text: &str) -> usize {
-    text.chars().map(char_display_width).sum()
-}
-
-fn line_plain_text(line: &Line<'_>) -> String {
-    line.spans
-        .iter()
-        .map(|span| span.content.as_ref())
-        .collect::<String>()
-}
-
-fn line_display_width(line: &Line<'_>) -> usize {
-    line.spans
-        .iter()
-        .flat_map(|span| span.content.chars())
-        .map(char_display_width)
-        .sum()
-}
-
-fn slice_text_by_display_columns(text: &str, start_col: usize, end_col: usize) -> String {
-    if start_col >= end_col {
-        return String::new();
-    }
-
-    let mut current_col = 0usize;
-    let mut selected = String::new();
-    for ch in text.chars() {
-        let ch_width = char_display_width(ch);
-        let next_col = current_col + ch_width;
-        if next_col > start_col && current_col < end_col {
-            selected.push(ch);
-        }
-        current_col = next_col;
-        if current_col >= end_col {
-            break;
-        }
-    }
-    selected
-}
-
-fn highlight_line_columns(line: &mut Line<'static>, start_col: usize, end_col: usize) {
-    let highlight_style = Style::default()
-        .bg(Color::Rgb(108, 117, 160))
-        .fg(Color::White);
-    let mut current_col = 0usize;
-    let mut spans = Vec::new();
-
-    for span in &line.spans {
-        for ch in span.content.chars() {
-            let ch_width = char_display_width(ch);
-            let next_col = current_col + ch_width;
-            let selected = next_col > start_col && current_col < end_col;
-            let style = if selected {
-                span.style.patch(highlight_style)
-            } else {
-                span.style
-            };
-            push_styled_char(&mut spans, ch, style);
-            current_col = next_col;
-        }
-    }
-
-    line.spans = spans;
-}
-
-fn push_styled_char(spans: &mut Vec<Span<'static>>, ch: char, style: Style) {
-    if let Some(last) = spans.last_mut() {
-        if last.style == style {
-            last.content.to_mut().push(ch);
-            return;
-        }
-    }
-    spans.push(Span::styled(ch.to_string(), style));
-}
-
-fn char_display_width(ch: char) -> usize {
-    if ch == '\t' {
-        4
-    } else {
-        UnicodeWidthChar::width(ch).unwrap_or(0)
-    }
-}
-
-fn summarize_for_queue(input: &str) -> String {
-    const MAX: usize = 42;
-    let trimmed = input.trim();
-    let mut chars = trimmed.chars();
-    let head: String = chars.by_ref().take(MAX).collect();
-    if chars.next().is_some() {
-        format!("{}...", head)
-    } else {
-        head
-    }
-}
-
-fn compact_workspace_path(path: &Path) -> String {
-    let raw = path.display().to_string();
-    if let Ok(home) = env::var("HOME") {
-        if raw.starts_with(&home) {
-            return raw.replacen(&home, "~", 1);
-        }
-    }
-    raw
-}
-
-fn copy_to_system_clipboard(text: &str) -> Result<(), String> {
-    fn try_copy(command: &str, args: &[&str], text: &str) -> Result<(), String> {
-        let mut child = Command::new(command)
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|e| e.to_string())?;
-
-        if let Some(stdin) = child.stdin.as_mut() {
-            stdin
-                .write_all(text.as_bytes())
-                .map_err(|e| e.to_string())?;
-        }
-
-        let status = child.wait().map_err(|e| e.to_string())?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(format!("{} exited with {}", command, status))
-        }
-    }
-
-    let candidates: [(&str, &[&str]); 3] = [
-        ("pbcopy", &[]),
-        ("wl-copy", &[]),
-        ("xclip", &["-selection", "clipboard"]),
-    ];
-    for (cmd, args) in candidates {
-        if try_copy(cmd, args, text).is_ok() {
-            return Ok(());
-        }
-    }
-
-    Err("no clipboard command available (pbcopy/wl-copy/xclip)".to_string())
-}
-
-fn build_welcome_card(model: &str, workspace: &Path) -> String {
-    const CARD_WIDTH: usize = 50;
-
-    fn card_line(content: &str) -> String {
-        let mut inner: String = content.chars().take(CARD_WIDTH).collect();
-        let used = inner.chars().count();
-        if used < CARD_WIDTH {
-            inner.push_str(&" ".repeat(CARD_WIDTH - used));
-        }
-        format!("│{}│", inner)
-    }
-
-    let workspace_line = format!("workspace: {}", workspace.display());
-    [
-        "╭──────────────────────────────────────────────────╮".to_string(),
-        card_line(&format!(" >_ Talos TUI ({})", APP_VERSION)),
-        card_line(""),
-        card_line(&format!(" model:     {:<12} /model to change", model)),
-        card_line(&workspace_line),
-        "╰──────────────────────────────────────────────────╯".to_string(),
-    ]
-    .join("\n")
-}
-
-fn render_markdown_lines(markdown: &str) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
-    let mut in_code_block = false;
-
-    for raw in markdown.lines() {
-        let trimmed = raw.trim_start();
-        if trimmed.starts_with("```") {
-            in_code_block = !in_code_block;
-            lines.push(Line::from(Span::styled(
-                raw.to_string(),
-                Style::default().fg(Color::DarkGray),
-            )));
-            continue;
-        }
-
-        if in_code_block {
-            lines.push(Line::from(Span::styled(
-                raw.to_string(),
-                Style::default().fg(Color::LightGreen),
-            )));
-            continue;
-        }
-
-        if let Some(rest) = trimmed.strip_prefix("### ") {
-            lines.push(Line::from(Span::styled(
-                rest.to_string(),
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            )));
-            continue;
-        }
-
-        if let Some(rest) = trimmed.strip_prefix("## ") {
-            lines.push(Line::from(Span::styled(
-                rest.to_string(),
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            )));
-            continue;
-        }
-
-        if let Some(rest) = trimmed.strip_prefix("# ") {
-            lines.push(Line::from(Span::styled(
-                rest.to_string(),
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
-            )));
-            continue;
-        }
-
-        if let Some(rest) = trimmed.strip_prefix("> ") {
-            lines.push(Line::from(Span::styled(
-                rest.to_string(),
-                Style::default()
-                    .fg(Color::Gray)
-                    .add_modifier(Modifier::ITALIC),
-            )));
-            continue;
-        }
-
-        lines.push(Line::from(raw.to_string()));
-    }
-
-    if lines.is_empty() {
-        lines.push(Line::from(String::new()));
-    }
-
-    lines
-}
-
-fn byte_index_at_char(text: &str, char_index: usize) -> usize {
-    if char_index == 0 {
-        return 0;
-    }
-    text.char_indices()
-        .nth(char_index)
-        .map(|(byte, _)| byte)
-        .unwrap_or_else(|| text.len())
-}
-
-/// Run TUI with embedded agent mode.
-pub async fn run_tui_app(agent: Arc<dyn Agent>) -> Result<(), Box<dyn Error>> {
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-    terminal.hide_cursor()?;
-
-    let mut app = TuiApp::new_with_agent(agent);
-    let run_result = run_event_loop(&mut terminal, &mut app).await;
-
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        DisableMouseCapture,
-        LeaveAlternateScreen
-    )?;
-    terminal.show_cursor()?;
-
-    run_result
-}
-
-/// Run TUI with gateway mode.
-pub async fn run_tui_app_with_client(client: Arc<TalosClient>) -> Result<(), Box<dyn Error>> {
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-    terminal.hide_cursor()?;
-
-    let mut app = TuiApp::new_with_client(client);
-    app.initialize_remote().await;
-    let run_result = run_event_loop(&mut terminal, &mut app).await;
-
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        DisableMouseCapture,
-        LeaveAlternateScreen
-    )?;
-    terminal.show_cursor()?;
-
-    run_result
-}
-
-async fn run_event_loop<B: Backend>(
-    terminal: &mut Terminal<B>,
-    app: &mut TuiApp,
-) -> Result<(), Box<dyn Error>> {
-    loop {
-        app.on_tick().await;
-        if app.should_exit {
-            return Ok(());
-        }
-        terminal.draw(|frame| app.render_ui(frame))?;
-
-        if event::poll(Duration::from_millis(50))? {
-            match event::read()? {
-                Event::Key(key) => {
-                    if key.kind == KeyEventKind::Press {
-                        if app.handle_input(key).await? {
-                            return Ok(());
-                        }
-                    }
-                }
-                Event::Mouse(mouse) => app.handle_mouse(mouse),
-                _ => {}
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Mutex;
-    use talos_agent::MockAgent;
     use talos_client::{
         TalosEventPayload, TalosMessageCompletedEvent, TalosMessageOutputDeltaEvent,
         TalosMessageReasoningDeltaEvent, TalosMessageStartedEvent, TalosThinkingSource,
@@ -3052,6 +3243,10 @@ mod tests {
     impl GatewayClient for MockGatewayClient {
         async fn list_models(&self) -> TalosResult<Vec<ModelInfo>> {
             Ok(self.state.lock().unwrap().models.clone())
+        }
+
+        async fn list_sessions(&self) -> TalosResult<Vec<TalosSession>> {
+            Ok(vec![])
         }
 
         async fn create_session(&self, _params: &SessionCreateParams) -> TalosResult<TalosSession> {
@@ -3240,11 +3435,21 @@ mod tests {
             drop(tx);
             Ok(rx)
         }
+
+        async fn submit_tool_approval(
+            &self,
+            _session_id: &str,
+            _call_id: &str,
+            _tool_name: &str,
+            _approved: bool,
+            _reason: Option<String>,
+        ) -> TalosResult<()> {
+            Ok(())
+        }
     }
 
     fn create_embedded_app() -> TuiApp {
-        let agent = Arc::new(MockAgent::new());
-        TuiApp::new_with_agent(agent)
+        create_remote_app()
     }
 
     fn create_remote_app() -> TuiApp {
@@ -4001,5 +4206,261 @@ mod tests {
             .as_ref()
             .map(|(msg, _)| msg.contains("closing"))
             .unwrap_or(false));
+    }
+
+    // ── Phase 3: tool call inline cards ──────────────────────────────────
+
+    #[test]
+    fn test_tool_call_block_pushed_on_started_event() {
+        let mut app = create_remote_app();
+        app.session_id = Some("sess".to_string());
+
+        let event = TalosEvent {
+            event_type: TalosEventType::MessageToolCallStarted,
+            message_id: "msg1".to_string(),
+            session_id: "sess".to_string(),
+            sequence: 1,
+            payload: TalosEventPayload::MessageToolCallStarted(
+                talos_client::TalosMessageToolCallStartedEvent {
+                    request_id: "req1".to_string(),
+                    call_id: "call-1".to_string(),
+                    name: "bash".to_string(),
+                    arguments: serde_json::json!({"command": "ls"}),
+                    item_index: 0,
+                    iteration: 1,
+                    step_id: "step-1".to_string(),
+                    timing_ms: None,
+                },
+            ),
+        };
+
+        app.handle_stream_event(event);
+
+        let tool_block = app.chat_blocks.iter().find(|b| b.role == ChatRole::Tool);
+        assert!(tool_block.is_some(), "expected tool block to be added");
+        let block = tool_block.unwrap();
+        assert_eq!(block.tool_name.as_deref(), Some("bash"));
+        assert_eq!(block.tool_status, Some(ToolCallStatus::Running));
+        assert!(app.active_tool_calls.contains_key("call-1"));
+    }
+
+    #[test]
+    fn test_tool_call_block_completed_on_event() {
+        let mut app = create_remote_app();
+        app.session_id = Some("sess".to_string());
+
+        // First push a started event
+        let started = TalosEvent {
+            event_type: TalosEventType::MessageToolCallStarted,
+            message_id: "msg1".to_string(),
+            session_id: "sess".to_string(),
+            sequence: 1,
+            payload: TalosEventPayload::MessageToolCallStarted(
+                talos_client::TalosMessageToolCallStartedEvent {
+                    request_id: "req1".to_string(),
+                    call_id: "call-2".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: serde_json::json!({"path": "/tmp/x"}),
+                    item_index: 0,
+                    iteration: 1,
+                    step_id: "step-1".to_string(),
+                    timing_ms: None,
+                },
+            ),
+        };
+        app.handle_stream_event(started);
+
+        let completed = TalosEvent {
+            event_type: TalosEventType::MessageToolCallCompleted,
+            message_id: "msg1".to_string(),
+            session_id: "sess".to_string(),
+            sequence: 2,
+            payload: TalosEventPayload::MessageToolCallCompleted(
+                talos_client::TalosMessageToolCallCompletedEvent {
+                    request_id: "req1".to_string(),
+                    call_id: "call-2".to_string(),
+                    tool: "read_file".to_string(),
+                    content: vec![talos_client::TalosContentItem::Text {
+                        text: "file contents".to_string(),
+                    }],
+                    is_error: false,
+                    item_index: 0,
+                    iteration: 1,
+                    step_id: "step-1".to_string(),
+                    timing_ms: Some(42),
+                },
+            ),
+        };
+        app.handle_stream_event(completed);
+
+        let tool_block = app.chat_blocks.iter().find(|b| b.role == ChatRole::Tool);
+        assert!(tool_block.is_some());
+        let block = tool_block.unwrap();
+        assert_eq!(block.tool_status, Some(ToolCallStatus::Completed { exit_ok: true }));
+        assert_eq!(block.content, "file contents");
+        assert_eq!(block.timing_ms, Some(42));
+        // Should be removed from active after completion
+        assert!(!app.active_tool_calls.contains_key("call-2"));
+    }
+
+    #[test]
+    fn test_tool_block_tab_toggle_expand() {
+        let mut app = create_remote_app();
+        app.session_id = Some("sess".to_string());
+        app.active_stream_message_id = Some("msg1".to_string());
+
+        app.push_tool_call_block(
+            "call-3".to_string(),
+            "grep".to_string(),
+            serde_json::json!({"pattern": "foo"}),
+            None,
+        );
+
+        let idx = *app.active_tool_calls.get("call-3").unwrap();
+        assert!(!app.chat_blocks[idx].expanded);
+
+        app.toggle_last_tool_block();
+        assert!(app.chat_blocks[idx].expanded);
+
+        app.toggle_last_tool_block();
+        assert!(!app.chat_blocks[idx].expanded);
+    }
+
+    // ── Phase 4: markdown rendering ──────────────────────────────────────
+
+    #[test]
+    fn test_markdown_bold_renders_bold_span() {
+        let lines = render_markdown_lines("Hello **world** text");
+        assert_eq!(lines.len(), 1);
+        let has_bold = lines[0].spans.iter().any(|s| {
+            s.content.contains("world")
+                && s.style.add_modifier.contains(Modifier::BOLD)
+        });
+        assert!(has_bold, "expected 'world' to be bold");
+    }
+
+    #[test]
+    fn test_markdown_italic_renders_italic_span() {
+        let lines = render_markdown_lines("Hello *italic* text");
+        assert_eq!(lines.len(), 1);
+        let has_italic = lines[0].spans.iter().any(|s| {
+            s.content.contains("italic")
+                && s.style.add_modifier.contains(Modifier::ITALIC)
+        });
+        assert!(has_italic, "expected 'italic' to be italic");
+    }
+
+    #[test]
+    fn test_markdown_inline_code_uses_green_fg() {
+        let lines = render_markdown_lines("Run `cargo build` now");
+        assert_eq!(lines.len(), 1);
+        let has_code = lines[0].spans.iter().any(|s| {
+            s.content.contains("cargo build") && s.style.fg == Some(Color::LightGreen)
+        });
+        assert!(has_code, "expected inline code to have LightGreen fg");
+    }
+
+    #[test]
+    fn test_markdown_header_h1_has_prefix() {
+        let lines = render_markdown_lines("# Title");
+        assert_eq!(lines.len(), 1);
+        let has_prefix = lines[0].spans.first().map(|s| s.content.contains('▌')).unwrap_or(false);
+        assert!(has_prefix, "H1 should have ▌ prefix span");
+    }
+
+    #[test]
+    fn test_markdown_list_item_has_bullet() {
+        let lines = render_markdown_lines("- item one");
+        assert_eq!(lines.len(), 1);
+        let has_bullet = lines[0].spans.iter().any(|s| s.content.contains('•'));
+        assert!(has_bullet, "list item should have • bullet");
+    }
+
+    #[test]
+    fn test_markdown_code_block_uses_distinct_style() {
+        let md = "text\n```rust\nlet x = 1;\n```\nafter";
+        let lines = render_markdown_lines(md);
+        // Line 0: "text", line 1: fence label, line 2: code, line 3: close fence, line 4: "after"
+        assert!(lines.len() >= 3);
+        // The code line should have LightGreen fg
+        let code_line = &lines[2];
+        let is_green = code_line.spans.iter().any(|s| s.style.fg == Some(Color::LightGreen));
+        assert!(is_green, "code block lines should be LightGreen");
+    }
+
+    // ── Phase 5: history + model picker ──────────────────────────────────
+
+    #[tokio::test]
+    async fn test_ctrl_h_switches_to_history_state() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+        assert_eq!(app.current_state, AppState::Chat);
+
+        app.open_history();
+
+        assert_eq!(app.current_state, AppState::History);
+    }
+
+    #[test]
+    fn test_toggle_model_picker_shows_picker() {
+        let mut app = create_remote_app();
+        app.available_models = vec!["gpt-4o".to_string(), "qwen-plus".to_string()];
+        app.current_model = "gpt-4o".to_string();
+        assert!(!app.show_model_picker);
+
+        app.toggle_model_picker();
+        assert!(app.show_model_picker);
+        // Pre-selects current model index
+        assert_eq!(app.model_picker_selected, 0);
+
+        // Toggle again closes
+        app.toggle_model_picker();
+        assert!(!app.show_model_picker);
+    }
+
+    #[test]
+    fn test_toggle_model_picker_without_models_shows_hint() {
+        let mut app = create_remote_app();
+        app.available_models.clear();
+        app.toggle_model_picker();
+        assert!(!app.show_model_picker, "picker should not open without models");
+        assert!(app.chat_blocks.iter().any(|b| b.content.contains("No models")));
+    }
+
+    #[tokio::test]
+    async fn test_history_enter_switches_session() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+
+        let mut config = talos_types::TalosConfig::default();
+        config.llm.model = "claude-3".to_string();
+        app.history_sessions = vec![TalosSession {
+            context: talos_types::SessionContext {
+                session_id: "hist-sess-1".to_string(),
+                workspace_id: None,
+                source_type: talos_types::talos::TalosSourceType::Http,
+                provider: talos_types::talos::TalosProvider::Sdk,
+                user_id: "u".to_string(),
+                message_id: "m".to_string(),
+                trace_id: "t".to_string(),
+                channel_id: None,
+                thread_id: None,
+            },
+            config,
+            state: talos_types::SessionState {
+                created_at: 0,
+                last_activity: 0,
+                message_count: 3,
+                usage: talos_types::talos::TalosUsage::default(),
+            },
+        }];
+        app.current_state = AppState::History;
+        app.history_selected = 0;
+
+        app.switch_to_history_session();
+
+        assert_eq!(app.session_id.as_deref(), Some("hist-sess-1"));
+        assert_eq!(app.current_model, "claude-3");
+        assert_eq!(app.current_state, AppState::Chat);
     }
 }

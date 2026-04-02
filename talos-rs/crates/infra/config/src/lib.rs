@@ -341,14 +341,25 @@ impl Default for McpToolConfig {
 pub struct DynamicToolConfig {
     #[serde(default = "default_tools_dynamic_timeout_ms")]
     pub response_timeout_ms: u64,
+    #[serde(default)]
+    pub on_timeout: DynamicToolTimeoutBehavior,
 }
 
 impl Default for DynamicToolConfig {
     fn default() -> Self {
         Self {
             response_timeout_ms: default_tools_dynamic_timeout_ms(),
+            on_timeout: DynamicToolTimeoutBehavior::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DynamicToolTimeoutBehavior {
+    #[default]
+    ErrorToModel,
+    AbortTurn,
 }
 
 /// MCP tool federation configuration

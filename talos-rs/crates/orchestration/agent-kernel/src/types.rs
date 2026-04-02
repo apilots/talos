@@ -244,6 +244,7 @@ pub enum KernelStreamEventType {
     ToolCallStart,
     ToolResult,
     PromptWarning,
+    ConfirmationRequest,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -272,6 +273,15 @@ pub enum KernelStreamEventData {
     ToolCallStart(ToolCallStartStreamData),
     ToolResult(ToolResultStreamData),
     PromptWarning(PromptWarningEventData),
+    ConfirmationRequest(ConfirmationRequestStreamData),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfirmationRequestStreamData {
+    pub call_id: String,
+    pub tool_name: String,
+    pub prompt: String,
+    pub arguments: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -480,6 +490,8 @@ pub struct InvocationLimits {
     pub tool_parallelism: usize,
     pub max_llm_calls: u32,
     pub context_compaction_max_bytes: usize,
+    pub dynamic_tool_timeout_ms: u64,
+    pub dynamic_tool_timeout_behavior: talos_config::DynamicToolTimeoutBehavior,
 }
 
 impl Default for InvocationLimits {
@@ -491,6 +503,8 @@ impl Default for InvocationLimits {
             tool_parallelism: config.tool_parallelism,
             max_llm_calls: config.max_llm_calls,
             context_compaction_max_bytes: config.context_compaction_max_bytes,
+            dynamic_tool_timeout_ms: config.tools.dynamic.response_timeout_ms,
+            dynamic_tool_timeout_behavior: config.tools.dynamic.on_timeout,
         }
     }
 }
@@ -561,6 +575,8 @@ impl From<&talos_config::AgentKernelConfig> for InvocationLimits {
             tool_parallelism: config.tool_parallelism,
             max_llm_calls: config.max_llm_calls,
             context_compaction_max_bytes: config.context_compaction_max_bytes,
+            dynamic_tool_timeout_ms: config.tools.dynamic.response_timeout_ms,
+            dynamic_tool_timeout_behavior: config.tools.dynamic.on_timeout,
         }
     }
 }

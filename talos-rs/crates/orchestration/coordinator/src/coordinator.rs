@@ -11,7 +11,8 @@ use talos_types::talos::{
     TalosContext, TalosEvent, TalosEventPayload, TalosEventType, TalosMessageCompletedEvent,
     TalosMessageErrorEvent, TalosMessageExecutionSummaryEvent, TalosMessageOutputDeltaEvent,
     TalosMessageReasoningDeltaEvent, TalosMessageStartedEvent, TalosMessageToolCallCompletedEvent,
-    TalosMessageToolCallStartedEvent, TalosProvider, TalosUsage,
+    TalosMessageToolCallPendingApprovalEvent, TalosMessageToolCallStartedEvent, TalosProvider,
+    TalosUsage,
 };
 use talos_types::{
     RequestHandler, SessionPatch, SessionPatchAck, SessionQuery, SessionRecord, SessionService,
@@ -550,6 +551,19 @@ fn map_orchestrator_event(event: OrchestratorEvent) -> (TalosEventType, TalosEve
                 timing_ms: payload.timing_ms,
             }),
         ),
+        OrchestratorEvent::MessageToolCallPendingApproval(payload) => (
+            TalosEventType::MessageToolCallPendingApproval,
+            TalosEventPayload::MessageToolCallPendingApproval(
+                TalosMessageToolCallPendingApprovalEvent {
+                    request_id: payload.request_id,
+                    call_id: payload.call_id,
+                    tool_name: payload.tool_name,
+                    prompt: payload.prompt,
+                    arguments: payload.arguments,
+                    step_id: payload.step_id,
+                },
+            ),
+        ),
         OrchestratorEvent::MessageCompleted(payload) => (
             TalosEventType::MessageCompleted,
             TalosEventPayload::MessageCompleted(TalosMessageCompletedEvent {
@@ -618,8 +632,12 @@ impl SessionService for CoordinatorImpl {
         };
 
         let (_target_agent, agent) = self.resolve_session_agent(&session).await?;
-        agent.close_session(session).await?;
         self.sessions.invalidate_cached_session(session_id).await;
+        tokio::spawn(async move {
+            if let Err(e) = agent.close_session(session).await {
+                tracing::warn!("background memory flush failed: {}", e);
+            }
+        });
         Ok(())
     }
 

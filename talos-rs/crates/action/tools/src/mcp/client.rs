@@ -81,8 +81,9 @@ impl McpClient {
     }
 
     pub async fn list_resources(&self, cursor: Option<String>) -> TalosResult<ListResourcesResult> {
-        let params = serde_json::to_value(PaginatedParams { cursor })
-            .map_err(|e| TalosError::ToolError(format!("MCP serialize resources/list params: {e}")))?;
+        let params = serde_json::to_value(PaginatedParams { cursor }).map_err(|e| {
+            TalosError::ToolError(format!("MCP serialize resources/list params: {e}"))
+        })?;
         let req = JsonRpcRequest::new(self.next_id(), "resources/list", Some(params));
         let body = serde_json::to_string(&req)
             .map_err(|e| TalosError::ToolError(format!("MCP serialize request: {e}")))?;
@@ -94,9 +95,9 @@ impl McpClient {
             )));
         }
         serde_json::from_value(
-            response
-                .result
-                .ok_or_else(|| TalosError::ToolError("MCP resources/list: empty result".to_string()))?,
+            response.result.ok_or_else(|| {
+                TalosError::ToolError("MCP resources/list: empty result".to_string())
+            })?,
         )
         .map_err(|e| TalosError::ToolError(format!("MCP resources/list parse: {e}")))
     }
@@ -123,9 +124,7 @@ impl McpClient {
         serde_json::from_value(response.result.ok_or_else(|| {
             TalosError::ToolError("MCP resources/templates/list: empty result".to_string())
         })?)
-        .map_err(|e| {
-            TalosError::ToolError(format!("MCP resources/templates/list parse: {e}"))
-        })
+        .map_err(|e| TalosError::ToolError(format!("MCP resources/templates/list parse: {e}")))
     }
 
     pub async fn read_resource(&self, uri: &str) -> TalosResult<ReadResourceResult> {
@@ -144,9 +143,9 @@ impl McpClient {
             )));
         }
         serde_json::from_value(
-            response
-                .result
-                .ok_or_else(|| TalosError::ToolError("MCP resources/read: empty result".to_string()))?,
+            response.result.ok_or_else(|| {
+                TalosError::ToolError("MCP resources/read: empty result".to_string())
+            })?,
         )
         .map_err(|e| TalosError::ToolError(format!("MCP resources/read parse: {e}")))
     }

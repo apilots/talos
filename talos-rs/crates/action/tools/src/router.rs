@@ -101,7 +101,7 @@ mod tests {
     }
 
     fn mcp_catalog() -> ToolCatalog {
-        use crate::spec::{ToolPayloadKind, ToolSource};
+        use crate::spec::{default_governance_for_source, ToolPayloadKind, ToolSource};
         ToolCatalog::new(vec![RegisteredToolSpec::new(
             ToolDefinition::new(
                 "mcp__github__create_issue",
@@ -112,6 +112,7 @@ mod tests {
             ToolPayloadKind::Mcp,
             ToolParallelism::ParallelSafe,
             false,
+            default_governance_for_source(ToolSource::Mcp),
         )])
     }
 

@@ -1,3 +1,4 @@
+pub mod collaboration;
 pub mod context;
 pub mod handlers;
 pub mod invocation;
@@ -11,6 +12,7 @@ pub mod spec;
 pub mod r#trait;
 pub mod trait_impl;
 
+pub use collaboration::{CollaborationAgentStatus, CollaborationRuntime};
 pub use context::ToolContext;
 pub use handlers::{DynamicToolHandler, LocalToolHandler, McpToolHandler, ToolHandler};
 pub use invocation::{ToolCallPayload, ToolDispatchContext, ToolInvocation};
@@ -19,11 +21,15 @@ pub use output::{ToolDispatchOutcome, ToolOutputPayload, ToolPending};
 pub use r#trait::{Tool, ToolOutput};
 pub use registry::ToolRegistry;
 pub use router::ToolRouter;
-pub use spec::{RegisteredToolSpec, ToolCatalog, ToolParallelism, ToolPayloadKind, ToolSource};
+pub use spec::{
+    default_governance_for_source, RegisteredToolSpec, ToolCatalog, ToolParallelism,
+    ToolPayloadKind, ToolSource,
+};
 
 // Built-in tools
 pub mod tools {
     pub mod apply_patch;
+    pub mod collaboration;
     pub mod edit;
     pub mod grep_files;
     pub mod list_dir;
@@ -37,6 +43,9 @@ pub mod tools {
 // Re-export the built-in tools
 pub use tools::{
     apply_patch::ApplyPatchTool,
+    collaboration::{
+        CloseAgentTool, ResumeAgentTool, SendInputTool, SpawnAgentTool, WaitAgentTool,
+    },
     edit::EditTool,
     grep_files::GrepFilesTool,
     list_dir::ListDirTool,
@@ -69,4 +78,33 @@ pub fn register_network_tools(registry: &ToolRegistry) {
     registry.register(Arc::new(WebSearchTool));
     registry.register(Arc::new(WebFetchTool));
     registry.register(Arc::new(HttpRequestTool));
+}
+
+pub fn register_collaboration_tools(registry: &ToolRegistry) {
+    for tool in [
+        Arc::new(SpawnAgentTool) as Arc<dyn Tool>,
+        Arc::new(SendInputTool) as Arc<dyn Tool>,
+        Arc::new(WaitAgentTool) as Arc<dyn Tool>,
+        Arc::new(CloseAgentTool) as Arc<dyn Tool>,
+        Arc::new(ResumeAgentTool) as Arc<dyn Tool>,
+    ] {
+        let definition = talos_llm_provider::ToolDefinition::new(
+            tool.name(),
+            tool.description(),
+            tool.parameters_schema(),
+        );
+        let spec = RegisteredToolSpec::new(
+            definition,
+            ToolSource::Collaboration,
+            ToolPayloadKind::Function,
+            ToolParallelism::SerialOnly,
+            true,
+            default_governance_for_source(ToolSource::Collaboration),
+        );
+        registry.register_handler(
+            tool.name().to_string(),
+            spec,
+            Arc::new(LocalToolHandler::new(tool, true)),
+        );
+    }
 }

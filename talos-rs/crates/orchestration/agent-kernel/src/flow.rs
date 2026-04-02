@@ -8,14 +8,14 @@ use crate::general_turn::{
 };
 use crate::{
     execution::DynamicToolRequestPayload, CallbackControl, CallbackRegistry,
-    ConfirmationRequestPayload, EventAuthor, EventPayload, ExecutionBranch, ExecutionEvent,
-    ExecutionEventKind, FlowKind, FlowProfile, InvocationContext, InvocationPluginManager,
-    KernelExecutionSettings, KernelStreamEvent, KernelStreamEventData, KernelStreamEventType,
-    KernelThinkingSource, KernelThinkingStage, KernelWarning, LlmRequestEnvelope,
-    LlmResponseEnvelope, MemoryBackedSessionService, Planner, RequestProcessorPipeline,
-    ResponseProcessorPipeline, SessionEvent, SessionEventKind, SessionEventPayload,
-    SessionService, StopReason, ThinkingDeltaStreamData, ToolCallbackPayload, ToolExecutor,
-    ToolExecutorFactory,
+    ConfirmationRequestPayload, ConfirmationRequestStreamData, EventAuthor, EventPayload,
+    ExecutionBranch, ExecutionEvent, ExecutionEventKind, FlowKind, FlowProfile, InvocationContext,
+    InvocationPluginManager, KernelExecutionSettings, KernelStreamEvent, KernelStreamEventData,
+    KernelStreamEventType, KernelThinkingSource, KernelThinkingStage, KernelWarning,
+    LlmRequestEnvelope, LlmResponseEnvelope, MemoryBackedSessionService, Planner,
+    RequestProcessorPipeline, ResponseProcessorPipeline, SessionEvent, SessionEventKind,
+    SessionEventPayload, SessionService, StopReason, ThinkingDeltaStreamData, ToolCallbackPayload,
+    ToolExecutor, ToolExecutorFactory,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -725,7 +725,26 @@ impl BaseLlmFlow for SingleFlow {
                 );
             }
             apply_general_turn_tool_batch(&mut state, &tool_batch, &self.kernel_config);
-            if !tool_batch.pending_confirmations.is_empty() || !tool_batch.pending_dynamic_requests.is_empty() {
+            if !tool_batch.pending_confirmations.is_empty()
+                || !tool_batch.pending_dynamic_requests.is_empty()
+            {
+                if let Some(tx) = prepared.stream_tx.as_ref() {
+                    for confirmation in &tool_batch.pending_confirmations {
+                        let _ = tx
+                            .send(KernelStreamEvent::new(
+                                KernelStreamEventType::ConfirmationRequest,
+                                KernelStreamEventData::ConfirmationRequest(
+                                    ConfirmationRequestStreamData {
+                                        call_id: confirmation.call_id.clone(),
+                                        tool_name: confirmation.tool_name.clone(),
+                                        prompt: confirmation.prompt.clone(),
+                                        arguments: confirmation.arguments.clone(),
+                                    },
+                                ),
+                            ))
+                            .await;
+                    }
+                }
                 final_text = if !tool_batch.pending_confirmations.is_empty() {
                     "Tool confirmation pending.".to_string()
                 } else {

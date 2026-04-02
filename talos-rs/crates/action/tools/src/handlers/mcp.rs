@@ -45,7 +45,9 @@ impl ToolHandler for McpToolHandler {
                 tool,
                 arguments,
             } => Ok(ToolDispatchOutcome::executed(
-                self.manager.call_tool(&server, &tool, Some(arguments)).await?,
+                self.manager
+                    .call_tool(&server, &tool, Some(arguments))
+                    .await?,
             )),
             ToolCallPayload::Function { arguments } => match invocation.tool_name.as_str() {
                 "list_mcp_resources" => {
@@ -55,15 +57,13 @@ impl ToolHandler for McpToolHandler {
                             err
                         ))
                     })?;
-                    Ok(ToolDispatchOutcome::executed(ToolOutputPayload::Function {
-                        content: self
-                            .manager
-                            .list_resources(args.server.as_deref(), args.cursor)
-                            .await?
-                            .to_string(),
-                        success: true,
-                        structured_content: None,
-                    }))
+                    Ok(ToolDispatchOutcome::executed(
+                        function_payload_from_mcp_result(
+                            self.manager
+                                .list_resources(args.server.as_deref(), args.cursor)
+                                .await,
+                        )?,
+                    ))
                 }
                 "list_mcp_resource_templates" => {
                     let args: ListArgs = serde_json::from_value(arguments).map_err(|err| {
@@ -72,15 +72,13 @@ impl ToolHandler for McpToolHandler {
                             err
                         ))
                     })?;
-                    Ok(ToolDispatchOutcome::executed(ToolOutputPayload::Function {
-                        content: self
-                            .manager
-                            .list_resource_templates(args.server.as_deref(), args.cursor)
-                            .await?
-                            .to_string(),
-                        success: true,
-                        structured_content: None,
-                    }))
+                    Ok(ToolDispatchOutcome::executed(
+                        function_payload_from_mcp_result(
+                            self.manager
+                                .list_resource_templates(args.server.as_deref(), args.cursor)
+                                .await,
+                        )?,
+                    ))
                 }
                 "read_mcp_resource" => {
                     let args: ReadResourceArgs =
@@ -104,6 +102,69 @@ impl ToolHandler for McpToolHandler {
                 invocation.tool_name
             ))),
         }
+    }
+}
+
+fn function_payload_from_mcp_result(
+    result: TalosResult<serde_json::Value>,
+) -> TalosResult<ToolOutputPayload> {
+    match result {
+        Ok(value) => Ok(ToolOutputPayload::Function {
+            content: value.to_string(),
+            success: true,
+            structured_content: None,
+        }),
+        Err(TalosError::ToolError(message)) => {
+            let mapped = map_mcp_json_rpc_error(message.as_str());
+            Ok(ToolOutputPayload::Function {
+                content: mapped.clone(),
+                success: false,
+                structured_content: Some(serde_json::json!({ "error": mapped })),
+            })
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn map_mcp_json_rpc_error(message: &str) -> String {
+    if let Some((code, tail)) = parse_mcp_error_code(message) {
+        return match code {
+            -32601 => format!("MCP method not supported: {tail}"),
+            -32602 => format!("Invalid MCP arguments: {tail}"),
+            -32603 => format!("MCP server internal error: {tail}"),
+            other => format!("MCP error {other}: {tail}"),
+        };
+    }
+    message.to_string()
+}
+
+fn parse_mcp_error_code(message: &str) -> Option<(i64, &str)> {
+    let marker = " error ";
+    let index = message.find(marker)?;
+    let rest = &message[index + marker.len()..];
+    let (code, tail) = rest.split_once(':')?;
+    let code = code.trim().parse::<i64>().ok()?;
+    Some((code, tail.trim()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_map_mcp_json_rpc_error_known_codes() {
+        assert_eq!(
+            map_mcp_json_rpc_error("MCP resources/list error -32601: missing"),
+            "MCP method not supported: missing"
+        );
+        assert_eq!(
+            map_mcp_json_rpc_error("MCP resources/list error -32602: bad args"),
+            "Invalid MCP arguments: bad args"
+        );
+        assert_eq!(
+            map_mcp_json_rpc_error("MCP resources/list error -32603: boom"),
+            "MCP server internal error: boom"
+        );
     }
 }
 

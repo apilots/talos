@@ -19,11 +19,76 @@ pub enum ToolApprovalRequirement {
     Forbidden { reason: String },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolGovernanceArgumentOverride {
+    #[default]
+    None,
+    ExecCommandPermissions,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolGovernanceSpec {
+    pub default_approval: ToolApprovalRequirement,
+    pub preferred_sandbox: ToolSandboxMode,
+    pub argument_override: ToolGovernanceArgumentOverride,
+    pub retry_without_sandbox: bool,
+}
+
+impl Default for ToolGovernanceSpec {
+    fn default() -> Self {
+        Self {
+            default_approval: ToolApprovalRequirement::Skip,
+            preferred_sandbox: ToolSandboxMode::UseDefault,
+            argument_override: ToolGovernanceArgumentOverride::None,
+            retry_without_sandbox: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolExecutionPlan {
     pub approval: ToolApprovalRequirement,
     pub sandbox_mode: ToolSandboxMode,
     pub retry_without_sandbox: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum GovernanceOutcome {
+    Allowed,
+    PendingApproval { prompt: String },
+    Forbidden { reason: String },
+    Skipped,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum GovernanceDecisionReason {
+    NoKernelConfig,
+    PreApproved,
+    ToolGovernanceSpec { override_applied: bool },
+    GlobalPolicy { policy: ToolApprovalPolicySnapshot },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolApprovalPolicySnapshot {
+    OnRequest,
+    Never,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolGovernanceDecision {
+    pub tool_name: String,
+    pub call_id: String,
+    pub outcome: GovernanceOutcome,
+    pub sandbox_mode: ToolSandboxMode,
+    pub decision_reason: GovernanceDecisionReason,
+}
+
+pub trait GovernanceEventSink: Send + Sync {
+    fn on_decision(&self, decision: &ToolGovernanceDecision);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

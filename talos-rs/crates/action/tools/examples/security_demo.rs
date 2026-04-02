@@ -1,8 +1,22 @@
 //! Example demonstrating enhanced tool system with security policies
 
 use serde_json::json;
-use talos_tools::{ExecCommandTool, ReadFileTool, ToolRegistry, WriteTool};
+use talos_tools::{
+    ExecCommandTool, ReadFileTool, ToolContext, ToolDispatchOutcome, ToolRegistry, WriteTool,
+};
 use talos_tools_policy::ToolPolicy;
+
+async fn dispatch(
+    registry: &ToolRegistry,
+    call_id: &str,
+    tool_name: &str,
+    arguments: serde_json::Value,
+) -> Result<ToolDispatchOutcome, Box<dyn std::error::Error>> {
+    let invocation = registry.build_function_invocation(call_id, tool_name, arguments)?;
+    Ok(registry
+        .execute_invocation_with_context(invocation, ToolContext::default())
+        .await?)
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -43,15 +57,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("3. Tool Execution Under Restrictive Policy:");
 
     // This should fail (write is not in allow list)
-    let write_result = restricted_registry
-        .execute(
-            "write",
-            json!({
-                "path": "/tmp/test.txt",
-                "content": "Hello, World!"
-            }),
-        )
-        .await;
+    let write_result = dispatch(
+        &restricted_registry,
+        "call-write",
+        "write",
+        json!({
+            "path": "/tmp/test.txt",
+            "content": "Hello, World!"
+        }),
+    )
+    .await;
     println!(
         "   Write tool execution: {}",
         match write_result {
@@ -76,9 +91,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         deny_registry.list_allowed_tool_names()
     );
 
-    let exec_result = deny_registry
-        .execute("exec_command", json!({"cmd": "echo hello"}))
-        .await;
+    let exec_result = dispatch(
+        &deny_registry,
+        "call-exec-command",
+        "exec_command",
+        json!({"cmd": "echo hello"}),
+    )
+    .await;
     println!(
         "   exec_command tool execution: {}",
         match exec_result {

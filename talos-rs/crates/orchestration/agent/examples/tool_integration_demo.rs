@@ -3,8 +3,8 @@
 use std::sync::Arc;
 use talos_agent::MockAgent;
 use talos_tools::{
-    ExecCommandTool, HttpRequestTool, ReadFileTool, ToolRegistry, WebFetchTool, WebSearchTool,
-    WriteTool,
+    ExecCommandTool, HttpRequestTool, ReadFileTool, ToolContext, ToolDispatchOutcome, ToolRegistry,
+    WebFetchTool, WebSearchTool, WriteTool,
 };
 use talos_tools_policy::ToolPolicy;
 
@@ -48,24 +48,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test tool execution
     println!("\n5. Testing tool execution:");
+    let web_search_invocation = registry.build_function_invocation(
+        "call-web-search",
+        "web_search",
+        serde_json::json!({"query": "test"}),
+    )?;
     match registry
-        .execute("web_search", serde_json::json!({"query": "test"}))
+        .execute_invocation_with_context(web_search_invocation, ToolContext::default())
         .await
     {
-        Ok(result) => {
-            println!("   Web search tool executed: {}", result.success);
+        Ok(ToolDispatchOutcome::Executed { payload }) => {
+            println!("   Web search tool executed: {}", !payload.is_error());
             println!(
                 "   Result: {}",
-                result.output.lines().next().unwrap_or("No output")
+                payload.content().lines().next().unwrap_or("No output")
             );
+        }
+        Ok(ToolDispatchOutcome::Pending { tool_name, .. }) => {
+            println!("   Tool unexpectedly entered pending state: {}", tool_name);
         }
         Err(e) => println!("   Web search tool failed: {}", e),
     }
 
     // Test security policy
     println!("\n6. Testing security policy (exec_command should be blocked):");
+    let exec_invocation = registry.build_function_invocation(
+        "call-exec-command",
+        "exec_command",
+        serde_json::json!({"cmd": "ls"}),
+    )?;
     match registry
-        .execute("exec_command", serde_json::json!({"cmd": "ls"}))
+        .execute_invocation_with_context(exec_invocation, ToolContext::default())
         .await
     {
         Ok(_) => println!("   exec_command tool executed (unexpected)"),

@@ -11,11 +11,12 @@ use tokio::sync::mpsc;
 
 use talos_error::{TalosError, TalosResult};
 pub use talos_types::talos::{
-    TalosContext, TalosEvent, TalosEventPayload, TalosEventType, TalosInputItem,
+    TalosContentItem, TalosContext, TalosEvent, TalosEventPayload, TalosEventType, TalosInputItem,
     TalosMessageCompletedEvent, TalosMessageErrorEvent, TalosMessageExecutionSummaryEvent,
     TalosMessageOutputDeltaEvent, TalosMessageReasoningDeltaEvent, TalosMessageRequest,
     TalosMessageResponse, TalosMessageStartedEvent, TalosMessageToolCallCompletedEvent,
-    TalosMessageToolCallStartedEvent, TalosOutputItem, TalosProvider, TalosSourceType,
+    TalosMessageToolCallPendingApprovalEvent, TalosMessageToolCallStartedEvent, TalosOutputItem,
+    TalosProvider, TalosSourceType,
     TalosThinkingSource, TalosThinkingStage,
 };
 pub use talos_types::{ModelInfo, TalosSession};
@@ -76,7 +77,7 @@ pub struct TalosClient {
 
 impl TalosClient {
     pub fn new(config: ClientConfig) -> TalosResult<Self> {
-        let mut builder = Client::builder().timeout(std::time::Duration::from_secs(config.timeout));
+        let mut builder = Client::builder().connect_timeout(std::time::Duration::from_secs(config.timeout));
 
         // For local gateway endpoints, bypass system proxy settings to avoid
         // loopback requests being intercepted by desktop proxy tools.

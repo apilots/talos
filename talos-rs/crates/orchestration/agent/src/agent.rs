@@ -10,27 +10,29 @@ use crate::{
         OrchestratorMessageCompletedEvent, OrchestratorMessageErrorEvent,
         OrchestratorMessageExecutionSummaryEvent, OrchestratorMessageOutputDeltaEvent,
         OrchestratorMessageReasoningDeltaEvent, OrchestratorMessageStartedEvent,
-        OrchestratorMessageToolCallCompletedEvent, OrchestratorMessageToolCallStartedEvent,
+        OrchestratorMessageToolCallCompletedEvent, OrchestratorMessageToolCallPendingApprovalEvent,
+        OrchestratorMessageToolCallStartedEvent,
     },
     Agent, AgentOrchestrator, AgentRequest, AgentResponse, OrchestratorEvent,
     OrchestratorExecution, OrchestratorRequest,
 };
 use serde_json::Value;
 use talos_agent_kernel::{
-    flush_session_memory, Agent as KernelAgent, AgentRunResult, BuiltInPlanner, InvocationContext,
-    KernelRuntime, KernelStreamEvent, KernelStreamEventData, KernelStreamEventType,
-    KernelThinkingSource, KernelThinkingStage, LlmKernelAgent, LoopKernelAgent,
-    ParallelKernelAgent, PlanReActPlanner, Planner, RoutingKernelAgent, RunRequest,
-    SequentialKernelAgent, StopReason, TaskKind, TaskResult, TaskStatus,
+    flush_session_memory, Agent as KernelAgent, AgentRunResult, BuiltInPlanner,
+    ConfirmationRequestStreamData, InvocationContext, KernelRuntime, KernelStreamEvent,
+    KernelStreamEventData, KernelStreamEventType, KernelThinkingSource, KernelThinkingStage,
+    LlmKernelAgent, LoopKernelAgent, ParallelKernelAgent, PlanReActPlanner, Planner,
+    RoutingKernelAgent, RunRequest, SequentialKernelAgent, StopReason, TaskKind, TaskResult,
+    TaskStatus,
 };
 use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{ChatMessage, FunctionCall, LlmProvider};
 use talos_memory::{
     Memory, MemoryStore, SessionTranscriptActions, SessionTranscriptApprovalResponsePayload,
-    SessionTranscriptAuthor, SessionTranscriptBranch,
-    SessionTranscriptDynamicToolResponsePayload, SessionTranscriptEventKind,
-    SessionTranscriptHeader, SessionTranscriptPayload, SessionTranscriptRecord,
+    SessionTranscriptAuthor, SessionTranscriptBranch, SessionTranscriptDynamicToolResponsePayload,
+    SessionTranscriptEventKind, SessionTranscriptHeader, SessionTranscriptPayload,
+    SessionTranscriptRecord,
 };
 use talos_tools::ToolRegistry;
 use talos_types::talos::{
@@ -88,6 +90,70 @@ pub struct AgentImpl {
 }
 
 impl AgentImpl {
+    async fn validate_dynamic_tool_submission(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+    ) -> TalosResult<()> {
+        let records = self
+            .memory_store
+            .load_transcript_records(session_id, None, SessionTranscriptBranch::ReactiveLoop)
+            .await?;
+
+        let mut latest_request_timestamp = None;
+        let mut latest_request_tool_name = None;
+        let mut latest_response_timestamp = None;
+
+        for record in records {
+            match record.payload {
+                SessionTranscriptPayload::DynamicToolRequest { payload }
+                    if payload.call_id == call_id =>
+                {
+                    latest_request_timestamp = Some(record.header.timestamp);
+                    latest_request_tool_name = Some(payload.tool_name);
+                }
+                SessionTranscriptPayload::DynamicToolResponse { payload }
+                    if payload.call_id == call_id =>
+                {
+                    latest_response_timestamp = Some(record.header.timestamp);
+                }
+                _ => {}
+            }
+        }
+
+        let Some(request_timestamp) = latest_request_timestamp else {
+            return Err(TalosError::ToolError(format!(
+                "dynamic tool call `{call_id}` is not pending for session `{session_id}`"
+            )));
+        };
+
+        if latest_request_tool_name.as_deref() != Some(tool_name) {
+            return Err(TalosError::ToolError(format!(
+                "dynamic tool call `{call_id}` belongs to `{}` not `{tool_name}`",
+                latest_request_tool_name.unwrap_or_else(|| "unknown".to_string())
+            )));
+        }
+
+        if latest_response_timestamp.is_some_and(|ts| ts > request_timestamp) {
+            return Err(TalosError::ToolError(format!(
+                "dynamic tool call `{call_id}` has already been resolved"
+            )));
+        }
+
+        let timeout_ms = self.kernel_config.tools.dynamic.response_timeout_ms;
+        if timeout_ms > 0 {
+            let elapsed_ms = (Utc::now() - request_timestamp).num_milliseconds().max(0) as u64;
+            if elapsed_ms >= timeout_ms {
+                return Err(TalosError::ToolError(format!(
+                    "dynamic tool call `{call_id}` timed out after {timeout_ms} ms"
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
     fn map_stop_reason(stop_reason: StopReason) -> &'static str {
         match stop_reason {
             StopReason::EndTurn => "end_turn",
@@ -265,28 +331,49 @@ impl AgentImpl {
                 tool_call.arguments
             );
 
+            let invocation = self.tool_registry.build_function_invocation(
+                format!("agent-call-{}", tool_call.id),
+                &tool_call.name,
+                tool_call.arguments.clone(),
+            )?;
             match self
                 .tool_registry
-                .execute_with_context(
-                    &tool_call.name,
-                    tool_call.arguments.clone(),
-                    context.clone(),
-                )
+                .execute_invocation_with_context(invocation, context.clone())
                 .await
             {
                 Ok(tool_result) => {
-                    let content_json = if tool_result.success {
-                        serde_json::json!({
-                            "ok": true,
-                            "tool": tool_call.name,
-                            "result": tool_result.output,
-                        })
-                    } else {
-                        serde_json::json!({
-                            "ok": false,
-                            "tool": tool_call.name,
-                            "error": tool_result.error.unwrap_or_else(|| "unknown error".to_string()),
-                        })
+                    let content_json = match tool_result {
+                        talos_tools::ToolDispatchOutcome::Executed { payload } => {
+                            if payload.is_error() {
+                                serde_json::json!({
+                                    "ok": false,
+                                    "tool": tool_call.name,
+                                    "error": payload.error_message().unwrap_or_else(|| "unknown error".to_string()),
+                                })
+                            } else {
+                                serde_json::json!({
+                                    "ok": true,
+                                    "tool": tool_call.name,
+                                    "result": payload.content(),
+                                })
+                            }
+                        }
+                        talos_tools::ToolDispatchOutcome::Pending { pending, .. } => {
+                            match pending {
+                                talos_tools::ToolPending::Approval { prompt, .. } => {
+                                    serde_json::json!({
+                                        "ok": false,
+                                        "tool": tool_call.name,
+                                        "error": prompt,
+                                    })
+                                }
+                                talos_tools::ToolPending::Dynamic { .. } => serde_json::json!({
+                                    "ok": false,
+                                    "tool": tool_call.name,
+                                    "error": "dynamic tool response is pending",
+                                }),
+                            }
+                        }
                     };
 
                     tool_messages.push(ChatMessage::tool(
@@ -565,6 +652,24 @@ After receiving tool outputs, continue reasoning and provide the final response.
                     },
                 ))
             }
+            (
+                KernelStreamEventType::ConfirmationRequest,
+                KernelStreamEventData::ConfirmationRequest(ConfirmationRequestStreamData {
+                    call_id,
+                    tool_name,
+                    prompt,
+                    arguments,
+                }),
+            ) => Some(OrchestratorEvent::MessageToolCallPendingApproval(
+                OrchestratorMessageToolCallPendingApprovalEvent {
+                    request_id: request_id.to_string(),
+                    call_id,
+                    tool_name,
+                    prompt,
+                    arguments,
+                    step_id,
+                },
+            )),
             _ => None,
         };
         if mapped.is_some() {
@@ -619,6 +724,8 @@ After receiving tool outputs, continue reasoning and provide the final response.
         output: String,
         success: bool,
     ) -> TalosResult<()> {
+        self.validate_dynamic_tool_submission(session_id, call_id, tool_name)
+            .await?;
         let record = SessionTranscriptRecord {
             header: SessionTranscriptHeader {
                 id: Uuid::new_v4().to_string(),
@@ -685,18 +792,37 @@ impl Agent for AgentImpl {
             self.name.clone(),
             Some(Arc::new(self.kernel_config_snapshot())),
         );
+        let invocation = self.tool_registry.build_function_invocation(
+            format!("agent-direct-{tool_name}"),
+            tool_name,
+            args,
+        )?;
         let tool_result = self
             .tool_registry
-            .execute_with_context(tool_name, args, tool_context)
+            .execute_invocation_with_context(invocation, tool_context)
             .await?;
 
-        let content = if tool_result.success {
-            tool_result.output
-        } else {
-            format!(
-                "Tool execution failed: {:?}",
-                tool_result.error.unwrap_or("Unknown error".to_string())
-            )
+        let content = match tool_result {
+            talos_tools::ToolDispatchOutcome::Executed { payload } => {
+                if payload.is_error() {
+                    format!(
+                        "Tool execution failed: {}",
+                        payload
+                            .error_message()
+                            .unwrap_or_else(|| "Unknown error".to_string())
+                    )
+                } else {
+                    payload.content().to_string()
+                }
+            }
+            talos_tools::ToolDispatchOutcome::Pending { pending, .. } => match pending {
+                talos_tools::ToolPending::Approval { prompt, .. } => {
+                    format!("Tool execution pending approval: {prompt}")
+                }
+                talos_tools::ToolPending::Dynamic { .. } => {
+                    "Tool execution is waiting for a dynamic tool response".to_string()
+                }
+            },
         };
 
         Ok(AgentResponse {
@@ -1398,6 +1524,104 @@ mod tests {
     fn test_kernel_binding_default_is_llm() {
         let agent = build_test_agent();
         assert_eq!(agent.kernel_config.binding.default_agent_kind, "llm");
+    }
+
+    #[tokio::test]
+    async fn test_submit_dynamic_tool_result_rejects_replay() {
+        let (_temp_dir, agent) = build_temp_agent();
+        let session_id = "session-dynamic-replay";
+        let request_record = SessionTranscriptRecord {
+            header: SessionTranscriptHeader {
+                id: Uuid::new_v4().to_string(),
+                session_id: session_id.to_string(),
+                invocation_id: Uuid::new_v4().to_string(),
+                branch: SessionTranscriptBranch::ReactiveLoop,
+                timestamp: Utc::now(),
+            },
+            author: SessionTranscriptAuthor::System,
+            kind: SessionTranscriptEventKind::SystemMessage,
+            payload: SessionTranscriptPayload::DynamicToolRequest {
+                payload: talos_memory::SessionTranscriptDynamicToolRequestPayload {
+                    call_id: "call-1".to_string(),
+                    tool_name: "skill_greet".to_string(),
+                    arguments: json!({ "name": "Talos" }),
+                },
+            },
+            actions: SessionTranscriptActions::default(),
+            partial: false,
+        };
+        agent
+            .memory_store
+            .append_transcript_record(&request_record)
+            .await
+            .expect("request record should append");
+
+        agent
+            .submit_dynamic_tool_result(
+                session_id,
+                "call-1",
+                "skill_greet",
+                "hello".to_string(),
+                true,
+            )
+            .await
+            .expect("first submission should succeed");
+
+        let error = agent
+            .submit_dynamic_tool_result(
+                session_id,
+                "call-1",
+                "skill_greet",
+                "hello again".to_string(),
+                true,
+            )
+            .await
+            .expect_err("second submission should be rejected");
+        assert!(error.to_string().contains("already been resolved"));
+    }
+
+    #[tokio::test]
+    async fn test_submit_dynamic_tool_result_rejects_timeout() {
+        let (_temp_dir, mut agent) = build_temp_agent();
+        agent.kernel_config.tools.dynamic.response_timeout_ms = 1;
+        let session_id = "session-dynamic-timeout";
+        let request_record = SessionTranscriptRecord {
+            header: SessionTranscriptHeader {
+                id: Uuid::new_v4().to_string(),
+                session_id: session_id.to_string(),
+                invocation_id: Uuid::new_v4().to_string(),
+                branch: SessionTranscriptBranch::ReactiveLoop,
+                timestamp: Utc::now() - chrono::Duration::milliseconds(10),
+            },
+            author: SessionTranscriptAuthor::System,
+            kind: SessionTranscriptEventKind::SystemMessage,
+            payload: SessionTranscriptPayload::DynamicToolRequest {
+                payload: talos_memory::SessionTranscriptDynamicToolRequestPayload {
+                    call_id: "call-timeout".to_string(),
+                    tool_name: "skill_greet".to_string(),
+                    arguments: json!({}),
+                },
+            },
+            actions: SessionTranscriptActions::default(),
+            partial: false,
+        };
+        agent
+            .memory_store
+            .append_transcript_record(&request_record)
+            .await
+            .expect("request record should append");
+
+        let error = agent
+            .submit_dynamic_tool_result(
+                session_id,
+                "call-timeout",
+                "skill_greet",
+                "late".to_string(),
+                true,
+            )
+            .await
+            .expect_err("timed out submission should be rejected");
+        assert!(error.to_string().contains("timed out"));
     }
 
     // Mock LLM provider for testing

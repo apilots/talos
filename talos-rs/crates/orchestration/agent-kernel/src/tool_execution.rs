@@ -83,8 +83,12 @@ async fn execute_single_tool_call(
     let pre_approved = execution_context
         .pre_approved_call_ids
         .contains(&call.call_id);
-    let tool_context =
-        build_tool_context(execution_context, registry.as_ref(), pre_approved, &call.call_id);
+    let tool_context = build_tool_context(
+        execution_context,
+        registry.as_ref(),
+        pre_approved,
+        &call.call_id,
+    );
     let invocation = call.to_invocation();
     let result = registry
         .execute_invocation_with_context(invocation, tool_context)
@@ -93,7 +97,10 @@ async fn execute_single_tool_call(
         Ok(payload) => ToolExecutionOutput {
             call_id: call.call_id,
             tool_name: call.tool_name,
-            is_error: payload.payload().map(|item| item.is_error()).unwrap_or(false),
+            is_error: payload
+                .payload()
+                .map(|item| item.is_error())
+                .unwrap_or(false),
             outcome: payload,
         },
         Err(error) => ToolExecutionOutput {
@@ -166,8 +173,12 @@ impl ToolExecutor for ParallelToolExecutor {
             let pre_approved = execution_context
                 .pre_approved_call_ids
                 .contains(&call.call_id);
-            let tool_context =
-                build_tool_context(execution_context, registry.as_ref(), pre_approved, &call.call_id);
+            let tool_context = build_tool_context(
+                execution_context,
+                registry.as_ref(),
+                pre_approved,
+                &call.call_id,
+            );
             join_set.spawn(async move {
                 let invocation = call.to_invocation();
                 let result = registry
@@ -177,7 +188,10 @@ impl ToolExecutor for ParallelToolExecutor {
                     Ok(payload) => ToolExecutionOutput {
                         call_id: call.call_id,
                         tool_name: call.tool_name,
-                        is_error: payload.payload().map(|item| item.is_error()).unwrap_or(false),
+                        is_error: payload
+                            .payload()
+                            .map(|item| item.is_error())
+                            .unwrap_or(false),
                         outcome: payload,
                     },
                     Err(error) => ToolExecutionOutput {
