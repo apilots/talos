@@ -73,6 +73,7 @@ pub struct McpConnectionManager {
     clients: HashMap<String, Arc<McpClient>>,
     /// server_name → cached tool definitions
     tool_specs: HashMap<String, Vec<RegisteredToolSpec>>,
+    resource_specs: Vec<RegisteredToolSpec>,
 }
 
 impl McpConnectionManager {
@@ -81,6 +82,7 @@ impl McpConnectionManager {
         Self {
             clients: HashMap::new(),
             tool_specs: HashMap::new(),
+            resource_specs: Self::resource_tool_specs(),
         }
     }
 
@@ -138,7 +140,12 @@ impl McpConnectionManager {
 
     /// Return all registered tool specs across every connected server.
     pub fn all_tool_specs(&self) -> Vec<RegisteredToolSpec> {
-        self.tool_specs.values().flatten().cloned().collect()
+        self.tool_specs
+            .values()
+            .flatten()
+            .cloned()
+            .chain(self.resource_specs.iter().cloned())
+            .collect()
     }
 
     /// Invoke a tool on the named server.
@@ -157,6 +164,172 @@ impl McpConnectionManager {
             content: text,
             is_error: result.is_error,
         })
+    }
+
+    pub async fn list_resources(
+        &self,
+        server: Option<&str>,
+        cursor: Option<String>,
+    ) -> TalosResult<serde_json::Value> {
+        match server {
+            Some(server_name) => {
+                let client = self.clients.get(server_name).ok_or_else(|| {
+                    TalosError::ToolError(format!("MCP server `{}` not connected", server_name))
+                })?;
+                let result = client.list_resources(cursor).await?;
+                serde_json::to_value(serde_json::json!({
+                    "server": server_name,
+                    "resources": result.resources,
+                    "next_cursor": result.next_cursor,
+                }))
+                .map_err(|err| TalosError::ToolError(format!("serialize MCP resources: {err}")))
+            }
+            None => {
+                let mut resources = Vec::new();
+                for (server_name, client) in &self.clients {
+                    let result = client.list_resources(None).await?;
+                    resources.push(serde_json::json!({
+                        "server": server_name,
+                        "resources": result.resources,
+                    }));
+                }
+                Ok(serde_json::json!({ "servers": resources }))
+            }
+        }
+    }
+
+    pub async fn list_resource_templates(
+        &self,
+        server: Option<&str>,
+        cursor: Option<String>,
+    ) -> TalosResult<serde_json::Value> {
+        match server {
+            Some(server_name) => {
+                let client = self.clients.get(server_name).ok_or_else(|| {
+                    TalosError::ToolError(format!("MCP server `{}` not connected", server_name))
+                })?;
+                let result = client.list_resource_templates(cursor).await?;
+                serde_json::to_value(serde_json::json!({
+                    "server": server_name,
+                    "resource_templates": result.resource_templates,
+                    "next_cursor": result.next_cursor,
+                }))
+                .map_err(|err| {
+                    TalosError::ToolError(format!("serialize MCP resource templates: {err}"))
+                })
+            }
+            None => {
+                let mut templates = Vec::new();
+                for (server_name, client) in &self.clients {
+                    let result = client.list_resource_templates(None).await?;
+                    templates.push(serde_json::json!({
+                        "server": server_name,
+                        "resource_templates": result.resource_templates,
+                    }));
+                }
+                Ok(serde_json::json!({ "servers": templates }))
+            }
+        }
+    }
+
+    pub async fn read_resource(
+        &self,
+        server: &str,
+        uri: &str,
+    ) -> TalosResult<ToolOutputPayload> {
+        let client = self.clients.get(server).ok_or_else(|| {
+            TalosError::ToolError(format!("MCP server `{}` not connected", server))
+        })?;
+        let result = client.read_resource(uri).await?;
+        let mut combined = Vec::new();
+        let mut mime_type = None;
+        for item in result.contents {
+            match item {
+                protocol::McpResourceContents::TextResourceContents {
+                    mime_type: item_mime,
+                    text,
+                    ..
+                } => {
+                    if mime_type.is_none() {
+                        mime_type = item_mime;
+                    }
+                    combined.push(text);
+                }
+                protocol::McpResourceContents::BlobResourceContents {
+                    mime_type: item_mime,
+                    blob,
+                    ..
+                } => {
+                    if mime_type.is_none() {
+                        mime_type = item_mime;
+                    }
+                    combined.push(blob);
+                }
+                protocol::McpResourceContents::Unknown => {}
+            }
+        }
+        Ok(ToolOutputPayload::Resource {
+            uri: uri.to_string(),
+            mime_type,
+            content: combined.join("\n"),
+        })
+    }
+
+    fn resource_tool_specs() -> Vec<RegisteredToolSpec> {
+        vec![
+            RegisteredToolSpec::new(
+                ToolDefinition::new(
+                    "list_mcp_resources",
+                    "List available MCP resources from one server or all connected servers.",
+                    Some(serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "server": { "type": "string" },
+                            "cursor": { "type": "string" }
+                        }
+                    })),
+                ),
+                ToolSource::Mcp,
+                ToolPayloadKind::Function,
+                ToolParallelism::ParallelSafe,
+                false,
+            ),
+            RegisteredToolSpec::new(
+                ToolDefinition::new(
+                    "list_mcp_resource_templates",
+                    "List MCP resource templates from one server or all connected servers.",
+                    Some(serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "server": { "type": "string" },
+                            "cursor": { "type": "string" }
+                        }
+                    })),
+                ),
+                ToolSource::Mcp,
+                ToolPayloadKind::Function,
+                ToolParallelism::ParallelSafe,
+                false,
+            ),
+            RegisteredToolSpec::new(
+                ToolDefinition::new(
+                    "read_mcp_resource",
+                    "Read a specific MCP resource from a connected server.",
+                    Some(serde_json::json!({
+                        "type": "object",
+                        "required": ["server", "uri"],
+                        "properties": {
+                            "server": { "type": "string" },
+                            "uri": { "type": "string" }
+                        }
+                    })),
+                ),
+                ToolSource::Mcp,
+                ToolPayloadKind::Function,
+                ToolParallelism::ParallelSafe,
+                false,
+            ),
+        ]
     }
 }
 

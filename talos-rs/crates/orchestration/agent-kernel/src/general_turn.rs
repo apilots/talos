@@ -26,7 +26,7 @@ use talos_prompt::{
     render_prompt_assembly, PromptBudget, PromptBuildConfig, PromptBuilder, PromptDiagnostics,
     PromptLoadPolicy, PromptPhase,
 };
-use talos_tools::{ToolOutputPayload, ToolRegistry};
+use talos_tools::{ToolDispatchOutcome, ToolOutputPayload, ToolPending, ToolRegistry};
 use talos_types::talos::{TalosContentItem, TalosOutputItem, TalosUsage};
 use tokio::sync::mpsc;
 use tracing::warn;
@@ -177,6 +177,7 @@ pub struct GeneralTurnToolBatch {
     pub output_items: Vec<TalosOutputItem>,
     pub tool_messages: Vec<ChatMessage>,
     pub pending_confirmations: Vec<PendingToolConfirmation>,
+    pub pending_dynamic_requests: Vec<PendingDynamicToolRequest>,
     pub retrieved_memories: Vec<RetrievedMemoryItem>,
     pub logs: Vec<ToolResultLog>,
     pub error_count: usize,
@@ -187,6 +188,13 @@ pub struct PendingToolConfirmation {
     pub tool_name: String,
     pub call_id: String,
     pub prompt: String,
+    pub arguments: Value,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingDynamicToolRequest {
+    pub tool_name: String,
+    pub call_id: String,
     pub arguments: Value,
 }
 
@@ -1205,8 +1213,34 @@ pub fn apply_general_turn_step(state: &mut GeneralTurnLoopState, step: &GeneralT
     }
 }
 
-fn build_tool_result_payload(tool_name: &str, payload: &ToolOutputPayload) -> (Value, bool) {
-    match payload {
+fn build_tool_result_payload(
+    tool_name: &str,
+    outcome: &ToolDispatchOutcome,
+) -> (Value, bool, Option<Value>) {
+    match outcome {
+        ToolDispatchOutcome::Pending { pending, .. } => match pending {
+            ToolPending::Approval { prompt, arguments } => (
+                serde_json::json!({
+                    "ok": false,
+                    "tool": tool_name,
+                    "error": prompt,
+                    "truncated": false,
+                }),
+                true,
+                Some(arguments.clone()),
+            ),
+            ToolPending::Dynamic { arguments } => (
+                serde_json::json!({
+                    "ok": false,
+                    "tool": tool_name,
+                    "error": "dynamic tool response is pending",
+                    "truncated": false,
+                }),
+                true,
+                Some(arguments.clone()),
+            ),
+        },
+        ToolDispatchOutcome::Executed { payload } => match payload {
         ToolOutputPayload::Function {
             content,
             success,
@@ -1215,7 +1249,7 @@ fn build_tool_result_payload(tool_name: &str, payload: &ToolOutputPayload) -> (V
             let truncated = content.contains("[truncated]");
             if *success {
                 if let Some(structured) = structured_content {
-                    (structured.clone(), false)
+                    (structured.clone(), false, None)
                 } else {
                     (
                         serde_json::json!({
@@ -1225,6 +1259,7 @@ fn build_tool_result_payload(tool_name: &str, payload: &ToolOutputPayload) -> (V
                             "truncated": truncated,
                         }),
                         false,
+                        None,
                     )
                 }
             } else {
@@ -1252,7 +1287,7 @@ fn build_tool_result_payload(tool_name: &str, payload: &ToolOutputPayload) -> (V
                         object.insert("structured".to_string(), structured.clone());
                     }
                 }
-                (value, true)
+                (value, true, None)
             }
         }
         ToolOutputPayload::Resource {
@@ -1269,6 +1304,7 @@ fn build_tool_result_payload(tool_name: &str, payload: &ToolOutputPayload) -> (V
                 "truncated": content.contains("[truncated]"),
             }),
             false,
+            None,
         ),
         ToolOutputPayload::Mcp { content, is_error } => {
             if *is_error {
@@ -1280,6 +1316,7 @@ fn build_tool_result_payload(tool_name: &str, payload: &ToolOutputPayload) -> (V
                         "truncated": content.contains("[truncated]"),
                     }),
                     true,
+                    None,
                 )
             } else {
                 (
@@ -1290,38 +1327,12 @@ fn build_tool_result_payload(tool_name: &str, payload: &ToolOutputPayload) -> (V
                         "truncated": content.contains("[truncated]"),
                     }),
                     false,
+                    None,
                 )
             }
         }
+        },
     }
-}
-
-fn extract_pending_tool_confirmation(
-    tool_name: &str,
-    call_id: &str,
-    arguments: Value,
-    payload: &Value,
-    is_error: bool,
-) -> Option<PendingToolConfirmation> {
-    if !is_error {
-        return None;
-    }
-
-    let error = payload.get("error").and_then(Value::as_str)?;
-    let prompt = error
-        .strip_prefix("Tool error: ")
-        .unwrap_or(error)
-        .to_string();
-    if !prompt.starts_with("tool approval is required") {
-        return None;
-    }
-
-    Some(PendingToolConfirmation {
-        tool_name: tool_name.to_string(),
-        call_id: call_id.to_string(),
-        prompt,
-        arguments,
-    })
 }
 
 pub async fn execute_general_turn_tool_batch(
@@ -1332,6 +1343,7 @@ pub async fn execute_general_turn_tool_batch(
     user_id: &str,
     tool_calls: &[FunctionCall],
     pre_approved_call_ids: std::collections::HashSet<String>,
+    replay_dynamic_tool_results: std::collections::HashMap<String, Value>,
     stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
 ) -> TalosResult<GeneralTurnToolBatch> {
     let execution_context = ToolExecutionContext {
@@ -1339,6 +1351,7 @@ pub async fn execute_general_turn_tool_batch(
         user_id: user_id.to_string(),
         kernel_config,
         pre_approved_call_ids,
+        dynamic_tool_results: replay_dynamic_tool_results,
     };
     let inputs = tool_calls
         .iter()
@@ -1348,10 +1361,6 @@ pub async fn execute_general_turn_tool_batch(
             arguments: call.arguments.clone(),
         })
         .collect::<Vec<_>>();
-    let call_arguments: std::collections::HashMap<String, Value> = tool_calls
-        .iter()
-        .map(|call| (call.id.clone(), call.arguments.clone()))
-        .collect();
     let outputs = tool_executor
         .execute(&execution_context, tool_registry, &inputs)
         .await?;
@@ -1359,18 +1368,21 @@ pub async fn execute_general_turn_tool_batch(
     let mut output_items = Vec::new();
     let mut tool_messages = Vec::new();
     let mut pending_confirmations = Vec::new();
+    let mut pending_dynamic_requests = Vec::new();
     let mut retrieved_memories = Vec::new();
     let mut logs = Vec::new();
     let mut error_count = 0_usize;
 
     for output in outputs {
-        let (payload, is_error) = build_tool_result_payload(&output.tool_name, &output.payload);
+        let (payload, is_error, pending_arguments) =
+            build_tool_result_payload(&output.tool_name, &output.outcome);
         if is_error {
             error_count += 1;
         }
         let memory_payload = output
-            .payload
-            .structured_content()
+            .outcome
+            .payload()
+            .and_then(|payload| payload.structured_content())
             .cloned()
             .unwrap_or_else(|| payload.clone());
         output_items.push(TalosOutputItem::ToolResult {
@@ -1411,18 +1423,27 @@ pub async fn execute_general_turn_tool_batch(
             &output.tool_name,
             &memory_payload,
         ));
-        let call_args = call_arguments
-            .get(&output.call_id)
-            .cloned()
-            .unwrap_or(Value::Null);
-        if let Some(confirmation) = extract_pending_tool_confirmation(
-            &output.tool_name,
-            &output.call_id,
-            call_args,
-            &payload,
-            is_error,
-        ) {
-            pending_confirmations.push(confirmation);
+        if let ToolDispatchOutcome::Pending {
+            pending: ToolPending::Approval { prompt, .. },
+            ..
+        } = &output.outcome
+        {
+            pending_confirmations.push(PendingToolConfirmation {
+                tool_name: output.tool_name.clone(),
+                call_id: output.call_id.clone(),
+                prompt: prompt.clone(),
+                arguments: pending_arguments.unwrap_or(Value::Null),
+            });
+        } else if let ToolDispatchOutcome::Pending {
+            pending: ToolPending::Dynamic { .. },
+            ..
+        } = &output.outcome
+        {
+            pending_dynamic_requests.push(PendingDynamicToolRequest {
+                tool_name: output.tool_name.clone(),
+                call_id: output.call_id.clone(),
+                arguments: pending_arguments.unwrap_or(Value::Null),
+            });
         }
         tool_messages.push(ChatMessage::tool(
             output.call_id,
@@ -1435,6 +1456,7 @@ pub async fn execute_general_turn_tool_batch(
         output_items,
         tool_messages,
         pending_confirmations,
+        pending_dynamic_requests,
         retrieved_memories,
         logs,
         error_count,
@@ -1664,14 +1686,19 @@ pub async fn execute_general_turn_loop(
             agent_name,
             &step.tool_calls,
             std::collections::HashSet::new(),
+            std::collections::HashMap::new(),
             prepared.stream_tx.as_ref(),
         )
         .await?;
         apply_general_turn_tool_batch(&mut state, &tool_batch, kernel_config.as_ref());
 
-        if !tool_batch.pending_confirmations.is_empty() {
+        if !tool_batch.pending_confirmations.is_empty() || !tool_batch.pending_dynamic_requests.is_empty() {
             break (
-                "Tool confirmation pending.".to_string(),
+                if !tool_batch.pending_confirmations.is_empty() {
+                    "Tool confirmation pending.".to_string()
+                } else {
+                    "Dynamic tool response pending.".to_string()
+                },
                 StopReason::EndTurn,
             );
         }

@@ -7,10 +7,6 @@ use std::time::Duration;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use talos_error::{TalosError, TalosResult};
-use talos_tools_sandbox::{
-    ApprovableTool, SandboxAwareTool, ToolApprovalRequirement, ToolOrchestrator,
-    ToolOrchestratorConfig, ToolSandboxMode,
-};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{Mutex, Notify};
@@ -96,42 +92,10 @@ pub struct ExecResponse {
     pub truncated: bool,
 }
 
-struct ExecCommandPlanner;
-
-impl ApprovableTool<ExecCommandRequest> for ExecCommandPlanner {
-    fn approval_requirement(&self, request: &ExecCommandRequest) -> ToolApprovalRequirement {
-        match request.sandbox_permissions {
-            SandboxPermissions::UseDefault => ToolApprovalRequirement::Skip,
-            SandboxPermissions::RequireEscalated => ToolApprovalRequirement::NeedsApproval {
-                reason: request
-                    .justification
-                    .clone()
-                    .or_else(|| Some("exec_command requested escalated permissions".to_string())),
-            },
-        }
-    }
-}
-
-impl SandboxAwareTool<ExecCommandRequest> for ExecCommandPlanner {
-    fn sandbox_mode(
-        &self,
-        request: &ExecCommandRequest,
-        config: &ToolOrchestratorConfig,
-    ) -> ToolSandboxMode {
-        match request.sandbox_permissions {
-            SandboxPermissions::UseDefault => config.default_sandbox_mode,
-            SandboxPermissions::RequireEscalated => ToolSandboxMode::DangerFullAccess,
-        }
-    }
-
-    fn retry_without_sandbox(&self) -> bool {
-        true
-    }
-}
-
 struct ExecSession {
     session_id: i64,
     owner_session_id: String,
+    max_output_bytes: usize,
     stdin: Mutex<Option<ChildStdin>>,
     state: Mutex<ExecSessionState>,
     notify: Notify,
@@ -166,7 +130,6 @@ impl ExecSessionManager {
         if request.cmd.trim().is_empty() {
             return Err(TalosError::ToolError("cmd cannot be empty".to_string()));
         }
-        enforce_exec_plan(request, context)?;
 
         let base_dir = resolve_base_dir(context)?;
         let workdir = request
@@ -188,6 +151,11 @@ impl ExecSessionManager {
         let session = Arc::new(ExecSession {
             session_id,
             owner_session_id: context.session_id().to_string(),
+            max_output_bytes: context
+                .kernel_config()
+                .map(|config| config.tools.local_exec.max_output_bytes)
+                .unwrap_or(DEFAULT_MAX_OUTPUT_BYTES)
+                .max(DEFAULT_MAX_OUTPUT_BYTES),
             stdin: Mutex::new(stdin),
             state: Mutex::new(ExecSessionState::default()),
             notify: Notify::new(),
@@ -276,7 +244,7 @@ impl ExecSessionManager {
 
         let mut state = session.state.lock().await;
         let pending = &state.output[state.delivered_bytes..];
-        let max_bytes = max_output_tokens.unwrap_or(DEFAULT_MAX_OUTPUT_BYTES);
+        let max_bytes = max_output_tokens.unwrap_or(session.max_output_bytes);
         let (chunk, consumed_bytes, truncated) = truncate_prefix(pending, max_bytes);
         state.delivered_bytes += consumed_bytes;
 
@@ -330,18 +298,6 @@ pub async fn write_stdin_with_context(
     ExecSessionManager::global()
         .write_stdin(request, context)
         .await
-}
-
-fn enforce_exec_plan(request: &ExecCommandRequest, context: &ToolContext) -> TalosResult<()> {
-    if context.pre_approved() {
-        return Ok(());
-    }
-    let orchestrator = ToolOrchestrator::new(ToolOrchestratorConfig::default());
-    let plan = orchestrator
-        .plan(&ExecCommandPlanner, request)
-        .map_err(|err| TalosError::ToolError(err.to_string()))?;
-    plan.ensure_approved()
-        .map_err(|err| TalosError::ToolError(err.to_string()))
 }
 
 fn build_command(request: &ExecCommandRequest, workdir: &PathBuf) -> TalosResult<Command> {
@@ -458,9 +414,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_exec_runtime_rejects_escalated_command_without_approval_flow() {
+    async fn test_exec_runtime_allows_escalated_command_when_called_directly() {
         let context = crate::ToolContext::default();
-        let error = exec_command(
+        let result = exec_command(
             &ExecCommandRequest {
                 cmd: "echo hi".to_string(),
                 workdir: None,
@@ -476,11 +432,9 @@ mod tests {
             &context,
         )
         .await
-        .expect_err("escalated command should be rejected until approval flow is wired");
+        .expect("direct runtime execution no longer applies approval policy");
 
-        assert!(error
-            .to_string()
-            .contains("tool approval is required: needs unrestricted filesystem access"));
+        assert!(result.output.contains("hi") || result.status == ExecStatus::Exited);
     }
 
     #[tokio::test]

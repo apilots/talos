@@ -1,6 +1,6 @@
 use crate::execution::ContentsMode;
 use crate::{
-    execution::{PlanningResponseSegmentKind, ReplayToolInvocation},
+    execution::{PlanningResponseSegmentKind, ReplayDynamicToolResult, ReplayToolInvocation},
     CompactionSummaryPayload, ContentsBuilder, EventActions, EventAuthor, EventPayload,
     ExecutionEvent, ExecutionEventKind, FlowProfile, InvocationContext, LlmRequestEnvelope,
     LlmResponseEnvelope, Planner, RequestOutputContract, ResponseDisposition, SessionEvent,
@@ -18,16 +18,17 @@ pub enum RequestProcessorKind {
     Basic = 0,
     Auth = 1,
     RequestConfirmation = 2,
-    Instructions = 3,
-    Identity = 4,
-    Compaction = 5,
-    Contents = 6,
-    ContextCache = 7,
-    Interactions = 8,
-    OutputSchema = 9,
-    Planning = 10,
-    ToolContext = 11,
-    AgentTransfer = 12,
+    DynamicToolReplay = 3,
+    Instructions = 4,
+    Identity = 5,
+    Compaction = 6,
+    Contents = 7,
+    ContextCache = 8,
+    Interactions = 9,
+    OutputSchema = 10,
+    Planning = 11,
+    ToolContext = 12,
+    AgentTransfer = 13,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,6 +93,7 @@ pub struct BasicRequestProcessor;
 pub struct InstructionsRequestProcessor;
 pub struct AuthRequestProcessor;
 pub struct RequestConfirmationRequestProcessor;
+pub struct DynamicToolReplayRequestProcessor;
 pub struct IdentityRequestProcessor {
     agent_name: String,
     agent_description: String,
@@ -376,6 +378,71 @@ impl RequestProcessor for RequestConfirmationRequestProcessor {
                 request.prompt_prefix_messages.push(ChatMessage::system(format!(
                     "A tool confirmation is pending for `{}` (call `{}`). Wait for explicit user approval before continuing. Prompt: {}",
                     confirmation.tool_name, confirmation.call_id, confirmation.prompt
+                )));
+            }
+        }
+
+        Ok(RequestProcessorOutput::default())
+    }
+}
+
+#[async_trait]
+impl RequestProcessor for DynamicToolReplayRequestProcessor {
+    fn kind(&self) -> RequestProcessorKind {
+        RequestProcessorKind::DynamicToolReplay
+    }
+
+    async fn run(
+        &self,
+        ctx: &mut InvocationContext,
+        request: &mut LlmRequestEnvelope,
+    ) -> TalosResult<RequestProcessorOutput> {
+        let latest_dynamic_request = latest_branch_event(ctx, request.branch, |event| {
+            matches!(event.payload, SessionEventPayload::DynamicToolRequest { .. })
+        });
+
+        let Some(dynamic_request_event) = latest_dynamic_request else {
+            return Ok(RequestProcessorOutput::default());
+        };
+
+        let SessionEventPayload::DynamicToolRequest {
+            payload: dynamic_request,
+        } = &dynamic_request_event.payload
+        else {
+            return Ok(RequestProcessorOutput::default());
+        };
+
+        let latest_dynamic_response = latest_branch_event(ctx, request.branch, |event| {
+            if let SessionEventPayload::DynamicToolResponse { payload } = &event.payload {
+                payload.call_id == dynamic_request.call_id
+            } else {
+                false
+            }
+        });
+
+        match latest_dynamic_response {
+            Some(response_event) if response_event.timestamp > dynamic_request_event.timestamp => {
+                let SessionEventPayload::DynamicToolResponse { payload } = &response_event.payload
+                else {
+                    return Ok(RequestProcessorOutput::default());
+                };
+                request.replay_tool_invocations.push(ReplayToolInvocation {
+                    call_id: payload.call_id.clone(),
+                    tool_name: payload.tool_name.clone(),
+                    arguments: dynamic_request.arguments.clone(),
+                });
+                request.replay_dynamic_tool_results.insert(
+                    payload.call_id.clone(),
+                    ReplayDynamicToolResult {
+                        output: payload.output.clone(),
+                        success: payload.success,
+                    },
+                );
+            }
+            _ => {
+                request.prompt_prefix_messages.push(ChatMessage::system(format!(
+                    "A dynamic tool response is pending for `{}` (call `{}`). Wait for the external tool result before continuing.",
+                    dynamic_request.tool_name, dynamic_request.call_id
                 )));
             }
         }
@@ -1017,6 +1084,7 @@ impl RequestProcessorPipeline {
             .with_processor(Arc::new(BasicRequestProcessor))
             .with_processor(Arc::new(AuthRequestProcessor))
             .with_processor(Arc::new(RequestConfirmationRequestProcessor))
+            .with_processor(Arc::new(DynamicToolReplayRequestProcessor))
             .with_processor(Arc::new(InstructionsRequestProcessor))
             .with_processor(Arc::new(IdentityRequestProcessor::new(
                 agent_name,

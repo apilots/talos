@@ -1,9 +1,5 @@
 use serde::{Deserialize, Serialize};
 use talos_error::{TalosError, TalosResult};
-use talos_tools_sandbox::{
-    ApprovableTool, SandboxAwareTool, ToolApprovalRequirement, ToolOrchestrator,
-    ToolOrchestratorConfig, ToolSandboxMode,
-};
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
@@ -20,24 +16,6 @@ pub struct ApplyPatchResponse {
     pub output: String,
 }
 
-struct ApplyPatchPlanner;
-
-impl ApprovableTool<ApplyPatchRequest> for ApplyPatchPlanner {
-    fn approval_requirement(&self, _request: &ApplyPatchRequest) -> ToolApprovalRequirement {
-        ToolApprovalRequirement::Skip
-    }
-}
-
-impl SandboxAwareTool<ApplyPatchRequest> for ApplyPatchPlanner {
-    fn sandbox_mode(
-        &self,
-        _request: &ApplyPatchRequest,
-        _config: &ToolOrchestratorConfig,
-    ) -> ToolSandboxMode {
-        ToolSandboxMode::WorkspaceWrite
-    }
-}
-
 pub async fn run(
     request: &ApplyPatchRequest,
     context: &ToolContext,
@@ -46,15 +24,6 @@ pub async fn run(
         return Err(TalosError::ToolError(
             "input must contain a patch body".to_string(),
         ));
-    }
-
-    if !context.pre_approved() {
-        let orchestrator = ToolOrchestrator::new(ToolOrchestratorConfig::default());
-        let plan = orchestrator
-            .plan(&ApplyPatchPlanner, request)
-            .map_err(|err| TalosError::ToolError(err.to_string()))?;
-        plan.ensure_approved()
-            .map_err(|err| TalosError::ToolError(err.to_string()))?;
     }
 
     let base_dir = resolve_base_dir(context)?;

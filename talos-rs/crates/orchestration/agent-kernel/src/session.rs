@@ -15,9 +15,10 @@ use talos_memory::{
     Memory, MemoryStore, SessionTranscriptActions, SessionTranscriptApprovalResponsePayload,
     SessionTranscriptAuthPayload, SessionTranscriptAuthor, SessionTranscriptBranch,
     SessionTranscriptCompaction, SessionTranscriptCompactionPayload,
-    SessionTranscriptConfirmationPayload, SessionTranscriptEventKind, SessionTranscriptHeader,
-    SessionTranscriptRecord, SessionTranscriptStateDelta, SessionTranscriptStateNamespace,
-    SessionTranscriptTransferPayload,
+    SessionTranscriptConfirmationPayload, SessionTranscriptDynamicToolRequestPayload,
+    SessionTranscriptDynamicToolResponsePayload, SessionTranscriptEventKind,
+    SessionTranscriptHeader, SessionTranscriptRecord, SessionTranscriptStateDelta,
+    SessionTranscriptStateNamespace, SessionTranscriptTransferPayload,
 };
 use uuid::Uuid;
 
@@ -52,6 +53,12 @@ pub enum SessionEventPayload {
     ApprovalResponse {
         payload: SessionApprovalResponsePayload,
     },
+    DynamicToolRequest {
+        payload: SessionDynamicToolRequestPayload,
+    },
+    DynamicToolResponse {
+        payload: SessionDynamicToolResponsePayload,
+    },
     Compaction {
         payload: SessionCompactionPayload,
     },
@@ -66,6 +73,8 @@ impl SessionEventPayload {
             | Self::Auth { .. }
             | Self::Confirmation { .. }
             | Self::ApprovalResponse { .. }
+            | Self::DynamicToolRequest { .. }
+            | Self::DynamicToolResponse { .. }
             | Self::StateOnly => None,
         }
     }
@@ -96,6 +105,21 @@ pub struct SessionApprovalResponsePayload {
     pub tool_name: String,
     pub approved: bool,
     pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SessionDynamicToolRequestPayload {
+    pub call_id: String,
+    pub tool_name: String,
+    pub arguments: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionDynamicToolResponsePayload {
+    pub call_id: String,
+    pub tool_name: String,
+    pub output: String,
+    pub success: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -207,6 +231,23 @@ impl SessionEvent {
                     reason: payload.reason.clone(),
                 },
             },
+            EventPayload::DynamicToolRequest { payload } => SessionEventPayload::DynamicToolRequest {
+                payload: SessionDynamicToolRequestPayload {
+                    call_id: payload.call_id.clone(),
+                    tool_name: payload.tool_name.clone(),
+                    arguments: payload.arguments.clone(),
+                },
+            },
+            EventPayload::DynamicToolResponse { payload } => {
+                SessionEventPayload::DynamicToolResponse {
+                    payload: SessionDynamicToolResponsePayload {
+                        call_id: payload.call_id.clone(),
+                        tool_name: payload.tool_name.clone(),
+                        output: payload.output.clone(),
+                        success: payload.success,
+                    },
+                }
+            }
             EventPayload::CompactionSummary { payload } => SessionEventPayload::Compaction {
                 payload: SessionCompactionPayload {
                     summary_message: ChatMessage::assistant(payload.summary.clone()),
@@ -534,6 +575,25 @@ impl MemoryBackedSessionService {
                     },
                 }
             }
+            SessionEventPayload::DynamicToolRequest { payload } => {
+                SessionTranscriptPayload::DynamicToolRequest {
+                    payload: SessionTranscriptDynamicToolRequestPayload {
+                        call_id: payload.call_id.clone(),
+                        tool_name: payload.tool_name.clone(),
+                        arguments: payload.arguments.clone(),
+                    },
+                }
+            }
+            SessionEventPayload::DynamicToolResponse { payload } => {
+                SessionTranscriptPayload::DynamicToolResponse {
+                    payload: SessionTranscriptDynamicToolResponsePayload {
+                        call_id: payload.call_id.clone(),
+                        tool_name: payload.tool_name.clone(),
+                        output: payload.output.clone(),
+                        success: payload.success,
+                    },
+                }
+            }
             SessionEventPayload::Compaction { payload } => SessionTranscriptPayload::Compaction {
                 payload: SessionTranscriptCompactionPayload {
                     summary_message: payload.summary_message.clone(),
@@ -576,6 +636,25 @@ impl MemoryBackedSessionService {
                         tool_name: payload.tool_name,
                         approved: payload.approved,
                         reason: payload.reason,
+                    },
+                }
+            }
+            SessionTranscriptPayload::DynamicToolRequest { payload } => {
+                SessionEventPayload::DynamicToolRequest {
+                    payload: SessionDynamicToolRequestPayload {
+                        call_id: payload.call_id,
+                        tool_name: payload.tool_name,
+                        arguments: payload.arguments,
+                    },
+                }
+            }
+            SessionTranscriptPayload::DynamicToolResponse { payload } => {
+                SessionEventPayload::DynamicToolResponse {
+                    payload: SessionDynamicToolResponsePayload {
+                        call_id: payload.call_id,
+                        tool_name: payload.tool_name,
+                        output: payload.output,
+                        success: payload.success,
                     },
                 }
             }

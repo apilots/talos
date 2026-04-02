@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use talos_error::TalosResult;
 
 use crate::invocation::{ToolDispatchContext, ToolInvocation};
-use crate::output::ToolOutputPayload;
+use crate::output::ToolDispatchOutcome;
 use crate::spec::ToolSource;
 
 pub use dynamic::DynamicToolHandler;
@@ -27,5 +27,5 @@ pub trait ToolHandler: Send + Sync {
         &self,
         invocation: ToolInvocation,
         context: ToolDispatchContext,
-    ) -> TalosResult<ToolOutputPayload>;
+    ) -> TalosResult<ToolDispatchOutcome>;
 }

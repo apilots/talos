@@ -810,6 +810,15 @@ pub trait SessionService: Send + Sync {
         approved: bool,
         reason: Option<String>,
     ) -> TalosResult<()>;
+
+    async fn submit_dynamic_tool_result(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        output: String,
+        success: bool,
+    ) -> TalosResult<()>;
 }
 
 pub fn now() -> u64 {

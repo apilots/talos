@@ -32,7 +32,9 @@ impl ContentsBuilder {
                 | SessionEventPayload::Transfer { .. }
                 | SessionEventPayload::Auth { .. }
                 | SessionEventPayload::Confirmation { .. }
-                | SessionEventPayload::ApprovalResponse { .. } => None,
+                | SessionEventPayload::ApprovalResponse { .. }
+                | SessionEventPayload::DynamicToolRequest { .. }
+                | SessionEventPayload::DynamicToolResponse { .. } => None,
             })
             .collect()
     }

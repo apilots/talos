@@ -7,14 +7,15 @@ use crate::general_turn::{
     GeneralTurnStepDisposition,
 };
 use crate::{
-    CallbackControl, CallbackRegistry, ConfirmationRequestPayload, EventAuthor, EventPayload,
-    ExecutionBranch, ExecutionEvent, ExecutionEventKind, FlowKind, FlowProfile, InvocationContext,
-    InvocationPluginManager, KernelExecutionSettings, KernelStreamEvent, KernelStreamEventData,
-    KernelStreamEventType, KernelThinkingSource, KernelThinkingStage, KernelWarning,
-    LlmRequestEnvelope, LlmResponseEnvelope, MemoryBackedSessionService, Planner,
-    RequestProcessorPipeline, ResponseProcessorPipeline, SessionEvent, SessionEventKind,
-    SessionEventPayload, SessionService, StopReason, ThinkingDeltaStreamData, ToolCallbackPayload,
-    ToolExecutor, ToolExecutorFactory,
+    execution::DynamicToolRequestPayload, CallbackControl, CallbackRegistry,
+    ConfirmationRequestPayload, EventAuthor, EventPayload, ExecutionBranch, ExecutionEvent,
+    ExecutionEventKind, FlowKind, FlowProfile, InvocationContext, InvocationPluginManager,
+    KernelExecutionSettings, KernelStreamEvent, KernelStreamEventData, KernelStreamEventType,
+    KernelThinkingSource, KernelThinkingStage, KernelWarning, LlmRequestEnvelope,
+    LlmResponseEnvelope, MemoryBackedSessionService, Planner, RequestProcessorPipeline,
+    ResponseProcessorPipeline, SessionEvent, SessionEventKind, SessionEventPayload,
+    SessionService, StopReason, ThinkingDeltaStreamData, ToolCallbackPayload, ToolExecutor,
+    ToolExecutorFactory,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -452,6 +453,19 @@ impl BaseLlmFlow for SingleFlow {
                     &self.agent_name,
                     &replay_calls,
                     pre_approved_call_ids,
+                    step_model_request
+                        .replay_dynamic_tool_results
+                        .iter()
+                        .map(|(call_id, result)| {
+                            (
+                                call_id.clone(),
+                                serde_json::json!({
+                                    "output": result.output,
+                                    "success": result.success,
+                                }),
+                            )
+                        })
+                        .collect(),
                     prepared.stream_tx.as_ref(),
                 )
                 .await?;
@@ -612,6 +626,7 @@ impl BaseLlmFlow for SingleFlow {
                 &self.agent_name,
                 &step.tool_calls,
                 std::collections::HashSet::new(),
+                std::collections::HashMap::new(),
                 prepared.stream_tx.as_ref(),
             )
             .await?;
@@ -676,9 +691,46 @@ impl BaseLlmFlow for SingleFlow {
                     ),
                 );
             }
+            for dynamic_request in &tool_batch.pending_dynamic_requests {
+                events.push(ExecutionEvent::new(
+                    ctx,
+                    EventAuthor::System,
+                    request.branch,
+                    ExecutionEventKind::System,
+                    EventPayload::DynamicToolRequest {
+                        payload: DynamicToolRequestPayload {
+                            tool_name: dynamic_request.tool_name.clone(),
+                            call_id: dynamic_request.call_id.clone(),
+                            arguments: dynamic_request.arguments.clone(),
+                        },
+                    },
+                    false,
+                ));
+                stage_session_event(
+                    ctx,
+                    SessionEvent::new(
+                        prepared.session_id.clone(),
+                        prepared.invocation_id.clone(),
+                        request.branch,
+                        EventAuthor::System,
+                        SessionEventKind::SystemMessage,
+                        SessionEventPayload::DynamicToolRequest {
+                            payload: crate::session::SessionDynamicToolRequestPayload {
+                                tool_name: dynamic_request.tool_name.clone(),
+                                call_id: dynamic_request.call_id.clone(),
+                                arguments: dynamic_request.arguments.clone(),
+                            },
+                        },
+                    ),
+                );
+            }
             apply_general_turn_tool_batch(&mut state, &tool_batch, &self.kernel_config);
-            if !tool_batch.pending_confirmations.is_empty() {
-                final_text = "Tool confirmation pending.".to_string();
+            if !tool_batch.pending_confirmations.is_empty() || !tool_batch.pending_dynamic_requests.is_empty() {
+                final_text = if !tool_batch.pending_confirmations.is_empty() {
+                    "Tool confirmation pending.".to_string()
+                } else {
+                    "Dynamic tool response pending.".to_string()
+                };
                 break StopReason::EndTurn;
             }
             if matches!(self.flow_profile, FlowProfile::PlanReactLoop) {

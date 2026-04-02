@@ -218,9 +218,137 @@ pub struct AgentKernelConfig {
     #[serde(default)]
     pub binding: AgentKernelBindingConfig,
 
+    /// Tools runtime defaults
+    #[serde(default)]
+    pub tools: ToolsRuntimeConfig,
+
     /// MCP server connections available to this kernel
     #[serde(default)]
     pub mcp: AgentKernelMcpConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ToolsRuntimeConfig {
+    #[serde(default)]
+    pub approval_policy: ToolApprovalPolicy,
+    #[serde(default)]
+    pub sandbox_policy: ToolSandboxPolicy,
+    #[serde(default)]
+    pub local_exec: LocalExecToolConfig,
+    #[serde(default)]
+    pub file: FileToolConfig,
+    #[serde(default)]
+    pub mcp_runtime: McpToolConfig,
+    #[serde(default)]
+    pub dynamic: DynamicToolConfig,
+    #[serde(default = "default_true")]
+    pub enable_apply_patch: bool,
+    #[serde(default = "default_true")]
+    pub enable_mcp_tools: bool,
+    #[serde(default)]
+    pub enable_dynamic_tools: bool,
+    #[serde(default)]
+    pub enable_collaboration_tools: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolApprovalPolicy {
+    #[default]
+    OnRequest,
+    Never,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolSandboxPolicy {
+    #[serde(default)]
+    pub default_mode: ToolSandboxModeConfig,
+}
+
+impl Default for ToolSandboxPolicy {
+    fn default() -> Self {
+        Self {
+            default_mode: ToolSandboxModeConfig::UseDefault,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolSandboxModeConfig {
+    #[default]
+    UseDefault,
+    ReadOnly,
+    WorkspaceWrite,
+    DangerFullAccess,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalExecToolConfig {
+    #[serde(default = "default_kernel_tool_result_max_bytes")]
+    pub max_output_bytes: usize,
+    #[serde(default = "default_tools_exec_timeout_ms")]
+    pub default_timeout_ms: u64,
+}
+
+impl Default for LocalExecToolConfig {
+    fn default() -> Self {
+        Self {
+            max_output_bytes: default_kernel_tool_result_max_bytes(),
+            default_timeout_ms: default_tools_exec_timeout_ms(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileToolConfig {
+    #[serde(default = "default_tools_file_read_limit")]
+    pub default_read_limit: usize,
+    #[serde(default = "default_tools_file_search_limit")]
+    pub default_search_limit: usize,
+    #[serde(default = "default_tools_file_list_limit")]
+    pub default_list_limit: usize,
+}
+
+impl Default for FileToolConfig {
+    fn default() -> Self {
+        Self {
+            default_read_limit: default_tools_file_read_limit(),
+            default_search_limit: default_tools_file_search_limit(),
+            default_list_limit: default_tools_file_list_limit(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpToolConfig {
+    #[serde(default = "default_true")]
+    pub enable_tools: bool,
+    #[serde(default = "default_true")]
+    pub enable_resource_tools: bool,
+}
+
+impl Default for McpToolConfig {
+    fn default() -> Self {
+        Self {
+            enable_tools: true,
+            enable_resource_tools: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DynamicToolConfig {
+    #[serde(default = "default_tools_dynamic_timeout_ms")]
+    pub response_timeout_ms: u64,
+}
+
+impl Default for DynamicToolConfig {
+    fn default() -> Self {
+        Self {
+            response_timeout_ms: default_tools_dynamic_timeout_ms(),
+        }
+    }
 }
 
 /// MCP tool federation configuration
@@ -288,6 +416,26 @@ fn default_kernel_max_tool_rounds() -> u32 {
 
 fn default_kernel_tool_result_max_bytes() -> usize {
     64 * 1024
+}
+
+fn default_tools_exec_timeout_ms() -> u64 {
+    60_000
+}
+
+fn default_tools_dynamic_timeout_ms() -> u64 {
+    300_000
+}
+
+fn default_tools_file_read_limit() -> usize {
+    200
+}
+
+fn default_tools_file_search_limit() -> usize {
+    200
+}
+
+fn default_tools_file_list_limit() -> usize {
+    200
 }
 
 fn default_kernel_context_compaction_max_bytes() -> usize {
@@ -662,6 +810,7 @@ impl Default for AgentKernelConfig {
             prompt: AgentKernelPromptConfig::default(),
             memory: AgentKernelMemoryConfig::default(),
             binding: AgentKernelBindingConfig::default(),
+            tools: ToolsRuntimeConfig::default(),
             mcp: AgentKernelMcpConfig::default(),
         }
     }

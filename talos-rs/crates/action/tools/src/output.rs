@@ -4,6 +4,18 @@ use serde_json::Value;
 use crate::r#trait::ToolOutput;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ToolPending {
+    Approval {
+        prompt: String,
+        arguments: Value,
+    },
+    Dynamic {
+        arguments: Value,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ToolOutputPayload {
     Function {
         content: String,
@@ -18,6 +30,18 @@ pub enum ToolOutputPayload {
     Mcp {
         content: String,
         is_error: bool,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum ToolDispatchOutcome {
+    Executed {
+        payload: ToolOutputPayload,
+    },
+    Pending {
+        tool_name: String,
+        pending: ToolPending,
     },
 }
 
@@ -104,6 +128,73 @@ impl ToolOutputPayload {
                     content.clone()
                 },
                 error: if is_error { Some(content) } else { None },
+            },
+        }
+    }
+}
+
+impl ToolDispatchOutcome {
+    pub fn executed(payload: ToolOutputPayload) -> Self {
+        Self::Executed { payload }
+    }
+
+    pub fn pending_approval(
+        tool_name: impl Into<String>,
+        prompt: impl Into<String>,
+        arguments: Value,
+    ) -> Self {
+        Self::Pending {
+            tool_name: tool_name.into(),
+            pending: ToolPending::Approval {
+                prompt: prompt.into(),
+                arguments,
+            },
+        }
+    }
+
+    pub fn pending_dynamic(tool_name: impl Into<String>, arguments: Value) -> Self {
+        Self::Pending {
+            tool_name: tool_name.into(),
+            pending: ToolPending::Dynamic { arguments },
+        }
+    }
+
+    pub fn payload(&self) -> Option<&ToolOutputPayload> {
+        match self {
+            Self::Executed { payload } => Some(payload),
+            Self::Pending { .. } => None,
+        }
+    }
+
+    pub fn pending(&self) -> Option<&ToolPending> {
+        match self {
+            Self::Executed { .. } => None,
+            Self::Pending { pending, .. } => Some(pending),
+        }
+    }
+
+    pub fn is_error(&self) -> bool {
+        self.payload().map(|payload| payload.is_error()).unwrap_or(false)
+    }
+
+    pub fn content(&self) -> &str {
+        self.payload().map(|payload| payload.content()).unwrap_or("")
+    }
+
+    pub fn into_legacy_output(self) -> ToolOutput {
+        match self {
+            Self::Executed { payload } => payload.into_legacy_output(),
+            Self::Pending { pending, .. } => match pending {
+                ToolPending::Approval { prompt, .. } => ToolOutput {
+                    success: false,
+                    output: String::new(),
+                    error: Some(prompt),
+                },
+                ToolPending::Dynamic { .. } => ToolOutput {
+                    success: false,
+                    output: String::new(),
+                    error: Some("dynamic tool response is pending".to_string()),
+                },
             },
         }
     }

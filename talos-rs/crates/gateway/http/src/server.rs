@@ -178,6 +178,10 @@ impl HttpServer {
                 "/v1/sessions/:session_id/tool-approvals",
                 post(submit_tool_approval_handler),
             )
+            .route(
+                "/v1/sessions/:session_id/dynamic-tool-results",
+                post(submit_dynamic_tool_result_handler),
+            )
             .with_state(state.clone())
             .layer(middleware::from_fn_with_state(state, auth_middleware))
             .layer(CorsLayer::permissive());
@@ -613,6 +617,14 @@ struct ToolApprovalRequest {
     reason: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct DynamicToolResultRequest {
+    call_id: String,
+    tool_name: String,
+    output: String,
+    success: bool,
+}
+
 async fn submit_tool_approval_handler(
     State(state): State<Arc<HttpApiState>>,
     Path(session_id): Path<String>,
@@ -633,6 +645,32 @@ async fn submit_tool_approval_handler(
         Err(e) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "approval_failed",
+            e.to_string(),
+        )
+        .into_response(),
+    }
+}
+
+async fn submit_dynamic_tool_result_handler(
+    State(state): State<Arc<HttpApiState>>,
+    Path(session_id): Path<String>,
+    Json(body): Json<DynamicToolResultRequest>,
+) -> impl IntoResponse {
+    match state
+        .session_service
+        .submit_dynamic_tool_result(
+            &session_id,
+            &body.call_id,
+            &body.tool_name,
+            body.output,
+            body.success,
+        )
+        .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "dynamic_tool_result_failed",
             e.to_string(),
         )
         .into_response(),
@@ -973,6 +1011,17 @@ mod tests {
             _tool_name: &str,
             _approved: bool,
             _reason: Option<String>,
+        ) -> TalosResult<()> {
+            Ok(())
+        }
+
+        async fn submit_dynamic_tool_result(
+            &self,
+            _session_id: &str,
+            _call_id: &str,
+            _tool_name: &str,
+            _output: String,
+            _success: bool,
         ) -> TalosResult<()> {
             Ok(())
         }

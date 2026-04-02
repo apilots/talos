@@ -28,7 +28,8 @@ use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{ChatMessage, FunctionCall, LlmProvider};
 use talos_memory::{
     Memory, MemoryStore, SessionTranscriptActions, SessionTranscriptApprovalResponsePayload,
-    SessionTranscriptAuthor, SessionTranscriptBranch, SessionTranscriptEventKind,
+    SessionTranscriptAuthor, SessionTranscriptBranch,
+    SessionTranscriptDynamicToolResponsePayload, SessionTranscriptEventKind,
     SessionTranscriptHeader, SessionTranscriptPayload, SessionTranscriptRecord,
 };
 use talos_tools::ToolRegistry;
@@ -123,40 +124,6 @@ impl AgentImpl {
                 _ => None,
             })
             .collect()
-    }
-
-    fn spawn_session_memory_flush(&self, session: talos_types::TalosSession) {
-        let selected_model = if session.config.llm.model.trim().is_empty() {
-            self.model.clone()
-        } else {
-            session.config.llm.model.clone()
-        };
-        let session_id = session.context.session_id.clone();
-        let llm_provider = self.llm_provider.clone();
-        let memory_store = self.memory_store.clone();
-        let kernel_config = self.kernel_config.clone();
-
-        tokio::spawn(async move {
-            // TODO: Investigate flush latency further; session close must stay non-blocking for TUI exit.
-            if let Err(err) = flush_session_memory(
-                &session_id,
-                &selected_model,
-                llm_provider,
-                &memory_store,
-                &kernel_config,
-                false,
-                false,
-                kernel_config.memory.workspace_memory_flush_enabled,
-            )
-            .await
-            {
-                tracing::warn!(
-                    session_id = %session_id,
-                    error = %err,
-                    "background session memory flush failed"
-                );
-            }
-        });
     }
 
     fn to_agent_request(&self, request: OrchestratorRequest) -> AgentRequest {
@@ -643,6 +610,38 @@ After receiving tool outputs, continue reasoning and provide the final response.
         };
         self.memory_store.append_transcript_record(&record).await
     }
+
+    pub async fn submit_dynamic_tool_result(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        output: String,
+        success: bool,
+    ) -> TalosResult<()> {
+        let record = SessionTranscriptRecord {
+            header: SessionTranscriptHeader {
+                id: Uuid::new_v4().to_string(),
+                session_id: session_id.to_string(),
+                invocation_id: Uuid::new_v4().to_string(),
+                branch: SessionTranscriptBranch::ReactiveLoop,
+                timestamp: Utc::now(),
+            },
+            author: SessionTranscriptAuthor::System,
+            kind: SessionTranscriptEventKind::SystemMessage,
+            payload: SessionTranscriptPayload::DynamicToolResponse {
+                payload: SessionTranscriptDynamicToolResponsePayload {
+                    call_id: call_id.to_string(),
+                    tool_name: tool_name.to_string(),
+                    output,
+                    success,
+                },
+            },
+            actions: SessionTranscriptActions::default(),
+            partial: false,
+        };
+        self.memory_store.append_transcript_record(&record).await
+    }
 }
 
 fn map_thinking_source(source: KernelThinkingSource) -> TalosThinkingSource {
@@ -886,8 +885,22 @@ impl AgentOrchestrator for AgentImpl {
     }
 
     async fn close_session(&self, session: talos_types::TalosSession) -> TalosResult<()> {
-        self.spawn_session_memory_flush(session);
-        Ok(())
+        let selected_model = if session.config.llm.model.trim().is_empty() {
+            self.model.clone()
+        } else {
+            session.config.llm.model.clone()
+        };
+        flush_session_memory(
+            &session.context.session_id,
+            &selected_model,
+            self.llm_provider.clone(),
+            &self.memory_store,
+            &self.kernel_config,
+            false,
+            false,
+            self.kernel_config.memory.workspace_memory_flush_enabled,
+        )
+        .await
     }
 
     async fn submit_tool_approval(
@@ -899,6 +912,18 @@ impl AgentOrchestrator for AgentImpl {
         reason: Option<String>,
     ) -> TalosResult<()> {
         AgentImpl::submit_tool_approval(self, session_id, call_id, tool_name, approved, reason)
+            .await
+    }
+
+    async fn submit_dynamic_tool_result(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        output: String,
+        success: bool,
+    ) -> TalosResult<()> {
+        AgentImpl::submit_dynamic_tool_result(self, session_id, call_id, tool_name, output, success)
             .await
     }
 }
@@ -1058,11 +1083,23 @@ impl AgentOrchestrator for MockAgent {
     ) -> TalosResult<()> {
         Ok(())
     }
+
+    async fn submit_dynamic_tool_result(
+        &self,
+        _session_id: &str,
+        _call_id: &str,
+        _tool_name: &str,
+        _output: String,
+        _success: bool,
+    ) -> TalosResult<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Local;
     use serde_json::json;
     use std::sync::Arc;
     use talos_agent_kernel::TurnPhase;
@@ -1318,7 +1355,7 @@ mod tests {
         let file_path = _guard
             .path()
             .join("memory")
-            .join(format!("{}.md", Utc::now().format("%Y-%m-%d")));
+            .join(format!("{}.md", Local::now().format("%Y-%m-%d")));
         let mut content = None;
         for _ in 0..20 {
             match tokio::fs::read_to_string(&file_path).await {

@@ -10,7 +10,8 @@ use tracing::warn;
 use crate::handlers::{DynamicToolHandler, LocalToolHandler, McpToolHandler, ToolHandler};
 use crate::invocation::{ToolDispatchContext, ToolInvocation};
 use crate::mcp::McpConnectionManager;
-use crate::output::ToolOutputPayload;
+use crate::orchestrator::RegistryOrchestrator;
+use crate::output::{ToolDispatchOutcome, ToolOutputPayload};
 use crate::r#trait::{Tool, ToolOutput};
 use crate::router::ToolRouter;
 use crate::spec::{RegisteredToolSpec, ToolCatalog, ToolParallelism};
@@ -93,10 +94,16 @@ impl ToolRegistry {
 
     fn enforce_output_limits(
         tool_name: &str,
-        mut result: ToolOutputPayload,
+        mut result: ToolDispatchOutcome,
         max_output_bytes: usize,
-    ) -> ToolOutputPayload {
-        let (content_truncated, content_raw_size, content_returned_size) = match &mut result {
+    ) -> ToolDispatchOutcome {
+        let Some(payload) = (match &mut result {
+            ToolDispatchOutcome::Executed { payload } => Some(payload),
+            ToolDispatchOutcome::Pending { .. } => None,
+        }) else {
+            return result;
+        };
+        let (content_truncated, content_raw_size, content_returned_size) = match payload {
             ToolOutputPayload::Function { content, .. }
             | ToolOutputPayload::Resource { content, .. }
             | ToolOutputPayload::Mcp { content, .. } => {
@@ -112,7 +119,7 @@ impl ToolRegistry {
 
         if let ToolOutputPayload::Function {
             structured_content, ..
-        } = &mut result
+        } = payload
         {
             if let Some((raw_size, returned_size)) =
                 Self::truncate_structured_error(structured_content, max_output_bytes)
@@ -230,6 +237,12 @@ impl ToolRegistry {
         self.register_handler(tool_name, spec, handler);
     }
 
+    pub fn register_external_dynamic_tool(&self, spec: RegisteredToolSpec) {
+        let tool_name = spec.definition.name.clone();
+        let handler = Arc::new(DynamicToolHandler::external(spec.source));
+        self.register_handler(tool_name, spec, handler);
+    }
+
     pub fn tool_catalog(&self) -> ToolCatalog {
         ToolCatalog::new(
             self.specs
@@ -294,7 +307,7 @@ impl ToolRegistry {
         &self,
         invocation: ToolInvocation,
         context: ToolContext,
-    ) -> TalosResult<ToolOutputPayload> {
+    ) -> TalosResult<ToolDispatchOutcome> {
         self.policy_checker
             .check_tool_access(invocation.tool_name.as_str())?;
         self.execute_invocation_unchecked_with_context(invocation, context)
@@ -305,7 +318,7 @@ impl ToolRegistry {
         &self,
         invocation: ToolInvocation,
         context: ToolContext,
-    ) -> TalosResult<ToolOutputPayload> {
+    ) -> TalosResult<ToolDispatchOutcome> {
         let max_output_bytes = Self::resolve_max_output_bytes(&context);
         let tool_name = invocation.tool_name.clone();
         let result = self
@@ -322,8 +335,12 @@ impl ToolRegistry {
         &self,
         invocation: ToolInvocation,
         context: ToolDispatchContext,
-    ) -> TalosResult<ToolOutputPayload> {
+    ) -> TalosResult<ToolDispatchOutcome> {
         let invocation = self.router.normalize(invocation, &self.tool_catalog())?;
+        let orchestrator = RegistryOrchestrator::from_context(context.tool_context());
+        if let Some(pending) = orchestrator.resolve_pending(&invocation, &context)? {
+            return Ok(pending);
+        }
         let Some(handler) = self.handlers.get(invocation.tool_name.as_str()) else {
             return Err(TalosError::ToolError(format!(
                 "Tool '{}' not found",

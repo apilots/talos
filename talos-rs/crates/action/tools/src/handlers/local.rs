@@ -5,7 +5,7 @@ use talos_error::{TalosError, TalosResult};
 
 use crate::handlers::ToolHandler;
 use crate::invocation::{ToolCallPayload, ToolDispatchContext, ToolInvocation};
-use crate::output::ToolOutputPayload;
+use crate::output::{ToolDispatchOutcome, ToolOutputPayload};
 use crate::r#trait::Tool;
 use crate::spec::ToolSource;
 
@@ -38,7 +38,7 @@ impl ToolHandler for LocalToolHandler {
         &self,
         invocation: ToolInvocation,
         context: ToolDispatchContext,
-    ) -> TalosResult<ToolOutputPayload> {
+    ) -> TalosResult<ToolDispatchOutcome> {
         let ToolCallPayload::Function { arguments } = invocation.payload else {
             return Err(TalosError::ToolError(format!(
                 "Local tool '{}' requires function payload",
@@ -50,6 +50,6 @@ impl ToolHandler for LocalToolHandler {
             .tool
             .execute(arguments, context.into_tool_context())
             .await?;
-        Ok(output.into())
+        Ok(ToolDispatchOutcome::executed(ToolOutputPayload::from(output)))
     }
 }

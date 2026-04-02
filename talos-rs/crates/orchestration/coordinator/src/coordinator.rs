@@ -660,6 +660,44 @@ impl SessionService for CoordinatorImpl {
             .await?;
         Ok(())
     }
+
+    async fn submit_dynamic_tool_result(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        output: String,
+        success: bool,
+    ) -> TalosResult<()> {
+        let session = self
+            .sessions
+            .get_session(session_id)
+            .await?
+            .ok_or_else(|| {
+                talos_error::TalosError::ResourceNotFound(format!("session {}", session_id))
+            })?;
+        let (_target_agent, agent) = self.resolve_session_agent(&session).await?;
+        agent
+            .submit_dynamic_tool_result(session_id, call_id, tool_name, output, success)
+            .await?;
+
+        let response = agent
+            .run(OrchestratorRequest {
+                session: session.clone(),
+                input: Vec::new(),
+            })
+            .await?;
+        let model_for_turn = session.config.llm.model.clone();
+        self.sessions
+            .record_turn_completion(
+                &session.context.session_id,
+                &model_for_turn,
+                1,
+                &response.usage,
+            )
+            .await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -761,6 +799,17 @@ mod tests {
                 approved,
                 reason,
             ));
+            Ok(())
+        }
+
+        async fn submit_dynamic_tool_result(
+            &self,
+            _session_id: &str,
+            _call_id: &str,
+            _tool_name: &str,
+            _output: String,
+            _success: bool,
+        ) -> TalosResult<()> {
             Ok(())
         }
     }

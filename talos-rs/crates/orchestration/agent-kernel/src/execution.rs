@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use talos_error::TalosResult;
 use talos_llm_provider::{
     ChatMessage, NativeThinkingConfig, NativeThinkingSupport, ToolDefinition,
@@ -116,6 +117,21 @@ pub struct ApprovalResponsePayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DynamicToolRequestPayload {
+    pub call_id: String,
+    pub tool_name: String,
+    pub arguments: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DynamicToolResponsePayload {
+    pub call_id: String,
+    pub tool_name: String,
+    pub output: String,
+    pub success: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CompactionSummaryPayload {
     pub summary: String,
 }
@@ -146,6 +162,12 @@ pub enum EventPayload {
     },
     ApprovalResponse {
         payload: ApprovalResponsePayload,
+    },
+    DynamicToolRequest {
+        payload: DynamicToolRequestPayload,
+    },
+    DynamicToolResponse {
+        payload: DynamicToolResponsePayload,
     },
     CompactionSummary {
         payload: CompactionSummaryPayload,
@@ -284,6 +306,12 @@ pub struct ReplayToolInvocation {
     pub arguments: Value,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReplayDynamicToolResult {
+    pub output: String,
+    pub success: bool,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct LlmRequestEnvelope {
     pub messages: Vec<ChatMessage>,
@@ -295,6 +323,8 @@ pub struct LlmRequestEnvelope {
     pub contents_mode: ContentsMode,
     #[allow(dead_code)]
     pub replay_tool_invocations: Vec<ReplayToolInvocation>,
+    #[allow(dead_code)]
+    pub replay_dynamic_tool_results: HashMap<String, ReplayDynamicToolResult>,
     pub branch: ExecutionBranch,
     pub native_thinking: Option<NativeThinkingConfig>,
     pub native_thinking_support: NativeThinkingSupport,

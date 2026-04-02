@@ -177,6 +177,12 @@ pub enum SessionTranscriptPayload {
     ApprovalResponse {
         payload: SessionTranscriptApprovalResponsePayload,
     },
+    DynamicToolRequest {
+        payload: SessionTranscriptDynamicToolRequestPayload,
+    },
+    DynamicToolResponse {
+        payload: SessionTranscriptDynamicToolResponsePayload,
+    },
     Compaction {
         payload: SessionTranscriptCompactionPayload,
     },
@@ -207,6 +213,21 @@ pub struct SessionTranscriptApprovalResponsePayload {
     pub tool_name: String,
     pub approved: bool,
     pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SessionTranscriptDynamicToolRequestPayload {
+    pub call_id: String,
+    pub tool_name: String,
+    pub arguments: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionTranscriptDynamicToolResponsePayload {
+    pub call_id: String,
+    pub tool_name: String,
+    pub output: String,
+    pub success: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

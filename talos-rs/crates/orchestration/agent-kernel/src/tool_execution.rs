@@ -2,11 +2,11 @@ use crate::ToolExecutionMode;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 use talos_error::TalosResult;
-use talos_tools::{ToolInvocation, ToolOutputPayload, ToolRegistry};
+use talos_tools::{ToolDispatchOutcome, ToolInvocation, ToolOutputPayload, ToolRegistry};
 use tokio::task::JoinSet;
 
 #[derive(Debug, Clone)]
@@ -15,6 +15,7 @@ pub struct ToolExecutionContext {
     pub user_id: String,
     pub kernel_config: Arc<AgentKernelConfig>,
     pub pre_approved_call_ids: HashSet<String>,
+    pub dynamic_tool_results: HashMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,7 +30,7 @@ pub struct ToolExecutionInput {
 pub struct ToolExecutionOutput {
     pub call_id: String,
     pub tool_name: String,
-    pub payload: ToolOutputPayload,
+    pub outcome: ToolDispatchOutcome,
     #[serde(default)]
     pub is_error: bool,
 }
@@ -54,12 +55,19 @@ fn build_tool_context(
     execution_context: &ToolExecutionContext,
     registry: &ToolRegistry,
     pre_approved: bool,
+    call_id: &str,
 ) -> talos_tools::ToolContext {
     let ctx = registry.build_context(
         execution_context.session_id.clone(),
         execution_context.user_id.clone(),
         Some(execution_context.kernel_config.clone()),
     );
+    if let Some(result) = execution_context.dynamic_tool_results.get(call_id) {
+        ctx.set_state(
+            talos_tools::handlers::dynamic::dynamic_tool_state_key(call_id),
+            result.clone(),
+        );
+    }
     if pre_approved {
         ctx.with_pre_approved()
     } else {
@@ -75,7 +83,8 @@ async fn execute_single_tool_call(
     let pre_approved = execution_context
         .pre_approved_call_ids
         .contains(&call.call_id);
-    let tool_context = build_tool_context(execution_context, registry.as_ref(), pre_approved);
+    let tool_context =
+        build_tool_context(execution_context, registry.as_ref(), pre_approved, &call.call_id);
     let invocation = call.to_invocation();
     let result = registry
         .execute_invocation_with_context(invocation, tool_context)
@@ -84,16 +93,16 @@ async fn execute_single_tool_call(
         Ok(payload) => ToolExecutionOutput {
             call_id: call.call_id,
             tool_name: call.tool_name,
-            is_error: payload.is_error(),
-            payload,
+            is_error: payload.payload().map(|item| item.is_error()).unwrap_or(false),
+            outcome: payload,
         },
         Err(error) => ToolExecutionOutput {
             call_id: call.call_id,
             tool_name: call.tool_name,
-            payload: ToolOutputPayload::Mcp {
+            outcome: ToolDispatchOutcome::executed(ToolOutputPayload::Mcp {
                 content: error.to_string(),
                 is_error: true,
-            },
+            }),
             is_error: true,
         },
     }
@@ -158,7 +167,7 @@ impl ToolExecutor for ParallelToolExecutor {
                 .pre_approved_call_ids
                 .contains(&call.call_id);
             let tool_context =
-                build_tool_context(execution_context, registry.as_ref(), pre_approved);
+                build_tool_context(execution_context, registry.as_ref(), pre_approved, &call.call_id);
             join_set.spawn(async move {
                 let invocation = call.to_invocation();
                 let result = registry
@@ -168,16 +177,16 @@ impl ToolExecutor for ParallelToolExecutor {
                     Ok(payload) => ToolExecutionOutput {
                         call_id: call.call_id,
                         tool_name: call.tool_name,
-                        is_error: payload.is_error(),
-                        payload,
+                        is_error: payload.payload().map(|item| item.is_error()).unwrap_or(false),
+                        outcome: payload,
                     },
                     Err(error) => ToolExecutionOutput {
                         call_id: call.call_id,
                         tool_name: call.tool_name,
-                        payload: ToolOutputPayload::Mcp {
+                        outcome: ToolDispatchOutcome::executed(ToolOutputPayload::Mcp {
                             content: error.to_string(),
                             is_error: true,
-                        },
+                        }),
                         is_error: true,
                     },
                 };
@@ -293,6 +302,7 @@ mod tests {
             user_id: "u1".to_string(),
             kernel_config: Arc::new(AgentKernelConfig::default()),
             pre_approved_call_ids: HashSet::new(),
+            dynamic_tool_results: HashMap::new(),
         };
         let calls = vec![
             ToolExecutionInput {
@@ -348,6 +358,7 @@ mod tests {
             user_id: "u1".to_string(),
             kernel_config: Arc::new(AgentKernelConfig::default()),
             pre_approved_call_ids: HashSet::new(),
+            dynamic_tool_results: HashMap::new(),
         };
         let calls = vec![
             ToolExecutionInput {
