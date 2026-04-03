@@ -13,7 +13,7 @@ use utils::*;
 use async_trait::async_trait;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
@@ -2458,7 +2458,9 @@ impl TuiApp {
         let left_block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Rgb(106, 111, 123)))
-            .title(format!("Talos TUI ({})", APP_VERSION));
+            .title(format!("Talos TUI ({})", APP_VERSION))
+            .title_alignment(Alignment::Left)
+            .style(Style::default().fg(Color::White));
         let left_inner = left_block.inner(area);
         f.render_widget(left_block, area);
 
@@ -2567,12 +2569,10 @@ impl TuiApp {
             Style::default()
                 .bg(Color::Rgb(36, 39, 46))
                 .fg(Color::Cyan)
-                .add_modifier(Modifier::DIM)
         } else {
             Style::default()
                 .bg(Color::Rgb(36, 39, 46))
-                .fg(Color::Gray)
-                .add_modifier(Modifier::DIM)
+                .fg(Color::White)
         };
         let status_block = Block::default().style(Style::default().bg(Color::Rgb(36, 39, 46)));
         f.render_widget(status_block, left_chunks[3]);
@@ -3420,17 +3420,18 @@ impl TuiApp {
 
     fn system_block_lines(&self, block: &ChatBlock, _content_width: usize) -> Vec<RenderedChatLine> {
         let mut lines = vec![];
-        let system_style = Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM);
+        let label_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+        let body_style = Style::default().fg(Color::White);
 
         let content_line = Line::from(vec![
-            Span::styled("ℹ ", system_style),
-            Span::styled(block.content.clone(), system_style),
+            Span::styled("[SYS] ", label_style),
+            Span::styled(block.content.clone(), body_style),
         ]);
 
         lines.push(RenderedChatLine {
             display: content_line.clone(),
             copy_projection: Some(CopyProjection {
-                text: format!("ℹ {}", block.content),
+                text: format!("[SYS] {}", block.content),
                 display_start_col: 0,
             }),
         });
