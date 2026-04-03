@@ -25,6 +25,7 @@ talos-router = { path = "../../crates/orchestration/router" }
 talos-session-store = { path = "../../crates/orchestration/session-store" }
 talos-storage = { path = "../../crates/infra/storage" }
 talos-config = { path = "../../crates/infra/config" }
+talos-logging = { path = "../../crates/infra/logging" }
 talos-client = { path = "../sdk" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

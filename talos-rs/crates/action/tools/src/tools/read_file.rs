@@ -14,7 +14,7 @@ impl Tool for ReadFileTool {
     }
 
     fn description(&self) -> &str {
-        "Read a file from an absolute path and return numbered lines."
+        "Read a specific local file from a user-provided absolute path and return numbered lines. Prefer this after list_dir or grep_files has already narrowed the target file."
     }
 
     fn parameters_schema(&self) -> Option<Value> {

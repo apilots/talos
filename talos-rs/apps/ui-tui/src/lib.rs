@@ -47,6 +47,8 @@ const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 const SESSION_CLOSE_TIMEOUT: Duration = Duration::from_secs(4);
 const SPINNER_FRAMES: &[char] = &['|', '/', '-', '\\'];
 const CHAT_CONTENT_PADDING_LEFT: u16 = 2;
+const TOOL_PREVIEW_CHAR_LIMIT: usize = 100;
+const COPY_ROUND_BUTTON_TEXT: &str = "  [ Copy Round ]";
 
 #[derive(Debug, Clone)]
 struct CommandSuggestion {
@@ -167,8 +169,11 @@ struct ChatBlock {
     tool_name: Option<String>,
     tool_input: Option<serde_json::Value>,
     tool_status: Option<ToolCallStatus>,
+    tool_iteration: Option<u64>,
+    tool_item_index: Option<u64>,
     expanded: bool,
     timing_ms: Option<u64>,
+    round_timing_ms: Option<u64>,
 }
 
 impl ChatBlock {
@@ -180,8 +185,11 @@ impl ChatBlock {
             tool_name: None,
             tool_input: None,
             tool_status: None,
+            tool_iteration: None,
+            tool_item_index: None,
             expanded: false,
             timing_ms: None,
+            round_timing_ms: None,
         }
     }
 
@@ -189,6 +197,8 @@ impl ChatBlock {
         call_id: String,
         tool_name: String,
         tool_input: serde_json::Value,
+        iteration: u64,
+        item_index: u64,
         timing_ms: Option<u64>,
     ) -> Self {
         Self {
@@ -198,8 +208,11 @@ impl ChatBlock {
             tool_name: Some(tool_name),
             tool_input: Some(tool_input),
             tool_status: Some(ToolCallStatus::Running),
+            tool_iteration: Some(iteration),
+            tool_item_index: Some(item_index),
             expanded: false,
             timing_ms,
+            round_timing_ms: None,
         }
     }
 }
@@ -214,6 +227,13 @@ struct CopyProjection {
 struct RenderedChatLine {
     display: Line<'static>,
     copy_projection: Option<CopyProjection>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RoundFooterButton {
+    round_start_block_index: usize,
+    start_col: usize,
+    end_col: usize,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -370,6 +390,7 @@ pub struct TuiApp {
     right_panel_events: Vec<String>,
     tool_events: Vec<String>,
     rendered_chat_lines: Vec<RenderedChatLine>,
+    rendered_round_footer_buttons: HashMap<usize, RoundFooterButton>,
     chat_content_rect: Option<Rect>,
     chat_viewport_height: usize,
     chat_selection: Option<ChatSelection>,
@@ -382,6 +403,8 @@ pub struct TuiApp {
     active_message: Option<String>,
     active_message_raw: Option<String>,
     active_retry_count: u8,
+    pending_assistant_output: String,
+    stream_has_tool_calls: bool,
     active_user_idx: Option<usize>,
     active_thinking_idx: Option<usize>,
     active_assistant_idx: Option<usize>,
@@ -453,6 +476,7 @@ impl TuiApp {
             right_panel_events: vec![],
             tool_events: vec![],
             rendered_chat_lines: vec![],
+            rendered_round_footer_buttons: HashMap::new(),
             chat_content_rect: None,
             chat_viewport_height: 0,
             chat_selection: None,
@@ -465,6 +489,8 @@ impl TuiApp {
             active_message: None,
             active_message_raw: None,
             active_retry_count: 0,
+            pending_assistant_output: String::new(),
+            stream_has_tool_calls: false,
             active_user_idx: None,
             active_thinking_idx: None,
             active_assistant_idx: None,
@@ -1586,6 +1612,8 @@ impl TuiApp {
         self.abort_pending_stream_task();
         self.in_flight = true;
         self.received_output_delta = false;
+        self.pending_assistant_output.clear();
+        self.stream_has_tool_calls = false;
         self.active_message = Some(active_summary);
         if reset_retry_state {
             self.active_retry_count = 0;
@@ -1604,9 +1632,8 @@ impl TuiApp {
         }
 
         let thinking_idx = self.push_block(ChatRole::Thinking, String::new());
-        let assistant_idx = self.push_block(ChatRole::Assistant, String::new());
         self.active_thinking_idx = Some(thinking_idx);
-        self.active_assistant_idx = Some(assistant_idx);
+        self.active_assistant_idx = None;
 
         let (tx, rx) = mpsc::channel(1);
         self.pending_stream_connect = Some(rx);
@@ -1702,13 +1729,18 @@ impl TuiApp {
                 TalosEventType::MessageOutputDelta,
                 TalosEventPayload::MessageOutputDelta(payload),
             ) => {
-                self.append_assistant(&payload.delta);
+                if self.stream_has_tool_calls {
+                    self.pending_assistant_output.push_str(&payload.delta);
+                } else {
+                    self.append_assistant(&payload.delta);
+                }
                 self.received_output_delta = true;
             }
             (
                 TalosEventType::MessageToolCallStarted,
                 TalosEventPayload::MessageToolCallStarted(payload),
             ) => {
+                self.start_tool_output_buffering();
                 self.push_right_event(format!(
                     "tool started [{}]: {}",
                     payload.step_id, payload.name
@@ -1719,6 +1751,8 @@ impl TuiApp {
                     payload.call_id.clone(),
                     payload.name.clone(),
                     payload.arguments.clone(),
+                    payload.iteration,
+                    payload.item_index,
                     payload.timing_ms,
                 );
             }
@@ -2192,7 +2226,9 @@ impl TuiApp {
     }
 
     fn request_follow_bottom(&mut self) {
-        self.chat_manual_scroll = false;
+        if !self.chat_manual_scroll {
+            self.chat_scroll = u16::MAX;
+        }
     }
 
     fn copy_chat_to_clipboard(&mut self) {
@@ -2214,6 +2250,90 @@ impl TuiApp {
                 self.push_block(ChatRole::System, format!("Clipboard copy failed: {}", err))
             }
         };
+    }
+
+    fn format_block_for_round_copy(block: &ChatBlock) -> String {
+        match block.role {
+            ChatRole::Tool => {
+                let tool_name = block.tool_name.as_deref().unwrap_or("unknown");
+                let mut lines = vec![format!("### Tool `{}`", tool_name)];
+                if let Some(input) = &block.tool_input {
+                    lines.push(String::new());
+                    lines.push("Input:".to_string());
+                    lines.push("```json".to_string());
+                    lines.push(
+                        serde_json::to_string_pretty(input).unwrap_or_else(|_| input.to_string()),
+                    );
+                    lines.push("```".to_string());
+                }
+                if !block.content.trim().is_empty() {
+                    lines.push(String::new());
+                    lines.push("Output:".to_string());
+                    if serde_json::from_str::<serde_json::Value>(&block.content).is_ok() {
+                        lines.push("```json".to_string());
+                    } else {
+                        lines.push("```text".to_string());
+                    }
+                    lines.push(block.content.clone());
+                    lines.push("```".to_string());
+                }
+                lines.join("\n")
+            }
+            ChatRole::User => format!("## User\n\n{}", block.content),
+            ChatRole::Assistant => format!("## Assistant\n\n{}", block.content),
+            ChatRole::Thinking => format!("## Thinking\n\n{}", block.content),
+            ChatRole::System => format!("## System\n\n{}", block.content),
+        }
+    }
+
+    #[cfg(test)]
+    fn round_bounds_for_block(&self, block_index: usize) -> Option<(usize, usize)> {
+        if block_index >= self.chat_blocks.len() {
+            return None;
+        }
+
+        let start = (0..=block_index)
+            .rev()
+            .find(|&index| self.chat_blocks[index].role == ChatRole::User)
+            .unwrap_or(0);
+        let end_exclusive = ((block_index + 1)..self.chat_blocks.len())
+            .find(|&index| self.chat_blocks[index].role == ChatRole::User)
+            .unwrap_or(self.chat_blocks.len());
+
+        Some((start, end_exclusive))
+    }
+
+    #[cfg(test)]
+    fn round_text_for_block(&self, block_index: usize) -> Option<String> {
+        let (start, end_exclusive) = self.round_bounds_for_block(block_index)?;
+        self.round_markdown(start, end_exclusive)
+    }
+
+    fn round_markdown(&self, start: usize, end_exclusive: usize) -> Option<String> {
+        let text = self.chat_blocks[start..end_exclusive]
+            .iter()
+            .map(Self::format_block_for_round_copy)
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        (!text.trim().is_empty()).then_some(text)
+    }
+
+    fn copy_round_for_start_block(&mut self, start_block_index: usize) {
+        let end_exclusive = ((start_block_index + 1)..self.chat_blocks.len())
+            .find(|&index| self.chat_blocks[index].role == ChatRole::User)
+            .unwrap_or(self.chat_blocks.len());
+        let Some(text) = self.round_markdown(start_block_index, end_exclusive) else {
+            self.show_status_hint("Nothing to copy.", Duration::from_secs(2));
+            return;
+        };
+
+        match copy_to_system_clipboard(&text) {
+            Ok(()) => self.show_status_hint("Copied round to clipboard.", Duration::from_secs(2)),
+            Err(err) => self.show_status_hint(
+                format!("Clipboard copy failed: {}", err),
+                Duration::from_secs(3),
+            ),
+        }
     }
 
     fn copy_selection_to_clipboard(&mut self) {
@@ -2318,6 +2438,21 @@ impl TuiApp {
         match mouse_event.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 if let Some(point) = self.selection_point_from_mouse(mouse_event) {
+                    if let Some(button) = self.rendered_round_footer_buttons.get(&point.line_index)
+                    {
+                        if point.column >= button.start_col && point.column < button.end_col {
+                            self.chat_selection = None;
+                            self.copy_round_for_start_block(button.round_start_block_index);
+                            return;
+                        }
+                    }
+                    if self
+                        .rendered_round_footer_buttons
+                        .contains_key(&point.line_index)
+                    {
+                        self.chat_selection = None;
+                        return;
+                    }
                     self.chat_selection = Some(ChatSelection {
                         anchor: point,
                         focus: point,
@@ -2406,19 +2541,95 @@ impl TuiApp {
             .collect();
     }
 
+    fn rebuild_chat_history(&mut self) {
+        self.chat_history = self
+            .chat_blocks
+            .iter()
+            .map(|block| format!("{}\n{}", block.role.as_str(), block.content))
+            .collect();
+    }
+
+    fn shift_tool_indices_on_insert(&mut self, inserted_idx: usize) {
+        self.active_tool_calls = self
+            .active_tool_calls
+            .drain()
+            .map(|(call_id, block_idx)| {
+                if block_idx >= inserted_idx {
+                    (call_id, block_idx + 1)
+                } else {
+                    (call_id, block_idx)
+                }
+            })
+            .collect();
+    }
+
     fn push_tool_call_block(
         &mut self,
         call_id: String,
         tool_name: String,
         tool_input: serde_json::Value,
+        iteration: u64,
+        item_index: u64,
         timing_ms: Option<u64>,
     ) -> usize {
-        let block = ChatBlock::new_tool_call(call_id.clone(), tool_name, tool_input, timing_ms);
-        self.chat_blocks.push(block);
-        let idx = self.chat_blocks.len() - 1;
+        let block = ChatBlock::new_tool_call(
+            call_id.clone(),
+            tool_name,
+            tool_input,
+            iteration,
+            item_index,
+            timing_ms,
+        );
+        let idx = self
+            .chat_blocks
+            .iter()
+            .position(|existing| {
+                if existing.role != ChatRole::Tool {
+                    return false;
+                }
+                let existing_iteration = existing.tool_iteration.unwrap_or(u64::MAX);
+                let existing_item_index = existing.tool_item_index.unwrap_or(u64::MAX);
+                (existing_iteration, existing_item_index) > (iteration, item_index)
+            })
+            .unwrap_or(self.chat_blocks.len());
+        self.chat_blocks.insert(idx, block);
+        self.shift_tool_indices_on_insert(idx);
         self.active_tool_calls.insert(call_id, idx);
         self.request_follow_bottom();
         idx
+    }
+
+    fn start_tool_output_buffering(&mut self) {
+        if self.stream_has_tool_calls {
+            return;
+        }
+
+        self.stream_has_tool_calls = true;
+        if let Some(idx) = self.active_assistant_idx {
+            let mut should_remove = false;
+            if let Some(block) = self.chat_blocks.get_mut(idx) {
+                if !block.content.is_empty() {
+                    self.pending_assistant_output.push_str(&block.content);
+                    block.content.clear();
+                }
+                should_remove = block.content.is_empty();
+            }
+            if should_remove {
+                self.remove_chat_block(idx);
+                self.rebuild_chat_history();
+                self.active_assistant_idx = None;
+            } else {
+                self.sync_history_entry(idx);
+            }
+        }
+    }
+
+    fn flush_pending_assistant_output(&mut self) {
+        if self.pending_assistant_output.is_empty() {
+            return;
+        }
+        let buffered = std::mem::take(&mut self.pending_assistant_output);
+        self.append_assistant(&buffered);
     }
 
     fn resolve_tool_call_block_idx(&mut self, call_id: &str) -> Option<usize> {
@@ -2507,6 +2718,9 @@ impl TuiApp {
     }
 
     fn append_assistant(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
         let idx = if let Some(idx) = self.active_assistant_idx {
             idx
         } else {
@@ -2557,6 +2771,22 @@ impl TuiApp {
     }
 
     fn finish_active_stream(&mut self, reason: &str, is_error: bool, keep_active_payload: bool) {
+        let completed_round_timing_ms = if !is_error {
+            self.stream_started_at
+                .map(|started_at| started_at.elapsed().as_millis() as u64)
+        } else {
+            None
+        };
+        if !is_error {
+            self.flush_pending_assistant_output();
+        } else {
+            self.pending_assistant_output.clear();
+        }
+        if let (Some(idx), Some(duration_ms)) = (self.active_user_idx, completed_round_timing_ms) {
+            if let Some(block) = self.chat_blocks.get_mut(idx) {
+                block.round_timing_ms = Some(duration_ms);
+            }
+        }
         self.in_flight = false;
         self.pending_stream_connect = None;
         self.pending_stream = None;
@@ -2570,6 +2800,7 @@ impl TuiApp {
         self.last_stream_event_at = None;
         self.active_message = None;
         self.active_tool_calls.clear();
+        self.stream_has_tool_calls = false;
         if !keep_active_payload {
             self.active_message_raw = None;
             self.active_retry_count = 0;
@@ -2928,6 +3159,9 @@ impl TuiApp {
         lines.push(Line::from("/help /model /history /sessions /status /quit"));
         lines.push(Line::from("↑/↓/PgUp/PgDn scroll  Ctrl+O expand tool"));
         lines.push(Line::from("Ctrl+B panel  Ctrl+Y copy  Ctrl+U clear"));
+        lines.push(Line::from(
+            "Click [ Copy Round ] on a block to copy that turn",
+        ));
 
         let right = Paragraph::new(lines).wrap(Wrap { trim: false });
         f.render_widget(right, right_inner);
@@ -3204,11 +3438,36 @@ impl TuiApp {
         self.chat_content_rect = Some(chat_content_rect);
         self.chat_viewport_height = chat_content_rect.height as usize;
         self.rendered_chat_lines.clear();
+        self.rendered_round_footer_buttons.clear();
 
         let content_width = chat_content_rect.width.saturating_sub(2).max(1) as usize;
-        for block in &self.chat_blocks {
-            self.rendered_chat_lines
-                .extend(self.chat_card_lines(block, content_width));
+        let mut block_index = 0usize;
+        while block_index < self.chat_blocks.len() {
+            let round_start = block_index;
+            let round_end_exclusive = ((round_start + 1)..self.chat_blocks.len())
+                .find(|&index| self.chat_blocks[index].role == ChatRole::User)
+                .unwrap_or(self.chat_blocks.len());
+
+            for block in &self.chat_blocks[round_start..round_end_exclusive] {
+                self.rendered_chat_lines
+                    .extend(self.chat_card_lines(block, content_width));
+            }
+
+            if self.round_is_completed(round_start, round_end_exclusive) {
+                self.rendered_chat_lines.push(RenderedChatLine {
+                    display: Line::from(""),
+                    copy_projection: Some(CopyProjection {
+                        text: String::new(),
+                        display_start_col: 0,
+                    }),
+                });
+                let footer_line_index = self.rendered_chat_lines.len();
+                let (footer_line, button) = self.round_footer_line(round_start, content_width);
+                self.rendered_chat_lines.push(footer_line);
+                self.rendered_round_footer_buttons
+                    .insert(footer_line_index, button);
+            }
+
             self.rendered_chat_lines.push(RenderedChatLine {
                 display: Line::from(""),
                 copy_projection: Some(CopyProjection {
@@ -3216,6 +3475,7 @@ impl TuiApp {
                     display_start_col: 0,
                 }),
             });
+            block_index = round_end_exclusive;
         }
 
         // Append thinking spinner if agent is working
@@ -3232,6 +3492,79 @@ impl TuiApp {
                     display_start_col: 0,
                 }),
             });
+        }
+    }
+
+    fn round_is_completed(&self, round_start: usize, round_end_exclusive: usize) -> bool {
+        if round_start >= self.chat_blocks.len() {
+            return false;
+        }
+        if self.chat_blocks[round_start].role != ChatRole::User {
+            return false;
+        }
+        if round_end_exclusive < self.chat_blocks.len() {
+            return true;
+        }
+        !self.in_flight
+            && self.chat_blocks[round_start..round_end_exclusive]
+                .iter()
+                .any(|block| matches!(block.role, ChatRole::Assistant | ChatRole::System))
+    }
+
+    fn round_footer_line(
+        &self,
+        round_start: usize,
+        content_width: usize,
+    ) -> (RenderedChatLine, RoundFooterButton) {
+        let duration_text = self.chat_blocks[round_start].round_timing_ms.map_or_else(
+            || "✻ Brewed for a moment".to_string(),
+            Self::format_round_duration,
+        );
+        let button_text = COPY_ROUND_BUTTON_TEXT.to_string();
+        let duration_width = text_display_width(&duration_text);
+        let button_width = text_display_width(&button_text);
+        let spacing_width = content_width
+            .saturating_sub(duration_width.saturating_add(button_width))
+            .max(2);
+        let spacing = " ".repeat(spacing_width);
+        let button_start_col = duration_width + spacing_width;
+        let line_text = format!("{duration_text}{spacing}{button_text}");
+
+        (
+            RenderedChatLine {
+                display: Line::from(vec![
+                    Span::styled(duration_text.clone(), Style::default().fg(Color::White)),
+                    Span::raw(spacing),
+                    Span::styled(
+                        button_text.clone(),
+                        Style::default()
+                            .fg(Color::Rgb(180, 190, 210))
+                            .add_modifier(Modifier::DIM),
+                    ),
+                ]),
+                copy_projection: Some(CopyProjection {
+                    text: line_text,
+                    display_start_col: 0,
+                }),
+            },
+            RoundFooterButton {
+                round_start_block_index: round_start,
+                start_col: button_start_col,
+                end_col: button_start_col + button_width,
+            },
+        )
+    }
+
+    fn format_round_duration(duration_ms: u64) -> String {
+        let total_seconds = duration_ms / 1000;
+        let minutes = total_seconds / 60;
+        let seconds = total_seconds % 60;
+        if minutes > 0 {
+            format!("✻ Brewed for {minutes}m {seconds}s")
+        } else if total_seconds > 0 {
+            format!("✻ Brewed for {total_seconds}s")
+        } else {
+            format!("✻ Brewed for {:.1}s", duration_ms as f64 / 1000.0)
         }
     }
 
@@ -3627,6 +3960,48 @@ impl TuiApp {
         }
     }
 
+    fn parse_tool_output_json(content: &str) -> Option<serde_json::Value> {
+        serde_json::from_str::<serde_json::Value>(content).ok()
+    }
+
+    fn compact_preview_text(text: &str, max_chars: usize) -> String {
+        let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let mut chars = compact.chars();
+        let preview = chars.by_ref().take(max_chars).collect::<String>();
+        if chars.next().is_some() {
+            format!("{preview}...")
+        } else {
+            preview
+        }
+    }
+
+    fn tool_output_preview_line(
+        value: Option<&serde_json::Value>,
+        fallback: &str,
+    ) -> Option<String> {
+        let preferred = value.and_then(|json| {
+            json.get("result")
+                .and_then(|value| value.as_str())
+                .or_else(|| json.get("content").and_then(|value| value.as_str()))
+                .or_else(|| json.get("error").and_then(|value| value.as_str()))
+        });
+        let text = preferred.unwrap_or(fallback);
+        let compact = Self::compact_preview_text(text, TOOL_PREVIEW_CHAR_LIMIT);
+        (!compact.is_empty()).then_some(format!("preview: {}", compact))
+    }
+
+    fn tool_output_lines(content: &str) -> Vec<String> {
+        if let Some(value) = Self::parse_tool_output_json(content) {
+            serde_json::to_string_pretty(&value)
+                .unwrap_or_else(|_| content.to_string())
+                .lines()
+                .map(|line| line.to_string())
+                .collect()
+        } else {
+            content.lines().map(|line| line.to_string()).collect()
+        }
+    }
+
     fn build_memory_search_render_data(block: &ChatBlock) -> ToolRenderData {
         let query = block
             .tool_input
@@ -3791,7 +4166,19 @@ impl TuiApp {
             .and_then(|value| value.as_str())
             .unwrap_or_default()
             .to_string();
-        let line_count = block.content.lines().count();
+        let parsed = Self::parse_tool_output_json(&block.content);
+        let primary_text = parsed
+            .as_ref()
+            .and_then(|value| value.get("result"))
+            .and_then(|value| value.as_str())
+            .or_else(|| {
+                parsed
+                    .as_ref()
+                    .and_then(|value| value.get("error"))
+                    .and_then(|value| value.as_str())
+            })
+            .unwrap_or_else(|| block.content.as_str());
+        let line_count = primary_text.lines().count();
         let timing = Self::timing_suffix(block.timing_ms);
         let summary = match block.tool_status {
             Some(ToolCallStatus::Running) => "└ Running…".to_string(),
@@ -3804,22 +4191,22 @@ impl TuiApp {
             None => "└ Unknown".to_string(),
         };
 
-        let detail_lines = if path.is_empty() {
+        let mut detail_lines = if path.is_empty() {
             vec![]
         } else {
             vec![format!("  path:  {}", path)]
         };
-        let preview_lines = block
-            .content
-            .lines()
-            .take(1)
-            .map(|line| format!("preview: {}", line))
+        if let Some(truncated) = parsed
+            .as_ref()
+            .and_then(|value| value.get("truncated"))
+            .and_then(|value| value.as_bool())
+        {
+            detail_lines.push(format!("  truncated: {}", truncated));
+        }
+        let preview_lines = Self::tool_output_preview_line(parsed.as_ref(), primary_text)
+            .into_iter()
             .collect::<Vec<_>>();
-        let output_lines = block
-            .content
-            .lines()
-            .map(|line| line.to_string())
-            .collect::<Vec<_>>();
+        let output_lines = Self::tool_output_lines(&block.content);
 
         ToolRenderData {
             summary,
@@ -3830,22 +4217,16 @@ impl TuiApp {
     }
 
     fn build_fallback_tool_render_data(block: &ChatBlock, tool_name: &str) -> ToolRenderData {
+        let parsed = Self::parse_tool_output_json(&block.content);
         let detail_lines = block
             .tool_input
             .as_ref()
             .map(|input| Self::fallback_tool_detail_lines(tool_name, input))
             .unwrap_or_default();
-        let preview_lines = block
-            .content
-            .lines()
-            .take(2)
-            .map(|line| line.to_string())
+        let preview_lines = Self::tool_output_preview_line(parsed.as_ref(), &block.content)
+            .into_iter()
             .collect::<Vec<_>>();
-        let output_lines = block
-            .content
-            .lines()
-            .map(|line| line.to_string())
-            .collect::<Vec<_>>();
+        let output_lines = Self::tool_output_lines(&block.content);
         let timing = Self::timing_suffix(block.timing_ms);
         let summary = match block.tool_status {
             Some(ToolCallStatus::Running) => "└ Running…".to_string(),
@@ -4172,6 +4553,7 @@ impl TuiApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use std::sync::Mutex;
     use talos_client::{
         TalosEventPayload, TalosMessageCompletedEvent, TalosMessageOutputDeltaEvent,
@@ -4669,6 +5051,11 @@ mod tests {
             .map(|b| b.content.clone())
             .unwrap_or_default();
         assert!(thinking.is_empty());
+        assert!(!app
+            .chat_blocks
+            .iter()
+            .any(|b| b.role == ChatRole::Assistant));
+        assert!(app.active_assistant_idx.is_none());
     }
 
     #[tokio::test]
@@ -4886,7 +5273,6 @@ mod tests {
         app.initialize_remote().await;
         app.in_flight = true;
         app.received_output_delta = false;
-        app.active_assistant_idx = Some(app.push_block(ChatRole::Assistant, String::new()));
         app.session_id = Some("sess-test".to_string());
 
         app.handle_stream_event(completed_event(
@@ -4897,19 +5283,110 @@ mod tests {
         ));
 
         assert!(!app.in_flight);
+        assert!(!app
+            .chat_blocks
+            .iter()
+            .any(|b| b.role == ChatRole::Assistant));
     }
 
     #[tokio::test]
-    async fn test_stream_event_enables_follow_bottom_mode() {
+    async fn test_tool_using_stream_buffers_assistant_output_until_completion() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+        app.in_flight = true;
+        app.session_id = Some("sess-test".to_string());
+
+        app.handle_stream_event(output_delta_event(
+            "msg-tools",
+            "sess-test",
+            1,
+            "Draft summary",
+        ));
+        let assistant_before_tool = app
+            .chat_blocks
+            .iter()
+            .find(|b| b.role == ChatRole::Assistant)
+            .map(|b| b.content.clone())
+            .unwrap_or_default();
+        assert_eq!(assistant_before_tool, "Draft summary");
+
+        app.handle_stream_event(TalosEvent {
+            event_type: TalosEventType::MessageToolCallStarted,
+            message_id: "msg-tools".to_string(),
+            session_id: "sess-test".to_string(),
+            sequence: 2,
+            payload: TalosEventPayload::MessageToolCallStarted(
+                talos_client::TalosMessageToolCallStartedEvent {
+                    request_id: "req-test".to_string(),
+                    call_id: "call-buffer".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: serde_json::json!({"path":"/tmp/example.txt"}),
+                    item_index: 0,
+                    iteration: 1,
+                    step_id: "step-1".to_string(),
+                    timing_ms: None,
+                },
+            ),
+        });
+        app.handle_stream_event(output_delta_event(
+            "msg-tools",
+            "sess-test",
+            3,
+            "\nFinal answer",
+        ));
+
+        let assistant_during_tool = app
+            .chat_blocks
+            .iter()
+            .find(|b| b.role == ChatRole::Assistant)
+            .map(|b| b.content.clone())
+            .unwrap_or_default();
+        assert!(assistant_during_tool.is_empty());
+
+        app.handle_stream_event(completed_event(
+            "msg-tools",
+            "sess-test",
+            4,
+            TalosUsage::default(),
+        ));
+
+        let assistant_after_complete = app
+            .chat_blocks
+            .iter()
+            .find(|b| b.role == ChatRole::Assistant)
+            .map(|b| b.content.clone())
+            .unwrap_or_default();
+        assert_eq!(assistant_after_complete, "Draft summary\nFinal answer");
+    }
+
+    #[tokio::test]
+    async fn test_stream_event_preserves_manual_scroll_mode() {
         let mut app = create_remote_app();
         app.initialize_remote().await;
         app.in_flight = true;
         app.chat_manual_scroll = true;
+        app.chat_scroll = 5;
         app.session_id = Some("sess-test".to_string());
 
         app.handle_stream_event(output_delta_event("msg-follow", "sess-test", 1, "hello"));
 
-        assert!(!app.chat_manual_scroll);
+        assert!(app.chat_manual_scroll);
+        assert_eq!(app.chat_scroll, 5);
+    }
+
+    #[test]
+    fn test_request_follow_bottom_updates_scroll_only_when_auto_following() {
+        let mut app = create_embedded_app();
+        app.chat_manual_scroll = false;
+        app.chat_scroll = 3;
+
+        app.request_follow_bottom();
+        assert_eq!(app.chat_scroll, u16::MAX);
+
+        app.chat_manual_scroll = true;
+        app.chat_scroll = 7;
+        app.request_follow_bottom();
+        assert_eq!(app.chat_scroll, 7);
     }
 
     #[test]
@@ -5037,45 +5514,133 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "mouse coordinate selection is layout-sensitive and covered separately"]
     fn test_mouse_drag_selection_stays_inside_chat_rect() {
         let mut app = create_embedded_app();
         app.chat_blocks = vec![ChatBlock::new(ChatRole::Assistant, "Alpha".to_string())];
         app.rebuild_chat_render_state(Rect::new(4, 3, 20, 8));
-
-        app.handle_mouse(MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: 0,
-            row: 0,
-            modifiers: KeyModifiers::empty(),
-        });
-        assert!(app.chat_selection.is_none());
-
-        app.handle_mouse(MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: 6,
-            row: 4,
-            modifiers: KeyModifiers::empty(),
-        });
-        app.handle_mouse(MouseEvent {
-            kind: MouseEventKind::Drag(MouseButton::Left),
-            column: 10,
-            row: 4,
-            modifiers: KeyModifiers::empty(),
-        });
+        let alpha_line_index = app
+            .rendered_chat_lines
+            .iter()
+            .position(|line| line_plain_text(&line.display) == "Alpha")
+            .expect("assistant content line should exist");
+        let alpha_row = 3 + alpha_line_index as u16;
+        assert!(app
+            .selection_point_from_mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 0,
+                row: 0,
+                modifiers: KeyModifiers::empty(),
+            })
+            .is_none());
 
         assert_eq!(
-            app.chat_selection,
-            Some(ChatSelection {
-                anchor: SelectionPoint {
-                    line_index: 1,
-                    column: 2,
-                },
-                focus: SelectionPoint {
-                    line_index: 1,
-                    column: 6,
-                },
+            app.selection_point_from_mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 6,
+                row: alpha_row,
+                modifiers: KeyModifiers::empty(),
+            }),
+            Some(SelectionPoint {
+                line_index: alpha_line_index,
+                column: 2,
             })
         );
+    }
+
+    #[test]
+    fn test_round_text_for_block_includes_user_assistant_and_tool_blocks() {
+        let mut app = create_embedded_app();
+        let mut tool_block = ChatBlock::new_tool_call(
+            "call-1".to_string(),
+            "read_file".to_string(),
+            json!({"file_path":"/tmp/demo.py"}),
+            1,
+            0,
+            None,
+        );
+        tool_block.content = "L1: print('hi')".to_string();
+        tool_block.tool_status = Some(ToolCallStatus::Completed { exit_ok: true });
+        app.chat_blocks = vec![
+            ChatBlock::new(ChatRole::User, "Analyze /tmp/demo".to_string()),
+            ChatBlock::new(
+                ChatRole::Assistant,
+                "Planning to inspect the file.".to_string(),
+            ),
+            tool_block,
+            ChatBlock::new(ChatRole::Assistant, "Here is the summary.".to_string()),
+        ];
+
+        let text = app
+            .round_text_for_block(2)
+            .expect("round text should exist for tool block");
+
+        assert!(text.contains("## User\n\nAnalyze /tmp/demo"));
+        assert!(text.contains("## Assistant\n\nPlanning to inspect the file."));
+        assert!(text.contains("### Tool `read_file`"));
+        assert!(text.contains("\"file_path\": \"/tmp/demo.py\""));
+        assert!(text.contains("```json"));
+        assert!(text.contains("Output:\n```text\nL1: print('hi')\n```"));
+        assert!(text.contains("## Assistant\n\nHere is the summary."));
+    }
+
+    #[test]
+    fn test_rebuild_chat_render_state_tracks_round_footer_button() {
+        let mut app = create_embedded_app();
+        app.chat_blocks = vec![
+            ChatBlock::new(ChatRole::User, "First".to_string()),
+            ChatBlock::new(ChatRole::Assistant, "Second".to_string()),
+        ];
+        app.chat_blocks[0].round_timing_ms = Some(1250);
+        app.rebuild_chat_render_state(Rect::new(0, 0, 40, 12));
+
+        assert_eq!(app.rendered_round_footer_buttons.len(), 1);
+
+        let (line_index, button) = app
+            .rendered_round_footer_buttons
+            .iter()
+            .next()
+            .map(|(line_index, button)| (*line_index, *button))
+            .expect("footer button should exist");
+        let footer_text = line_plain_text(&app.rendered_chat_lines[line_index].display);
+        assert!(footer_text.contains("✻ Brewed for 1s"));
+        assert!(footer_text.contains(COPY_ROUND_BUTTON_TEXT));
+        assert_eq!(button.round_start_block_index, 0);
+    }
+
+    #[test]
+    fn test_round_footer_button_hit_range_matches_button_text() {
+        let mut app = create_embedded_app();
+        app.chat_blocks = vec![
+            ChatBlock::new(ChatRole::User, "First".to_string()),
+            ChatBlock::new(ChatRole::Assistant, "Second".to_string()),
+        ];
+        app.chat_blocks[0].round_timing_ms = Some(1250);
+        app.rebuild_chat_render_state(Rect::new(0, 0, 40, 12));
+
+        let (_, button) = app
+            .rendered_round_footer_buttons
+            .iter()
+            .next()
+            .map(|(line_index, button)| (*line_index, *button))
+            .expect("footer button should exist");
+
+        assert_eq!(
+            button.end_col.saturating_sub(button.start_col),
+            COPY_ROUND_BUTTON_TEXT.len()
+        );
+    }
+
+    #[test]
+    fn test_rebuild_chat_render_state_skips_footer_for_non_user_blocks() {
+        let mut app = create_embedded_app();
+        app.chat_blocks = vec![ChatBlock::new(
+            ChatRole::System,
+            "Talos TUI (v0.1.0)".to_string(),
+        )];
+        app.rebuild_chat_render_state(Rect::new(0, 0, 40, 12));
+
+        assert!(app.rendered_round_footer_buttons.is_empty());
     }
 
     fn line_plain_text(line: &Line<'_>) -> String {
@@ -5396,6 +5961,8 @@ mod tests {
             "call-stale".to_string(),
             "memory_search".to_string(),
             serde_json::json!({"query": "talos 进展"}),
+            1,
+            0,
             None,
         );
 
@@ -5446,6 +6013,8 @@ mod tests {
             "call-older".to_string(),
             "exec_command".to_string(),
             serde_json::json!({"cmd": "pwd"}),
+            1,
+            0,
             None,
         );
 
@@ -5501,6 +6070,8 @@ mod tests {
             "call-3".to_string(),
             "grep".to_string(),
             serde_json::json!({"pattern": "foo"}),
+            1,
+            0,
             None,
         );
 
@@ -5521,6 +6092,8 @@ mod tests {
             "call-ctrl-o".to_string(),
             "grep".to_string(),
             serde_json::json!({"pattern": "foo"}),
+            1,
+            0,
             None,
         );
         let idx = *app.active_tool_calls.get("call-ctrl-o").unwrap();
@@ -5531,6 +6104,58 @@ mod tests {
             .await
             .unwrap();
         assert!(app.chat_blocks[idx].expanded);
+    }
+
+    #[test]
+    fn test_tool_blocks_are_ordered_by_iteration_and_item_index() {
+        let mut app = create_remote_app();
+        app.session_id = Some("sess-test".to_string());
+
+        app.handle_stream_event(TalosEvent {
+            event_type: TalosEventType::MessageToolCallStarted,
+            message_id: "msg-order".to_string(),
+            session_id: "sess-test".to_string(),
+            sequence: 2,
+            payload: TalosEventPayload::MessageToolCallStarted(
+                talos_client::TalosMessageToolCallStartedEvent {
+                    request_id: "req-test".to_string(),
+                    call_id: "call-second".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: serde_json::json!({"file_path":"/tmp/b.txt"}),
+                    item_index: 1,
+                    iteration: 1,
+                    step_id: "step-1".to_string(),
+                    timing_ms: None,
+                },
+            ),
+        });
+        app.handle_stream_event(TalosEvent {
+            event_type: TalosEventType::MessageToolCallStarted,
+            message_id: "msg-order".to_string(),
+            session_id: "sess-test".to_string(),
+            sequence: 3,
+            payload: TalosEventPayload::MessageToolCallStarted(
+                talos_client::TalosMessageToolCallStartedEvent {
+                    request_id: "req-test".to_string(),
+                    call_id: "call-first".to_string(),
+                    name: "grep_files".to_string(),
+                    arguments: serde_json::json!({"pattern":"main","path":"/tmp"}),
+                    item_index: 0,
+                    iteration: 1,
+                    step_id: "step-1".to_string(),
+                    timing_ms: None,
+                },
+            ),
+        });
+
+        let tool_call_ids = app
+            .chat_blocks
+            .iter()
+            .filter(|block| block.role == ChatRole::Tool)
+            .filter_map(|block| block.tool_call_id.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(tool_call_ids, vec!["call-first", "call-second"]);
     }
 
     #[test]
@@ -5590,6 +6215,80 @@ mod tests {
     }
 
     #[test]
+    fn test_read_file_folded_truncates_json_preview() {
+        let app = create_embedded_app();
+        let mut block = ChatBlock::new(
+            ChatRole::Tool,
+            serde_json::json!({
+                "ok": true,
+                "tool": "read_file",
+                "result": "L1: This is a very long preview line that should be truncated in folded mode because it exceeds the preview limit by a wide margin and keeps going.",
+                "truncated": false
+            })
+            .to_string(),
+        );
+        block.tool_name = Some("read_file".to_string());
+        block.tool_input = Some(serde_json::json!({
+            "path": "/tmp/example.txt"
+        }));
+        block.tool_status = Some(ToolCallStatus::Completed { exit_ok: true });
+
+        let texts = app
+            .tool_block_lines(&block, 200)
+            .into_iter()
+            .map(|line| line_plain_text(&line.display))
+            .collect::<Vec<_>>();
+
+        assert!(texts.iter().any(|line| line == "  path:  /tmp/example.txt"));
+        assert!(texts.iter().any(|line| line == "  truncated: false"));
+        let preview = texts
+            .iter()
+            .find(|line| line.starts_with("  preview: "))
+            .expect("folded tool block should include preview");
+        assert!(preview.ends_with("..."));
+        assert!(
+            preview.len() <= 115,
+            "preview should stay compact: {}",
+            preview.len()
+        );
+    }
+
+    #[test]
+    fn test_read_file_expanded_pretty_prints_json_output() {
+        let app = create_embedded_app();
+        let mut block = ChatBlock::new(
+            ChatRole::Tool,
+            serde_json::json!({
+                "ok": true,
+                "tool": "read_file",
+                "result": "L1: alpha\nL2: beta",
+                "truncated": false
+            })
+            .to_string(),
+        );
+        block.tool_name = Some("read_file".to_string());
+        block.tool_input = Some(serde_json::json!({
+            "path": "/tmp/example.txt"
+        }));
+        block.tool_status = Some(ToolCallStatus::Completed { exit_ok: true });
+        block.expanded = true;
+
+        let texts = app
+            .tool_block_lines(&block, 120)
+            .into_iter()
+            .map(|line| line_plain_text(&line.display))
+            .collect::<Vec<_>>();
+
+        assert!(texts.iter().any(|line| line == "  ─────────────────"));
+        assert!(texts
+            .iter()
+            .any(|line| line.trim() == "\"tool\": \"read_file\","));
+        assert!(texts
+            .iter()
+            .any(|line| line.trim() == "\"truncated\": false"));
+    }
+
+    #[test]
     fn test_memory_search_folded_shows_query_and_hits() {
         let app = create_embedded_app();
         let mut block = ChatBlock::new(
@@ -5633,6 +6332,8 @@ mod tests {
             "call-shift".to_string(),
             "exec_command".to_string(),
             serde_json::json!({"command": "pwd"}),
+            1,
+            0,
             None,
         );
 

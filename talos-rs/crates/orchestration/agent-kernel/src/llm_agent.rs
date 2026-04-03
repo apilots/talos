@@ -1,17 +1,21 @@
 use crate::{
-    Agent, AgentRunResult, ExecutionBranch, ExecutionEventHandler, FlowFactory, FlowProfile,
-    InvocationContext, MemoryBackedSessionService, Planner, StopReason, TaskResult, TaskStatus,
+    planner_selector::{PlannerSelectionRequest, PlannerSelector},
+    Agent, AgentRunResult, BuiltInPlanner, EventAuthor, EventPayload, ExecutionBranch,
+    ExecutionEvent, ExecutionEventHandler, ExecutionEventKind, FlowFactory, FlowProfile,
+    InvocationContext, MemoryBackedSessionService, PlanReActPlanner, Planner, PlannerKind,
+    StopReason, TaskResult, TaskStatus,
 };
 use async_trait::async_trait;
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
-use talos_config::AgentKernelConfig;
+use talos_config::{AgentKernelConfig, ExecutionMode, PlannerSelection};
 use talos_error::TalosResult;
 use talos_llm_provider::LlmProvider;
 use talos_memory::MemoryStore;
 use talos_tools::{ToolDefinitionProvider, ToolExecutorPort};
 use talos_types::talos::{TalosOutputItem, TalosUsage};
+use tracing::{info, warn};
 use uuid::Uuid;
 
 pub struct LlmKernelAgent {
@@ -23,7 +27,7 @@ pub struct LlmKernelAgent {
     kernel_config: AgentKernelConfig,
     tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
     tool_executor_port: Arc<dyn ToolExecutorPort>,
-    planner: Arc<dyn Planner>,
+    planner_selector: Arc<PlannerSelector>,
 }
 
 impl LlmKernelAgent {
@@ -37,7 +41,7 @@ impl LlmKernelAgent {
         kernel_config: AgentKernelConfig,
         tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
         tool_executor_port: Arc<dyn ToolExecutorPort>,
-        planner: Arc<dyn Planner>,
+        planner_selector: Arc<PlannerSelector>,
     ) -> Self {
         Self {
             id: id.into(),
@@ -48,8 +52,104 @@ impl LlmKernelAgent {
             kernel_config,
             tool_definition_provider,
             tool_executor_port,
-            planner,
+            planner_selector,
         }
+    }
+
+    /// Resolve the planner for this turn.
+    /// Static: use planner_mode config directly.
+    /// Auto (Single mode only): call LLM selector; fall back to planner_mode on error.
+    async fn resolve_planner(
+        &self,
+        ctx: &InvocationContext,
+    ) -> (Arc<dyn Planner>, Option<crate::PlannerSelectionResponse>) {
+        let fallback = self.kernel_config.planner_mode;
+        let auto_requested = self.kernel_config.planner_selection == PlannerSelection::Auto;
+        let single_mode = self.kernel_config.execution_mode == ExecutionMode::Single;
+        let use_selector = auto_requested && single_mode;
+
+        if auto_requested && !single_mode {
+            warn!(
+                execution_mode = ?self.kernel_config.execution_mode,
+                planner_selection = ?self.kernel_config.planner_selection,
+                planner_mode = ?self.kernel_config.planner_mode,
+                session_id = %ctx.session_id,
+                invocation_id = %ctx.invocation_id,
+                "planner_selection=auto is ignored when execution_mode is not single; falling back to static planner_mode"
+            );
+        }
+
+        if use_selector {
+            let tool_names = self
+                .tool_definition_provider
+                .get_tool_definitions()
+                .into_iter()
+                .map(|t| t.name.clone())
+                .collect();
+            let recent_events = self.load_recent_history(ctx).await;
+            let request = PlannerSelectionRequest {
+                input: ctx.input.clone(),
+                recent_events,
+                tool_names,
+                model: ctx.model.clone(),
+            };
+            let response = self.planner_selector.select(request, fallback).await;
+            info!(
+                selected_planner = ?response.planner_kind,
+                selection_status = ?response.status,
+                model = %ctx.model,
+                session_id = %ctx.session_id,
+                invocation_id = %ctx.invocation_id,
+                "planner selector resolved planner in auto mode"
+            );
+            (make_planner(response.planner_kind), Some(response))
+        } else {
+            (make_planner(fallback), None)
+        }
+    }
+
+    async fn load_recent_history(&self, ctx: &InvocationContext) -> Vec<crate::SessionEvent> {
+        let events = match ctx.session_service() {
+            Ok(service) => match service.load_session(&ctx.session_id, None, None).await {
+                Ok(session) if !session.events.is_empty() => session.events,
+                _ => ctx.session.events.clone(),
+            },
+            Err(_) => ctx.session.events.clone(),
+        };
+
+        events
+            .into_iter()
+            .filter(|event| {
+                matches!(
+                    event.kind,
+                    crate::SessionEventKind::UserMessage | crate::SessionEventKind::AgentMessage
+                )
+            })
+            .rev()
+            .take(3)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect()
+    }
+
+    async fn emit_planner_selection_event(
+        &self,
+        ctx: &mut InvocationContext,
+        event_handler: &mut dyn ExecutionEventHandler,
+        response: crate::PlannerSelectionResponse,
+        branch: ExecutionBranch,
+    ) -> TalosResult<()> {
+        let event = ExecutionEvent::new(
+            ctx,
+            EventAuthor::System,
+            branch,
+            ExecutionEventKind::Planning,
+            EventPayload::PlannerSelection { payload: response },
+            false,
+        );
+        let _ = event_handler.handle(ctx, event).await?;
+        Ok(())
     }
 
     fn branch_for_profile(profile: FlowProfile) -> ExecutionBranch {
@@ -93,6 +193,33 @@ impl LlmKernelAgent {
         let mut usage = TalosUsage::default();
         let mut warnings = Vec::new();
 
+        if ctx.session_service.is_none() {
+            ctx.session_service = Some(Arc::new(MemoryBackedSessionService::new(
+                self.memory_store.clone(),
+            )));
+        }
+
+        let (planner, selection) = self.resolve_planner(ctx).await;
+        if let Some(response) = selection {
+            let branch = Self::branch_for_profile(match response.planner_kind {
+                PlannerKind::BuiltIn => {
+                    if self
+                        .tool_definition_provider
+                        .get_tool_definitions()
+                        .is_empty()
+                    {
+                        FlowProfile::DirectAnswer
+                    } else {
+                        FlowProfile::ModelThinking
+                    }
+                }
+                PlannerKind::PlanReAct => FlowProfile::ReactiveLoop,
+            });
+            if let Some(handler) = event_handler.as_deref_mut() {
+                self.emit_planner_selection_event(ctx, handler, response, branch)
+                    .await?;
+            }
+        }
         let flow = FlowFactory::build(
             &self.name,
             &self.description,
@@ -101,13 +228,8 @@ impl LlmKernelAgent {
             self.tool_executor_port.clone(),
             self.memory_store.clone(),
             self.kernel_config.clone(),
-            self.planner.clone(),
+            planner,
         );
-        if ctx.session_service.is_none() {
-            ctx.session_service = Some(Arc::new(MemoryBackedSessionService::new(
-                self.memory_store.clone(),
-            )));
-        }
         let session_service = ctx.session_service()?;
         let plugin_manager = ctx.plugin_manager.clone();
         plugin_manager.before_flow(ctx, flow.settings()).await?;
@@ -232,13 +354,15 @@ impl Agent for LlmKernelAgent {
 mod tests {
     use super::*;
     use crate::{
-        ContextStateBags, EventAuthor, ExecutionBranch, InvocationLimits, SessionEvent,
-        SessionEventFilter, SessionEventKind, SessionEventPayload, SessionService, TurnPhase,
+        ContextStateBags, EventAuthor, EventPayload, ExecutionBranch, ExecutionEvent,
+        ExecutionEventKind, InvocationLimits, SessionEvent, SessionEventFilter, SessionEventKind,
+        SessionEventPayload, SessionService, TurnPhase,
     };
     use async_trait::async_trait;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
+    use talos_config::{PlannerMode, PlannerSelection};
     use talos_error::TalosResult;
     use talos_llm_provider::{
         ChatChunk, ChatRequest, ChatResponse, ChatStream, LlmProvider, ToolStream, ToolStreamEvent,
@@ -329,38 +453,36 @@ mod tests {
         }
     }
 
-    struct PhaseAssertingPlanner;
-
-    impl Planner for PhaseAssertingPlanner {
-        fn build_request_effect(
-            &self,
-            ctx: &InvocationContext,
-            _request: &crate::LlmRequestEnvelope,
-        ) -> crate::PlanningRequestEffect {
-            assert_eq!(ctx.phase, TurnPhase::Execution);
-            crate::PlanningRequestEffect {
-                planning_instruction: Some("build a short plan first".to_string()),
-                native_thinking: None,
-                clear_request_thoughts: false,
-            }
-        }
-    }
-
-    struct EmptyPlanner;
     struct RecordingSessionService {
         recorded: Arc<Mutex<Vec<SessionEvent>>>,
     }
+
+    #[derive(Default)]
+    struct RecordingEventHandler {
+        events: Vec<ExecutionEvent>,
+    }
+
     struct ToolCallingFailureProvider {
         call_count: AtomicUsize,
     }
-
-    impl Planner for EmptyPlanner {}
 
     impl RecordingSessionService {
         fn new() -> Self {
             Self {
                 recorded: Arc::new(Mutex::new(Vec::new())),
             }
+        }
+    }
+
+    #[async_trait]
+    impl ExecutionEventHandler for RecordingEventHandler {
+        async fn handle(
+            &mut self,
+            _ctx: &mut InvocationContext,
+            event: ExecutionEvent,
+        ) -> TalosResult<Option<ExecutionEvent>> {
+            self.events.push(event.clone());
+            Ok(Some(event))
         }
     }
 
@@ -434,43 +556,57 @@ mod tests {
         }
     }
 
-    fn build_agent(planner: Arc<dyn Planner>) -> LlmKernelAgent {
+    fn build_agent() -> LlmKernelAgent {
+        let provider = Arc::new(NoopLlmProvider);
         LlmKernelAgent::new(
             "agent-1",
             "Test Agent",
             "Test kernel agent",
-            Arc::new(NoopLlmProvider),
+            provider.clone(),
             Arc::new(MemoryStore::new(
                 std::env::temp_dir().join("talos-llm-agent-tests"),
             )),
             AgentKernelConfig::default(),
             Arc::new(ToolRegistry::new()),
             Arc::new(ToolRegistry::new()),
-            planner,
+            Arc::new(PlannerSelector::new(provider)),
         )
     }
 
-    fn build_agent_with_provider(
-        planner: Arc<dyn Planner>,
-        provider: Arc<dyn LlmProvider>,
-    ) -> LlmKernelAgent {
+    fn build_agent_with_config(config: AgentKernelConfig) -> LlmKernelAgent {
+        let provider = Arc::new(NoopLlmProvider);
         LlmKernelAgent::new(
             "agent-1",
             "Test Agent",
             "Test kernel agent",
-            provider,
+            provider.clone(),
+            Arc::new(MemoryStore::new(
+                std::env::temp_dir().join("talos-llm-agent-tests"),
+            )),
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(ToolRegistry::new()),
+            Arc::new(PlannerSelector::new(provider)),
+        )
+    }
+
+    fn build_agent_with_provider(provider: Arc<dyn LlmProvider>) -> LlmKernelAgent {
+        LlmKernelAgent::new(
+            "agent-1",
+            "Test Agent",
+            "Test kernel agent",
+            provider.clone(),
             Arc::new(MemoryStore::new(
                 std::env::temp_dir().join("talos-llm-agent-tests"),
             )),
             AgentKernelConfig::default(),
             Arc::new(ToolRegistry::new()),
             Arc::new(ToolRegistry::new()),
-            planner,
+            Arc::new(PlannerSelector::new(provider)),
         )
     }
 
     fn build_agent_with_provider_and_registry(
-        planner: Arc<dyn Planner>,
         provider: Arc<dyn LlmProvider>,
         tool_registry: Arc<ToolRegistry>,
     ) -> LlmKernelAgent {
@@ -478,14 +614,14 @@ mod tests {
             "agent-1",
             "Test Agent",
             "Test kernel agent",
-            provider,
+            provider.clone(),
             Arc::new(MemoryStore::new(
                 std::env::temp_dir().join("talos-llm-agent-tests"),
             )),
             AgentKernelConfig::default(),
             tool_registry.clone(),
             tool_registry,
-            planner,
+            Arc::new(PlannerSelector::new(provider)),
         )
     }
 
@@ -517,15 +653,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_keeps_planner_instruction_outside_agent_phase() {
-        let agent = build_agent(Arc::new(PhaseAssertingPlanner));
+        let mut config = AgentKernelConfig::default();
+        config.planner_mode = PlannerMode::PlanReAct;
+        let agent = build_agent_with_config(config);
         let mut ctx = build_ctx();
 
         let result = agent.run(&mut ctx, None).await.expect("run should succeed");
 
         assert_eq!(ctx.phase, TurnPhase::Execution);
-        assert_eq!(
-            ctx.planning_instruction.as_deref(),
-            Some("build a short plan first")
+        assert!(
+            ctx.planning_instruction.is_some(),
+            "PlanReAct planner should set a planning instruction"
         );
         assert_eq!(result.task_results.len(), 1);
     }
@@ -544,7 +682,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_returns_typed_transfer_request() {
-        let agent = build_agent(Arc::new(EmptyPlanner));
+        let agent = build_agent();
         let mut ctx = build_ctx();
         ctx.transfer_to = Some("agent-b".to_string());
 
@@ -555,8 +693,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_accumulates_usage_from_general_turn() {
-        let agent =
-            build_agent_with_provider(Arc::new(EmptyPlanner), Arc::new(UsageStreamProvider));
+        let agent = build_agent_with_provider(Arc::new(UsageStreamProvider));
         let mut ctx = build_ctx();
 
         let result = agent.run(&mut ctx, None).await.expect("run should succeed");
@@ -575,8 +712,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_collects_prompt_warnings() {
-        let agent =
-            build_agent_with_provider(Arc::new(EmptyPlanner), Arc::new(UsageStreamProvider));
+        let agent = build_agent_with_provider(Arc::new(UsageStreamProvider));
         let mut ctx = build_ctx();
 
         let result = agent.run(&mut ctx, None).await.expect("run should succeed");
@@ -592,7 +728,6 @@ mod tests {
     #[tokio::test]
     async fn test_run_persists_staged_session_events_on_flow_error() {
         let agent = build_agent_with_provider_and_registry(
-            Arc::new(EmptyPlanner),
             Arc::new(ToolCallingFailureProvider {
                 call_count: AtomicUsize::new(0),
             }),
@@ -624,5 +759,103 @@ mod tests {
         assert!(recorded.iter().any(|event| {
             event.kind == SessionEventKind::ToolResult && event.author == EventAuthor::Tool
         }));
+    }
+
+    struct SelectorProvider;
+
+    #[async_trait]
+    impl LlmProvider for SelectorProvider {
+        fn name(&self) -> &str {
+            "selector"
+        }
+
+        async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+            let content = if request.tools.is_none() && request.max_tokens == Some(32) {
+                assert!(request.messages[1].content.contains("recent_history:"));
+                assert!(request.messages[1]
+                    .content
+                    .contains("assistant: previous answer"));
+                r#"{"mode":"react"}"#.to_string()
+            } else {
+                "ok".to_string()
+            };
+
+            Ok(ChatResponse {
+                content,
+                model: "selector".to_string(),
+                usage: Usage::default(),
+                finish_reason: Some("stop".to_string()),
+                tool_calls: None,
+            })
+        }
+
+        async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
+            let (_tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(1);
+            Ok(ChatStream::new(rx))
+        }
+
+        fn default_model(&self) -> &str {
+            "selector"
+        }
+    }
+
+    #[tokio::test]
+    async fn test_run_emits_planner_selection_event_in_auto_mode() {
+        let mut config = AgentKernelConfig::default();
+        config.planner_selection = PlannerSelection::Auto;
+        let provider = Arc::new(SelectorProvider);
+        let agent = LlmKernelAgent::new(
+            "agent-1",
+            "Test Agent",
+            "Test kernel agent",
+            provider.clone(),
+            Arc::new(MemoryStore::new(
+                std::env::temp_dir().join("talos-llm-agent-tests"),
+            )),
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(ToolRegistry::new()),
+            Arc::new(PlannerSelector::new(provider)),
+        );
+        let session_service = Arc::new(RecordingSessionService::new());
+        let mut event_handler = RecordingEventHandler::default();
+        let mut ctx = build_ctx();
+        ctx.session_service = Some(session_service);
+        ctx.session.events.push(SessionEvent {
+            id: "history-1".to_string(),
+            session_id: "s1".to_string(),
+            invocation_id: "prev".to_string(),
+            branch: ExecutionBranch::ReactiveLoop,
+            author: EventAuthor::Agent,
+            kind: SessionEventKind::AgentMessage,
+            payload: SessionEventPayload::Message {
+                message: talos_llm_provider::ChatMessage::assistant("previous answer"),
+            },
+            actions: crate::EventActions::default(),
+            partial: false,
+            timestamp: chrono::Utc::now(),
+        });
+
+        let _ = agent
+            .run(&mut ctx, Some(&mut event_handler))
+            .await
+            .expect("run should succeed");
+
+        assert!(event_handler.events.iter().any(|event| {
+            matches!(
+                &event.payload,
+                EventPayload::PlannerSelection { payload }
+                    if event.kind == ExecutionEventKind::Planning
+                        && payload.planner_kind == PlannerKind::PlanReAct
+                        && payload.status.is_ok()
+            )
+        }));
+    }
+}
+
+fn make_planner(kind: PlannerKind) -> Arc<dyn Planner> {
+    match kind {
+        PlannerKind::BuiltIn => Arc::new(BuiltInPlanner::new()),
+        PlannerKind::PlanReAct => Arc::new(PlanReActPlanner::new()),
     }
 }

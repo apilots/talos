@@ -119,6 +119,7 @@ pub struct GeneralTurnLoopState {
 pub struct PlanReActLoopState {
     pub replan_count: u32,
     pub consecutive_no_progress_rounds: u32,
+    pub consecutive_read_only_rounds: u32,
 }
 
 impl GeneralTurnLoopState {

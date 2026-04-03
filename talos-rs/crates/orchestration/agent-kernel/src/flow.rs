@@ -4,7 +4,7 @@ use crate::general_turn::{
     emit_general_turn_finalization_stream, execute_general_turn_step,
     execute_general_turn_tool_batch, finalize_general_turn_artifacts,
     persist_general_turn_artifacts, prepare_general_turn, GeneralTurnLoopState,
-    GeneralTurnStepDisposition, GeneralTurnToolBatch, PlanReActLoopState,
+    GeneralTurnStepDisposition, GeneralTurnStepResult, GeneralTurnToolBatch, PlanReActLoopState,
 };
 use crate::{
     execution::DynamicToolRequestPayload, CallbackControl, CallbackRegistry,
@@ -545,12 +545,15 @@ impl BaseLlmFlow for SingleFlow {
             apply_general_turn_step(&mut state, &step);
 
             if matches!(step.disposition, GeneralTurnStepDisposition::FinalResponse) {
+                let missing_local_path_probe =
+                    is_plan_react && should_require_local_path_file_probe(input, &state);
                 // PlanReAct mode: when require_final_answer_tag is enabled, only accept a
                 // FinalResponse that carries a confirmed FINAL_ANSWER tag. A response without
                 // the tag is treated as a no-progress round and may trigger a replan.
                 if is_plan_react
-                    && self.kernel_config.plan_react.require_final_answer_tag
-                    && !ctx.execution_state.plan_react_has_final_answer
+                    && ((self.kernel_config.plan_react.require_final_answer_tag
+                        && !ctx.execution_state.plan_react_has_final_answer)
+                        || missing_local_path_probe)
                 {
                     plan_react_state.consecutive_no_progress_rounds += 1;
                     if should_replan(
@@ -563,7 +566,12 @@ impl BaseLlmFlow for SingleFlow {
                             continue;
                         }
                     }
-                    final_text = "[plan-react stalled: no final answer]".to_string();
+                    final_text = if missing_local_path_probe {
+                        "[plan-react stalled: local path analysis requires file tool verification]"
+                            .to_string()
+                    } else {
+                        "[plan-react stalled: no final answer]".to_string()
+                    };
                     break StopReason::ToolRoundLimit;
                 }
                 final_text = step.text.clone();
@@ -594,6 +602,23 @@ impl BaseLlmFlow for SingleFlow {
                 ctx.set_plan_react_has_final_answer(false);
             }
             plan_react_state.consecutive_no_progress_rounds = 0;
+            if is_plan_react {
+                if is_read_only_tool_round(&step) {
+                    plan_react_state.consecutive_read_only_rounds += 1;
+                    if plan_react_state.consecutive_read_only_rounds >= 3 {
+                        tracing::warn!(
+                            round = state.round,
+                            "plan-react terminated after repeated read-only investigation rounds"
+                        );
+                        final_text =
+                            "[plan-react investigation limit reached: repeated read-only tool rounds]"
+                                .to_string();
+                        break StopReason::ToolRoundLimit;
+                    }
+                } else {
+                    plan_react_state.consecutive_read_only_rounds = 0;
+                }
+            }
             if matches!(self.flow_profile, FlowProfile::ReactiveLoop) {
                 let tool_names = tool_names_for_thinking(&step.output_items);
                 let tool_list = if tool_names.is_empty() {
@@ -902,12 +927,106 @@ fn should_replan(
     state.consecutive_no_progress_rounds < policy.max_no_progress_rounds
 }
 
+fn trim_path_token(token: &str) -> &str {
+    token.trim_matches(|ch: char| {
+        matches!(
+            ch,
+            '"' | '\''
+                | '`'
+                | ','
+                | '.'
+                | ':'
+                | ';'
+                | '('
+                | ')'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '<'
+                | '>'
+        )
+    })
+}
+
+fn contains_local_absolute_path(input: &str) -> bool {
+    input
+        .split_whitespace()
+        .map(trim_path_token)
+        .any(|token| token.starts_with('/') && token.len() > 1)
+}
+
+fn contains_analysis_keyword(input: &str) -> bool {
+    let lowered = input.to_ascii_lowercase();
+    [
+        "analyze",
+        "analysis",
+        "architecture",
+        "review",
+        "inspect",
+        "explain",
+        "summarize",
+        "summary",
+        "structure",
+    ]
+    .iter()
+    .any(|keyword| lowered.contains(keyword))
+        || [
+            "分析", "架构", "结构", "解释", "梳理", "总结", "查看", "评审",
+        ]
+        .iter()
+        .any(|keyword| input.contains(keyword))
+}
+
+fn is_local_path_analysis_request(input: &str) -> bool {
+    contains_local_absolute_path(input) && contains_analysis_keyword(input)
+}
+
+fn is_file_probe_tool_name(tool_name: &str) -> bool {
+    matches!(tool_name, "list_dir" | "read_file" | "grep_files")
+}
+
+fn has_file_probe_tool_call(state: &GeneralTurnLoopState) -> bool {
+    state
+        .tool_call_log
+        .iter()
+        .any(|record| is_file_probe_tool_name(&record.name))
+}
+
+fn should_require_local_path_file_probe(input: &str, state: &GeneralTurnLoopState) -> bool {
+    is_local_path_analysis_request(input) && !has_file_probe_tool_call(state)
+}
+
+fn is_read_only_tool_name(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "read"
+            | "read_file"
+            | "list_dir"
+            | "grep_files"
+            | "memory_search"
+            | "memory_get"
+            | "web_search"
+            | "web_fetch"
+            | "http_request"
+            | "list_mcp_resources"
+            | "list_mcp_resource_templates"
+    )
+}
+
+fn is_read_only_tool_round(step: &GeneralTurnStepResult) -> bool {
+    !step.tool_calls.is_empty()
+        && step
+            .tool_calls
+            .iter()
+            .all(|call| is_read_only_tool_name(&call.name))
+}
+
 fn select_flow_profile(
     settings: &KernelExecutionSettings,
     tool_registry: &dyn ToolDefinitionProvider,
 ) -> FlowProfile {
     match settings.planner_kind {
-        crate::PlannerKind::None => FlowProfile::DirectAnswer,
         crate::PlannerKind::BuiltIn => {
             if tool_registry.get_tool_definitions().is_empty() {
                 FlowProfile::DirectAnswer
@@ -968,6 +1087,7 @@ mod tests {
         ChatChunk, ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, Role,
         ToolStream, ToolStreamEvent, Usage,
     };
+    use talos_memory::ToolCallRecord;
     use talos_tools::{Tool, ToolContext, ToolOutput, ToolRegistry};
     use tokio::sync::mpsc;
     use uuid::Uuid;
@@ -1577,6 +1697,7 @@ mod tests {
         let state = PlanReActLoopState {
             replan_count: 0,
             consecutive_no_progress_rounds: 0,
+            consecutive_read_only_rounds: 0,
         };
         assert!(!should_replan(&state, None, &policy));
     }
@@ -1591,6 +1712,7 @@ mod tests {
         let state = PlanReActLoopState {
             replan_count: 2,
             consecutive_no_progress_rounds: 1,
+            consecutive_read_only_rounds: 0,
         };
         // replan_count == max_replans: no further replan even if no-progress budget remains
         assert!(!should_replan(&state, None, &policy));
@@ -1606,6 +1728,7 @@ mod tests {
         let state = PlanReActLoopState {
             replan_count: 1,
             consecutive_no_progress_rounds: 1,
+            consecutive_read_only_rounds: 0,
         };
         assert!(should_replan(&state, None, &policy));
     }
@@ -1621,6 +1744,7 @@ mod tests {
         let state = PlanReActLoopState {
             replan_count: 1,
             consecutive_no_progress_rounds: 0,
+            consecutive_read_only_rounds: 0,
         };
         let tool_batch = GeneralTurnToolBatch {
             output_items: Vec::new(),
@@ -1644,6 +1768,7 @@ mod tests {
         let state = PlanReActLoopState {
             replan_count: 2,
             consecutive_no_progress_rounds: 0,
+            consecutive_read_only_rounds: 0,
         };
         let tool_batch = GeneralTurnToolBatch {
             output_items: Vec::new(),
@@ -1656,5 +1781,95 @@ mod tests {
         };
         // Multiple errors in batch still can't replan — budget exhausted at decision level.
         assert!(!should_replan(&state, Some(&tool_batch), &policy));
+    }
+
+    fn test_loop_state(tool_names: &[&str]) -> GeneralTurnLoopState {
+        GeneralTurnLoopState {
+            messages: Vec::new(),
+            round: 0,
+            output_items: Vec::new(),
+            usage: talos_types::talos::TalosUsage::default(),
+            reasoning_log: Vec::new(),
+            tool_call_log: tool_names
+                .iter()
+                .enumerate()
+                .map(|(index, name)| ToolCallRecord {
+                    call_id: format!("call-{index}"),
+                    name: (*name).to_string(),
+                    arguments: json!({}),
+                })
+                .collect(),
+            tool_result_log: Vec::new(),
+            retrieved_memories: Vec::new(),
+            tool_call_count: tool_names.len(),
+            tool_error_count: 0,
+            saw_output_delta: false,
+        }
+    }
+
+    #[test]
+    fn test_is_local_path_analysis_request_true_for_absolute_path_prompt() {
+        assert!(is_local_path_analysis_request(
+            "分析 /Users/xujiang/data/ailabs/PageIndex 项目架构"
+        ));
+        assert!(is_local_path_analysis_request(
+            "Please analyze /tmp/demo-project architecture"
+        ));
+    }
+
+    #[test]
+    fn test_is_local_path_analysis_request_false_without_analysis_intent() {
+        assert!(!is_local_path_analysis_request(
+            "Run /Users/xujiang/data/ailabs/PageIndex/run_pageindex.py"
+        ));
+        assert!(!is_local_path_analysis_request(
+            "Please analyze the project architecture"
+        ));
+    }
+
+    #[test]
+    fn test_should_require_local_path_file_probe_until_file_tool_runs() {
+        let empty_state = test_loop_state(&[]);
+        assert!(should_require_local_path_file_probe(
+            "分析 /Users/xujiang/data/ailabs/PageIndex 项目架构",
+            &empty_state,
+        ));
+
+        let probed_state = test_loop_state(&["memory_search", "list_dir"]);
+        assert!(!should_require_local_path_file_probe(
+            "分析 /Users/xujiang/data/ailabs/PageIndex 项目架构",
+            &probed_state,
+        ));
+    }
+
+    #[test]
+    fn test_is_read_only_tool_round_true_for_read_only_calls() {
+        let step = GeneralTurnStepResult {
+            text: String::new(),
+            reasoning: Vec::new(),
+            tool_calls: vec![
+                FunctionCall::new("1", "read_file", json!({"path":"a"})),
+                FunctionCall::new("2", "web_search", json!({"query":"x"})),
+            ],
+            output_items: Vec::new(),
+            usage: talos_types::talos::TalosUsage::default(),
+            saw_output_delta: false,
+            disposition: GeneralTurnStepDisposition::ContinueWithTools,
+        };
+        assert!(is_read_only_tool_round(&step));
+    }
+
+    #[test]
+    fn test_is_read_only_tool_round_false_for_exec_command() {
+        let step = GeneralTurnStepResult {
+            text: String::new(),
+            reasoning: Vec::new(),
+            tool_calls: vec![FunctionCall::new("1", "exec_command", json!({"cmd":"ls"}))],
+            output_items: Vec::new(),
+            usage: talos_types::talos::TalosUsage::default(),
+            saw_output_delta: false,
+            disposition: GeneralTurnStepDisposition::ContinueWithTools,
+        };
+        assert!(!is_read_only_tool_round(&step));
     }
 }

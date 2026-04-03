@@ -272,6 +272,7 @@ impl SessionEvent {
                     SessionEventPayload::StateOnly
                 }
             }
+            EventPayload::PlannerSelection { .. } => SessionEventPayload::StateOnly,
         };
 
         let kind = match event.kind {

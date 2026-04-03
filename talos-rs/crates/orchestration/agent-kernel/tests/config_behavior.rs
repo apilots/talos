@@ -2,7 +2,7 @@
 //!
 //! Tests verify default values and boundary conditions for kernel configuration.
 
-use talos_config::{AgentKernelConfig, Config, PlannerMode};
+use talos_config::{AgentKernelConfig, Config, PlannerMode, PlannerSelection};
 use talos_error::TalosError;
 
 /// Tests that AgentKernelConfig default values match the specification.
@@ -10,11 +10,11 @@ use talos_error::TalosError;
 /// Default values per specification:
 /// - max_iters: 1
 /// - max_task_per_turn: 3
-/// - tool_parallelism: 4
+/// - tool_parallelism: 1
 /// - max_llm_calls: 8
 /// - max_tool_rounds: 8
 /// - planner_mode: "built_in"
-/// - allow_request_planner_override: false
+/// - planner_selection: "static"
 #[test]
 fn test_default_values() {
     let config = AgentKernelConfig::default();
@@ -25,8 +25,8 @@ fn test_default_values() {
         "max_task_per_turn should default to 3"
     );
     assert_eq!(
-        config.tool_parallelism, 4,
-        "tool_parallelism should default to 4"
+        config.tool_parallelism, 1,
+        "tool_parallelism should default to 1"
     );
     assert_eq!(config.max_llm_calls, 8, "max_llm_calls should default to 8");
     assert_eq!(
@@ -39,9 +39,10 @@ fn test_default_values() {
         PlannerMode::BuiltIn,
         "planner_mode should default to 'built_in'"
     );
-    assert!(
-        !config.allow_request_planner_override,
-        "allow_request_planner_override should default to false"
+    assert_eq!(
+        config.planner_selection,
+        PlannerSelection::Static,
+        "planner_selection should default to 'static'"
     );
 }
 
@@ -53,7 +54,7 @@ fn test_default_values() {
 /// - tool_parallelism: must be > 0
 /// - max_llm_calls: must be > 0
 /// - max_tool_rounds: must be > 0
-/// - planner_mode: must be "built_in" or "plan_react"
+/// - planner_mode: must be "built_in" or "plan_react" (None removed)
 #[test]
 fn test_boundary_validation() {
     let config = AgentKernelConfig::default();
@@ -185,10 +186,7 @@ fn test_config_clone() {
 
     assert_eq!(original.max_iters, cloned.max_iters);
     assert_eq!(original.planner_mode, cloned.planner_mode);
-    assert_eq!(
-        original.allow_request_planner_override,
-        cloned.allow_request_planner_override
-    );
+    assert_eq!(original.planner_selection, cloned.planner_selection);
 }
 
 #[test]

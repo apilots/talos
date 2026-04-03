@@ -58,6 +58,11 @@ async fn run_embedded(_args: Vec<String>) -> Result<(), Box<dyn std::error::Erro
         "failed to load Talos config from <talos_home>/conf/talos.yaml — run `talos init` or use --gateway to connect to an external gateway",
     );
     config.validate_runtime().expect("invalid runtime config");
+    let mut logging_config = config.logging.clone();
+    // TUI owns stdout for terminal rendering; keep file logging but disable stdout logs here.
+    logging_config.stdout = false;
+    let _log_guard =
+        talos_logging::init_with_config(logging_config).expect("failed to initialize logging");
 
     let storage_impl = create_storage(&StorageConfig {
         database_type: config.storage.database_type.clone(),

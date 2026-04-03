@@ -18,11 +18,11 @@ use crate::{
 };
 use serde_json::Value;
 use talos_agent_kernel::{
-    flush_session_memory, Agent as KernelAgent, AgentRunResult, BuiltInPlanner,
-    ConfirmationRequestStreamData, InvocationContext, KernelRuntime, KernelStreamEvent,
-    KernelStreamEventData, KernelStreamEventType, KernelThinkingSource, KernelThinkingStage,
-    LlmKernelAgent, LoopKernelAgent, ParallelKernelAgent, PlanReActPlanner, Planner, RunRequest,
-    SequentialKernelAgent, StopReason, TaskKind, TaskResult, TaskStatus,
+    flush_session_memory, Agent as KernelAgent, AgentRunResult, ConfirmationRequestStreamData,
+    InvocationContext, KernelRuntime, KernelStreamEvent, KernelStreamEventData,
+    KernelStreamEventType, KernelThinkingSource, KernelThinkingStage, LlmKernelAgent,
+    LoopKernelAgent, ParallelKernelAgent, PlannerSelector, RunRequest, SequentialKernelAgent,
+    StopReason, TaskKind, TaskResult, TaskStatus,
 };
 use talos_config::{AgentKernelConfig, ExecutionMode, PlannerMode};
 use talos_error::{TalosError, TalosResult};
@@ -56,7 +56,6 @@ pub struct AgentImpl {
     pub model: String,
     pub memory_store: Arc<MemoryStore>,
     pub tool_registry: Arc<ToolRegistry>,
-    planner_override: Option<Arc<dyn Planner>>,
     kernel_config: AgentKernelConfig,
     pub kernel_runtime: Arc<KernelRuntime>,
 }
@@ -240,7 +239,6 @@ impl AgentImpl {
             model,
             memory_store,
             tool_registry,
-            planner_override: None,
             kernel_config,
             kernel_runtime: Arc::new(KernelRuntime::new_default()),
         }
@@ -256,19 +254,10 @@ impl AgentImpl {
         self.tool_registry = tool_registry;
     }
 
-    /// Set planner for this agent.
-    pub fn set_planner(&mut self, planner: Arc<dyn Planner>) {
-        self.planner_override = Some(planner);
-    }
-
     pub fn set_default_planner_mode(&mut self, planner_mode: &str) -> TalosResult<()> {
         let mode = PlannerMode::parse(planner_mode.trim())?;
         self.kernel_config.planner_mode = mode;
         Ok(())
-    }
-
-    pub fn set_allow_request_planner_override(&mut self, allow: bool) {
-        self.kernel_config.allow_request_planner_override = allow;
     }
 
     pub fn set_prompt_budget(&mut self, max_static_tokens: usize, max_dynamic_tokens: usize) {
@@ -409,8 +398,8 @@ After receiving tool outputs, continue reasoning and provide the final response.
         &self,
         id: impl Into<String>,
         name: impl Into<String>,
-        planner: Arc<dyn Planner>,
     ) -> Arc<dyn KernelAgent> {
+        let planner_selector = Arc::new(PlannerSelector::new(self.llm_provider.clone()));
         Arc::new(LlmKernelAgent::new(
             id,
             name,
@@ -420,27 +409,12 @@ After receiving tool outputs, continue reasoning and provide the final response.
             self.kernel_config_snapshot(),
             self.tool_registry.clone(),
             self.tool_registry.clone(),
-            planner,
+            planner_selector,
         ))
     }
 
     fn kernel_config_snapshot(&self) -> AgentKernelConfig {
         self.kernel_config.clone()
-    }
-
-    fn resolve_planner_mode(&self) -> TalosResult<PlannerMode> {
-        Ok(self.kernel_config.planner_mode)
-    }
-
-    fn build_planner_for_request(&self) -> TalosResult<Arc<dyn Planner>> {
-        if let Some(planner) = self.planner_override.as_ref() {
-            return Ok(planner.clone());
-        }
-        Ok(match self.resolve_planner_mode()? {
-            PlannerMode::None => Arc::new(BuiltInPlanner::new()),
-            PlannerMode::BuiltIn => Arc::new(BuiltInPlanner::new()),
-            PlannerMode::PlanReAct => Arc::new(PlanReActPlanner::new()),
-        })
     }
 
     fn resolve_kernel_mode(&self) -> TalosResult<KernelExecutionMode> {
@@ -454,14 +428,13 @@ After receiving tool outputs, continue reasoning and provide the final response.
     }
 
     fn build_kernel_agent_for_request(&self) -> TalosResult<Arc<dyn KernelAgent>> {
-        let planner = self.build_planner_for_request()?;
         let mode = self.resolve_kernel_mode()?;
         let child_count = self.kernel_config.execution_children.clamp(1, 4);
         let loop_iters = self.kernel_config.execution_loop_iters.clamp(1, 16);
 
         Ok(match mode {
             KernelExecutionMode::Single => {
-                self.build_llm_kernel_agent(self.id.clone(), self.name.clone(), planner.clone())
+                self.build_llm_kernel_agent(self.id.clone(), self.name.clone())
             }
             KernelExecutionMode::Sequential => {
                 let children = (0..child_count)
@@ -469,7 +442,6 @@ After receiving tool outputs, continue reasoning and provide the final response.
                         self.build_llm_kernel_agent(
                             format!("{}-seq-{}", self.id, idx + 1),
                             format!("{} seq {}", self.name, idx + 1),
-                            planner.clone(),
                         )
                     })
                     .collect::<Vec<_>>();
@@ -484,7 +456,6 @@ After receiving tool outputs, continue reasoning and provide the final response.
                         self.build_llm_kernel_agent(
                             format!("{}-par-{}", self.id, idx + 1),
                             format!("{} par {}", self.name, idx + 1),
-                            planner.clone(),
                         )
                     })
                     .collect::<Vec<_>>();
@@ -498,7 +469,6 @@ After receiving tool outputs, continue reasoning and provide the final response.
                 self.build_llm_kernel_agent(
                     format!("{}-loop-body", self.id),
                     format!("{} loop body", self.name),
-                    planner.clone(),
                 ),
                 loop_iters,
             )),
@@ -1170,7 +1140,6 @@ mod tests {
     use chrono::Local;
     use serde_json::json;
     use std::sync::Arc;
-    use talos_agent_kernel::TurnPhase;
     use talos_config::AgentKernelConfig;
     use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Role, Usage};
     use talos_memory::{Memory, RecordHeader, TalosMessage, TalosMessageRole, TalosTurn};
@@ -1208,32 +1177,6 @@ mod tests {
             kernel_config,
         );
         (temp_dir, agent)
-    }
-
-    fn mock_invocation_ctx() -> InvocationContext {
-        InvocationContext {
-            session_id: "s1".to_string(),
-            invocation_id: "i1".to_string(),
-            agent_id: "a1".to_string(),
-            workspace_id: "w1".to_string(),
-            input: "hello".to_string(),
-            model: "m1".to_string(),
-            phase: TurnPhase::Execution,
-            planning_instruction: None,
-            transfer_to: None,
-            execution_state: talos_agent_kernel::InvocationExecutionState::default(),
-            session: talos_agent_kernel::InvocationSession {
-                session_id: "s1".to_string(),
-                ..talos_agent_kernel::InvocationSession::default()
-            },
-            state: HashMap::new(),
-            state_bags: Default::default(),
-            limits: Default::default(),
-            events: Vec::new(),
-            plugin_manager: talos_agent_kernel::default_plugin_manager(),
-            session_service: None,
-            stream_tx: None,
-        }
     }
 
     fn build_test_session(session_id: &str, workspace_id: &str) -> TalosSession {
@@ -1453,14 +1396,10 @@ mod tests {
         agent
             .set_default_planner_mode("plan_react")
             .expect("planner mode should parse");
-        let planner = agent
-            .build_planner_for_request()
-            .expect("planner should build");
-        let ctx = mock_invocation_ctx();
-        assert!(planner
-            .build_request_effect(&ctx, &talos_agent_kernel::LlmRequestEnvelope::default())
-            .planning_instruction
-            .is_some());
+        assert_eq!(
+            agent.kernel_config.planner_mode,
+            talos_config::PlannerMode::PlanReAct
+        );
     }
 
     #[test]

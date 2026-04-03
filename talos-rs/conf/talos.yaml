@@ -11,14 +11,14 @@ agent:
   kernel:
     max_iters: 1
     max_task_per_turn: 3
-    tool_parallelism: 4
+    tool_parallelism: 1
     max_llm_calls: 8
     max_tool_rounds: 8
     tool_result_max_bytes: 65536
     context_compaction_max_bytes: 262144
     default_workspace_id: "default"
     planner_mode: "built_in"
-    allow_request_planner_override: false
+    planner_selection: "auto"
     execution_mode: "single"
     execution_children: 2
     execution_loop_iters: 3

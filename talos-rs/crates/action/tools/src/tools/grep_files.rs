@@ -14,7 +14,7 @@ impl Tool for GrepFilesTool {
     }
 
     fn description(&self) -> &str {
-        "Search files with ripgrep and return matching file paths."
+        "Search the workspace or a provided path with ripgrep to locate entrypoints, symbols, modules, routes, or call sites before reading files. For a user-provided absolute path, verify the target first with list_dir or read_file."
     }
 
     fn parameters_schema(&self) -> Option<Value> {

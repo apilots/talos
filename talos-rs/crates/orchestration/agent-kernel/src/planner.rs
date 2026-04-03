@@ -14,6 +14,27 @@ const PLAN_REACT_FINAL_ANSWER_TAG: &str = "/*FINAL_ANSWER*/";
 const PLAN_REACT_INSTRUCTION: &str = "When answering, prefer available tools over memorized \
 knowledge.\n\nFollow this process:\n1. Start with a natural-language plan.\n2. Use tools to \
 execute the plan and interleave tool use with reasoning updates.\n3. End with one final answer.\n\n\
+Tool usage rules:\n- Prefer one tool call at a time unless the calls are clearly independent.\n- \
+When the user provides a local absolute path, treat it as a path you should verify with file \
+tools before making environment claims.\n- For a user-provided absolute directory path, start \
+with list_dir. For a user-provided absolute file path, start with read_file.\n- Do not claim a \
+path is outside the sandbox, outside the workspace, on the host filesystem, unmounted, or \
+inaccessible until a file tool has actually failed on that path.\n- For local path analysis, do \
+not start with memory_search or web_search when local file tools can inspect the path directly.\n- \
+For codebase investigation, narrow scope before reading files: start with directory listing or \
+globbing, then use grep/search, then read specific files.\n- Do not jump into repeated read_file \
+calls when grep/search can locate symbols or call sites first.\n- For repository or architecture \
+analysis, do not stop after a directory listing. Inspect the top-level structure, read at least \
+one manifest or README file, and run at least one grep/search pass for entrypoints, modules, or \
+key symbols before writing the summary.\n- Separate verified facts from inference. If the \
+investigation is still shallow, say it is a preliminary assessment rather than a full architecture \
+analysis.\n- For repository or architecture analysis, the first investigation pass should normally \
+be list_dir or grep_files, not read_file, unless the user already named an exact file to inspect.\n- \
+For repository or architecture analysis, a strong default sequence is: 1) list_dir at the repo \
+root, 2) read README or a manifest such as Cargo.toml/package.json/pyproject.toml/go.mod, 3) \
+grep_files for entrypoints and modules using patterns like main, app, server, router, cli, or \
+register, 4) then read the specific files you found.\n- A summary based on only one directory \
+listing or one file read is usually insufficient for architecture analysis.\n\n\
 Use this format:\n- planning under /*PLANNING*/\n- replanning under /*REPLANNING*/ when needed\n\
 - reasoning under /*REASONING*/\n- tool actions under /*ACTION*/\n- final answer under \
 /*FINAL_ANSWER*/.\n\nThe plan should be coherent, tool-grounded, and decomposed into numbered \
@@ -22,7 +43,25 @@ and explicitly state when the task cannot be completed with the available contex
 
 const BUILT_IN_TOOL_GUIDANCE: &str = "Use available tools whenever they can verify facts, inspect \
 the workspace, execute commands, or fetch concrete results. Do not answer from memory when a tool \
-can check the answer. Use a direct answer only when no tool is needed.";
+can check the answer. Prefer one tool call at a time unless parallel work is clearly necessary. \
+When the user provides a local absolute path, verify it with local file tools before making any \
+claim about sandbox limits, workspace boundaries, mount state, or filesystem access. For a \
+directory path, start with list_dir. For a file path, start with read_file. Do not default to \
+memory_search or web_search for local path analysis when file tools can inspect the target \
+directly. \
+For repository analysis, narrow scope before opening files: start with list_dir or glob patterns, \
+then grep/search for symbols or paths, then read the specific files you need. For repository or \
+architecture analysis, do not stop after a directory listing: inspect the top-level structure, \
+read at least one manifest or README file, and run at least one grep/search pass for entrypoints, \
+modules, or key symbols before summarizing. Separate verified facts from inference, and label the \
+result as preliminary when the investigation is still shallow. For repository or architecture \
+analysis, the first investigation pass should normally be list_dir or grep_files, not read_file, \
+unless the user already named an exact file to inspect. A strong default sequence is: 1) list_dir \
+at the repo root, 2) read README or a manifest such as Cargo.toml/package.json/pyproject.toml/go.mod, \
+3) grep_files for entrypoints and modules using patterns like main, app, server, router, cli, or \
+register, 4) then read the specific files you found. A summary based on only one directory \
+listing or one file read is usually insufficient for architecture analysis. Use a direct answer \
+only when no tool is needed.";
 
 pub struct BuiltInPlanner;
 
@@ -238,6 +277,15 @@ mod tests {
             .planning_instruction
             .expect("instruction should exist");
         assert!(instruction.contains("Use available tools"));
+        assert!(instruction.contains("Prefer one tool call at a time"));
+        assert!(instruction.contains("then grep/search"));
+        assert!(instruction.contains("read at least one manifest or README file"));
+        assert!(instruction.contains("Separate verified facts from inference"));
+        assert!(instruction
+            .contains("first investigation pass should normally be list_dir or grep_files"));
+        assert!(instruction.contains("strong default sequence"));
+        assert!(instruction.contains("Cargo.toml/package.json/pyproject.toml/go.mod"));
+        assert!(instruction.contains("usually insufficient for architecture analysis"));
     }
 
     #[test]
@@ -251,6 +299,15 @@ mod tests {
             .expect("instruction should exist");
         assert!(instruction.contains("/*PLANNING*/"));
         assert!(instruction.contains("/*FINAL_ANSWER*/"));
+        assert!(instruction.contains("Prefer one tool call at a time"));
+        assert!(instruction.contains("then use grep/search"));
+        assert!(instruction.contains("read at least one manifest or README file"));
+        assert!(instruction.contains("preliminary assessment"));
+        assert!(instruction
+            .contains("first investigation pass should normally be list_dir or grep_files"));
+        assert!(instruction.contains("strong default sequence"));
+        assert!(instruction.contains("Cargo.toml/package.json/pyproject.toml/go.mod"));
+        assert!(instruction.contains("usually insufficient for architecture analysis"));
 
         let empty_response = crate::LlmResponseEnvelope {
             output_text: "   ".to_string(),

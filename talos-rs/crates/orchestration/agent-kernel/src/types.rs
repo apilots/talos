@@ -525,12 +525,10 @@ impl TryFrom<&talos_config::AgentKernelConfig> for KernelExecutionSettings {
             _ => FlowKind::Auto,
         };
         let thinking_mode = match planner_kind {
-            PlannerKind::None => ThinkingMode::Disabled,
             PlannerKind::BuiltIn => ThinkingMode::ModelNative,
             PlannerKind::PlanReAct => ThinkingMode::PlanningProcessor,
         };
         let default_path = match planner_kind {
-            PlannerKind::None => ExecutionPath::DirectAnswer,
             PlannerKind::BuiltIn => ExecutionPath::DirectAnswer,
             PlannerKind::PlanReAct => ExecutionPath::ReactiveLoop,
         };

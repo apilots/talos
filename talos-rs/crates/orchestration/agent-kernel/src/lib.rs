@@ -6,6 +6,7 @@ mod flow;
 mod general_turn;
 mod llm_agent;
 mod planner;
+mod planner_selector;
 mod plugin;
 mod processor;
 mod runner;
@@ -47,6 +48,9 @@ pub use general_turn::{
 };
 pub use llm_agent::LlmKernelAgent;
 pub use planner::{BuiltInPlanner, PlanReActPlanner};
+pub use planner_selector::{
+    LlmCallError, LlmCallStatus, PlannerSelectionRequest, PlannerSelectionResponse, PlannerSelector,
+};
 pub use plugin::{InvocationPluginManager, PluginRegistry};
 pub use processor::{
     AgentTransferRequestProcessor, BasicRequestProcessor, ContentsRequestProcessor,

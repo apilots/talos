@@ -183,6 +183,9 @@ pub enum EventPayload {
     CompactionSummary {
         payload: CompactionSummaryPayload,
     },
+    PlannerSelection {
+        payload: crate::planner_selector::PlannerSelectionResponse,
+    },
     Empty,
 }
 

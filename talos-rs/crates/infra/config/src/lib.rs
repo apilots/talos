@@ -336,7 +336,6 @@ impl Default for AgentConfig {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PlannerMode {
-    None,
     #[default]
     BuiltIn,
     PlanReAct,
@@ -345,7 +344,6 @@ pub enum PlannerMode {
 impl PlannerMode {
     pub fn parse(value: &str) -> TalosResult<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "none" => Ok(Self::None),
             "built_in" => Ok(Self::BuiltIn),
             "plan_react" => Ok(Self::PlanReAct),
             other => Err(talos_error::TalosError::ValidationError(format!(
@@ -357,11 +355,22 @@ impl PlannerMode {
 
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::None => "none",
             Self::BuiltIn => "built_in",
             Self::PlanReAct => "plan_react",
         }
     }
+}
+
+/// Controls how the planner is selected for each turn.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PlannerSelection {
+    /// Always use the configured `planner_mode` value. No LLM inference.
+    #[default]
+    Static,
+    /// Use an LLM classifier to select the planner each turn.
+    /// Falls back to `planner_mode` on classifier failure.
+    Auto,
 }
 
 impl fmt::Display for PlannerMode {
@@ -477,13 +486,13 @@ pub struct AgentKernelConfig {
     #[serde(default = "default_workspace_id")]
     pub default_workspace_id: String,
 
-    /// Planner mode for kernel orchestration.
+    /// Planner mode used directly (Static) or as fallback (Auto).
     #[serde(default = "default_kernel_planner_mode")]
     pub planner_mode: PlannerMode,
 
-    /// Deprecated planner override switch; request-level config no longer overrides kernel config.
-    #[serde(default = "default_kernel_allow_request_planner_override")]
-    pub allow_request_planner_override: bool,
+    /// Planner selection strategy: Static uses planner_mode directly; Auto uses LLM inference.
+    #[serde(default)]
+    pub planner_selection: PlannerSelection,
 
     /// Kernel execution mode: single, sequential, parallel, or loop.
     #[serde(default = "default_kernel_execution_mode")]
@@ -709,7 +718,7 @@ fn default_kernel_max_task_per_turn() -> usize {
 }
 
 fn default_kernel_tool_parallelism() -> usize {
-    4
+    1
 }
 
 fn default_kernel_max_llm_calls() -> u32 {
@@ -754,10 +763,6 @@ fn default_workspace_id() -> String {
 
 fn default_kernel_planner_mode() -> PlannerMode {
     PlannerMode::BuiltIn
-}
-
-fn default_kernel_allow_request_planner_override() -> bool {
-    false
 }
 
 fn default_kernel_execution_mode() -> ExecutionMode {
@@ -1112,7 +1117,7 @@ impl Default for AgentKernelConfig {
             context_compaction_max_bytes: default_kernel_context_compaction_max_bytes(),
             default_workspace_id: default_workspace_id(),
             planner_mode: default_kernel_planner_mode(),
-            allow_request_planner_override: default_kernel_allow_request_planner_override(),
+            planner_selection: PlannerSelection::Static,
             execution_mode: default_kernel_execution_mode(),
             execution_children: default_kernel_execution_children(),
             execution_loop_iters: default_kernel_execution_loop_iters(),
@@ -1981,7 +1986,7 @@ const REQUIRED_CONFIG_PATHS: &[&str] = &[
     "agent.kernel.context_compaction_max_bytes",
     "agent.kernel.default_workspace_id",
     "agent.kernel.planner_mode",
-    "agent.kernel.allow_request_planner_override",
+    "agent.kernel.planner_selection",
     "agent.kernel.execution_mode",
     "agent.kernel.execution_children",
     "agent.kernel.execution_loop_iters",
@@ -2085,14 +2090,14 @@ agent:
   kernel:
     max_iters: 1
     max_task_per_turn: 3
-    tool_parallelism: 4
+    tool_parallelism: 1
     max_llm_calls: 8
     max_tool_rounds: 8
     tool_result_max_bytes: 65536
     context_compaction_max_bytes: 262144
     default_workspace_id: default
     planner_mode: built_in
-    allow_request_planner_override: false
+    planner_selection: static
     execution_mode: single
     execution_children: 2
     execution_loop_iters: 3
@@ -2242,7 +2247,10 @@ mod tests {
         assert_eq!(config.agent.kernel.context_compaction_max_bytes, 256 * 1024);
         assert_eq!(config.agent.kernel.default_workspace_id, "default");
         assert_eq!(config.agent.kernel.planner_mode, PlannerMode::BuiltIn);
-        assert!(!config.agent.kernel.allow_request_planner_override);
+        assert_eq!(
+            config.agent.kernel.planner_selection,
+            PlannerSelection::Static
+        );
         assert_eq!(config.agent.kernel.execution_mode, ExecutionMode::Single);
         assert_eq!(config.agent.kernel.execution_children, 2);
         assert_eq!(config.agent.kernel.execution_loop_iters, 3);
@@ -2408,14 +2416,14 @@ agent:
   kernel:
     max_iters: 1
     max_task_per_turn: 3
-    tool_parallelism: 4
+    tool_parallelism: 1
     max_llm_calls: 8
     max_tool_rounds: 8
     tool_result_max_bytes: 65536
     context_compaction_max_bytes: 262144
     default_workspace_id: default
     planner_mode: built_in
-    allow_request_planner_override: false
+    planner_selection: static
     execution_mode: single
     execution_children: 2
     execution_loop_iters: 3
