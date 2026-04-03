@@ -25,7 +25,7 @@ if [ $? -eq 0 ]; then
     echo "To run the server, use: cargo run -p talos"
     echo "Make sure to set required environment variables:"
     echo "export ANTHROPIC_API_KEY=your_api_key_here"
-    echo "or update talos.yaml with your preferred LLM provider"
+    echo "or update <talos_home>/conf/talos.yaml with your preferred LLM provider"
 else
     echo "Build failed!"
     exit 1

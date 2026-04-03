@@ -1,14 +1,14 @@
 //! Pure utility functions for TUI rendering and layout.
 
+use ratatui::{
+    style::{Color, Style},
+    text::{Line, Span},
+};
 use std::{
     env,
     io::Write,
     path::Path,
     process::{Command, Stdio},
-};
-use ratatui::{
-    style::{Color, Style},
-    text::{Line, Span},
 };
 use talos_types::talos::TalosEventType;
 use unicode_width::UnicodeWidthChar;
@@ -142,11 +142,7 @@ pub(crate) fn slice_text_by_display_columns(
     selected
 }
 
-pub(crate) fn highlight_line_columns(
-    line: &mut Line<'static>,
-    start_col: usize,
-    end_col: usize,
-) {
+pub(crate) fn highlight_line_columns(line: &mut Line<'static>, start_col: usize, end_col: usize) {
     let highlight_style = Style::default()
         .bg(Color::Rgb(108, 117, 160))
         .fg(Color::White);

@@ -123,10 +123,7 @@ pub(crate) fn render_markdown_lines(markdown: &str) -> Vec<Line<'static>> {
                 Span::raw(" ".repeat(indent)),
                 Span::styled("• ".to_string(), Style::default().fg(Color::Cyan)),
             ];
-            spans.extend(parse_inline_spans(
-                rest,
-                Style::default().fg(Color::White),
-            ));
+            spans.extend(parse_inline_spans(rest, Style::default().fg(Color::White)));
             lines.push(Line::from(spans));
             continue;
         }

@@ -16,8 +16,7 @@ pub use talos_types::talos::{
     TalosMessageOutputDeltaEvent, TalosMessageReasoningDeltaEvent, TalosMessageRequest,
     TalosMessageResponse, TalosMessageStartedEvent, TalosMessageToolCallCompletedEvent,
     TalosMessageToolCallPendingApprovalEvent, TalosMessageToolCallStartedEvent, TalosOutputItem,
-    TalosProvider, TalosSourceType,
-    TalosThinkingSource, TalosThinkingStage,
+    TalosProvider, TalosSourceType, TalosThinkingSource, TalosThinkingStage,
 };
 pub use talos_types::{ModelInfo, TalosSession};
 
@@ -77,7 +76,8 @@ pub struct TalosClient {
 
 impl TalosClient {
     pub fn new(config: ClientConfig) -> TalosResult<Self> {
-        let mut builder = Client::builder().connect_timeout(std::time::Duration::from_secs(config.timeout));
+        let mut builder =
+            Client::builder().connect_timeout(std::time::Duration::from_secs(config.timeout));
 
         // For local gateway endpoints, bypass system proxy settings to avoid
         // loopback requests being intercepted by desktop proxy tools.

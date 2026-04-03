@@ -67,10 +67,11 @@ cd talos/talos-rs
 
 1. Copy the example configuration:
 ```bash
-cp talos.yaml.example talos.yaml
+mkdir -p "${TALOS_HOME:-$HOME/.talos}/conf"
+cp talos.yaml.example "${TALOS_HOME:-$HOME/.talos}/conf/talos.yaml"
 ```
 
-2. Edit `talos.yaml` to match your requirements
+2. Edit `${TALOS_HOME:-$HOME/.talos}/conf/talos.yaml` to match your requirements
 
 3. Set required environment variables:
 ```bash
@@ -184,7 +185,7 @@ Talos follows an eight-layer architecture with clear separation of concerns:
 
 ## ⚙️ Configuration Options
 
-The system can be configured via `talos.yaml` or environment variables:
+The system can be configured via `${TALOS_HOME:-$HOME/.talos}/conf/talos.yaml` or environment variables:
 
 - `ANTHROPIC_API_KEY` - API key for Anthropic services
 - `OPENAI_API_KEY` - API key for OpenAI services

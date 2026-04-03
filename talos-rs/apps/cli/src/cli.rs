@@ -12,6 +12,7 @@ use talos_client::{
     TalosEventType, TalosInputItem, TalosMessageRequest, TalosMessageResponse, TalosOutputItem,
     TalosThinkingSource, TalosThinkingStage,
 };
+use talos_config::Config;
 
 /// Command-line interface for Talos AI system - Full-featured command set for system access
 #[derive(Parser)]
@@ -210,7 +211,12 @@ pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     // Default config path
-    let file_config = TalosCliConfig::load_from_file("talos.yaml")?; // default config
+    let default_config_path = Config::default_path();
+    let file_config = TalosCliConfig::load_from_file(
+        default_config_path
+            .to_str()
+            .ok_or("talos config path is not valid unicode")?,
+    )?;
 
     // Override with command-line arguments if provided
     let gateway_url = cli
@@ -426,7 +432,7 @@ async fn execute_status_command(client: &TalosClient) -> Result<(), Box<dyn std:
 async fn execute_info_command(_client: &TalosClient) -> Result<(), Box<dyn std::error::Error>> {
     println!("Talos CLI - AI Assistant System");
     println!("Version: 1.0.0");
-    println!("Gateway: configured via --gateway-url or talos.yaml");
+    println!("Gateway: configured via --gateway-url or <talos_home>/conf/talos.yaml");
     Ok(())
 }
 

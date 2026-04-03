@@ -3,11 +3,11 @@
 //! Gateway mode supports real session APIs and SSE streaming.
 
 mod markdown;
-mod utils;
 pub mod run;
+mod utils;
 
-pub use run::run_tui_app_with_client;
 use markdown::*;
+pub use run::run_tui_app_with_client;
 use utils::*;
 
 use async_trait::async_trait;
@@ -16,7 +16,10 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
+    widgets::{
+        Block, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
+        ScrollbarOrientation, ScrollbarState, Wrap,
+    },
     Frame,
 };
 use std::{
@@ -48,7 +51,8 @@ const CHAT_CONTENT_PADDING_LEFT: u16 = 2;
 #[derive(Debug, Clone)]
 struct CommandSuggestion {
     name: String,
-    usage: String,
+    insert_text: String,
+    display_text: String,
     description: String,
 }
 
@@ -57,46 +61,64 @@ impl CommandSuggestion {
         vec![
             CommandSuggestion {
                 name: "help".to_string(),
-                usage: "/help".to_string(),
+                insert_text: "/help".to_string(),
+                display_text: "/help".to_string(),
                 description: "Show help and available commands".to_string(),
             },
             CommandSuggestion {
                 name: "model".to_string(),
-                usage: "/model [id]".to_string(),
+                insert_text: "/model".to_string(),
+                display_text: "/model [id]".to_string(),
                 description: "Switch model (no args: show picker)".to_string(),
             },
             CommandSuggestion {
                 name: "models".to_string(),
-                usage: "/models".to_string(),
+                insert_text: "/models".to_string(),
+                display_text: "/models".to_string(),
                 description: "List all available models".to_string(),
             },
             CommandSuggestion {
                 name: "history".to_string(),
-                usage: "/history".to_string(),
+                insert_text: "/history".to_string(),
+                display_text: "/history".to_string(),
                 description: "Open session history panel".to_string(),
             },
             CommandSuggestion {
                 name: "sessions".to_string(),
-                usage: "/sessions [1-9]".to_string(),
+                insert_text: "/sessions".to_string(),
+                display_text: "/sessions [1-9]".to_string(),
                 description: "Quick session switch (supports digit shortcuts)".to_string(),
             },
             CommandSuggestion {
                 name: "status".to_string(),
-                usage: "/status".to_string(),
+                insert_text: "/status".to_string(),
+                display_text: "/status".to_string(),
                 description: "Show connection status".to_string(),
             },
             CommandSuggestion {
                 name: "quit".to_string(),
-                usage: "/quit".to_string(),
+                insert_text: "/quit".to_string(),
+                display_text: "/quit".to_string(),
                 description: "Exit application".to_string(),
             },
         ]
     }
 
     fn filter(query: &str) -> Vec<CommandSuggestion> {
+        let normalized = query.trim_start_matches('/');
         Self::all()
             .into_iter()
-            .filter(|cmd| cmd.name.starts_with(query) || cmd.usage.contains(query))
+            .filter(|cmd| {
+                cmd.name.starts_with(normalized)
+                    || cmd
+                        .insert_text
+                        .trim_start_matches('/')
+                        .starts_with(normalized)
+                    || cmd
+                        .display_text
+                        .trim_start_matches('/')
+                        .starts_with(normalized)
+            })
             .collect()
     }
 }
@@ -107,7 +129,6 @@ pub enum AppState {
     Chat,
     History,
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ChatRole {
@@ -164,7 +185,12 @@ impl ChatBlock {
         }
     }
 
-    fn new_tool_call(call_id: String, tool_name: String, tool_input: serde_json::Value, timing_ms: Option<u64>) -> Self {
+    fn new_tool_call(
+        call_id: String,
+        tool_name: String,
+        tool_input: serde_json::Value,
+        timing_ms: Option<u64>,
+    ) -> Self {
         Self {
             role: ChatRole::Tool,
             content: String::new(),
@@ -397,6 +423,7 @@ pub struct TuiApp {
     closing_session_id: Option<String>,
     should_exit: bool,
     left_panel_area: Option<Rect>,
+    input_area: Option<Rect>,
 }
 
 impl TuiApp {
@@ -479,6 +506,7 @@ impl TuiApp {
             closing_session_id: None,
             should_exit: false,
             left_panel_area: None,
+            input_area: None,
         };
 
         app.push_block(
@@ -677,7 +705,8 @@ impl TuiApp {
                     return Ok(false);
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
-                    self.command_autocomplete_selected = self.command_autocomplete_selected.saturating_sub(1);
+                    self.command_autocomplete_selected =
+                        self.command_autocomplete_selected.saturating_sub(1);
                     return Ok(false);
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
@@ -688,9 +717,11 @@ impl TuiApp {
                     return Ok(false);
                 }
                 KeyCode::Enter => {
-                    if let Some(cmd) = self.command_suggestions.get(self.command_autocomplete_selected) {
-                        // Use the command usage as input
-                        self.input_buffer = cmd.usage.clone();
+                    if let Some(cmd) = self
+                        .command_suggestions
+                        .get(self.command_autocomplete_selected)
+                    {
+                        self.input_buffer = cmd.insert_text.clone();
                         self.cursor_index = self.input_buffer.chars().count();
                         self.show_command_autocomplete = false;
                         self.command_input_buffer.clear();
@@ -706,7 +737,11 @@ impl TuiApp {
                     }
                     return Ok(false);
                 }
-                KeyCode::Char(c) if !key_event.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {
+                KeyCode::Char(c)
+                    if !key_event
+                        .modifiers
+                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                {
                     self.command_input_buffer.push(c);
                     self.update_command_suggestions();
                     return Ok(false);
@@ -1040,7 +1075,10 @@ impl TuiApp {
                 Ok(sessions) => {
                     self.history_sessions = sessions;
                     self.history_selected = 0;
-                    self.push_right_event(format!("history loaded: {} sessions", self.history_sessions.len()));
+                    self.push_right_event(format!(
+                        "history loaded: {} sessions",
+                        self.history_sessions.len()
+                    ));
                 }
                 Err(err) => {
                     self.push_right_event(format!("history load failed: {err}"));
@@ -1292,7 +1330,8 @@ impl TuiApp {
                 if requested.is_empty() {
                     // No argument: open model picker
                     self.show_model_picker = true;
-                    self.model_picker_selected = self.available_models
+                    self.model_picker_selected = self
+                        .available_models
                         .iter()
                         .position(|m| m == &self.current_model)
                         .unwrap_or(0);
@@ -1533,9 +1572,7 @@ impl TuiApp {
         };
 
         let Some(session_id) = self.session_id.clone() else {
-            return Err(TalosError::ClientError(
-                "session is not ready".to_string(),
-            ));
+            return Err(TalosError::ClientError("session is not ready".to_string()));
         };
         let active_summary = summarize_for_queue(&user_message);
         let request = TalosMessageRequest {
@@ -1854,7 +1891,10 @@ impl TuiApp {
             return;
         }
         if self.available_models.is_empty() {
-            self.push_block(ChatRole::System, "No models loaded. Run /models first.".to_string());
+            self.push_block(
+                ChatRole::System,
+                "No models loaded. Run /models first.".to_string(),
+            );
             return;
         }
         // Pre-select current model
@@ -1884,7 +1924,11 @@ impl TuiApp {
     }
 
     fn switch_to_sessions_picker(&mut self) {
-        let Some(session) = self.history_sessions.get(self.sessions_picker_selected).cloned() else {
+        let Some(session) = self
+            .history_sessions
+            .get(self.sessions_picker_selected)
+            .cloned()
+        else {
             return;
         };
         let session_id = session.context.session_id.clone();
@@ -1920,7 +1964,11 @@ impl TuiApp {
     }
 
     fn confirm_model_picker(&mut self) {
-        let Some(model) = self.available_models.get(self.model_picker_selected).cloned() else {
+        let Some(model) = self
+            .available_models
+            .get(self.model_picker_selected)
+            .cloned()
+        else {
             return;
         };
         let Some(client) = self.gateway_client.clone() else {
@@ -2358,7 +2406,13 @@ impl TuiApp {
             .collect();
     }
 
-    fn push_tool_call_block(&mut self, call_id: String, tool_name: String, tool_input: serde_json::Value, timing_ms: Option<u64>) -> usize {
+    fn push_tool_call_block(
+        &mut self,
+        call_id: String,
+        tool_name: String,
+        tool_input: serde_json::Value,
+        timing_ms: Option<u64>,
+    ) -> usize {
         let block = ChatBlock::new_tool_call(call_id.clone(), tool_name, tool_input, timing_ms);
         self.chat_blocks.push(block);
         let idx = self.chat_blocks.len() - 1;
@@ -2387,7 +2441,13 @@ impl TuiApp {
         Some(idx)
     }
 
-    fn complete_tool_call_block(&mut self, call_id: &str, output: String, exit_ok: bool, timing_ms: Option<u64>) {
+    fn complete_tool_call_block(
+        &mut self,
+        call_id: &str,
+        output: String,
+        exit_ok: bool,
+        timing_ms: Option<u64>,
+    ) {
         if let Some(idx) = self.resolve_tool_call_block_idx(call_id) {
             if let Some(block) = self.chat_blocks.get_mut(idx) {
                 block.content = output;
@@ -2402,7 +2462,10 @@ impl TuiApp {
     }
 
     fn toggle_last_tool_block(&mut self) {
-        let last_tool_idx = self.chat_blocks.iter().rposition(|b| b.role == ChatRole::Tool);
+        let last_tool_idx = self
+            .chat_blocks
+            .iter()
+            .rposition(|b| b.role == ChatRole::Tool);
         if let Some(idx) = last_tool_idx {
             if let Some(block) = self.chat_blocks.get_mut(idx) {
                 block.expanded = !block.expanded;
@@ -2562,6 +2625,7 @@ impl TuiApp {
                 Constraint::Length(if show_queue_panel { 5 } else { 0 }),
                 Constraint::Length(3),
                 Constraint::Length(1),
+                Constraint::Length(8),
             ])
             .split(left_inner);
 
@@ -2627,11 +2691,12 @@ impl TuiApp {
         let input_panel = Block::default();
         let input_inner = input_panel.inner(left_chunks[2]);
         f.render_widget(input_panel, left_chunks[2]);
+        self.input_area = Some(input_inner);
 
         if let Some(approval) = &self.pending_approval {
             self.render_approval_card(f, input_inner, approval);
         } else {
-            let input_bg_style = Style::default().bg(Color::Rgb(66, 70, 78));
+            let input_bg_style = Style::default().bg(Color::Rgb(72, 76, 88));
             f.render_widget(Block::default().style(input_bg_style), input_inner);
 
             let input_rows = Layout::default()
@@ -2645,19 +2710,14 @@ impl TuiApp {
 
             let blank = Paragraph::new(Line::from("")).style(input_bg_style);
             f.render_widget(blank, input_rows[0]);
-
             let input_row = Paragraph::new(self.input_line()).style(input_bg_style);
             f.render_widget(input_row, input_rows[1]);
         }
 
         let wait_style = if self.in_flight {
-            Style::default()
-                .bg(Color::Rgb(36, 39, 46))
-                .fg(Color::Cyan)
+            Style::default().bg(Color::Rgb(36, 39, 46)).fg(Color::Cyan)
         } else {
-            Style::default()
-                .bg(Color::Rgb(36, 39, 46))
-                .fg(Color::White)
+            Style::default().bg(Color::Rgb(36, 39, 46)).fg(Color::White)
         };
         let status_block = Block::default().style(Style::default().bg(Color::Rgb(36, 39, 46)));
         f.render_widget(status_block, left_chunks[3]);
@@ -2665,6 +2725,9 @@ impl TuiApp {
             .style(wait_style)
             .wrap(Wrap { trim: false });
         f.render_widget(wait_row, left_chunks[3]);
+
+        let bottom_gap = Block::default().style(Style::default().bg(Color::Rgb(33, 38, 49)));
+        f.render_widget(bottom_gap, left_chunks[4]);
     }
 
     async fn submit_approval(&mut self, approved: bool) {
@@ -2683,7 +2746,13 @@ impl TuiApp {
         self.push_right_event(format!("tool approval {}: {}", label, approval.tool_name));
 
         if let Err(err) = client
-            .submit_tool_approval(&session_id, &approval.call_id, &approval.tool_name, approved, None)
+            .submit_tool_approval(
+                &session_id,
+                &approval.call_id,
+                &approval.tool_name,
+                approved,
+                None,
+            )
             .await
         {
             self.push_block(
@@ -2719,7 +2788,12 @@ impl TuiApp {
         let card = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Yellow))
-            .title(Span::styled(title, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)))
+            .title(Span::styled(
+                title,
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ))
             .style(card_style);
         let inner = card.inner(area);
         f.render_widget(card, area);
@@ -2734,12 +2808,18 @@ impl TuiApp {
             Line::from(vec![
                 Span::styled(
                     " [y / Enter: 批准] ",
-                    Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw("  "),
                 Span::styled(
                     " [n / Esc: 拒绝] ",
-                    Style::default().fg(Color::Black).bg(Color::Red).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Red)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ]),
         ];
@@ -2979,7 +3059,13 @@ impl TuiApp {
                 let model = &s.config.llm.model;
                 let msgs = s.state.message_count;
                 let idx_display = (idx + 1) % 10;
-                ListItem::new(format!(" [{}] {} [{}] {} msgs", idx_display, &session_id[0..8.min(session_id.len())], model, msgs))
+                ListItem::new(format!(
+                    " [{}] {} [{}] {} msgs",
+                    idx_display,
+                    &session_id[0..8.min(session_id.len())],
+                    model,
+                    msgs
+                ))
             })
             .collect();
 
@@ -2998,63 +3084,91 @@ impl TuiApp {
         f.render_stateful_widget(list, inner, &mut list_state);
     }
 
+    fn command_autocomplete_panel_height(&self) -> u16 {
+        if !self.show_command_autocomplete {
+            return 0;
+        }
+        self.command_suggestions.len().clamp(1, 7) as u16
+    }
+
     fn render_command_autocomplete(&self, f: &mut Frame, area: Rect) {
-        // Use left panel area for popup positioning
+        let Some(input_area) = self.input_area else {
+            return;
+        };
         let popup_area = self.left_panel_area.unwrap_or(area);
+        let popup_height = self.command_autocomplete_panel_height();
+        if popup_height == 0 || input_area.width == 0 {
+            return;
+        }
 
-        let popup_height = (self.command_suggestions.len() as u16 + 4).min(15);
-        let popup_width = 70u16;
-        let x = popup_area.x + popup_area.width.saturating_sub(popup_width) / 2;
-        let y = popup_area.y + (popup_area.height as usize).saturating_sub(popup_height as usize) as u16 / 2;
+        let max_width = popup_area.width.saturating_sub(2).max(1);
+        let popup_width = input_area.width.min(max_width);
+        let popup_x = input_area.x;
+        let popup_y = input_area.y.saturating_add(input_area.height);
+        let available_height = popup_area
+            .y
+            .saturating_add(popup_area.height)
+            .saturating_sub(popup_y);
         let popup_rect = Rect::new(
-            x.min(popup_area.x + popup_area.width.saturating_sub(popup_width)),
-            y.min(popup_area.y + popup_area.height.saturating_sub(popup_height)),
-            popup_width.min(popup_area.width),
-            popup_height.min(popup_area.height),
+            popup_x,
+            popup_y,
+            popup_width,
+            popup_height.min(available_height),
         );
+        if popup_rect.width == 0 || popup_rect.height == 0 {
+            return;
+        }
 
+        let bg_style = Style::default().bg(Color::Rgb(40, 44, 58));
         f.render_widget(Clear, popup_rect);
+        f.render_widget(Block::default().style(bg_style), popup_rect);
 
-        let title = if self.command_input_buffer.is_empty() {
-            " Commands  [↑↓] navigate  [Enter] select  [Esc] cancel ".to_string()
+        let items: Vec<ListItem> = if self.command_suggestions.is_empty() {
+            vec![ListItem::new(Line::from(vec![Span::styled(
+                "No matching commands",
+                Style::default().fg(Color::Rgb(150, 154, 165)),
+            )]))]
         } else {
-            format!(" Commands (/{})  [↑↓] navigate  [Enter] select  [Esc] cancel ", self.command_input_buffer)
+            self.command_suggestions
+                .iter()
+                .enumerate()
+                .map(|(index, cmd)| {
+                    let is_selected = index == self.command_autocomplete_selected;
+                    let command_style = if is_selected {
+                        Style::default()
+                            .fg(Color::Rgb(134, 233, 255))
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::Rgb(242, 243, 245))
+                    };
+                    let description_style = if is_selected {
+                        Style::default()
+                            .fg(Color::Rgb(134, 233, 255))
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::Rgb(186, 186, 186))
+                    };
+                    ListItem::new(vec![Line::from(vec![
+                        Span::styled(&cmd.display_text, command_style),
+                        Span::raw("  "),
+                        Span::styled(&cmd.description, description_style),
+                    ])])
+                })
+                .collect()
         };
 
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Rgb(100, 200, 100)))
-            .title(title);
-        let inner = block.inner(popup_rect);
-        f.render_widget(block, popup_rect);
-
-        let items: Vec<ListItem> = self
-            .command_suggestions
-            .iter()
-            .map(|cmd| {
-                ListItem::new(vec![
-                    Line::from(vec![
-                        Span::styled(&cmd.usage, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-                        Span::raw("  "),
-                        Span::styled(&cmd.description, Style::default().fg(Color::Gray)),
-                    ])
-                ])
-            })
-            .collect();
-
         let mut list_state = ListState::default();
-        list_state.select(Some(self.command_autocomplete_selected));
+        if !self.command_suggestions.is_empty() {
+            list_state.select(Some(self.command_autocomplete_selected));
+        }
 
         let list = List::new(items)
-            .highlight_style(
-                Style::default()
-                    .bg(Color::Rgb(50, 100, 50))
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            )
-            .highlight_symbol("▶ ");
+            .style(bg_style)
+            .highlight_style(Style::default().bg(Color::Rgb(40, 44, 58)))
+            .highlight_symbol("› ")
+            .highlight_spacing(ratatui::widgets::HighlightSpacing::Always);
 
-        f.render_stateful_widget(list, inner, &mut list_state);
+        f.render_stateful_widget(list, popup_rect, &mut list_state);
     }
 
     fn is_agent_working(&self) -> bool {
@@ -3069,10 +3183,7 @@ impl TuiApp {
         let color = Self::spinning_color(spinner_index);
         let text = "✢ Thinking…".to_string();
 
-        let display = Line::from(vec![Span::styled(
-            text.clone(),
-            Style::default().fg(color),
-        )]);
+        let display = Line::from(vec![Span::styled(text.clone(), Style::default().fg(color))]);
 
         RenderedChatLine {
             display,
@@ -3109,7 +3220,8 @@ impl TuiApp {
 
         // Append thinking spinner if agent is working
         if self.is_agent_working() {
-            self.rendered_chat_lines.push(self.thinking_spinner_line(self.spinner_index));
+            self.rendered_chat_lines
+                .push(self.thinking_spinner_line(self.spinner_index));
         }
 
         if self.rendered_chat_lines.is_empty() {
@@ -3213,7 +3325,10 @@ impl TuiApp {
                 motion, self.current_model, token_left, workspace, history_indicator
             )
         } else {
-            format!("{} · {} · {}{}", self.current_model, token_left, workspace, history_indicator)
+            format!(
+                "{} · {} · {}{}",
+                self.current_model, token_left, workspace, history_indicator
+            )
         };
         let mut text = if let Some((hint, expires_at)) = &self.status_hint {
             if Instant::now() < *expires_at {
@@ -3309,7 +3424,9 @@ impl TuiApp {
 
     fn user_block_lines(&self, block: &ChatBlock, content_width: usize) -> Vec<RenderedChatLine> {
         let mut lines = vec![];
-        let label_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+        let label_style = Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD);
         let body_style = Style::default().fg(Color::White);
 
         // Add role label
@@ -3373,7 +3490,9 @@ impl TuiApp {
         let render_data = Self::build_tool_render_data(block, tool_name);
         let (summary_text, summary_color) = match block.tool_status {
             Some(ToolCallStatus::Running) => (render_data.summary, Color::Yellow),
-            Some(ToolCallStatus::Completed { exit_ok: true }) => (render_data.summary, Color::Green),
+            Some(ToolCallStatus::Completed { exit_ok: true }) => {
+                (render_data.summary, Color::Green)
+            }
             Some(ToolCallStatus::Completed { exit_ok: false }) => (render_data.summary, Color::Red),
             None => (render_data.summary, Color::Gray),
         };
@@ -3542,7 +3661,8 @@ impl TuiApp {
         }
 
         let mut preview_lines = vec![];
-        if results.is_empty() && matches!(block.tool_status, Some(ToolCallStatus::Completed { .. })) {
+        if results.is_empty() && matches!(block.tool_status, Some(ToolCallStatus::Completed { .. }))
+        {
             preview_lines.push("0 hits".to_string());
         } else {
             for result in results.iter().take(2) {
@@ -3564,7 +3684,12 @@ impl TuiApp {
                 output_lines.push(format!("score: {:.2}", score));
             }
             if let Some(snippet) = result.get("snippet").and_then(|value| value.as_str()) {
-                output_lines.extend(snippet.lines().take(3).map(|line| format!("snippet: {}", line)));
+                output_lines.extend(
+                    snippet
+                        .lines()
+                        .take(3)
+                        .map(|line| format!("snippet: {}", line)),
+                );
             }
         }
 
@@ -3645,7 +3770,10 @@ impl TuiApp {
             preview_lines.push(format!("stdout: {}", first_line));
         }
 
-        let output_lines = output.lines().map(|line| line.to_string()).collect::<Vec<_>>();
+        let output_lines = output
+            .lines()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
 
         ToolRenderData {
             summary,
@@ -3687,7 +3815,11 @@ impl TuiApp {
             .take(1)
             .map(|line| format!("preview: {}", line))
             .collect::<Vec<_>>();
-        let output_lines = block.content.lines().map(|line| line.to_string()).collect::<Vec<_>>();
+        let output_lines = block
+            .content
+            .lines()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
 
         ToolRenderData {
             summary,
@@ -3709,7 +3841,11 @@ impl TuiApp {
             .take(2)
             .map(|line| line.to_string())
             .collect::<Vec<_>>();
-        let output_lines = block.content.lines().map(|line| line.to_string()).collect::<Vec<_>>();
+        let output_lines = block
+            .content
+            .lines()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
         let timing = Self::timing_suffix(block.timing_ms);
         let summary = match block.tool_status {
             Some(ToolCallStatus::Running) => "└ Running…".to_string(),
@@ -3762,9 +3898,15 @@ impl TuiApp {
             .unwrap_or_default()
     }
 
-    fn assistant_block_lines(&self, block: &ChatBlock, content_width: usize) -> Vec<RenderedChatLine> {
+    fn assistant_block_lines(
+        &self,
+        block: &ChatBlock,
+        content_width: usize,
+    ) -> Vec<RenderedChatLine> {
         let mut lines = vec![];
-        let label_style = Style::default().fg(Color::Green).add_modifier(Modifier::BOLD);
+        let label_style = Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD);
         lines.push(RenderedChatLine {
             display: Line::from(Span::styled("🤖 Assistant", label_style)),
             copy_projection: Some(CopyProjection {
@@ -3781,14 +3923,11 @@ impl TuiApp {
                 let mut colored_spans = vec![];
                 for span in &wrapped.spans {
                     let final_style = if span.style.fg.is_some() {
-                        span.style  // Keep original color if set
+                        span.style // Keep original color if set
                     } else {
-                        span.style.fg(Color::White)  // Default to white
+                        span.style.fg(Color::White) // Default to white
                     };
-                    colored_spans.push(Span::styled(
-                        span.content.to_string(),
-                        final_style,
-                    ));
+                    colored_spans.push(Span::styled(span.content.to_string(), final_style));
                 }
                 lines.push(RenderedChatLine {
                     display: Line::from(colored_spans),
@@ -3803,7 +3942,11 @@ impl TuiApp {
         lines
     }
 
-    fn thinking_block_lines(&self, block: &ChatBlock, content_width: usize) -> Vec<RenderedChatLine> {
+    fn thinking_block_lines(
+        &self,
+        block: &ChatBlock,
+        content_width: usize,
+    ) -> Vec<RenderedChatLine> {
         let mut lines = vec![];
         let label_style = Style::default()
             .fg(Color::Magenta)
@@ -3842,7 +3985,11 @@ impl TuiApp {
         lines
     }
 
-    fn system_block_lines(&self, block: &ChatBlock, _content_width: usize) -> Vec<RenderedChatLine> {
+    fn system_block_lines(
+        &self,
+        block: &ChatBlock,
+        _content_width: usize,
+    ) -> Vec<RenderedChatLine> {
         let mut lines = vec![];
         let gear_style = Style::default().fg(Color::Yellow);
 
@@ -3870,7 +4017,10 @@ impl TuiApp {
             // Regular system message: add icon prefix
             let first_line = content_lines[0];
             let mut first_spans = vec![Span::styled("⚙  ", gear_style)];
-            first_spans.push(Span::styled(first_line.to_string(), Style::default().fg(Color::White)));
+            first_spans.push(Span::styled(
+                first_line.to_string(),
+                Style::default().fg(Color::White),
+            ));
 
             lines.push(RenderedChatLine {
                 display: Line::from(first_spans),
@@ -3885,7 +4035,9 @@ impl TuiApp {
                 let display_line = Line::from(vec![
                     Span::styled(
                         "│  ",
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::DIM),
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::DIM),
                     ),
                     Span::styled(line.to_string(), Style::default().fg(Color::White)),
                 ]);
@@ -5224,7 +5376,10 @@ mod tests {
         let tool_block = app.chat_blocks.iter().find(|b| b.role == ChatRole::Tool);
         assert!(tool_block.is_some());
         let block = tool_block.unwrap();
-        assert_eq!(block.tool_status, Some(ToolCallStatus::Completed { exit_ok: true }));
+        assert_eq!(
+            block.tool_status,
+            Some(ToolCallStatus::Completed { exit_ok: true })
+        );
         assert_eq!(block.content, "file contents");
         assert_eq!(block.timing_ms, Some(42));
         // Should be removed from active after completion
@@ -5268,7 +5423,11 @@ mod tests {
 
         app.handle_stream_event(completed);
 
-        let idx = app.chat_blocks.iter().position(|b| b.tool_call_id.as_deref() == Some("call-stale")).unwrap();
+        let idx = app
+            .chat_blocks
+            .iter()
+            .position(|b| b.tool_call_id.as_deref() == Some("call-stale"))
+            .unwrap();
         assert_eq!(
             app.chat_blocks[idx].tool_status,
             Some(ToolCallStatus::Completed { exit_ok: true })
@@ -5320,7 +5479,11 @@ mod tests {
 
         app.handle_stream_event(completed);
 
-        let idx = app.chat_blocks.iter().position(|b| b.tool_call_id.as_deref() == Some("call-older")).unwrap();
+        let idx = app
+            .chat_blocks
+            .iter()
+            .position(|b| b.tool_call_id.as_deref() == Some("call-older"))
+            .unwrap();
         assert_eq!(
             app.chat_blocks[idx].tool_status,
             Some(ToolCallStatus::Completed { exit_ok: true })
@@ -5393,7 +5556,9 @@ mod tests {
             .map(|line| line_plain_text(&line.display))
             .collect::<Vec<_>>();
 
-        assert!(texts.iter().any(|line| line == "● exec_command(git diff HEAD~1)"));
+        assert!(texts
+            .iter()
+            .any(|line| line == "● exec_command(git diff HEAD~1)"));
         assert!(texts.iter().any(|line| line == "└ Done (exit:0 · 1.2s)"));
         assert!(texts.iter().any(|line| line == "  cmd:  git diff HEAD~1"));
         assert!(texts.iter().any(|line| line == "  dir:  /tmp/work"));
@@ -5445,11 +5610,17 @@ mod tests {
             .map(|line| line_plain_text(&line.display))
             .collect::<Vec<_>>();
 
-        assert!(texts.iter().any(|line| line == "● memory_search(talos 项目结构)"));
+        assert!(texts
+            .iter()
+            .any(|line| line == "● memory_search(talos 项目结构)"));
         assert!(texts.iter().any(|line| line == "└ Done (2 hits · 0.8s)"));
         assert!(texts.iter().any(|line| line == "  query: talos 项目结构"));
-        assert!(texts.iter().any(|line| line == "  hit: spec/tui-improvement.md"));
-        assert!(texts.iter().any(|line| line == "  hit: spec/tui-claude-code-style.md"));
+        assert!(texts
+            .iter()
+            .any(|line| line == "  hit: spec/tui-improvement.md"));
+        assert!(texts
+            .iter()
+            .any(|line| line == "  hit: spec/tui-claude-code-style.md"));
     }
 
     #[test]
@@ -5508,10 +5679,7 @@ mod tests {
     #[test]
     fn test_system_block_lines_render_welcome_card_without_prefix() {
         let app = create_embedded_app();
-        let block = ChatBlock::new(
-            ChatRole::System,
-            "╭────╮\n│ hi │\n╰────╯".to_string(),
-        );
+        let block = ChatBlock::new(ChatRole::System, "╭────╮\n│ hi │\n╰────╯".to_string());
 
         let lines = app.system_block_lines(&block, 80);
         let texts = lines
@@ -5528,10 +5696,10 @@ mod tests {
     fn test_markdown_bold_renders_bold_span() {
         let lines = render_markdown_lines("Hello **world** text");
         assert_eq!(lines.len(), 1);
-        let has_bold = lines[0].spans.iter().any(|s| {
-            s.content.contains("world")
-                && s.style.add_modifier.contains(Modifier::BOLD)
-        });
+        let has_bold = lines[0]
+            .spans
+            .iter()
+            .any(|s| s.content.contains("world") && s.style.add_modifier.contains(Modifier::BOLD));
         assert!(has_bold, "expected 'world' to be bold");
     }
 
@@ -5540,8 +5708,7 @@ mod tests {
         let lines = render_markdown_lines("Hello *italic* text");
         assert_eq!(lines.len(), 1);
         let has_italic = lines[0].spans.iter().any(|s| {
-            s.content.contains("italic")
-                && s.style.add_modifier.contains(Modifier::ITALIC)
+            s.content.contains("italic") && s.style.add_modifier.contains(Modifier::ITALIC)
         });
         assert!(has_italic, "expected 'italic' to be italic");
     }
@@ -5550,9 +5717,10 @@ mod tests {
     fn test_markdown_inline_code_uses_green_fg() {
         let lines = render_markdown_lines("Run `cargo build` now");
         assert_eq!(lines.len(), 1);
-        let has_code = lines[0].spans.iter().any(|s| {
-            s.content.contains("cargo build") && s.style.fg == Some(Color::LightGreen)
-        });
+        let has_code = lines[0]
+            .spans
+            .iter()
+            .any(|s| s.content.contains("cargo build") && s.style.fg == Some(Color::LightGreen));
         assert!(has_code, "expected inline code to have LightGreen fg");
     }
 
@@ -5560,7 +5728,11 @@ mod tests {
     fn test_markdown_header_h1_has_prefix() {
         let lines = render_markdown_lines("# Title");
         assert_eq!(lines.len(), 1);
-        let has_prefix = lines[0].spans.first().map(|s| s.content.contains('▌')).unwrap_or(false);
+        let has_prefix = lines[0]
+            .spans
+            .first()
+            .map(|s| s.content.contains('▌'))
+            .unwrap_or(false);
         assert!(has_prefix, "H1 should have ▌ prefix span");
     }
 
@@ -5580,7 +5752,10 @@ mod tests {
         assert!(lines.len() >= 3);
         // The code line should have LightGreen fg
         let code_line = &lines[2];
-        let is_green = code_line.spans.iter().any(|s| s.style.fg == Some(Color::LightGreen));
+        let is_green = code_line
+            .spans
+            .iter()
+            .any(|s| s.style.fg == Some(Color::LightGreen));
         assert!(is_green, "code block lines should be LightGreen");
     }
 
@@ -5604,7 +5779,13 @@ mod tests {
         assert!(texts.iter().any(|line| line == "2. Second"));
         assert!(texts.iter().any(|line| line == "─── rust ───"));
         assert!(texts.iter().any(|line| line == "let x = 1;"));
-        assert_eq!(texts.iter().filter(|line| line.starts_with("🤖 Assistant")).count(), 1);
+        assert_eq!(
+            texts
+                .iter()
+                .filter(|line| line.starts_with("🤖 Assistant"))
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -5675,8 +5856,48 @@ mod tests {
         let mut app = create_remote_app();
         app.available_models.clear();
         app.toggle_model_picker();
-        assert!(!app.show_model_picker, "picker should not open without models");
-        assert!(app.chat_blocks.iter().any(|b| b.content.contains("No models")));
+        assert!(
+            !app.show_model_picker,
+            "picker should not open without models"
+        );
+        assert!(app
+            .chat_blocks
+            .iter()
+            .any(|b| b.content.contains("No models")));
+    }
+
+    #[tokio::test]
+    async fn test_command_autocomplete_inserts_command_only() {
+        let mut app = create_remote_app();
+
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
+            .await
+            .unwrap();
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE))
+            .await
+            .unwrap();
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .await
+            .unwrap();
+
+        assert_eq!(app.input_buffer, "/sessions");
+        assert_eq!(app.cursor_index, "/sessions".chars().count());
+        assert!(!app.show_command_autocomplete);
+    }
+
+    #[test]
+    fn test_command_autocomplete_panel_height_is_inline_and_capped() {
+        let mut app = create_remote_app();
+        app.show_command_autocomplete = true;
+        app.command_suggestions = CommandSuggestion::all();
+
+        assert_eq!(app.command_autocomplete_panel_height(), 7);
+
+        app.command_suggestions.clear();
+        assert_eq!(app.command_autocomplete_panel_height(), 1);
     }
 
     #[tokio::test]

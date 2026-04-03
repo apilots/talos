@@ -16,8 +16,8 @@ use talos_session_store::{DatabaseSessionStore, SessionStore};
 use talos_storage::{create_storage, StorageConfig};
 use talos_tools::{register_core_local_tools, register_network_tools, ToolRegistry};
 use talos_types::{ModelInfo, RequestHandler, SessionService};
-use tracing::error;
 use talos_ui_tui::run_tui_app_with_client;
+use tracing::error;
 
 const DEFAULT_GATEWAY_URL: &str = "http://127.0.0.1:8080";
 const DEFAULT_GATEWAY_TOKEN: &str = "talos-local-test-token";
@@ -54,7 +54,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn run_embedded(_args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
-    let config = Config::load().expect("failed to load talos.yaml — run `talos init` or use --gateway to connect to an external gateway");
+    let config = Config::load().expect(
+        "failed to load Talos config from <talos_home>/conf/talos.yaml — run `talos init` or use --gateway to connect to an external gateway",
+    );
     config.validate_runtime().expect("invalid runtime config");
 
     let storage_impl = create_storage(&StorageConfig {
@@ -196,9 +198,7 @@ async fn create_llm_provider(
                     TalosError::InvalidConfiguration("llm.bailian.api_key is required".to_string())
                 })?;
                 let base_url = config.llm.bailian.base_url.clone().ok_or_else(|| {
-                    TalosError::InvalidConfiguration(
-                        "llm.bailian.base_url is required".to_string(),
-                    )
+                    TalosError::InvalidConfiguration("llm.bailian.base_url is required".to_string())
                 })?;
                 let bailian_cfg =
                     talos_llm_bailian::BailianConfig::new(&api_key).with_base_url(&base_url);
@@ -208,9 +208,7 @@ async fn create_llm_provider(
         "ollama" => {
             if config.llm.ollama.enabled {
                 let base_url = config.llm.ollama.base_url.clone().ok_or_else(|| {
-                    TalosError::InvalidConfiguration(
-                        "llm.ollama.base_url is required".to_string(),
-                    )
+                    TalosError::InvalidConfiguration("llm.ollama.base_url is required".to_string())
                 })?;
                 let openai_cfg =
                     talos_llm_openai::OpenAIConfig::new("ollama").with_base_url(&base_url);

@@ -8,7 +8,7 @@ fn main() {
     println!("The TUI now runs in gateway mode only.");
     println!();
     println!("To run the TUI:");
-    println!("  # With embedded gateway (requires talos.yaml):");
+    println!("  # With embedded gateway (requires <talos_home>/conf/talos.yaml):");
     println!("  cargo run -p talos-ui-tui");
     println!();
     println!("  # With external gateway:");
