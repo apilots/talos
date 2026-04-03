@@ -44,6 +44,62 @@ const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 const SESSION_CLOSE_TIMEOUT: Duration = Duration::from_secs(4);
 const SPINNER_FRAMES: &[char] = &['|', '/', '-', '\\'];
 
+#[derive(Debug, Clone)]
+struct CommandSuggestion {
+    name: String,
+    usage: String,
+    description: String,
+}
+
+impl CommandSuggestion {
+    fn all() -> Vec<Self> {
+        vec![
+            CommandSuggestion {
+                name: "help".to_string(),
+                usage: "/help".to_string(),
+                description: "Show help and available commands".to_string(),
+            },
+            CommandSuggestion {
+                name: "model".to_string(),
+                usage: "/model [id]".to_string(),
+                description: "Switch model (no args: show picker)".to_string(),
+            },
+            CommandSuggestion {
+                name: "models".to_string(),
+                usage: "/models".to_string(),
+                description: "List all available models".to_string(),
+            },
+            CommandSuggestion {
+                name: "history".to_string(),
+                usage: "/history".to_string(),
+                description: "Open session history panel".to_string(),
+            },
+            CommandSuggestion {
+                name: "sessions".to_string(),
+                usage: "/sessions [1-9]".to_string(),
+                description: "Quick session switch (supports digit shortcuts)".to_string(),
+            },
+            CommandSuggestion {
+                name: "status".to_string(),
+                usage: "/status".to_string(),
+                description: "Show connection status".to_string(),
+            },
+            CommandSuggestion {
+                name: "quit".to_string(),
+                usage: "/quit".to_string(),
+                description: "Exit application".to_string(),
+            },
+        ]
+    }
+
+    fn filter(query: &str) -> Vec<CommandSuggestion> {
+        Self::all()
+            .into_iter()
+            .filter(|cmd| cmd.name.starts_with(query) || cmd.usage.contains(query))
+            .collect()
+    }
+}
+
 /// Application states.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppState {
@@ -317,11 +373,20 @@ pub struct TuiApp {
     history_selected: usize,
     show_model_picker: bool,
     model_picker_selected: usize,
+    show_sessions_picker: bool,
+    sessions_picker_selected: usize,
+    sent_messages_history: VecDeque<String>,
+    message_history_index: Option<usize>,
+    show_command_autocomplete: bool,
+    command_suggestions: Vec<CommandSuggestion>,
+    command_autocomplete_selected: usize,
+    command_input_buffer: String,
     close_in_progress: bool,
     close_started_at: Option<Instant>,
     close_timeout_reported: bool,
     closing_session_id: Option<String>,
     should_exit: bool,
+    left_panel_area: Option<Rect>,
 }
 
 impl TuiApp {
@@ -380,11 +445,20 @@ impl TuiApp {
             history_selected: 0,
             show_model_picker: false,
             model_picker_selected: 0,
+            show_sessions_picker: false,
+            sessions_picker_selected: 0,
+            sent_messages_history: VecDeque::new(),
+            message_history_index: None,
+            show_command_autocomplete: false,
+            command_suggestions: Vec::new(),
+            command_autocomplete_selected: 0,
+            command_input_buffer: String::new(),
             close_in_progress: false,
             close_started_at: None,
             close_timeout_reported: false,
             closing_session_id: None,
             should_exit: false,
+            left_panel_area: None,
         };
 
         app.push_block(
@@ -393,7 +467,7 @@ impl TuiApp {
         );
         app.push_block(
             ChatRole::System,
-            "Type a message or use /help /model /models /status /quit".to_string(),
+            "Type a message or use /help /model /history /sessions /status /quit".to_string(),
         );
         app.push_right_event("tui initialized".to_string());
         app
@@ -482,14 +556,6 @@ impl TuiApp {
                     self.copy_chat_to_clipboard();
                     return Ok(false);
                 }
-                KeyCode::Char('h') => {
-                    self.open_history();
-                    return Ok(false);
-                }
-                KeyCode::Char('m') => {
-                    self.toggle_model_picker();
-                    return Ok(false);
-                }
                 _ => {}
             }
         }
@@ -543,6 +609,84 @@ impl TuiApp {
             return Ok(false);
         }
 
+        // Sessions picker navigation
+        if self.show_sessions_picker {
+            match key_event.code {
+                KeyCode::Esc => {
+                    self.show_sessions_picker = false;
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.sessions_picker_selected = self.sessions_picker_selected.saturating_sub(1);
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    let max = self.history_sessions.len().saturating_sub(1);
+                    if self.sessions_picker_selected < max {
+                        self.sessions_picker_selected += 1;
+                    }
+                }
+                KeyCode::Enter => {
+                    self.switch_to_sessions_picker();
+                }
+                KeyCode::Char(c) if c.is_numeric() => {
+                    let index = (c.to_digit(10).unwrap_or(0) as usize).saturating_sub(1);
+                    if index < self.history_sessions.len() {
+                        self.sessions_picker_selected = index;
+                        self.switch_to_sessions_picker();
+                    }
+                }
+                _ => {}
+            }
+            return Ok(false);
+        }
+
+        // Command autocomplete navigation
+        if self.show_command_autocomplete {
+            match key_event.code {
+                KeyCode::Esc => {
+                    self.show_command_autocomplete = false;
+                    self.command_input_buffer.clear();
+                    return Ok(false);
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.command_autocomplete_selected = self.command_autocomplete_selected.saturating_sub(1);
+                    return Ok(false);
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    let max = self.command_suggestions.len().saturating_sub(1);
+                    if self.command_autocomplete_selected < max {
+                        self.command_autocomplete_selected += 1;
+                    }
+                    return Ok(false);
+                }
+                KeyCode::Enter => {
+                    if let Some(cmd) = self.command_suggestions.get(self.command_autocomplete_selected) {
+                        // Use the command usage as input
+                        self.input_buffer = cmd.usage.clone();
+                        self.cursor_index = self.input_buffer.chars().count();
+                        self.show_command_autocomplete = false;
+                        self.command_input_buffer.clear();
+                    }
+                    return Ok(false);
+                }
+                KeyCode::Backspace => {
+                    self.command_input_buffer.pop();
+                    if self.command_input_buffer.is_empty() {
+                        self.show_command_autocomplete = false;
+                    } else {
+                        self.update_command_suggestions();
+                    }
+                    return Ok(false);
+                }
+                KeyCode::Char(c) if !key_event.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {
+                    self.command_input_buffer.push(c);
+                    self.update_command_suggestions();
+                    return Ok(false);
+                }
+                _ => {}
+            }
+            return Ok(false);
+        }
+
         match key_event.code {
             KeyCode::Esc => {
                 self.chat_selection = None;
@@ -568,11 +712,19 @@ impl TuiApp {
                 Ok(false)
             }
             KeyCode::Up => {
-                self.scroll_chat_up(1);
+                if self.input_buffer.is_empty() {
+                    self.navigate_message_history(-1);
+                } else {
+                    self.scroll_chat_up(1);
+                }
                 Ok(false)
             }
             KeyCode::Down => {
-                self.scroll_chat_down(1);
+                if self.input_buffer.is_empty() {
+                    self.navigate_message_history(1);
+                } else {
+                    self.scroll_chat_down(1);
+                }
                 Ok(false)
             }
             KeyCode::PageUp => {
@@ -1026,8 +1178,12 @@ impl TuiApp {
                     .split(f.area());
                 self.render_left_panel(f, chunks[0]);
                 self.render_right_panel(f, chunks[1]);
-                if self.show_model_picker {
+                if self.show_command_autocomplete {
+                    self.render_command_autocomplete(f, f.area());
+                } else if self.show_model_picker {
                     self.render_model_picker(f, f.area());
+                } else if self.show_sessions_picker {
+                    self.render_sessions_picker(f, f.area());
                 }
             }
         }
@@ -1085,7 +1241,7 @@ impl TuiApp {
             "help" => {
                 self.push_block(
                     ChatRole::System,
-                    "Commands: /help /model <id> /models /modes /status /quit\nKeys: ↑/↓/PgUp/PgDn scroll, Ctrl+Y copy, Ctrl+U clear input"
+                    "Commands: /help /model /models /history /sessions /status /quit\nKeys: ↑/↓/PgUp/PgDn scroll, Ctrl+Y copy, Ctrl+U clear input"
                         .to_string(),
                 );
                 Ok(false)
@@ -1094,16 +1250,19 @@ impl TuiApp {
                 self.refresh_models_command()?;
                 Ok(false)
             }
+            "history" => {
+                self.open_history();
+                Ok(false)
+            }
             "model" => {
                 let requested = args.trim();
                 if requested.is_empty() {
-                    self.push_block(
-                        ChatRole::System,
-                        format!(
-                            "Current model: `{}`. Usage: /model <id>",
-                            self.current_model
-                        ),
-                    );
+                    // No argument: open model picker
+                    self.show_model_picker = true;
+                    self.model_picker_selected = self.available_models
+                        .iter()
+                        .position(|m| m == &self.current_model)
+                        .unwrap_or(0);
                     return Ok(false);
                 }
 
@@ -1120,6 +1279,22 @@ impl TuiApp {
                 self.switch_remote_model_command(requested.to_string())?;
 
                 Ok(false)
+            }
+            "sessions" | "s" => {
+                // Load sessions for quick switch
+                if let Some(client) = self.gateway_client.clone() {
+                    let _ = self.spawn_remote_command_task("loading sessions", async move {
+                        RemoteCommandUpdate::HistoryLoaded(client.list_sessions().await)
+                    });
+                    self.show_sessions_picker = true;
+                    Ok(false)
+                } else {
+                    self.push_block(
+                        ChatRole::System,
+                        "Sessions picker requires gateway mode.".to_string(),
+                    );
+                    Ok(false)
+                }
             }
             "status" => {
                 self.status_command()?;
@@ -1155,6 +1330,60 @@ impl TuiApp {
                 Ok(false)
             }
         }
+    }
+
+    fn navigate_message_history(&mut self, direction: i32) {
+        if self.sent_messages_history.is_empty() {
+            return;
+        }
+
+        match direction {
+            -1 => {
+                // Up: go to previous message in history
+                let new_index = if let Some(idx) = self.message_history_index {
+                    if idx == 0 {
+                        self.sent_messages_history.len() - 1
+                    } else {
+                        idx - 1
+                    }
+                } else {
+                    self.sent_messages_history.len() - 1
+                };
+                self.message_history_index = Some(new_index);
+                if let Some(msg) = self.sent_messages_history.get(new_index) {
+                    self.input_buffer = msg.clone();
+                    self.cursor_index = self.input_buffer.chars().count();
+                }
+            }
+            1 => {
+                // Down: go to next message in history or back to empty input
+                if let Some(idx) = self.message_history_index {
+                    let new_index = (idx + 1) % self.sent_messages_history.len();
+                    if new_index == 0 && idx > 0 {
+                        // Return to empty input
+                        self.input_buffer.clear();
+                        self.cursor_index = 0;
+                        self.message_history_index = None;
+                    } else {
+                        self.message_history_index = Some(new_index);
+                        if let Some(msg) = self.sent_messages_history.get(new_index) {
+                            self.input_buffer = msg.clone();
+                            self.cursor_index = self.input_buffer.chars().count();
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn add_message_to_history(&mut self, message: String) {
+        const MAX_HISTORY: usize = 100;
+        self.sent_messages_history.push_back(message);
+        if self.sent_messages_history.len() > MAX_HISTORY {
+            self.sent_messages_history.pop_front();
+        }
+        self.message_history_index = None;
     }
 
     async fn send_user_message(&mut self, user_message: String) -> TalosResult<bool> {
@@ -1194,6 +1423,7 @@ impl TuiApp {
 
         self.message_queue
             .push_back(QueuedMessage::new(user_message.clone()));
+        self.add_message_to_history(user_message.clone());
         self.push_right_event(format!(
             "queued ({}/{}): {}",
             self.message_queue.len(),
@@ -1583,6 +1813,7 @@ impl TuiApp {
         });
     }
 
+    #[allow(dead_code)]
     fn toggle_model_picker(&mut self) {
         if self.show_model_picker {
             self.show_model_picker = false;
@@ -1616,6 +1847,23 @@ impl TuiApp {
             format!("Switched to session {} (model: {})", session_id, model),
         );
         self.push_right_event(format!("switched to history session: {}", session_id));
+    }
+
+    fn switch_to_sessions_picker(&mut self) {
+        let Some(session) = self.history_sessions.get(self.sessions_picker_selected).cloned() else {
+            return;
+        };
+        let session_id = session.context.session_id.clone();
+        let model = session.config.llm.model.clone();
+        self.session_id = Some(session_id.clone());
+        self.current_model = model.clone();
+        self.session_usage = session.state.usage.clone();
+        self.show_sessions_picker = false;
+        self.push_block(
+            ChatRole::System,
+            format!("Switched to session {} (model: {})", session_id, model),
+        );
+        self.push_right_event(format!("switched via /sessions: {}", session_id));
     }
 
     fn delete_history_session(&mut self) {
@@ -1803,9 +2051,23 @@ impl TuiApp {
     }
 
     fn insert_char(&mut self, c: char) {
+        // Trigger command autocomplete when typing /
+        if c == '/' && self.cursor_index == 0 && self.input_buffer.is_empty() {
+            self.show_command_autocomplete = true;
+            self.command_suggestions = CommandSuggestion::all();
+            self.command_autocomplete_selected = 0;
+            self.command_input_buffer.clear();
+            return;
+        }
+
         let idx = byte_index_at_char(&self.input_buffer, self.cursor_index);
         self.input_buffer.insert(idx, c);
         self.cursor_index += 1;
+    }
+
+    fn update_command_suggestions(&mut self) {
+        self.command_suggestions = CommandSuggestion::filter(&self.command_input_buffer);
+        self.command_autocomplete_selected = 0;
     }
 
     fn handle_backspace(&mut self) {
@@ -2190,6 +2452,9 @@ impl TuiApp {
     }
 
     fn render_left_panel(&mut self, f: &mut Frame, area: ratatui::layout::Rect) {
+        // Save left panel area for floater positioning
+        self.left_panel_area = Some(area);
+
         let left_block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Rgb(106, 111, 123)))
@@ -2495,9 +2760,8 @@ impl TuiApp {
             }
         }
         lines.push(Line::from(""));
-        lines.push(Line::from("/help /model /models /status /quit"));
+        lines.push(Line::from("/help /model /history /sessions /status /quit"));
         lines.push(Line::from("↑/↓/PgUp/PgDn scroll  Tab expand tool"));
-        lines.push(Line::from("Ctrl+H history  Ctrl+M model picker"));
         lines.push(Line::from("Ctrl+Y copy  Ctrl+U clear"));
 
         let right = Paragraph::new(lines).wrap(Wrap { trim: false });
@@ -2546,16 +2810,19 @@ impl TuiApp {
     }
 
     fn render_model_picker(&self, f: &mut Frame, area: Rect) {
+        // Use left panel area for popup positioning
+        let popup_area = self.left_panel_area.unwrap_or(area);
+
         // Center a popup of width=50, height=min(models+4, 20)
         let popup_height = (self.available_models.len() as u16 + 4).min(20);
         let popup_width = 52u16;
-        let x = area.x + area.width.saturating_sub(popup_width) / 2;
-        let y = area.y + area.height.saturating_sub(popup_height) / 2;
+        let x = popup_area.x + popup_area.width.saturating_sub(popup_width) / 2;
+        let y = popup_area.y + popup_area.height.saturating_sub(popup_height) / 2;
         let popup_rect = Rect::new(
-            x.min(area.x + area.width.saturating_sub(popup_width)),
-            y.min(area.y + area.height.saturating_sub(popup_height)),
-            popup_width.min(area.width),
-            popup_height.min(area.height),
+            x.min(popup_area.x + popup_area.width.saturating_sub(popup_width)),
+            y.min(popup_area.y + popup_area.height.saturating_sub(popup_height)),
+            popup_width.min(popup_area.width),
+            popup_height.min(popup_area.height),
         );
 
         f.render_widget(Clear, popup_rect);
@@ -2586,6 +2853,117 @@ impl TuiApp {
             .highlight_style(
                 Style::default()
                     .bg(Color::Rgb(40, 80, 140))
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol("▶ ");
+
+        f.render_stateful_widget(list, inner, &mut list_state);
+    }
+
+    fn render_sessions_picker(&self, f: &mut Frame, area: Rect) {
+        // Use left panel area for popup positioning
+        let popup_area = self.left_panel_area.unwrap_or(area);
+
+        let popup_height = (self.history_sessions.len() as u16 + 4).min(20);
+        let popup_width = 70u16;
+        let x = popup_area.x + popup_area.width.saturating_sub(popup_width) / 2;
+        let y = popup_area.y + popup_area.height.saturating_sub(popup_height) / 2;
+        let popup_rect = Rect::new(
+            x.min(popup_area.x + popup_area.width.saturating_sub(popup_width)),
+            y.min(popup_area.y + popup_area.height.saturating_sub(popup_height)),
+            popup_width.min(popup_area.width),
+            popup_height.min(popup_area.height),
+        );
+
+        f.render_widget(Clear, popup_rect);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Rgb(100, 180, 240)))
+            .title(" Recent Sessions  [↑↓] navigate  [1-9] quick  [Enter] switch  [Esc] cancel ");
+        let inner = block.inner(popup_rect);
+        f.render_widget(block, popup_rect);
+
+        let items: Vec<ListItem> = self
+            .history_sessions
+            .iter()
+            .enumerate()
+            .map(|(idx, s)| {
+                let session_id = &s.context.session_id;
+                let model = &s.config.llm.model;
+                let msgs = s.state.message_count;
+                let idx_display = (idx + 1) % 10;
+                ListItem::new(format!(" [{}] {} [{}] {} msgs", idx_display, &session_id[0..8.min(session_id.len())], model, msgs))
+            })
+            .collect();
+
+        let mut list_state = ListState::default();
+        list_state.select(Some(self.sessions_picker_selected));
+
+        let list = List::new(items)
+            .highlight_style(
+                Style::default()
+                    .bg(Color::Rgb(40, 80, 140))
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol("▶ ");
+
+        f.render_stateful_widget(list, inner, &mut list_state);
+    }
+
+    fn render_command_autocomplete(&self, f: &mut Frame, area: Rect) {
+        // Use left panel area for popup positioning
+        let popup_area = self.left_panel_area.unwrap_or(area);
+
+        let popup_height = (self.command_suggestions.len() as u16 + 4).min(15);
+        let popup_width = 70u16;
+        let x = popup_area.x + popup_area.width.saturating_sub(popup_width) / 2;
+        let y = popup_area.y + (popup_area.height as usize).saturating_sub(popup_height as usize) as u16 / 2;
+        let popup_rect = Rect::new(
+            x.min(popup_area.x + popup_area.width.saturating_sub(popup_width)),
+            y.min(popup_area.y + popup_area.height.saturating_sub(popup_height)),
+            popup_width.min(popup_area.width),
+            popup_height.min(popup_area.height),
+        );
+
+        f.render_widget(Clear, popup_rect);
+
+        let title = if self.command_input_buffer.is_empty() {
+            " Commands  [↑↓] navigate  [Enter] select  [Esc] cancel ".to_string()
+        } else {
+            format!(" Commands (/{})  [↑↓] navigate  [Enter] select  [Esc] cancel ", self.command_input_buffer)
+        };
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Rgb(100, 200, 100)))
+            .title(title);
+        let inner = block.inner(popup_rect);
+        f.render_widget(block, popup_rect);
+
+        let items: Vec<ListItem> = self
+            .command_suggestions
+            .iter()
+            .map(|cmd| {
+                ListItem::new(vec![
+                    Line::from(vec![
+                        Span::styled(&cmd.usage, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                        Span::raw("  "),
+                        Span::styled(&cmd.description, Style::default().fg(Color::Gray)),
+                    ])
+                ])
+            })
+            .collect();
+
+        let mut list_state = ListState::default();
+        list_state.select(Some(self.command_autocomplete_selected));
+
+        let list = List::new(items)
+            .highlight_style(
+                Style::default()
+                    .bg(Color::Rgb(50, 100, 50))
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
             )
@@ -2697,6 +3075,15 @@ impl TuiApp {
             .token_left_percent()
             .map(|percent| format!("{}% left", percent))
             .unwrap_or_else(|| "n/a left".to_string());
+
+        // Add message history indicator if browsing history
+        let history_indicator = if let Some(idx) = self.message_history_index {
+            let total = self.sent_messages_history.len();
+            format!("  [History {}/{}]", idx + 1, total)
+        } else {
+            String::new()
+        };
+
         let base = if self.close_in_progress {
             let session_id = self
                 .closing_session_id
@@ -2706,11 +3093,11 @@ impl TuiApp {
         } else if self.in_flight {
             let motion = self.stripe_line(6);
             format!(
-                "{} {} · {} · {}",
-                motion, self.current_model, token_left, workspace
+                "{} {} · {} · {}{}",
+                motion, self.current_model, token_left, workspace, history_indicator
             )
         } else {
-            format!("{} · {} · {}", self.current_model, token_left, workspace)
+            format!("{} · {} · {}{}", self.current_model, token_left, workspace, history_indicator)
         };
         let mut text = if let Some((hint, expires_at)) = &self.status_hint {
             if Instant::now() < *expires_at {
@@ -2821,7 +3208,7 @@ impl TuiApp {
     fn tool_block_content_lines(&self, block: &ChatBlock) -> Vec<Line<'static>> {
         let tool_name = block.tool_name.as_deref().unwrap_or("unknown");
         let status = block.tool_status.as_ref();
-        let timing = block.timing_ms.map(|ms| format!(" {ms}ms")).unwrap_or_default();
+        let timing = block.timing_ms.map(|ms| format!(" {}ms", ms)).unwrap_or_default();
 
         if !block.expanded {
             // Folded: single-line summary
@@ -2833,39 +3220,111 @@ impl TuiApp {
                 ),
                 Some(ToolCallStatus::Completed { exit_ok: true }) => (
                     "✓",
-                    format!("completed{timing}"),
+                    format!("completed{}", timing),
                     Style::default().fg(Color::Green),
                 ),
                 Some(ToolCallStatus::Completed { exit_ok: false }) => (
                     "✗",
-                    format!("error{timing}"),
+                    format!("error{}", timing),
                     Style::default().fg(Color::Red),
                 ),
                 None => ("?", "unknown".to_string(), Style::default().fg(Color::Gray)),
             };
             return vec![Line::from(vec![
-                Span::styled(format!("{status_icon} "), status_style),
+                Span::styled(format!("{} ", status_icon), status_style),
                 Span::styled(status_text, status_style),
                 Span::styled("  [Tab to expand]", Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)),
             ])];
         }
 
-        // Expanded: show input and output
+        // Expanded: show tool details, input and output
         let mut lines = vec![];
 
-        // Input section
+        // Tool ID section
+        if let Some(call_id) = &block.tool_call_id {
+            lines.push(Line::from(vec![
+                Span::styled("Call ID: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(call_id.clone(), Style::default().fg(Color::Cyan)),
+            ]));
+        }
+
+        // Extract and display tool-specific fields
         if let Some(input) = &block.tool_input {
-            let input_str = serde_json::to_string_pretty(input).unwrap_or_else(|_| input.to_string());
-            lines.push(Line::from(Span::styled(
-                "Input:",
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-            )));
-            for l in input_str.lines() {
-                lines.push(Line::from(Span::styled(
-                    format!("  {l}"),
-                    Style::default().fg(Color::Rgb(180, 190, 210)),
-                )));
+            match tool_name {
+                "exec_command" => {
+                    if let Some(cmd) = input.get("command").and_then(|v| v.as_str()) {
+                        lines.push(Line::from(vec![
+                            Span::styled("Command: ", Style::default().fg(Color::DarkGray)),
+                            Span::styled(cmd.to_string(), Style::default().fg(Color::Yellow)),
+                        ]));
+                    }
+                    if let Some(cwd) = input.get("cwd").and_then(|v| v.as_str()) {
+                        lines.push(Line::from(vec![
+                            Span::styled("Working Dir: ", Style::default().fg(Color::DarkGray)),
+                            Span::styled(cwd.to_string(), Style::default().fg(Color::Cyan)),
+                        ]));
+                    }
+                }
+                "read_file" => {
+                    if let Some(path) = input.get("path").and_then(|v| v.as_str()) {
+                        lines.push(Line::from(vec![
+                            Span::styled("Path: ", Style::default().fg(Color::DarkGray)),
+                            Span::styled(path.to_string(), Style::default().fg(Color::Yellow)),
+                        ]));
+                    }
+                }
+                "write_file" => {
+                    if let Some(path) = input.get("path").and_then(|v| v.as_str()) {
+                        lines.push(Line::from(vec![
+                            Span::styled("Path: ", Style::default().fg(Color::DarkGray)),
+                            Span::styled(path.to_string(), Style::default().fg(Color::Yellow)),
+                        ]));
+                    }
+                }
+                "web_search" => {
+                    if let Some(query) = input.get("query").and_then(|v| v.as_str()) {
+                        lines.push(Line::from(vec![
+                            Span::styled("Query: ", Style::default().fg(Color::DarkGray)),
+                            Span::styled(query.to_string(), Style::default().fg(Color::Yellow)),
+                        ]));
+                    }
+                    if let Some(max_results) = input.get("max_results").and_then(|v| v.as_i64()) {
+                        lines.push(Line::from(vec![
+                            Span::styled("Max Results: ", Style::default().fg(Color::DarkGray)),
+                            Span::styled(max_results.to_string(), Style::default().fg(Color::Cyan)),
+                        ]));
+                    }
+                }
+                "http_request" => {
+                    if let Some(url) = input.get("url").and_then(|v| v.as_str()) {
+                        lines.push(Line::from(vec![
+                            Span::styled("URL: ", Style::default().fg(Color::DarkGray)),
+                            Span::styled(url.to_string(), Style::default().fg(Color::Yellow)),
+                        ]));
+                    }
+                    if let Some(method) = input.get("method").and_then(|v| v.as_str()) {
+                        lines.push(Line::from(vec![
+                            Span::styled("Method: ", Style::default().fg(Color::DarkGray)),
+                            Span::styled(method.to_string(), Style::default().fg(Color::Cyan)),
+                        ]));
+                    }
+                }
+                _ => {}
             }
+        } else if !block.tool_call_id.as_deref().unwrap_or("").is_empty() {
+            // If no input details, show placeholder
+            lines.push(Line::from(Span::styled(
+                "(No input details available)",
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
+        // Separator
+        if !lines.is_empty() && !block.content.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "─".repeat(40),
+                Style::default().fg(Color::DarkGray),
+            )));
         }
 
         // Output section
@@ -2874,41 +3333,60 @@ impl TuiApp {
                 "Output:",
                 Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
             )));
-            for l in block.content.lines() {
+            let output_lines: Vec<&str> = block.content.lines().take(20).collect();
+            for l in output_lines {
                 lines.push(Line::from(Span::styled(
-                    format!("  {l}"),
+                    format!("  {}", l),
                     Style::default().fg(Color::White),
+                )));
+            }
+            if block.content.lines().count() > 20 {
+                lines.push(Line::from(Span::styled(
+                    format!("  ... ({} more lines)", block.content.lines().count() - 20),
+                    Style::default().fg(Color::DarkGray),
                 )));
             }
         }
 
-        // Status line
+        // Status line with exit code or error details
+        let _status_line = if let Some(ToolCallStatus::Completed { exit_ok }) = status {
+            // Extract exit code from output if available (common in exec_command)
+            let exit_code_str = if !block.content.is_empty() && block.content.contains("Exit:") {
+                "".to_string()
+            } else {
+                if *exit_ok { " Exit: 0".to_string() } else { " Exit: 1".to_string() }
+            };
+            format!("{}{}", timing, exit_code_str)
+        } else {
+            format!("{}", timing)
+        };
+
         let (status_icon, status_text, status_style) = match status {
             Some(ToolCallStatus::Running) => (
                 "⏳",
-                format!("running{timing}..."),
+                format!("running{}...", timing),
                 Style::default().fg(Color::Yellow),
             ),
             Some(ToolCallStatus::Completed { exit_ok: true }) => (
                 "✓",
-                format!("completed{timing}"),
+                format!("completed{}", timing),
                 Style::default().fg(Color::Green),
             ),
             Some(ToolCallStatus::Completed { exit_ok: false }) => (
                 "✗",
-                format!("error{timing}"),
+                format!("error{}", timing),
                 Style::default().fg(Color::Red),
             ),
             None => ("?", "unknown".to_string(), Style::default().fg(Color::Gray)),
         };
         lines.push(Line::from(vec![
-            Span::styled(format!("{status_icon} "), status_style),
+            Span::styled(format!("{} ", status_icon), status_style),
             Span::styled(status_text, status_style),
             Span::styled("  [Tab to collapse]", Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)),
         ]));
 
         if lines.is_empty() {
-            lines.push(Line::from(format!("⚙ {tool_name}")));
+            lines.push(Line::from(format!("⚙ {}", tool_name)));
         }
         lines
     }
