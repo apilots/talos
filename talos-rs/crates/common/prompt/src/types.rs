@@ -25,16 +25,18 @@ pub enum PromptMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PlannerMode {
+    None,
     #[default]
     BuiltIn,
-    PlanReact,
+    PlanReAct,
 }
 
 impl PlannerMode {
     pub(crate) fn parse(value: &str) -> TalosResult<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
+            "none" => Ok(Self::None),
             "built_in" => Ok(Self::BuiltIn),
-            "plan_react" => Ok(Self::PlanReact),
+            "plan_react" => Ok(Self::PlanReAct),
             other => Err(TalosError::ValidationError(format!(
                 "invalid planner mode: {}",
                 other
@@ -44,8 +46,9 @@ impl PlannerMode {
 
     pub(crate) fn as_str(self) -> &'static str {
         match self {
+            Self::None => "none",
             Self::BuiltIn => "built_in",
-            Self::PlanReact => "plan_react",
+            Self::PlanReAct => "plan_react",
         }
     }
 }

@@ -1,3 +1,4 @@
+mod mapper;
 mod memory_impl;
 mod path_policy;
 mod retrieval;
@@ -6,6 +7,7 @@ pub mod store;
 pub mod r#trait;
 mod workspace_store;
 
+pub use mapper::SessionTranscriptMapper;
 pub use r#trait::Memory;
 pub use retrieval::MemorySearchResponse;
 pub use store::{

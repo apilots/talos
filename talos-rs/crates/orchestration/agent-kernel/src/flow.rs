@@ -23,7 +23,7 @@ use talos_config::AgentKernelConfig;
 use talos_error::TalosResult;
 use talos_llm_provider::LlmProvider;
 use talos_memory::MemoryStore;
-use talos_tools::ToolRegistry;
+use talos_tools::{ToolDefinitionProvider, ToolExecutorPort};
 use talos_types::talos::{TalosOutputItem, TalosUsage};
 use tokio::sync::mpsc;
 
@@ -57,7 +57,8 @@ pub struct SingleFlow {
     agent_name: String,
     agent_description: String,
     llm_provider: Arc<dyn LlmProvider>,
-    tool_registry: Arc<ToolRegistry>,
+    tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
+    tool_executor_port: Arc<dyn ToolExecutorPort>,
     memory_store: Arc<MemoryStore>,
     kernel_config: AgentKernelConfig,
     #[allow(dead_code)]
@@ -78,7 +79,8 @@ impl SingleFlow {
         agent_name: impl Into<String>,
         agent_description: impl Into<String>,
         llm_provider: Arc<dyn LlmProvider>,
-        tool_registry: Arc<ToolRegistry>,
+        tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
+        tool_executor_port: Arc<dyn ToolExecutorPort>,
         memory_store: Arc<MemoryStore>,
         kernel_config: AgentKernelConfig,
         planner: Arc<dyn Planner>,
@@ -86,13 +88,14 @@ impl SingleFlow {
         let agent_name = agent_name.into();
         let agent_description = agent_description.into();
         let settings = KernelExecutionSettings::try_from(&kernel_config).unwrap_or_default();
-        let flow_profile = select_flow_profile(&settings, tool_registry.as_ref());
+        let flow_profile = select_flow_profile(&settings, tool_definition_provider.as_ref());
         let tool_executor = ToolExecutorFactory::build(settings.tool_execution_mode);
         Self {
             agent_name: agent_name.clone(),
             agent_description: agent_description.clone(),
             llm_provider,
-            tool_registry,
+            tool_definition_provider,
+            tool_executor_port,
             memory_store: memory_store.clone(),
             kernel_config,
             planner: planner.clone(),
@@ -123,9 +126,9 @@ impl SingleFlow {
 
     pub fn current_branch(&self) -> ExecutionBranch {
         match self.flow_profile {
-            FlowProfile::BuiltInDirect => ExecutionBranch::DirectAnswer,
-            FlowProfile::BuiltInModelThinking => ExecutionBranch::ModelThinking,
-            FlowProfile::PlanReactLoop => ExecutionBranch::ReactiveLoop,
+            FlowProfile::DirectAnswer => ExecutionBranch::DirectAnswer,
+            FlowProfile::ModelThinking => ExecutionBranch::ModelThinking,
+            FlowProfile::ReactiveLoop => ExecutionBranch::ReactiveLoop,
         }
     }
 
@@ -228,38 +231,7 @@ fn build_flow_step_model_request(
 
 fn stage_session_event(ctx: &mut InvocationContext, event: SessionEvent) {
     for delta in &event.actions.state_delta {
-        match delta.namespace {
-            crate::StateNamespace::App => {
-                ctx.session
-                    .state
-                    .app_state
-                    .insert(delta.key.clone(), delta.value.clone());
-            }
-            crate::StateNamespace::User => {
-                ctx.session
-                    .state
-                    .user_state
-                    .insert(delta.key.clone(), delta.value.clone());
-            }
-            crate::StateNamespace::Temp => {
-                ctx.session
-                    .state
-                    .temp_state
-                    .insert(delta.key.clone(), delta.value.clone());
-            }
-            crate::StateNamespace::Session => {
-                ctx.session
-                    .state
-                    .session_state
-                    .insert(delta.key.clone(), delta.value.clone());
-            }
-            crate::StateNamespace::Workspace => {
-                ctx.session
-                    .state
-                    .workspace_state
-                    .insert(delta.key.clone(), delta.value.clone());
-            }
-        }
+        ctx.session.state.apply_delta(delta);
     }
     ctx.session.events.push(event);
 }
@@ -373,7 +345,7 @@ impl BaseLlmFlow for SingleFlow {
             &self.agent_name,
             &self.agent_description,
             input,
-            self.tool_registry.clone(),
+            self.tool_definition_provider.clone(),
             self.memory_store.clone(),
             &self.kernel_config,
         )
@@ -396,7 +368,7 @@ impl BaseLlmFlow for SingleFlow {
         let mut state = GeneralTurnLoopState::new(&prepared);
         let mut final_text = String::new();
         let stop_reason = loop {
-            if matches!(self.flow_profile, FlowProfile::PlanReactLoop) {
+            if matches!(self.flow_profile, FlowProfile::ReactiveLoop) {
                 let stage = if state.round == 0 {
                     KernelThinkingStage::FrameworkPlan
                 } else {
@@ -448,7 +420,7 @@ impl BaseLlmFlow for SingleFlow {
                 let replay_batch = execute_general_turn_tool_batch(
                     &prepared,
                     self.tool_executor.clone(),
-                    self.tool_registry.clone(),
+                    self.tool_executor_port.clone(),
                     Arc::new(self.kernel_config.clone()),
                     &self.agent_name,
                     &replay_calls,
@@ -586,7 +558,7 @@ impl BaseLlmFlow for SingleFlow {
                 );
                 break StopReason::EndTurn;
             }
-            if matches!(self.flow_profile, FlowProfile::PlanReactLoop) {
+            if matches!(self.flow_profile, FlowProfile::ReactiveLoop) {
                 let tool_names = tool_names_for_thinking(&step.output_items);
                 let tool_list = if tool_names.is_empty() {
                     "available tools".to_string()
@@ -621,7 +593,7 @@ impl BaseLlmFlow for SingleFlow {
             let tool_batch = execute_general_turn_tool_batch(
                 &prepared,
                 self.tool_executor.clone(),
-                self.tool_registry.clone(),
+                self.tool_executor_port.clone(),
                 Arc::new(self.kernel_config.clone()),
                 &self.agent_name,
                 &step.tool_calls,
@@ -752,7 +724,7 @@ impl BaseLlmFlow for SingleFlow {
                 };
                 break StopReason::EndTurn;
             }
-            if matches!(self.flow_profile, FlowProfile::PlanReactLoop) {
+            if matches!(self.flow_profile, FlowProfile::ReactiveLoop) {
                 let tool_names = tool_names_for_thinking(&tool_response.output_items);
                 let observed = tool_names.len();
                 let tool_list = if tool_names.is_empty() {
@@ -870,17 +842,18 @@ pub struct FlowFactory;
 
 fn select_flow_profile(
     settings: &KernelExecutionSettings,
-    tool_registry: &ToolRegistry,
+    tool_registry: &dyn ToolDefinitionProvider,
 ) -> FlowProfile {
     match settings.planner_kind {
+        crate::PlannerKind::None => FlowProfile::DirectAnswer,
         crate::PlannerKind::BuiltIn => {
             if tool_registry.get_tool_definitions().is_empty() {
-                FlowProfile::BuiltInDirect
+                FlowProfile::DirectAnswer
             } else {
-                FlowProfile::BuiltInModelThinking
+                FlowProfile::ModelThinking
             }
         }
-        crate::PlannerKind::PlanReact => FlowProfile::PlanReactLoop,
+        crate::PlannerKind::PlanReAct => FlowProfile::ReactiveLoop,
     }
 }
 
@@ -890,7 +863,8 @@ impl FlowFactory {
         agent_name: impl Into<String>,
         agent_description: impl Into<String>,
         llm_provider: Arc<dyn LlmProvider>,
-        tool_registry: Arc<ToolRegistry>,
+        tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
+        tool_executor_port: Arc<dyn ToolExecutorPort>,
         memory_store: Arc<MemoryStore>,
         kernel_config: AgentKernelConfig,
         planner: Arc<dyn Planner>,
@@ -900,7 +874,8 @@ impl FlowFactory {
             agent_name,
             agent_description,
             llm_provider,
-            tool_registry,
+            tool_definition_provider,
+            tool_executor_port,
             memory_store,
             kernel_config,
             planner,
@@ -1298,23 +1273,23 @@ mod tests {
         let empty_tools = ToolRegistry::new();
         assert_eq!(
             select_flow_profile(&built_in_settings, &empty_tools),
-            FlowProfile::BuiltInDirect
+            FlowProfile::DirectAnswer
         );
 
         let tool_registry = Arc::new(ToolRegistry::new());
         tool_registry.register(Arc::new(EchoTool));
         assert_eq!(
             select_flow_profile(&built_in_settings, tool_registry.as_ref()),
-            FlowProfile::BuiltInModelThinking
+            FlowProfile::ModelThinking
         );
 
         let plan_react_settings = KernelExecutionSettings {
-            planner_kind: crate::PlannerKind::PlanReact,
+            planner_kind: crate::PlannerKind::PlanReAct,
             ..KernelExecutionSettings::default()
         };
         assert_eq!(
             select_flow_profile(&plan_react_settings, tool_registry.as_ref()),
-            FlowProfile::PlanReactLoop
+            FlowProfile::ReactiveLoop
         );
     }
 
@@ -1340,6 +1315,7 @@ mod tests {
             "agent-1",
             "test agent",
             Arc::new(NoopLlmProvider),
+            Arc::new(ToolRegistry::new()),
             Arc::new(ToolRegistry::new()),
             Arc::new(MemoryStore::new(
                 std::env::temp_dir().join("talos-flow-tests"),
@@ -1375,6 +1351,7 @@ mod tests {
             Arc::new(StepEventMockProvider {
                 state: state.clone(),
             }),
+            tool_registry.clone(),
             tool_registry,
             Arc::new(MemoryStore::new(workspace_dir)),
             AgentKernelConfig::default(),
@@ -1435,6 +1412,7 @@ mod tests {
             Arc::new(ApprovalMockProvider {
                 state: state.clone(),
             }),
+            tool_registry.clone(),
             tool_registry,
             Arc::new(MemoryStore::new(workspace_dir)),
             AgentKernelConfig::default(),
@@ -1471,11 +1449,12 @@ mod tests {
             "test agent",
             Arc::new(NoopLlmProvider),
             Arc::new(ToolRegistry::new()),
+            Arc::new(ToolRegistry::new()),
             Arc::new(MemoryStore::new(
                 std::env::temp_dir().join(Uuid::new_v4().to_string()),
             )),
             AgentKernelConfig {
-                planner_mode: "built_in".to_string(),
+                planner_mode: talos_config::PlannerMode::BuiltIn,
                 ..AgentKernelConfig::default()
             },
             Arc::new(BuiltInPlanner::new()),
@@ -1492,11 +1471,12 @@ mod tests {
             "test agent",
             Arc::new(NoopLlmProvider),
             tool_registry.clone(),
+            tool_registry.clone(),
             Arc::new(MemoryStore::new(
                 std::env::temp_dir().join(Uuid::new_v4().to_string()),
             )),
             AgentKernelConfig {
-                planner_mode: "built_in".to_string(),
+                planner_mode: talos_config::PlannerMode::BuiltIn,
                 ..AgentKernelConfig::default()
             },
             Arc::new(BuiltInPlanner::new()),
@@ -1510,12 +1490,13 @@ mod tests {
             "agent-1",
             "test agent",
             Arc::new(NoopLlmProvider),
+            tool_registry.clone(),
             tool_registry,
             Arc::new(MemoryStore::new(
                 std::env::temp_dir().join(Uuid::new_v4().to_string()),
             )),
             AgentKernelConfig {
-                planner_mode: "plan_react".to_string(),
+                planner_mode: talos_config::PlannerMode::PlanReAct,
                 ..AgentKernelConfig::default()
             },
             Arc::new(PlanReActPlanner::new()),

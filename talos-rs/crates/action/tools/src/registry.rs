@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use dashmap::DashMap;
 use serde_json::Value;
 use std::sync::Arc;
@@ -25,6 +26,39 @@ use crate::ToolContext;
 
 const DEFAULT_TOOL_OUTPUT_MAX_BYTES: usize = 64 * 1024;
 const TOOL_OUTPUT_TRUNCATED_SUFFIX: &str = "\n...[truncated]";
+
+pub trait ToolDefinitionProvider: Send + Sync {
+    fn get_tool_definitions(&self) -> Vec<ToolDefinition>;
+}
+
+#[async_trait]
+pub trait ToolExecutorPort: Send + Sync {
+    fn build_function_invocation(
+        &self,
+        call_id: String,
+        tool_name: String,
+        arguments: Value,
+    ) -> TalosResult<ToolInvocation>;
+
+    async fn execute_invocation_with_context(
+        &self,
+        invocation: ToolInvocation,
+        context: ToolContext,
+    ) -> TalosResult<ToolDispatchOutcome>;
+
+    fn tool_supports_parallel(&self, name: &str) -> bool;
+
+    fn tool_is_mutating(&self, name: &str) -> bool;
+
+    fn build_context(
+        &self,
+        session_id: String,
+        user_id: String,
+        kernel_config: Option<Arc<AgentKernelConfig>>,
+    ) -> ToolContext;
+}
+
+pub trait ToolRuntime: ToolDefinitionProvider + ToolExecutorPort + Send + Sync {}
 
 /// Registry for managing tools with security policies.
 pub struct ToolRegistry {
@@ -412,6 +446,51 @@ impl ToolRegistry {
         &self.policy_checker.policy
     }
 }
+
+impl ToolDefinitionProvider for ToolRegistry {
+    fn get_tool_definitions(&self) -> Vec<ToolDefinition> {
+        ToolRegistry::get_tool_definitions(self)
+    }
+}
+
+#[async_trait]
+impl ToolExecutorPort for ToolRegistry {
+    fn build_function_invocation(
+        &self,
+        call_id: String,
+        tool_name: String,
+        arguments: Value,
+    ) -> TalosResult<ToolInvocation> {
+        ToolRegistry::build_function_invocation(self, call_id, tool_name, arguments)
+    }
+
+    async fn execute_invocation_with_context(
+        &self,
+        invocation: ToolInvocation,
+        context: ToolContext,
+    ) -> TalosResult<ToolDispatchOutcome> {
+        ToolRegistry::execute_invocation_with_context(self, invocation, context).await
+    }
+
+    fn tool_supports_parallel(&self, name: &str) -> bool {
+        ToolRegistry::tool_supports_parallel(self, name)
+    }
+
+    fn tool_is_mutating(&self, name: &str) -> bool {
+        ToolRegistry::tool_is_mutating(self, name)
+    }
+
+    fn build_context(
+        &self,
+        session_id: String,
+        user_id: String,
+        kernel_config: Option<Arc<AgentKernelConfig>>,
+    ) -> ToolContext {
+        ToolRegistry::build_context(self, session_id, user_id, kernel_config)
+    }
+}
+
+impl ToolRuntime for ToolRegistry {}
 
 impl Default for ToolRegistry {
     fn default() -> Self {

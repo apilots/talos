@@ -1,12 +1,19 @@
 use async_trait::async_trait;
+use serde::Deserialize;
 use serde_json::Value;
 use std::fs;
 use talos_error::TalosResult;
 
-use crate::{Tool, ToolContext, ToolOutput};
+use crate::{decode_tool_input, Tool, ToolContext, ToolOutput};
 
 /// Tool for writing content to a file
 pub struct WriteTool;
+
+#[derive(Debug, Deserialize)]
+struct WriteToolInput {
+    path: String,
+    content: String,
+}
 
 #[async_trait]
 impl Tool for WriteTool {
@@ -30,41 +37,38 @@ impl Tool for WriteTool {
     }
 
     async fn execute(&self, input: Value, _context: ToolContext) -> TalosResult<ToolOutput> {
-        // Extract path and content from input
-        let path = if let Some(path_val) = input.get("path") {
-            path_val.as_str().unwrap_or("")
-        } else {
-            return Ok(ToolOutput {
-                success: false,
-                output: "".to_string(),
-                error: Some("Input must contain 'path' field".to_string()),
-            });
+        let input: WriteToolInput = match decode_tool_input(input, self.name()) {
+            Ok(input) => input,
+            Err(err) => {
+                let error = if err.to_string().contains("missing field `path`") {
+                    "Input must contain 'path' field".to_string()
+                } else if err.to_string().contains("missing field `content`") {
+                    "Input must contain 'content' field".to_string()
+                } else {
+                    err.to_string()
+                };
+                return Ok(ToolOutput {
+                    success: false,
+                    output: String::new(),
+                    error: Some(error),
+                });
+            }
         };
 
-        let content = if let Some(content_val) = input.get("content") {
-            content_val.as_str().unwrap_or("")
-        } else {
-            return Ok(ToolOutput {
-                success: false,
-                output: "".to_string(),
-                error: Some("Input must contain 'content' field".to_string()),
-            });
-        };
-
-        match fs::write(path, content) {
+        match fs::write(&input.path, &input.content) {
             Ok(_) => Ok(ToolOutput {
                 success: true,
                 output: format!(
                     "Successfully wrote {} characters to {}",
-                    content.len(),
-                    path
+                    input.content.len(),
+                    input.path
                 ),
                 error: None,
             }),
             Err(err) => Ok(ToolOutput {
                 success: false,
                 output: "".to_string(),
-                error: Some(format!("Failed to write to file '{}': {}", path, err)),
+                error: Some(format!("Failed to write to file '{}': {}", input.path, err)),
             }),
         }
     }

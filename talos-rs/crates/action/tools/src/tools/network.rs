@@ -1,11 +1,19 @@
 use async_trait::async_trait;
+use serde::Deserialize;
 use serde_json::Value;
 use talos_error::TalosResult;
 
-use crate::{Tool, ToolContext, ToolOutput};
+use crate::{decode_tool_input, Tool, ToolContext, ToolOutput};
 
 /// Tool for performing web searches
 pub struct WebSearchTool;
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum WebSearchInput {
+    Query { query: String },
+    Raw(String),
+}
 
 #[async_trait]
 impl Tool for WebSearchTool {
@@ -28,17 +36,17 @@ impl Tool for WebSearchTool {
     }
 
     async fn execute(&self, input: Value, _context: ToolContext) -> TalosResult<ToolOutput> {
-        // Extract query from input
-        let query = if let Some(query_val) = input.get("query") {
-            query_val.as_str().unwrap_or("")
-        } else if input.is_string() {
-            input.as_str().unwrap()
-        } else {
-            return Ok(ToolOutput {
-                success: false,
-                output: "".to_string(),
-                error: Some("Input must contain 'query' field or be a string".to_string()),
-            });
+        let query = match decode_tool_input::<WebSearchInput>(input, self.name()) {
+            Ok(input) => match input {
+                WebSearchInput::Query { query } | WebSearchInput::Raw(query) => query,
+            },
+            Err(_) => {
+                return Ok(ToolOutput {
+                    success: false,
+                    output: String::new(),
+                    error: Some("Input must contain 'query' field".to_string()),
+                });
+            }
         };
 
         // For now, return a mock response since we don't have a real search API integrated
@@ -58,6 +66,13 @@ impl Tool for WebSearchTool {
 
 /// Tool for fetching web content
 pub struct WebFetchTool;
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum WebFetchInput {
+    Url { url: String },
+    Raw(String),
+}
 
 #[async_trait]
 impl Tool for WebFetchTool {
@@ -80,17 +95,17 @@ impl Tool for WebFetchTool {
     }
 
     async fn execute(&self, input: Value, _context: ToolContext) -> TalosResult<ToolOutput> {
-        // Extract URL from input
-        let url = if let Some(url_val) = input.get("url") {
-            url_val.as_str().unwrap_or("")
-        } else if input.is_string() {
-            input.as_str().unwrap()
-        } else {
-            return Ok(ToolOutput {
-                success: false,
-                output: "".to_string(),
-                error: Some("Input must contain 'url' field or be a string".to_string()),
-            });
+        let url = match decode_tool_input::<WebFetchInput>(input, self.name()) {
+            Ok(input) => match input {
+                WebFetchInput::Url { url } | WebFetchInput::Raw(url) => url,
+            },
+            Err(_) => {
+                return Ok(ToolOutput {
+                    success: false,
+                    output: String::new(),
+                    error: Some("Input must contain 'url' field".to_string()),
+                });
+            }
         };
 
         // Basic URL validation
@@ -120,6 +135,21 @@ impl Tool for WebFetchTool {
 /// Tool for making HTTP requests
 pub struct HttpRequestTool;
 
+#[derive(Debug, Deserialize)]
+struct HttpRequestInput {
+    url: String,
+    #[serde(default = "default_http_method")]
+    method: String,
+    #[serde(default)]
+    headers: Option<Value>,
+    #[serde(default)]
+    body: Option<Value>,
+}
+
+fn default_http_method() -> String {
+    "GET".to_string()
+}
+
 #[async_trait]
 impl Tool for HttpRequestTool {
     fn name(&self) -> &str {
@@ -144,24 +174,29 @@ impl Tool for HttpRequestTool {
     }
 
     async fn execute(&self, input: Value, _context: ToolContext) -> TalosResult<ToolOutput> {
-        let url = match input.get("url") {
-            Some(url_val) => url_val.as_str().unwrap_or(""),
-            None => {
+        let input: HttpRequestInput = match decode_tool_input(input, self.name()) {
+            Ok(input) => input,
+            Err(_) => {
                 return Ok(ToolOutput {
                     success: false,
-                    output: "".to_string(),
+                    output: String::new(),
                     error: Some("Input must contain 'url' field".to_string()),
                 });
             }
         };
-
-        let method = match input.get("method") {
-            Some(method_val) => method_val.as_str().unwrap_or("GET"),
-            None => "GET", // Default to GET
-        };
+        let header_summary = input
+            .headers
+            .as_ref()
+            .map(Value::to_string)
+            .unwrap_or_else(|| "{}".to_string());
+        let body_summary = input
+            .body
+            .as_ref()
+            .map(Value::to_string)
+            .unwrap_or_else(|| "null".to_string());
 
         // Basic validation
-        if !url.starts_with("http://") && !url.starts_with("https://") {
+        if !input.url.starts_with("http://") && !input.url.starts_with("https://") {
             return Ok(ToolOutput {
                 success: false,
                 output: "".to_string(),
@@ -171,9 +206,11 @@ impl Tool for HttpRequestTool {
 
         // For now, return a mock response
         let mock_response = format!(
-            "HTTP {} request to '{}'\nResponse status: 200 OK\nResponse headers: {{\"content-type\": \"application/json\"}}\nResponse body: {{\"message\": \"Success\"}}",
-            method.to_uppercase(),
-            url
+            "HTTP {} request to '{}'\nRequest headers: {}\nRequest body: {}\nResponse status: 200 OK\nResponse headers: {{\"content-type\": \"application/json\"}}\nResponse body: {{\"message\": \"Success\"}}",
+            input.method.to_uppercase(),
+            input.url,
+            header_summary,
+            body_summary
         );
 
         Ok(ToolOutput {

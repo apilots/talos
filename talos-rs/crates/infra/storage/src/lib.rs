@@ -20,6 +20,7 @@ pub use sqlite::SqliteStorage;
 
 use async_trait::async_trait;
 use serde_json::Value;
+use talos_config::DatabaseType;
 use talos_error::{TalosError, TalosResult};
 
 /// Row represents a database row with column names and values
@@ -94,7 +95,7 @@ pub trait Storage: Send + Sync {
 /// Storage configuration
 #[derive(Debug, Clone)]
 pub struct StorageConfig {
-    pub database_type: String,
+    pub database_type: DatabaseType,
     pub connection_string: String,
     pub max_connections: u32,
 }
@@ -102,7 +103,7 @@ pub struct StorageConfig {
 impl Default for StorageConfig {
     fn default() -> Self {
         Self {
-            database_type: "sqlite".to_string(),
+            database_type: DatabaseType::Sqlite,
             connection_string: "talos.db".to_string(),
             max_connections: 5,
         }
@@ -111,12 +112,12 @@ impl Default for StorageConfig {
 
 /// Create a storage instance from config
 pub async fn create_storage(config: &StorageConfig) -> TalosResult<Box<dyn Storage>> {
-    match config.database_type.as_str() {
-        "sqlite" => {
+    match config.database_type {
+        DatabaseType::Sqlite => {
             let storage = SqliteStorage::new(&config.connection_string).await?;
             Ok(Box::new(storage))
         }
-        _ => Err(TalosError::StorageError(format!(
+        DatabaseType::Postgres => Err(TalosError::StorageError(format!(
             "Unsupported database type: {}",
             config.database_type
         ))),

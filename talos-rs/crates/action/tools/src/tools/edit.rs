@@ -1,12 +1,20 @@
 use async_trait::async_trait;
+use serde::Deserialize;
 use serde_json::Value;
 use std::fs;
 use talos_error::TalosResult;
 
-use crate::{Tool, ToolContext, ToolOutput};
+use crate::{decode_tool_input, Tool, ToolContext, ToolOutput};
 
 /// Tool for editing file content (find and replace)
 pub struct EditTool;
+
+#[derive(Debug, Deserialize)]
+struct EditToolInput {
+    path: String,
+    find: String,
+    replace: String,
+}
 
 #[async_trait]
 impl Tool for EditTool {
@@ -31,77 +39,66 @@ impl Tool for EditTool {
     }
 
     async fn execute(&self, input: Value, _context: ToolContext) -> TalosResult<ToolOutput> {
-        // Extract path, find, and replace from input
-        let path = if let Some(path_val) = input.get("path") {
-            path_val.as_str().unwrap_or("")
-        } else {
-            return Ok(ToolOutput {
-                success: false,
-                output: "".to_string(),
-                error: Some("Input must contain 'path' field".to_string()),
-            });
-        };
-
-        let find = if let Some(find_val) = input.get("find") {
-            find_val.as_str().unwrap_or("")
-        } else {
-            return Ok(ToolOutput {
-                success: false,
-                output: "".to_string(),
-                error: Some("Input must contain 'find' field".to_string()),
-            });
-        };
-
-        let replace = if let Some(replace_val) = input.get("replace") {
-            replace_val.as_str().unwrap_or("")
-        } else {
-            return Ok(ToolOutput {
-                success: false,
-                output: "".to_string(),
-                error: Some("Input must contain 'replace' field".to_string()),
-            });
+        let input: EditToolInput = match decode_tool_input(input, self.name()) {
+            Ok(input) => input,
+            Err(err) => {
+                let error = if err.to_string().contains("missing field `path`") {
+                    "Input must contain 'path' field".to_string()
+                } else if err.to_string().contains("missing field `find`") {
+                    "Input must contain 'find' field".to_string()
+                } else if err.to_string().contains("missing field `replace`") {
+                    "Input must contain 'replace' field".to_string()
+                } else {
+                    err.to_string()
+                };
+                return Ok(ToolOutput {
+                    success: false,
+                    output: String::new(),
+                    error: Some(error),
+                });
+            }
         };
 
         // Read the original content
-        let original_content = match fs::read_to_string(path) {
+        let original_content = match fs::read_to_string(&input.path) {
             Ok(content) => content,
             Err(err) => {
                 return Ok(ToolOutput {
                     success: false,
                     output: "".to_string(),
-                    error: Some(format!("Failed to read file '{}': {}", path, err)),
+                    error: Some(format!("Failed to read file '{}': {}", input.path, err)),
                 });
             }
         };
 
         // Perform the replacement
-        let new_content = original_content.replace(find, replace);
+        let new_content = original_content.replace(&input.find, &input.replace);
 
         // If no replacements were made, mention this in the output
-        let replacements = original_content.matches(find).count();
+        let replacements = original_content.matches(&input.find).count();
 
         if new_content == original_content {
             return Ok(ToolOutput {
                 success: true,
-                output: format!("No occurrences of '{}' found in {}", find, path),
+                output: format!("No occurrences of '{}' found in {}", input.find, input.path),
                 error: None,
             });
         }
 
         // Write the new content back to the file
-        match fs::write(path, &new_content) {
+        match fs::write(&input.path, &new_content) {
             Ok(_) => Ok(ToolOutput {
                 success: true,
                 output: format!(
                     "Replaced {} occurrence(s) of '{}' with '{}' in {}",
-                    replacements, find, replace, path
+                    replacements, input.find, input.replace, input.path
                 ),
                 error: None,
             }),
             Err(err) => Ok(ToolOutput {
                 success: false,
                 output: "".to_string(),
-                error: Some(format!("Failed to write to file '{}': {}", path, err)),
+                error: Some(format!("Failed to write to file '{}': {}", input.path, err)),
             }),
         }
     }

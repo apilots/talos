@@ -27,7 +27,10 @@ impl Tool for EchoTestTool {
     }
 
     async fn execute(&self, input: Value, _context: ToolContext) -> TalosResult<ToolOutput> {
-        let output = input.as_str().unwrap_or(&input.to_string()).to_string();
+        let output = input
+            .as_str()
+            .map(ToString::to_string)
+            .unwrap_or_else(|| input.to_string());
         Ok(ToolOutput {
             success: true,
             output,

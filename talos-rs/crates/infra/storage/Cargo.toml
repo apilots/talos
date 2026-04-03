@@ -17,6 +17,7 @@ sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio"] }
 
 # Error handling
 talos-error = { path = "../error" }
+talos-config = { path = "../config" }
 
 # Serialization
 serde = { workspace = true }

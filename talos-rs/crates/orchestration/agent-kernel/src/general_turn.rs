@@ -26,7 +26,9 @@ use talos_prompt::{
     render_prompt_assembly, PromptBudget, PromptBuildConfig, PromptBuilder, PromptDiagnostics,
     PromptLoadPolicy, PromptPhase,
 };
-use talos_tools::{ToolDispatchOutcome, ToolOutputPayload, ToolPending, ToolRegistry};
+use talos_tools::{
+    ToolDefinitionProvider, ToolDispatchOutcome, ToolExecutorPort, ToolOutputPayload, ToolPending,
+};
 use talos_types::talos::{TalosContentItem, TalosOutputItem, TalosUsage};
 use tokio::sync::mpsc;
 use tracing::warn;
@@ -787,6 +789,7 @@ mod tests {
             "assistant",
             "hello",
             provider,
+            tool_registry.clone(),
             tool_registry,
             memory_store,
             &config,
@@ -822,6 +825,7 @@ mod tests {
             "assistant",
             "hello",
             provider,
+            tool_registry.clone(),
             tool_registry,
             memory_store,
             &config,
@@ -861,6 +865,7 @@ mod tests {
             "assistant",
             "Use exec_command, then continue with write_stdin.",
             provider.clone(),
+            tool_registry.clone(),
             tool_registry,
             memory_store,
             &config,
@@ -896,6 +901,7 @@ mod tests {
             "assistant",
             "Use exec_command with escalated permissions.",
             provider.clone(),
+            tool_registry.clone(),
             tool_registry,
             memory_store,
             &config,
@@ -1338,7 +1344,7 @@ fn build_tool_result_payload(
 pub async fn execute_general_turn_tool_batch(
     prepared: &PreparedGeneralTurn,
     tool_executor: Arc<dyn ToolExecutor>,
-    tool_registry: Arc<ToolRegistry>,
+    tool_registry: Arc<dyn ToolExecutorPort>,
     kernel_config: Arc<AgentKernelConfig>,
     user_id: &str,
     tool_calls: &[FunctionCall],
@@ -1567,7 +1573,7 @@ pub async fn prepare_general_turn(
     agent_name: &str,
     agent_description: &str,
     input: &str,
-    tool_registry: Arc<ToolRegistry>,
+    tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
     memory_store: Arc<MemoryStore>,
     kernel_config: &AgentKernelConfig,
 ) -> TalosResult<PreparedGeneralTurn> {
@@ -1585,7 +1591,7 @@ pub async fn prepare_general_turn(
     let prompt_builder = PromptBuilder::new()
         .agent(agent_name.to_string(), agent_description.to_string())
         .phase(phase)
-        .planner_mode(kernel_config.planner_mode.clone())?
+        .planner_mode(kernel_config.planner_mode.as_str())?
         .planning_instruction(ctx.planning_instruction.clone())
         .config(PromptBuildConfig {
             budget: PromptBudget {
@@ -1604,7 +1610,7 @@ pub async fn prepare_general_turn(
             prompt: kernel_config.prompt.clone(),
             memory: kernel_config.memory.clone(),
         })
-        .tools(tool_registry.as_ref())
+        .tools(tool_definition_provider.as_ref())
         .memory_store(&session_id, memory_store.as_ref())
         .user_input(input.to_string());
     let prompt_assembly = prompt_builder.assemble().await?;
@@ -1643,7 +1649,7 @@ pub async fn prepare_general_turn(
             input,
         ),
         messages: render_prompt_assembly(&prompt_assembly),
-        tool_definitions: tool_registry.get_tool_definitions(),
+        tool_definitions: tool_definition_provider.get_tool_definitions(),
         prompt_diagnostics,
         warnings,
         stream_tx,
@@ -1654,7 +1660,7 @@ pub async fn execute_general_turn_loop(
     prepared: PreparedGeneralTurn,
     agent_name: &str,
     llm_provider: Arc<dyn LlmProvider>,
-    tool_registry: Arc<ToolRegistry>,
+    tool_executor_port: Arc<dyn ToolExecutorPort>,
     kernel_config: &AgentKernelConfig,
 ) -> TalosResult<ExecutedTurnArtifacts> {
     let max_tool_rounds = kernel_config.max_tool_rounds.max(1);
@@ -1681,7 +1687,7 @@ pub async fn execute_general_turn_loop(
         let tool_batch = execute_general_turn_tool_batch(
             &prepared,
             tool_executor.clone(),
-            tool_registry.clone(),
+            tool_executor_port.clone(),
             kernel_config.clone(),
             agent_name,
             &step.tool_calls,
@@ -1820,7 +1826,8 @@ pub async fn run_general_turn(
     agent_description: &str,
     input: &str,
     llm_provider: Arc<dyn LlmProvider>,
-    tool_registry: Arc<ToolRegistry>,
+    tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
+    tool_executor_port: Arc<dyn ToolExecutorPort>,
     memory_store: Arc<MemoryStore>,
     kernel_config: &AgentKernelConfig,
 ) -> TalosResult<GeneralTurnResult> {
@@ -1829,7 +1836,7 @@ pub async fn run_general_turn(
         agent_name,
         agent_description,
         input,
-        tool_registry.clone(),
+        tool_definition_provider,
         memory_store.clone(),
         kernel_config,
     )
@@ -1840,7 +1847,7 @@ pub async fn run_general_turn(
         prepared.clone(),
         agent_name,
         llm_provider.clone(),
-        tool_registry,
+        tool_executor_port,
         kernel_config,
     )
     .await?;

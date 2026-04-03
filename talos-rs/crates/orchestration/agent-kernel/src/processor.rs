@@ -123,38 +123,7 @@ impl IdentityRequestProcessor {
 fn stage_request_event(ctx: &mut InvocationContext, event: &ExecutionEvent) {
     let staged = SessionEvent::from_execution_event(ctx.session_id.clone(), event.clone());
     for delta in &staged.actions.state_delta {
-        match delta.namespace {
-            crate::StateNamespace::App => {
-                ctx.session
-                    .state
-                    .app_state
-                    .insert(delta.key.clone(), delta.value.clone());
-            }
-            crate::StateNamespace::User => {
-                ctx.session
-                    .state
-                    .user_state
-                    .insert(delta.key.clone(), delta.value.clone());
-            }
-            crate::StateNamespace::Temp => {
-                ctx.session
-                    .state
-                    .temp_state
-                    .insert(delta.key.clone(), delta.value.clone());
-            }
-            crate::StateNamespace::Session => {
-                ctx.session
-                    .state
-                    .session_state
-                    .insert(delta.key.clone(), delta.value.clone());
-            }
-            crate::StateNamespace::Workspace => {
-                ctx.session
-                    .state
-                    .workspace_state
-                    .insert(delta.key.clone(), delta.value.clone());
-            }
-        }
+        ctx.session.state.apply_delta(delta);
     }
     ctx.session.events.push(staged);
 }
@@ -1133,9 +1102,7 @@ impl RequestProcessorPipeline {
             .with_processor(Arc::new(InteractionsRequestProcessor));
         if matches!(
             profile,
-            FlowProfile::BuiltInDirect
-                | FlowProfile::BuiltInModelThinking
-                | FlowProfile::PlanReactLoop
+            FlowProfile::DirectAnswer | FlowProfile::ModelThinking | FlowProfile::ReactiveLoop
         ) {
             pipeline = pipeline.with_processor(Arc::new(PlanningRequestProcessor::new(planner)));
         }
@@ -1182,7 +1149,7 @@ impl ResponseProcessorPipeline {
 
     pub fn for_profile(profile: FlowProfile, planner: Arc<dyn Planner>) -> Self {
         let mut pipeline = Self::new();
-        if matches!(profile, FlowProfile::PlanReactLoop) {
+        if matches!(profile, FlowProfile::ReactiveLoop) {
             pipeline = pipeline.with_processor(Arc::new(PlanningResponseProcessor::new(planner)));
         }
         pipeline
@@ -1232,7 +1199,7 @@ mod tests {
 
     impl Planner for BranchingPlanner {
         fn kind(&self) -> crate::PlannerKind {
-            PlannerKind::PlanReact
+            PlannerKind::PlanReAct
         }
 
         fn process_planning_response_effect(

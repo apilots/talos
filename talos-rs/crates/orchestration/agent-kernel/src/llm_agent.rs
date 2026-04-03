@@ -10,7 +10,7 @@ use talos_config::AgentKernelConfig;
 use talos_error::TalosResult;
 use talos_llm_provider::LlmProvider;
 use talos_memory::MemoryStore;
-use talos_tools::ToolRegistry;
+use talos_tools::{ToolDefinitionProvider, ToolExecutorPort};
 use talos_types::talos::{TalosOutputItem, TalosUsage};
 use uuid::Uuid;
 
@@ -21,7 +21,8 @@ pub struct LlmKernelAgent {
     llm_provider: Arc<dyn LlmProvider>,
     memory_store: Arc<MemoryStore>,
     kernel_config: AgentKernelConfig,
-    tool_registry: Arc<ToolRegistry>,
+    tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
+    tool_executor_port: Arc<dyn ToolExecutorPort>,
     planner: Arc<dyn Planner>,
 }
 
@@ -34,7 +35,8 @@ impl LlmKernelAgent {
         llm_provider: Arc<dyn LlmProvider>,
         memory_store: Arc<MemoryStore>,
         kernel_config: AgentKernelConfig,
-        tool_registry: Arc<ToolRegistry>,
+        tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
+        tool_executor_port: Arc<dyn ToolExecutorPort>,
         planner: Arc<dyn Planner>,
     ) -> Self {
         Self {
@@ -44,16 +46,17 @@ impl LlmKernelAgent {
             llm_provider,
             memory_store,
             kernel_config,
-            tool_registry,
+            tool_definition_provider,
+            tool_executor_port,
             planner,
         }
     }
 
     fn branch_for_profile(profile: FlowProfile) -> ExecutionBranch {
         match profile {
-            FlowProfile::BuiltInDirect => ExecutionBranch::DirectAnswer,
-            FlowProfile::BuiltInModelThinking => ExecutionBranch::ModelThinking,
-            FlowProfile::PlanReactLoop => ExecutionBranch::ReactiveLoop,
+            FlowProfile::DirectAnswer => ExecutionBranch::DirectAnswer,
+            FlowProfile::ModelThinking => ExecutionBranch::ModelThinking,
+            FlowProfile::ReactiveLoop => ExecutionBranch::ReactiveLoop,
         }
     }
 
@@ -94,7 +97,8 @@ impl LlmKernelAgent {
             &self.name,
             &self.description,
             self.llm_provider.clone(),
-            self.tool_registry.clone(),
+            self.tool_definition_provider.clone(),
+            self.tool_executor_port.clone(),
             self.memory_store.clone(),
             self.kernel_config.clone(),
             self.planner.clone(),
@@ -437,6 +441,7 @@ mod tests {
             )),
             AgentKernelConfig::default(),
             Arc::new(ToolRegistry::new()),
+            Arc::new(ToolRegistry::new()),
             planner,
         )
     }
@@ -454,6 +459,7 @@ mod tests {
                 std::env::temp_dir().join("talos-llm-agent-tests"),
             )),
             AgentKernelConfig::default(),
+            Arc::new(ToolRegistry::new()),
             Arc::new(ToolRegistry::new()),
             planner,
         )
@@ -473,6 +479,7 @@ mod tests {
                 std::env::temp_dir().join("talos-llm-agent-tests"),
             )),
             AgentKernelConfig::default(),
+            tool_registry.clone(),
             tool_registry,
             planner,
         )

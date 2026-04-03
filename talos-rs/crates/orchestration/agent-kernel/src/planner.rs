@@ -78,7 +78,7 @@ impl PlanReActPlanner {
 
 impl Planner for PlanReActPlanner {
     fn kind(&self) -> PlannerKind {
-        PlannerKind::PlanReact
+        PlannerKind::PlanReAct
     }
 
     fn thinking_mode(&self) -> ThinkingMode {

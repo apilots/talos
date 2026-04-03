@@ -5,8 +5,8 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
-use talos_error::TalosResult;
-use talos_tools::{ToolDispatchOutcome, ToolInvocation, ToolOutputPayload, ToolRegistry};
+use talos_error::{TalosError, TalosResult};
+use talos_tools::{ToolDispatchOutcome, ToolInvocation, ToolOutputPayload, ToolExecutorPort};
 use tokio::task::JoinSet;
 
 #[derive(Debug, Clone)]
@@ -42,7 +42,7 @@ pub trait ToolExecutor: Send + Sync {
     async fn execute(
         &self,
         _execution_context: &ToolExecutionContext,
-        _registry: Arc<ToolRegistry>,
+        _registry: Arc<dyn ToolExecutorPort>,
         _calls: &[ToolExecutionInput],
     ) -> TalosResult<Vec<ToolExecutionOutput>> {
         Ok(Vec::new())
@@ -53,7 +53,7 @@ pub struct SequentialToolExecutor;
 
 fn build_tool_context(
     execution_context: &ToolExecutionContext,
-    registry: &ToolRegistry,
+    registry: &dyn ToolExecutorPort,
     pre_approved: bool,
     call_id: &str,
 ) -> talos_tools::ToolContext {
@@ -76,7 +76,7 @@ fn build_tool_context(
 }
 
 async fn execute_single_tool_call(
-    registry: Arc<ToolRegistry>,
+    registry: Arc<dyn ToolExecutorPort>,
     execution_context: &ToolExecutionContext,
     call: ToolExecutionInput,
 ) -> ToolExecutionOutput {
@@ -124,7 +124,7 @@ impl ToolExecutor for SequentialToolExecutor {
     async fn execute(
         &self,
         execution_context: &ToolExecutionContext,
-        registry: Arc<ToolRegistry>,
+        registry: Arc<dyn ToolExecutorPort>,
         calls: &[ToolExecutionInput],
     ) -> TalosResult<Vec<ToolExecutionOutput>> {
         let mut outputs = Vec::with_capacity(calls.len());
@@ -140,7 +140,7 @@ impl ToolExecutor for SequentialToolExecutor {
 pub struct ParallelToolExecutor;
 
 impl ParallelToolExecutor {
-    fn batch_allows_parallel(registry: &ToolRegistry, calls: &[ToolExecutionInput]) -> bool {
+    fn batch_allows_parallel(registry: &dyn ToolExecutorPort, calls: &[ToolExecutionInput]) -> bool {
         !calls.is_empty()
             && calls.iter().all(|call| {
                 registry.tool_supports_parallel(&call.tool_name)
@@ -158,7 +158,7 @@ impl ToolExecutor for ParallelToolExecutor {
     async fn execute(
         &self,
         execution_context: &ToolExecutionContext,
-        registry: Arc<ToolRegistry>,
+        registry: Arc<dyn ToolExecutorPort>,
         calls: &[ToolExecutionInput],
     ) -> TalosResult<Vec<ToolExecutionOutput>> {
         if !Self::batch_allows_parallel(registry.as_ref(), calls) {
@@ -210,13 +210,22 @@ impl ToolExecutor for ParallelToolExecutor {
 
         let mut outputs = vec![None; calls.len()];
         while let Some(result) = join_set.join_next().await {
-            let (index, output) = result.expect("parallel tool execution task should not panic");
+            let (index, output) = result.map_err(|error| {
+                TalosError::InternalError(format!("parallel tool execution task failed: {error}"))
+            })?;
             outputs[index] = Some(output);
         }
-        Ok(outputs
+        outputs
             .into_iter()
-            .map(|output| output.expect("parallel tool output should exist"))
-            .collect())
+            .enumerate()
+            .map(|(index, output)| {
+                output.ok_or_else(|| {
+                    TalosError::InternalError(format!(
+                        "missing parallel tool output at index {index}"
+                    ))
+                })
+            })
+            .collect()
     }
 }
 
@@ -248,7 +257,7 @@ mod tests {
     use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
-    use talos_tools::{Tool, ToolContext, ToolOutput};
+    use talos_tools::{Tool, ToolContext, ToolOutput, ToolRegistry};
     use tokio::time::{sleep, Duration};
 
     struct ObservedDelayTool {

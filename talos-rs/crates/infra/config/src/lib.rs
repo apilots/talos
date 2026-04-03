@@ -28,6 +28,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
+use std::fmt;
 use std::path::PathBuf;
 use talos_error::TalosResult;
 use talos_logging::LoggingConfig;
@@ -73,12 +74,35 @@ impl Default for Config {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DatabaseType {
+    #[default]
+    Sqlite,
+    Postgres,
+}
+
+impl DatabaseType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Sqlite => "sqlite",
+            Self::Postgres => "postgres",
+        }
+    }
+}
+
+impl fmt::Display for DatabaseType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Storage backend configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageBackendConfig {
     /// Backend type, currently only `sqlite` is supported.
     #[serde(default = "default_storage_database_type")]
-    pub database_type: String,
+    pub database_type: DatabaseType,
 
     /// Database connection string or file path.
     #[serde(default = "default_storage_connection_string")]
@@ -89,8 +113,8 @@ pub struct StorageBackendConfig {
     pub max_connections: u32,
 }
 
-fn default_storage_database_type() -> String {
-    "sqlite".to_string()
+fn default_storage_database_type() -> DatabaseType {
+    DatabaseType::Sqlite
 }
 
 fn default_storage_connection_string() -> String {
@@ -151,6 +175,83 @@ impl Default for AgentConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PlannerMode {
+    None,
+    #[default]
+    BuiltIn,
+    PlanReAct,
+}
+
+impl PlannerMode {
+    pub fn parse(value: &str) -> TalosResult<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "none" => Ok(Self::None),
+            "built_in" => Ok(Self::BuiltIn),
+            "plan_react" => Ok(Self::PlanReAct),
+            other => Err(talos_error::TalosError::ValidationError(format!(
+                "invalid planner mode: {}",
+                other
+            ))),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::BuiltIn => "built_in",
+            Self::PlanReAct => "plan_react",
+        }
+    }
+}
+
+impl fmt::Display for PlannerMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionMode {
+    #[default]
+    Single,
+    Sequential,
+    Parallel,
+    Loop,
+}
+
+impl ExecutionMode {
+    pub fn parse(value: &str) -> TalosResult<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "single" => Ok(Self::Single),
+            "sequential" => Ok(Self::Sequential),
+            "parallel" => Ok(Self::Parallel),
+            "loop" => Ok(Self::Loop),
+            other => Err(talos_error::TalosError::ValidationError(format!(
+                "invalid execution mode: {}",
+                other
+            ))),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Single => "single",
+            Self::Sequential => "sequential",
+            Self::Parallel => "parallel",
+            Self::Loop => "loop",
+        }
+    }
+}
+
+impl fmt::Display for ExecutionMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Agent kernel runtime configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentKernelConfig {
@@ -186,23 +287,23 @@ pub struct AgentKernelConfig {
     #[serde(default = "default_workspace_id")]
     pub default_workspace_id: String,
 
-    /// Planner mode for kernel orchestration: built_in or plan_react
+    /// Planner mode for kernel orchestration.
     #[serde(default = "default_kernel_planner_mode")]
-    pub planner_mode: String,
+    pub planner_mode: PlannerMode,
 
     /// Deprecated planner override switch; request-level config no longer overrides kernel config.
     #[serde(default = "default_kernel_allow_request_planner_override")]
     pub allow_request_planner_override: bool,
 
-    /// Kernel execution mode: single, sequential, parallel, loop, or a2a.
+    /// Kernel execution mode: single, sequential, parallel, or loop.
     #[serde(default = "default_kernel_execution_mode")]
-    pub execution_mode: String,
+    pub execution_mode: ExecutionMode,
 
     /// Child agent count used by sequential/parallel execution mode.
     #[serde(default = "default_kernel_execution_children")]
     pub execution_children: usize,
 
-    /// Iteration count used by loop/a2a execution mode.
+    /// Iteration count used by loop execution mode.
     #[serde(default = "default_kernel_execution_loop_iters")]
     pub execution_loop_iters: u32,
 
@@ -457,16 +558,16 @@ fn default_workspace_id() -> String {
     "default".to_string()
 }
 
-fn default_kernel_planner_mode() -> String {
-    "built_in".to_string()
+fn default_kernel_planner_mode() -> PlannerMode {
+    PlannerMode::BuiltIn
 }
 
 fn default_kernel_allow_request_planner_override() -> bool {
     false
 }
 
-fn default_kernel_execution_mode() -> String {
-    "single".to_string()
+fn default_kernel_execution_mode() -> ExecutionMode {
+    ExecutionMode::Single
 }
 
 fn default_kernel_execution_children() -> usize {
@@ -1417,23 +1518,6 @@ impl Config {
                 "agent.kernel.default_workspace_id is empty or unresolved placeholder".to_string(),
             ));
         }
-        let planner_mode = self.agent.kernel.planner_mode.trim().to_ascii_lowercase();
-        if planner_mode != "built_in" && planner_mode != "plan_react" {
-            return Err(TalosError::InvalidConfiguration(
-                "agent.kernel.planner_mode must be one of: built_in, plan_react".to_string(),
-            ));
-        }
-        let execution_mode = self.agent.kernel.execution_mode.trim().to_ascii_lowercase();
-        if execution_mode != "single"
-            && execution_mode != "sequential"
-            && execution_mode != "parallel"
-            && execution_mode != "loop"
-            && execution_mode != "a2a"
-        {
-            return Err(TalosError::InvalidConfiguration(
-                "agent.kernel.execution_mode must be one of: single, sequential, parallel, loop, a2a".to_string(),
-            ));
-        }
         if self.agent.kernel.execution_children == 0 {
             return Err(TalosError::InvalidConfiguration(
                 "agent.kernel.execution_children must be > 0".to_string(),
@@ -1579,14 +1663,7 @@ impl Config {
             ));
         }
 
-        if self.storage.database_type.trim().is_empty()
-            || is_unresolved_placeholder(&self.storage.database_type)
-        {
-            return Err(TalosError::InvalidConfiguration(
-                "storage.database_type is empty or unresolved placeholder".to_string(),
-            ));
-        }
-        if self.storage.database_type != "sqlite" {
+        if self.storage.database_type != DatabaseType::Sqlite {
             return Err(TalosError::InvalidConfiguration(format!(
                 "unsupported storage.database_type: {}",
                 self.storage.database_type
@@ -1925,7 +2002,7 @@ mod tests {
         assert_eq!(config.agent.name, "talos");
         assert_eq!(config.gateway.port, 18789);
         assert!(!config.gateway.auth);
-        assert_eq!(config.storage.database_type, "sqlite");
+        assert_eq!(config.storage.database_type, DatabaseType::Sqlite);
         assert_eq!(config.storage.connection_string, "talos.db");
     }
 
@@ -1945,9 +2022,9 @@ mod tests {
         assert_eq!(config.agent.kernel.tool_result_max_bytes, 64 * 1024);
         assert_eq!(config.agent.kernel.context_compaction_max_bytes, 256 * 1024);
         assert_eq!(config.agent.kernel.default_workspace_id, "default");
-        assert_eq!(config.agent.kernel.planner_mode, "built_in");
+        assert_eq!(config.agent.kernel.planner_mode, PlannerMode::BuiltIn);
         assert!(!config.agent.kernel.allow_request_planner_override);
-        assert_eq!(config.agent.kernel.execution_mode, "single");
+        assert_eq!(config.agent.kernel.execution_mode, ExecutionMode::Single);
         assert_eq!(config.agent.kernel.execution_children, 2);
         assert_eq!(config.agent.kernel.execution_loop_iters, 3);
         assert_eq!(config.agent.kernel.prompt.max_static_tokens, 1200);

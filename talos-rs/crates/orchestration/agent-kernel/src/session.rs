@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use talos_error::TalosResult;
 use talos_llm_provider::{ChatMessage, FunctionCall};
@@ -17,8 +17,8 @@ use talos_memory::{
     SessionTranscriptCompaction, SessionTranscriptCompactionPayload,
     SessionTranscriptConfirmationPayload, SessionTranscriptDynamicToolRequestPayload,
     SessionTranscriptDynamicToolResponsePayload, SessionTranscriptEventKind,
-    SessionTranscriptHeader, SessionTranscriptRecord, SessionTranscriptStateDelta,
-    SessionTranscriptStateNamespace, SessionTranscriptTransferPayload,
+    SessionTranscriptHeader, SessionTranscriptMapper, SessionTranscriptRecord,
+    SessionTranscriptStateDelta, SessionTranscriptStateNamespace, SessionTranscriptTransferPayload,
 };
 use uuid::Uuid;
 
@@ -306,15 +306,25 @@ impl SessionEvent {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SessionState {
     #[serde(default)]
-    pub app_state: HashMap<String, Value>,
-    #[serde(default)]
-    pub user_state: HashMap<String, Value>,
-    #[serde(default)]
-    pub temp_state: HashMap<String, Value>,
-    #[serde(default)]
-    pub session_state: HashMap<String, Value>,
-    #[serde(default)]
-    pub workspace_state: HashMap<String, Value>,
+    pub bags: BTreeMap<StateNamespace, BTreeMap<String, Value>>,
+}
+
+impl SessionState {
+    pub fn get(&self, namespace: StateNamespace, key: &str) -> Option<&Value> {
+        self.bags.get(&namespace).and_then(|bag| bag.get(key))
+    }
+
+    pub fn bag(&self, namespace: StateNamespace) -> Option<&BTreeMap<String, Value>> {
+        self.bags.get(&namespace)
+    }
+
+    pub fn insert(&mut self, namespace: StateNamespace, key: String, value: Value) {
+        self.bags.entry(namespace).or_default().insert(key, value);
+    }
+
+    pub fn apply_delta(&mut self, delta: &crate::StateDelta) {
+        self.insert(delta.namespace, delta.key.clone(), delta.value.clone());
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -377,13 +387,21 @@ pub trait SessionService: Send + Sync {
 
 pub struct MemoryBackedSessionService {
     memory_store: Arc<MemoryStore>,
+    mapper: Arc<dyn SessionTranscriptMapper<SessionEvent>>,
 }
 
 impl MemoryBackedSessionService {
     pub fn new(memory_store: Arc<MemoryStore>) -> Self {
-        Self { memory_store }
+        Self {
+            memory_store,
+            mapper: Arc::new(KernelSessionTranscriptMapper),
+        }
     }
+}
 
+struct KernelSessionTranscriptMapper;
+
+impl KernelSessionTranscriptMapper {
     fn map_branch_to_transcript(branch: ExecutionBranch) -> SessionTranscriptBranch {
         match branch {
             ExecutionBranch::DirectAnswer => SessionTranscriptBranch::DirectAnswer,
@@ -505,38 +523,7 @@ impl MemoryBackedSessionService {
 
     fn apply_state_delta(session: &mut InvocationSession, event: &SessionEvent) {
         for delta in &event.actions.state_delta {
-            match delta.namespace {
-                StateNamespace::App => {
-                    session
-                        .state
-                        .app_state
-                        .insert(delta.key.clone(), delta.value.clone());
-                }
-                StateNamespace::User => {
-                    session
-                        .state
-                        .user_state
-                        .insert(delta.key.clone(), delta.value.clone());
-                }
-                StateNamespace::Temp => {
-                    session
-                        .state
-                        .temp_state
-                        .insert(delta.key.clone(), delta.value.clone());
-                }
-                StateNamespace::Session => {
-                    session
-                        .state
-                        .session_state
-                        .insert(delta.key.clone(), delta.value.clone());
-                }
-                StateNamespace::Workspace => {
-                    session
-                        .state
-                        .workspace_state
-                        .insert(delta.key.clone(), delta.value.clone());
-                }
-            }
+            session.state.apply_delta(delta);
         }
     }
 
@@ -669,6 +656,40 @@ impl MemoryBackedSessionService {
     }
 }
 
+impl SessionTranscriptMapper<SessionEvent> for KernelSessionTranscriptMapper {
+    fn to_record(&self, event: &SessionEvent) -> SessionTranscriptRecord {
+        SessionTranscriptRecord {
+            header: SessionTranscriptHeader {
+                id: event.id.clone(),
+                session_id: event.session_id.clone(),
+                invocation_id: event.invocation_id.clone(),
+                branch: Self::map_branch_to_transcript(event.branch),
+                timestamp: event.timestamp,
+            },
+            author: Self::map_author_to_transcript(event.author.clone()),
+            kind: Self::map_kind_to_transcript(event.kind.clone()),
+            payload: Self::map_payload_to_transcript(&event.payload),
+            actions: Self::map_actions_to_transcript(&event.actions),
+            partial: event.partial,
+        }
+    }
+
+    fn from_record(&self, record: SessionTranscriptRecord) -> SessionEvent {
+        SessionEvent {
+            id: record.header.id,
+            session_id: record.header.session_id,
+            invocation_id: record.header.invocation_id,
+            branch: Self::map_branch_from_transcript(record.header.branch),
+            author: Self::map_author_from_transcript(record.author),
+            kind: Self::map_kind_from_transcript(record.kind),
+            payload: Self::map_payload_from_transcript(record.payload),
+            actions: Self::map_actions_from_transcript(record.actions),
+            partial: record.partial,
+            timestamp: record.header.timestamp,
+        }
+    }
+}
+
 #[async_trait]
 impl SessionService for MemoryBackedSessionService {
     async fn append_event(
@@ -680,22 +701,9 @@ impl SessionService for MemoryBackedSessionService {
             return Ok(event);
         }
 
-        Self::apply_state_delta(session, &event);
+        KernelSessionTranscriptMapper::apply_state_delta(session, &event);
         self.memory_store
-            .append_transcript_record(&SessionTranscriptRecord {
-                header: SessionTranscriptHeader {
-                    id: event.id.clone(),
-                    session_id: event.session_id.clone(),
-                    invocation_id: event.invocation_id.clone(),
-                    branch: Self::map_branch_to_transcript(event.branch),
-                    timestamp: event.timestamp,
-                },
-                author: Self::map_author_to_transcript(event.author.clone()),
-                kind: Self::map_kind_to_transcript(event.kind.clone()),
-                payload: Self::map_payload_to_transcript(&event.payload),
-                actions: Self::map_actions_to_transcript(&event.actions),
-                partial: event.partial,
-            })
+            .append_transcript_record(&self.mapper.to_record(&event))
             .await?;
         session.events.push(event.clone());
         Ok(event)
@@ -712,44 +720,22 @@ impl SessionService for MemoryBackedSessionService {
                 .load_transcript_records(
                     session_id,
                     Some(invocation_id),
-                    Self::map_branch_to_transcript(branch),
+                    KernelSessionTranscriptMapper::map_branch_to_transcript(branch),
                 )
                 .await?
                 .into_iter()
-                .map(|record| SessionEvent {
-                    id: record.header.id,
-                    session_id: record.header.session_id,
-                    invocation_id: record.header.invocation_id,
-                    branch: Self::map_branch_from_transcript(record.header.branch),
-                    author: Self::map_author_from_transcript(record.author),
-                    kind: Self::map_kind_from_transcript(record.kind),
-                    payload: Self::map_payload_from_transcript(record.payload),
-                    actions: Self::map_actions_from_transcript(record.actions),
-                    partial: record.partial,
-                    timestamp: record.header.timestamp,
-                })
+                .map(|record| self.mapper.from_record(record))
                 .collect()
         } else if let Some(branch) = branch {
             self.memory_store
                 .load_transcript_records(
                     session_id,
                     invocation_id,
-                    Self::map_branch_to_transcript(branch),
+                    KernelSessionTranscriptMapper::map_branch_to_transcript(branch),
                 )
                 .await?
                 .into_iter()
-                .map(|record| SessionEvent {
-                    id: record.header.id,
-                    session_id: record.header.session_id,
-                    invocation_id: record.header.invocation_id,
-                    branch: Self::map_branch_from_transcript(record.header.branch),
-                    author: Self::map_author_from_transcript(record.author),
-                    kind: Self::map_kind_from_transcript(record.kind),
-                    payload: Self::map_payload_from_transcript(record.payload),
-                    actions: Self::map_actions_from_transcript(record.actions),
-                    partial: record.partial,
-                    timestamp: record.header.timestamp,
-                })
+                .map(|record| self.mapper.from_record(record))
                 .collect()
         } else {
             Vec::new()
@@ -761,7 +747,7 @@ impl SessionService for MemoryBackedSessionService {
             state: SessionState::default(),
         };
         for event in session.events.clone() {
-            Self::apply_state_delta(&mut session, &event);
+            KernelSessionTranscriptMapper::apply_state_delta(&mut session, &event);
         }
         Ok(session)
     }
@@ -873,7 +859,7 @@ mod tests {
             .expect("load should succeed");
 
         assert_eq!(
-            loaded.state.session_state.get("plan_seen"),
+            loaded.state.get(StateNamespace::Session, "plan_seen"),
             Some(&serde_json::json!(true))
         );
     }

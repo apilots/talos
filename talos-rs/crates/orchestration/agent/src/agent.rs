@@ -21,11 +21,10 @@ use talos_agent_kernel::{
     flush_session_memory, Agent as KernelAgent, AgentRunResult, BuiltInPlanner,
     ConfirmationRequestStreamData, InvocationContext, KernelRuntime, KernelStreamEvent,
     KernelStreamEventData, KernelStreamEventType, KernelThinkingSource, KernelThinkingStage,
-    LlmKernelAgent, LoopKernelAgent, ParallelKernelAgent, PlanReActPlanner, Planner,
-    RoutingKernelAgent, RunRequest, SequentialKernelAgent, StopReason, TaskKind, TaskResult,
-    TaskStatus,
+    LlmKernelAgent, LoopKernelAgent, ParallelKernelAgent, PlanReActPlanner, Planner, RunRequest,
+    SequentialKernelAgent, StopReason, TaskKind, TaskResult, TaskStatus,
 };
-use talos_config::AgentKernelConfig;
+use talos_config::{AgentKernelConfig, ExecutionMode, PlannerMode};
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{ChatMessage, FunctionCall, LlmProvider};
 use talos_memory::{
@@ -46,33 +45,6 @@ enum KernelExecutionMode {
     Sequential,
     Parallel,
     Loop,
-    A2A,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PlannerMode {
-    BuiltIn,
-    PlanReAct,
-}
-
-impl PlannerMode {
-    fn as_str(self) -> &'static str {
-        match self {
-            PlannerMode::BuiltIn => "built_in",
-            PlannerMode::PlanReAct => "plan_react",
-        }
-    }
-
-    fn parse(value: &str) -> TalosResult<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "built_in" => Ok(Self::BuiltIn),
-            "plan_react" => Ok(Self::PlanReAct),
-            other => Err(TalosError::ValidationError(format!(
-                "invalid planner mode: {}",
-                other
-            ))),
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -291,7 +263,7 @@ impl AgentImpl {
 
     pub fn set_default_planner_mode(&mut self, planner_mode: &str) -> TalosResult<()> {
         let mode = PlannerMode::parse(planner_mode.trim())?;
-        self.kernel_config.planner_mode = mode.as_str().to_string();
+        self.kernel_config.planner_mode = mode;
         Ok(())
     }
 
@@ -447,6 +419,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
             self.memory_store.clone(),
             self.kernel_config_snapshot(),
             self.tool_registry.clone(),
+            self.tool_registry.clone(),
             planner,
         ))
     }
@@ -456,7 +429,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
     }
 
     fn resolve_planner_mode(&self) -> TalosResult<PlannerMode> {
-        PlannerMode::parse(&self.kernel_config.planner_mode)
+        Ok(self.kernel_config.planner_mode)
     }
 
     fn build_planner_for_request(&self) -> TalosResult<Arc<dyn Planner>> {
@@ -464,6 +437,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
             return Ok(planner.clone());
         }
         Ok(match self.resolve_planner_mode()? {
+            PlannerMode::None => Arc::new(BuiltInPlanner::new()),
             PlannerMode::BuiltIn => Arc::new(BuiltInPlanner::new()),
             PlannerMode::PlanReAct => Arc::new(PlanReActPlanner::new()),
         })
@@ -472,21 +446,12 @@ After receiving tool outputs, continue reasoning and provide the final response.
     fn resolve_kernel_mode(&self) -> TalosResult<KernelExecutionMode> {
         let mode = self
             .kernel_config
-            .execution_mode
-            .trim()
-            .to_ascii_lowercase();
-        Ok(match mode.as_str() {
-            "single" => KernelExecutionMode::Single,
-            "sequential" => KernelExecutionMode::Sequential,
-            "parallel" => KernelExecutionMode::Parallel,
-            "loop" => KernelExecutionMode::Loop,
-            "a2a" => KernelExecutionMode::A2A,
-            other => {
-                return Err(TalosError::ValidationError(format!(
-                    "invalid execution mode: {}",
-                    other
-                )))
-            }
+            .execution_mode;
+        Ok(match mode {
+            ExecutionMode::Single => KernelExecutionMode::Single,
+            ExecutionMode::Sequential => KernelExecutionMode::Sequential,
+            ExecutionMode::Parallel => KernelExecutionMode::Parallel,
+            ExecutionMode::Loop => KernelExecutionMode::Loop,
         })
     }
 
@@ -539,27 +504,6 @@ After receiving tool outputs, continue reasoning and provide the final response.
                 ),
                 loop_iters,
             )),
-            KernelExecutionMode::A2A => {
-                let mut router = RoutingKernelAgent::new(format!("{}-routing", self.id), "primary")
-                    .with_max_hops(loop_iters);
-                router.register_node(
-                    "primary",
-                    self.build_llm_kernel_agent(
-                        format!("{}-primary", self.id),
-                        format!("{} primary", self.name),
-                        planner.clone(),
-                    ),
-                );
-                router.register_node(
-                    "peer",
-                    self.build_llm_kernel_agent(
-                        format!("{}-peer", self.id),
-                        format!("{} peer", self.name),
-                        planner,
-                    ),
-                );
-                Arc::new(router)
-            }
         })
     }
 

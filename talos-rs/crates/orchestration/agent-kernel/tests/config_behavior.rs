@@ -2,7 +2,7 @@
 //!
 //! Tests verify default values and boundary conditions for kernel configuration.
 
-use talos_config::{AgentKernelConfig, Config};
+use talos_config::{AgentKernelConfig, Config, PlannerMode};
 use talos_error::TalosError;
 
 /// Tests that AgentKernelConfig default values match the specification.
@@ -35,7 +35,7 @@ fn test_default_values() {
     );
 
     assert_eq!(
-        config.planner_mode, "built_in",
+        config.planner_mode, PlannerMode::BuiltIn,
         "planner_mode should default to 'built_in'"
     );
     assert!(
@@ -66,11 +66,9 @@ fn test_boundary_validation() {
     assert!(config.max_llm_calls > 0, "max_llm_calls must be > 0");
     assert!(config.max_tool_rounds > 0, "max_tool_rounds must be > 0");
 
-    let valid_modes = ["built_in", "plan_react"];
     assert!(
-        valid_modes.contains(&config.planner_mode.as_str()),
-        "planner_mode must be one of: {:?}",
-        valid_modes
+        matches!(config.planner_mode, PlannerMode::BuiltIn | PlannerMode::PlanReAct),
+        "planner_mode must be a valid planner mode"
     );
 
     assert!(

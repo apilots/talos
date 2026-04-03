@@ -18,8 +18,8 @@ pub use handlers::{DynamicToolHandler, LocalToolHandler, McpToolHandler, ToolHan
 pub use invocation::{ToolCallPayload, ToolDispatchContext, ToolInvocation};
 pub use mcp::{mcp_tool_name, split_mcp_tool_name, McpConnectionManager};
 pub use output::{ToolDispatchOutcome, ToolOutputPayload, ToolPending};
-pub use r#trait::{Tool, ToolOutput};
-pub use registry::ToolRegistry;
+pub use r#trait::{decode_tool_input, Tool, ToolOutput};
+pub use registry::{ToolDefinitionProvider, ToolExecutorPort, ToolRegistry, ToolRuntime};
 pub use router::ToolRouter;
 pub use spec::{
     default_governance_for_source, RegisteredToolSpec, ToolCatalog, ToolParallelism,

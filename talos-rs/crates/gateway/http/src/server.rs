@@ -500,7 +500,19 @@ async fn stream_session_message(
         })?;
     let stream = ReceiverStream::new(stream_rx).map(|event| {
         let event_name = talos_event_name(&event.event_type);
-        let data = serde_json::to_string(&event).expect("failed to serialize talos event");
+        let data = match serde_json::to_string(&event) {
+            Ok(data) => data,
+            Err(err) => {
+                error!(error = %err, "failed to serialize talos event");
+                json!({
+                    "event_type": "error",
+                    "label": "error",
+                    "data": { "type": "none" },
+                    "timestamp": chrono::Utc::now().timestamp_millis(),
+                })
+                .to_string()
+            }
+        };
         Ok::<Event, Infallible>(Event::default().event(event_name).data(data))
     });
     let sse = Sse::new(stream).keep_alive(KeepAlive::default());

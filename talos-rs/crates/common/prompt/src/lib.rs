@@ -25,7 +25,7 @@ use std::sync::Arc;
 use talos_error::TalosResult;
 use talos_llm_provider::ChatMessage;
 use talos_memory::{MemoryStore, RetrievedMemoryItem};
-use talos_tools::ToolRegistry;
+use talos_tools::ToolDefinitionProvider;
 use tokio::fs;
 
 /// A prompt template that can be rendered with context variables
@@ -314,7 +314,7 @@ pub struct PromptBuilder<'a> {
     pub(crate) planner_mode: PlannerMode,
     pub(crate) planning_instruction: Option<String>,
     pub(crate) user_input: Option<String>,
-    pub(crate) tool_registry: Option<&'a ToolRegistry>,
+    pub(crate) tool_registry: Option<&'a dyn ToolDefinitionProvider>,
     pub(crate) memory_store: Option<&'a MemoryStore>,
     pub(crate) session_id: Option<&'a str>,
     pub(crate) retrieved_memories: Vec<RetrievedMemoryItem>,
@@ -371,7 +371,7 @@ impl<'a> PromptBuilder<'a> {
         self
     }
 
-    pub fn tools(mut self, tool_registry: &'a ToolRegistry) -> Self {
+    pub fn tools(mut self, tool_registry: &'a dyn ToolDefinitionProvider) -> Self {
         self.tool_registry = Some(tool_registry);
         self
     }
@@ -422,7 +422,7 @@ impl<'a> PromptBuilder<'a> {
         assembler::assemble(&self).await
     }
 
-    fn render_tool_summary(tool_registry: &ToolRegistry) -> String {
+    fn render_tool_summary(tool_registry: &dyn ToolDefinitionProvider) -> String {
         let mut definitions = tool_registry.get_tool_definitions();
         if definitions.is_empty() {
             return "none".to_string();

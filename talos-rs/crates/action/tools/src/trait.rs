@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 use talos_error::TalosResult;
 
@@ -28,4 +29,13 @@ pub trait Tool: Send + Sync {
 
     /// Execute the tool with given input
     async fn execute(&self, input: Value, context: ToolContext) -> TalosResult<ToolOutput>;
+}
+
+pub fn decode_tool_input<T>(input: Value, tool_name: &str) -> TalosResult<T>
+where
+    T: DeserializeOwned,
+{
+    serde_json::from_value(input).map_err(|err| {
+        talos_error::TalosError::ToolError(format!("invalid {} arguments: {}", tool_name, err))
+    })
 }

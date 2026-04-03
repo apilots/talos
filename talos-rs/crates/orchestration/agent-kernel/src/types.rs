@@ -17,26 +17,7 @@ pub enum TurnPhase {
     Planning,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum PlannerKind {
-    #[default]
-    BuiltIn,
-    PlanReact,
-}
-
-impl PlannerKind {
-    pub fn parse(value: &str) -> TalosResult<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "built_in" => Ok(Self::BuiltIn),
-            "plan_react" => Ok(Self::PlanReact),
-            other => Err(TalosError::ValidationError(format!(
-                "invalid planner kind: {}",
-                other
-            ))),
-        }
-    }
-}
+pub type PlannerKind = talos_config::PlannerMode;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -49,10 +30,10 @@ pub enum FlowKind {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum FlowProfile {
-    BuiltInDirect,
-    BuiltInModelThinking,
+    DirectAnswer,
+    ModelThinking,
     #[default]
-    PlanReactLoop,
+    ReactiveLoop,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -88,21 +69,15 @@ pub enum KernelExecutionKind {
     Sequential,
     Parallel,
     Loop,
-    A2a,
 }
 
 impl KernelExecutionKind {
-    pub fn parse(value: &str) -> TalosResult<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "single" => Ok(Self::Single),
-            "sequential" => Ok(Self::Sequential),
-            "parallel" => Ok(Self::Parallel),
-            "loop" => Ok(Self::Loop),
-            "a2a" => Ok(Self::A2a),
-            other => Err(TalosError::ValidationError(format!(
-                "invalid execution kind: {}",
-                other
-            ))),
+    pub fn from_mode(value: talos_config::ExecutionMode) -> Self {
+        match value {
+            talos_config::ExecutionMode::Single => Self::Single,
+            talos_config::ExecutionMode::Sequential => Self::Sequential,
+            talos_config::ExecutionMode::Parallel => Self::Parallel,
+            talos_config::ExecutionMode::Loop => Self::Loop,
         }
     }
 }
@@ -536,19 +511,21 @@ impl TryFrom<&talos_config::AgentKernelConfig> for KernelExecutionSettings {
     type Error = talos_error::TalosError;
 
     fn try_from(config: &talos_config::AgentKernelConfig) -> TalosResult<Self> {
-        let planner_kind = PlannerKind::parse(&config.planner_mode)?;
-        let execution_kind = KernelExecutionKind::parse(&config.execution_mode)?;
+        let planner_kind = config.planner_mode;
+        let execution_kind = KernelExecutionKind::from_mode(config.execution_mode);
         let flow_kind = match execution_kind {
             KernelExecutionKind::Single => FlowKind::Single,
             _ => FlowKind::Auto,
         };
         let thinking_mode = match planner_kind {
+            PlannerKind::None => ThinkingMode::Disabled,
             PlannerKind::BuiltIn => ThinkingMode::ModelNative,
-            PlannerKind::PlanReact => ThinkingMode::PlanningProcessor,
+            PlannerKind::PlanReAct => ThinkingMode::PlanningProcessor,
         };
         let default_path = match planner_kind {
+            PlannerKind::None => ExecutionPath::DirectAnswer,
             PlannerKind::BuiltIn => ExecutionPath::DirectAnswer,
-            PlannerKind::PlanReact => ExecutionPath::ReactiveLoop,
+            PlannerKind::PlanReAct => ExecutionPath::ReactiveLoop,
         };
         let tool_execution_mode = if config.tool_parallelism > 1 {
             ToolExecutionMode::Parallel
@@ -663,7 +640,7 @@ mod tests {
     #[test]
     fn test_kernel_execution_settings_follow_planner_defaults() {
         let built_in = talos_config::AgentKernelConfig {
-            planner_mode: "built_in".to_string(),
+            planner_mode: talos_config::PlannerMode::BuiltIn,
             ..talos_config::AgentKernelConfig::default()
         };
         let built_in_settings = KernelExecutionSettings::try_from(&built_in).unwrap();
@@ -671,7 +648,7 @@ mod tests {
         assert_eq!(built_in_settings.default_path, ExecutionPath::DirectAnswer);
 
         let plan_react = talos_config::AgentKernelConfig {
-            planner_mode: "plan_react".to_string(),
+            planner_mode: talos_config::PlannerMode::PlanReAct,
             ..talos_config::AgentKernelConfig::default()
         };
         let plan_react_settings = KernelExecutionSettings::try_from(&plan_react).unwrap();
