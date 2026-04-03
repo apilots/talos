@@ -2972,6 +2972,33 @@ impl TuiApp {
         f.render_stateful_widget(list, inner, &mut list_state);
     }
 
+    fn is_agent_working(&self) -> bool {
+        !self.active_tool_calls.is_empty()
+            || self
+                .chat_blocks
+                .last()
+                .map(|b| b.role == ChatRole::Thinking && b.content.is_empty())
+                .unwrap_or(false)
+    }
+
+    fn thinking_spinner_line(&self, spinner_index: usize) -> RenderedChatLine {
+        let color = Self::spinning_color(spinner_index);
+        let text = "✢ Thinking…".to_string();
+
+        let display = Line::from(vec![Span::styled(
+            text.clone(),
+            Style::default().fg(color),
+        )]);
+
+        RenderedChatLine {
+            display,
+            copy_projection: Some(CopyProjection {
+                text,
+                display_start_col: 0,
+            }),
+        }
+    }
+
     fn rebuild_chat_render_state_if_rect(&mut self) {
         if let Some(rect) = self.chat_content_rect {
             self.rebuild_chat_render_state(rect);
@@ -2994,6 +3021,11 @@ impl TuiApp {
                     display_start_col: 0,
                 }),
             });
+        }
+
+        // Append thinking spinner if agent is working
+        if self.is_agent_working() {
+            self.rendered_chat_lines.push(self.thinking_spinner_line(self.spinner_index));
         }
 
         if self.rendered_chat_lines.is_empty() {
@@ -3181,255 +3213,243 @@ impl TuiApp {
         preview.into_iter().map(Line::from).collect()
     }
 
-    fn block_content_lines(&self, block: &ChatBlock) -> Vec<Line<'static>> {
+    fn chat_card_lines(&self, block: &ChatBlock, content_width: usize) -> Vec<RenderedChatLine> {
         match block.role {
-            ChatRole::Assistant => render_markdown_lines(&block.content),
-            ChatRole::Thinking => block
-                .content
-                .lines()
-                .map(|line| {
-                    Line::from(Span::styled(
-                        line.to_string(),
-                        Style::default()
-                            .fg(Color::White)
-                            .add_modifier(Modifier::DIM | Modifier::ITALIC),
-                    ))
-                })
-                .collect(),
-            ChatRole::Tool => self.tool_block_content_lines(block),
-            _ => block
-                .content
-                .lines()
-                .map(|line| Line::from(line.to_string()))
-                .collect(),
+            ChatRole::User => self.user_block_lines(block, content_width),
+            ChatRole::Tool => self.tool_block_lines(block, content_width),
+            ChatRole::Assistant => self.assistant_block_lines(block, content_width),
+            ChatRole::Thinking => self.thinking_block_lines(block, content_width),
+            ChatRole::System => self.system_block_lines(block, content_width),
         }
     }
 
-    fn tool_block_content_lines(&self, block: &ChatBlock) -> Vec<Line<'static>> {
-        let tool_name = block.tool_name.as_deref().unwrap_or("unknown");
-        let status = block.tool_status.as_ref();
-        let timing = block.timing_ms.map(|ms| format!(" {}ms", ms)).unwrap_or_default();
-
-        if !block.expanded {
-            // Folded: single-line summary
-            let (status_icon, status_text, status_style) = match status {
-                Some(ToolCallStatus::Running) => (
-                    "⏳",
-                    "running...".to_string(),
-                    Style::default().fg(Color::Yellow),
-                ),
-                Some(ToolCallStatus::Completed { exit_ok: true }) => (
-                    "✓",
-                    format!("completed{}", timing),
-                    Style::default().fg(Color::Green),
-                ),
-                Some(ToolCallStatus::Completed { exit_ok: false }) => (
-                    "✗",
-                    format!("error{}", timing),
-                    Style::default().fg(Color::Red),
-                ),
-                None => ("?", "unknown".to_string(), Style::default().fg(Color::Gray)),
-            };
-            return vec![Line::from(vec![
-                Span::styled(format!("{} ", status_icon), status_style),
-                Span::styled(status_text, status_style),
-                Span::styled("  [Tab to expand]", Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)),
-            ])];
-        }
-
-        // Expanded: show tool details, input and output
+    fn user_block_lines(&self, block: &ChatBlock, content_width: usize) -> Vec<RenderedChatLine> {
         let mut lines = vec![];
+        let prefix_style = Style::default().fg(Color::Cyan);
+        let body_style = Style::default().fg(Color::White);
 
-        // Tool ID section
-        if let Some(call_id) = &block.tool_call_id {
-            lines.push(Line::from(vec![
-                Span::styled("Call ID: ", Style::default().fg(Color::DarkGray)),
-                Span::styled(call_id.clone(), Style::default().fg(Color::Cyan)),
-            ]));
+        let content_lines = block
+            .content
+            .lines()
+            .map(|line| Line::from(line.to_string()))
+            .collect::<Vec<_>>();
+
+        if content_lines.is_empty() {
+            return lines;
         }
 
-        // Extract and display tool-specific fields
-        if let Some(input) = &block.tool_input {
-            match tool_name {
-                "exec_command" => {
-                    if let Some(cmd) = input.get("command").and_then(|v| v.as_str()) {
-                        lines.push(Line::from(vec![
-                            Span::styled("Command: ", Style::default().fg(Color::DarkGray)),
-                            Span::styled(cmd.to_string(), Style::default().fg(Color::Yellow)),
-                        ]));
-                    }
-                    if let Some(cwd) = input.get("cwd").and_then(|v| v.as_str()) {
-                        lines.push(Line::from(vec![
-                            Span::styled("Working Dir: ", Style::default().fg(Color::DarkGray)),
-                            Span::styled(cwd.to_string(), Style::default().fg(Color::Cyan)),
-                        ]));
-                    }
-                }
-                "read_file" => {
-                    if let Some(path) = input.get("path").and_then(|v| v.as_str()) {
-                        lines.push(Line::from(vec![
-                            Span::styled("Path: ", Style::default().fg(Color::DarkGray)),
-                            Span::styled(path.to_string(), Style::default().fg(Color::Yellow)),
-                        ]));
-                    }
-                }
-                "write_file" => {
-                    if let Some(path) = input.get("path").and_then(|v| v.as_str()) {
-                        lines.push(Line::from(vec![
-                            Span::styled("Path: ", Style::default().fg(Color::DarkGray)),
-                            Span::styled(path.to_string(), Style::default().fg(Color::Yellow)),
-                        ]));
-                    }
-                }
-                "web_search" => {
-                    if let Some(query) = input.get("query").and_then(|v| v.as_str()) {
-                        lines.push(Line::from(vec![
-                            Span::styled("Query: ", Style::default().fg(Color::DarkGray)),
-                            Span::styled(query.to_string(), Style::default().fg(Color::Yellow)),
-                        ]));
-                    }
-                    if let Some(max_results) = input.get("max_results").and_then(|v| v.as_i64()) {
-                        lines.push(Line::from(vec![
-                            Span::styled("Max Results: ", Style::default().fg(Color::DarkGray)),
-                            Span::styled(max_results.to_string(), Style::default().fg(Color::Cyan)),
-                        ]));
-                    }
-                }
-                "http_request" => {
-                    if let Some(url) = input.get("url").and_then(|v| v.as_str()) {
-                        lines.push(Line::from(vec![
-                            Span::styled("URL: ", Style::default().fg(Color::DarkGray)),
-                            Span::styled(url.to_string(), Style::default().fg(Color::Yellow)),
-                        ]));
-                    }
-                    if let Some(method) = input.get("method").and_then(|v| v.as_str()) {
-                        lines.push(Line::from(vec![
-                            Span::styled("Method: ", Style::default().fg(Color::DarkGray)),
-                            Span::styled(method.to_string(), Style::default().fg(Color::Cyan)),
-                        ]));
-                    }
-                }
-                _ => {}
-            }
-        } else if !block.tool_call_id.as_deref().unwrap_or("").is_empty() {
-            // If no input details, show placeholder
-            lines.push(Line::from(Span::styled(
-                "(No input details available)",
-                Style::default().fg(Color::DarkGray),
-            )));
-        }
+        // Process all lines with wrapping
+        for (line_idx, line) in content_lines.iter().enumerate() {
+            let wrap_width = content_width.saturating_sub(2);  // Account for "> " or indent
 
-        // Separator
-        if !lines.is_empty() && !block.content.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "─".repeat(40),
-                Style::default().fg(Color::DarkGray),
-            )));
-        }
-
-        // Output section
-        if !block.content.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "Output:",
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-            )));
-            let output_lines: Vec<&str> = block.content.lines().take(20).collect();
-            for l in output_lines {
-                lines.push(Line::from(Span::styled(
-                    format!("  {}", l),
-                    Style::default().fg(Color::White),
-                )));
-            }
-            if block.content.lines().count() > 20 {
-                lines.push(Line::from(Span::styled(
-                    format!("  ... ({} more lines)", block.content.lines().count() - 20),
-                    Style::default().fg(Color::DarkGray),
-                )));
+            for (wrap_idx, wrapped) in wrap_line_visual(line.clone(), wrap_width).iter().enumerate() {
+                if line_idx == 0 && wrap_idx == 0 {
+                    // First wrapped line: add prefix
+                    let mut first_spans = vec![Span::styled("> ", prefix_style)];
+                    for span in &wrapped.spans {
+                        first_spans.push(Span::styled(
+                            span.content.to_string(),
+                            span.style.patch(body_style),
+                        ));
+                    }
+                    let copy_text = line_plain_text(wrapped);
+                    lines.push(RenderedChatLine {
+                        display: Line::from(first_spans),
+                        copy_projection: Some(CopyProjection {
+                            text: copy_text,
+                            display_start_col: 2,
+                        }),
+                    });
+                } else {
+                    // Subsequent wrapped lines: add indent
+                    lines.push(self.decorate_chat_line(wrapped.clone(), body_style, 2));
+                }
             }
         }
 
-        // Status line with exit code or error details
-        let _status_line = if let Some(ToolCallStatus::Completed { exit_ok }) = status {
-            // Extract exit code from output if available (common in exec_command)
-            let exit_code_str = if !block.content.is_empty() && block.content.contains("Exit:") {
-                "".to_string()
-            } else {
-                if *exit_ok { " Exit: 0".to_string() } else { " Exit: 1".to_string() }
-            };
-            format!("{}{}", timing, exit_code_str)
-        } else {
-            format!("{}", timing)
-        };
-
-        let (status_icon, status_text, status_style) = match status {
-            Some(ToolCallStatus::Running) => (
-                "⏳",
-                format!("running{}...", timing),
-                Style::default().fg(Color::Yellow),
-            ),
-            Some(ToolCallStatus::Completed { exit_ok: true }) => (
-                "✓",
-                format!("completed{}", timing),
-                Style::default().fg(Color::Green),
-            ),
-            Some(ToolCallStatus::Completed { exit_ok: false }) => (
-                "✗",
-                format!("error{}", timing),
-                Style::default().fg(Color::Red),
-            ),
-            None => ("?", "unknown".to_string(), Style::default().fg(Color::Gray)),
-        };
-        lines.push(Line::from(vec![
-            Span::styled(format!("{} ", status_icon), status_style),
-            Span::styled(status_text, status_style),
-            Span::styled("  [Tab to collapse]", Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)),
-        ]));
-
-        if lines.is_empty() {
-            lines.push(Line::from(format!("⚙ {}", tool_name)));
-        }
         lines
     }
 
-    fn chat_card_lines(&self, block: &ChatBlock, content_width: usize) -> Vec<RenderedChatLine> {
-        let (label, label_style, body_style, border_style) = self.chat_role_styles(&block.role);
-        let header_text = if block.role == ChatRole::Tool {
-            let tool_name = block.tool_name.as_deref().unwrap_or("unknown");
-            format!("⚙ {tool_name} ")
+    fn tool_block_lines(&self, block: &ChatBlock, content_width: usize) -> Vec<RenderedChatLine> {
+        let tool_name = block.tool_name.as_deref().unwrap_or("unknown");
+        let mut lines = vec![];
+
+        // Tool call header line: ⏺ ToolName(arg_summary)
+        let arg_summary = if let Some(input) = &block.tool_input {
+            Self::tool_arg_summary(tool_name, input)
         } else {
-            format!("{label} ")
+            String::new()
         };
-        let header_copy = if block.role == ChatRole::Tool {
-            block.tool_name.as_deref().unwrap_or("unknown").to_string()
+
+        let (icon_str, icon_color) = match block.tool_status {
+            Some(ToolCallStatus::Running) => ("⏳", Color::Yellow),
+            Some(ToolCallStatus::Completed { exit_ok: true }) => ("⏺", Color::Green),
+            Some(ToolCallStatus::Completed { exit_ok: false }) => ("✗", Color::Red),
+            None => ("?", Color::Gray),
+        };
+
+        let header_text = if arg_summary.is_empty() {
+            format!("{} {}", icon_str, tool_name)
         } else {
-            label.to_string()
+            format!("{} {}({})", icon_str, tool_name, arg_summary)
         };
-        let mut lines = vec![RenderedChatLine {
-            display: Line::from(vec![
-                Span::styled("┌ ", border_style),
-                Span::styled(header_text, label_style),
-            ]),
+
+        let header_style = Style::default().fg(icon_color).add_modifier(Modifier::BOLD);
+        lines.push(RenderedChatLine {
+            display: Line::from(vec![Span::styled(header_text.clone(), header_style)]),
             copy_projection: Some(CopyProjection {
-                text: header_copy,
-                display_start_col: 2,
+                text: header_text,
+                display_start_col: 0,
             }),
-        }];
+        });
 
-        let mut content_lines = self.block_content_lines(block);
-        if content_lines.is_empty() {
-            content_lines.push(Line::from(String::new()));
-        }
+        // Tool output lines
+        if !block.content.is_empty() {
+            let output_lines: Vec<&str> = block.content.lines().collect();
 
-        for line in content_lines {
-            for wrapped in wrap_line_visual(line, content_width) {
-                lines.push(self.decorate_chat_line(wrapped, body_style, border_style));
+            if !block.expanded {
+                // Folded: show collapse indicator
+                let fold_line = format!("  ⎿  … +{} lines (ctrl+o to expand)", output_lines.len());
+                lines.push(RenderedChatLine {
+                    display: Line::from(Span::styled(
+                        fold_line.clone(),
+                        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                    )),
+                    copy_projection: Some(CopyProjection {
+                        text: fold_line,
+                        display_start_col: 0,
+                    }),
+                });
+            } else {
+                // Expanded: show all lines
+                for (idx, output) in output_lines.iter().enumerate() {
+                    let line = Line::from(output.to_string());
+                    for wrapped in wrap_line_visual(line, content_width.saturating_sub(5)) {
+                        let prefix = if idx == 0 { "  ⎿  " } else { "     " };
+                        let copy_text = line_plain_text(&wrapped);
+                        let mut spans = vec![Span::raw(prefix)];
+                        spans.extend(wrapped.spans);
+
+                        lines.push(RenderedChatLine {
+                            display: Line::from(spans),
+                            copy_projection: Some(CopyProjection {
+                                text: format!("{}{}", prefix, copy_text),
+                                display_start_col: 0,
+                            }),
+                        });
+                    }
+                }
             }
         }
 
+        lines
+    }
+
+    fn assistant_block_lines(&self, block: &ChatBlock, content_width: usize) -> Vec<RenderedChatLine> {
+        let mut lines = vec![];
+        let prefix_style = Style::default().fg(Color::Green);
+        let body_style = Style::default().fg(Color::White);
+
+        let content_lines = render_markdown_lines(&block.content);
+
+        if content_lines.is_empty() {
+            return lines;
+        }
+
+        // Process all lines with wrapping
+        for (line_idx, line) in content_lines.iter().enumerate() {
+            let wrap_width = if line_idx == 0 {
+                content_width.saturating_sub(2)  // First line: account for "⏺ "
+            } else {
+                content_width.saturating_sub(2)  // Other lines: account for indent
+            };
+
+            for (wrap_idx, wrapped) in wrap_line_visual(line.clone(), wrap_width).iter().enumerate() {
+                if line_idx == 0 && wrap_idx == 0 {
+                    // First wrapped line of first content line: add icon
+                    let mut first_spans = vec![Span::styled("⏺ ", prefix_style)];
+                    for span in &wrapped.spans {
+                        first_spans.push(span.clone());
+                    }
+                    let copy_text = line_plain_text(wrapped);
+                    lines.push(RenderedChatLine {
+                        display: Line::from(first_spans),
+                        copy_projection: Some(CopyProjection {
+                            text: copy_text,
+                            display_start_col: 2,
+                        }),
+                    });
+                } else {
+                    // Subsequent wrapped lines: add indent
+                    lines.push(self.decorate_chat_line(wrapped.clone(), body_style, 2));
+                }
+            }
+        }
+
+        lines
+    }
+
+    fn thinking_block_lines(&self, block: &ChatBlock, content_width: usize) -> Vec<RenderedChatLine> {
+        let mut lines = vec![];
+        let prefix_style = Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::ITALIC | Modifier::DIM);
+
+        let content_lines = block
+            .content
+            .lines()
+            .map(|line| Line::from(line.to_string()))
+            .collect::<Vec<_>>();
+
+        if content_lines.is_empty() {
+            return lines;
+        }
+
+        // First line with thinking indicator
+        if let Some(first_line) = content_lines.first() {
+            let mut first_spans = vec![Span::styled("💭 ", prefix_style)];
+            for span in &first_line.spans {
+                first_spans.push(Span::styled(
+                    span.content.to_string(),
+                    span.style.patch(prefix_style),
+                ));
+            }
+            lines.push(RenderedChatLine {
+                display: Line::from(first_spans),
+                copy_projection: Some(CopyProjection {
+                    text: format!("💭 {}", line_plain_text(first_line)),
+                    display_start_col: 0,
+                }),
+            });
+        }
+
+        // Rest lines with indent
+        for line in content_lines.iter().skip(1) {
+            for wrapped in wrap_line_visual(line.clone(), content_width.saturating_sub(2)) {
+                lines.push(self.decorate_chat_line(wrapped, prefix_style, 2));
+            }
+        }
+
+        lines
+    }
+
+    fn system_block_lines(&self, block: &ChatBlock, _content_width: usize) -> Vec<RenderedChatLine> {
+        let mut lines = vec![];
+        let system_style = Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM);
+
+        let content_line = Line::from(vec![
+            Span::styled("ℹ ", system_style),
+            Span::styled(block.content.clone(), system_style),
+        ]);
+
         lines.push(RenderedChatLine {
-            display: Line::from(Span::styled("└", border_style)),
-            copy_projection: None,
+            display: content_line.clone(),
+            copy_projection: Some(CopyProjection {
+                text: format!("ℹ {}", block.content),
+                display_start_col: 0,
+            }),
         });
+
         lines
     }
 
@@ -3437,16 +3457,21 @@ impl TuiApp {
         &self,
         line: Line<'static>,
         body_style: Style,
-        border_style: Style,
+        indent: usize,
     ) -> RenderedChatLine {
-        let mut spans: Vec<Span<'static>> = vec![Span::styled("│ ", border_style)];
+        let indent_str = " ".repeat(indent);
+        let mut spans: Vec<Span<'static>> = vec![];
+
+        if !indent_str.is_empty() {
+            spans.push(Span::raw(indent_str.clone()));
+        }
+
         if line.spans.is_empty() {
-            spans.push(Span::styled(" ", body_style));
             return RenderedChatLine {
                 display: Line::from(spans),
                 copy_projection: Some(CopyProjection {
                     text: String::new(),
-                    display_start_col: 2,
+                    display_start_col: indent,
                 }),
             };
         }
@@ -3462,8 +3487,52 @@ impl TuiApp {
             display: Line::from(spans),
             copy_projection: Some(CopyProjection {
                 text: copy_text,
-                display_start_col: 2,
+                display_start_col: indent,
             }),
+        }
+    }
+
+    fn tool_arg_summary(tool_name: &str, input: &serde_json::Value) -> String {
+        let summary = match tool_name {
+            "exec_command" => input
+                .get("command")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_default(),
+            "read_file" | "write_file" => input
+                .get("path")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_default(),
+            "web_search" => input
+                .get("query")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_default(),
+            "http_request" => input
+                .get("url")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_default(),
+            _ => input
+                .as_object()
+                .and_then(|m| m.values().find_map(|v| v.as_str()))
+                .map(|s| s.to_string())
+                .unwrap_or_default(),
+        };
+        if summary.len() > 70 {
+            format!("{}...", &summary[..67])
+        } else {
+            summary
+        }
+    }
+
+    fn spinning_color(spinner_index: usize) -> Color {
+        match spinner_index % 4 {
+            0 => Color::Cyan,
+            1 => Color::Blue,
+            2 => Color::Magenta,
+            _ => Color::Cyan,
         }
     }
 
@@ -4335,21 +4404,26 @@ mod tests {
     }
 
     #[test]
-    fn test_chat_card_wrapped_lines_keep_border_prefix() {
+    fn test_chat_card_wrapped_lines_keep_indent() {
         let app = create_embedded_app();
         let block = ChatBlock::new(
             ChatRole::Assistant,
-            "这是一个非常长的回答，用于测试换行后是否仍然带有左侧边框前缀。".to_string(),
+            "这是一个非常长的回答，用于测试换行后是否仍然带有缩进。".to_string(),
         );
         let lines = app.chat_card_lines(&block, 12);
-        let content_lines: Vec<String> = lines
-            .iter()
-            .skip(1)
-            .take(lines.len().saturating_sub(2))
-            .map(|line| line_plain_text(&line.display))
-            .collect();
-        assert!(!content_lines.is_empty());
-        assert!(content_lines.iter().all(|line| line.starts_with("│ ")));
+        assert!(!lines.is_empty());
+        // First line should have icon prefix
+        assert!(line_plain_text(&lines[0].display).starts_with("⏺ "));
+        // Wrapped lines should be indented by 2 spaces
+        if lines.len() > 1 {
+            for line in lines.iter().skip(1) {
+                let text = line_plain_text(&line.display);
+                if !text.is_empty() {
+                    assert!(text.starts_with("  ") || text.starts_with("⏺ "),
+                        "line should be indented or have icon: {:?}", text);
+                }
+            }
+        }
     }
 
     #[test]
@@ -4383,14 +4457,16 @@ mod tests {
             "Alpha Beta".to_string(),
         )];
         app.rebuild_chat_render_state(Rect::new(0, 0, 20, 8));
+        // In new format, first line is at line_index 0 with "⏺ Alpha Beta"
+        // Selecting from column 2 (after "⏺ ") to column 12 should give "Alpha Beta"
         app.chat_selection = Some(ChatSelection {
             anchor: SelectionPoint {
-                line_index: 1,
-                column: 0,
+                line_index: 0,
+                column: 2,
             },
             focus: SelectionPoint {
-                line_index: 1,
-                column: 11,
+                line_index: 0,
+                column: 12,
             },
         });
 
@@ -4405,18 +4481,27 @@ mod tests {
             "abcdefghij".to_string(),
         )];
         app.rebuild_chat_render_state(Rect::new(0, 0, 8, 8));
+        // In new format with width 8:
+        // content_width = 8 - 2 = 6
+        // wrap width for assistant = 6 - 2 = 4
+        // "abcdefghij" wraps to ["abcd", "efgh", "ij"]
+        // Line 0: "⏺ abcd" (copy_projection: text="abcd", display_start_col=2)
+        // Line 1: "  efgh" (copy_projection: text="efgh", display_start_col=2)
+        // Line 2: "  ij" (copy_projection: text="ij", display_start_col=2)
+        // Line 3: empty line
+        // Selecting from line 0 column 2 (start of content) to line 1 column 6 (end of efgh)
         app.chat_selection = Some(ChatSelection {
             anchor: SelectionPoint {
-                line_index: 1,
-                column: 0,
+                line_index: 0,
+                column: 2,
             },
             focus: SelectionPoint {
-                line_index: 3,
-                column: 4,
+                line_index: 1,
+                column: 6,
             },
         });
 
-        assert_eq!(app.selected_chat_text().as_deref(), Some("abcdef\nghij"));
+        assert_eq!(app.selected_chat_text().as_deref(), Some("abcd\nefgh"));
     }
 
     #[test]
