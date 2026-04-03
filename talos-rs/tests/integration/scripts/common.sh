@@ -52,6 +52,7 @@ start_server() {
     fi
   fi
 
+  mkdir -p "${ROOT_DIR}/tests/integration/reports"
   : > "${SERVER_LOG}"
   "${ROOT_DIR}/target/debug/talos" >>"${SERVER_LOG}" 2>&1 &
   export TALOS_SERVER_PID=$!

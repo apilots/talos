@@ -43,6 +43,7 @@ const MAX_QUEUE_LEN: usize = 3;
 const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 const SESSION_CLOSE_TIMEOUT: Duration = Duration::from_secs(4);
 const SPINNER_FRAMES: &[char] = &['|', '/', '-', '\\'];
+const CHAT_CONTENT_PADDING_LEFT: u16 = 2;
 
 #[derive(Debug, Clone)]
 struct CommandSuggestion {
@@ -187,6 +188,14 @@ struct CopyProjection {
 struct RenderedChatLine {
     display: Line<'static>,
     copy_projection: Option<CopyProjection>,
+}
+
+#[derive(Debug, Default, Clone)]
+struct ToolRenderData {
+    summary: String,
+    detail_lines: Vec<String>,
+    preview_lines: Vec<String>,
+    output_lines: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -375,6 +384,7 @@ pub struct TuiApp {
     model_picker_selected: usize,
     show_sessions_picker: bool,
     sessions_picker_selected: usize,
+    right_panel_visible: bool,
     sent_messages_history: VecDeque<String>,
     message_history_index: Option<usize>,
     show_command_autocomplete: bool,
@@ -390,6 +400,15 @@ pub struct TuiApp {
 }
 
 impl TuiApp {
+    fn is_tool_lifecycle_event(event_type: &TalosEventType) -> bool {
+        matches!(
+            event_type,
+            TalosEventType::MessageToolCallStarted
+                | TalosEventType::MessageToolCallCompleted
+                | TalosEventType::MessageToolCallPendingApproval
+        )
+    }
+
     fn build(gateway_client: Option<Arc<dyn GatewayClient>>) -> Self {
         let mut app = Self {
             current_state: AppState::Chat,
@@ -447,6 +466,7 @@ impl TuiApp {
             model_picker_selected: 0,
             show_sessions_picker: false,
             sessions_picker_selected: 0,
+            right_panel_visible: false,
             sent_messages_history: VecDeque::new(),
             message_history_index: None,
             show_command_autocomplete: false,
@@ -548,6 +568,15 @@ impl TuiApp {
         if key_event.modifiers.intersects(KeyModifiers::CONTROL) {
             match key_event.code {
                 KeyCode::Char('c') => return Ok(true),
+                KeyCode::Char('b') => {
+                    self.toggle_right_panel();
+                    return Ok(false);
+                }
+                KeyCode::Char('o') => {
+                    self.toggle_last_tool_block();
+                    self.rebuild_chat_render_state_if_rect();
+                    return Ok(false);
+                }
                 KeyCode::Char('u') => {
                     self.reset_input();
                     return Ok(false);
@@ -1172,12 +1201,16 @@ impl TuiApp {
                 self.render_history_panel(f, f.area());
             }
             AppState::Chat => {
-                let chunks = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])
-                    .split(f.area());
-                self.render_left_panel(f, chunks[0]);
-                self.render_right_panel(f, chunks[1]);
+                if self.right_panel_visible {
+                    let chunks = Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])
+                        .split(f.area());
+                    self.render_left_panel(f, chunks[0]);
+                    self.render_right_panel(f, chunks[1]);
+                } else {
+                    self.render_left_panel(f, f.area());
+                }
                 if self.show_command_autocomplete {
                     self.render_command_autocomplete(f, f.area());
                 } else if self.show_model_picker {
@@ -1241,7 +1274,7 @@ impl TuiApp {
             "help" => {
                 self.push_block(
                     ChatRole::System,
-                    "Commands: /help /model /models /history /sessions /status /quit\nKeys: ↑/↓/PgUp/PgDn scroll, Ctrl+Y copy, Ctrl+U clear input"
+                    "Commands: /help /model /models /history /sessions /status /quit\nKeys: ↑/↓/PgUp/PgDn scroll, Ctrl+O expand tool, Ctrl+B toggle panel, Ctrl+Y copy, Ctrl+U clear input"
                         .to_string(),
                 );
                 Ok(false)
@@ -1558,6 +1591,7 @@ impl TuiApp {
 
     fn handle_stream_event(&mut self, event: TalosEvent) {
         self.trace_event_count = self.trace_event_count.saturating_add(1);
+        let is_tool_lifecycle_event = Self::is_tool_lifecycle_event(&event.event_type);
 
         if let Some(session_id) = self.session_id.as_deref() {
             if event.session_id != session_id {
@@ -1570,7 +1604,7 @@ impl TuiApp {
         }
 
         match self.active_stream_message_id.as_deref() {
-            Some(active_id) if event.message_id != active_id => {
+            Some(active_id) if event.message_id != active_id && !is_tool_lifecycle_event => {
                 self.push_right_event(format!(
                     "ignored stale event for {} (active {})",
                     event.message_id, active_id
@@ -1584,7 +1618,7 @@ impl TuiApp {
         }
 
         if let Some(last_seq) = self.last_stream_sequence {
-            if event.sequence < last_seq {
+            if event.sequence < last_seq && !is_tool_lifecycle_event {
                 self.push_right_event(format!(
                     "ignored out-of-order event seq {} < {}",
                     event.sequence, last_seq
@@ -2302,6 +2336,28 @@ impl TuiApp {
         idx
     }
 
+    fn remove_chat_block(&mut self, idx: usize) {
+        if idx >= self.chat_blocks.len() {
+            return;
+        }
+
+        self.chat_blocks.remove(idx);
+
+        self.active_tool_calls = self
+            .active_tool_calls
+            .drain()
+            .filter_map(|(call_id, block_idx)| {
+                if block_idx == idx {
+                    None
+                } else if block_idx > idx {
+                    Some((call_id, block_idx - 1))
+                } else {
+                    Some((call_id, block_idx))
+                }
+            })
+            .collect();
+    }
+
     fn push_tool_call_block(&mut self, call_id: String, tool_name: String, tool_input: serde_json::Value, timing_ms: Option<u64>) -> usize {
         let block = ChatBlock::new_tool_call(call_id.clone(), tool_name, tool_input, timing_ms);
         self.chat_blocks.push(block);
@@ -2311,8 +2367,28 @@ impl TuiApp {
         idx
     }
 
-    fn complete_tool_call_block(&mut self, call_id: &str, output: String, exit_ok: bool, timing_ms: Option<u64>) {
+    fn resolve_tool_call_block_idx(&mut self, call_id: &str) -> Option<usize> {
         if let Some(&idx) = self.active_tool_calls.get(call_id) {
+            if self
+                .chat_blocks
+                .get(idx)
+                .and_then(|block| block.tool_call_id.as_deref())
+                == Some(call_id)
+            {
+                return Some(idx);
+            }
+        }
+
+        let idx = self
+            .chat_blocks
+            .iter()
+            .position(|block| block.tool_call_id.as_deref() == Some(call_id))?;
+        self.active_tool_calls.insert(call_id.to_string(), idx);
+        Some(idx)
+    }
+
+    fn complete_tool_call_block(&mut self, call_id: &str, output: String, exit_ok: bool, timing_ms: Option<u64>) {
+        if let Some(idx) = self.resolve_tool_call_block_idx(call_id) {
             if let Some(block) = self.chat_blocks.get_mut(idx) {
                 block.content = output;
                 block.tool_status = Some(ToolCallStatus::Completed { exit_ok });
@@ -2335,6 +2411,10 @@ impl TuiApp {
         }
     }
 
+    fn toggle_right_panel(&mut self) {
+        self.right_panel_visible = !self.right_panel_visible;
+    }
+
     fn discard_active_pending_blocks(&mut self) {
         let mut remove_indices = vec![];
         if let Some(idx) = self.active_assistant_idx {
@@ -2350,9 +2430,7 @@ impl TuiApp {
         remove_indices.dedup();
 
         for idx in remove_indices.into_iter().rev() {
-            if idx < self.chat_blocks.len() {
-                self.chat_blocks.remove(idx);
-            }
+            self.remove_chat_block(idx);
         }
 
         self.chat_history = self
@@ -2451,6 +2529,18 @@ impl TuiApp {
         }
     }
 
+    fn chat_content_columns(&self, chat_inner: Rect) -> (Rect, Rect) {
+        let chat_columns = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Length(CHAT_CONTENT_PADDING_LEFT),
+                Constraint::Min(1),
+                Constraint::Length(1),
+            ])
+            .split(chat_inner);
+        (chat_columns[1], chat_columns[2])
+    }
+
     fn render_left_panel(&mut self, f: &mut Frame, area: ratatui::layout::Rect) {
         // Save left panel area for floater positioning
         self.left_panel_area = Some(area);
@@ -2479,12 +2569,7 @@ impl TuiApp {
         let chat_inner = chat_panel.inner(left_chunks[0]);
         f.render_widget(chat_panel, left_chunks[0]);
 
-        let chat_columns = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(1), Constraint::Length(1)])
-            .split(chat_inner);
-        let chat_content_rect = chat_columns[0];
-        let chat_scrollbar_rect = chat_columns[1];
+        let (chat_content_rect, chat_scrollbar_rect) = self.chat_content_columns(chat_inner);
 
         self.rebuild_chat_render_state(chat_content_rect);
         let visible_lines = self.visible_chat_lines();
@@ -2761,8 +2846,8 @@ impl TuiApp {
         }
         lines.push(Line::from(""));
         lines.push(Line::from("/help /model /history /sessions /status /quit"));
-        lines.push(Line::from("↑/↓/PgUp/PgDn scroll  Tab expand tool"));
-        lines.push(Line::from("Ctrl+Y copy  Ctrl+U clear"));
+        lines.push(Line::from("↑/↓/PgUp/PgDn scroll  Ctrl+O expand tool"));
+        lines.push(Line::from("Ctrl+B panel  Ctrl+Y copy  Ctrl+U clear"));
 
         let right = Paragraph::new(lines).wrap(Wrap { trim: false });
         f.render_widget(right, right_inner);
@@ -3256,7 +3341,7 @@ impl TuiApp {
         let tool_name = block.tool_name.as_deref().unwrap_or("unknown");
         let mut lines = vec![];
 
-        // Tool call header line: ⏺ ToolName(arg_summary)
+        // Tool call header: ● ToolName(arg_summary)
         let arg_summary = if let Some(input) = &block.tool_input {
             Self::tool_arg_summary(tool_name, input)
         } else {
@@ -3265,9 +3350,9 @@ impl TuiApp {
 
         let (icon_str, icon_color) = match block.tool_status {
             Some(ToolCallStatus::Running) => ("⏳", Color::Yellow),
-            Some(ToolCallStatus::Completed { exit_ok: true }) => ("⏺", Color::Green),
-            Some(ToolCallStatus::Completed { exit_ok: false }) => ("✗", Color::Red),
-            None => ("?", Color::Gray),
+            Some(ToolCallStatus::Completed { exit_ok: true }) => ("●", Color::Green),
+            Some(ToolCallStatus::Completed { exit_ok: false }) => ("●", Color::Red),
+            None => ("●", Color::Gray),
         };
 
         let header_text = if arg_summary.is_empty() {
@@ -3285,61 +3370,401 @@ impl TuiApp {
             }),
         });
 
-        // Tool details and output
-        if !block.content.is_empty() {
-            let output_lines: Vec<&str> = block.content.lines().collect();
-            let output_style = Style::default().fg(Color::White);
+        let render_data = Self::build_tool_render_data(block, tool_name);
+        let (summary_text, summary_color) = match block.tool_status {
+            Some(ToolCallStatus::Running) => (render_data.summary, Color::Yellow),
+            Some(ToolCallStatus::Completed { exit_ok: true }) => (render_data.summary, Color::Green),
+            Some(ToolCallStatus::Completed { exit_ok: false }) => (render_data.summary, Color::Red),
+            None => (render_data.summary, Color::Gray),
+        };
 
-            if !block.expanded {
-                // Folded: show collapse indicator
-                let fold_indicator = if output_lines.len() <= 3 {
-                    format!("  output: {} line{}", output_lines.len(), if output_lines.len() == 1 { "" } else { "s" })
-                } else {
-                    format!("  … +{} lines (ctrl+o to expand)", output_lines.len())
-                };
+        let summary_style = Style::default().fg(summary_color);
+        lines.push(RenderedChatLine {
+            display: Line::from(Span::styled(summary_text.clone(), summary_style)),
+            copy_projection: Some(CopyProjection {
+                text: summary_text,
+                display_start_col: 0,
+            }),
+        });
+
+        let detail_style = Style::default().fg(Color::Gray);
+        let output_style = Style::default().fg(Color::White);
+        let detail_lines = render_data.detail_lines;
+        let preview_lines = render_data.preview_lines;
+        let output_lines = render_data.output_lines;
+        let has_output = !output_lines.is_empty();
+        let has_extra_details = !detail_lines.is_empty() || !preview_lines.is_empty() || has_output;
+
+        if !block.expanded {
+            for detail_line in detail_lines.iter() {
                 lines.push(RenderedChatLine {
-                    display: Line::from(Span::styled(
-                        fold_indicator.clone(),
-                        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
-                    )),
+                    display: Line::from(Span::styled(detail_line.clone(), detail_style)),
                     copy_projection: Some(CopyProjection {
-                        text: fold_indicator,
+                        text: detail_line.clone(),
                         display_start_col: 0,
                     }),
                 });
-            } else {
-                // Expanded: show all output lines with color
-                for output in output_lines.iter() {
-                    let line = Line::from(output.to_string());
-                    for wrapped in wrap_line_visual(line, content_width.saturating_sub(2)) {
-                        let mut spans = vec![Span::raw("  ")];  // indent
-                        for span in &wrapped.spans {
-                            spans.push(Span::styled(
-                                span.content.to_string(),
-                                span.style.patch(output_style),
-                            ));
-                        }
-                        lines.push(RenderedChatLine {
-                            display: Line::from(spans),
-                            copy_projection: Some(CopyProjection {
-                                text: format!("  {}", line_plain_text(&wrapped)),
-                                display_start_col: 0,
-                            }),
-                        });
+            }
+
+            for preview_line in preview_lines.iter().take(3) {
+                let line = Line::from(preview_line.to_string());
+                for wrapped in wrap_line_visual(line, content_width.saturating_sub(2)) {
+                    let mut spans = vec![Span::raw("  ")];
+                    for span in &wrapped.spans {
+                        spans.push(Span::styled(
+                            span.content.to_string(),
+                            span.style.patch(output_style),
+                        ));
                     }
+                    lines.push(RenderedChatLine {
+                        display: Line::from(spans),
+                        copy_projection: Some(CopyProjection {
+                            text: format!("  {}", line_plain_text(&wrapped)),
+                            display_start_col: 0,
+                        }),
+                    });
                 }
+            }
+
+            if has_extra_details {
+                let expand_hint = "  (ctrl+o to expand)";
+                lines.push(RenderedChatLine {
+                    display: Line::from(Span::styled(
+                        expand_hint,
+                        detail_style.add_modifier(Modifier::DIM),
+                    )),
+                    copy_projection: Some(CopyProjection {
+                        text: expand_hint.to_string(),
+                        display_start_col: 0,
+                    }),
+                });
+            }
+        } else {
+            for detail_line in detail_lines.iter() {
+                lines.push(RenderedChatLine {
+                    display: Line::from(Span::styled(detail_line.clone(), detail_style)),
+                    copy_projection: Some(CopyProjection {
+                        text: detail_line.clone(),
+                        display_start_col: 0,
+                    }),
+                });
+            }
+
+            if has_output {
+                let separator = "  ─────────────────";
+                lines.push(RenderedChatLine {
+                    display: Line::from(Span::styled(separator, detail_style)),
+                    copy_projection: Some(CopyProjection {
+                        text: separator.to_string(),
+                        display_start_col: 0,
+                    }),
+                });
+            }
+
+            for output in output_lines.iter() {
+                let line = Line::from(output.to_string());
+                for wrapped in wrap_line_visual(line, content_width.saturating_sub(2)) {
+                    let mut spans = vec![Span::raw("  ")];
+                    for span in &wrapped.spans {
+                        spans.push(Span::styled(
+                            span.content.to_string(),
+                            span.style.patch(output_style),
+                        ));
+                    }
+                    lines.push(RenderedChatLine {
+                        display: Line::from(spans),
+                        copy_projection: Some(CopyProjection {
+                            text: format!("  {}", line_plain_text(&wrapped)),
+                            display_start_col: 0,
+                        }),
+                    });
+                }
+            }
+
+            if has_extra_details {
+                let collapse_hint = "  (ctrl+o to collapse)";
+                lines.push(RenderedChatLine {
+                    display: Line::from(Span::styled(
+                        collapse_hint,
+                        detail_style.add_modifier(Modifier::DIM),
+                    )),
+                    copy_projection: Some(CopyProjection {
+                        text: collapse_hint.to_string(),
+                        display_start_col: 0,
+                    }),
+                });
             }
         }
 
         lines
     }
 
+    fn build_tool_render_data(block: &ChatBlock, tool_name: &str) -> ToolRenderData {
+        match tool_name {
+            "memory_search" => Self::build_memory_search_render_data(block),
+            "exec_command" => Self::build_exec_command_render_data(block),
+            "read_file" | "write_file" => Self::build_read_file_render_data(block),
+            _ => Self::build_fallback_tool_render_data(block, tool_name),
+        }
+    }
+
+    fn build_memory_search_render_data(block: &ChatBlock) -> ToolRenderData {
+        let query = block
+            .tool_input
+            .as_ref()
+            .and_then(|input| input.get("query"))
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let parsed = serde_json::from_str::<serde_json::Value>(&block.content).ok();
+        let results = parsed
+            .as_ref()
+            .and_then(|value| value.get("results"))
+            .and_then(|value| value.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let hit_count = results.len();
+        let timing = Self::timing_suffix(block.timing_ms);
+        let summary = match block.tool_status {
+            Some(ToolCallStatus::Running) => "└ Running…".to_string(),
+            Some(ToolCallStatus::Completed { exit_ok: true }) => {
+                format!("└ Done ({} hits{})", hit_count, timing)
+            }
+            Some(ToolCallStatus::Completed { exit_ok: false }) => {
+                format!("└ Error ({} hits{})", hit_count, timing)
+            }
+            None => "└ Unknown".to_string(),
+        };
+
+        let mut detail_lines = vec![];
+        if !query.is_empty() {
+            detail_lines.push(format!("  query: {}", query));
+        }
+
+        let mut preview_lines = vec![];
+        if results.is_empty() && matches!(block.tool_status, Some(ToolCallStatus::Completed { .. })) {
+            preview_lines.push("0 hits".to_string());
+        } else {
+            for result in results.iter().take(2) {
+                if let Some(path) = result.get("path").and_then(|value| value.as_str()) {
+                    preview_lines.push(format!("hit: {}", path));
+                }
+            }
+        }
+
+        let mut output_lines = vec![];
+        for (index, result) in results.iter().enumerate() {
+            if index > 0 {
+                output_lines.push(String::new());
+            }
+            if let Some(path) = result.get("path").and_then(|value| value.as_str()) {
+                output_lines.push(format!("hit: {}", path));
+            }
+            if let Some(score) = result.get("score").and_then(|value| value.as_f64()) {
+                output_lines.push(format!("score: {:.2}", score));
+            }
+            if let Some(snippet) = result.get("snippet").and_then(|value| value.as_str()) {
+                output_lines.extend(snippet.lines().take(3).map(|line| format!("snippet: {}", line)));
+            }
+        }
+
+        ToolRenderData {
+            summary,
+            detail_lines,
+            preview_lines,
+            output_lines,
+        }
+    }
+
+    fn build_exec_command_render_data(block: &ChatBlock) -> ToolRenderData {
+        let input = block.tool_input.as_ref();
+        let cmd = input.and_then(|value| {
+            value
+                .get("cmd")
+                .or_else(|| value.get("command"))
+                .and_then(|value| value.as_str())
+        });
+        let dir = input.and_then(|value| {
+            value
+                .get("workdir")
+                .or_else(|| value.get("cwd"))
+                .and_then(|value| value.as_str())
+        });
+        let parsed = serde_json::from_str::<serde_json::Value>(&block.content).ok();
+        let exit_code = parsed
+            .as_ref()
+            .and_then(|value| value.get("exit_code"))
+            .and_then(|value| value.as_i64());
+        let output = parsed
+            .as_ref()
+            .and_then(|value| value.get("output"))
+            .and_then(|value| value.as_str())
+            .unwrap_or_else(|| block.content.as_str());
+        let status = parsed
+            .as_ref()
+            .and_then(|value| value.get("status"))
+            .and_then(|value| value.as_str());
+        let timing = Self::timing_suffix(block.timing_ms);
+
+        let summary = match block.tool_status {
+            Some(ToolCallStatus::Running) => "└ Running…".to_string(),
+            Some(ToolCallStatus::Completed { exit_ok: true }) => {
+                if let Some(exit) = exit_code {
+                    format!("└ Done (exit:{}{})", exit, timing)
+                } else {
+                    format!("└ Done{}", timing)
+                }
+            }
+            Some(ToolCallStatus::Completed { exit_ok: false }) => {
+                if let Some(exit) = exit_code {
+                    format!("└ Error (exit:{}{})", exit, timing)
+                } else {
+                    format!("└ Error{}", timing)
+                }
+            }
+            None => "└ Unknown".to_string(),
+        };
+
+        let mut detail_lines = vec![];
+        if let Some(cmd) = cmd {
+            detail_lines.push(format!("  cmd:  {}", cmd));
+        }
+        if let Some(dir) = dir {
+            detail_lines.push(format!("  dir:  {}", dir));
+        }
+        if let Some(status) = status {
+            let normalized = match status {
+                "exited" => "success",
+                other => other,
+            };
+            detail_lines.push(format!("  status: {}", normalized));
+        }
+
+        let mut preview_lines = vec![];
+        if let Some(first_line) = output.lines().find(|line| !line.trim().is_empty()) {
+            preview_lines.push(format!("stdout: {}", first_line));
+        }
+
+        let output_lines = output.lines().map(|line| line.to_string()).collect::<Vec<_>>();
+
+        ToolRenderData {
+            summary,
+            detail_lines,
+            preview_lines,
+            output_lines,
+        }
+    }
+
+    fn build_read_file_render_data(block: &ChatBlock) -> ToolRenderData {
+        let path = block
+            .tool_input
+            .as_ref()
+            .and_then(|input| input.get("path"))
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let line_count = block.content.lines().count();
+        let timing = Self::timing_suffix(block.timing_ms);
+        let summary = match block.tool_status {
+            Some(ToolCallStatus::Running) => "└ Running…".to_string(),
+            Some(ToolCallStatus::Completed { exit_ok: true }) => {
+                format!("└ Done ({} lines{})", line_count, timing)
+            }
+            Some(ToolCallStatus::Completed { exit_ok: false }) => {
+                format!("└ Error ({} lines{})", line_count, timing)
+            }
+            None => "└ Unknown".to_string(),
+        };
+
+        let detail_lines = if path.is_empty() {
+            vec![]
+        } else {
+            vec![format!("  path:  {}", path)]
+        };
+        let preview_lines = block
+            .content
+            .lines()
+            .take(1)
+            .map(|line| format!("preview: {}", line))
+            .collect::<Vec<_>>();
+        let output_lines = block.content.lines().map(|line| line.to_string()).collect::<Vec<_>>();
+
+        ToolRenderData {
+            summary,
+            detail_lines,
+            preview_lines,
+            output_lines,
+        }
+    }
+
+    fn build_fallback_tool_render_data(block: &ChatBlock, tool_name: &str) -> ToolRenderData {
+        let detail_lines = block
+            .tool_input
+            .as_ref()
+            .map(|input| Self::fallback_tool_detail_lines(tool_name, input))
+            .unwrap_or_default();
+        let preview_lines = block
+            .content
+            .lines()
+            .take(2)
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        let output_lines = block.content.lines().map(|line| line.to_string()).collect::<Vec<_>>();
+        let timing = Self::timing_suffix(block.timing_ms);
+        let summary = match block.tool_status {
+            Some(ToolCallStatus::Running) => "└ Running…".to_string(),
+            Some(ToolCallStatus::Completed { exit_ok: true }) => format!("└ Done{}", timing),
+            Some(ToolCallStatus::Completed { exit_ok: false }) => format!("└ Error{}", timing),
+            None => "└ Unknown".to_string(),
+        };
+
+        ToolRenderData {
+            summary,
+            detail_lines,
+            preview_lines,
+            output_lines,
+        }
+    }
+
+    fn fallback_tool_detail_lines(tool_name: &str, input: &serde_json::Value) -> Vec<String> {
+        match tool_name {
+            "web_search" => input
+                .get("query")
+                .and_then(|v| v.as_str())
+                .map(|query| vec![format!("  query: {}", query)])
+                .unwrap_or_default(),
+            "http_request" => input
+                .get("url")
+                .and_then(|v| v.as_str())
+                .map(|url| {
+                    let method = input
+                        .get("method")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("GET");
+                    vec![format!("  {} {}", method, url)]
+                })
+                .unwrap_or_default(),
+            _ => input
+                .as_object()
+                .and_then(|m| {
+                    m.iter().find_map(|(key, value)| {
+                        value.as_str().map(|value| format!("  {}: {}", key, value))
+                    })
+                })
+                .map(|line| vec![line])
+                .unwrap_or_default(),
+        }
+    }
+
+    fn timing_suffix(timing_ms: Option<u64>) -> String {
+        timing_ms
+            .map(|ms| format!(" · {:.1}s", ms as f64 / 1000.0))
+            .unwrap_or_default()
+    }
+
     fn assistant_block_lines(&self, block: &ChatBlock, content_width: usize) -> Vec<RenderedChatLine> {
         let mut lines = vec![];
         let label_style = Style::default().fg(Color::Green).add_modifier(Modifier::BOLD);
-        let body_style = Style::default().fg(Color::White);
-
-        // Add role label
         lines.push(RenderedChatLine {
             display: Line::from(Span::styled("🤖 Assistant", label_style)),
             copy_projection: Some(CopyProjection {
@@ -3347,7 +3772,6 @@ impl TuiApp {
                 display_start_col: 0,
             }),
         });
-
         let content_lines = render_markdown_lines(&block.content);
 
         // Content lines with wrapping and proper color
@@ -3420,21 +3844,60 @@ impl TuiApp {
 
     fn system_block_lines(&self, block: &ChatBlock, _content_width: usize) -> Vec<RenderedChatLine> {
         let mut lines = vec![];
-        let label_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
-        let body_style = Style::default().fg(Color::White);
+        let gear_style = Style::default().fg(Color::Yellow);
 
-        let content_line = Line::from(vec![
-            Span::styled("[SYS] ", label_style),
-            Span::styled(block.content.clone(), body_style),
-        ]);
+        let content_lines: Vec<&str> = block.content.lines().collect();
+        if content_lines.is_empty() {
+            return lines;
+        }
 
-        lines.push(RenderedChatLine {
-            display: content_line.clone(),
-            copy_projection: Some(CopyProjection {
-                text: format!("[SYS] {}", block.content),
-                display_start_col: 0,
-            }),
-        });
+        // Check if it's a welcome card (starts with ╭)
+        let is_welcome_card = content_lines[0].starts_with('╭');
+
+        if is_welcome_card {
+            // Welcome card: render all lines without icon prefix
+            for line in &content_lines {
+                let display_line = Line::from(line.to_string());
+                lines.push(RenderedChatLine {
+                    display: display_line,
+                    copy_projection: Some(CopyProjection {
+                        text: line.to_string(),
+                        display_start_col: 0,
+                    }),
+                });
+            }
+        } else {
+            // Regular system message: add icon prefix
+            let first_line = content_lines[0];
+            let mut first_spans = vec![Span::styled("⚙  ", gear_style)];
+            first_spans.push(Span::styled(first_line.to_string(), Style::default().fg(Color::White)));
+
+            lines.push(RenderedChatLine {
+                display: Line::from(first_spans),
+                copy_projection: Some(CopyProjection {
+                    text: format!("⚙  {}", first_line),
+                    display_start_col: 0,
+                }),
+            });
+
+            // Additional lines without prefix
+            for line in content_lines.iter().skip(1) {
+                let display_line = Line::from(vec![
+                    Span::styled(
+                        "│  ",
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::DIM),
+                    ),
+                    Span::styled(line.to_string(), Style::default().fg(Color::White)),
+                ]);
+                lines.push(RenderedChatLine {
+                    display: display_line,
+                    copy_projection: Some(CopyProjection {
+                        text: format!("│  {}", line),
+                        display_start_col: 0,
+                    }),
+                });
+            }
+        }
 
         lines
     }
@@ -3481,7 +3944,8 @@ impl TuiApp {
     fn tool_arg_summary(tool_name: &str, input: &serde_json::Value) -> String {
         let summary = match tool_name {
             "exec_command" => input
-                .get("command")
+                .get("cmd")
+                .or_else(|| input.get("command"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
                 .unwrap_or_default(),
@@ -3519,56 +3983,6 @@ impl TuiApp {
             1 => Color::Blue,
             2 => Color::Magenta,
             _ => Color::Cyan,
-        }
-    }
-
-    fn chat_role_styles(&self, role: &ChatRole) -> (&'static str, Style, Style, Style) {
-        match role {
-            ChatRole::User => (
-                "User",
-                Style::default()
-                    .fg(Color::Rgb(202, 214, 233))
-                    .add_modifier(Modifier::BOLD),
-                Style::default().fg(Color::White),
-                Style::default().fg(Color::Rgb(178, 189, 203)),
-            ),
-            ChatRole::Thinking => (
-                "Thinking",
-                Style::default()
-                    .bg(Color::Rgb(49, 55, 66))
-                    .fg(Color::Rgb(228, 234, 245))
-                    .add_modifier(Modifier::BOLD),
-                Style::default()
-                    .bg(Color::Rgb(31, 36, 45))
-                    .fg(Color::Rgb(189, 195, 209))
-                    .add_modifier(Modifier::DIM | Modifier::ITALIC),
-                Style::default().fg(Color::Rgb(84, 92, 110)),
-            ),
-            ChatRole::Assistant => (
-                "Assistant",
-                Style::default()
-                    .fg(Color::Rgb(233, 238, 247))
-                    .add_modifier(Modifier::BOLD),
-                Style::default().fg(Color::White),
-                Style::default().fg(Color::Rgb(99, 109, 130)),
-            ),
-            ChatRole::System => (
-                "System",
-                Style::default()
-                    .bg(Color::Rgb(88, 89, 108))
-                    .fg(Color::Rgb(242, 243, 247))
-                    .add_modifier(Modifier::BOLD),
-                Style::default().bg(Color::Rgb(39, 40, 52)).fg(Color::Gray),
-                Style::default().fg(Color::Rgb(112, 115, 139)),
-            ),
-            ChatRole::Tool => (
-                "Tool",
-                Style::default()
-                    .fg(Color::Rgb(97, 214, 180))
-                    .add_modifier(Modifier::BOLD),
-                Style::default().fg(Color::Rgb(180, 220, 210)),
-                Style::default().fg(Color::Rgb(60, 140, 120)),
-            ),
         }
     }
 
@@ -4398,9 +4812,7 @@ mod tests {
         );
         let lines = app.chat_card_lines(&block, 12);
         assert!(!lines.is_empty());
-        // First line should have role label
         assert!(line_plain_text(&lines[0].display).starts_with("🤖 Assistant"));
-        // Content lines should follow
         assert!(lines.len() > 1);
     }
 
@@ -4416,7 +4828,7 @@ mod tests {
         let lines = app.chat_card_lines(&block, body_width);
 
         let max_line_width = body_width + 2;
-        for line in lines.iter().skip(1).take(lines.len().saturating_sub(2)) {
+        for line in lines.iter() {
             let width = line_display_width(&line.display);
             assert!(
                 width <= max_line_width,
@@ -4435,10 +4847,6 @@ mod tests {
             "Alpha Beta".to_string(),
         )];
         app.rebuild_chat_render_state(Rect::new(0, 0, 20, 8));
-        // In new format with role label:
-        // Line 0: "🤖 Assistant"
-        // Line 1: "Alpha Beta"
-        // Select from line 1 to get content
         app.chat_selection = Some(ChatSelection {
             anchor: SelectionPoint {
                 line_index: 1,
@@ -4461,15 +4869,7 @@ mod tests {
             "abcdefghij".to_string(),
         )];
         app.rebuild_chat_render_state(Rect::new(0, 0, 8, 8));
-        // In new format with role label and width 8:
-        // content_width = 8 - 2 = 6
-        // wrap width = 6 (no icon prefix since new format uses role label)
-        // "abcdefghij" wraps to ["abcdef", "ghij"]
-        // Line 0: "🤖 Assistant" (role label)
-        // Line 1: "abcdef" (first wrapped line)
-        // Line 2: "ghij" (second wrapped line)
-        // Line 3: empty line
-        // Select content from line 1 column 0 to line 2 column 4
+        // Line 0 is the assistant header, then content width = 6 wraps to ["abcdef", "ghij"].
         app.chat_selection = Some(ChatSelection {
             anchor: SelectionPoint {
                 line_index: 1,
@@ -4524,21 +4924,6 @@ mod tests {
                 },
             })
         );
-    }
-
-    #[test]
-    fn test_user_assistant_styles_have_no_background() {
-        let app = create_embedded_app();
-        let (_, user_label, user_body, _) = app.chat_role_styles(&ChatRole::User);
-        let (_, assistant_label, assistant_body, _) = app.chat_role_styles(&ChatRole::Assistant);
-        let (_, thinking_label, thinking_body, _) = app.chat_role_styles(&ChatRole::Thinking);
-
-        assert!(user_label.bg.is_none());
-        assert!(user_body.bg.is_none());
-        assert!(assistant_label.bg.is_none());
-        assert!(assistant_body.bg.is_none());
-        assert!(thinking_label.bg.is_some());
-        assert!(thinking_body.bg.is_some());
     }
 
     fn line_plain_text(line: &Line<'_>) -> String {
@@ -4847,6 +5232,103 @@ mod tests {
     }
 
     #[test]
+    fn test_tool_completed_event_updates_block_even_with_different_message_id() {
+        let mut app = create_remote_app();
+        app.session_id = Some("sess".to_string());
+        app.active_stream_message_id = Some("msg-active".to_string());
+        app.last_stream_sequence = Some(10);
+        app.push_tool_call_block(
+            "call-stale".to_string(),
+            "memory_search".to_string(),
+            serde_json::json!({"query": "talos 进展"}),
+            None,
+        );
+
+        let completed = TalosEvent {
+            event_type: TalosEventType::MessageToolCallCompleted,
+            message_id: "msg-other".to_string(),
+            session_id: "sess".to_string(),
+            sequence: 11,
+            payload: TalosEventPayload::MessageToolCallCompleted(
+                talos_client::TalosMessageToolCallCompletedEvent {
+                    request_id: "req1".to_string(),
+                    call_id: "call-stale".to_string(),
+                    tool: "memory_search".to_string(),
+                    content: vec![talos_client::TalosContentItem::Json {
+                        value: serde_json::json!({"results": []}),
+                    }],
+                    is_error: false,
+                    item_index: 0,
+                    iteration: 1,
+                    step_id: "step-1".to_string(),
+                    timing_ms: Some(120),
+                },
+            ),
+        };
+
+        app.handle_stream_event(completed);
+
+        let idx = app.chat_blocks.iter().position(|b| b.tool_call_id.as_deref() == Some("call-stale")).unwrap();
+        assert_eq!(
+            app.chat_blocks[idx].tool_status,
+            Some(ToolCallStatus::Completed { exit_ok: true })
+        );
+        assert_eq!(app.chat_blocks[idx].timing_ms, Some(120));
+        assert!(!app.active_tool_calls.contains_key("call-stale"));
+    }
+
+    #[test]
+    fn test_tool_completed_event_updates_block_even_when_sequence_is_older() {
+        let mut app = create_remote_app();
+        app.session_id = Some("sess".to_string());
+        app.active_stream_message_id = Some("msg-active".to_string());
+        app.last_stream_sequence = Some(20);
+        app.push_tool_call_block(
+            "call-older".to_string(),
+            "exec_command".to_string(),
+            serde_json::json!({"cmd": "pwd"}),
+            None,
+        );
+
+        let completed = TalosEvent {
+            event_type: TalosEventType::MessageToolCallCompleted,
+            message_id: "msg-active".to_string(),
+            session_id: "sess".to_string(),
+            sequence: 5,
+            payload: TalosEventPayload::MessageToolCallCompleted(
+                talos_client::TalosMessageToolCallCompletedEvent {
+                    request_id: "req1".to_string(),
+                    call_id: "call-older".to_string(),
+                    tool: "exec_command".to_string(),
+                    content: vec![talos_client::TalosContentItem::Json {
+                        value: serde_json::json!({
+                            "session_id": null,
+                            "status": "exited",
+                            "output": "/tmp\n",
+                            "exit_code": 0,
+                            "truncated": false
+                        }),
+                    }],
+                    is_error: false,
+                    item_index: 0,
+                    iteration: 1,
+                    step_id: "step-1".to_string(),
+                    timing_ms: Some(15),
+                },
+            ),
+        };
+
+        app.handle_stream_event(completed);
+
+        let idx = app.chat_blocks.iter().position(|b| b.tool_call_id.as_deref() == Some("call-older")).unwrap();
+        assert_eq!(
+            app.chat_blocks[idx].tool_status,
+            Some(ToolCallStatus::Completed { exit_ok: true })
+        );
+        assert!(!app.active_tool_calls.contains_key("call-older"));
+    }
+
+    #[test]
     fn test_tool_block_tab_toggle_expand() {
         let mut app = create_remote_app();
         app.session_id = Some("sess".to_string());
@@ -4867,6 +5349,177 @@ mod tests {
 
         app.toggle_last_tool_block();
         assert!(!app.chat_blocks[idx].expanded);
+    }
+
+    #[tokio::test]
+    async fn test_ctrl_o_toggles_last_tool_block() {
+        let mut app = create_remote_app();
+        app.push_tool_call_block(
+            "call-ctrl-o".to_string(),
+            "grep".to_string(),
+            serde_json::json!({"pattern": "foo"}),
+            None,
+        );
+        let idx = *app.active_tool_calls.get("call-ctrl-o").unwrap();
+        assert!(!app.chat_blocks[idx].expanded);
+
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL))
+            .await
+            .unwrap();
+        assert!(app.chat_blocks[idx].expanded);
+    }
+
+    #[test]
+    fn test_tool_block_folded_shows_details_and_output_preview() {
+        let app = create_embedded_app();
+        let mut block = ChatBlock::new(
+            ChatRole::Tool,
+            r#"{"session_id":null,"status":"exited","output":"line1\nline2\nline3\nline4","exit_code":0,"truncated":false}"#
+                .to_string(),
+        );
+        block.tool_name = Some("exec_command".to_string());
+        block.tool_input = Some(serde_json::json!({
+            "cmd": "git diff HEAD~1",
+            "workdir": "/tmp/work"
+        }));
+        block.tool_status = Some(ToolCallStatus::Completed { exit_ok: true });
+        block.timing_ms = Some(1200);
+        block.expanded = false;
+
+        let lines = app.tool_block_lines(&block, 80);
+        let texts = lines
+            .iter()
+            .map(|line| line_plain_text(&line.display))
+            .collect::<Vec<_>>();
+
+        assert!(texts.iter().any(|line| line == "● exec_command(git diff HEAD~1)"));
+        assert!(texts.iter().any(|line| line == "└ Done (exit:0 · 1.2s)"));
+        assert!(texts.iter().any(|line| line == "  cmd:  git diff HEAD~1"));
+        assert!(texts.iter().any(|line| line == "  dir:  /tmp/work"));
+        assert!(texts.iter().any(|line| line == "  status: success"));
+        assert!(texts.iter().any(|line| line == "  stdout: line1"));
+        assert!(texts.iter().any(|line| line == "  (ctrl+o to expand)"));
+    }
+
+    #[test]
+    fn test_tool_block_expanded_shows_details_without_output() {
+        let app = create_embedded_app();
+        let mut block = ChatBlock::new(ChatRole::Tool, String::new());
+        block.tool_name = Some("read_file".to_string());
+        block.tool_input = Some(serde_json::json!({
+            "path": "/tmp/example.txt"
+        }));
+        block.tool_status = Some(ToolCallStatus::Completed { exit_ok: true });
+        block.expanded = true;
+
+        let lines = app.tool_block_lines(&block, 80);
+        let texts = lines
+            .iter()
+            .map(|line| line_plain_text(&line.display))
+            .collect::<Vec<_>>();
+
+        assert!(texts.iter().any(|line| line == "  path:  /tmp/example.txt"));
+        assert!(!texts.iter().any(|line| line == "  ─────────────────"));
+        assert!(texts.iter().any(|line| line == "  (ctrl+o to collapse)"));
+    }
+
+    #[test]
+    fn test_memory_search_folded_shows_query_and_hits() {
+        let app = create_embedded_app();
+        let mut block = ChatBlock::new(
+            ChatRole::Tool,
+            r#"{"results":[{"path":"spec/tui-improvement.md","snippet":"TUI layout summary","citation":"spec/tui-improvement.md#L1","score":0.91,"start_line":1,"end_line":1},{"path":"spec/tui-claude-code-style.md","snippet":"Claude style summary","citation":"spec/tui-claude-code-style.md#L1","score":0.87,"start_line":1,"end_line":1}]}"#
+                .to_string(),
+        );
+        block.tool_name = Some("memory_search".to_string());
+        block.tool_input = Some(serde_json::json!({
+            "query": "talos 项目结构"
+        }));
+        block.tool_status = Some(ToolCallStatus::Completed { exit_ok: true });
+        block.timing_ms = Some(800);
+
+        let texts = app
+            .tool_block_lines(&block, 100)
+            .into_iter()
+            .map(|line| line_plain_text(&line.display))
+            .collect::<Vec<_>>();
+
+        assert!(texts.iter().any(|line| line == "● memory_search(talos 项目结构)"));
+        assert!(texts.iter().any(|line| line == "└ Done (2 hits · 0.8s)"));
+        assert!(texts.iter().any(|line| line == "  query: talos 项目结构"));
+        assert!(texts.iter().any(|line| line == "  hit: spec/tui-improvement.md"));
+        assert!(texts.iter().any(|line| line == "  hit: spec/tui-claude-code-style.md"));
+    }
+
+    #[test]
+    fn test_complete_tool_call_recovers_after_block_index_shift() {
+        let mut app = create_embedded_app();
+        let user_idx = app.push_block(ChatRole::User, "hello".to_string());
+        let thinking_idx = app.push_block(ChatRole::Thinking, String::new());
+        let assistant_idx = app.push_block(ChatRole::Assistant, String::new());
+        let tool_idx = app.push_tool_call_block(
+            "call-shift".to_string(),
+            "exec_command".to_string(),
+            serde_json::json!({"command": "pwd"}),
+            None,
+        );
+
+        app.active_user_idx = Some(user_idx);
+        app.active_thinking_idx = Some(thinking_idx);
+        app.active_assistant_idx = Some(assistant_idx);
+        app.discard_active_pending_blocks();
+
+        let shifted_idx = *app
+            .active_tool_calls
+            .get("call-shift")
+            .expect("tool block index should be remapped");
+        assert!(shifted_idx < tool_idx);
+        assert_eq!(
+            app.chat_blocks[shifted_idx].tool_call_id.as_deref(),
+            Some("call-shift")
+        );
+
+        app.complete_tool_call_block("call-shift", "ok".to_string(), true, Some(15));
+
+        assert_eq!(app.chat_blocks[shifted_idx].content, "ok");
+        assert_eq!(
+            app.chat_blocks[shifted_idx].tool_status,
+            Some(ToolCallStatus::Completed { exit_ok: true })
+        );
+        assert_eq!(app.chat_blocks[shifted_idx].timing_ms, Some(15));
+        assert!(!app.active_tool_calls.contains_key("call-shift"));
+    }
+
+    #[test]
+    fn test_system_block_lines_keep_multiline_structure() {
+        let app = create_embedded_app();
+        let block = ChatBlock::new(ChatRole::System, "System ready\nLoading tools".to_string());
+
+        let lines = app.system_block_lines(&block, 80);
+        let texts = lines
+            .iter()
+            .map(|line| line_plain_text(&line.display))
+            .collect::<Vec<_>>();
+
+        assert_eq!(texts, vec!["⚙  System ready", "│  Loading tools"]);
+    }
+
+    #[test]
+    fn test_system_block_lines_render_welcome_card_without_prefix() {
+        let app = create_embedded_app();
+        let block = ChatBlock::new(
+            ChatRole::System,
+            "╭────╮\n│ hi │\n╰────╯".to_string(),
+        );
+
+        let lines = app.system_block_lines(&block, 80);
+        let texts = lines
+            .iter()
+            .map(|line| line_plain_text(&line.display))
+            .collect::<Vec<_>>();
+
+        assert_eq!(texts, vec!["╭────╮", "│ hi │", "╰────╯"]);
     }
 
     // ── Phase 4: markdown rendering ──────────────────────────────────────
@@ -4931,6 +5584,44 @@ mod tests {
         assert!(is_green, "code block lines should be LightGreen");
     }
 
+    #[test]
+    fn test_assistant_block_renders_full_markdown_without_role_label() {
+        let app = create_embedded_app();
+        let block = ChatBlock::new(
+            ChatRole::Assistant,
+            "## Summary\n\n1. First\n2. Second\n\n```rust\nlet x = 1;\n```".to_string(),
+        );
+
+        let lines = app.assistant_block_lines(&block, 80);
+        let texts = lines
+            .iter()
+            .map(|line| line_plain_text(&line.display))
+            .collect::<Vec<_>>();
+
+        assert_eq!(texts.first().map(String::as_str), Some("🤖 Assistant"));
+        assert!(texts.iter().any(|line| line == "▌ Summary"));
+        assert!(texts.iter().any(|line| line == "1. First"));
+        assert!(texts.iter().any(|line| line == "2. Second"));
+        assert!(texts.iter().any(|line| line == "─── rust ───"));
+        assert!(texts.iter().any(|line| line == "let x = 1;"));
+        assert_eq!(texts.iter().filter(|line| line.starts_with("🤖 Assistant")).count(), 1);
+    }
+
+    #[test]
+    fn test_chat_content_columns_apply_left_padding() {
+        let app = create_embedded_app();
+        let (chat_rect, scrollbar_rect) = app.chat_content_columns(Rect::new(1, 1, 20, 6));
+
+        assert_eq!(chat_rect, Rect::new(3, 1, 17, 6));
+        assert_eq!(scrollbar_rect, Rect::new(20, 1, 1, 6));
+    }
+
+    #[test]
+    fn test_right_panel_hidden_by_default() {
+        let app = create_embedded_app();
+        assert!(!app.right_panel_visible);
+    }
+
     // ── Phase 5: history + model picker ──────────────────────────────────
 
     #[tokio::test]
@@ -4942,6 +5633,24 @@ mod tests {
         app.open_history();
 
         assert_eq!(app.current_state, AppState::History);
+    }
+
+    #[tokio::test]
+    async fn test_ctrl_b_toggles_right_panel() {
+        let mut app = create_remote_app();
+        assert!(!app.right_panel_visible);
+
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL))
+            .await
+            .unwrap();
+        assert!(app.right_panel_visible);
+
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL))
+            .await
+            .unwrap();
+        assert!(!app.right_panel_visible);
     }
 
     #[test]

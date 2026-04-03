@@ -475,7 +475,8 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use talos_llm_provider::{
-        ChatChunk, ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, Usage,
+        ChatChunk, ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, ToolStream,
+        ToolStreamEvent, Usage,
     };
     use talos_tools::{register_core_local_tools, ToolRegistry};
     use tokio::sync::mpsc;
@@ -492,6 +493,8 @@ mod tests {
     struct ApprovalLoopProvider {
         round: AtomicUsize,
     }
+
+    struct StreamingToolCallIdProvider;
 
     #[async_trait]
     impl LlmProvider for NoopLlmProvider {
@@ -670,6 +673,54 @@ mod tests {
 
         fn default_model(&self) -> &str {
             "approval-loop"
+        }
+    }
+
+    #[async_trait]
+    impl LlmProvider for StreamingToolCallIdProvider {
+        fn name(&self) -> &str {
+            "streaming-tool-call-id"
+        }
+
+        async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
+            panic!("chat should not be called in stream_round test");
+        }
+
+        async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
+            let (_tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(1);
+            Ok(ChatStream::new(rx))
+        }
+
+        async fn stream_with_tools(&self, _request: ChatRequest) -> TalosResult<ToolStream> {
+            let (tx, rx) = mpsc::channel::<TalosResult<ToolStreamEvent>>(8);
+            tokio::spawn(async move {
+                tx.send(Ok(ToolStreamEvent::ToolCallStart {
+                    index: 0,
+                    id: Some(String::new()),
+                    name: Some("memory_search".to_string()),
+                }))
+                .await
+                .expect("tool start should send");
+                tx.send(Ok(ToolStreamEvent::ToolCallEnd {
+                    index: 0,
+                    id: Some(String::new()),
+                    name: Some("memory_search".to_string()),
+                    arguments: json!({ "query": "talos项目" }),
+                }))
+                .await
+                .expect("tool end should send");
+                tx.send(Ok(ToolStreamEvent::Done {
+                    finish_reason: Some("tool_calls".to_string()),
+                    usage: None,
+                }))
+                .await
+                .expect("done event should send");
+            });
+            Ok(ToolStream::new(rx))
+        }
+
+        fn default_model(&self) -> &str {
+            "streaming-tool-call-id"
         }
     }
 
@@ -924,6 +975,30 @@ mod tests {
         )));
         assert_eq!(provider.round.load(Ordering::SeqCst), 1);
     }
+
+    #[tokio::test]
+    async fn test_stream_round_normalizes_empty_tool_call_id_before_emitting_start_event() {
+        let provider = Arc::new(StreamingToolCallIdProvider);
+        let request = ChatRequest::new_user("Search workspace memory", "streaming-tool-call-id");
+        let (tx, mut rx) = mpsc::channel(8);
+
+        let result = stream_round(provider, request, 0, Some(&tx))
+            .await
+            .expect("stream round should succeed");
+
+        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(result.tool_calls[0].id, "tool-0-0");
+
+        let mut started_call_id = None;
+        while let Ok(event) = rx.try_recv() {
+            if let KernelStreamEventData::ToolCallStart(data) = event.data {
+                started_call_id = data.call_id;
+                break;
+            }
+        }
+
+        assert_eq!(started_call_id.as_deref(), Some("tool-0-0"));
+    }
 }
 
 async fn emit_stream_event(
@@ -969,10 +1044,7 @@ fn finalize_tool_calls(
             continue;
         };
 
-        let id = call
-            .id
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| format!("tool-{}-{}", round, index));
+        let id = normalized_tool_call_id(round, index, call.id);
         let arguments = if let Some(value) = call.final_arguments {
             value
         } else if call.arguments_buffer.trim().is_empty() {
@@ -986,6 +1058,11 @@ fn finalize_tool_calls(
     }
 
     calls
+}
+
+fn normalized_tool_call_id(round: u32, index: usize, id: Option<String>) -> String {
+    id.filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| format!("tool-{}-{}", round, index))
 }
 
 async fn stream_round(
@@ -1062,13 +1139,15 @@ async fn stream_round(
                     entry.name = name;
                 }
                 let arguments_copy = arguments.clone();
+                let stable_call_id = normalized_tool_call_id(round, index, entry.id.clone());
+                entry.id = Some(stable_call_id.clone());
                 entry.final_arguments = Some(arguments);
                 emit_stream_event(
                     stream_tx,
                     KernelStreamEventType::ToolCallStart,
                     KernelStreamEventData::ToolCallStart(ToolCallStartStreamData {
                         index,
-                        call_id: entry.id.clone(),
+                        call_id: Some(stable_call_id),
                         tool_name: entry.name.clone(),
                         arguments: arguments_copy,
                         round,
