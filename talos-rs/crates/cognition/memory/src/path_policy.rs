@@ -1,5 +1,6 @@
 use chrono::{DateTime, Local, Utc};
 use std::path::{Component, Path, PathBuf};
+use talos_config::{resolve_runtime_path, TalosPaths};
 use talos_error::{TalosError, TalosResult};
 use tokio::fs;
 
@@ -8,17 +9,11 @@ use crate::store::MemoryStore;
 const DAY_FILE_PATTERN_LEN: usize = 10; // YYYY-MM-DD
 
 pub(crate) fn default_workspace_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".talos").join("workspace")
+    TalosPaths::resolve().workspace_dir_for_agent("talos")
 }
 
 pub(crate) fn resolve_workspace_dir(path: &str) -> PathBuf {
-    if let Some(stripped) = path.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home).join(stripped);
-        }
-    }
-    PathBuf::from(path)
+    resolve_runtime_path(path)
 }
 
 pub(crate) fn session_dir(store: &MemoryStore, session_id: &str) -> PathBuf {

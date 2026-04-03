@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult};
-use talos_tools::{ToolDispatchOutcome, ToolInvocation, ToolOutputPayload, ToolExecutorPort};
+use talos_tools::{ToolDispatchOutcome, ToolExecutorPort, ToolInvocation, ToolOutputPayload};
 use tokio::task::JoinSet;
 
 #[derive(Debug, Clone)]
@@ -140,7 +140,10 @@ impl ToolExecutor for SequentialToolExecutor {
 pub struct ParallelToolExecutor;
 
 impl ParallelToolExecutor {
-    fn batch_allows_parallel(registry: &dyn ToolExecutorPort, calls: &[ToolExecutionInput]) -> bool {
+    fn batch_allows_parallel(
+        registry: &dyn ToolExecutorPort,
+        calls: &[ToolExecutionInput],
+    ) -> bool {
         !calls.is_empty()
             && calls.iter().all(|call| {
                 registry.tool_supports_parallel(&call.tool_name)

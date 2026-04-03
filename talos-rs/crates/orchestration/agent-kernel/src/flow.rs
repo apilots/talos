@@ -365,10 +365,7 @@ impl BaseLlmFlow for SingleFlow {
             ),
         );
         let max_tool_rounds = self.kernel_config.max_tool_rounds.max(1);
-        let is_plan_react = matches!(
-            self.settings.planner_kind,
-            crate::PlannerKind::PlanReAct
-        );
+        let is_plan_react = matches!(self.settings.planner_kind, crate::PlannerKind::PlanReAct);
         let mut state = GeneralTurnLoopState::new(&prepared);
         let mut plan_react_state = PlanReActLoopState::default();
         let mut last_tool_batch: Option<GeneralTurnToolBatch> = None;

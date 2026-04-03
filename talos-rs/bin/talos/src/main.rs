@@ -145,19 +145,10 @@ async fn main() {
 }
 
 fn resolve_default_config_path() -> Option<PathBuf> {
-    if let Some(user_config_dir) = Config::user_config_dir() {
-        let home_config = user_config_dir.join("talos.yaml");
-        if home_config.exists() {
-            return Some(canonical_or_original(home_config));
-        }
-    }
-
-    let cwd_config = PathBuf::from("talos.yaml");
-    if cwd_config.exists() {
-        return Some(canonical_or_original(cwd_config));
-    }
-
-    None
+    let config_path = Config::default_path();
+    config_path
+        .exists()
+        .then(|| canonical_or_original(config_path))
 }
 
 fn canonical_or_original(path: PathBuf) -> PathBuf {

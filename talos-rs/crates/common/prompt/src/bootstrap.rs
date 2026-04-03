@@ -1,21 +1,11 @@
 use std::path::{Path, PathBuf};
+use talos_config::resolve_runtime_path;
 use talos_error::{TalosError, TalosResult};
 use tokio::fs::{self, OpenOptions};
 use tokio::io::AsyncWriteExt;
 
 pub(crate) fn expand_workspace_dir(workspace_dir: &str) -> PathBuf {
-    let trimmed = workspace_dir.trim();
-    if trimmed == "~" {
-        if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home);
-        }
-    }
-    if let Some(suffix) = trimmed.strip_prefix("~/") {
-        if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home).join(suffix);
-        }
-    }
-    PathBuf::from(trimmed)
+    resolve_runtime_path(workspace_dir)
 }
 
 pub(crate) async fn ensure_bootstrap_file(path: &Path, template: &str) -> TalosResult<()> {

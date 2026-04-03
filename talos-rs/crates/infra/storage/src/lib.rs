@@ -20,7 +20,7 @@ pub use sqlite::SqliteStorage;
 
 use async_trait::async_trait;
 use serde_json::Value;
-use talos_config::DatabaseType;
+use talos_config::{DatabaseType, TalosPaths};
 use talos_error::{TalosError, TalosResult};
 
 /// Row represents a database row with column names and values
@@ -104,7 +104,10 @@ impl Default for StorageConfig {
     fn default() -> Self {
         Self {
             database_type: DatabaseType::Sqlite,
-            connection_string: "talos.db".to_string(),
+            connection_string: TalosPaths::resolve()
+                .sqlite_db
+                .to_string_lossy()
+                .to_string(),
             max_connections: 5,
         }
     }

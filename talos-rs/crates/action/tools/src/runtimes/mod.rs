@@ -6,6 +6,7 @@ pub mod fs_search;
 
 use std::path::{Path, PathBuf};
 
+use talos_config::resolve_runtime_path;
 use talos_error::{TalosError, TalosResult};
 
 use crate::ToolContext;
@@ -13,18 +14,7 @@ use crate::ToolContext;
 const TRUNCATED_SUFFIX: &str = "...[truncated]";
 
 pub(crate) fn expand_workspace_dir(workspace_dir: &str) -> PathBuf {
-    let trimmed = workspace_dir.trim();
-    if trimmed == "~" {
-        if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home);
-        }
-    }
-    if let Some(suffix) = trimmed.strip_prefix("~/") {
-        if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home).join(suffix);
-        }
-    }
-    PathBuf::from(trimmed)
+    resolve_runtime_path(workspace_dir)
 }
 
 pub(crate) fn resolve_base_dir(context: &ToolContext) -> TalosResult<PathBuf> {

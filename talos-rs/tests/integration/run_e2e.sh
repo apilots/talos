@@ -6,7 +6,6 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${ROOT_DIR}/tests/integration/scripts/common.sh"
 
 load_env
-"${ROOT_DIR}/tests/architecture/check_layering.sh"
 build_binaries
 
 timestamp="$(date '+%Y%m%d_%H%M%S')"

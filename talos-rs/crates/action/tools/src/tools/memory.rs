@@ -277,8 +277,7 @@ mod tests {
         let (year, month, day) = (2026, 3, 27);
         let daily_file_name = format!("{year:04}-{month:02}-{day:02}.md");
         let expected_memory_path = format!("memory/{daily_file_name}");
-        let home = std::env::var("HOME").expect("HOME should be set");
-        let home_path = std::path::PathBuf::from(&home);
+        let home_path = dirs::home_dir().expect("HOME should be set");
         let workspace_dir = home_path.join(format!(
             "talos-memory-tool-tilde-{}",
             std::time::SystemTime::now()

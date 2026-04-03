@@ -35,7 +35,8 @@ fn test_default_values() {
     );
 
     assert_eq!(
-        config.planner_mode, PlannerMode::BuiltIn,
+        config.planner_mode,
+        PlannerMode::BuiltIn,
         "planner_mode should default to 'built_in'"
     );
     assert!(
@@ -67,7 +68,10 @@ fn test_boundary_validation() {
     assert!(config.max_tool_rounds > 0, "max_tool_rounds must be > 0");
 
     assert!(
-        matches!(config.planner_mode, PlannerMode::BuiltIn | PlannerMode::PlanReAct),
+        matches!(
+            config.planner_mode,
+            PlannerMode::BuiltIn | PlannerMode::PlanReAct
+        ),
         "planner_mode must be a valid planner mode"
     );
 

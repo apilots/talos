@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::{Column, Pool, Row as SqlxRow, Sqlite};
+use std::path::Path;
 use talos_error::{TalosError, TalosResult};
 use tracing::{debug, info};
 
@@ -18,9 +19,23 @@ impl SqliteStorage {
     pub async fn new(database_path: &str) -> TalosResult<Self> {
         info!("Connecting to SQLite database: {}", database_path);
 
+        let connection_string = Self::normalize_connection_string(database_path);
+
+        if let Some(parent) = Self::database_parent_dir(database_path) {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent).map_err(|err| {
+                    TalosError::StorageError(format!(
+                        "Failed to create database directory {}: {}",
+                        parent.display(),
+                        err
+                    ))
+                })?;
+            }
+        }
+
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
-            .connect(database_path)
+            .connect(&connection_string)
             .await
             .map_err(|e| {
                 TalosError::StorageError(format!("Failed to connect to database: {}", e))
@@ -55,6 +70,34 @@ impl SqliteStorage {
             Value::Null => String::new(),
             _ => value.to_string(),
         }
+    }
+
+    fn normalize_connection_string(database_path: &str) -> String {
+        if database_path == ":memory:"
+            || database_path == "sqlite::memory:"
+            || database_path.starts_with("sqlite:")
+        {
+            return database_path.to_string();
+        }
+
+        let path = Path::new(database_path);
+        let rendered = path.to_string_lossy();
+        if path.is_absolute() {
+            format!("sqlite://{}?mode=rwc", rendered)
+        } else {
+            format!("sqlite://{}?mode=rwc", rendered)
+        }
+    }
+
+    fn database_parent_dir(database_path: &str) -> Option<&Path> {
+        if database_path == ":memory:"
+            || database_path == "sqlite::memory:"
+            || database_path.starts_with("sqlite:")
+        {
+            return None;
+        }
+
+        Path::new(database_path).parent()
     }
 }
 

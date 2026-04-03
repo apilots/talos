@@ -780,11 +780,10 @@ mod tests {
 
     #[test]
     fn test_memory_store_new_expands_tilde_workspace_dir() {
-        let home = std::env::var("HOME").expect("HOME should be set");
         let store = MemoryStore::new("~/talos-memory-test");
         assert_eq!(
             store.workspace_dir(),
-            std::path::Path::new(&home).join("talos-memory-test")
+            talos_config::resolve_runtime_path("~/talos-memory-test")
         );
     }
 

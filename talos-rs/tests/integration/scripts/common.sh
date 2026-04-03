@@ -18,6 +18,17 @@ load_env() {
   fi
 }
 
+prepare_talos_home() {
+  local test_home="${HOME}/.talos"
+  local config_src="${ROOT_DIR}/talos.yaml"
+  local config_dst="${test_home}/conf/talos.yaml"
+
+  mkdir -p "${test_home}/conf" "${test_home}/logs" "${test_home}/data"
+  if [[ ! -f "${config_dst}" ]]; then
+    cp "${config_src}" "${config_dst}"
+  fi
+}
+
 require_command() {
   local cmd="$1"
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -53,6 +64,7 @@ start_server() {
   fi
 
   mkdir -p "${ROOT_DIR}/tests/integration/reports"
+  prepare_talos_home
   : > "${SERVER_LOG}"
   "${ROOT_DIR}/target/debug/talos" >>"${SERVER_LOG}" 2>&1 &
   export TALOS_SERVER_PID=$!

@@ -45,7 +45,6 @@ agent:
         include_bootstrap: true
         include_memory: true
     memory:
-      workspace_dir: "~/.talos/workspace"
       hot_recent_messages: 64
       session_recent_messages_limit: 24
       session_summary_enabled: true
@@ -174,9 +173,7 @@ logging:
   level: "info"
   format: "text"
   stdout: true
-  file: "logs/talos.log"
 
 storage:
   database_type: "sqlite"
-  connection_string: "talos.db"
   max_connections: 5

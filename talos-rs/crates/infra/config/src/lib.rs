@@ -4,9 +4,8 @@
 //!
 //! # 配置文件
 //!
-//! 默认加载顺序：
-//! 1. `~/.talos/talos.yaml` (用户目录)
-//! 2. `talos.yaml` (当前目录)
+//! 默认加载位置：
+//! 1. `<talos_home>/conf/talos.yaml`
 //!
 //! # 环境变量覆盖
 //!
@@ -29,9 +28,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use talos_error::TalosResult;
 use talos_logging::LoggingConfig;
+
+static TALOS_HOME_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
 
 /// 主配置结构
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,15 +65,168 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self {
+        let mut config = Self {
             agent: AgentConfig::default(),
             gateway: GatewayConfig::default(),
             channels: ChannelsConfig::default(),
             logging: LoggingConfig::default(),
             storage: StorageBackendConfig::default(),
             llm: LlmConfig::default(),
+        };
+        config.apply_derived_paths();
+        config
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TalosPaths {
+    pub talos_home: PathBuf,
+    pub conf_dir: PathBuf,
+    pub config_file: PathBuf,
+    pub logs_dir: PathBuf,
+    pub log_file: PathBuf,
+    pub data_dir: PathBuf,
+    pub sqlite_db: PathBuf,
+}
+
+impl TalosPaths {
+    pub fn resolve() -> Self {
+        let talos_home = resolve_talos_home();
+        Self::from_home(talos_home)
+    }
+
+    pub fn from_home(talos_home: PathBuf) -> Self {
+        let conf_dir = talos_home.join("conf");
+        let logs_dir = talos_home.join("logs");
+        let data_dir = talos_home.join("data");
+        Self {
+            config_file: conf_dir.join("talos.yaml"),
+            log_file: logs_dir.join("talos.log"),
+            sqlite_db: data_dir.join("talos.db"),
+            talos_home,
+            conf_dir,
+            logs_dir,
+            data_dir,
         }
     }
+
+    pub fn workspace_dir_for_agent(&self, agent_name: &str) -> PathBuf {
+        self.talos_home
+            .join(format!("workspace-{}", sanitize_agent_name(agent_name)))
+    }
+
+    pub fn sessions_dir_for_agent(&self, agent_name: &str) -> PathBuf {
+        self.workspace_dir_for_agent(agent_name).join("sessions")
+    }
+
+    pub fn memory_dir_for_agent(&self, agent_name: &str) -> PathBuf {
+        self.workspace_dir_for_agent(agent_name).join("memory")
+    }
+
+    pub fn ensure_base_dirs(&self) -> TalosResult<()> {
+        use talos_error::TalosError;
+
+        for dir in [
+            &self.talos_home,
+            &self.conf_dir,
+            &self.logs_dir,
+            &self.data_dir,
+        ] {
+            std::fs::create_dir_all(dir).map_err(|err| {
+                TalosError::StorageError(format!(
+                    "create talos runtime dir {}: {}",
+                    dir.display(),
+                    err
+                ))
+            })?;
+        }
+        Ok(())
+    }
+
+    pub fn ensure_agent_workspace(&self, agent_name: &str) -> TalosResult<()> {
+        use talos_error::TalosError;
+
+        let workspace_dir = self.workspace_dir_for_agent(agent_name);
+        for dir in [
+            workspace_dir.clone(),
+            self.sessions_dir_for_agent(agent_name),
+            self.memory_dir_for_agent(agent_name),
+        ] {
+            std::fs::create_dir_all(&dir).map_err(|err| {
+                TalosError::StorageError(format!(
+                    "create agent workspace dir {}: {}",
+                    dir.display(),
+                    err
+                ))
+            })?;
+        }
+        Ok(())
+    }
+}
+
+pub fn set_talos_home(path: impl Into<PathBuf>) -> TalosResult<()> {
+    use talos_error::TalosError;
+
+    TALOS_HOME_OVERRIDE.set(path.into()).map_err(|_| {
+        TalosError::InvalidConfiguration("talos_home is already initialized".to_string())
+    })
+}
+
+pub fn resolve_talos_home() -> PathBuf {
+    if let Some(path) = env::var_os("TALOS_HOME") {
+        return normalize_path(PathBuf::from(path));
+    }
+
+    if let Some(path) = TALOS_HOME_OVERRIDE.get() {
+        return normalize_path(path.clone());
+    }
+
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    normalize_path(home.join(".talos"))
+}
+
+pub fn resolve_runtime_path(path: &str) -> PathBuf {
+    normalize_path(PathBuf::from(path.trim()))
+}
+
+pub fn sanitize_agent_name(agent_name: &str) -> String {
+    let trimmed = agent_name.trim().to_ascii_lowercase();
+    let mut out = String::with_capacity(trimmed.len());
+    let mut prev_dash = false;
+
+    for ch in trimmed.chars() {
+        let safe = if ch.is_ascii_alphanumeric() { ch } else { '-' };
+        if safe == '-' {
+            if !prev_dash {
+                out.push('-');
+            }
+            prev_dash = true;
+        } else {
+            out.push(safe);
+            prev_dash = false;
+        }
+    }
+
+    let sanitized = out.trim_matches('-');
+    if sanitized.is_empty() {
+        "default".to_string()
+    } else {
+        sanitized.to_string()
+    }
+}
+
+fn normalize_path(path: PathBuf) -> PathBuf {
+    if let Some(stripped) = path.to_string_lossy().strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(stripped);
+        }
+    }
+    if path == Path::new("~") {
+        if let Some(home) = dirs::home_dir() {
+            return home;
+        }
+    }
+    path
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -118,7 +273,10 @@ fn default_storage_database_type() -> DatabaseType {
 }
 
 fn default_storage_connection_string() -> String {
-    "talos.db".to_string()
+    TalosPaths::resolve()
+        .sqlite_db
+        .to_string_lossy()
+        .to_string()
 }
 
 fn default_storage_max_connections() -> u32 {
@@ -850,7 +1008,10 @@ pub struct AgentKernelMemoryConfig {
 }
 
 fn default_kernel_memory_workspace_dir() -> String {
-    "~/.talos/workspace".to_string()
+    TalosPaths::resolve()
+        .workspace_dir_for_agent(&default_agent_name())
+        .to_string_lossy()
+        .to_string()
 }
 
 fn default_kernel_memory_hot_recent_messages() -> usize {
@@ -1353,6 +1514,20 @@ pub enum ThinkingFormat {
 }
 
 impl Config {
+    pub fn talos_paths(&self) -> TalosPaths {
+        TalosPaths::resolve()
+    }
+
+    pub fn apply_derived_paths(&mut self) {
+        let paths = self.talos_paths();
+        self.logging.file = Some(paths.log_file.to_string_lossy().to_string());
+        self.storage.connection_string = paths.sqlite_db.to_string_lossy().to_string();
+        self.agent.kernel.memory.workspace_dir = paths
+            .workspace_dir_for_agent(&self.agent.name)
+            .to_string_lossy()
+            .to_string();
+    }
+
     pub fn current_provider_config(&self) -> Option<&ProviderConfig> {
         match self.llm.provider.trim().to_ascii_lowercase().as_str() {
             "anthropic" => Some(&self.llm.anthropic),
@@ -1375,9 +1550,8 @@ impl Config {
 
     /// Load configuration.
     ///
-    /// Lookup order:
-    /// 1. `~/.talos/talos.yaml` (home directory)
-    /// 2. `talos.yaml` (current working directory)
+    /// Lookup path:
+    /// 1. `<talos_home>/conf/talos.yaml`
     pub fn load() -> TalosResult<Self> {
         Self::load_from_path(None)
     }
@@ -1386,18 +1560,20 @@ impl Config {
     pub fn load_from_path(path: Option<&str>) -> TalosResult<Self> {
         use talos_error::TalosError;
 
+        let paths = TalosPaths::resolve();
+        paths.ensure_base_dirs()?;
+
         let config_path = match path {
             Some(path) => PathBuf::from(path),
-            None => {
-                let candidates = default_config_candidates();
-                select_first_existing_path(&candidates).ok_or_else(|| {
-                    TalosError::InvalidConfiguration(format!(
-                        "no config file found, tried: {}",
-                        format_path_list(&candidates)
-                    ))
-                })?
-            }
+            None => Config::default_path(),
         };
+
+        if !config_path.exists() {
+            return Err(TalosError::InvalidConfiguration(format!(
+                "no config file found at {}",
+                config_path.display()
+            )));
+        }
 
         let builder = config::Config::builder()
             .add_source(config::File::from(config_path).required(true))
@@ -1414,12 +1590,18 @@ impl Config {
             .try_deserialize()
             .map_err(|e| TalosError::ConfigError(e.to_string()))?;
         validate_required_paths(&raw_value)?;
+        validate_forbidden_paths(&raw_value)?;
 
         // Deserialize into typed config after strict key presence validation.
         let config: Config = serde_json::from_value(raw_value)
             .map_err(|e| TalosError::ConfigError(e.to_string()))?;
+        let mut config = config.resolve_env_placeholders()?;
+        config.apply_derived_paths();
+        config
+            .talos_paths()
+            .ensure_agent_workspace(&config.agent.name)?;
 
-        Ok(config.resolve_env_placeholders()?)
+        Ok(config)
     }
 
     /// 保存到文件
@@ -1437,12 +1619,7 @@ impl Config {
 
     /// 获取配置文件路径
     pub fn default_path() -> PathBuf {
-        PathBuf::from("talos.yaml")
-    }
-
-    /// 获取用户配置目录
-    pub fn user_config_dir() -> Option<PathBuf> {
-        dirs::home_dir().map(|d| d.join(".talos"))
+        TalosPaths::resolve().config_file
     }
 
     fn resolve_env_placeholders(self) -> TalosResult<Self> {
@@ -1822,7 +1999,6 @@ const REQUIRED_CONFIG_PATHS: &[&str] = &[
     "logging.format",
     "logging.stdout",
     "storage.database_type",
-    "storage.connection_string",
     "storage.max_connections",
     "llm.provider",
     "llm.model",
@@ -1830,6 +2006,12 @@ const REQUIRED_CONFIG_PATHS: &[&str] = &[
     "llm.openai.enabled",
     "llm.bailian.enabled",
     "llm.ollama.enabled",
+];
+
+const FORBIDDEN_CONFIG_PATHS: &[&str] = &[
+    "logging.file",
+    "storage.connection_string",
+    "agent.kernel.memory.workspace_dir",
 ];
 
 fn validate_required_paths(root: &Value) -> TalosResult<()> {
@@ -1848,6 +2030,25 @@ fn validate_required_paths(root: &Value) -> TalosResult<()> {
     Err(TalosError::InvalidConfiguration(format!(
         "missing required config key(s): {}",
         missing.join(", ")
+    )))
+}
+
+fn validate_forbidden_paths(root: &Value) -> TalosResult<()> {
+    use talos_error::TalosError;
+
+    let present: Vec<&str> = FORBIDDEN_CONFIG_PATHS
+        .iter()
+        .copied()
+        .filter(|path| has_json_path(root, path))
+        .collect();
+
+    if present.is_empty() {
+        return Ok(());
+    }
+
+    Err(TalosError::InvalidConfiguration(format!(
+        "config key(s) are derived from talos_home and cannot be configured directly: {}",
+        present.join(", ")
     )))
 }
 
@@ -1870,27 +2071,6 @@ fn has_json_path(root: &Value, path: &str) -> bool {
 fn is_unresolved_placeholder(value: &str) -> bool {
     let trimmed = value.trim();
     trimmed.starts_with("${") && trimmed.ends_with('}')
-}
-
-fn default_config_candidates() -> Vec<PathBuf> {
-    let mut candidates = Vec::with_capacity(2);
-    if let Some(home_dir) = dirs::home_dir() {
-        candidates.push(home_dir.join(".talos").join("talos.yaml"));
-    }
-    candidates.push(Config::default_path());
-    candidates
-}
-
-fn select_first_existing_path(paths: &[PathBuf]) -> Option<PathBuf> {
-    paths.iter().find(|path| path.exists()).cloned()
-}
-
-fn format_path_list(paths: &[PathBuf]) -> String {
-    paths
-        .iter()
-        .map(|path| path.display().to_string())
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 /// 生成默认配置文件
@@ -2018,12 +2198,10 @@ logging:
   level: info
   format: text  # json or text
   stdout: true
-  file: logs/talos.log
 
 # Storage 配置
 storage:
   database_type: sqlite
-  connection_string: talos.db
   max_connections: 5
 "#
     .to_string()
@@ -2040,7 +2218,11 @@ mod tests {
         assert_eq!(config.gateway.port, 18789);
         assert!(!config.gateway.auth);
         assert_eq!(config.storage.database_type, DatabaseType::Sqlite);
-        assert_eq!(config.storage.connection_string, "talos.db");
+        assert!(config.storage.connection_string.ends_with("/data/talos.db"));
+        assert_eq!(
+            config.logging.file.as_deref(),
+            Some(config.talos_paths().log_file.to_string_lossy().as_ref())
+        );
     }
 
     #[test]
@@ -2086,7 +2268,11 @@ mod tests {
         assert!(config.agent.kernel.prompt.bootstrap.include_memory);
         assert_eq!(
             config.agent.kernel.memory.workspace_dir,
-            "~/.talos/workspace"
+            config
+                .talos_paths()
+                .workspace_dir_for_agent("talos")
+                .to_string_lossy()
+                .to_string()
         );
         assert_eq!(config.agent.kernel.memory.hot_recent_messages, 64);
         assert_eq!(config.agent.kernel.memory.session_recent_messages_limit, 24);
@@ -2208,20 +2394,75 @@ models:
     }
 
     #[test]
-    fn test_select_first_existing_path_prefers_first_match() {
-        let base_dir =
-            std::env::temp_dir().join(format!("talos-config-select-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&base_dir);
-        let first = base_dir.join("first.yaml");
-        let second = base_dir.join("second.yaml");
-        std::fs::write(&first, "x: 1\n").expect("failed to write first file");
-        std::fs::write(&second, "x: 2\n").expect("failed to write second file");
+    fn test_sanitize_agent_name_for_workspace() {
+        assert_eq!(sanitize_agent_name("Talos Agent"), "talos-agent");
+        assert_eq!(sanitize_agent_name("..."), "default");
+    }
 
-        let selected = select_first_existing_path(&[first.clone(), second.clone()]);
-        assert_eq!(selected, Some(first));
-
-        let _ = std::fs::remove_file(second);
-        let _ = std::fs::remove_file(base_dir.join("first.yaml"));
-        let _ = std::fs::remove_dir_all(base_dir);
+    #[test]
+    fn test_forbidden_path_config_is_rejected() {
+        let yaml = r#"
+agent:
+  name: talos
+  model: qwen-plus
+  kernel:
+    max_iters: 1
+    max_task_per_turn: 3
+    tool_parallelism: 4
+    max_llm_calls: 8
+    max_tool_rounds: 8
+    tool_result_max_bytes: 65536
+    context_compaction_max_bytes: 262144
+    default_workspace_id: default
+    planner_mode: built_in
+    allow_request_planner_override: false
+    execution_mode: single
+    execution_children: 2
+    execution_loop_iters: 3
+    prompt:
+      max_static_tokens: 1200
+      max_dynamic_tokens: 3200
+      include_session_summary: true
+      include_recent_messages: true
+    memory:
+      workspace_dir: /tmp/custom
+    binding:
+      default_agent_kind: llm
+gateway:
+  host: 127.0.0.1
+  port: 18789
+  token: token
+  auth: false
+  jwt_secret: jwt
+logging:
+  level: info
+  format: text
+  stdout: true
+storage:
+  database_type: sqlite
+  connection_string: /tmp/custom.db
+  max_connections: 5
+llm:
+  provider: ollama
+  model: qwen-plus
+  anthropic: { enabled: false }
+  openai: { enabled: false }
+  bailian: { enabled: false }
+  ollama:
+    enabled: true
+    base_url: http://localhost:11434
+"#;
+        let temp_file = std::env::temp_dir().join(format!(
+            "talos-config-forbidden-{}.yaml",
+            std::process::id()
+        ));
+        std::fs::write(&temp_file, yaml).expect("failed to write temp config");
+        let result = Config::load_from_path(Some(
+            temp_file
+                .to_str()
+                .expect("temp path should be valid unicode"),
+        ));
+        let _ = std::fs::remove_file(&temp_file);
+        assert!(result.is_err());
     }
 }

@@ -12,7 +12,7 @@ require_command python3
 start_server
 trap stop_server EXIT
 
-WORKSPACE_DIR="${HOME}/.talos/workspace"
+WORKSPACE_DIR="${HOME}/.talos/workspace-talos"
 ROOT_MEMORY_FILE="${WORKSPACE_DIR}/MEMORY.md"
 DAY_FILE="${WORKSPACE_DIR}/memory/$(date '+%Y-%m-%d').md"
 mkdir -p "${WORKSPACE_DIR}"

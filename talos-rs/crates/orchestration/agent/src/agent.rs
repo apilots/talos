@@ -444,9 +444,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
     }
 
     fn resolve_kernel_mode(&self) -> TalosResult<KernelExecutionMode> {
-        let mode = self
-            .kernel_config
-            .execution_mode;
+        let mode = self.kernel_config.execution_mode;
         Ok(match mode {
             ExecutionMode::Single => KernelExecutionMode::Single,
             ExecutionMode::Sequential => KernelExecutionMode::Sequential,
