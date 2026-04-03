@@ -31,9 +31,9 @@ pub use execution::{
     AuthRequestPayload, CompactionSummaryPayload, ConfirmationRequestPayload, EventActions,
     EventAuthor, EventPayload, EventSink, ExecutionBranch, ExecutionEvent, ExecutionEventBuffer,
     ExecutionEventHandler, ExecutionEventKind, LlmRequestEnvelope, LlmResponseEnvelope,
-    PlanningResponseEffect, PlanningResponseSegment, PlanningResponseSegmentKind,
-    RequestCacheContext, RequestInteractionContext, RequestOutputContract, ResponseDisposition,
-    StateDelta, StateNamespace, VecEventSink,
+    PlanningRequestEffect, PlanningResponseEffect, PlanningResponseSegment,
+    PlanningResponseSegmentKind, RequestCacheContext, RequestInteractionContext,
+    RequestOutputContract, ResponseDisposition, StateDelta, StateNamespace, VecEventSink,
 };
 pub use flow::{AutoFlow, BaseLlmFlow, FlowExecution, FlowFactory, FlowRunSummary, SingleFlow};
 pub use general_turn::{
@@ -42,7 +42,8 @@ pub use general_turn::{
     execute_general_turn_tool_batch, finalize_general_turn_artifacts, flush_session_memory,
     persist_general_turn_artifacts, prepare_general_turn, run_general_turn, ExecutedTurnArtifacts,
     GeneralTurnLoopState, GeneralTurnResult, GeneralTurnStepDisposition, GeneralTurnStepRequest,
-    GeneralTurnStepResult, GeneralTurnToolBatch, ModelFinishReason, PreparedGeneralTurn,
+    GeneralTurnStepResult, GeneralTurnToolBatch, ModelFinishReason, PlanReActLoopState,
+    PreparedGeneralTurn,
 };
 pub use llm_agent::LlmKernelAgent;
 pub use planner::{BuiltInPlanner, PlanReActPlanner};

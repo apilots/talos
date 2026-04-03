@@ -788,10 +788,10 @@ impl RequestProcessor for PlanningRequestProcessor {
         ctx: &mut InvocationContext,
         request: &mut LlmRequestEnvelope,
     ) -> TalosResult<RequestProcessorOutput> {
-        request.native_thinking = self.planner.native_thinking_config(ctx, request);
-        let instruction = self.planner.build_planning_instruction(ctx, request);
-        ctx.planning_instruction = instruction.clone();
-        request.planning_instruction = instruction;
+        let effect = self.planner.build_request_effect(ctx, request);
+        request.native_thinking = effect.native_thinking;
+        ctx.planning_instruction = effect.planning_instruction.clone();
+        request.planning_instruction = effect.planning_instruction;
         Ok(RequestProcessorOutput::default())
     }
 }
@@ -817,8 +817,9 @@ impl ResponseProcessor for PlanningResponseProcessor {
         ctx: &mut InvocationContext,
         response: &mut LlmResponseEnvelope,
     ) -> TalosResult<ResponseProcessorOutput> {
-        let effect = self.planner.process_planning_response_effect(ctx, response);
+        let effect = self.planner.process_response_effect(ctx, response);
 
+        ctx.set_plan_react_has_final_answer(effect.has_final_answer);
         if let Some(normalized) = effect.normalized_text {
             ctx.set_planning_response(normalized);
         }
@@ -1198,11 +1199,11 @@ mod tests {
     struct BranchingPlanner;
 
     impl Planner for BranchingPlanner {
-        fn kind(&self) -> crate::PlannerKind {
+        fn mode(&self) -> crate::PlannerKind {
             PlannerKind::PlanReAct
         }
 
-        fn process_planning_response_effect(
+        fn process_response_effect(
             &self,
             _ctx: &InvocationContext,
             response: &LlmResponseEnvelope,
@@ -1218,6 +1219,7 @@ mod tests {
                     value: json!(true),
                 }],
                 branch_override: Some(ExecutionBranch::DirectAnswer),
+                has_final_answer: false,
             }
         }
     }
@@ -1315,6 +1317,7 @@ mod tests {
 
         assert_eq!(output.disposition, ResponseDisposition::Continue);
         assert_eq!(response.output_text, "done");
+        assert!(ctx.execution_state.plan_react_has_final_answer);
         assert!(response
             .output_items
             .iter()

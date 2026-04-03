@@ -332,13 +332,17 @@ mod tests {
     struct PhaseAssertingPlanner;
 
     impl Planner for PhaseAssertingPlanner {
-        fn build_planning_instruction(
+        fn build_request_effect(
             &self,
             ctx: &InvocationContext,
             _request: &crate::LlmRequestEnvelope,
-        ) -> Option<String> {
+        ) -> crate::PlanningRequestEffect {
             assert_eq!(ctx.phase, TurnPhase::Execution);
-            Some("build a short plan first".to_string())
+            crate::PlanningRequestEffect {
+                planning_instruction: Some("build a short plan first".to_string()),
+                native_thinking: None,
+                clear_request_thoughts: false,
+            }
         }
     }
 

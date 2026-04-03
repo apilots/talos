@@ -50,6 +50,14 @@ pub struct StateDelta {
     pub value: Value,
 }
 
+/// Effect produced by the planner's request-phase processing.
+#[derive(Debug, Clone, Default)]
+pub struct PlanningRequestEffect {
+    pub planning_instruction: Option<String>,
+    pub native_thinking: Option<NativeThinkingConfig>,
+    pub clear_request_thoughts: bool,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PlanningResponseEffect {
     pub normalized_text: Option<String>,
@@ -61,6 +69,9 @@ pub struct PlanningResponseEffect {
     #[serde(default)]
     pub state_delta: Vec<StateDelta>,
     pub branch_override: Option<ExecutionBranch>,
+    /// True when the planner detected a completed FINAL_ANSWER in the response.
+    #[serde(default)]
+    pub has_final_answer: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

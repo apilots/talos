@@ -1,13 +1,12 @@
 use crate::{
-    AgentRunResult, CallbackControl, ExecutionEvent, ExecutionEventHandler, ExecutionPath,
+    AgentRunResult, CallbackControl, ExecutionEvent, ExecutionEventHandler,
     InvocationContext, KernelExecutionSettings, LlmRequestEnvelope, LlmResponseEnvelope,
-    PlannerKind, PlanningResponseEffect, RunRequest, RunResponse, TaskResult, ThinkingMode,
+    PlannerKind, PlanningRequestEffect, PlanningResponseEffect, RunRequest, RunResponse, TaskResult,
     ToolCallbackPayload,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
 use talos_error::TalosResult;
-use talos_llm_provider::NativeThinkingConfig;
 
 #[async_trait]
 pub trait Agent: Send + Sync {
@@ -25,55 +24,26 @@ impl<T: Agent + ?Sized> BaseKernelAgent for T {}
 
 #[async_trait]
 pub trait Planner: Send + Sync {
-    fn kind(&self) -> PlannerKind {
+    fn mode(&self) -> PlannerKind {
         PlannerKind::BuiltIn
     }
 
-    fn thinking_mode(&self) -> ThinkingMode {
-        ThinkingMode::Disabled
-    }
-
-    fn default_execution_path(&self) -> ExecutionPath {
-        ExecutionPath::ReactiveLoop
-    }
-
-    fn native_thinking_config(
+    /// Produce the request-phase effect: planning instruction and optional native thinking config.
+    fn build_request_effect(
         &self,
         _ctx: &InvocationContext,
         _request: &LlmRequestEnvelope,
-    ) -> Option<NativeThinkingConfig> {
-        None
+    ) -> PlanningRequestEffect {
+        PlanningRequestEffect::default()
     }
 
-    fn build_planning_instruction(
-        &self,
-        _ctx: &InvocationContext,
-        _request: &LlmRequestEnvelope,
-    ) -> Option<String> {
-        None
-    }
-
-    fn process_planning_response_effect(
-        &self,
-        ctx: &InvocationContext,
-        response: &LlmResponseEnvelope,
-    ) -> PlanningResponseEffect {
-        PlanningResponseEffect {
-            normalized_text: self.process_planning_response(ctx, response),
-            segments: Vec::new(),
-            output_text_override: None,
-            clear_output_text: false,
-            state_delta: Vec::new(),
-            branch_override: None,
-        }
-    }
-
-    fn process_planning_response(
+    /// Produce the response-phase effect: normalized text, segments, final answer detection, etc.
+    fn process_response_effect(
         &self,
         _ctx: &InvocationContext,
         _response: &LlmResponseEnvelope,
-    ) -> Option<String> {
-        None
+    ) -> PlanningResponseEffect {
+        PlanningResponseEffect::default()
     }
 }
 

@@ -113,6 +113,14 @@ pub struct GeneralTurnLoopState {
     pub saw_output_delta: bool,
 }
 
+/// Per-turn loop control state for PlanReAct mode.
+/// Lives only within a single `general_turn` execution; not persisted to session.
+#[derive(Debug, Clone, Default)]
+pub struct PlanReActLoopState {
+    pub replan_count: u32,
+    pub consecutive_no_progress_rounds: u32,
+}
+
 impl GeneralTurnLoopState {
     pub fn new(_prepared: &PreparedGeneralTurn) -> Self {
         Self {

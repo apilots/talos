@@ -1460,7 +1460,8 @@ mod tests {
             .expect("planner should build");
         let ctx = mock_invocation_ctx();
         assert!(planner
-            .build_planning_instruction(&ctx, &talos_agent_kernel::LlmRequestEnvelope::default())
+            .build_request_effect(&ctx, &talos_agent_kernel::LlmRequestEnvelope::default())
+            .planning_instruction
             .is_some());
     }
 

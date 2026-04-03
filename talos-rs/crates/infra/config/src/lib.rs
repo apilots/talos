@@ -212,6 +212,38 @@ impl fmt::Display for PlannerMode {
     }
 }
 
+/// Loop control policy for PlanReAct mode.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanReActPolicy {
+    /// Maximum number of replanning iterations allowed per turn.
+    #[serde(default = "default_plan_react_max_replans")]
+    pub max_replans: u32,
+    /// Maximum consecutive no-progress rounds before aborting.
+    #[serde(default = "default_plan_react_max_no_progress_rounds")]
+    pub max_no_progress_rounds: u32,
+    /// Whether the model must output a FINAL_ANSWER tag to end the turn.
+    #[serde(default = "default_true")]
+    pub require_final_answer_tag: bool,
+}
+
+impl Default for PlanReActPolicy {
+    fn default() -> Self {
+        Self {
+            max_replans: default_plan_react_max_replans(),
+            max_no_progress_rounds: default_plan_react_max_no_progress_rounds(),
+            require_final_answer_tag: true,
+        }
+    }
+}
+
+fn default_plan_react_max_replans() -> u32 {
+    3
+}
+
+fn default_plan_react_max_no_progress_rounds() -> u32 {
+    2
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionMode {
@@ -326,6 +358,10 @@ pub struct AgentKernelConfig {
     /// MCP server connections available to this kernel
     #[serde(default)]
     pub mcp: AgentKernelMcpConfig,
+
+    /// Loop control policy for PlanReAct mode.
+    #[serde(default)]
+    pub plan_react: PlanReActPolicy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -924,6 +960,7 @@ impl Default for AgentKernelConfig {
             binding: AgentKernelBindingConfig::default(),
             tools: ToolsRuntimeConfig::default(),
             mcp: AgentKernelMcpConfig::default(),
+            plan_react: PlanReActPolicy::default(),
         }
     }
 }

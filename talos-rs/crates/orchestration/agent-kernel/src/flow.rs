@@ -4,7 +4,7 @@ use crate::general_turn::{
     emit_general_turn_finalization_stream, execute_general_turn_step,
     execute_general_turn_tool_batch, finalize_general_turn_artifacts,
     persist_general_turn_artifacts, prepare_general_turn, GeneralTurnLoopState,
-    GeneralTurnStepDisposition,
+    GeneralTurnStepDisposition, GeneralTurnToolBatch, PlanReActLoopState,
 };
 use crate::{
     execution::DynamicToolRequestPayload, CallbackControl, CallbackRegistry,
@@ -365,7 +365,13 @@ impl BaseLlmFlow for SingleFlow {
             ),
         );
         let max_tool_rounds = self.kernel_config.max_tool_rounds.max(1);
+        let is_plan_react = matches!(
+            self.settings.planner_kind,
+            crate::PlannerKind::PlanReAct
+        );
         let mut state = GeneralTurnLoopState::new(&prepared);
+        let mut plan_react_state = PlanReActLoopState::default();
+        let mut last_tool_batch: Option<GeneralTurnToolBatch> = None;
         let mut final_text = String::new();
         let stop_reason = loop {
             if matches!(self.flow_profile, FlowProfile::ReactiveLoop) {
@@ -542,6 +548,27 @@ impl BaseLlmFlow for SingleFlow {
             apply_general_turn_step(&mut state, &step);
 
             if matches!(step.disposition, GeneralTurnStepDisposition::FinalResponse) {
+                // PlanReAct mode: when require_final_answer_tag is enabled, only accept a
+                // FinalResponse that carries a confirmed FINAL_ANSWER tag. A response without
+                // the tag is treated as a no-progress round and may trigger a replan.
+                if is_plan_react
+                    && self.kernel_config.plan_react.require_final_answer_tag
+                    && !ctx.execution_state.plan_react_has_final_answer
+                {
+                    plan_react_state.consecutive_no_progress_rounds += 1;
+                    if should_replan(
+                        &plan_react_state,
+                        last_tool_batch.as_ref(),
+                        &self.kernel_config.plan_react,
+                    ) {
+                        plan_react_state.replan_count += 1;
+                        if state.round < max_tool_rounds {
+                            continue;
+                        }
+                    }
+                    final_text = "[plan-react stalled: no final answer]".to_string();
+                    break StopReason::ToolRoundLimit;
+                }
                 final_text = step.text.clone();
                 stage_session_event(
                     ctx,
@@ -558,6 +585,18 @@ impl BaseLlmFlow for SingleFlow {
                 );
                 break StopReason::EndTurn;
             }
+
+            // PlanReAct mode with tool calls: if the model also produced a FINAL_ANSWER tag
+            // in the same round, drop it and warn — tool calls take priority.
+            if is_plan_react && ctx.execution_state.plan_react_has_final_answer {
+                tracing::warn!(
+                    round = state.round,
+                    "plan-react response contains both tool_calls and final_answer; \
+                     final_answer dropped for this round"
+                );
+                ctx.set_plan_react_has_final_answer(false);
+            }
+            plan_react_state.consecutive_no_progress_rounds = 0;
             if matches!(self.flow_profile, FlowProfile::ReactiveLoop) {
                 let tool_names = tool_names_for_thinking(&step.output_items);
                 let tool_list = if tool_names.is_empty() {
@@ -697,6 +736,7 @@ impl BaseLlmFlow for SingleFlow {
                 );
             }
             apply_general_turn_tool_batch(&mut state, &tool_batch, &self.kernel_config);
+            last_tool_batch = Some(tool_batch.clone());
             if !tool_batch.pending_confirmations.is_empty()
                 || !tool_batch.pending_dynamic_requests.is_empty()
             {
@@ -839,6 +879,31 @@ impl From<crate::ExecutionPath> for ExecutionBranch {
 }
 
 pub struct FlowFactory;
+
+/// Determine whether the PlanReAct loop should allow another replan round.
+///
+/// `replan_count` is the number of replan *decisions* already made this turn (one per
+/// no-progress or tool-error round that continued). Both the tool-error path and the
+/// no-progress path share the same `max_replans` budget so callers cannot bypass the
+/// limit by mixing the two triggers.
+fn should_replan(
+    state: &PlanReActLoopState,
+    last_tool_batch: Option<&GeneralTurnToolBatch>,
+    policy: &talos_config::PlanReActPolicy,
+) -> bool {
+    // Global replan budget exhausted — never allow another round.
+    if state.replan_count >= policy.max_replans {
+        return false;
+    }
+    // Allow replan when the last tool batch had errors (model-driven replan).
+    if let Some(tool_batch) = last_tool_batch {
+        if tool_batch.error_count > 0 {
+            return true;
+        }
+    }
+    // Allow replan for genuine no-progress rounds within the separate no-progress budget.
+    state.consecutive_no_progress_rounds < policy.max_no_progress_rounds
+}
 
 fn select_flow_profile(
     settings: &KernelExecutionSettings,
@@ -1502,5 +1567,97 @@ mod tests {
             Arc::new(PlanReActPlanner::new()),
         );
         assert_eq!(plan_react.current_branch(), ExecutionBranch::ReactiveLoop);
+    }
+
+    #[test]
+    fn test_should_replan_false_when_replan_budget_exhausted_regardless_of_no_progress_budget() {
+        // max_replans = 0 means no replan at all, even when no-progress budget remains.
+        let policy = talos_config::PlanReActPolicy {
+            max_replans: 0,
+            max_no_progress_rounds: 5,
+            require_final_answer_tag: true,
+        };
+        let state = PlanReActLoopState {
+            replan_count: 0,
+            consecutive_no_progress_rounds: 0,
+        };
+        assert!(!should_replan(&state, None, &policy));
+    }
+
+    #[test]
+    fn test_should_replan_false_when_replan_count_reached_max() {
+        let policy = talos_config::PlanReActPolicy {
+            max_replans: 2,
+            max_no_progress_rounds: 5,
+            require_final_answer_tag: true,
+        };
+        let state = PlanReActLoopState {
+            replan_count: 2,
+            consecutive_no_progress_rounds: 1,
+        };
+        // replan_count == max_replans: no further replan even if no-progress budget remains
+        assert!(!should_replan(&state, None, &policy));
+    }
+
+    #[test]
+    fn test_should_replan_true_when_no_progress_budget_remains() {
+        let policy = talos_config::PlanReActPolicy {
+            max_replans: 3,
+            max_no_progress_rounds: 2,
+            require_final_answer_tag: true,
+        };
+        let state = PlanReActLoopState {
+            replan_count: 1,
+            consecutive_no_progress_rounds: 1,
+        };
+        assert!(should_replan(&state, None, &policy));
+    }
+
+    #[test]
+    fn test_should_replan_true_when_tool_errors_within_budget() {
+        // max_no_progress_rounds = 0, but tool errors still trigger replan via max_replans budget.
+        let policy = talos_config::PlanReActPolicy {
+            max_replans: 3,
+            max_no_progress_rounds: 0,
+            require_final_answer_tag: true,
+        };
+        let state = PlanReActLoopState {
+            replan_count: 1,
+            consecutive_no_progress_rounds: 0,
+        };
+        let tool_batch = GeneralTurnToolBatch {
+            output_items: Vec::new(),
+            tool_messages: Vec::new(),
+            pending_confirmations: Vec::new(),
+            pending_dynamic_requests: Vec::new(),
+            retrieved_memories: Vec::new(),
+            logs: Vec::new(),
+            error_count: 3, // multiple errors in one batch count as one replan opportunity
+        };
+        assert!(should_replan(&state, Some(&tool_batch), &policy));
+    }
+
+    #[test]
+    fn test_should_replan_false_when_tool_errors_but_replan_budget_exhausted() {
+        let policy = talos_config::PlanReActPolicy {
+            max_replans: 2,
+            max_no_progress_rounds: 0,
+            require_final_answer_tag: true,
+        };
+        let state = PlanReActLoopState {
+            replan_count: 2,
+            consecutive_no_progress_rounds: 0,
+        };
+        let tool_batch = GeneralTurnToolBatch {
+            output_items: Vec::new(),
+            tool_messages: Vec::new(),
+            pending_confirmations: Vec::new(),
+            pending_dynamic_requests: Vec::new(),
+            retrieved_memories: Vec::new(),
+            logs: Vec::new(),
+            error_count: 5,
+        };
+        // Multiple errors in batch still can't replan — budget exhausted at decision level.
+        assert!(!should_replan(&state, Some(&tool_batch), &policy));
     }
 }

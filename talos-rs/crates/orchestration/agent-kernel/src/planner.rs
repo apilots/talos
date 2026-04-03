@@ -1,7 +1,7 @@
 use crate::{
     execution::{PlanningResponseSegment, PlanningResponseSegmentKind},
-    ExecutionPath, InvocationContext, LlmRequestEnvelope, LlmResponseEnvelope, Planner,
-    PlannerKind, PlanningResponseEffect, ThinkingMode,
+    InvocationContext, LlmRequestEnvelope, LlmResponseEnvelope, Planner, PlannerKind,
+    PlanningRequestEffect, PlanningResponseEffect,
 };
 use talos_llm_provider::{NativeThinkingConfig, NativeThinkingEffort};
 
@@ -33,38 +33,30 @@ impl BuiltInPlanner {
 }
 
 impl Planner for BuiltInPlanner {
-    fn kind(&self) -> PlannerKind {
+    fn mode(&self) -> PlannerKind {
         PlannerKind::BuiltIn
     }
 
-    fn thinking_mode(&self) -> ThinkingMode {
-        ThinkingMode::ModelNative
-    }
-
-    fn default_execution_path(&self) -> ExecutionPath {
-        ExecutionPath::DirectAnswer
-    }
-
-    fn build_planning_instruction(
+    fn build_request_effect(
         &self,
         _ctx: &InvocationContext,
         request: &LlmRequestEnvelope,
-    ) -> Option<String> {
-        (!request.tool_definitions.is_empty()).then(|| BUILT_IN_TOOL_GUIDANCE.to_string())
-    }
-
-    fn native_thinking_config(
-        &self,
-        _ctx: &InvocationContext,
-        request: &LlmRequestEnvelope,
-    ) -> Option<NativeThinkingConfig> {
-        if !request.native_thinking_support.is_supported() {
-            return None;
+    ) -> PlanningRequestEffect {
+        let native_thinking = if request.native_thinking_support.is_supported() {
+            Some(NativeThinkingConfig {
+                effort: NativeThinkingEffort::Medium,
+                budget_tokens: Some(2048),
+            })
+        } else {
+            None
+        };
+        let planning_instruction =
+            (!request.tool_definitions.is_empty()).then(|| BUILT_IN_TOOL_GUIDANCE.to_string());
+        PlanningRequestEffect {
+            planning_instruction,
+            native_thinking,
+            clear_request_thoughts: false,
         }
-        Some(NativeThinkingConfig {
-            effort: NativeThinkingEffort::Medium,
-            budget_tokens: Some(2048),
-        })
     }
 }
 
@@ -77,27 +69,23 @@ impl PlanReActPlanner {
 }
 
 impl Planner for PlanReActPlanner {
-    fn kind(&self) -> PlannerKind {
+    fn mode(&self) -> PlannerKind {
         PlannerKind::PlanReAct
     }
 
-    fn thinking_mode(&self) -> ThinkingMode {
-        ThinkingMode::PlanningProcessor
-    }
-
-    fn default_execution_path(&self) -> ExecutionPath {
-        ExecutionPath::ReactiveLoop
-    }
-
-    fn build_planning_instruction(
+    fn build_request_effect(
         &self,
         _ctx: &InvocationContext,
         _request: &LlmRequestEnvelope,
-    ) -> Option<String> {
-        Some(PLAN_REACT_INSTRUCTION.to_string())
+    ) -> PlanningRequestEffect {
+        PlanningRequestEffect {
+            planning_instruction: Some(PLAN_REACT_INSTRUCTION.to_string()),
+            native_thinking: None,
+            clear_request_thoughts: false,
+        }
     }
 
-    fn process_planning_response_effect(
+    fn process_response_effect(
         &self,
         _ctx: &InvocationContext,
         response: &LlmResponseEnvelope,
@@ -110,6 +98,7 @@ impl Planner for PlanReActPlanner {
         let mut segments = Vec::new();
         let mut final_output_text = None;
         let mut saw_tagged_thought = false;
+        let mut has_final_answer = false;
 
         if let Some((reasoning_text, final_answer_text)) =
             split_by_last_pattern(normalized, PLAN_REACT_FINAL_ANSWER_TAG)
@@ -127,6 +116,7 @@ impl Planner for PlanReActPlanner {
                     text: final_answer_text.trim().to_string(),
                 });
                 final_output_text = Some(final_answer_text.trim().to_string());
+                has_final_answer = true;
             }
         } else if starts_with_tagged_thought(normalized) {
             segments.push(PlanningResponseSegment {
@@ -143,6 +133,7 @@ impl Planner for PlanReActPlanner {
             clear_output_text: saw_tagged_thought,
             state_delta: Vec::new(),
             branch_override: None,
+            has_final_answer,
         }
     }
 }
@@ -172,7 +163,7 @@ mod tests {
     use crate::{ContextStateBags, InvocationExecutionState, InvocationLimits, TurnPhase};
     use std::collections::HashMap;
 
-    fn mock_ctx(input: &str, _context_hint: Option<serde_json::Value>) -> InvocationContext {
+    fn mock_ctx(input: &str) -> InvocationContext {
         InvocationContext {
             session_id: "s1".to_string(),
             invocation_id: "i1".to_string(),
@@ -199,40 +190,40 @@ mod tests {
     }
 
     #[test]
-    fn test_built_in_planner_defaults_to_direct_answer_model_thinking() {
+    fn test_built_in_planner_mode() {
         let planner = BuiltInPlanner::new();
-        assert_eq!(planner.kind(), PlannerKind::BuiltIn);
-        assert_eq!(planner.thinking_mode(), ThinkingMode::ModelNative);
-        assert_eq!(
-            planner.default_execution_path(),
-            ExecutionPath::DirectAnswer
-        );
+        assert_eq!(planner.mode(), PlannerKind::BuiltIn);
     }
 
     #[test]
     fn test_built_in_planner_gates_native_thinking_by_request_support() {
         let planner = BuiltInPlanner::new();
-        let ctx = mock_ctx("hello", None);
+        let ctx = mock_ctx("hello");
 
         let mut supported_request = crate::LlmRequestEnvelope::default();
         supported_request.native_thinking_support =
             talos_llm_provider::NativeThinkingSupport::Supported;
         assert!(planner
-            .native_thinking_config(&ctx, &supported_request)
+            .build_request_effect(&ctx, &supported_request)
+            .native_thinking
             .is_some());
 
         let unsupported_request = crate::LlmRequestEnvelope::default();
         assert!(planner
-            .native_thinking_config(&ctx, &unsupported_request)
+            .build_request_effect(&ctx, &unsupported_request)
+            .native_thinking
             .is_none());
     }
 
     #[test]
     fn test_built_in_planner_adds_tool_guidance_only_when_tools_exist() {
         let planner = BuiltInPlanner::new();
-        let ctx = mock_ctx("hello", None);
+        let ctx = mock_ctx("hello");
         let request = crate::LlmRequestEnvelope::default();
-        assert!(planner.build_planning_instruction(&ctx, &request).is_none());
+        assert!(planner
+            .build_request_effect(&ctx, &request)
+            .planning_instruction
+            .is_none());
 
         let request_with_tools = crate::LlmRequestEnvelope {
             tool_definitions: vec![talos_llm_provider::ToolDefinition::new(
@@ -242,8 +233,9 @@ mod tests {
             )],
             ..crate::LlmRequestEnvelope::default()
         };
-        let instruction = planner
-            .build_planning_instruction(&ctx, &request_with_tools)
+        let effect = planner.build_request_effect(&ctx, &request_with_tools);
+        let instruction = effect
+            .planning_instruction
             .expect("instruction should exist");
         assert!(instruction.contains("Use available tools"));
     }
@@ -251,10 +243,11 @@ mod tests {
     #[test]
     fn test_plan_react_planner_instruction_and_response_processing() {
         let planner = PlanReActPlanner::new();
-        let ctx = mock_ctx("hello", None);
+        let ctx = mock_ctx("hello");
         let request = crate::LlmRequestEnvelope::default();
-        let instruction = planner
-            .build_planning_instruction(&ctx, &request)
+        let effect = planner.build_request_effect(&ctx, &request);
+        let instruction = effect
+            .planning_instruction
             .expect("instruction should exist");
         assert!(instruction.contains("/*PLANNING*/"));
         assert!(instruction.contains("/*FINAL_ANSWER*/"));
@@ -263,18 +256,18 @@ mod tests {
             output_text: "   ".to_string(),
             ..crate::LlmResponseEnvelope::default()
         };
-        assert_eq!(
-            planner.process_planning_response(&ctx, &empty_response),
-            None
-        );
+        let empty_effect = planner.process_response_effect(&ctx, &empty_response);
+        assert!(!empty_effect.has_final_answer);
+        assert!(empty_effect.output_text_override.is_none());
 
         let final_response = crate::LlmResponseEnvelope {
             output_text: "/*REASONING*/ think\n/*FINAL_ANSWER*/done".to_string(),
             ..crate::LlmResponseEnvelope::default()
         };
-        let effect = planner.process_planning_response_effect(&ctx, &final_response);
+        let effect = planner.process_response_effect(&ctx, &final_response);
         assert_eq!(effect.output_text_override.as_deref(), Some("done"));
         assert!(effect.clear_output_text);
+        assert!(effect.has_final_answer);
         assert_eq!(effect.segments.len(), 2);
         assert!(matches!(
             effect.segments[0].kind,
