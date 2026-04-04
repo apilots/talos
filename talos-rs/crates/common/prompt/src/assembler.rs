@@ -30,6 +30,17 @@ pub(crate) fn build_identity_prompt(builder: &PromptBuilder<'_>) -> String {
         .tool_registry
         .map(PromptBuilder::render_tool_summary)
         .unwrap_or_else(|| "none".to_string());
+    let environment_summary = builder
+        .session_environment
+        .as_ref()
+        .map(|environment| {
+            format!(
+                "Session environment:\n- directory: {}\n- connection_mode: {}",
+                environment.directory.display(),
+                environment.connection_mode
+            )
+        })
+        .unwrap_or_else(|| "Session environment:\n- none".to_string());
 
     format!(
         r#"You are {}, {}
@@ -37,6 +48,8 @@ pub(crate) fn build_identity_prompt(builder: &PromptBuilder<'_>) -> String {
 Phase: {}
 Planner mode: {}
 Prompt mode: {}
+{}
+
 {}
 
 Available tools:
@@ -47,6 +60,7 @@ Available tools:
         planner_mode,
         prompt_mode,
         phase_instruction,
+        environment_summary,
         tool_summary
     )
 }

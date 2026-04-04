@@ -316,6 +316,7 @@ impl CoordinatorImpl {
             trace_id: session.context.trace_id.clone(),
             channel_id: session.context.channel_id.clone(),
             thread_id: session.context.thread_id.clone(),
+            environment: session.context.environment.clone(),
         });
         let target_agent = self
             .router
@@ -884,6 +885,7 @@ mod tests {
                     trace_id: "trace-1".to_string(),
                     channel_id: Some("test-channel".to_string()),
                     thread_id: None,
+                    environment: None,
                 },
             })
             .await

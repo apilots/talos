@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use talos_error::{TalosError, TalosResult};
+use talos_types::talos::TalosSessionEnvironment;
 use talos_types::talos::{TalosContentItem, TalosOutputItem, TalosUsage};
 use tokio::sync::mpsc;
 
@@ -348,6 +349,8 @@ pub struct InvocationContext {
     pub execution_state: InvocationExecutionState,
     #[serde(default)]
     pub session: InvocationSession,
+    #[serde(default)]
+    pub session_environment: Option<TalosSessionEnvironment>,
     pub state: HashMap<String, Value>,
     #[serde(default)]
     pub state_bags: ContextStateBags,
@@ -576,6 +579,8 @@ pub struct RunRequest {
     pub planning_instruction: Option<String>,
     pub transfer_to: Option<String>,
     pub initial_state_bags: Option<ContextStateBags>,
+    #[serde(default)]
+    pub session_environment: Option<TalosSessionEnvironment>,
     pub kernel_config: Option<talos_config::AgentKernelConfig>,
     #[serde(skip)]
     pub stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
@@ -620,6 +625,7 @@ mod tests {
                 session_id: "s1".to_string(),
                 ..crate::InvocationSession::default()
             },
+            session_environment: None,
             state: HashMap::new(),
             state_bags: ContextStateBags::default(),
             limits: InvocationLimits::default(),

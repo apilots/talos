@@ -99,6 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     trace_id: "demo-trace".to_string(),
                     channel_id: None,
                     thread_id: None,
+                    environment: None,
                 },
                 config: talos_config::Config::default(),
                 state: SessionState::default(),

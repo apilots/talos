@@ -15,6 +15,7 @@ use talos_router::{Binding, MatchRule, Router, RouterImpl};
 use talos_session_store::{DatabaseSessionStore, SessionStore};
 use talos_storage::{create_storage, StorageConfig};
 use talos_tools::{register_core_local_tools, register_network_tools, ToolRegistry};
+use talos_types::talos::TalosConnectionMode;
 use talos_types::{ModelInfo, RequestHandler, SessionService};
 use talos_ui_tui::run_tui_app_with_client;
 use tracing::error;
@@ -45,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             timeout: 30,
         };
         let client = Arc::new(TalosClient::new(config)?);
-        run_tui_app_with_client(client).await?;
+        run_tui_app_with_client(client, TalosConnectionMode::Remote).await?;
     } else {
         run_embedded(args).await?;
     }
@@ -152,7 +153,7 @@ async fn run_embedded(_args: Vec<String>) -> Result<(), Box<dyn std::error::Erro
         timeout: 30,
     };
     let client = Arc::new(TalosClient::new(client_config)?);
-    run_tui_app_with_client(client).await?;
+    run_tui_app_with_client(client, TalosConnectionMode::Embedded).await?;
 
     Ok(())
 }

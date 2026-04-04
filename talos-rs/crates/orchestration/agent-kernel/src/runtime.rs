@@ -159,6 +159,7 @@ mod tests {
                     planning_instruction: None,
                     transfer_to: None,
                     initial_state_bags: None,
+                    session_environment: None,
                     kernel_config: None,
                     stream_tx: None,
                 },

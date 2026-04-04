@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
@@ -142,6 +143,31 @@ pub mod gateway {
 pub mod talos {
     use super::*;
 
+    #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+    #[serde(rename_all = "snake_case")]
+    pub enum TalosConnectionMode {
+        Embedded,
+        #[default]
+        Remote,
+    }
+
+    impl fmt::Display for TalosConnectionMode {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            let label = match self {
+                Self::Embedded => "embedded",
+                Self::Remote => "remote",
+            };
+            write!(f, "{}", label)
+        }
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+    pub struct TalosSessionEnvironment {
+        pub directory: PathBuf,
+        #[serde(default)]
+        pub connection_mode: TalosConnectionMode,
+    }
+
     /// High-level source category.
     #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
     #[serde(rename_all = "snake_case")]
@@ -247,6 +273,8 @@ pub mod talos {
         pub channel_id: Option<String>,
         #[serde(default)]
         pub thread_id: Option<String>,
+        #[serde(default)]
+        pub environment: Option<TalosSessionEnvironment>,
     }
 
     impl TalosContext {
@@ -265,6 +293,7 @@ pub mod talos {
                 trace_id: trace_id.into(),
                 channel_id: None,
                 thread_id: None,
+                environment: None,
             }
         }
 
@@ -275,6 +304,11 @@ pub mod talos {
 
         pub fn with_thread_id(mut self, thread_id: impl Into<String>) -> Self {
             self.thread_id = Some(thread_id.into());
+            self
+        }
+
+        pub fn with_environment(mut self, environment: TalosSessionEnvironment) -> Self {
+            self.environment = Some(environment);
             self
         }
 
@@ -601,6 +635,7 @@ impl SessionRecord {
                 trace_id: session.context.trace_id.clone(),
                 channel_id: session.context.channel_id.clone(),
                 thread_id: session.context.thread_id.clone(),
+                environment: session.context.environment.clone(),
             },
             model: effective_model,
             created_at: session.state.created_at,
@@ -626,6 +661,8 @@ pub struct SessionContext {
     pub channel_id: Option<String>,
     #[serde(default)]
     pub thread_id: Option<String>,
+    #[serde(default)]
+    pub environment: Option<talos::TalosSessionEnvironment>,
 }
 
 impl SessionContext {
@@ -640,6 +677,7 @@ impl SessionContext {
             trace_id: record.context.trace_id.clone(),
             channel_id: record.context.channel_id.clone(),
             thread_id: record.context.thread_id.clone(),
+            environment: record.context.environment.clone(),
         }
     }
 }
@@ -974,6 +1012,7 @@ mod tests {
                 trace_id: "trace-1".to_string(),
                 channel_id: Some("channel-1".to_string()),
                 thread_id: Some("thread-1".to_string()),
+                environment: None,
             },
             model: "qwen-max".to_string(),
             created_at: 100,
@@ -1007,6 +1046,7 @@ mod tests {
                 trace_id: "trace-1".to_string(),
                 channel_id: Some("default".to_string()),
                 thread_id: None,
+                environment: None,
             },
             model: "qwen-max".to_string(),
             created_at: 100,

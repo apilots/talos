@@ -35,7 +35,9 @@ use talos_client::{
     TalosEventPayload, TalosInputItem, TalosMessageRequest, TalosSession,
 };
 use talos_error::{TalosError, TalosResult};
-use talos_types::talos::{TalosEventType, TalosUsage};
+use talos_types::talos::{
+    TalosConnectionMode, TalosEventType, TalosSessionEnvironment, TalosUsage,
+};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
 use tracing::error;
@@ -378,7 +380,8 @@ pub struct TuiApp {
     current_state: AppState,
     input_buffer: String,
     cursor_index: usize,
-    startup_workspace: PathBuf,
+    startup_directory: PathBuf,
+    connection_mode: TalosConnectionMode,
     current_model: String,
     session_usage: TalosUsage,
     available_model_info: Vec<ModelInfo>,
@@ -459,12 +462,16 @@ impl TuiApp {
         )
     }
 
-    fn build(gateway_client: Option<Arc<dyn GatewayClient>>) -> Self {
+    fn build(
+        gateway_client: Option<Arc<dyn GatewayClient>>,
+        connection_mode: TalosConnectionMode,
+    ) -> Self {
         let mut app = Self {
             current_state: AppState::Chat,
             input_buffer: String::new(),
             cursor_index: 0,
-            startup_workspace: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            startup_directory: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            connection_mode,
             current_model: DEFAULT_MODEL.to_string(),
             session_usage: TalosUsage::default(),
             available_model_info: vec![],
@@ -537,7 +544,12 @@ impl TuiApp {
 
         app.push_block(
             ChatRole::System,
-            build_welcome_card(APP_VERSION, &app.current_model, &app.startup_workspace),
+            build_welcome_card(
+                APP_VERSION,
+                &app.current_model,
+                &app.startup_directory,
+                app.connection_mode,
+            ),
         );
         app.push_block(
             ChatRole::System,
@@ -547,13 +559,29 @@ impl TuiApp {
         app
     }
 
-    pub fn new_with_client(client: Arc<TalosClient>) -> Self {
+    pub fn new_with_client(client: Arc<TalosClient>, connection_mode: TalosConnectionMode) -> Self {
         let gateway_client: Arc<dyn GatewayClient> = client;
-        Self::build(Some(gateway_client))
+        Self::build(Some(gateway_client), connection_mode)
     }
 
-    pub fn new_with_gateway_client(gateway_client: Arc<dyn GatewayClient>) -> Self {
-        Self::build(Some(gateway_client))
+    pub fn new_with_gateway_client(
+        gateway_client: Arc<dyn GatewayClient>,
+        connection_mode: TalosConnectionMode,
+    ) -> Self {
+        Self::build(Some(gateway_client), connection_mode)
+    }
+
+    fn session_environment(&self) -> TalosSessionEnvironment {
+        TalosSessionEnvironment {
+            directory: self.startup_directory.clone(),
+            connection_mode: self.connection_mode,
+        }
+    }
+
+    fn build_session_context(&self) -> TalosContext {
+        TalosContext::cli(env::var("USER").unwrap_or_else(|_| "local-user".to_string()))
+            .with_channel_id("terminal")
+            .with_environment(self.session_environment())
     }
 
     pub async fn initialize_remote(&mut self) {
@@ -1055,7 +1083,8 @@ impl TuiApp {
                     let mut lines = vec![
                         "mode: Gateway".to_string(),
                         format!("model: {}", self.current_model),
-                        format!("workspace: {}", self.startup_workspace.display()),
+                        format!("directory: {}", self.startup_directory.display()),
+                        format!("connection_mode: {}", self.connection_mode),
                         format!(
                             "session: {}",
                             self.session_id
@@ -1888,14 +1917,11 @@ impl TuiApp {
             ));
         };
         let session_id = self.session_id.clone();
+        let context = self.build_session_context();
         self.spawn_remote_command_task(format!("model switch started: {}", requested), async move {
             let result = if let Some(session_id) = session_id {
                 client.update_session_model(&session_id, &requested).await
             } else {
-                let context = TalosContext::cli(
-                    env::var("USER").unwrap_or_else(|_| "local-user".to_string()),
-                )
-                .with_channel_id("terminal");
                 client
                     .create_session(&SessionCreateParams {
                         context: Some(context),
@@ -2011,16 +2037,13 @@ impl TuiApp {
         };
         let session_id = self.session_id.clone();
         let requested = model.clone();
+        let context = self.build_session_context();
         let _ = self.spawn_remote_command_task(
             format!("model picker switching to: {}", model),
             async move {
                 let result = if let Some(session_id) = session_id {
                     client.update_session_model(&session_id, &requested).await
                 } else {
-                    let context = TalosContext::cli(
-                        env::var("USER").unwrap_or_else(|_| "local-user".to_string()),
-                    )
-                    .with_channel_id("terminal");
                     client
                         .create_session(&SessionCreateParams {
                             context: Some(context),
@@ -2112,9 +2135,7 @@ impl TuiApp {
             ));
         };
 
-        let context =
-            TalosContext::cli(env::var("USER").unwrap_or_else(|_| "local-user".to_string()))
-                .with_channel_id("terminal");
+        let context = self.build_session_context();
         let params = SessionCreateParams {
             context: Some(context),
             model: Some(self.current_model.clone()),
@@ -2137,15 +2158,13 @@ impl TuiApp {
         };
 
         let current_model = self.current_model.clone();
+        let context = self.build_session_context();
         let (tx, rx) = mpsc::channel(1);
         self.pending_session_connect = Some(rx);
         self.connection_status = "connecting".to_string();
         self.push_right_event("session create started".to_string());
 
         let handle = tokio::spawn(async move {
-            let context =
-                TalosContext::cli(env::var("USER").unwrap_or_else(|_| "local-user".to_string()))
-                    .with_channel_id("terminal");
             let result = client
                 .create_session(&SessionCreateParams {
                     context: Some(context),
@@ -3631,7 +3650,7 @@ impl TuiApp {
     }
 
     fn input_status_line(&self, width: usize) -> Line<'static> {
-        let workspace = compact_workspace_path(&self.startup_workspace);
+        let directory = compact_directory_path(&self.startup_directory);
         let token_left = self
             .token_left_percent()
             .map(|percent| format!("{}% left", percent))
@@ -3650,17 +3669,17 @@ impl TuiApp {
                 .closing_session_id
                 .clone()
                 .unwrap_or_else(|| "unknown".to_string());
-            format!("closing {} · flushing memory · {}", session_id, workspace)
+            format!("closing {} · flushing memory · {}", session_id, directory)
         } else if self.in_flight {
             let motion = self.stripe_line(6);
             format!(
                 "{} {} · {} · {}{}",
-                motion, self.current_model, token_left, workspace, history_indicator
+                motion, self.current_model, token_left, directory, history_indicator
             )
         } else {
             format!(
                 "{} · {} · {}{}",
-                self.current_model, token_left, workspace, history_indicator
+                self.current_model, token_left, directory, history_indicator
             )
         };
         let mut text = if let Some((hint, expires_at)) = &self.status_hint {
@@ -4747,6 +4766,7 @@ mod tests {
                     trace_id: "trace-1".to_string(),
                     channel_id: Some("terminal".to_string()),
                     thread_id: None,
+                    environment: None,
                 },
                 config: {
                     let mut config = talos_types::TalosConfig::default();
@@ -4776,6 +4796,7 @@ mod tests {
                     trace_id: "trace-1".to_string(),
                     channel_id: Some("terminal".to_string()),
                     thread_id: None,
+                    environment: None,
                 },
                 config: {
                     let mut config = talos_types::TalosConfig::default();
@@ -4819,6 +4840,7 @@ mod tests {
                     trace_id: "trace-1".to_string(),
                     channel_id: Some("terminal".to_string()),
                     thread_id: None,
+                    environment: None,
                 },
                 config: {
                     let mut config = talos_types::TalosConfig::default();
@@ -4930,36 +4952,37 @@ mod tests {
     }
 
     fn create_embedded_app() -> TuiApp {
-        create_remote_app()
+        let client: Arc<dyn GatewayClient> = Arc::new(MockGatewayClient::new());
+        TuiApp::new_with_gateway_client(client, TalosConnectionMode::Embedded)
     }
 
     fn create_remote_app() -> TuiApp {
         let client: Arc<dyn GatewayClient> = Arc::new(MockGatewayClient::new());
-        TuiApp::new_with_gateway_client(client)
+        TuiApp::new_with_gateway_client(client, TalosConnectionMode::Remote)
     }
 
     fn create_remote_app_with_connect_delay(delay_ms: u64) -> TuiApp {
         let client: Arc<dyn GatewayClient> =
             Arc::new(MockGatewayClient::with_connect_delay(delay_ms));
-        TuiApp::new_with_gateway_client(client)
+        TuiApp::new_with_gateway_client(client, TalosConnectionMode::Remote)
     }
 
     fn create_remote_app_with_session_delay(delay_ms: u64) -> TuiApp {
         let client: Arc<dyn GatewayClient> =
             Arc::new(MockGatewayClient::with_session_delay(delay_ms));
-        TuiApp::new_with_gateway_client(client)
+        TuiApp::new_with_gateway_client(client, TalosConnectionMode::Remote)
     }
 
     fn create_remote_app_with_stream_failures(failures: u8) -> TuiApp {
         let client: Arc<dyn GatewayClient> =
             Arc::new(MockGatewayClient::with_stream_failures(failures));
-        TuiApp::new_with_gateway_client(client)
+        TuiApp::new_with_gateway_client(client, TalosConnectionMode::Remote)
     }
 
     fn create_remote_app_with_close_delay(delay_ms: u64) -> TuiApp {
         let client: Arc<dyn GatewayClient> =
             Arc::new(MockGatewayClient::with_close_delay(delay_ms));
-        TuiApp::new_with_gateway_client(client)
+        TuiApp::new_with_gateway_client(client, TalosConnectionMode::Remote)
     }
 
     fn set_test_model_info(app: &mut TuiApp, model_id: &str, context_window: u32) {
@@ -6619,6 +6642,7 @@ mod tests {
                 trace_id: "t".to_string(),
                 channel_id: None,
                 thread_id: None,
+                environment: None,
             },
             config,
             state: talos_types::SessionState {

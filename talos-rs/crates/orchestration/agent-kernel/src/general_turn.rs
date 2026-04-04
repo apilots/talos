@@ -743,6 +743,7 @@ mod tests {
                 session_id: "s1".to_string(),
                 ..crate::InvocationSession::default()
             },
+            session_environment: None,
             state: HashMap::new(),
             state_bags: ContextStateBags::default(),
             limits: InvocationLimits::default(),
@@ -1700,6 +1701,7 @@ pub async fn prepare_general_turn(
         })
         .tools(tool_definition_provider.as_ref())
         .memory_store(&session_id, memory_store.as_ref())
+        .session_environment(ctx.session_environment.clone())
         .user_input(input.to_string());
     let prompt_assembly = prompt_builder.assemble().await?;
     let prompt_diagnostics = prompt_assembly.diagnostics.clone();

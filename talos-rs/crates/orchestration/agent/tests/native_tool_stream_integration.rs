@@ -274,6 +274,7 @@ fn build_request(input: &str) -> OrchestratorRequest {
                 trace_id: "integration-trace".to_string(),
                 channel_id: None,
                 thread_id: None,
+                environment: None,
             },
             config: talos_config::Config::default(),
             state: SessionState::default(),

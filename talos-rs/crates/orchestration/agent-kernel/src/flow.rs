@@ -24,6 +24,7 @@ use talos_error::TalosResult;
 use talos_llm_provider::LlmProvider;
 use talos_memory::MemoryStore;
 use talos_tools::{ToolDefinitionProvider, ToolExecutorPort};
+use talos_types::talos::TalosConnectionMode;
 use talos_types::talos::{TalosOutputItem, TalosUsage};
 use tokio::sync::mpsc;
 
@@ -546,14 +547,17 @@ impl BaseLlmFlow for SingleFlow {
 
             if matches!(step.disposition, GeneralTurnStepDisposition::FinalResponse) {
                 let missing_local_path_probe =
-                    is_plan_react && should_require_local_path_file_probe(input, &state);
+                    is_plan_react && should_require_local_path_file_probe(ctx, input, &state);
+                let missing_structure_probe =
+                    is_plan_react && should_require_structure_probe(ctx, input, &state);
                 // PlanReAct mode: when require_final_answer_tag is enabled, only accept a
                 // FinalResponse that carries a confirmed FINAL_ANSWER tag. A response without
                 // the tag is treated as a no-progress round and may trigger a replan.
                 if is_plan_react
                     && ((self.kernel_config.plan_react.require_final_answer_tag
                         && !ctx.execution_state.plan_react_has_final_answer)
-                        || missing_local_path_probe)
+                        || missing_local_path_probe
+                        || missing_structure_probe)
                 {
                     plan_react_state.consecutive_no_progress_rounds += 1;
                     if should_replan(
@@ -568,6 +572,9 @@ impl BaseLlmFlow for SingleFlow {
                     }
                     final_text = if missing_local_path_probe {
                         "[plan-react stalled: local path analysis requires file tool verification]"
+                            .to_string()
+                    } else if missing_structure_probe {
+                        "[plan-react stalled: repository analysis requires at least one grep/search pass]"
                             .to_string()
                     } else {
                         "[plan-react stalled: no final answer]".to_string()
@@ -993,8 +1000,38 @@ fn has_file_probe_tool_call(state: &GeneralTurnLoopState) -> bool {
         .any(|record| is_file_probe_tool_name(&record.name))
 }
 
-fn should_require_local_path_file_probe(input: &str, state: &GeneralTurnLoopState) -> bool {
-    is_local_path_analysis_request(input) && !has_file_probe_tool_call(state)
+fn can_use_local_directory_probe(ctx: &InvocationContext) -> bool {
+    ctx.session_environment
+        .as_ref()
+        .map(|environment| matches!(environment.connection_mode, TalosConnectionMode::Embedded))
+        .unwrap_or(false)
+}
+
+fn has_structure_probe_tool_call(state: &GeneralTurnLoopState) -> bool {
+    state
+        .tool_call_log
+        .iter()
+        .any(|record| record.name == "grep_files")
+}
+
+fn should_require_local_path_file_probe(
+    ctx: &InvocationContext,
+    input: &str,
+    state: &GeneralTurnLoopState,
+) -> bool {
+    can_use_local_directory_probe(ctx)
+        && is_local_path_analysis_request(input)
+        && !has_file_probe_tool_call(state)
+}
+
+fn should_require_structure_probe(
+    _ctx: &InvocationContext,
+    input: &str,
+    state: &GeneralTurnLoopState,
+) -> bool {
+    is_local_path_analysis_request(input)
+        && has_file_probe_tool_call(state)
+        && !has_structure_probe_tool_call(state)
 }
 
 fn is_read_only_tool_name(tool_name: &str) -> bool {
@@ -1319,6 +1356,7 @@ mod tests {
                 session_id: "s1".to_string(),
                 ..crate::InvocationSession::default()
             },
+            session_environment: None,
             state: HashMap::new(),
             state_bags: ContextStateBags::default(),
             limits: InvocationLimits::default(),
@@ -1829,16 +1867,101 @@ mod tests {
 
     #[test]
     fn test_should_require_local_path_file_probe_until_file_tool_runs() {
+        let mut embedded_ctx = build_ctx();
+        embedded_ctx.session_environment = Some(talos_types::talos::TalosSessionEnvironment {
+            directory: std::path::PathBuf::from("/Users/xujiang/data/ailabs/talos"),
+            connection_mode: talos_types::talos::TalosConnectionMode::Embedded,
+        });
         let empty_state = test_loop_state(&[]);
         assert!(should_require_local_path_file_probe(
+            &embedded_ctx,
             "分析 /Users/xujiang/data/ailabs/PageIndex 项目架构",
             &empty_state,
         ));
 
         let probed_state = test_loop_state(&["memory_search", "list_dir"]);
         assert!(!should_require_local_path_file_probe(
+            &embedded_ctx,
             "分析 /Users/xujiang/data/ailabs/PageIndex 项目架构",
             &probed_state,
+        ));
+    }
+
+    #[test]
+    fn test_should_not_require_local_path_file_probe_for_remote_or_missing_environment() {
+        let remote_ctx = InvocationContext {
+            session_environment: Some(talos_types::talos::TalosSessionEnvironment {
+                directory: std::path::PathBuf::from("/Users/xujiang/data/ailabs/talos"),
+                connection_mode: talos_types::talos::TalosConnectionMode::Remote,
+            }),
+            ..build_ctx()
+        };
+        let none_ctx = build_ctx();
+        let state = test_loop_state(&[]);
+
+        assert!(!should_require_local_path_file_probe(
+            &remote_ctx,
+            "分析 /Users/xujiang/data/ailabs/PageIndex 项目架构",
+            &state,
+        ));
+        assert!(!should_require_local_path_file_probe(
+            &none_ctx,
+            "分析 /Users/xujiang/data/ailabs/PageIndex 项目架构",
+            &state,
+        ));
+    }
+
+    #[test]
+    fn test_should_require_structure_probe_for_embedded_without_grep_files() {
+        let embedded_ctx = InvocationContext {
+            session_environment: Some(talos_types::talos::TalosSessionEnvironment {
+                directory: std::path::PathBuf::from("/Users/xujiang/data/ailabs/talos"),
+                connection_mode: talos_types::talos::TalosConnectionMode::Embedded,
+            }),
+            ..build_ctx()
+        };
+        let state = test_loop_state(&["list_dir", "read_file"]);
+
+        assert!(should_require_structure_probe(
+            &embedded_ctx,
+            "分析 /Users/xujiang/data/ailabs/PageIndex 项目架构",
+            &state,
+        ));
+    }
+
+    #[test]
+    fn test_should_not_require_structure_probe_after_grep_files() {
+        let embedded_ctx = InvocationContext {
+            session_environment: Some(talos_types::talos::TalosSessionEnvironment {
+                directory: std::path::PathBuf::from("/Users/xujiang/data/ailabs/talos"),
+                connection_mode: talos_types::talos::TalosConnectionMode::Embedded,
+            }),
+            ..build_ctx()
+        };
+        let state = test_loop_state(&["list_dir", "grep_files", "read_file"]);
+
+        assert!(!should_require_structure_probe(
+            &embedded_ctx,
+            "分析 /Users/xujiang/data/ailabs/PageIndex 项目架构",
+            &state,
+        ));
+    }
+
+    #[test]
+    fn test_should_require_structure_probe_for_remote_when_file_probe_exists() {
+        let remote_ctx = InvocationContext {
+            session_environment: Some(talos_types::talos::TalosSessionEnvironment {
+                directory: std::path::PathBuf::from("/Users/xujiang/data/ailabs/talos"),
+                connection_mode: talos_types::talos::TalosConnectionMode::Remote,
+            }),
+            ..build_ctx()
+        };
+        let state = test_loop_state(&["list_dir", "read_file"]);
+
+        assert!(should_require_structure_probe(
+            &remote_ctx,
+            "分析 /Users/xujiang/data/ailabs/PageIndex 项目架构",
+            &state,
         ));
     }
 

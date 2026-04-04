@@ -10,7 +10,7 @@ use std::{
     path::Path,
     process::{Command, Stdio},
 };
-use talos_types::talos::TalosEventType;
+use talos_types::talos::{TalosConnectionMode, TalosEventType};
 use unicode_width::UnicodeWidthChar;
 
 pub(crate) const APP_VERSION: &str = "v0.1.0";
@@ -191,7 +191,7 @@ pub(crate) fn summarize_for_queue(input: &str) -> String {
     }
 }
 
-pub(crate) fn compact_workspace_path(path: &Path) -> String {
+pub(crate) fn compact_directory_path(path: &Path) -> String {
     let raw = path.display().to_string();
     if let Ok(home) = env::var("HOME") {
         if raw.starts_with(&home) {
@@ -239,7 +239,12 @@ pub(crate) fn copy_to_system_clipboard(text: &str) -> Result<(), String> {
     Err("no clipboard command available (pbcopy/wl-copy/xclip)".to_string())
 }
 
-pub(crate) fn build_welcome_card(version: &str, model: &str, workspace: &Path) -> String {
+pub(crate) fn build_welcome_card(
+    version: &str,
+    model: &str,
+    directory: &Path,
+    connection_mode: TalosConnectionMode,
+) -> String {
     const CARD_WIDTH: usize = 50;
 
     fn card_line(content: &str) -> String {
@@ -251,13 +256,15 @@ pub(crate) fn build_welcome_card(version: &str, model: &str, workspace: &Path) -
         format!("│{}│", inner)
     }
 
-    let workspace_line = format!("workspace: {}", workspace.display());
+    let directory_line = format!("directory: {}", compact_directory_path(directory));
+    let connection_line = format!("connection: {}", connection_mode);
     [
         "╭──────────────────────────────────────────────────╮".to_string(),
         card_line(&format!(" >_ Talos TUI ({})", version)),
         card_line(""),
         card_line(&format!(" model:     {:<12} /model to change", model)),
-        card_line(&workspace_line),
+        card_line(&directory_line),
+        card_line(&connection_line),
         "╰──────────────────────────────────────────────────╯".to_string(),
     ]
     .join("\n")

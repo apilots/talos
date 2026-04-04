@@ -477,6 +477,7 @@ async fn stream_session_message(
         trace_id: session.context.trace_id.clone(),
         channel_id: session.context.channel_id.clone(),
         thread_id: session.context.thread_id.clone(),
+        environment: session.context.environment.clone(),
     };
     validate_auth_context(&auth, &context, DEFAULT_SCOPE_MESSAGES_WRITE)?;
     validate_text_input(&request.input)?;
@@ -553,6 +554,7 @@ async fn process_session_message(
         trace_id: session.context.trace_id.clone(),
         channel_id: session.context.channel_id.clone(),
         thread_id: session.context.thread_id.clone(),
+        environment: session.context.environment.clone(),
     };
     validate_auth_context(&auth, &context, DEFAULT_SCOPE_MESSAGES_WRITE)?;
     let idempotency_key = headers
@@ -952,6 +954,7 @@ mod tests {
                     trace_id: context.trace_id,
                     channel_id: context.channel_id,
                     thread_id: context.thread_id,
+                    environment: context.environment,
                 },
                 config: {
                     let mut config = talos_types::TalosConfig::default();
@@ -989,6 +992,7 @@ mod tests {
                     trace_id: "trace-1".to_string(),
                     channel_id: Some("test-channel".to_string()),
                     thread_id: None,
+                    environment: None,
                 },
                 config: {
                     let mut config = talos_types::TalosConfig::default();

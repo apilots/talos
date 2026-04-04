@@ -785,6 +785,7 @@ impl AgentOrchestrator for AgentImpl {
                     planning_instruction,
                     transfer_to,
                     initial_state_bags: None,
+                    session_environment: agent_request.session.context.environment.clone(),
                     kernel_config: Some(self.kernel_config.clone()),
                     stream_tx: None,
                 },
@@ -853,6 +854,7 @@ impl AgentOrchestrator for AgentImpl {
                 planning_instruction,
                 transfer_to,
                 initial_state_bags: None,
+                session_environment: agent_request.session.context.environment.clone(),
                 kernel_config: Some(this.kernel_config.clone()),
                 stream_tx: Some(kernel_tx),
             };
@@ -1191,6 +1193,7 @@ mod tests {
                 trace_id: "trace-1".to_string(),
                 channel_id: None,
                 thread_id: None,
+                environment: None,
             },
             config: talos_config::Config::default(),
             state: SessionState {

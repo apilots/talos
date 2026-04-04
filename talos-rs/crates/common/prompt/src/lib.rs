@@ -26,6 +26,7 @@ use talos_error::TalosResult;
 use talos_llm_provider::ChatMessage;
 use talos_memory::{MemoryStore, RetrievedMemoryItem};
 use talos_tools::ToolDefinitionProvider;
+use talos_types::talos::TalosSessionEnvironment;
 use tokio::fs;
 
 /// A prompt template that can be rendered with context variables
@@ -318,6 +319,7 @@ pub struct PromptBuilder<'a> {
     pub(crate) memory_store: Option<&'a MemoryStore>,
     pub(crate) session_id: Option<&'a str>,
     pub(crate) retrieved_memories: Vec<RetrievedMemoryItem>,
+    pub(crate) session_environment: Option<TalosSessionEnvironment>,
     pub(crate) config: PromptBuildConfig,
 }
 
@@ -341,6 +343,7 @@ impl<'a> PromptBuilder<'a> {
             memory_store: None,
             session_id: None,
             retrieved_memories: Vec::new(),
+            session_environment: None,
             config: PromptBuildConfig::default(),
         }
     }
@@ -394,6 +397,11 @@ impl<'a> PromptBuilder<'a> {
 
     pub fn retrieved_memories(mut self, memories: Vec<RetrievedMemoryItem>) -> Self {
         self.retrieved_memories = memories;
+        self
+    }
+
+    pub fn session_environment(mut self, environment: Option<TalosSessionEnvironment>) -> Self {
+        self.session_environment = environment;
         self
     }
 
@@ -502,7 +510,7 @@ mod tests {
     use talos_memory::{
         Memory, MemoryStore, RecordHeader, TalosMessage, TalosMessageRole, TalosTurn,
     };
-    use talos_tools::{Tool, ToolContext, ToolOutput};
+    use talos_tools::{Tool, ToolContext, ToolOutput, ToolRegistry};
     use uuid::Uuid;
 
     #[test]

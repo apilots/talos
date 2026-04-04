@@ -411,6 +411,7 @@ mod tests {
                 trace_id: "t1".to_string(),
                 channel_id: Some("default".to_string()),
                 thread_id: None,
+                environment: None,
             },
             config,
             state: talos_types::SessionState {

@@ -650,6 +650,7 @@ impl SessionStore for MockSessionStore {
                 trace_id: "trace-mock".to_string(),
                 channel_id: Some("default".to_string()),
                 thread_id: None,
+                environment: None,
             },
             model: "default".to_string(),
             created_at: 0,
@@ -709,6 +710,7 @@ mod scope_tests {
             trace_id: "trace-1".to_string(),
             channel_id: Some("group-1".to_string()),
             thread_id: Some("topic-1".to_string()),
+            environment: None,
         }
     }
 

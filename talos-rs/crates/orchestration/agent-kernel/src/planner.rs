@@ -218,6 +218,7 @@ mod tests {
                 session_id: "s1".to_string(),
                 ..crate::InvocationSession::default()
             },
+            session_environment: None,
             state: HashMap::new(),
             state_bags: ContextStateBags::default(),
             limits: InvocationLimits::default(),

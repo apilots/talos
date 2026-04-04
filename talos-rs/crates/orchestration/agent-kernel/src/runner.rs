@@ -70,6 +70,7 @@ impl Runner for DefaultRunner {
             planning_instruction,
             transfer_to,
             initial_state_bags,
+            session_environment,
             kernel_config,
             stream_tx,
         } = request;
@@ -97,6 +98,7 @@ impl Runner for DefaultRunner {
                 session_id: ctx_session_id,
                 ..crate::InvocationSession::default()
             },
+            session_environment,
             state: HashMap::new(),
             state_bags: initial_state_bags.unwrap_or_default(),
             limits: crate::InvocationLimits::from(&config),
@@ -343,6 +345,7 @@ mod tests {
                 session_id: "s1".to_string(),
                 ..crate::InvocationSession::default()
             },
+            session_environment: None,
             state: HashMap::new(),
             state_bags: crate::ContextStateBags::default(),
             limits: crate::InvocationLimits::default(),
@@ -409,6 +412,7 @@ mod tests {
                     planning_instruction: None,
                     transfer_to: None,
                     initial_state_bags: None,
+                    session_environment: None,
                     kernel_config: Some(talos_config::AgentKernelConfig::default()),
                     stream_tx: None,
                 },

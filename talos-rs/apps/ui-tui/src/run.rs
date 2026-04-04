@@ -12,11 +12,15 @@ use ratatui::{
     Terminal,
 };
 use talos_client::TalosClient;
+use talos_types::talos::TalosConnectionMode;
 
 use super::TuiApp;
 
 /// Run the TUI connected to a remote gateway via `client`.
-pub async fn run_tui_app_with_client(client: Arc<TalosClient>) -> Result<(), Box<dyn Error>> {
+pub async fn run_tui_app_with_client(
+    client: Arc<TalosClient>,
+    connection_mode: TalosConnectionMode,
+) -> Result<(), Box<dyn Error>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -24,7 +28,7 @@ pub async fn run_tui_app_with_client(client: Arc<TalosClient>) -> Result<(), Box
     let mut terminal = Terminal::new(backend)?;
     terminal.hide_cursor()?;
 
-    let mut app = TuiApp::new_with_client(client);
+    let mut app = TuiApp::new_with_client(client, connection_mode);
     app.initialize_remote().await;
     let run_result = run_event_loop(&mut terminal, &mut app).await;
 
