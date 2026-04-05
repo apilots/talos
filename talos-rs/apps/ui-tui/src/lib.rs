@@ -6452,7 +6452,10 @@ mod tests {
             .map(|line| line_plain_text(&line.display))
             .collect::<Vec<_>>();
 
-        assert_eq!(texts, vec!["⚙  System", "", "System ready", "Loading tools"]);
+        assert_eq!(
+            texts,
+            vec!["⚙  System", "", "System ready", "Loading tools"]
+        );
     }
 
     #[test]
@@ -6561,9 +6564,9 @@ mod tests {
         assert!(texts.iter().any(|line| line == "let x = 1;"));
         assert_eq!(
             texts
-            .iter()
-            .filter(|line| line.starts_with("🤖 Assistant"))
-            .count(),
+                .iter()
+                .filter(|line| line.starts_with("🤖 Assistant"))
+                .count(),
             1
         );
     }

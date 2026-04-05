@@ -682,12 +682,12 @@ mod tests {
             )
             .unwrap();
 
-        let result = registry
+        let error = registry
             .execute_invocation_with_context(invocation, context)
             .await
-            .expect("default policy should allow memory_search");
+            .expect_err("memory_search should fail without injected memory store");
 
-        assert!(!result.is_error());
+        assert!(matches!(error, talos_error::TalosError::ToolError(_)));
     }
 
     #[test]

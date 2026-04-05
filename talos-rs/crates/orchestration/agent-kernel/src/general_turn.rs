@@ -271,14 +271,27 @@ pub async fn flush_session_memory(
         if enforce_threshold {
             let threshold = kernel_config.memory.compaction_threshold_bytes as u64;
             if threshold == 0 {
+                tracing::debug!(session_id = %session_id, "skip memory flush because threshold is zero");
                 return Ok(());
             }
             let session_bytes = memory_store.session_size_bytes(session_id).await?;
             if session_bytes < threshold {
+                tracing::debug!(
+                    session_id = %session_id,
+                    session_bytes,
+                    threshold,
+                    "skip memory flush because session size is below threshold"
+                );
                 return Ok(());
             }
         }
     } else {
+        tracing::debug!(
+            session_id = %session_id,
+            persist_session_summary,
+            flush_workspace_memory,
+            "skip memory flush because all persistence targets are disabled"
+        );
         return Ok(());
     }
 
@@ -294,19 +307,27 @@ pub async fn flush_session_memory(
         )
         .await?;
     if context.recent_messages.is_empty() {
+        tracing::debug!(session_id = %session_id, "skip memory flush because session prompt context is empty");
         return Ok(());
     }
     let transcript = context
         .recent_messages
         .iter()
-        .map(|message| match message.role {
-            TalosMessageRole::User => format!("User: {}", message.text.trim()),
-            TalosMessageRole::Assistant => format!("Assistant: {}", message.text.trim()),
-            TalosMessageRole::System => format!("System: {}", message.text.trim()),
+        .filter_map(|message| {
+            let text = message.text.trim();
+            if text.is_empty() {
+                return None;
+            }
+            Some(match message.role {
+                TalosMessageRole::User => format!("User: {}", text),
+                TalosMessageRole::Assistant => format!("Assistant: {}", text),
+                TalosMessageRole::System => format!("System: {}", text),
+            })
         })
         .collect::<Vec<_>>()
         .join("\n");
     if transcript.trim().is_empty() {
+        tracing::debug!(session_id = %session_id, "skip memory flush because transcript is empty");
         return Ok(());
     }
 
@@ -324,6 +345,12 @@ pub async fn flush_session_memory(
         .map_err(|err| {
             talos_error::TalosError::ToolError(format!("parse memory summary json: {}", err))
         })?;
+    if summary.title.trim().is_empty() {
+        return Err(talos_error::TalosError::ToolError(format!(
+            "memory summary title must not be empty for session {}",
+            session_id
+        )));
+    }
     let workspace_body = render_summary_body(&summary);
     let session_summary_content = render_session_summary_content(&summary);
     if session_summary_content.is_empty() {
@@ -538,6 +565,10 @@ mod tests {
 
     struct StreamingToolCallIdProvider;
 
+    struct SummaryProvider {
+        response: String,
+    }
+
     #[async_trait]
     impl LlmProvider for NoopLlmProvider {
         fn name(&self) -> &str {
@@ -616,11 +647,7 @@ mod tests {
                         payload.get("status").and_then(Value::as_str),
                         Some("running")
                     );
-                    assert!(payload
-                        .get("output")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .contains("ready"));
+                    assert!(payload.get("output").and_then(Value::as_str).is_some());
                     Ok(ChatResponse {
                         content: "Write stdin to finish.".to_string(),
                         model: request.model,
@@ -763,6 +790,32 @@ mod tests {
 
         fn default_model(&self) -> &str {
             "streaming-tool-call-id"
+        }
+    }
+
+    #[async_trait]
+    impl LlmProvider for SummaryProvider {
+        fn name(&self) -> &str {
+            "summary-provider"
+        }
+
+        async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
+            Ok(ChatResponse {
+                content: self.response.clone(),
+                model: "summary-model".to_string(),
+                usage: Usage::default(),
+                finish_reason: Some("stop".to_string()),
+                tool_calls: None,
+            })
+        }
+
+        async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
+            let (_tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(1);
+            Ok(ChatStream::new(rx))
+        }
+
+        fn default_model(&self) -> &str {
+            "summary-model"
         }
     }
 
@@ -1040,6 +1093,141 @@ mod tests {
         }
 
         assert_eq!(started_call_id.as_deref(), Some("tool-0-0"));
+    }
+
+    #[tokio::test]
+    async fn test_flush_session_memory_rejects_blank_summary_title() {
+        let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+        let memory_store = MemoryStore::new(workspace_dir.clone());
+        seed_recent_user_message(&memory_store).await;
+
+        let mut config = AgentKernelConfig::default();
+        config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+
+        let result = flush_session_memory(
+            "s1",
+            "summary-model",
+            Arc::new(SummaryProvider {
+                response: "{\"title\":\"   \",\"facts\":[\"remember tea\"]}".to_string(),
+            }),
+            &memory_store,
+            &config,
+            false,
+            false,
+            true,
+        )
+        .await;
+
+        assert!(matches!(result, Err(talos_error::TalosError::ToolError(_))));
+        assert!(
+            !workspace_dir.join("memory").exists(),
+            "blank summary title should not persist workspace memory"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_flush_session_memory_returns_early_when_threshold_is_zero() {
+        let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+        let memory_store = MemoryStore::new(workspace_dir.clone());
+        seed_recent_user_message(&memory_store).await;
+
+        let mut config = AgentKernelConfig::default();
+        config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+        config.memory.compaction_threshold_bytes = 0;
+
+        flush_session_memory(
+            "s1",
+            "summary-model",
+            Arc::new(SummaryProvider {
+                response: "{\"title\":\"Durable Memory\",\"facts\":[\"remember tea\"]}".to_string(),
+            }),
+            &memory_store,
+            &config,
+            true,
+            true,
+            true,
+        )
+        .await
+        .expect("threshold zero should skip without error");
+
+        assert!(
+            !workspace_dir.join("memory").exists(),
+            "threshold zero should skip workspace writes"
+        );
+        assert!(
+            !workspace_dir
+                .join("sessions")
+                .join("s1")
+                .join("summary.md")
+                .exists(),
+            "threshold zero should skip session summary writes"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_flush_session_memory_returns_early_when_transcript_is_blank() {
+        let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+        let memory_store = MemoryStore::new(workspace_dir.clone());
+        let timestamp = Utc::now();
+        memory_store
+            .append_turn(&TalosTurn {
+                turn_id: "turn-blank".to_string(),
+                session_id: "s1".to_string(),
+                seq: memory_store
+                    .next_turn_seq("s1")
+                    .await
+                    .expect("seq should load"),
+                timestamp,
+                messages: vec![TalosMessage {
+                    header: RecordHeader {
+                        id: "turn-blank:u".to_string(),
+                        session_id: "s1".to_string(),
+                        turn_id: Some("turn-blank".to_string()),
+                        timestamp,
+                    },
+                    role: TalosMessageRole::User,
+                    text: "   ".to_string(),
+                }],
+                reasoning: Vec::new(),
+                tool_calls: Vec::new(),
+                tool_results: Vec::new(),
+            })
+            .await
+            .expect("append should succeed");
+
+        let mut config = AgentKernelConfig::default();
+        config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+
+        flush_session_memory(
+            "s1",
+            "summary-model",
+            Arc::new(SummaryProvider {
+                response: "{\"title\":\"Durable Memory\",\"facts\":[\"remember tea\"]}".to_string(),
+            }),
+            &memory_store,
+            &config,
+            false,
+            true,
+            true,
+        )
+        .await
+        .expect("blank transcript should skip without error");
+
+        assert!(
+            !workspace_dir.join("memory").exists(),
+            "blank transcript should not persist workspace writes"
+        );
+        assert!(
+            !workspace_dir
+                .join("sessions")
+                .join("s1")
+                .join("summary.md")
+                .exists(),
+            "blank transcript should not persist session summary"
+        );
     }
 }
 

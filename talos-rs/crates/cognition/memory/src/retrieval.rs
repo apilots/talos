@@ -33,7 +33,7 @@ impl MemorySearchResponse {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 struct SectionRef {
     path: String,
     from: usize,
@@ -328,6 +328,27 @@ fn dedupe_section_refs(section_refs: Vec<SectionRef>) -> Vec<SectionRef> {
     deduped
 }
 
+fn retain_candidate_section_refs(
+    section_refs: Vec<SectionRef>,
+    candidate_files: &[MemoryIndexFile],
+) -> Vec<SectionRef> {
+    let allowed = candidate_files
+        .iter()
+        .flat_map(|file| {
+            file.sections.iter().map(|section| SectionRef {
+                path: file.path.clone(),
+                from: section.start_line,
+                to: section.end_line,
+            })
+        })
+        .collect::<HashSet<_>>();
+
+    section_refs
+        .into_iter()
+        .filter(|section_ref| allowed.contains(section_ref))
+        .collect()
+}
+
 pub(crate) async fn semantic_search(
     store: &MemoryStore,
     query: &MemorySearchQuery,
@@ -361,8 +382,11 @@ pub(crate) async fn semantic_search(
         return Ok(Vec::new());
     }
 
-    let section_refs = dedupe_section_refs(
-        select_candidate_sections(llm, query_text, &candidate_files, query.max_results).await?,
+    let section_refs = retain_candidate_section_refs(
+        dedupe_section_refs(
+            select_candidate_sections(llm, query_text, &candidate_files, query.max_results).await?,
+        ),
+        &candidate_files,
     );
     if section_refs.is_empty() {
         return Ok(Vec::new());
@@ -566,7 +590,7 @@ mod tests {
     async fn test_semantic_search_uses_two_hops() {
         let (_guard, store) = new_temp_store_with_llm(vec![
             "[\"memory/2026-04-04.md\"]".to_string(),
-            "[{\"path\":\"memory/2026-04-04.md\",\"from\":1,\"to\":6}]".to_string(),
+            "[{\"path\":\"memory/2026-04-04.md\",\"from\":1,\"to\":5}]".to_string(),
         ]);
         let memory_dir = store.workspace_memory_dir();
         tokio::fs::create_dir_all(&memory_dir)
@@ -592,6 +616,102 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].path, "memory/2026-04-04.md");
         assert!(results[0].snippet.contains("flush on close"));
+    }
+
+    #[tokio::test]
+    async fn test_semantic_search_rejects_hop2_refs_outside_candidate_sections() {
+        let (_guard, store) = new_temp_store_with_llm(vec![
+            "[\"memory/2026-04-04.md\"]".to_string(),
+            "[{\"path\":\"memory/2026-04-05.md\",\"from\":1,\"to\":6},{\"path\":\"memory/2026-04-04.md\",\"from\":1,\"to\":99}]".to_string(),
+        ]);
+        let memory_dir = store.workspace_memory_dir();
+        tokio::fs::create_dir_all(&memory_dir)
+            .await
+            .expect("memory dir should exist");
+        tokio::fs::write(
+            memory_dir.join("2026-04-04.md"),
+            "## [10:41] Flush required\nsession: session-1\n\n**Facts:**\n- flush on close\n",
+        )
+        .await
+        .expect("seed memory file should write");
+        tokio::fs::write(
+            memory_dir.join("2026-04-05.md"),
+            "## [11:01] Unrelated\nsession: session-2\n\n**Facts:**\n- unrelated content\n",
+        )
+        .await
+        .expect("second seed memory file should write");
+        rebuild_all_indexes(&store)
+            .await
+            .expect("rebuild all should succeed");
+
+        let results = store
+            .search_memory(&MemorySearchQuery {
+                query: "flush".to_string(),
+                max_results: 3,
+            })
+            .await
+            .expect("search should succeed");
+        assert!(results.is_empty(), "invalid hop2 refs should be discarded");
+    }
+
+    #[tokio::test]
+    async fn test_semantic_search_ignores_hop2_refs_with_inverted_range() {
+        let (_guard, store) = new_temp_store_with_llm(vec![
+            "[\"memory/2026-04-04.md\"]".to_string(),
+            "[{\"path\":\"memory/2026-04-04.md\",\"from\":5,\"to\":1}]".to_string(),
+        ]);
+        let memory_dir = store.workspace_memory_dir();
+        tokio::fs::create_dir_all(&memory_dir)
+            .await
+            .expect("memory dir should exist");
+        tokio::fs::write(
+            memory_dir.join("2026-04-04.md"),
+            "## [10:41] Flush required\nsession: session-1\n\n**Facts:**\n- flush on close\n",
+        )
+        .await
+        .expect("seed memory file should write");
+        rebuild_all_indexes(&store)
+            .await
+            .expect("rebuild all should succeed");
+
+        let results = store
+            .search_memory(&MemorySearchQuery {
+                query: "flush".to_string(),
+                max_results: 3,
+            })
+            .await
+            .expect("search should succeed");
+        assert!(results.is_empty(), "inverted hop2 refs should be ignored");
+    }
+
+    #[tokio::test]
+    async fn test_semantic_search_errors_on_invalid_hop2_json() {
+        let (_guard, store) = new_temp_store_with_llm(vec![
+            "[\"memory/2026-04-04.md\"]".to_string(),
+            "{\"path\":\"memory/2026-04-04.md\"}".to_string(),
+        ]);
+        let memory_dir = store.workspace_memory_dir();
+        tokio::fs::create_dir_all(&memory_dir)
+            .await
+            .expect("memory dir should exist");
+        tokio::fs::write(
+            memory_dir.join("2026-04-04.md"),
+            "## [10:41] Flush required\nsession: session-1\n\n**Facts:**\n- flush on close\n",
+        )
+        .await
+        .expect("seed memory file should write");
+        rebuild_all_indexes(&store)
+            .await
+            .expect("rebuild all should succeed");
+
+        let error = store
+            .search_memory(&MemorySearchQuery {
+                query: "flush".to_string(),
+                max_results: 3,
+            })
+            .await
+            .expect_err("invalid hop2 json should fail");
+        assert!(matches!(error, TalosError::ToolError(_)));
     }
 
     #[tokio::test]

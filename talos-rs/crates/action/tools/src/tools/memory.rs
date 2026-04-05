@@ -13,18 +13,6 @@ fn resolve_search_defaults(context: &ToolContext) -> usize {
         .max(1)
 }
 
-fn disabled_output(reason: impl Into<String>) -> ToolOutput {
-    ToolOutput {
-        success: true,
-        output: serde_json::json!({
-            "disabled": true,
-            "error": reason.into(),
-        })
-        .to_string(),
-        error: None,
-    }
-}
-
 pub struct MemorySearchTool;
 
 #[async_trait]
@@ -50,7 +38,9 @@ impl Tool for MemorySearchTool {
 
     async fn execute(&self, input: Value, context: ToolContext) -> TalosResult<ToolOutput> {
         let Some(memory) = context.memory_store() else {
-            return Ok(disabled_output("memory store unavailable"));
+            return Err(TalosError::ToolError(
+                "memory_search requires an injected memory store in tool context".to_string(),
+            ));
         };
         let query = input
             .get("query")
@@ -114,7 +104,9 @@ impl Tool for MemoryGetTool {
 
     async fn execute(&self, input: Value, context: ToolContext) -> TalosResult<ToolOutput> {
         let Some(memory) = context.memory_store() else {
-            return Ok(disabled_output("memory store unavailable"));
+            return Err(TalosError::ToolError(
+                "memory_get requires an injected memory store in tool context".to_string(),
+            ));
         };
         let path = input
             .get("path")
@@ -229,7 +221,7 @@ mod tests {
         let workspace_dir = temp_workspace_dir();
         let llm = Arc::new(MockLlmProvider::new(vec![
             "[\"memory/2026-03-25.md\"]".to_string(),
-            "[{\"path\":\"memory/2026-03-25.md\",\"from\":1,\"to\":4}]".to_string(),
+            "[{\"path\":\"memory/2026-03-25.md\",\"from\":1,\"to\":5}]".to_string(),
         ]));
         let memory = Arc::new(MemoryStore::new_with_llm(workspace_dir.clone(), llm));
         tokio::fs::create_dir_all(workspace_dir.join("memory"))
@@ -270,7 +262,7 @@ mod tests {
         let workspace_dir = temp_workspace_dir();
         let llm = Arc::new(MockLlmProvider::new(vec![
             "[\"memory/2026-03-25.md\",\"memory/2026-03-26.md\"]".to_string(),
-            "[{\"path\":\"memory/2026-03-25.md\",\"from\":1,\"to\":4},{\"path\":\"memory/2026-03-26.md\",\"from\":1,\"to\":4}]".to_string(),
+            "[{\"path\":\"memory/2026-03-25.md\",\"from\":1,\"to\":5},{\"path\":\"memory/2026-03-26.md\",\"from\":1,\"to\":5}]".to_string(),
         ]));
         let memory = Arc::new(MemoryStore::new_with_llm(workspace_dir.clone(), llm));
         tokio::fs::create_dir_all(workspace_dir.join("memory"))
@@ -346,7 +338,7 @@ mod tests {
         let llm = Arc::new(MockLlmProvider::new(vec![
             format!("[\"{}\"]", expected_memory_path),
             format!(
-                "[{{\"path\":\"{}\",\"from\":1,\"to\":4}}]",
+                "[{{\"path\":\"{}\",\"from\":1,\"to\":2}}]",
                 expected_memory_path
             ),
         ]));
@@ -377,7 +369,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_memory_search_returns_disabled_without_memory_store() {
+    async fn test_memory_search_errors_without_memory_store() {
         let workspace_dir = temp_workspace_dir();
         let tool = MemorySearchTool;
         let context = ToolContext::new_with_kernel_config(
@@ -385,15 +377,15 @@ mod tests {
             "user-1",
             Some(test_kernel_config(&workspace_dir)),
         );
-        let output = tool
+        let error = tool
             .execute(serde_json::json!({ "query": "friday" }), context)
             .await
-            .expect("tool should execute");
-        assert!(output.output.contains("\"disabled\":true"));
+            .expect_err("tool should fail when memory store is missing");
+        assert!(matches!(error, TalosError::ToolError(_)));
     }
 
     #[tokio::test]
-    async fn test_memory_get_returns_disabled_without_memory_store() {
+    async fn test_memory_get_errors_without_memory_store() {
         let workspace_dir = temp_workspace_dir();
         let tool = MemoryGetTool;
         let context = ToolContext::new_with_kernel_config(
@@ -401,13 +393,13 @@ mod tests {
             "user-1",
             Some(test_kernel_config(&workspace_dir)),
         );
-        let output = tool
+        let error = tool
             .execute(
                 serde_json::json!({ "path": "memory/2026-03-25.md" }),
                 context,
             )
             .await
-            .expect("tool should execute");
-        assert!(output.output.contains("\"disabled\":true"));
+            .expect_err("tool should fail when memory store is missing");
+        assert!(matches!(error, TalosError::ToolError(_)));
     }
 }
