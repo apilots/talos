@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
+use talos_memory::MemoryStore;
 
 use crate::collaboration::CollaborationRuntime;
 
@@ -15,6 +16,7 @@ pub struct ToolContext {
     kernel_config: Option<Arc<AgentKernelConfig>>,
     pre_approved: bool,
     collaboration_runtime: Option<Arc<CollaborationRuntime>>,
+    memory_store: Option<Arc<MemoryStore>>,
 }
 
 impl ToolContext {
@@ -34,6 +36,7 @@ impl ToolContext {
             kernel_config,
             pre_approved: false,
             collaboration_runtime: None,
+            memory_store: None,
         }
     }
 
@@ -48,6 +51,11 @@ impl ToolContext {
 
     pub fn with_collaboration_runtime(mut self, runtime: Arc<CollaborationRuntime>) -> Self {
         self.collaboration_runtime = Some(runtime);
+        self
+    }
+
+    pub fn with_memory_store(mut self, store: Arc<MemoryStore>) -> Self {
+        self.memory_store = Some(store);
         self
     }
 
@@ -81,6 +89,10 @@ impl ToolContext {
 
     pub fn collaboration_runtime(&self) -> Option<Arc<CollaborationRuntime>> {
         self.collaboration_runtime.clone()
+    }
+
+    pub fn memory_store(&self) -> Option<Arc<MemoryStore>> {
+        self.memory_store.clone()
     }
 
     pub fn state_snapshot(&self) -> HashMap<String, Value> {

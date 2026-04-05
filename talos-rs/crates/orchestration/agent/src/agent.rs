@@ -204,18 +204,20 @@ impl AgentImpl {
         kernel_config.memory.compaction_threshold_bytes =
             kernel_config.memory.compaction_threshold_bytes.max(1024);
         kernel_config.memory.search_max_results = kernel_config.memory.search_max_results.max(1);
-        kernel_config.memory.search_min_score =
-            kernel_config.memory.search_min_score.clamp(0.0, 1.0);
         kernel_config
     }
 
-    fn build_memory_store_from_kernel_config(kernel_config: &AgentKernelConfig) -> MemoryStore {
-        MemoryStore::from_config(&kernel_config.memory)
+    fn build_memory_store_from_kernel_config(
+        kernel_config: &AgentKernelConfig,
+        llm_provider: Arc<dyn LlmProvider>,
+    ) -> MemoryStore {
+        MemoryStore::from_config_with_llm(kernel_config, llm_provider)
     }
 
     fn rebuild_memory_store(&mut self) {
         self.memory_store = Arc::new(Self::build_memory_store_from_kernel_config(
             &self.kernel_config,
+            self.llm_provider.clone(),
         ));
     }
 
@@ -229,7 +231,10 @@ impl AgentImpl {
         kernel_config: AgentKernelConfig,
     ) -> Self {
         let kernel_config = Self::normalized_kernel_config(kernel_config);
-        let memory_store = Arc::new(Self::build_memory_store_from_kernel_config(&kernel_config));
+        let memory_store = Arc::new(Self::build_memory_store_from_kernel_config(
+            &kernel_config,
+            llm_provider.clone(),
+        ));
 
         Self {
             id,
@@ -278,11 +283,14 @@ impl AgentImpl {
         tool_calls: Vec<FunctionCall>,
     ) -> TalosResult<Vec<ChatMessage>> {
         let mut tool_messages = Vec::new();
-        let context = self.tool_registry.build_context(
-            format!("agent-{}", self.id),
-            self.name.clone(),
-            Some(Arc::new(self.kernel_config_snapshot())),
-        );
+        let context = self
+            .tool_registry
+            .build_context(
+                format!("agent-{}", self.id),
+                self.name.clone(),
+                Some(Arc::new(self.kernel_config_snapshot())),
+            )
+            .with_memory_store(self.memory_store.clone());
 
         for tool_call in tool_calls {
             tracing::info!(
@@ -699,11 +707,14 @@ impl Agent for AgentImpl {
         );
 
         // Execute the tool through the registry
-        let tool_context = self.tool_registry.build_context(
-            format!("agent-{}", self.id),
-            self.name.clone(),
-            Some(Arc::new(self.kernel_config_snapshot())),
-        );
+        let tool_context = self
+            .tool_registry
+            .build_context(
+                format!("agent-{}", self.id),
+                self.name.clone(),
+                Some(Arc::new(self.kernel_config_snapshot())),
+            )
+            .with_memory_store(self.memory_store.clone());
         let invocation = self.tool_registry.build_function_invocation(
             format!("agent-direct-{tool_name}"),
             tool_name,
@@ -1381,7 +1392,9 @@ mod tests {
             }
         }
         let content = content.expect("workspace daily memory file should exist");
-        assert!(content.contains("## Durable Memory"));
+        assert!(content.contains("## ["));
+        assert!(content.contains("session:"));
+        assert!(content.contains("Durable Memory"));
         assert!(!content.trim().is_empty());
     }
 
@@ -1522,9 +1535,19 @@ mod tests {
             "mock-model"
         }
 
-        async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
+        async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+            let content = if request.messages.iter().any(|message| {
+                message
+                    .content
+                    .contains("Extract durable memory from this conversation as JSON.")
+            }) {
+                "{\"title\":\"Durable Memory\",\"facts\":[\"User prefers tea over coffee\"]}"
+                    .to_string()
+            } else {
+                "Test response".to_string()
+            };
             Ok(ChatResponse {
-                content: "Test response".to_string(),
+                content,
                 model: "mock-model".to_string(),
                 usage: Usage {
                     prompt_tokens: 0,

@@ -1,13 +1,19 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use talos_error::{TalosError, TalosResult};
+use talos_llm_provider::{ChatMessage, ChatRequest, LlmProvider};
 use tokio::fs;
 
 use crate::path_policy;
 use crate::store::{
-    MemoryGetResult, MemorySearchQuery, MemorySearchResult, MemoryStore, RetrievedMemoryItem,
+    MemoryGetResult, MemoryIndexFile, MemoryIndexSection, MemorySearchQuery, MemorySearchResult,
+    MemoryStore, RetrievedMemoryItem,
 };
+
+const INDEX_PREVIEW_LIMIT: usize = 100;
+const HOP1_FILE_SECTION_LIMIT: usize = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MemorySearchResponse {
@@ -22,173 +28,299 @@ impl MemorySearchResponse {
             .map(|item| RetrievedMemoryItem {
                 path: item.path,
                 snippet: item.snippet,
-                citation: item.citation,
-                score: item.score,
             })
             .collect()
     }
 }
 
-#[derive(Debug, Clone)]
-struct RetrievalSource {
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct SectionRef {
     path: String,
-    content: String,
+    from: usize,
+    to: usize,
 }
 
-#[derive(Debug, Clone)]
-struct RetrievalChunk {
-    path: String,
-    text: String,
-    start_line: usize,
-    end_line: usize,
-}
-
-pub(crate) fn build_citation(path: &str, start_line: usize, end_line: usize) -> String {
-    if start_line == end_line {
-        format!("{path}#L{start_line}")
+pub fn strip_json_fences(raw: &str) -> &str {
+    let trimmed = raw.trim();
+    if let Some(rest) = trimmed.strip_prefix("```json") {
+        rest.strip_suffix("```").unwrap_or(rest).trim()
+    } else if let Some(rest) = trimmed.strip_prefix("```") {
+        rest.strip_suffix("```").unwrap_or(rest).trim()
     } else {
-        format!("{path}#L{start_line}-L{end_line}")
+        trimmed
     }
 }
 
-fn normalized_query(query: &str) -> Option<String> {
-    let normalized = query.trim().to_ascii_lowercase();
-    if normalized.is_empty() {
-        None
-    } else {
-        Some(normalized)
-    }
+fn relative_source_path(workspace_dir: &Path, file: &Path) -> String {
+    file.strip_prefix(workspace_dir)
+        .unwrap_or(file)
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
-fn score_match(haystack: &str, query: &str) -> f32 {
-    let normalized_haystack = haystack.to_ascii_lowercase();
-    let normalized_query = query.to_ascii_lowercase();
-    if normalized_query.is_empty() {
-        return 0.0;
-    }
-    let occurrences = normalized_haystack.matches(&normalized_query).count();
-    if occurrences == 0 {
-        return 0.0;
-    }
-    let covered_chars =
-        (occurrences.saturating_mul(normalized_query.len())).min(normalized_haystack.len());
-    covered_chars as f32 / normalized_haystack.len().max(1) as f32
+fn index_file_path_for(md_path: &Path) -> PathBuf {
+    md_path.with_extension("index.json")
 }
 
-fn push_chunk(
-    chunks: &mut Vec<RetrievalChunk>,
-    path: &str,
-    lines: &[&str],
-    start_line: usize,
-    end_line: usize,
-) {
-    let text = lines
+fn truncate_preview(input: &str, max_chars: usize) -> String {
+    let trimmed = input.trim();
+    if trimmed.chars().count() <= max_chars {
+        return trimmed.to_string();
+    }
+    trimmed.chars().take(max_chars).collect::<String>()
+}
+
+fn parse_heading_title(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with("## ") {
+        return None;
+    }
+    let without_prefix = trimmed.trim_start_matches("## ").trim();
+    if let Some(rest) = without_prefix.strip_prefix('[') {
+        let closing = rest.find(']')?;
+        return Some(rest[closing + 1..].trim().to_string());
+    }
+    Some(without_prefix.to_string())
+}
+
+fn extract_session_id(section_lines: &[&str]) -> String {
+    section_lines
         .iter()
-        .map(|line| line.trim_end())
-        .collect::<Vec<_>>()
-        .join("\n")
-        .trim()
-        .to_string();
-    if text.is_empty() {
-        return;
-    }
-    chunks.push(RetrievalChunk {
-        path: path.to_string(),
-        text,
-        start_line,
-        end_line,
-    });
+        .find_map(|line| {
+            line.trim()
+                .strip_prefix("session: ")
+                .map(|value| value.trim().to_string())
+        })
+        .unwrap_or_default()
 }
 
-fn chunk_source(source: &RetrievalSource) -> Vec<RetrievalChunk> {
-    let lines: Vec<&str> = source.content.lines().collect();
-    let mut chunks = Vec::new();
-    let mut current_lines: Vec<&str> = Vec::new();
-    let mut current_start = 1usize;
-
-    for (idx, line) in lines.iter().enumerate() {
-        let line_no = idx + 1;
+fn extract_summary_preview(section_lines: &[&str]) -> String {
+    let mut parts = Vec::new();
+    for line in section_lines {
         let trimmed = line.trim();
-
-        let should_split_before = (!current_lines.is_empty() && trimmed.starts_with('#'))
-            || (!current_lines.is_empty() && trimmed.is_empty());
-        if should_split_before {
-            push_chunk(
-                &mut chunks,
-                &source.path,
-                &current_lines,
-                current_start,
-                line_no.saturating_sub(1),
-            );
-            current_lines.clear();
-        }
-
-        if trimmed.is_empty() {
-            current_start = line_no.saturating_add(1);
+        if trimmed.is_empty()
+            || trimmed.starts_with("## ")
+            || trimmed.starts_with("session: ")
+            || trimmed.starts_with("**")
+        {
             continue;
         }
-
-        if current_lines.is_empty() {
-            current_start = line_no;
+        if let Some(item) = trimmed.strip_prefix("- ") {
+            parts.push(item.trim().to_string());
+        } else {
+            parts.push(trimmed.to_string());
         }
-        current_lines.push(line);
+        if parts.len() >= 2 {
+            break;
+        }
     }
-
-    if !current_lines.is_empty() {
-        push_chunk(
-            &mut chunks,
-            &source.path,
-            &current_lines,
-            current_start,
-            lines.len().max(current_start),
-        );
-    }
-
-    chunks
+    truncate_preview(&parts.join(" "), INDEX_PREVIEW_LIMIT)
 }
 
-fn rank_chunk(chunk: &RetrievalChunk, query: &str) -> f32 {
-    let text_score = score_match(&chunk.text, query);
-    if text_score <= 0.0 {
-        return 0.0;
+fn build_index_file_from_content(
+    workspace_dir: &Path,
+    md_path: &Path,
+    content: &str,
+) -> MemoryIndexFile {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut sections = Vec::new();
+    let mut section_start_indices = Vec::new();
+
+    for (idx, line) in lines.iter().enumerate() {
+        if line.trim().starts_with("## ") {
+            section_start_indices.push(idx);
+        }
     }
 
-    let heading_score = chunk
-        .text
-        .lines()
-        .next()
-        .map(|line| {
-            if line.trim_start().starts_with('#') {
-                score_match(line, query)
-            } else {
-                0.0
+    for (position, start_idx) in section_start_indices.iter().enumerate() {
+        let end_idx = section_start_indices
+            .get(position + 1)
+            .map(|next| next.saturating_sub(1))
+            .unwrap_or_else(|| lines.len().saturating_sub(1));
+        let section_lines = &lines[*start_idx..=end_idx];
+        let Some(title) = parse_heading_title(section_lines[0]) else {
+            continue;
+        };
+        sections.push(MemoryIndexSection {
+            title,
+            session_id: extract_session_id(section_lines),
+            summary_preview: extract_summary_preview(section_lines),
+            start_line: start_idx + 1,
+            end_line: end_idx + 1,
+        });
+    }
+
+    let path = relative_source_path(workspace_dir, md_path);
+    let date = md_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_string();
+    MemoryIndexFile {
+        path,
+        date,
+        sections,
+    }
+}
+
+pub(crate) async fn rebuild_file_index(
+    store: &MemoryStore,
+    date: &str,
+) -> TalosResult<MemoryIndexFile> {
+    let md_path = store.workspace_memory_dir().join(format!("{date}.md"));
+    let content = fs::read_to_string(&md_path)
+        .await
+        .map_err(|e| TalosError::StorageError(format!("read workspace memory file: {}", e)))?;
+    let index_file = build_index_file_from_content(store.workspace_dir(), &md_path, &content);
+    let json = serde_json::to_string_pretty(&index_file)
+        .map_err(|e| TalosError::StorageError(format!("serialize memory index: {}", e)))?;
+    fs::write(index_file_path_for(&md_path), json)
+        .await
+        .map_err(|e| TalosError::StorageError(format!("write memory index file: {}", e)))?;
+    Ok(index_file)
+}
+
+pub(crate) async fn rebuild_file_index_for_timestamp(
+    store: &MemoryStore,
+    timestamp: chrono::DateTime<chrono::Utc>,
+) -> TalosResult<MemoryIndexFile> {
+    let date = timestamp
+        .with_timezone(&store.timezone())
+        .format("%Y-%m-%d")
+        .to_string();
+    rebuild_file_index(store, &date).await
+}
+
+pub(crate) async fn rebuild_all_indexes(store: &MemoryStore) -> TalosResult<()> {
+    for file in path_policy::list_workspace_memory_files(store).await? {
+        let Some(date) = file.file_stem().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        rebuild_file_index(store, date).await?;
+    }
+    Ok(())
+}
+
+async fn load_index_files(store: &MemoryStore) -> TalosResult<Vec<MemoryIndexFile>> {
+    let daily_files = path_policy::list_workspace_memory_files(store).await?;
+    if daily_files.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let has_missing_index = daily_files
+        .iter()
+        .any(|path| !index_file_path_for(path).exists());
+    if has_missing_index {
+        rebuild_all_indexes(store).await?;
+    }
+
+    let mut indexes = Vec::new();
+    for file in daily_files {
+        let index_path = index_file_path_for(&file);
+        let content = fs::read_to_string(&index_path)
+            .await
+            .map_err(|e| TalosError::StorageError(format!("read memory index file: {}", e)))?;
+        let parsed = serde_json::from_str::<MemoryIndexFile>(&content)
+            .map_err(|e| TalosError::StorageError(format!("parse memory index file: {}", e)))?;
+        indexes.push(parsed);
+    }
+    indexes.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(indexes)
+}
+
+fn format_file_summaries(indexes: &[MemoryIndexFile]) -> String {
+    indexes
+        .iter()
+        .map(|file| {
+            let mut output = format!("{} ({} sections)", file.path, file.sections.len());
+            for section in file.sections.iter().take(HOP1_FILE_SECTION_LIMIT) {
+                output.push_str(&format!("\n  - {}", section.title));
+                if !section.summary_preview.is_empty() {
+                    output.push_str(&format!(" | {}", section.summary_preview));
+                }
             }
+            output
         })
-        .unwrap_or(0.0);
-
-    ((text_score * 0.8) + (heading_score * 0.2)).clamp(0.0, 1.0)
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
-fn render_chunk(chunk: &RetrievalChunk, score: f32) -> MemorySearchResult {
-    MemorySearchResult {
-        path: chunk.path.clone(),
-        snippet: chunk.text.clone(),
-        citation: Some(build_citation(
-            &chunk.path,
-            chunk.start_line,
-            chunk.end_line,
-        )),
-        score,
-        start_line: chunk.start_line,
-        end_line: chunk.end_line,
-    }
+fn format_candidate_sections(files: &[MemoryIndexFile]) -> String {
+    files
+        .iter()
+        .map(|file| {
+            let mut output = format!("{}:", file.path);
+            for section in &file.sections {
+                output.push_str(&format!(
+                    "\n  L{}-{}: \"{}\"\n          session: {} | \"{}\"",
+                    section.start_line,
+                    section.end_line,
+                    section.title,
+                    section.session_id,
+                    section.summary_preview
+                ));
+            }
+            output
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
-fn dedupe_results(results: Vec<MemorySearchResult>) -> Vec<MemorySearchResult> {
+async fn select_candidate_files(
+    llm: Arc<dyn LlmProvider>,
+    query: &str,
+    indexes: &[MemoryIndexFile],
+    max_results: usize,
+) -> TalosResult<Vec<String>> {
+    let request = ChatRequest::builder()
+        .model(llm.default_model().to_string())
+        .messages(vec![
+            ChatMessage::system(
+                "You select relevant memory files for a query. Respond ONLY with a valid JSON array of file paths.",
+            ),
+            ChatMessage::user(format!(
+                "Query: \"{}\"\n\nMemory files:\n{}\n\nReturn at most {} relevant file paths as JSON array in the form [\"memory/YYYY-MM-DD.md\"].",
+                query,
+                format_file_summaries(indexes),
+                max_results.max(1)
+            )),
+        ])
+        .build();
+    let response = llm.chat(request).await?;
+    serde_json::from_str::<Vec<String>>(strip_json_fences(&response.content))
+        .map_err(|e| TalosError::ToolError(format!("parse hop1 memory search response: {}", e)))
+}
+
+async fn select_candidate_sections(
+    llm: Arc<dyn LlmProvider>,
+    query: &str,
+    files: &[MemoryIndexFile],
+    max_results: usize,
+) -> TalosResult<Vec<SectionRef>> {
+    let request = ChatRequest::builder()
+        .model(llm.default_model().to_string())
+        .messages(vec![
+            ChatMessage::system(
+                "You select relevant memory sections for a query. Respond ONLY with a valid JSON array.",
+            ),
+            ChatMessage::user(format!(
+                "Query: \"{}\"\n\nCandidate sections:\n{}\n\nReturn at most {} items as JSON array in the form [{{\"path\":\"memory/...\",\"from\":1,\"to\":2}}].",
+                query,
+                format_candidate_sections(files),
+                max_results.max(1)
+            )),
+        ])
+        .build();
+    let response = llm.chat(request).await?;
+    serde_json::from_str::<Vec<SectionRef>>(strip_json_fences(&response.content))
+        .map_err(|e| TalosError::ToolError(format!("parse hop2 memory search response: {}", e)))
+}
+
+fn dedupe_section_refs(section_refs: Vec<SectionRef>) -> Vec<SectionRef> {
     let mut seen = HashSet::new();
     let mut deduped = Vec::new();
-    for item in results {
-        let key = format!("{}:{}", item.path, item.snippet.to_ascii_lowercase());
+    for item in section_refs {
+        let key = format!("{}:{}:{}", item.path, item.from, item.to);
         if seen.insert(key) {
             deduped.push(item);
         }
@@ -196,68 +328,68 @@ fn dedupe_results(results: Vec<MemorySearchResult>) -> Vec<MemorySearchResult> {
     deduped
 }
 
-fn relative_source_path(workspace_dir: &Path, file: &PathBuf) -> String {
-    file.strip_prefix(workspace_dir)
-        .unwrap_or(file)
-        .to_string_lossy()
-        .replace('\\', "/")
-}
-
-async fn load_sources(store: &MemoryStore) -> TalosResult<Vec<RetrievalSource>> {
-    let mut sources = Vec::new();
-
-    for file in path_policy::list_workspace_memory_files(store).await? {
-        let content = fs::read_to_string(&file)
-            .await
-            .map_err(|e| TalosError::StorageError(format!("read workspace memory file: {}", e)))?;
-        if content.trim().is_empty() {
-            continue;
-        }
-        sources.push(RetrievalSource {
-            path: relative_source_path(store.workspace_dir(), &file),
-            content,
-        });
-    }
-
-    Ok(sources)
-}
-
-pub(crate) async fn search_memory(
+pub(crate) async fn semantic_search(
     store: &MemoryStore,
     query: &MemorySearchQuery,
 ) -> TalosResult<Vec<MemorySearchResult>> {
-    let Some(query_text) = normalized_query(&query.query) else {
+    let query_text = query.query.trim();
+    if query_text.is_empty() {
         return Ok(Vec::new());
+    }
+    let Some(llm) = store.llm_provider() else {
+        return Err(TalosError::ToolError(
+            "memory search requires an llm-backed memory store".to_string(),
+        ));
     };
 
-    let mut results = load_sources(store)
-        .await?
-        .into_iter()
-        .flat_map(|source| chunk_source(&source))
-        .filter_map(|chunk| {
-            let score = rank_chunk(&chunk, &query_text);
-            if score <= 0.0 {
-                None
-            } else {
-                Some(render_chunk(&chunk, score))
-            }
-        })
-        .collect::<Vec<_>>();
-
-    results.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then(a.path.cmp(&b.path))
-            .then(a.start_line.cmp(&b.start_line))
-    });
-    results = dedupe_results(results);
-
-    if let Some(min_score) = query.min_score {
-        results.retain(|item| item.score >= min_score);
+    let indexes = load_index_files(store).await?;
+    if indexes.is_empty() {
+        return Ok(Vec::new());
     }
-    if results.len() > query.max_results {
-        results.truncate(query.max_results);
+
+    let candidate_paths =
+        select_candidate_files(llm.clone(), query_text, &indexes, query.max_results.max(3)).await?;
+    if candidate_paths.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let candidate_files = indexes
+        .into_iter()
+        .filter(|file| candidate_paths.iter().any(|path| path == &file.path))
+        .collect::<Vec<_>>();
+    if candidate_files.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let section_refs = dedupe_section_refs(
+        select_candidate_sections(llm, query_text, &candidate_files, query.max_results).await?,
+    );
+    if section_refs.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut results = Vec::new();
+    for section in section_refs.into_iter().take(query.max_results) {
+        if section.to < section.from {
+            continue;
+        }
+        let fetched = get_memory(
+            store,
+            &section.path,
+            Some(section.from),
+            Some(section.to - section.from + 1),
+        )
+        .await?;
+        let snippet = fetched.text.trim().to_string();
+        if snippet.is_empty() {
+            continue;
+        }
+        results.push(MemorySearchResult {
+            path: fetched.path,
+            snippet,
+            start_line: section.from,
+            end_line: section.to,
+        });
     }
     Ok(results)
 }
@@ -310,107 +442,174 @@ pub(crate) async fn get_memory(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use async_trait::async_trait;
     use chrono::Utc;
+    use talos_error::TalosResult;
+    use talos_llm_provider::{
+        ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, NativeThinkingSupport,
+        ToolStream, Usage,
+    };
     use tempfile::TempDir;
 
-    use crate::store::{MemorySearchQuery, MemoryStore};
     use crate::{Memory, WorkspaceMemoryRecord};
 
-    use super::{chunk_source, normalized_query, rank_chunk, RetrievalChunk, RetrievalSource};
+    #[derive(Clone)]
+    struct MockLlmProvider {
+        responses: Arc<tokio::sync::Mutex<Vec<String>>>,
+    }
 
-    fn new_temp_store() -> (TempDir, MemoryStore) {
+    impl MockLlmProvider {
+        fn new(responses: Vec<String>) -> Self {
+            Self {
+                responses: Arc::new(tokio::sync::Mutex::new(responses)),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl LlmProvider for MockLlmProvider {
+        fn name(&self) -> &str {
+            "mock"
+        }
+
+        async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
+            let mut responses = self.responses.lock().await;
+            let content = responses.remove(0);
+            Ok(ChatResponse {
+                content,
+                model: "mock".to_string(),
+                usage: Usage::default(),
+                finish_reason: Some("stop".to_string()),
+                tool_calls: Some(Vec::<FunctionCall>::new()),
+            })
+        }
+
+        async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
+            unreachable!("stream is not used in tests")
+        }
+
+        fn default_model(&self) -> &str {
+            "mock-model"
+        }
+
+        fn native_thinking_support(&self, _model: &str) -> NativeThinkingSupport {
+            NativeThinkingSupport::Unsupported
+        }
+
+        async fn stream_with_tools(&self, _request: ChatRequest) -> TalosResult<ToolStream> {
+            unreachable!("tool stream is not used in tests")
+        }
+    }
+
+    fn new_temp_store_with_llm(responses: Vec<String>) -> (TempDir, MemoryStore) {
         let temp_dir = tempfile::tempdir().expect("temp dir should be created");
-        let store = MemoryStore::new(temp_dir.path().to_path_buf());
+        let llm = Arc::new(MockLlmProvider::new(responses));
+        let store = MemoryStore::new_with_llm(temp_dir.path().to_path_buf(), llm);
         (temp_dir, store)
     }
 
-    #[test]
-    fn test_chunk_source_splits_on_headings_and_blank_lines() {
-        let source = RetrievalSource {
-            path: "MEMORY.md".to_string(),
-            content: "# Preferences\nTea only\n\n# Decisions\nUse blue green\n".to_string(),
-        };
-
-        let chunks = chunk_source(&source);
-        assert_eq!(chunks.len(), 2);
-        assert!(chunks[0].text.contains("Tea only"));
-        assert!(chunks[1].text.contains("Use blue green"));
-    }
-
-    #[test]
-    fn test_rank_chunk_prefers_heading_match() {
-        let query = normalized_query("preferences").expect("query should normalize");
-        let chunk = RetrievalChunk {
-            path: "MEMORY.md".to_string(),
-            text: "# Preferences\nTea only".to_string(),
-            start_line: 1,
-            end_line: 2,
-        };
-
-        let score = rank_chunk(&chunk, &query);
-        assert!(score > 0.0);
-        assert!(score <= 1.0);
-    }
-
     #[tokio::test]
-    async fn test_search_memory_returns_block_snippet() {
-        let (_guard, store) = new_temp_store();
+    async fn test_rebuild_file_index_extracts_sections() {
+        let (_guard, store) = new_temp_store_with_llm(Vec::new());
+        let timestamp = Utc::now();
         store
             .append_workspace_memory(&WorkspaceMemoryRecord {
-                timestamp: Utc::now(),
-                title: Some("Daily".to_string()),
-                content: "# Preferences\nTea only\nNo coffee\n\n# Decisions\nUse blue green"
+                timestamp,
+                session_id: "session-1".to_string(),
+                title: "Flush required".to_string(),
+                content: "**Facts:**\n- flush on close\n\n**Preferences:**\n- ephemeral sessions\n"
                     .to_string(),
             })
             .await
             .expect("workspace memory append should succeed");
 
-        let results = store
-            .search_memory(&MemorySearchQuery {
-                query: "tea".to_string(),
-                max_results: 5,
-                min_score: Some(0.0),
-            })
+        let date = timestamp
+            .with_timezone(&store.timezone())
+            .format("%Y-%m-%d")
+            .to_string();
+        let index = rebuild_file_index(&store, &date)
             .await
-            .expect("search should succeed");
-
-        assert!(!results.is_empty());
-        assert!(results[0].path.starts_with("memory/"));
-        assert!(results[0].snippet.contains("Tea only"));
-        assert!(results[0].snippet.contains("No coffee"));
-        assert_eq!(results[0].start_line, 2);
-        assert_eq!(results[0].end_line, 4);
+            .expect("rebuild should succeed");
+        assert_eq!(index.sections.len(), 1);
+        assert_eq!(index.sections[0].title, "Flush required");
+        assert_eq!(index.sections[0].session_id, "session-1");
+        assert!(index.sections[0].summary_preview.contains("flush on close"));
     }
 
     #[tokio::test]
-    async fn test_search_memory_dedupes_repeated_chunks() {
-        let (_guard, store) = new_temp_store();
-        store
-            .append_workspace_memory(&WorkspaceMemoryRecord {
-                timestamp: Utc::now(),
-                title: Some("Daily".to_string()),
-                content: "deployment decision: blue green".to_string(),
-            })
+    async fn test_rebuild_all_indexes_bootstraps_existing_md_files() {
+        let (_guard, store) = new_temp_store_with_llm(Vec::new());
+        let memory_dir = store.workspace_memory_dir();
+        tokio::fs::create_dir_all(&memory_dir)
             .await
-            .expect("workspace memory append should succeed");
-        store
-            .append_workspace_memory(&WorkspaceMemoryRecord {
-                timestamp: Utc::now(),
-                title: Some("Daily".to_string()),
-                content: "deployment decision: blue green".to_string(),
-            })
+            .expect("memory dir should exist");
+        tokio::fs::write(
+            memory_dir.join("2026-04-04.md"),
+            "## [10:41] Flush required\nsession: session-1\n\n**Facts:**\n- keep no residue\n",
+        )
+        .await
+        .expect("seed memory file should write");
+
+        rebuild_all_indexes(&store)
             .await
-            .expect("workspace memory append should succeed");
+            .expect("rebuild all should succeed");
+
+        let loaded = load_index_files(&store)
+            .await
+            .expect("load indexes should succeed");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].path, "memory/2026-04-04.md");
+    }
+
+    #[tokio::test]
+    async fn test_semantic_search_uses_two_hops() {
+        let (_guard, store) = new_temp_store_with_llm(vec![
+            "[\"memory/2026-04-04.md\"]".to_string(),
+            "[{\"path\":\"memory/2026-04-04.md\",\"from\":1,\"to\":6}]".to_string(),
+        ]);
+        let memory_dir = store.workspace_memory_dir();
+        tokio::fs::create_dir_all(&memory_dir)
+            .await
+            .expect("memory dir should exist");
+        tokio::fs::write(
+            memory_dir.join("2026-04-04.md"),
+            "## [10:41] Flush required\nsession: session-1\n\n**Facts:**\n- flush on close\n",
+        )
+        .await
+        .expect("seed memory file should write");
+        rebuild_all_indexes(&store)
+            .await
+            .expect("rebuild all should succeed");
 
         let results = store
             .search_memory(&MemorySearchQuery {
-                query: "blue green".to_string(),
-                max_results: 10,
-                min_score: Some(0.0),
+                query: "flush".to_string(),
+                max_results: 3,
             })
             .await
             .expect("search should succeed");
-
         assert_eq!(results.len(), 1);
+        assert_eq!(results[0].path, "memory/2026-04-04.md");
+        assert!(results[0].snippet.contains("flush on close"));
+    }
+
+    #[tokio::test]
+    async fn test_semantic_search_requires_llm_backed_store() {
+        let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+        let store = MemoryStore::new(temp_dir.path().to_path_buf());
+        let result = store
+            .search_memory(&MemorySearchQuery {
+                query: "anything".to_string(),
+                max_results: 1,
+            })
+            .await;
+        assert!(matches!(result, Err(TalosError::ToolError(_))));
+    }
+
+    #[test]
+    fn test_strip_json_fences_supports_markdown_wrappers() {
+        assert_eq!(strip_json_fences("```json\n[1,2]\n```"), "[1,2]");
+        assert_eq!(strip_json_fences("```\n{\"a\":1}\n```"), "{\"a\":1}");
     }
 }

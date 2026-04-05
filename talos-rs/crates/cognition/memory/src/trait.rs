@@ -42,5 +42,6 @@ pub trait Memory: Send + Sync {
         from: Option<usize>,
         lines: Option<usize>,
     ) -> TalosResult<MemoryGetResult>;
+    async fn rebuild_memory_indexes(&self) -> TalosResult<()>;
     async fn append_workspace_memory(&self, record: &WorkspaceMemoryRecord) -> TalosResult<()>;
 }

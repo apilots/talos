@@ -18,9 +18,9 @@ use talos_llm_provider::{
     ToolDefinition, ToolStreamEvent,
 };
 use talos_memory::{
-    Memory, MemoryGetResult, MemorySearchResponse, MemoryStore, RecordHeader, RetrievedMemoryItem,
-    SessionPromptContextConfig, SummaryRecord, TalosMessage, TalosMessageRole, TalosTurn,
-    ToolCallRecord, ToolResultRecord,
+    strip_json_fences, Memory, MemoryGetResult, MemorySearchResponse, MemoryStore, RecordHeader,
+    RetrievedMemoryItem, SessionMemorySummary, SessionPromptContextConfig, SummaryRecord,
+    TalosMessage, TalosMessageRole, TalosTurn, ToolCallRecord, ToolResultRecord,
 };
 use talos_prompt::{
     render_prompt_assembly, PromptBudget, PromptBuildConfig, PromptBuilder, PromptDiagnostics,
@@ -33,6 +33,54 @@ use talos_types::talos::{TalosContentItem, TalosOutputItem, TalosUsage};
 use tokio::sync::mpsc;
 use tracing::warn;
 use uuid::Uuid;
+
+const MEMORY_SUMMARY_PROMPT: &str = r#"Extract durable memory from this conversation as JSON.
+Return ONLY valid JSON, no markdown fences, no explanation.
+
+Schema:
+{
+  "title": "one-line core topic, max 12 words, no trailing punctuation",
+  "facts": ["..."],
+  "preferences": ["..."],
+  "open_tasks": ["..."],
+  "risks": ["..."]
+}
+
+Omit any field whose array would be empty. Keep total under 200 words."#;
+
+fn render_summary_body(summary: &SessionMemorySummary) -> String {
+    let mut out = String::new();
+    let sections = [
+        ("**Facts:**", &summary.facts),
+        ("**Preferences:**", &summary.preferences),
+        ("**Open Tasks:**", &summary.open_tasks),
+        ("**Risks:**", &summary.risks),
+    ];
+    for (heading, items) in sections {
+        if items.is_empty() {
+            continue;
+        }
+        out.push_str(heading);
+        out.push('\n');
+        for item in items {
+            out.push_str("- ");
+            out.push_str(item.trim());
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+    out.trim().to_string()
+}
+
+fn render_session_summary_content(summary: &SessionMemorySummary) -> String {
+    let mut out = String::new();
+    out.push_str("Title: ");
+    out.push_str(summary.title.trim());
+    out.push_str("\n\n");
+    let body = render_summary_body(summary);
+    out.push_str(body.trim());
+    out.trim().to_string()
+}
 
 #[derive(Debug, Clone)]
 pub struct GeneralTurnResult {
@@ -267,16 +315,18 @@ pub async fn flush_session_memory(
     let request = ChatRequest::builder()
         .model(selected_model)
         .messages(vec![
-            ChatMessage::system(
-                "Summarize the conversation into durable facts, user preferences, open tasks, and \
-                 unresolved risks. Keep under 220 words.",
-            ),
+            ChatMessage::system(MEMORY_SUMMARY_PROMPT),
             ChatMessage::user(format!("Conversation transcript:\n{}", transcript)),
         ])
         .build();
     let response = llm_provider_for_summary.chat(request).await?;
-    let summary = response.content.trim().to_string();
-    if summary.is_empty() {
+    let summary: SessionMemorySummary = serde_json::from_str(strip_json_fences(&response.content))
+        .map_err(|err| {
+            talos_error::TalosError::ToolError(format!("parse memory summary json: {}", err))
+        })?;
+    let workspace_body = render_summary_body(&summary);
+    let session_summary_content = render_session_summary_content(&summary);
+    if session_summary_content.is_empty() {
         return Ok(());
     }
     let latest_seq = memory_store.latest_seq(session_id).await?;
@@ -298,17 +348,18 @@ pub async fn flush_session_memory(
                 },
                 covers_until_seq: latest_seq,
                 source_turn_count,
-                content: summary.clone(),
+                content: session_summary_content,
             })
             .await?;
     }
 
-    if flush_workspace_memory {
+    if flush_workspace_memory && !workspace_body.is_empty() {
         memory_store
             .append_workspace_memory(&talos_memory::WorkspaceMemoryRecord {
                 timestamp: Utc::now(),
-                title: Some("Durable Memory".to_string()),
-                content: summary.clone(),
+                session_id: session_id.to_string(),
+                title: summary.title.clone(),
+                content: workspace_body,
             })
             .await?;
     }
@@ -399,8 +450,6 @@ fn parse_retrieved_memory_items(tool_name: &str, payload: &Value) -> Vec<Retriev
             Ok(result) if !result.text.trim().is_empty() => vec![RetrievedMemoryItem {
                 path: result.path,
                 snippet: result.text.trim().to_string(),
-                citation: None,
-                score: 1.0,
             }],
             Ok(_) => Vec::new(),
             Err(err) => {
@@ -427,15 +476,7 @@ fn build_retrieved_memories_message(
     }
     let mut content = String::new();
     for item in items.iter().take(max_items) {
-        let line = format!(
-            "- {}{}: {}",
-            item.path,
-            item.citation
-                .as_ref()
-                .map(|citation| format!(" ({citation})"))
-                .unwrap_or_default(),
-            item.snippet.trim()
-        );
+        let line = format!("- {}: {}", item.path, item.snippet.trim());
         if content.len() + line.len() + 1 > max_chars {
             break;
         }
@@ -789,8 +830,6 @@ mod tests {
             results: vec![talos_memory::MemorySearchResult {
                 path: "memory/2026-03-24.md".to_string(),
                 snippet: "launch on friday".to_string(),
-                citation: Some("memory/2026-03-24.md#L1-L1".to_string()),
-                score: 0.9,
                 start_line: 1,
                 end_line: 1,
             }],
@@ -799,7 +838,6 @@ mod tests {
         let items = parse_retrieved_memory_items("memory_search", &payload);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].path, "memory/2026-03-24.md");
-        assert_eq!(items[0].score, 0.9);
     }
 
     #[test]
@@ -808,13 +846,15 @@ mod tests {
             "results": [
                 {
                     "path": "memory/2026-03-25.md",
-                    "snippet": "missing score"
+                    "snippet": "valid snippet",
+                    "start_line": 1,
+                    "end_line": 1
                 }
             ]
         });
 
         let items = parse_retrieved_memory_items("memory_search", &payload);
-        assert!(items.is_empty());
+        assert_eq!(items.len(), 1);
     }
 
     #[test]
@@ -1434,6 +1474,7 @@ pub async fn execute_general_turn_tool_batch(
     prepared: &PreparedGeneralTurn,
     tool_executor: Arc<dyn ToolExecutor>,
     tool_registry: Arc<dyn ToolExecutorPort>,
+    memory_store: Arc<MemoryStore>,
     kernel_config: Arc<AgentKernelConfig>,
     user_id: &str,
     tool_calls: &[FunctionCall],
@@ -1445,6 +1486,7 @@ pub async fn execute_general_turn_tool_batch(
         session_id: format!("agent-{}", prepared.agent_id),
         user_id: user_id.to_string(),
         kernel_config,
+        memory_store,
         pre_approved_call_ids,
         dynamic_tool_results: replay_dynamic_tool_results,
     };
@@ -1751,6 +1793,7 @@ pub async fn execute_general_turn_loop(
     agent_name: &str,
     llm_provider: Arc<dyn LlmProvider>,
     tool_executor_port: Arc<dyn ToolExecutorPort>,
+    memory_store: Arc<MemoryStore>,
     kernel_config: &AgentKernelConfig,
 ) -> TalosResult<ExecutedTurnArtifacts> {
     let max_tool_rounds = kernel_config.max_tool_rounds.max(1);
@@ -1778,6 +1821,7 @@ pub async fn execute_general_turn_loop(
             &prepared,
             tool_executor.clone(),
             tool_executor_port.clone(),
+            memory_store.clone(),
             kernel_config.clone(),
             agent_name,
             &step.tool_calls,
@@ -1938,6 +1982,7 @@ pub async fn run_general_turn(
         agent_name,
         llm_provider.clone(),
         tool_executor_port,
+        memory_store.clone(),
         kernel_config,
     )
     .await?;

@@ -66,7 +66,7 @@ impl Memory for MemoryStore {
         &self,
         query: &MemorySearchQuery,
     ) -> TalosResult<Vec<MemorySearchResult>> {
-        retrieval::search_memory(self, query).await
+        retrieval::semantic_search(self, query).await
     }
 
     async fn get_memory(
@@ -80,5 +80,9 @@ impl Memory for MemoryStore {
 
     async fn append_workspace_memory(&self, record: &WorkspaceMemoryRecord) -> TalosResult<()> {
         workspace_store::append_workspace_memory(self, record).await
+    }
+
+    async fn rebuild_memory_indexes(&self) -> TalosResult<()> {
+        retrieval::rebuild_all_indexes(self).await
     }
 }

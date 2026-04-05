@@ -785,8 +785,11 @@ impl TuiApp {
                 KeyCode::Backspace => {
                     self.command_input_buffer.pop();
                     if self.command_input_buffer.is_empty() {
+                        self.input_buffer = "/".to_string();
+                        self.cursor_index = 1;
                         self.show_command_autocomplete = false;
                     } else {
+                        self.sync_command_input_to_main_buffer();
                         self.update_command_suggestions();
                     }
                     return Ok(false);
@@ -797,6 +800,7 @@ impl TuiApp {
                         .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
                 {
                     self.command_input_buffer.push(c);
+                    self.sync_command_input_to_main_buffer();
                     self.update_command_suggestions();
                     return Ok(false);
                 }
@@ -2185,6 +2189,15 @@ impl TuiApp {
             .unwrap_or(false)
     }
 
+    fn sync_command_input_to_main_buffer(&mut self) {
+        self.input_buffer = if self.command_input_buffer.is_empty() {
+            "/".to_string()
+        } else {
+            format!("/{}", self.command_input_buffer)
+        };
+        self.cursor_index = self.input_buffer.chars().count();
+    }
+
     fn insert_char(&mut self, c: char) {
         // Trigger command autocomplete when typing /
         if c == '/' && self.cursor_index == 0 && self.input_buffer.is_empty() {
@@ -2192,6 +2205,7 @@ impl TuiApp {
             self.command_suggestions = CommandSuggestion::all();
             self.command_autocomplete_selected = 0;
             self.command_input_buffer.clear();
+            self.sync_command_input_to_main_buffer();
             return;
         }
 
@@ -3447,6 +3461,20 @@ impl TuiApp {
         }
     }
 
+    fn blank_chat_line() -> RenderedChatLine {
+        RenderedChatLine {
+            display: Line::from(""),
+            copy_projection: Some(CopyProjection {
+                text: String::new(),
+                display_start_col: 0,
+            }),
+        }
+    }
+
+    fn push_block_header_gap(lines: &mut Vec<RenderedChatLine>) {
+        lines.push(Self::blank_chat_line());
+    }
+
     fn rebuild_chat_render_state_if_rect(&mut self) {
         if let Some(rect) = self.chat_content_rect {
             self.rebuild_chat_render_state(rect);
@@ -3467,19 +3495,17 @@ impl TuiApp {
                 .find(|&index| self.chat_blocks[index].role == ChatRole::User)
                 .unwrap_or(self.chat_blocks.len());
 
-            for block in &self.chat_blocks[round_start..round_end_exclusive] {
+            let round_blocks = &self.chat_blocks[round_start..round_end_exclusive];
+            for (index, block) in round_blocks.iter().enumerate() {
                 self.rendered_chat_lines
                     .extend(self.chat_card_lines(block, content_width));
+                if index + 1 < round_blocks.len() {
+                    self.rendered_chat_lines.push(Self::blank_chat_line());
+                }
             }
 
             if self.round_is_completed(round_start, round_end_exclusive) {
-                self.rendered_chat_lines.push(RenderedChatLine {
-                    display: Line::from(""),
-                    copy_projection: Some(CopyProjection {
-                        text: String::new(),
-                        display_start_col: 0,
-                    }),
-                });
+                self.rendered_chat_lines.push(Self::blank_chat_line());
                 let footer_line_index = self.rendered_chat_lines.len();
                 let (footer_line, button) = self.round_footer_line(round_start, content_width);
                 self.rendered_chat_lines.push(footer_line);
@@ -3487,13 +3513,7 @@ impl TuiApp {
                     .insert(footer_line_index, button);
             }
 
-            self.rendered_chat_lines.push(RenderedChatLine {
-                display: Line::from(""),
-                copy_projection: Some(CopyProjection {
-                    text: String::new(),
-                    display_start_col: 0,
-                }),
-            });
+            self.rendered_chat_lines.push(Self::blank_chat_line());
             block_index = round_end_exclusive;
         }
 
@@ -3796,6 +3816,10 @@ impl TuiApp {
             .map(|line| Line::from(line.to_string()))
             .collect::<Vec<_>>();
 
+        if !content_lines.is_empty() {
+            Self::push_block_header_gap(&mut lines);
+        }
+
         // Content lines with wrapping
         for line in content_lines.iter() {
             for wrapped in wrap_line_visual(line.clone(), content_width) {
@@ -3838,6 +3862,7 @@ impl TuiApp {
                 display_start_col: 0,
             }),
         });
+        Self::push_block_header_gap(&mut lines);
 
         let render_data = Self::build_tool_render_data(block, tool_name);
         let (summary_text, summary_color) = match block.tool_status {
@@ -4316,6 +4341,10 @@ impl TuiApp {
         });
         let content_lines = render_markdown_lines(&block.content);
 
+        if !content_lines.is_empty() {
+            Self::push_block_header_gap(&mut lines);
+        }
+
         // Content lines with wrapping and proper color
         for line in content_lines.iter() {
             for wrapped in wrap_line_visual(line.clone(), content_width) {
@@ -4375,6 +4404,10 @@ impl TuiApp {
             .map(|line| Line::from(line.to_string()))
             .collect::<Vec<_>>();
 
+        if !content_lines.is_empty() {
+            Self::push_block_header_gap(&mut lines);
+        }
+
         // Content lines with wrapping
         for line in content_lines.iter() {
             for wrapped in wrap_line_visual(line.clone(), content_width) {
@@ -4414,37 +4447,33 @@ impl TuiApp {
                 });
             }
         } else {
-            // Regular system message: add icon prefix
-            let first_line = content_lines[0];
-            let mut first_spans = vec![Span::styled("⚙  ", gear_style)];
-            first_spans.push(Span::styled(
-                first_line.to_string(),
-                Style::default().fg(Color::White),
-            ));
-
+            // Regular system message: render a dedicated title row and body below it
             lines.push(RenderedChatLine {
-                display: Line::from(first_spans),
+                display: Line::from(vec![
+                    Span::styled("⚙  ", gear_style),
+                    Span::styled(
+                        "System",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]),
                 copy_projection: Some(CopyProjection {
-                    text: format!("⚙  {}", first_line),
+                    text: "⚙  System".to_string(),
                     display_start_col: 0,
                 }),
             });
+            Self::push_block_header_gap(&mut lines);
 
-            // Additional lines without prefix
-            for line in content_lines.iter().skip(1) {
-                let display_line = Line::from(vec![
-                    Span::styled(
-                        "│  ",
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::DIM),
-                    ),
-                    Span::styled(line.to_string(), Style::default().fg(Color::White)),
-                ]);
+            for line in &content_lines {
+                let display_line = Line::from(Span::styled(
+                    line.to_string(),
+                    Style::default().fg(Color::White),
+                ));
                 lines.push(RenderedChatLine {
                     display: display_line,
                     copy_projection: Some(CopyProjection {
-                        text: format!("│  {}", line),
+                        text: line.to_string(),
                         display_start_col: 0,
                     }),
                 });
@@ -5632,6 +5661,31 @@ mod tests {
     }
 
     #[test]
+    fn test_rebuild_chat_render_state_inserts_spacing_between_blocks() {
+        let mut app = create_embedded_app();
+        app.chat_blocks = vec![
+            ChatBlock::new(ChatRole::System, "Execution summary".to_string()),
+            ChatBlock::new(ChatRole::Assistant, "Final answer".to_string()),
+        ];
+
+        app.rebuild_chat_render_state(Rect::new(0, 0, 60, 12));
+
+        let texts = app
+            .rendered_chat_lines
+            .iter()
+            .map(|line| line_plain_text(&line.display))
+            .collect::<Vec<_>>();
+
+        assert_eq!(texts[0], "⚙  System");
+        assert_eq!(texts[1], "");
+        assert_eq!(texts[2], "Execution summary");
+        assert_eq!(texts[3], "");
+        assert_eq!(texts[4], "🤖 Assistant");
+        assert_eq!(texts[5], "");
+        assert_eq!(texts[6], "Final answer");
+    }
+
+    #[test]
     fn test_round_footer_button_hit_range_matches_button_text() {
         let mut app = create_embedded_app();
         app.chat_blocks = vec![
@@ -6207,6 +6261,7 @@ mod tests {
         assert!(texts
             .iter()
             .any(|line| line == "● exec_command(git diff HEAD~1)"));
+        assert_eq!(texts.get(1).map(String::as_str), Some(""));
         assert!(texts.iter().any(|line| line == "└ Done (exit:0 · 1.2s)"));
         assert!(texts.iter().any(|line| line == "  cmd:  git diff HEAD~1"));
         assert!(texts.iter().any(|line| line == "  dir:  /tmp/work"));
@@ -6397,7 +6452,7 @@ mod tests {
             .map(|line| line_plain_text(&line.display))
             .collect::<Vec<_>>();
 
-        assert_eq!(texts, vec!["⚙  System ready", "│  Loading tools"]);
+        assert_eq!(texts, vec!["⚙  System", "", "System ready", "Loading tools"]);
     }
 
     #[test]
@@ -6498,6 +6553,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(texts.first().map(String::as_str), Some("🤖 Assistant"));
+        assert_eq!(texts.get(1).map(String::as_str), Some(""));
         assert!(texts.iter().any(|line| line == "▌ Summary"));
         assert!(texts.iter().any(|line| line == "1. First"));
         assert!(texts.iter().any(|line| line == "2. Second"));
@@ -6505,11 +6561,39 @@ mod tests {
         assert!(texts.iter().any(|line| line == "let x = 1;"));
         assert_eq!(
             texts
-                .iter()
-                .filter(|line| line.starts_with("🤖 Assistant"))
-                .count(),
+            .iter()
+            .filter(|line| line.starts_with("🤖 Assistant"))
+            .count(),
             1
         );
+    }
+
+    #[test]
+    fn test_user_block_inserts_blank_line_after_header() {
+        let app = create_embedded_app();
+        let block = ChatBlock::new(ChatRole::User, "hello world".to_string());
+
+        let texts = app
+            .user_block_lines(&block, 80)
+            .into_iter()
+            .map(|line| line_plain_text(&line.display))
+            .collect::<Vec<_>>();
+
+        assert_eq!(texts, vec!["👤 User", "", "hello world"]);
+    }
+
+    #[test]
+    fn test_thinking_block_inserts_blank_line_after_header() {
+        let app = create_embedded_app();
+        let block = ChatBlock::new(ChatRole::Thinking, "step one".to_string());
+
+        let texts = app
+            .thinking_block_lines(&block, 80)
+            .into_iter()
+            .map(|line| line_plain_text(&line.display))
+            .collect::<Vec<_>>();
+
+        assert_eq!(texts, vec!["💭 Thinking", "", "step one"]);
     }
 
     #[test]
@@ -6609,6 +6693,72 @@ mod tests {
 
         assert_eq!(app.input_buffer, "/sessions");
         assert_eq!(app.cursor_index, "/sessions".chars().count());
+        assert!(!app.show_command_autocomplete);
+    }
+
+    #[tokio::test]
+    async fn test_command_autocomplete_syncs_query_into_input_buffer() {
+        let mut app = create_remote_app();
+
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
+            .await
+            .unwrap();
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+            .await
+            .unwrap();
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE))
+            .await
+            .unwrap();
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE))
+            .await
+            .unwrap();
+
+        assert_eq!(app.input_buffer, "/qui");
+        assert_eq!(app.cursor_index, "/qui".chars().count());
+        assert_eq!(app.command_input_buffer, "qui");
+        assert!(app.show_command_autocomplete);
+        assert_eq!(app.command_suggestions.len(), 1);
+        assert_eq!(app.command_suggestions[0].name, "quit");
+    }
+
+    #[tokio::test]
+    async fn test_command_autocomplete_backspace_keeps_input_buffer_in_sync() {
+        let mut app = create_remote_app();
+
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
+            .await
+            .unwrap();
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+            .await
+            .unwrap();
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE))
+            .await
+            .unwrap();
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE))
+            .await
+            .unwrap();
+
+        assert_eq!(app.input_buffer, "/q");
+        assert_eq!(app.cursor_index, "/q".chars().count());
+        assert_eq!(app.command_input_buffer, "q");
+        assert!(app.show_command_autocomplete);
+
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE))
+            .await
+            .unwrap();
+
+        assert_eq!(app.input_buffer, "/");
+        assert_eq!(app.cursor_index, 1);
+        assert!(app.command_input_buffer.is_empty());
         assert!(!app.show_command_autocomplete);
     }
 

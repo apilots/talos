@@ -146,10 +146,6 @@ fn test_boundary_validation() {
         config.memory.session_recent_messages_limit > 0,
         "memory.session_recent_messages_limit must be > 0"
     );
-    assert!(
-        (0.0..=1.0).contains(&config.memory.search_min_score),
-        "memory.search_min_score must be in [0.0, 1.0]"
-    );
     assert_eq!(
         config.memory.root_memory_filename, "MEMORY.md",
         "memory.root_memory_filename should be fixed to MEMORY.md"

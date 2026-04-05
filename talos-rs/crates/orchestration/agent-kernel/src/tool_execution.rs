@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult};
+use talos_memory::MemoryStore;
 use talos_tools::{ToolDispatchOutcome, ToolExecutorPort, ToolInvocation, ToolOutputPayload};
 use tokio::task::JoinSet;
 
@@ -14,6 +15,7 @@ pub struct ToolExecutionContext {
     pub session_id: String,
     pub user_id: String,
     pub kernel_config: Arc<AgentKernelConfig>,
+    pub memory_store: Arc<MemoryStore>,
     pub pre_approved_call_ids: HashSet<String>,
     pub dynamic_tool_results: HashMap<String, Value>,
 }
@@ -62,6 +64,7 @@ fn build_tool_context(
         execution_context.user_id.clone(),
         Some(execution_context.kernel_config.clone()),
     );
+    let ctx = ctx.with_memory_store(execution_context.memory_store.clone());
     if let Some(result) = execution_context.dynamic_tool_results.get(call_id) {
         ctx.set_state(
             talos_tools::handlers::dynamic::dynamic_tool_state_key(call_id),
@@ -327,6 +330,9 @@ mod tests {
             session_id: "s1".to_string(),
             user_id: "u1".to_string(),
             kernel_config: Arc::new(AgentKernelConfig::default()),
+            memory_store: Arc::new(MemoryStore::new(
+                std::env::temp_dir().join("tool-executor-1"),
+            )),
             pre_approved_call_ids: HashSet::new(),
             dynamic_tool_results: HashMap::new(),
         };
@@ -383,6 +389,9 @@ mod tests {
             session_id: "s1".to_string(),
             user_id: "u1".to_string(),
             kernel_config: Arc::new(AgentKernelConfig::default()),
+            memory_store: Arc::new(MemoryStore::new(
+                std::env::temp_dir().join("tool-executor-2"),
+            )),
             pre_approved_call_ids: HashSet::new(),
             dynamic_tool_results: HashMap::new(),
         };

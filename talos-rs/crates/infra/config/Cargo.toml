@@ -24,3 +24,4 @@ talos-logging = { path = "../logging" }
 
 # Utils
 dirs = "5"
+chrono-tz = { workspace = true }

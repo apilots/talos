@@ -246,6 +246,7 @@ pub(crate) fn build_welcome_card(
     connection_mode: TalosConnectionMode,
 ) -> String {
     const CARD_WIDTH: usize = 50;
+    const INFO_BLOCK_INDENT: usize = 2;
 
     fn card_line(content: &str) -> String {
         let mut inner: String = content.chars().take(CARD_WIDTH).collect();
@@ -256,16 +257,59 @@ pub(crate) fn build_welcome_card(
         format!("│{}│", inner)
     }
 
+    fn indented_card_line(content: &str, indent: usize) -> String {
+        card_line(&format!("{}{}", " ".repeat(indent), content))
+    }
+
     let directory_line = format!("directory: {}", compact_directory_path(directory));
     let connection_line = format!("connection: {}", connection_mode);
     [
         "╭──────────────────────────────────────────────────╮".to_string(),
         card_line(&format!(" >_ Talos TUI ({})", version)),
         card_line(""),
-        card_line(&format!(" model:     {:<12} /model to change", model)),
-        card_line(&directory_line),
-        card_line(&connection_line),
+        indented_card_line("Session", INFO_BLOCK_INDENT),
+        indented_card_line("", INFO_BLOCK_INDENT),
+        indented_card_line(
+            &format!("model:     {:<12} /model to change", model),
+            INFO_BLOCK_INDENT,
+        ),
+        indented_card_line(&directory_line, INFO_BLOCK_INDENT),
+        indented_card_line(&connection_line, INFO_BLOCK_INDENT),
         "╰──────────────────────────────────────────────────╯".to_string(),
     ]
     .join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_welcome_card;
+    use crate::utils::TalosConnectionMode;
+    use std::path::Path;
+
+    #[test]
+    fn build_welcome_card_separates_title_and_session_block() {
+        let card = build_welcome_card(
+            "v0.1.0",
+            "qwen-plus",
+            Path::new("/Users/xujiang/data/ailabs/talos/talos-rs"),
+            TalosConnectionMode::Embedded,
+        );
+
+        let lines: Vec<&str> = card.lines().collect();
+        assert_eq!(
+            lines[1],
+            "│ >_ Talos TUI (v0.1.0)                            │"
+        );
+        assert_eq!(
+            lines[3],
+            "│  Session                                         │"
+        );
+        assert_eq!(
+            lines[4],
+            "│                                                  │"
+        );
+        assert!(lines[5].starts_with("│  model:"));
+        assert!(lines[6].starts_with("│  directory:"));
+        assert!(lines[7].starts_with("│  connection:"));
+    }
 }

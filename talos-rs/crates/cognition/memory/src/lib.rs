@@ -9,11 +9,11 @@ mod workspace_store;
 
 pub use mapper::SessionTranscriptMapper;
 pub use r#trait::Memory;
-pub use retrieval::MemorySearchResponse;
+pub use retrieval::{strip_json_fences, MemorySearchResponse};
 pub use store::{
-    MemoryGetResult, MemorySearchQuery, MemorySearchResult, MemoryStore, RecordHeader,
-    RetrievedMemoryItem, SessionPromptContext, SessionPromptContextConfig,
-    SessionTranscriptActions, SessionTranscriptApprovalResponsePayload,
+    MemoryGetResult, MemoryIndexFile, MemoryIndexSection, MemorySearchQuery, MemorySearchResult,
+    MemoryStore, RecordHeader, RetrievedMemoryItem, SessionMemorySummary, SessionPromptContext,
+    SessionPromptContextConfig, SessionTranscriptActions, SessionTranscriptApprovalResponsePayload,
     SessionTranscriptAuthPayload, SessionTranscriptAuthor, SessionTranscriptBranch,
     SessionTranscriptCompaction, SessionTranscriptCompactionPayload,
     SessionTranscriptConfirmationPayload, SessionTranscriptDynamicToolRequestPayload,

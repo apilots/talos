@@ -35,9 +35,15 @@ use talos_logging::LoggingConfig;
 
 static TALOS_HOME_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
 
+pub type TalosTimezone = chrono_tz::Tz;
+
 /// 主配置结构
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    /// Global timezone used for user-visible time rendering.
+    #[serde(default = "default_timezone")]
+    pub timezone: String,
+
     /// Agent 配置
     #[serde(default)]
     pub agent: AgentConfig,
@@ -66,6 +72,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         let mut config = Self {
+            timezone: default_timezone(),
             agent: AgentConfig::default(),
             gateway: GatewayConfig::default(),
             channels: ChannelsConfig::default(),
@@ -76,6 +83,20 @@ impl Default for Config {
         config.apply_derived_paths();
         config
     }
+}
+
+pub fn default_timezone() -> String {
+    "UTC".to_string()
+}
+
+pub fn parse_timezone(input: &str) -> TalosResult<TalosTimezone> {
+    input.trim().parse::<TalosTimezone>().map_err(|err| {
+        talos_error::TalosError::InvalidConfiguration(format!(
+            "invalid timezone `{}`: {}",
+            input.trim(),
+            err
+        ))
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -481,6 +502,10 @@ pub struct AgentKernelConfig {
     /// Trigger context compaction when session memory exceeds this threshold
     #[serde(default = "default_kernel_context_compaction_max_bytes")]
     pub context_compaction_max_bytes: usize,
+
+    /// Runtime timezone propagated from top-level config.
+    #[serde(default = "default_timezone")]
+    pub timezone: String,
 
     /// Default workspace id when request does not provide one
     #[serde(default = "default_workspace_id")]
@@ -995,10 +1020,6 @@ pub struct AgentKernelMemoryConfig {
     #[serde(default = "default_kernel_memory_search_max_results")]
     pub search_max_results: usize,
 
-    /// Default minimum score for workspace memory search.
-    #[serde(default = "default_kernel_memory_search_min_score")]
-    pub search_min_score: f32,
-
     /// Include root memory in workspace memory search.
     #[serde(default = "default_true")]
     pub search_include_root_memory: bool,
@@ -1055,10 +1076,6 @@ fn default_kernel_memory_search_max_results() -> usize {
     6
 }
 
-fn default_kernel_memory_search_min_score() -> f32 {
-    0.35
-}
-
 impl Default for AgentKernelMemoryConfig {
     fn default() -> Self {
         Self {
@@ -1077,7 +1094,6 @@ impl Default for AgentKernelMemoryConfig {
             tool_search_enabled: true,
             tool_get_enabled: true,
             search_max_results: default_kernel_memory_search_max_results(),
-            search_min_score: default_kernel_memory_search_min_score(),
             search_include_root_memory: true,
             search_include_daily_memory: true,
             search_include_sessions: false,
@@ -1115,6 +1131,7 @@ impl Default for AgentKernelConfig {
             max_tool_rounds: default_kernel_max_tool_rounds(),
             tool_result_max_bytes: default_kernel_tool_result_max_bytes(),
             context_compaction_max_bytes: default_kernel_context_compaction_max_bytes(),
+            timezone: default_timezone(),
             default_workspace_id: default_workspace_id(),
             planner_mode: default_kernel_planner_mode(),
             planner_selection: PlannerSelection::Static,
@@ -1527,6 +1544,7 @@ impl Config {
         let paths = self.talos_paths();
         self.logging.file = Some(paths.log_file.to_string_lossy().to_string());
         self.storage.connection_string = paths.sqlite_db.to_string_lossy().to_string();
+        self.agent.kernel.timezone = self.timezone.clone();
         self.agent.kernel.memory.workspace_dir = paths
             .workspace_dir_for_agent(&self.agent.name)
             .to_string_lossy()
@@ -1685,6 +1703,8 @@ impl Config {
     pub fn validate_runtime(&self) -> TalosResult<()> {
         use talos_error::TalosError;
 
+        parse_timezone(&self.timezone)?;
+
         if self.agent.name.trim().is_empty() || is_unresolved_placeholder(&self.agent.name) {
             return Err(TalosError::InvalidConfiguration(
                 "agent.name is empty or unresolved placeholder".to_string(),
@@ -1787,11 +1807,6 @@ impl Config {
         if self.agent.kernel.memory.compaction_threshold_bytes == 0 {
             return Err(TalosError::InvalidConfiguration(
                 "agent.kernel.memory.compaction_threshold_bytes must be > 0".to_string(),
-            ));
-        }
-        if self.agent.kernel.memory.search_min_score < 0.0 {
-            return Err(TalosError::InvalidConfiguration(
-                "agent.kernel.memory.search_min_score must be >= 0.0".to_string(),
             ));
         }
         if self.agent.kernel.memory.root_memory_filename.trim() != "MEMORY.md" {
@@ -2083,6 +2098,9 @@ pub fn generate_default_config() -> String {
     r#"# Talos Configuration
 # https://github.com/xiliu/talos
 
+# Global timezone for user-visible time rendering
+timezone: UTC
+
 # Agent 配置
 agent:
   name: jarvis
@@ -2274,6 +2292,8 @@ mod tests {
         );
         assert_eq!(config.agent.kernel.prompt.bootstrap.max_chars_total, 24_000);
         assert!(config.agent.kernel.prompt.bootstrap.include_memory);
+        assert_eq!(config.timezone, "UTC");
+        assert_eq!(config.agent.kernel.timezone, config.timezone);
         assert_eq!(
             config.agent.kernel.memory.workspace_dir,
             config
@@ -2293,7 +2313,6 @@ mod tests {
         );
         assert_eq!(config.agent.kernel.memory.root_memory_filename, "MEMORY.md");
         assert!(config.agent.kernel.memory.workspace_memory_flush_enabled);
-        assert!((config.agent.kernel.memory.search_min_score - 0.35).abs() < f32::EPSILON);
         assert_eq!(config.agent.kernel.binding.default_agent_kind, "llm");
     }
 
@@ -2335,6 +2354,22 @@ mod tests {
 
         config.llm.openai.api_key = Some("sk-test".to_string());
         assert!(config.validate_runtime().is_ok());
+    }
+
+    #[test]
+    fn test_validate_runtime_rejects_invalid_timezone() {
+        let mut config = Config::default();
+        config.gateway.auth = false;
+        config.gateway.token = Some("token".to_string());
+        config.llm.provider = "openai".to_string();
+        config.llm.model = "gpt-4o".to_string();
+        config.agent.model = "gpt-4o".to_string();
+        config.llm.openai.base_url = Some("https://api.openai.com/v1".to_string());
+        config.llm.openai.api_key = Some("sk-test".to_string());
+        config.timezone = "Mars/Olympus".to_string();
+        config.apply_derived_paths();
+
+        assert!(config.validate_runtime().is_err());
     }
 
     #[test]

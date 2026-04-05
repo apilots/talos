@@ -4,8 +4,8 @@ use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use talos_config::AgentKernelMemoryConfig;
-use talos_llm_provider::ChatMessage;
+use talos_config::{AgentKernelConfig, TalosTimezone};
+use talos_llm_provider::{ChatMessage, LlmProvider};
 
 use crate::path_policy;
 
@@ -287,7 +287,6 @@ impl Default for SessionPromptContextConfig {
 pub struct MemorySearchQuery {
     pub query: String,
     pub max_results: usize,
-    pub min_score: Option<f32>,
 }
 
 impl Default for MemorySearchQuery {
@@ -295,7 +294,6 @@ impl Default for MemorySearchQuery {
         Self {
             query: String::new(),
             max_results: 6,
-            min_score: None,
         }
     }
 }
@@ -304,8 +302,6 @@ impl Default for MemorySearchQuery {
 pub struct MemorySearchResult {
     pub path: String,
     pub snippet: String,
-    pub citation: Option<String>,
-    pub score: f32,
     pub start_line: usize,
     pub end_line: usize,
 }
@@ -322,20 +318,51 @@ pub struct MemoryGetResult {
 pub struct RetrievedMemoryItem {
     pub path: String,
     pub snippet: String,
-    pub citation: Option<String>,
-    pub score: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceMemoryRecord {
     pub timestamp: DateTime<Utc>,
-    pub title: Option<String>,
+    pub session_id: String,
+    pub title: String,
     pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionMemorySummary {
+    pub title: String,
+    #[serde(default)]
+    pub facts: Vec<String>,
+    #[serde(default)]
+    pub preferences: Vec<String>,
+    #[serde(default)]
+    pub open_tasks: Vec<String>,
+    #[serde(default)]
+    pub risks: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryIndexSection {
+    pub title: String,
+    pub session_id: String,
+    pub summary_preview: String,
+    pub start_line: usize,
+    pub end_line: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryIndexFile {
+    pub path: String,
+    pub date: String,
+    #[serde(default)]
+    pub sections: Vec<MemoryIndexSection>,
 }
 
 #[derive(Clone)]
 pub struct MemoryStore {
     pub(crate) workspace_dir: PathBuf,
+    pub(crate) timezone: TalosTimezone,
+    pub(crate) llm: Option<Arc<dyn LlmProvider>>,
     pub(crate) hot_recent_messages: usize,
     pub(crate) hot_cache: Arc<tokio::sync::RwLock<HashMap<String, VecDeque<TalosMessage>>>>,
     pub(crate) transcript_cache:
@@ -343,29 +370,65 @@ pub struct MemoryStore {
     pub(crate) seq_cache: Arc<tokio::sync::RwLock<HashMap<String, u64>>>,
 }
 
+impl std::fmt::Debug for MemoryStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MemoryStore")
+            .field("workspace_dir", &self.workspace_dir)
+            .field("timezone", &self.timezone.to_string())
+            .field("hot_recent_messages", &self.hot_recent_messages)
+            .field("has_llm", &self.llm.is_some())
+            .finish()
+    }
+}
+
 impl MemoryStore {
     pub fn new(workspace_dir: impl Into<PathBuf>) -> Self {
+        Self::new_internal(workspace_dir, chrono_tz::UTC, None, 64)
+    }
+
+    pub fn new_with_llm(workspace_dir: impl Into<PathBuf>, llm: Arc<dyn LlmProvider>) -> Self {
+        Self::new_internal(workspace_dir, chrono_tz::UTC, Some(llm), 64)
+    }
+
+    fn new_internal(
+        workspace_dir: impl Into<PathBuf>,
+        timezone: TalosTimezone,
+        llm: Option<Arc<dyn LlmProvider>>,
+        hot_recent_messages: usize,
+    ) -> Self {
         let workspace_dir = workspace_dir.into();
         Self {
             workspace_dir: match workspace_dir.to_str() {
                 Some(path) => Self::resolve_workspace_dir(path),
                 None => workspace_dir,
             },
-            hot_recent_messages: 64,
+            timezone,
+            llm,
+            hot_recent_messages,
             hot_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             transcript_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             seq_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         }
     }
 
-    pub fn from_config(config: &AgentKernelMemoryConfig) -> Self {
-        Self {
-            workspace_dir: Self::resolve_workspace_dir(&config.workspace_dir),
-            hot_recent_messages: config.hot_recent_messages.max(1),
-            hot_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
-            transcript_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
-            seq_cache: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
-        }
+    pub fn from_config(config: &AgentKernelConfig) -> Self {
+        Self::new_internal(
+            Self::resolve_workspace_dir(&config.memory.workspace_dir),
+            talos_config::parse_timezone(&config.timezone)
+                .expect("agent kernel timezone should be validated before memory store init"),
+            None,
+            config.memory.hot_recent_messages.max(1),
+        )
+    }
+
+    pub fn from_config_with_llm(config: &AgentKernelConfig, llm: Arc<dyn LlmProvider>) -> Self {
+        Self::new_internal(
+            Self::resolve_workspace_dir(&config.memory.workspace_dir),
+            talos_config::parse_timezone(&config.timezone)
+                .expect("agent kernel timezone should be validated before memory store init"),
+            Some(llm),
+            config.memory.hot_recent_messages.max(1),
+        )
     }
 
     pub fn new_default() -> Self {
@@ -378,6 +441,10 @@ impl MemoryStore {
 
     pub fn workspace_dir(&self) -> &Path {
         &self.workspace_dir
+    }
+
+    pub(crate) fn timezone(&self) -> TalosTimezone {
+        self.timezone
     }
 
     pub(crate) fn resolve_workspace_dir(path: &str) -> PathBuf {
@@ -398,6 +465,10 @@ impl MemoryStore {
 
     pub(crate) fn summary_file(&self, session_id: &str) -> PathBuf {
         self.session_dir(session_id).join("summary.md")
+    }
+
+    pub fn llm_provider(&self) -> Option<Arc<dyn LlmProvider>> {
+        self.llm.clone()
     }
 }
 
@@ -678,22 +749,20 @@ mod tests {
         store
             .append_workspace_memory(&WorkspaceMemoryRecord {
                 timestamp: Utc::now(),
-                title: Some("Daily".to_string()),
-                content: "deployment decision: blue/green".to_string(),
+                session_id: "session-1".to_string(),
+                title: "Daily".to_string(),
+                content: "**Facts:**\n- deployment decision: blue/green".to_string(),
             })
             .await
             .expect("workspace memory append should succeed");
 
-        let results = store
+        let _error = store
             .search_memory(&MemorySearchQuery {
                 query: "deployment".to_string(),
                 max_results: 5,
-                min_score: None,
             })
             .await
-            .expect("memory search should work");
-        assert!(!results.is_empty());
-        assert!(results[0].path.starts_with("memory/"));
+            .expect_err("memory search should require llm");
     }
 
     #[tokio::test]
@@ -704,40 +773,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_memory_search_scores_are_normalized() {
-        let (_guard, store) = new_temp_store();
-        store
-            .append_workspace_memory(&WorkspaceMemoryRecord {
-                timestamp: Utc::now(),
-                title: Some("Daily".to_string()),
-                content: "apollo apollo\nmission apollo timeline".to_string(),
-            })
-            .await
-            .expect("workspace memory append should succeed");
-
-        let results = store
-            .search_memory(&MemorySearchQuery {
-                query: "apollo".to_string(),
-                max_results: 8,
-                min_score: Some(0.0),
-            })
-            .await
-            .expect("memory search should work");
-
-        assert!(!results.is_empty());
-        assert!(results
-            .iter()
-            .all(|item| item.score >= 0.0 && item.score <= 1.0));
-    }
-
-    #[tokio::test]
     async fn test_append_workspace_memory_creates_daily_file_on_first_write() {
         let (_guard, store) = new_temp_store();
         let timestamp = Utc::now();
         let record = WorkspaceMemoryRecord {
             timestamp,
-            title: Some("Daily Memory".to_string()),
-            content: "first memory entry".to_string(),
+            session_id: "session-1".to_string(),
+            title: "Daily Memory".to_string(),
+            content: "**Facts:**\n- first memory entry".to_string(),
         };
 
         store
@@ -751,6 +794,7 @@ mod tests {
             .expect("workspace memory file should exist after first append");
 
         assert!(content.contains("first memory entry"));
+        assert!(content.contains("session: session-1"));
     }
 
     #[tokio::test]
@@ -758,8 +802,9 @@ mod tests {
         let (_guard, store) = new_temp_store();
         let record = WorkspaceMemoryRecord {
             timestamp: Utc::now(),
-            title: Some("Durable Memory".to_string()),
-            content: "user prefers tea over coffee".to_string(),
+            session_id: "session-1".to_string(),
+            title: "Durable Memory".to_string(),
+            content: "**Facts:**\n- user prefers tea over coffee".to_string(),
         };
 
         store
@@ -775,7 +820,7 @@ mod tests {
         let content = fs::read_to_string(file_path)
             .await
             .expect("workspace memory file should exist");
-        assert_eq!(content.matches("user prefers tea over coffee").count(), 1);
+        assert_eq!(content.matches("session: session-1").count(), 1);
     }
 
     #[test]
@@ -794,8 +839,9 @@ mod tests {
         store
             .append_workspace_memory(&WorkspaceMemoryRecord {
                 timestamp,
-                title: Some("Durable Memory".to_string()),
-                content: "deployment decision: blue green".to_string(),
+                session_id: "session-1".to_string(),
+                title: "Durable Memory".to_string(),
+                content: "**Facts:**\n- deployment decision: blue green".to_string(),
             })
             .await
             .expect("workspace memory append should succeed");
@@ -808,16 +854,12 @@ mod tests {
         .await
         .expect("user edit should succeed");
 
-        let results = store
+        let _error = store
             .search_memory(&MemorySearchQuery {
                 query: "canary".to_string(),
                 max_results: 5,
-                min_score: Some(0.0),
             })
             .await
-            .expect("search should succeed");
-
-        assert_eq!(results.len(), 1);
-        assert!(results[0].snippet.contains("canary"));
+            .expect_err("search should require llm");
     }
 }

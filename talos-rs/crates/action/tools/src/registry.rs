@@ -672,7 +672,6 @@ mod tests {
 
         let mut config = AgentKernelConfig::default();
         config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
-        config.memory.search_min_score = 0.0;
         let context =
             ToolContext::new_with_kernel_config("session-ctx", "user-ctx", Some(Arc::new(config)));
         let invocation = registry

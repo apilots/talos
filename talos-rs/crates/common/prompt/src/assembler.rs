@@ -295,15 +295,7 @@ pub(crate) async fn load_dynamic_sections(
                 .iter()
                 .take(retrieved_memory_max_items.max(1))
             {
-                let line = format!(
-                    "- {}{}: {}",
-                    item.path,
-                    item.citation
-                        .as_ref()
-                        .map(|citation| format!(" ({citation})"))
-                        .unwrap_or_default(),
-                    item.snippet.trim()
-                );
+                let line = format!("- {}: {}", item.path, item.snippet.trim());
                 if combined.len() + line.len() + 1 > retrieved_memory_max_chars.max(1) {
                     break;
                 }
