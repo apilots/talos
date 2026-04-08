@@ -407,7 +407,7 @@ impl OllamaProvider {
         let ollama_req = OllamaRequest {
             model: request.model,
             messages,
-            system: request.system.or(system),
+            system,
             stream: Some(false),
             options: Some(options),
         };
@@ -453,6 +453,8 @@ impl OllamaProvider {
                 completion_tokens: ollama_resp.eval_count.unwrap_or(0),
                 total_tokens: ollama_resp.prompt_eval_count.unwrap_or(0)
                     + ollama_resp.eval_count.unwrap_or(0),
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
             },
             finish_reason: Some("stop".to_string()),
             tool_calls: None,
@@ -518,6 +520,8 @@ impl OllamaProvider {
                 prompt_tokens: usage.prompt_tokens,
                 completion_tokens: usage.completion_tokens,
                 total_tokens: usage.total_tokens,
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
             },
             finish_reason: choice.finish_reason,
             tool_calls: Self::parse_openai_tool_calls(choice.message.tool_calls),
@@ -531,7 +535,7 @@ impl OllamaProvider {
         let ollama_req = OllamaRequest {
             model: request.model,
             messages,
-            system: request.system.or(system),
+            system,
             stream: Some(true),
             options: Some(options),
         };
@@ -828,6 +832,8 @@ impl LlmProvider for OllamaProvider {
                                     prompt_tokens: usage.prompt_tokens,
                                     completion_tokens: usage.completion_tokens,
                                     total_tokens: usage.total_tokens,
+                                    cache_creation_input_tokens: None,
+                                    cache_read_input_tokens: None,
                                 });
                             }
 
@@ -974,6 +980,7 @@ impl LlmProvider for OllamaProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use talos_llm_provider::{CacheControl, CacheControlKind, PromptCacheSupport};
 
     #[test]
     fn test_ollama_config_builder() {
@@ -1088,5 +1095,36 @@ mod tests {
         assert!(response.message.is_some());
         assert_eq!(response.prompt_eval_count, Some(10));
         assert_eq!(response.eval_count, Some(5));
+    }
+
+    #[test]
+    fn test_ollama_request_does_not_serialize_cache_control_for_unsupported_provider() {
+        let provider = OllamaProvider::new(OllamaConfig::new());
+        assert_eq!(
+            provider.prompt_cache_support(),
+            PromptCacheSupport::Unsupported
+        );
+
+        let mut message = ChatMessage::user("hello");
+        message.cache_control = Some(CacheControl {
+            kind: CacheControlKind::Ephemeral,
+        });
+
+        let request = OpenAICompatRequest {
+            model: "llama3".to_string(),
+            messages: OllamaProvider::convert_openai_messages(vec![message]),
+            temperature: None,
+            max_tokens: None,
+            top_p: None,
+            stop: None,
+            tools: None,
+            tool_choice: None,
+            parallel_tool_calls: None,
+            stream: Some(false),
+            stream_options: None,
+        };
+
+        let json = serde_json::to_string(&request).expect("request should serialize");
+        assert!(!json.contains("cache_control"));
     }
 }

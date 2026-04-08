@@ -14,7 +14,7 @@ impl Tool for ReadFileTool {
     }
 
     fn description(&self) -> &str {
-        "Read a specific local file from a user-provided absolute path and return numbered lines. Prefer this after list_dir or grep_files has already narrowed the target file."
+        "Read a specific local file from a user-provided absolute path and return numbered lines. Prefer this after list_dir or grep_files has narrowed the target file, and use it before editing to verify the current contents."
     }
 
     fn parameters_schema(&self) -> Option<Value> {
@@ -22,9 +22,20 @@ impl Tool for ReadFileTool {
             "type": "object",
             "required": ["file_path"],
             "properties": {
-                "file_path": { "type": "string" },
-                "offset": { "type": "integer", "minimum": 1 },
-                "limit": { "type": "integer", "minimum": 1 }
+                "file_path": {
+                    "type": "string",
+                    "description": "Absolute path to the file to read. Must start with /."
+                },
+                "offset": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "1-based line number to start reading from. Omit to read from the beginning."
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Maximum number of lines to return. Omit to use the default read limit."
+                }
             }
         }))
     }

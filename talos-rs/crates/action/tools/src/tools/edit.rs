@@ -23,7 +23,7 @@ impl Tool for EditTool {
     }
 
     fn description(&self) -> &str {
-        "Edits a file by finding and replacing text. Input should contain 'path', 'find', and 'replace' fields."
+        "Edit a file by finding and replacing text. All occurrences of the find string will be replaced.\n\nUsage:\n- path must be an absolute path to an existing file\n- find must match the target text exactly, including whitespace and indentation\n- If the find string appears multiple times, all occurrences will be replaced; use a longer, unique context string to target a specific location\n- To verify current content before editing, use read_file first\n\nIMPORTANT: Always read the file with read_file before editing. Do not edit a file you have not read in the current session."
     }
 
     fn parameters_schema(&self) -> Option<Value> {
@@ -31,9 +31,18 @@ impl Tool for EditTool {
             "type": "object",
             "required": ["path", "find", "replace"],
             "properties": {
-                "path": {"type": "string"},
-                "find": {"type": "string"},
-                "replace": {"type": "string"}
+                "path": {
+                    "type": "string",
+                    "description": "Absolute path to the file to edit."
+                },
+                "find": {
+                    "type": "string",
+                    "description": "Exact text to find in the file. Use a sufficiently unique context string to avoid changing multiple locations unintentionally."
+                },
+                "replace": {
+                    "type": "string",
+                    "description": "Replacement text that will be written wherever the find string matches."
+                }
             }
         }))
     }

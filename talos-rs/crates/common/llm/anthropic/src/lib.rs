@@ -9,9 +9,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
-    ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider,
-    NativeThinkingConfig, NativeThinkingSupport, Role, ToolChoice, ToolDefinition, ToolStream,
-    ToolStreamEvent, Usage,
+    CacheControl, ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall,
+    LlmProvider, NativeThinkingConfig, NativeThinkingSupport, PromptCacheSupport, Role, ToolChoice,
+    ToolDefinition, ToolStream, ToolStreamEvent, Usage,
 };
 use tokio::sync::mpsc;
 use tracing::{debug, error, info};
@@ -71,7 +71,7 @@ struct AnthropicRequest {
     model: String,
     messages: Vec<AnthropicMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<String>,
+    system: Option<Vec<AnthropicTextBlock>>,
     max_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
@@ -128,6 +128,19 @@ struct AnthropicContent {
 struct AnthropicUsage {
     input_tokens: u32,
     output_tokens: u32,
+    #[serde(default)]
+    cache_creation_input_tokens: Option<u32>,
+    #[serde(default)]
+    cache_read_input_tokens: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct AnthropicTextBlock {
+    #[serde(rename = "type")]
+    block_type: String,
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_control: Option<CacheControl>,
 }
 
 /// Anthropic LLM provider.
@@ -163,6 +176,15 @@ impl AnthropicProvider {
         headers
     }
 
+    fn text_block(text: String, cache_control: Option<CacheControl>) -> Value {
+        serde_json::to_value(AnthropicTextBlock {
+            block_type: "text".to_string(),
+            text,
+            cache_control,
+        })
+        .expect("anthropic text block should serialize")
+    }
+
     fn convert_tool_choice(choice: Option<ToolChoice>) -> Option<AnthropicToolChoice> {
         match choice {
             Some(ToolChoice::Auto) => Some(AnthropicToolChoice::Auto),
@@ -188,32 +210,35 @@ impl AnthropicProvider {
 
     fn convert_messages(
         messages: Vec<ChatMessage>,
-        override_system: Option<String>,
-    ) -> (Option<String>, Vec<AnthropicMessage>) {
-        let mut system_prompt = override_system;
+    ) -> (Option<Vec<AnthropicTextBlock>>, Vec<AnthropicMessage>) {
+        let mut system_blocks: Option<Vec<AnthropicTextBlock>> = None;
         let mut anthropic_messages = Vec::new();
 
         for msg in messages {
             match msg.role {
                 Role::System => {
-                    if system_prompt.is_none() {
-                        system_prompt = Some(msg.content);
-                    }
+                    system_blocks
+                        .get_or_insert_with(Vec::new)
+                        .push(AnthropicTextBlock {
+                            block_type: "text".to_string(),
+                            text: msg.content,
+                            cache_control: msg.cache_control,
+                        });
                 }
                 Role::User => {
                     anthropic_messages.push(AnthropicMessage {
                         role: "user".to_string(),
-                        content: Value::String(msg.content),
+                        content: Value::Array(vec![Self::text_block(
+                            msg.content,
+                            msg.cache_control,
+                        )]),
                     });
                 }
                 Role::Assistant => {
                     if let Some(tool_calls) = msg.tool_calls {
                         let mut blocks = Vec::new();
                         if !msg.content.is_empty() {
-                            blocks.push(serde_json::json!({
-                                "type": "text",
-                                "text": msg.content,
-                            }));
+                            blocks.push(Self::text_block(msg.content, msg.cache_control));
                         }
                         for call in tool_calls {
                             blocks.push(serde_json::json!({
@@ -230,7 +255,10 @@ impl AnthropicProvider {
                     } else {
                         anthropic_messages.push(AnthropicMessage {
                             role: "assistant".to_string(),
-                            content: Value::String(msg.content),
+                            content: Value::Array(vec![Self::text_block(
+                                msg.content,
+                                msg.cache_control,
+                            )]),
                         });
                     }
                 }
@@ -249,7 +277,7 @@ impl AnthropicProvider {
             }
         }
 
-        (system_prompt, anthropic_messages)
+        (system_blocks, anthropic_messages)
     }
 
     fn parse_response_content(content: &[AnthropicContent]) -> (String, Option<Vec<FunctionCall>>) {
@@ -279,7 +307,7 @@ impl AnthropicProvider {
     }
 
     fn build_request(request: ChatRequest, stream: bool) -> AnthropicRequest {
-        let (system, messages) = Self::convert_messages(request.messages, request.system);
+        let (system, messages) = Self::convert_messages(request.messages);
         AnthropicRequest {
             model: request.model,
             messages,
@@ -358,6 +386,8 @@ impl AnthropicProvider {
                 completion_tokens: anthropic_resp.usage.output_tokens,
                 total_tokens: anthropic_resp.usage.input_tokens
                     + anthropic_resp.usage.output_tokens,
+                cache_creation_input_tokens: anthropic_resp.usage.cache_creation_input_tokens,
+                cache_read_input_tokens: anthropic_resp.usage.cache_read_input_tokens,
             },
             finish_reason: anthropic_resp.stop_reason,
             tool_calls,
@@ -411,6 +441,10 @@ impl LlmProvider for AnthropicProvider {
         } else {
             NativeThinkingSupport::Unsupported
         }
+    }
+
+    fn prompt_cache_support(&self) -> PromptCacheSupport {
+        PromptCacheSupport::RequestLevel
     }
 
     async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
@@ -681,7 +715,7 @@ impl LlmProvider for AnthropicProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use talos_llm_provider::NativeThinkingEffort;
+    use talos_llm_provider::{CacheControlKind, NativeThinkingEffort, PromptCacheSupport};
 
     #[test]
     fn test_anthropic_config_builder() {
@@ -702,26 +736,20 @@ mod tests {
             ChatMessage::assistant("Hi there!"),
         ];
 
-        let (system, anthropic_msgs) = AnthropicProvider::convert_messages(messages, None);
+        let (system, anthropic_msgs) = AnthropicProvider::convert_messages(messages);
 
-        assert_eq!(system, Some("You are a helpful assistant".to_string()));
+        assert_eq!(system.as_ref().map(|blocks| blocks.len()), Some(1));
         assert_eq!(anthropic_msgs.len(), 2);
         assert_eq!(anthropic_msgs[0].role, "user");
-        assert_eq!(
-            anthropic_msgs[0].content,
-            Value::String("Hello".to_string())
-        );
+        assert!(anthropic_msgs[0].content.is_array());
         assert_eq!(anthropic_msgs[1].role, "assistant");
-        assert_eq!(
-            anthropic_msgs[1].content,
-            Value::String("Hi there!".to_string())
-        );
+        assert!(anthropic_msgs[1].content.is_array());
     }
 
     #[test]
     fn test_convert_messages_with_tool_result() {
         let messages = vec![ChatMessage::tool("call_1", "read", "done")];
-        let (_system, anthropic_msgs) = AnthropicProvider::convert_messages(messages, None);
+        let (_system, anthropic_msgs) = AnthropicProvider::convert_messages(messages);
         assert_eq!(anthropic_msgs.len(), 1);
         assert_eq!(anthropic_msgs[0].role, "user");
         assert!(anthropic_msgs[0].content.is_array());
@@ -733,6 +761,10 @@ mod tests {
         let provider = AnthropicProvider::new(config);
         assert_eq!(provider.name(), "anthropic");
         assert_eq!(provider.default_model(), "claude-3-5-sonnet-20241022");
+        assert_eq!(
+            provider.prompt_cache_support(),
+            PromptCacheSupport::RequestLevel
+        );
     }
 
     #[test]
@@ -792,5 +824,33 @@ mod tests {
                 .map(|thinking| thinking.budget_tokens),
             Some(4096)
         );
+    }
+
+    #[test]
+    fn test_convert_messages_preserves_multiple_system_blocks_and_cache_control() {
+        let mut first = ChatMessage::system("System text");
+        first.cache_control = Some(CacheControl {
+            kind: CacheControlKind::Ephemeral,
+        });
+        let messages = vec![first, ChatMessage::system("Workspace context")];
+
+        let (system_blocks, anthropic_msgs) = AnthropicProvider::convert_messages(messages);
+
+        assert!(anthropic_msgs.is_empty());
+        let blocks = system_blocks.expect("system blocks should exist");
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(
+            blocks[0].cache_control.as_ref().map(|c| c.kind),
+            Some(CacheControlKind::Ephemeral)
+        );
+        assert_eq!(blocks[1].text, "Workspace context");
+    }
+
+    #[test]
+    fn test_text_block_serialization_skips_null_cache_control() {
+        let block = AnthropicProvider::text_block("hello".to_string(), None);
+        let json = serde_json::to_string(&block).expect("text block should serialize");
+        assert!(!json.contains("cache_control"));
+        assert!(!json.contains("null"));
     }
 }

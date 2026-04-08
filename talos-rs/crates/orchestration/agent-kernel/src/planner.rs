@@ -11,57 +11,59 @@ const PLAN_REACT_REASONING_TAG: &str = "/*REASONING*/";
 const PLAN_REACT_ACTION_TAG: &str = "/*ACTION*/";
 const PLAN_REACT_FINAL_ANSWER_TAG: &str = "/*FINAL_ANSWER*/";
 
-const PLAN_REACT_INSTRUCTION: &str = "When answering, prefer available tools over memorized \
-knowledge.\n\nFollow this process:\n1. Start with a natural-language plan.\n2. Use tools to \
-execute the plan and interleave tool use with reasoning updates.\n3. End with one final answer.\n\n\
-Tool usage rules:\n- Prefer one tool call at a time unless the calls are clearly independent.\n- \
-When the user provides a local absolute path, treat it as a path you should verify with file \
-tools before making environment claims.\n- For a user-provided absolute directory path, start \
-with list_dir. For a user-provided absolute file path, start with read_file.\n- Do not claim a \
-path is outside the sandbox, outside the workspace, on the host filesystem, unmounted, or \
-inaccessible until a file tool has actually failed on that path.\n- For local path analysis, do \
-not start with memory_search or web_search when local file tools can inspect the path directly.\n- \
-For codebase investigation, narrow scope before reading files: start with directory listing or \
-globbing, then use grep/search, then read specific files.\n- Do not jump into repeated read_file \
-calls when grep/search can locate symbols or call sites first.\n- For repository or architecture \
-analysis, do not stop after a directory listing. Inspect the top-level structure, read at least \
-one manifest or README file, and run at least one grep/search pass for entrypoints, modules, or \
-key symbols before writing the summary.\n- Separate verified facts from inference. If the \
-investigation is still shallow, say it is a preliminary assessment rather than a full architecture \
-analysis.\n- For repository or architecture analysis, the first investigation pass should normally \
-be list_dir or grep_files, not read_file, unless the user already named an exact file to inspect.\n- \
-For repository or architecture analysis, a strong default sequence is: 1) list_dir at the repo \
-root, 2) read README or a manifest such as Cargo.toml/package.json/pyproject.toml/go.mod, 3) \
-grep_files for entrypoints and modules using patterns like main, app, server, router, cli, or \
-register, 4) then read the specific files you found.\n- A summary based on only one directory \
-listing or one file read is usually insufficient for architecture analysis.\n\n\
-Use this format:\n- planning under /*PLANNING*/\n- replanning under /*REPLANNING*/ when needed\n\
-- reasoning under /*REASONING*/\n- tool actions under /*ACTION*/\n- final answer under \
-/*FINAL_ANSWER*/.\n\nThe plan should be coherent, tool-grounded, and decomposed into numbered \
-steps. If execution fails, revise the plan under /*REPLANNING*/. The final answer must be precise \
-and explicitly state when the task cannot be completed with the available context.";
+const TOOL_USAGE_GUIDANCE: &str = "Tool usage rules:\n- Prefer one tool call at a time unless the \
+calls are clearly independent.\n- When the user provides a local absolute path, treat it as a path \
+you should verify with file tools before making environment claims.\n- For a user-provided absolute \
+directory path, start with list_dir. For a user-provided absolute file path, start with read_file.\n- \
+Do not claim a path is outside the sandbox, outside the workspace, on the host filesystem, \
+unmounted, or inaccessible until a file tool has actually failed on that path.\n- For local path \
+analysis, do not start with memory_search or web_search when local file tools can inspect the path \
+directly.\n- For codebase investigation, narrow scope before reading files: start with directory \
+listing or globbing, then grep/search, then read specific files. When refining a broad codebase \
+investigation, then use grep/search before opening many files.\n- Do not jump into repeated \
+read_file calls when grep/search can locate symbols or call sites first.\n- For repository or \
+architecture analysis, do not stop after a directory listing. Inspect the top-level structure, read \
+at least one manifest or README file, and run at least one grep/search pass for entrypoints, \
+modules, or key symbols before writing the summary.\n- Separate verified facts from inference. If \
+the investigation is still shallow, say it is a preliminary assessment rather than a full \
+architecture analysis.\n- For repository or architecture analysis, the first investigation pass \
+should normally be list_dir or grep_files, not read_file, unless the user already named an exact \
+file to inspect.\n- For repository or architecture analysis, a strong default sequence is: 1) \
+list_dir at the repo root, 2) read README or a manifest such as \
+Cargo.toml/package.json/pyproject.toml/go.mod, 3) grep_files for entrypoints and modules using \
+patterns like main, app, server, router, cli, or register, 4) then read the specific files you \
+found.\n- A summary based on only one directory listing or one file read is usually insufficient for \
+architecture analysis.\n- Do not use exec_command when a dedicated tool exists for the operation: \
+use read_file instead of cat or head, list_dir instead of ls or find, grep_files instead of grep or \
+rg, edit instead of sed or awk, and write instead of echo or heredoc.\n- When multiple tool calls \
+are needed and their inputs do not depend on each other, call them in parallel in a single response. \
+When a later call depends on the output of an earlier one, call them sequentially.\n- Before taking \
+actions that are hard to reverse, confirm with the user: deleting files or directories, force-pushing \
+or hard-resetting git history, or running commands that affect external services or shared state. \
+Never use --no-verify, --force, or similar bypass flags unless the user explicitly requests it.";
 
-const BUILT_IN_TOOL_GUIDANCE: &str = "Use available tools whenever they can verify facts, inspect \
-the workspace, execute commands, or fetch concrete results. Do not answer from memory when a tool \
-can check the answer. Prefer one tool call at a time unless parallel work is clearly necessary. \
-When the user provides a local absolute path, verify it with local file tools before making any \
-claim about sandbox limits, workspace boundaries, mount state, or filesystem access. For a \
-directory path, start with list_dir. For a file path, start with read_file. Do not default to \
-memory_search or web_search for local path analysis when file tools can inspect the target \
-directly. \
-For repository analysis, narrow scope before opening files: start with list_dir or glob patterns, \
-then grep/search for symbols or paths, then read the specific files you need. For repository or \
-architecture analysis, do not stop after a directory listing: inspect the top-level structure, \
-read at least one manifest or README file, and run at least one grep/search pass for entrypoints, \
-modules, or key symbols before summarizing. Separate verified facts from inference, and label the \
-result as preliminary when the investigation is still shallow. For repository or architecture \
-analysis, the first investigation pass should normally be list_dir or grep_files, not read_file, \
-unless the user already named an exact file to inspect. A strong default sequence is: 1) list_dir \
-at the repo root, 2) read README or a manifest such as Cargo.toml/package.json/pyproject.toml/go.mod, \
-3) grep_files for entrypoints and modules using patterns like main, app, server, router, cli, or \
-register, 4) then read the specific files you found. A summary based on only one directory \
-listing or one file read is usually insufficient for architecture analysis. Use a direct answer \
-only when no tool is needed.";
+fn plan_react_instruction() -> String {
+    format!(
+        "When answering, prefer available tools over memorized knowledge.\n\nFollow this process:\n\
+1. Start with a natural-language plan.\n2. Use tools to execute the plan and interleave tool use \
+with reasoning updates.\n3. End with one final answer.\n\n{}\n\nUse this format:\n- planning under \
+/*PLANNING*/\n- replanning under /*REPLANNING*/ when needed\n- reasoning under /*REASONING*/\n- \
+tool actions under /*ACTION*/\n- final answer under /*FINAL_ANSWER*/.\n\nThe plan should be \
+coherent, tool-grounded, and decomposed into numbered steps. If execution fails, revise the plan \
+under /*REPLANNING*/. The final answer must be precise and explicitly state when the task cannot \
+be completed with the available context.",
+        TOOL_USAGE_GUIDANCE
+    )
+}
+
+fn built_in_tool_guidance() -> String {
+    format!(
+        "Use available tools whenever they can verify facts, inspect the workspace, execute \
+commands, or fetch concrete results. Do not answer from memory when a tool can check the answer.\n\n\
+{}\n\nUse a direct answer only when no tool is needed.",
+        TOOL_USAGE_GUIDANCE
+    )
+}
 
 pub struct BuiltInPlanner;
 
@@ -90,7 +92,7 @@ impl Planner for BuiltInPlanner {
             None
         };
         let planning_instruction =
-            (!request.tool_definitions.is_empty()).then(|| BUILT_IN_TOOL_GUIDANCE.to_string());
+            (!request.tool_definitions.is_empty()).then(built_in_tool_guidance);
         PlanningRequestEffect {
             planning_instruction,
             native_thinking,
@@ -118,7 +120,7 @@ impl Planner for PlanReActPlanner {
         _request: &LlmRequestEnvelope,
     ) -> PlanningRequestEffect {
         PlanningRequestEffect {
-            planning_instruction: Some(PLAN_REACT_INSTRUCTION.to_string()),
+            planning_instruction: Some(plan_react_instruction()),
             native_thinking: None,
             clear_request_thoughts: false,
         }

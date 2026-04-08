@@ -18,7 +18,7 @@ impl Tool for ExecCommandTool {
     }
 
     fn description(&self) -> &str {
-        "Run a shell command and optionally keep the session open for later stdin writes."
+        "Run a shell command in the workspace. Use only when no dedicated file or search tool can accomplish the task.\n\nUsage:\n- Prefer read_file over exec_command with cat, head, or tail\n- Prefer list_dir over exec_command with ls or find\n- Prefer grep_files over exec_command with grep or rg\n- Prefer edit or write over exec_command with sed, awk, or heredoc writes\n- workdir defaults to the session workspace root when omitted\n- For commands that require elevated permissions, set sandbox_permissions to require_escalated and provide a justification\n\nIMPORTANT: Do not use exec_command as a substitute for dedicated tools. Reserve it for operations that no other tool supports."
     }
 
     fn parameters_schema(&self) -> Option<Value> {
@@ -26,18 +26,49 @@ impl Tool for ExecCommandTool {
             "type": "object",
             "required": ["cmd"],
             "properties": {
-                "cmd": { "type": "string" },
-                "workdir": { "type": "string" },
-                "shell": { "type": "string" },
-                "login": { "type": "boolean" },
-                "tty": { "type": "boolean" },
-                "yield_time_ms": { "type": "integer", "minimum": 0 },
-                "max_output_tokens": { "type": "integer", "minimum": 1 },
-                "sandbox_permissions": { "type": "string", "enum": ["use_default", "require_escalated"] },
-                "justification": { "type": "string" },
+                "cmd": {
+                    "type": "string",
+                    "description": "Shell command to execute."
+                },
+                "workdir": {
+                    "type": "string",
+                    "description": "Optional working directory for the command. Defaults to the session workspace when omitted."
+                },
+                "shell": {
+                    "type": "string",
+                    "description": "Optional shell binary to launch instead of the default shell."
+                },
+                "login": {
+                    "type": "boolean",
+                    "description": "Whether to start the shell with login semantics."
+                },
+                "tty": {
+                    "type": "boolean",
+                    "description": "Whether to allocate a TTY and keep the session interactive."
+                },
+                "yield_time_ms": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "How long to wait for output before returning control, in milliseconds."
+                },
+                "max_output_tokens": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Maximum number of output tokens to return in the response."
+                },
+                "sandbox_permissions": {
+                    "type": "string",
+                    "enum": ["use_default", "require_escalated"],
+                    "description": "Sandbox mode for the command: use_default runs with normal restrictions, require_escalated requests elevated permissions."
+                },
+                "justification": {
+                    "type": "string",
+                    "description": "Short explanation of why elevated permissions are needed when sandbox_permissions is require_escalated."
+                },
                 "prefix_rule": {
                     "type": "array",
-                    "items": { "type": "string" }
+                    "items": { "type": "string" },
+                    "description": "Optional command prefix pattern that can authorize similar elevated commands in future runs."
                 }
             }
         }))

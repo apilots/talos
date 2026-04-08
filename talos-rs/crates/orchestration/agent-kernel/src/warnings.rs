@@ -161,7 +161,7 @@ mod tests {
     fn base_diagnostics() -> PromptDiagnostics {
         PromptDiagnostics {
             mode: PromptMode::Full,
-            included_sections: vec![PromptSectionKind::Identity],
+            included_sections: vec![PromptSectionKind::System],
             dropped_sections: Vec::new(),
             truncated_sections: Vec::new(),
             bootstrap_files: Vec::new(),

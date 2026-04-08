@@ -409,6 +409,8 @@ impl OpenAIProvider {
                 prompt_tokens: usage.prompt_tokens,
                 completion_tokens: usage.completion_tokens,
                 total_tokens: usage.total_tokens,
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
             },
             finish_reason: choice.finish_reason,
             tool_calls: Self::parse_tool_calls(choice.message.tool_calls),
@@ -597,6 +599,8 @@ impl LlmProvider for OpenAIProvider {
                                     prompt_tokens: usage.prompt_tokens,
                                     completion_tokens: usage.completion_tokens,
                                     total_tokens: usage.total_tokens,
+                                    cache_creation_input_tokens: None,
+                                    cache_read_input_tokens: None,
                                 });
                             }
 
@@ -744,6 +748,7 @@ impl LlmProvider for OpenAIProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use talos_llm_provider::{CacheControl, CacheControlKind, PromptCacheSupport};
 
     #[test]
     fn test_openai_config_builder() {
@@ -853,6 +858,28 @@ mod tests {
         let provider = OpenAIProvider::new(config);
         assert_eq!(provider.name(), "openai");
         assert_eq!(provider.default_model(), "gpt-4o");
+        assert_eq!(
+            provider.prompt_cache_support(),
+            PromptCacheSupport::Unsupported
+        );
+    }
+
+    #[test]
+    fn test_openai_request_does_not_serialize_cache_control_for_unsupported_provider() {
+        let mut msg = ChatMessage::user("Hello");
+        msg.cache_control = Some(CacheControl {
+            kind: CacheControlKind::Ephemeral,
+        });
+        let request = OpenAIProvider::build_request(
+            ChatRequest::builder()
+                .model("gpt-4o")
+                .messages(vec![msg])
+                .build(),
+            false,
+        );
+
+        let json = serde_json::to_string(&request).expect("request should serialize");
+        assert!(!json.contains("cache_control"));
     }
 
     #[test]

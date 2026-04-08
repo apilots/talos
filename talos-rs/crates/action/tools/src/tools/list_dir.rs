@@ -14,7 +14,7 @@ impl Tool for ListDirTool {
     }
 
     fn description(&self) -> &str {
-        "List a local directory from a user-provided absolute path with bounded depth to map the top-level structure before reading files. Use this first when exploring a repository or subsystem."
+        "List a local directory from a user-provided absolute path with bounded depth to map the top-level structure before reading files. Use this first when exploring a repository, subsystem, or unfamiliar path."
     }
 
     fn parameters_schema(&self) -> Option<Value> {
@@ -22,10 +22,25 @@ impl Tool for ListDirTool {
             "type": "object",
             "required": ["dir_path"],
             "properties": {
-                "dir_path": { "type": "string" },
-                "offset": { "type": "integer", "minimum": 1 },
-                "limit": { "type": "integer", "minimum": 1 },
-                "depth": { "type": "integer", "minimum": 1 }
+                "dir_path": {
+                    "type": "string",
+                    "description": "Absolute path to the directory to inspect. Must start with /."
+                },
+                "offset": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "1-based offset into the directory entry list for pagination."
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Maximum number of directory entries to return in this call."
+                },
+                "depth": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Maximum recursion depth when expanding nested directories."
+                }
             }
         }))
     }

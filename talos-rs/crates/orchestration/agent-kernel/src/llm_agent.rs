@@ -415,6 +415,8 @@ mod tests {
                     prompt_tokens: 11,
                     completion_tokens: 7,
                     total_tokens: 18,
+                    cache_creation_input_tokens: None,
+                    cache_read_input_tokens: None,
                 },
                 finish_reason: Some("stop".to_string()),
                 tool_calls: None,
@@ -441,6 +443,8 @@ mod tests {
                             prompt_tokens: 11,
                             completion_tokens: 7,
                             total_tokens: 18,
+                            cache_creation_input_tokens: None,
+                            cache_read_input_tokens: None,
                         }),
                     }))
                     .await;
