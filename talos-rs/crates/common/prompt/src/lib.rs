@@ -14,7 +14,7 @@ mod renderer;
 mod types;
 
 pub use types::{
-    BootstrapFileDiagnostic, BudgetTier, PlannerMode, PromptAssembly, PromptBudget,
+    BootstrapFileDiagnostic, BudgetTier, CacheScope, PlannerMode, PromptAssembly, PromptBudget,
     PromptBuildConfig, PromptDiagnostics, PromptLoadPolicy, PromptMode, PromptPhase, PromptSection,
     PromptSectionKind, TruncationMode, WorkspaceBootstrapFile, WorkspaceBootstrapFileKind,
 };
@@ -662,8 +662,12 @@ mod tests {
             .await
             .expect("prompt build should succeed");
 
-        assert!(messages[0].content.contains("echo"));
-        assert!(messages[1].content.contains("Planning instruction"));
+        assert!(messages
+            .iter()
+            .any(|message| message.content.contains("echo")));
+        assert!(messages
+            .iter()
+            .any(|message| message.content.contains("Planning instruction")));
     }
 
     #[tokio::test]
@@ -878,6 +882,10 @@ mod tests {
             .await
             .expect("prompt assembly should succeed");
 
+        assert!(assembly
+            .system_sections
+            .iter()
+            .any(|section| section.kind == PromptSectionKind::System));
         let project_context = assembly
             .context_sections
             .iter()
@@ -911,5 +919,109 @@ mod tests {
             .iter()
             .all(|section| section.kind != PromptSectionKind::ProjectContext));
         assert!(assembly.diagnostics.bootstrap_files.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_prompt_assembly_splits_system_and_tooling_sections() {
+        let registry = ToolRegistry::new();
+        registry.register(Arc::new(EchoTool));
+
+        let assembly = PromptBuilder::new()
+            .agent("talos", "assistant")
+            .tools(&registry)
+            .user_input("hello")
+            .assemble()
+            .await
+            .expect("prompt assembly should succeed");
+
+        assert!(assembly
+            .system_sections
+            .iter()
+            .any(|section| section.kind == PromptSectionKind::System));
+        let tooling = assembly
+            .system_sections
+            .iter()
+            .find(|section| section.kind == PromptSectionKind::Tooling)
+            .expect("tooling section should exist");
+        assert!(tooling.content.contains("Available tools:"));
+        assert!(tooling.content.contains("echo"));
+        assert_eq!(tooling.cache_scope, CacheScope::Static);
+        assert!(assembly.context_sections.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_rendered_cache_breakpoints_stay_before_user_input() {
+        let registry = ToolRegistry::new();
+        registry.register(Arc::new(EchoTool));
+
+        let assembly = PromptBuilder::new()
+            .agent("talos", "assistant")
+            .phase(PromptPhase::Planning)
+            .planner_mode("built_in")
+            .expect("planner mode should parse")
+            .planning_instruction(Some("build a short plan first".to_string()))
+            .tools(&registry)
+            .user_input("hello")
+            .assemble()
+            .await
+            .expect("prompt assembly should succeed");
+
+        let rendered = render_prompt_assembly(&assembly);
+        let last_cached_index = rendered
+            .iter()
+            .enumerate()
+            .filter_map(|(index, message)| message.cache_control.as_ref().map(|_| index))
+            .max()
+            .expect("at least one cached message should exist");
+
+        assert!(last_cached_index < rendered.len() - 1);
+        assert_eq!(
+            rendered.last().expect("user message should exist").role,
+            Role::User
+        );
+        assert!(rendered
+            .iter()
+            .take(last_cached_index + 1)
+            .all(|message| message.role == Role::System));
+    }
+
+    #[tokio::test]
+    async fn test_rendered_cache_breakpoints_cover_tooling_and_workspace_sections() {
+        let registry = ToolRegistry::new();
+        registry.register(Arc::new(EchoTool));
+
+        let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let memory = MemoryStore::new(workspace_dir.clone());
+
+        let mut config = PromptBuildConfig::default();
+        config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+        config.load_policy.include_session_summary = false;
+        config.load_policy.include_recent_messages = false;
+
+        let assembly = PromptBuilder::new()
+            .agent("talos", "assistant")
+            .tools(&registry)
+            .memory_store("s1", &memory)
+            .config(config)
+            .user_input("hello")
+            .assemble()
+            .await
+            .expect("prompt assembly should succeed");
+
+        let rendered = render_prompt_assembly(&assembly);
+        let tooling_index = assembly
+            .system_sections
+            .iter()
+            .position(|section| section.kind == PromptSectionKind::Tooling)
+            .expect("tooling section should exist");
+        assert!(rendered[tooling_index].cache_control.is_some());
+        assert!(assembly
+            .context_sections
+            .iter()
+            .any(|section| section.kind == PromptSectionKind::ProjectContext));
+        assert!(rendered
+            .iter()
+            .take(rendered.len() - 1)
+            .any(|message| message.cache_control.is_some()));
     }
 }

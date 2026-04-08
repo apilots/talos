@@ -1,7 +1,7 @@
 use crate::{
-    bootstrap, budget, diagnostics, BootstrapFileDiagnostic, BudgetTier, PromptAssembly,
-    PromptBuilder, PromptDiagnostics, PromptMode, PromptPhase, PromptSection, PromptSectionKind,
-    TruncationMode, WorkspaceBootstrapFile,
+    bootstrap, budget, diagnostics, BootstrapFileDiagnostic, BudgetTier, CacheScope,
+    PromptAssembly, PromptBuilder, PromptDiagnostics, PromptMode, PromptPhase, PromptSection,
+    PromptSectionKind, TruncationMode, WorkspaceBootstrapFile,
 };
 use talos_error::{TalosError, TalosResult};
 use talos_memory::{Memory, SessionPromptContextConfig};
@@ -26,10 +26,6 @@ pub(crate) fn build_identity_prompt(builder: &PromptBuilder<'_>) -> String {
         PromptMode::None => "none",
     };
 
-    let tool_summary = builder
-        .tool_registry
-        .map(PromptBuilder::render_tool_summary)
-        .unwrap_or_else(|| "none".to_string());
     let environment_summary = builder
         .session_environment
         .as_ref()
@@ -50,9 +46,6 @@ Planner mode: {}
 Prompt mode: {}
 {}
 
-{}
-
-Available tools:
 {}"#,
         builder.agent_name,
         builder.agent_description,
@@ -60,9 +53,20 @@ Available tools:
         planner_mode,
         prompt_mode,
         phase_instruction,
-        environment_summary,
-        tool_summary
+        environment_summary
     )
+}
+
+pub(crate) fn build_tooling_prompt(builder: &PromptBuilder<'_>) -> Option<String> {
+    let Some(tool_registry) = builder.tool_registry else {
+        return None;
+    };
+    if tool_registry.get_tool_definitions().is_empty() {
+        return None;
+    }
+
+    let tool_summary = PromptBuilder::render_tool_summary(tool_registry);
+    Some(format!("Available tools:\n{}", tool_summary))
 }
 
 pub(crate) async fn assemble(builder: &PromptBuilder<'_>) -> TalosResult<PromptAssembly> {
@@ -71,15 +75,29 @@ pub(crate) async fn assemble(builder: &PromptBuilder<'_>) -> TalosResult<PromptA
     })?;
 
     let mut static_sections = vec![PromptSection {
-        kind: PromptSectionKind::Identity,
-        title: Some("Identity".to_string()),
+        kind: PromptSectionKind::System,
+        title: Some("System".to_string()),
         content: build_identity_prompt(builder),
         role: None,
+        cache_scope: CacheScope::Static,
         tier: BudgetTier::Critical,
         required: true,
         estimated_tokens: 0,
         truncation_mode: TruncationMode::TrimTail,
     }];
+    if let Some(tooling_prompt) = build_tooling_prompt(builder) {
+        static_sections.push(PromptSection {
+            kind: PromptSectionKind::Tooling,
+            title: Some("Tooling".to_string()),
+            content: tooling_prompt,
+            role: None,
+            cache_scope: CacheScope::Static,
+            tier: BudgetTier::Critical,
+            required: true,
+            estimated_tokens: 0,
+            truncation_mode: TruncationMode::TrimTail,
+        });
+    }
     if let Some(planning_instruction) = builder.planning_instruction.as_deref() {
         if !planning_instruction.trim().is_empty() {
             static_sections.push(PromptSection {
@@ -87,6 +105,7 @@ pub(crate) async fn assemble(builder: &PromptBuilder<'_>) -> TalosResult<PromptA
                 title: Some("Planning instruction".to_string()),
                 content: format!("Planning instruction:\n{}", planning_instruction.trim()),
                 role: None,
+                cache_scope: CacheScope::Static,
                 tier: BudgetTier::Important,
                 required: false,
                 estimated_tokens: 0,
@@ -201,6 +220,7 @@ pub(crate) fn build_project_context_section(
                 title: Some("Project Context".to_string()),
                 content: format!("# Project Context\n\n{}", sections.join("\n\n")),
                 role: None,
+                cache_scope: CacheScope::Workspace,
                 tier: BudgetTier::Critical,
                 required: false,
                 estimated_tokens: 0,
@@ -266,6 +286,7 @@ pub(crate) async fn load_dynamic_sections(
                             summary.header.id, content
                         ),
                         role: None,
+                        cache_scope: CacheScope::None,
                         tier: BudgetTier::Important,
                         required: false,
                         estimated_tokens: 0,
@@ -281,6 +302,7 @@ pub(crate) async fn load_dynamic_sections(
                     title: Some("Recent message".to_string()),
                     content: message.text,
                     role: Some(message.role),
+                    cache_scope: CacheScope::None,
                     tier: BudgetTier::Supplemental,
                     required: false,
                     estimated_tokens: 0,
@@ -310,6 +332,7 @@ pub(crate) async fn load_dynamic_sections(
                     title: Some("Retrieved memories".to_string()),
                     content: format!("Retrieved memories:\n{}", combined),
                     role: None,
+                    cache_scope: CacheScope::None,
                     tier: BudgetTier::Supplemental,
                     required: false,
                     estimated_tokens: 0,

@@ -151,7 +151,6 @@ impl PlannerSelector {
             tools: None,
             temperature: Some(0.0),
             max_tokens: Some(32),
-            system: None,
             stop: None,
             top_p: None,
             tool_choice: None,

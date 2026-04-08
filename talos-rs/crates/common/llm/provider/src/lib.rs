@@ -117,6 +117,12 @@ pub enum ToolChoice {
     Named { name: String },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptCacheSupport {
+    Unsupported,
+    RequestLevel,
+}
+
 /// Unified tool calling error.
 #[derive(Debug, Error)]
 pub enum ToolCallingError {
@@ -142,6 +148,10 @@ pub trait LlmProvider: Send + Sync {
     fn default_model(&self) -> &str;
     fn native_thinking_support(&self, _model: &str) -> NativeThinkingSupport {
         NativeThinkingSupport::Unsupported
+    }
+
+    fn prompt_cache_support(&self) -> PromptCacheSupport {
+        PromptCacheSupport::Unsupported
     }
 
     /// Native tool-calling request. Default implementation falls back to plain chat.
@@ -197,7 +207,6 @@ pub struct ChatRequest {
     pub model: String,
     pub temperature: Option<f32>,
     pub max_tokens: Option<u32>,
-    pub system: Option<String>,
     pub stop: Option<Vec<String>>,
     pub top_p: Option<f32>,
     pub tools: Option<Vec<ToolDefinition>>,
@@ -217,7 +226,6 @@ impl ChatRequest {
             model: model.into(),
             temperature: None,
             max_tokens: None,
-            system: None,
             stop: None,
             top_p: None,
             tools: None,
@@ -268,6 +276,22 @@ pub struct ChatMessage {
     pub tool_call_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<FunctionCall>>,
+    // Only RequestLevel providers should consume this field. Unsupported providers must drop it
+    // during request conversion rather than serializing it into outbound payloads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_control: Option<CacheControl>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CacheControl {
+    #[serde(rename = "type")]
+    pub kind: CacheControlKind,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum CacheControlKind {
+    #[serde(rename = "ephemeral")]
+    Ephemeral,
 }
 
 impl ChatMessage {
@@ -278,6 +302,7 @@ impl ChatMessage {
             name: None,
             tool_call_id: None,
             tool_calls: None,
+            cache_control: None,
         }
     }
 
@@ -288,6 +313,7 @@ impl ChatMessage {
             name: None,
             tool_call_id: None,
             tool_calls: None,
+            cache_control: None,
         }
     }
 
@@ -298,6 +324,7 @@ impl ChatMessage {
             name: None,
             tool_call_id: None,
             tool_calls: None,
+            cache_control: None,
         }
     }
 
@@ -311,6 +338,7 @@ impl ChatMessage {
             name: None,
             tool_call_id: None,
             tool_calls: Some(tool_calls),
+            cache_control: None,
         }
     }
 
@@ -325,6 +353,7 @@ impl ChatMessage {
             name: Some(name.into()),
             tool_call_id: Some(tool_call_id.into()),
             tool_calls: None,
+            cache_control: None,
         }
     }
 }
@@ -369,6 +398,10 @@ pub struct Usage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
     pub total_tokens: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_creation_input_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read_input_tokens: Option<u32>,
 }
 
 /// Streaming chunk for plain text APIs.
@@ -530,7 +563,6 @@ pub struct ChatRequestBuilder {
     model: Option<String>,
     temperature: Option<f32>,
     max_tokens: Option<u32>,
-    system: Option<String>,
     stop: Option<Vec<String>>,
     top_p: Option<f32>,
     tools: Option<Vec<ToolDefinition>>,
@@ -563,11 +595,6 @@ impl ChatRequestBuilder {
 
     pub fn max_tokens(mut self, tokens: u32) -> Self {
         self.max_tokens = Some(tokens);
-        self
-    }
-
-    pub fn system(mut self, system: impl Into<String>) -> Self {
-        self.system = Some(system.into());
         self
     }
 
@@ -607,7 +634,6 @@ impl ChatRequestBuilder {
             model: self.model.expect("model is required"),
             temperature: self.temperature,
             max_tokens: self.max_tokens,
-            system: self.system,
             stop: self.stop,
             top_p: self.top_p,
             tools: self.tools,

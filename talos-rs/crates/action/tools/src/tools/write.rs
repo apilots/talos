@@ -22,7 +22,7 @@ impl Tool for WriteTool {
     }
 
     fn description(&self) -> &str {
-        "Writes content to a file. Input should contain 'path' and 'content' fields."
+        "Write content to a file, creating it if it does not exist or overwriting it entirely if it does.\n\nUsage:\n- path must be an absolute path\n- content replaces the entire file; partial updates should use edit instead\n- To preserve existing content, read the file first and incorporate the existing content into the new write\n\nIMPORTANT: This tool overwrites the entire file. Use edit for targeted changes to existing files."
     }
 
     fn parameters_schema(&self) -> Option<Value> {
@@ -30,8 +30,14 @@ impl Tool for WriteTool {
             "type": "object",
             "required": ["path", "content"],
             "properties": {
-                "path": {"type": "string"},
-                "content": {"type": "string"}
+                "path": {
+                    "type": "string",
+                    "description": "Absolute path to the file to create or overwrite."
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Full file contents to write. This replaces the entire file."
+                }
             }
         }))
     }

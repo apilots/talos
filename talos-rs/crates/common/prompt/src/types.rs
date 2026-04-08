@@ -165,7 +165,8 @@ pub struct WorkspaceBootstrapFile {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PromptSectionKind {
-    Identity,
+    System,
+    Tooling,
     PlanningInstruction,
     ProjectContext,
     SessionSummary,
@@ -181,6 +182,16 @@ pub enum BudgetTier {
     Supplemental,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CacheScope {
+    Static,
+    Workspace,
+    // Default to the safest behavior for newly added sections until their reuse boundary is explicit.
+    #[default]
+    None,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TruncationMode {
@@ -194,6 +205,7 @@ pub struct PromptSection {
     pub title: Option<String>,
     pub content: String,
     pub role: Option<TalosMessageRole>,
+    pub cache_scope: CacheScope,
     pub tier: BudgetTier,
     pub required: bool,
     pub estimated_tokens: usize,

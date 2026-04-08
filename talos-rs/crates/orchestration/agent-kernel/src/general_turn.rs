@@ -583,6 +583,8 @@ mod tests {
                     prompt_tokens: 1,
                     completion_tokens: 1,
                     total_tokens: 2,
+                    cache_creation_input_tokens: None,
+                    cache_read_input_tokens: None,
                 },
                 finish_reason: Some("stop".to_string()),
                 tool_calls: None,

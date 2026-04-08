@@ -9,8 +9,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
-    ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider,
-    NativeThinkingSupport, Role, ToolChoice, ToolDefinition, ToolStream, ToolStreamEvent, Usage,
+    CacheControl, ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall,
+    LlmProvider, NativeThinkingSupport, PromptCacheSupport, Role, ToolChoice, ToolDefinition,
+    ToolStream, ToolStreamEvent, Usage,
 };
 use tokio::sync::mpsc;
 use tracing::{error, info};
@@ -64,13 +65,29 @@ pub enum BailianModelCapability {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct BailianMessage {
     role: String,
-    content: Option<String>,
+    content: Option<BailianMessageContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_call_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_calls: Option<Vec<BailianToolCall>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+enum BailianMessageContent {
+    Text(String),
+    Blocks(Vec<BailianContentBlock>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct BailianContentBlock {
+    #[serde(rename = "type")]
+    block_type: String,
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_control: Option<CacheControl>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -165,7 +182,7 @@ struct BailianChoice {
 #[derive(Debug, Clone, Deserialize)]
 struct BailianResponseMessage {
     #[serde(default)]
-    content: Option<String>,
+    content: Option<BailianMessageContent>,
     #[serde(default)]
     tool_calls: Option<Vec<BailianToolCall>>,
 }
@@ -175,6 +192,26 @@ struct BailianUsage {
     prompt_tokens: u32,
     completion_tokens: u32,
     total_tokens: u32,
+    #[serde(default)]
+    prompt_tokens_details: Option<BailianPromptTokensDetails>,
+    #[serde(default)]
+    cache_creation: Option<BailianCacheCreation>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BailianPromptTokensDetails {
+    // DashScope OpenAI-compatible responses expose cache hits as `cached_tokens`.
+    #[serde(default)]
+    cached_tokens: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BailianCacheCreation {
+    // DashScope OpenAI-compatible responses expose explicit cache writes here.
+    #[serde(default)]
+    cache_creation_input_tokens: Option<u32>,
+    #[serde(default)]
+    ephemeral_5m_input_tokens: Option<u32>,
 }
 
 /// Bailian LLM provider.
@@ -261,15 +298,82 @@ impl BailianProvider {
                         .collect()
                 });
 
+                let content = if let Some(cache_control) = msg.cache_control {
+                    Some(BailianMessageContent::Blocks(vec![BailianContentBlock {
+                        block_type: "text".to_string(),
+                        text: msg.content,
+                        cache_control: Some(cache_control),
+                    }]))
+                } else {
+                    Some(BailianMessageContent::Text(msg.content))
+                };
+
                 BailianMessage {
                     role,
-                    content: Some(msg.content),
+                    content,
                     name: msg.name,
                     tool_call_id: msg.tool_call_id,
                     tool_calls,
                 }
             })
             .collect()
+    }
+
+    fn parse_message_content(content: Option<BailianMessageContent>) -> TalosResult<String> {
+        match content {
+            Some(BailianMessageContent::Text(text)) => Ok(text),
+            Some(BailianMessageContent::Blocks(blocks)) => {
+                let mut text = String::new();
+                for block in blocks {
+                    if block.block_type != "text" {
+                        return Err(TalosError::ValidationError(format!(
+                            "Bailian response contains unsupported content block type: {}",
+                            block.block_type
+                        )));
+                    }
+                    text.push_str(&block.text);
+                }
+                Ok(text)
+            }
+            None => Ok(String::new()),
+        }
+    }
+
+    fn parse_cache_creation_input_tokens(
+        creation: &BailianCacheCreation,
+    ) -> TalosResult<Option<u32>> {
+        match (
+            creation.cache_creation_input_tokens,
+            creation.ephemeral_5m_input_tokens,
+        ) {
+            (Some(cache_creation_input_tokens), Some(ephemeral_5m_input_tokens))
+                if cache_creation_input_tokens != ephemeral_5m_input_tokens =>
+            {
+                Err(TalosError::ValidationError(format!(
+                    "Bailian cache creation token fields disagree: cache_creation_input_tokens={} ephemeral_5m_input_tokens={}",
+                    cache_creation_input_tokens, ephemeral_5m_input_tokens
+                )))
+            }
+            (Some(cache_creation_input_tokens), _) => Ok(Some(cache_creation_input_tokens)),
+            (None, Some(ephemeral_5m_input_tokens)) => Ok(Some(ephemeral_5m_input_tokens)),
+            (None, None) => Ok(None),
+        }
+    }
+
+    fn usage_from_bailian(usage: BailianUsage) -> TalosResult<Usage> {
+        Ok(Usage {
+            prompt_tokens: usage.prompt_tokens,
+            completion_tokens: usage.completion_tokens,
+            total_tokens: usage.total_tokens,
+            cache_creation_input_tokens: match usage.cache_creation.as_ref() {
+                Some(creation) => Self::parse_cache_creation_input_tokens(creation)?,
+                None => None,
+            },
+            cache_read_input_tokens: usage
+                .prompt_tokens_details
+                .as_ref()
+                .and_then(|details| details.cached_tokens),
+        })
     }
 
     fn parse_tool_calls(tool_calls: Option<Vec<BailianToolCall>>) -> Option<Vec<FunctionCall>> {
@@ -413,16 +517,14 @@ impl BailianProvider {
             prompt_tokens: 0,
             completion_tokens: 0,
             total_tokens: 0,
+            prompt_tokens_details: None,
+            cache_creation: None,
         });
 
         Ok(ChatResponse {
-            content: choice.message.content.unwrap_or_default(),
+            content: Self::parse_message_content(choice.message.content)?,
             model: bailian_resp.model,
-            usage: Usage {
-                prompt_tokens: usage.prompt_tokens,
-                completion_tokens: usage.completion_tokens,
-                total_tokens: usage.total_tokens,
-            },
+            usage: Self::usage_from_bailian(usage)?,
             finish_reason: choice.finish_reason,
             tool_calls: Self::parse_tool_calls(choice.message.tool_calls),
         })
@@ -466,6 +568,10 @@ impl LlmProvider for BailianProvider {
 
     fn default_model(&self) -> &str {
         "qwen-plus"
+    }
+
+    fn prompt_cache_support(&self) -> PromptCacheSupport {
+        PromptCacheSupport::RequestLevel
     }
 
     fn native_thinking_support(&self, model: &str) -> NativeThinkingSupport {
@@ -606,11 +712,13 @@ impl LlmProvider for BailianProvider {
                             if let Some(usage) = event.get("usage").and_then(|value| {
                                 serde_json::from_value::<BailianUsage>(value.clone()).ok()
                             }) {
-                                final_usage = Some(Usage {
-                                    prompt_tokens: usage.prompt_tokens,
-                                    completion_tokens: usage.completion_tokens,
-                                    total_tokens: usage.total_tokens,
-                                });
+                                match Self::usage_from_bailian(usage) {
+                                    Ok(mapped_usage) => final_usage = Some(mapped_usage),
+                                    Err(err) => {
+                                        let _ = tx.send(Err(err)).await;
+                                        return;
+                                    }
+                                }
                             }
 
                             let choice = event
@@ -756,7 +864,9 @@ impl LlmProvider for BailianProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use talos_llm_provider::{NativeThinkingConfig, NativeThinkingEffort, ToolStreamEvent};
+    use talos_llm_provider::{
+        CacheControlKind, NativeThinkingConfig, NativeThinkingEffort, ToolStreamEvent,
+    };
 
     #[test]
     fn test_bailian_config_builder() {
@@ -772,6 +882,10 @@ mod tests {
     #[test]
     fn test_native_thinking_support_is_qwen_gated() {
         let provider = BailianProvider::new(BailianConfig::new("test-key"));
+        assert_eq!(
+            provider.prompt_cache_support(),
+            PromptCacheSupport::RequestLevel
+        );
         assert_eq!(
             provider.native_thinking_support("qwen-plus"),
             NativeThinkingSupport::Supported
@@ -826,6 +940,8 @@ mod tests {
                 prompt_tokens: 1,
                 completion_tokens: 2,
                 total_tokens: 3,
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
             }),
         }))
         .await
@@ -844,5 +960,124 @@ mod tests {
                 usage: Some(_)
             }
         ));
+    }
+
+    #[test]
+    fn test_bailian_request_serializes_cache_control_for_request_level_provider() {
+        let provider = BailianProvider::new(BailianConfig::new("test-key"));
+        assert_eq!(
+            provider.prompt_cache_support(),
+            PromptCacheSupport::RequestLevel
+        );
+
+        let mut message = ChatMessage::user("hello");
+        message.cache_control = Some(CacheControl {
+            kind: CacheControlKind::Ephemeral,
+        });
+        let request = BailianProvider::build_request(
+            ChatRequest::builder()
+                .model("qwen-plus")
+                .messages(vec![message])
+                .build(),
+            false,
+        );
+
+        let json = serde_json::to_string(&request).expect("request should serialize");
+        assert!(json.contains("cache_control"));
+    }
+
+    #[test]
+    fn test_bailian_request_serializes_cache_control_as_content_block() {
+        let mut message = ChatMessage::system("stable context");
+        message.cache_control = Some(CacheControl {
+            kind: CacheControlKind::Ephemeral,
+        });
+        let request = BailianProvider::build_request(
+            ChatRequest::builder()
+                .model("qwen-plus")
+                .messages(vec![message])
+                .build(),
+            false,
+        );
+
+        let content = request.messages[0]
+            .content
+            .clone()
+            .expect("content should exist");
+        assert_eq!(
+            content,
+            BailianMessageContent::Blocks(vec![BailianContentBlock {
+                block_type: "text".to_string(),
+                text: "stable context".to_string(),
+                cache_control: Some(CacheControl {
+                    kind: CacheControlKind::Ephemeral,
+                }),
+            }])
+        );
+    }
+
+    #[test]
+    fn test_usage_from_bailian_maps_cache_fields() {
+        let usage = BailianProvider::usage_from_bailian(BailianUsage {
+            prompt_tokens: 128,
+            completion_tokens: 32,
+            total_tokens: 160,
+            prompt_tokens_details: Some(BailianPromptTokensDetails {
+                cached_tokens: Some(96),
+            }),
+            cache_creation: Some(BailianCacheCreation {
+                cache_creation_input_tokens: Some(48),
+                ephemeral_5m_input_tokens: Some(48),
+            }),
+        })
+        .expect("usage mapping should succeed");
+
+        assert_eq!(usage.prompt_tokens, 128);
+        assert_eq!(usage.completion_tokens, 32);
+        assert_eq!(usage.total_tokens, 160);
+        assert_eq!(usage.cache_read_input_tokens, Some(96));
+        assert_eq!(usage.cache_creation_input_tokens, Some(48));
+    }
+
+    #[test]
+    fn test_usage_from_bailian_maps_ephemeral_cache_creation_fallback() {
+        let usage = BailianProvider::usage_from_bailian(BailianUsage {
+            prompt_tokens: 256,
+            completion_tokens: 64,
+            total_tokens: 320,
+            prompt_tokens_details: Some(BailianPromptTokensDetails {
+                cached_tokens: Some(128),
+            }),
+            cache_creation: Some(BailianCacheCreation {
+                cache_creation_input_tokens: None,
+                ephemeral_5m_input_tokens: Some(72),
+            }),
+        })
+        .expect("usage mapping should succeed");
+
+        assert_eq!(usage.prompt_tokens, 256);
+        assert_eq!(usage.completion_tokens, 64);
+        assert_eq!(usage.total_tokens, 320);
+        assert_eq!(usage.cache_read_input_tokens, Some(128));
+        assert_eq!(usage.cache_creation_input_tokens, Some(72));
+    }
+
+    #[test]
+    fn test_usage_from_bailian_rejects_conflicting_cache_creation_fields() {
+        let err = BailianProvider::usage_from_bailian(BailianUsage {
+            prompt_tokens: 256,
+            completion_tokens: 64,
+            total_tokens: 320,
+            prompt_tokens_details: Some(BailianPromptTokensDetails {
+                cached_tokens: Some(128),
+            }),
+            cache_creation: Some(BailianCacheCreation {
+                cache_creation_input_tokens: Some(72),
+                ephemeral_5m_input_tokens: Some(96),
+            }),
+        })
+        .expect_err("usage mapping should reject conflicting cache creation fields");
+
+        assert!(matches!(err, TalosError::ValidationError(_)));
     }
 }
