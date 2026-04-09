@@ -109,7 +109,9 @@ impl Default for MessageId {
 
 /// Gateway module
 pub mod gateway {
-    use crate::talos::{TalosContext, TalosInputItem, TalosOutputItem, TalosReasoning, TalosUsage};
+    use crate::talos::{
+        StopReason, TalosContext, TalosInputItem, TalosOutputItem, TalosReasoning, TalosUsage,
+    };
     use serde::{Deserialize, Serialize};
 
     /// Request coming into the gateway
@@ -130,7 +132,7 @@ pub mod gateway {
         pub output_items: Vec<TalosOutputItem>,
         #[serde(default)]
         pub reasoning: Vec<TalosReasoning>,
-        pub stop_reason: String,
+        pub stop_reason: StopReason,
         #[serde(default)]
         pub usage: TalosUsage,
         pub success: bool,
@@ -159,6 +161,18 @@ pub mod talos {
             };
             write!(f, "{}", label)
         }
+    }
+
+    #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+    #[serde(rename_all = "snake_case")]
+    pub enum StopReason {
+        #[default]
+        EndTurn,
+        ToolRoundLimit,
+        TransferUnresolved,
+        BeforeModelCallbackStopped,
+        AfterModelCallbackStopped,
+        Cancelled,
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -399,6 +413,9 @@ pub mod talos {
     #[derive(Debug, Clone, Serialize, Deserialize)]
     #[serde(tag = "type", rename_all = "snake_case")]
     pub enum TalosOutputItem {
+        UserInput {
+            text: String,
+        },
         Reasoning {
             text: String,
         },
@@ -455,7 +472,7 @@ pub mod talos {
         pub output: Vec<TalosOutputItem>,
         #[serde(default)]
         pub reasoning: Vec<TalosReasoning>,
-        pub stop_reason: String,
+        pub stop_reason: StopReason,
         pub usage: TalosUsage,
     }
 
@@ -567,7 +584,7 @@ pub mod talos {
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct TalosMessageCompletedEvent {
         pub request_id: String,
-        pub stop_reason: String,
+        pub stop_reason: StopReason,
         pub usage: TalosUsage,
         pub total_output_items: u64,
         pub iteration: u64,
@@ -609,6 +626,7 @@ pub mod talos {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionRecord {
     pub id: String,
+    pub title: String,
     pub context: talos::TalosContext,
     pub model: String,
     pub created_at: u64,
@@ -620,6 +638,8 @@ pub struct SessionRecord {
     pub conf: HashMap<String, serde_json::Value>,
 }
 
+pub const DEFAULT_SESSION_TITLE: &str = "Untitled Session";
+
 impl SessionRecord {
     pub fn from_session(session: &TalosSession, base_model: &str) -> Self {
         let effective_model = session.config.llm.model.clone();
@@ -627,6 +647,7 @@ impl SessionRecord {
 
         Self {
             id: session.context.session_id.clone(),
+            title: session.title.clone(),
             context: talos::TalosContext {
                 source_type: session.context.source_type.clone(),
                 provider: session.context.provider.clone(),
@@ -644,6 +665,11 @@ impl SessionRecord {
             usage: session.state.usage.clone(),
             conf,
         }
+    }
+
+    pub fn has_real_title(&self) -> bool {
+        let normalized = self.title.trim();
+        !normalized.is_empty() && normalized != DEFAULT_SESSION_TITLE
     }
 }
 
@@ -704,6 +730,7 @@ impl SessionState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TalosSession {
+    pub title: String,
     pub context: SessionContext,
     pub config: TalosConfig,
     pub state: SessionState,
@@ -793,6 +820,7 @@ impl TalosSession {
             SessionConfigOverridePolicy::apply_to_config(base_config, &record.model, &record.conf)?;
 
         Ok(Self {
+            title: record.title.clone(),
             context: SessionContext::from_record(record, workspace_id),
             config,
             state: SessionState::from_record(record),
@@ -805,6 +833,11 @@ impl TalosSession {
         workspace_id: Option<String>,
     ) -> TalosResult<Self> {
         Self::restore(record, base_config, workspace_id)
+    }
+
+    pub fn has_real_title(&self) -> bool {
+        let normalized = self.title.trim();
+        !normalized.is_empty() && normalized != DEFAULT_SESSION_TITLE
     }
 }
 
@@ -832,6 +865,7 @@ pub struct SessionPatchAck {
     pub success: bool,
 }
 
+
 #[async_trait]
 pub trait SessionService: Send + Sync {
     async fn create_session(
@@ -852,6 +886,8 @@ pub trait SessionService: Send + Sync {
 
     async fn close_session(&self, session_id: &str) -> TalosResult<()>;
 
+    async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()>;
+
     async fn submit_tool_approval(
         &self,
         session_id: &str,
@@ -869,6 +905,8 @@ pub trait SessionService: Send + Sync {
         output: String,
         success: bool,
     ) -> TalosResult<()>;
+
+    async fn get_session_turns(&self, session_id: &str) -> TalosResult<Vec<talos::TalosMessageResponse>>;
 }
 
 pub fn now() -> u64 {
@@ -959,6 +997,8 @@ pub trait RequestHandler: Send + Sync {
         &self,
         request: gateway::GatewayRequest,
     ) -> TalosResult<tokio::sync::mpsc::Receiver<talos::TalosEvent>>;
+
+    async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()>;
 }
 
 #[cfg(test)]
@@ -1004,6 +1044,7 @@ mod tests {
     fn test_session_context_and_state_from_record() {
         let record = SessionRecord {
             id: "session-1".to_string(),
+            title: "Untitled Session".to_string(),
             context: talos::TalosContext {
                 source_type: talos::TalosSourceType::Im,
                 provider: talos::TalosProvider::Telegram,
@@ -1038,6 +1079,7 @@ mod tests {
     fn test_talos_session_from_record_applies_conf_override() {
         let mut record = SessionRecord {
             id: "session-1".to_string(),
+            title: "Untitled Session".to_string(),
             context: talos::TalosContext {
                 source_type: talos::TalosSourceType::Http,
                 provider: talos::TalosProvider::Http,
@@ -1062,6 +1104,7 @@ mod tests {
 
         let session = TalosSession::from_record(&record, &TalosConfig::default(), None)
             .expect("talos session restore should succeed");
+        assert_eq!(session.title, "Untitled Session");
         assert_eq!(session.config.agent.model, "qwen-plus");
         assert_eq!(session.config.llm.model, "qwen-plus");
     }

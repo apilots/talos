@@ -171,6 +171,14 @@ impl HttpServer {
                     .delete(close_session_handler),
             )
             .route(
+                "/v1/sessions/:session_id/turns",
+                get(get_session_turns_handler),
+            )
+            .route(
+                "/v1/sessions/:session_id/cancel",
+                post(cancel_active_turn_handler),
+            )
+            .route(
                 "/v1/sessions/:session_id/messages",
                 post(session_message_handler),
             )
@@ -367,6 +375,25 @@ async fn get_session_handler(
     Ok(Json(json!(session)))
 }
 
+async fn get_session_turns_handler(
+    State(state): State<Arc<HttpApiState>>,
+    _auth: axum::extract::Extension<AuthResult>,
+    Path(session_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let turns = state
+        .session_service
+        .get_session_turns(&session_id)
+        .await
+        .map_err(|e| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                e.to_string(),
+            )
+        })?;
+    Ok(Json(json!({ "data": turns })))
+}
+
 async fn patch_session_handler(
     State(state): State<Arc<HttpApiState>>,
     _auth: axum::extract::Extension<AuthResult>,
@@ -424,6 +451,31 @@ async fn close_session_handler(
                 other.to_string(),
             ),
         })?;
+    Ok(Json(json!({ "success": true })))
+}
+
+async fn cancel_active_turn_handler(
+    State(state): State<Arc<HttpApiState>>,
+    _auth: axum::extract::Extension<AuthResult>,
+    Path(session_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    state
+        .session_service
+        .cancel_active_turn(&session_id)
+        .await
+        .map_err(|err| match err {
+            talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
+                StatusCode::NOT_FOUND,
+                "invalid_request",
+                "session not found",
+            ),
+            _ => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                err.to_string(),
+            ),
+        })?;
+
     Ok(Json(json!({ "success": true })))
 }
 
@@ -604,11 +656,7 @@ async fn process_session_message(
         model: gateway_response.model.clone(),
         output,
         reasoning: gateway_response.reasoning.clone(),
-        stop_reason: if gateway_response.success {
-            gateway_response.stop_reason.clone()
-        } else {
-            "error".to_string()
-        },
+        stop_reason: gateway_response.stop_reason,
         usage: gateway_response.usage.clone(),
     };
 
@@ -831,8 +879,9 @@ mod tests {
     use axum::body::Body;
     use axum::http::Request;
     use talos_types::talos::{
-        TalosEvent, TalosEventPayload, TalosMessageCompletedEvent, TalosMessageOutputDeltaEvent,
-        TalosMessageStartedEvent, TalosProvider, TalosReasoning, TalosSourceType, TalosUsage,
+        StopReason, TalosEvent, TalosEventPayload, TalosMessageCompletedEvent,
+        TalosMessageOutputDeltaEvent, TalosMessageStartedEvent, TalosProvider, TalosReasoning,
+        TalosSourceType, TalosUsage,
     };
     use tower::util::ServiceExt;
 
@@ -867,7 +916,7 @@ mod tests {
                 reasoning: vec![TalosReasoning {
                     text: "mock reasoning".to_string(),
                 }],
-                stop_reason: "end_turn".to_string(),
+                stop_reason: StopReason::EndTurn,
                 usage: TalosUsage::default(),
                 success: true,
                 model: "qwen-plus".to_string(),
@@ -918,7 +967,7 @@ mod tests {
                     sequence: 2,
                     payload: TalosEventPayload::MessageCompleted(TalosMessageCompletedEvent {
                         request_id: "req_mock".to_string(),
-                        stop_reason: "end_turn".to_string(),
+                        stop_reason: StopReason::EndTurn,
                         usage: TalosUsage::default(),
                         total_output_items: 1,
                         iteration: 2,
@@ -934,6 +983,10 @@ mod tests {
         async fn start(&self) -> TalosResult<()> {
             Ok(())
         }
+
+        async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
+            Ok(())
+        }
     }
 
     #[async_trait::async_trait]
@@ -944,6 +997,7 @@ mod tests {
             model: Option<String>,
         ) -> TalosResult<talos_types::TalosSession> {
             Ok(talos_types::TalosSession {
+                title: "Untitled Session".to_string(),
                 context: talos_types::SessionContext {
                     session_id: "mock-session".to_string(),
                     workspace_id: None,
@@ -982,6 +1036,7 @@ mod tests {
                 return Ok(None);
             }
             Ok(Some(talos_types::TalosSession {
+                title: "Untitled Session".to_string(),
                 context: talos_types::SessionContext {
                     session_id: "mock-session".to_string(),
                     workspace_id: None,
@@ -1021,6 +1076,10 @@ mod tests {
             Ok(())
         }
 
+        async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
+            Ok(())
+        }
+
         async fn submit_tool_approval(
             &self,
             _session_id: &str,
@@ -1041,6 +1100,13 @@ mod tests {
             _success: bool,
         ) -> TalosResult<()> {
             Ok(())
+        }
+
+        async fn get_session_turns(
+            &self,
+            _session_id: &str,
+        ) -> TalosResult<Vec<talos_types::talos::TalosMessageResponse>> {
+            Ok(vec![])
         }
     }
 
@@ -1204,7 +1270,7 @@ mod tests {
         .expect("message should be processed");
 
         assert_eq!(result.session_id, "mock-session");
-        assert_eq!(result.stop_reason, "end_turn");
+        assert_eq!(result.stop_reason, talos_types::talos::StopReason::EndTurn);
         assert_eq!(result.reasoning.len(), 1);
         assert!(matches!(
             result.output.first(),
@@ -1241,6 +1307,28 @@ mod tests {
             .expect("stream body should be readable");
         let body_text = String::from_utf8_lossy(&body);
         assert!(body_text.contains("stream only content"));
+    }
+
+    #[tokio::test]
+    async fn test_cancel_active_turn_handler_returns_success() {
+        let state = Arc::new(HttpApiState::new(
+            Arc::new(MockGateway),
+            Arc::new(MockSessionService),
+            "test-secret".to_string(),
+            Some("test-token".to_string()),
+            false,
+            vec![test_model_info()],
+        ));
+
+        let result = cancel_active_turn_handler(
+            State(state),
+            axum::extract::Extension(test_auth()),
+            Path("mock-session".to_string()),
+        )
+        .await
+        .expect("cancel should succeed");
+
+        assert_eq!(result.0["success"], serde_json::Value::Bool(true));
     }
 
     #[tokio::test]

@@ -72,6 +72,7 @@ async fn main() {
     let llm_provider = create_llm_provider(&config)
         .await
         .expect("failed to create llm provider");
+    let agent_llm_provider = llm_provider.clone();
     let tool_registry = Arc::new(ToolRegistry::new());
     register_core_local_tools(tool_registry.as_ref());
     register_network_tools(tool_registry.as_ref());
@@ -80,18 +81,18 @@ async fn main() {
         "default".to_string(),
         config.agent.name.clone(),
         "Default AI assistant".to_string(),
-        llm_provider,
+        agent_llm_provider,
         config.llm.model.clone(),
         tool_registry.clone(),
         config.agent.kernel.clone(),
     );
     let agent: Arc<dyn AgentOrchestrator> = Arc::new(agent);
 
-    let coordinator = Arc::new(
-        CoordinatorImpl::new(router, session_store, config.clone())
-            .with_channel_dm_scope("telegram", config.channels.telegram.dm_scope.clone())
-            .with_default_workspace_id(config.agent.kernel.default_workspace_id.clone()),
-    );
+    let mut coordinator_builder = CoordinatorImpl::new(router, session_store, config.clone())
+        .with_channel_dm_scope("telegram", config.channels.telegram.dm_scope.clone())
+        .with_default_workspace_id(config.agent.kernel.default_workspace_id.clone());
+    coordinator_builder = coordinator_builder.with_session_title_generator(llm_provider.clone());
+    let coordinator = Arc::new(coordinator_builder);
     if config.agent.kernel.tools.enable_collaboration_tools {
         register_collaboration_tools(tool_registry.as_ref());
         tool_registry.set_collaboration_runtime(Arc::new(CollaborationRuntime::new(

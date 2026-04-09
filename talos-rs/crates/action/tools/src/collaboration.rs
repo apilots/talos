@@ -4,7 +4,7 @@ use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use talos_error::{TalosError, TalosResult};
 use talos_types::gateway::GatewayRequest;
-use talos_types::talos::{TalosContext, TalosInputItem, TalosProvider, TalosSourceType};
+use talos_types::talos::{StopReason, TalosContext, TalosInputItem, TalosProvider, TalosSourceType};
 use talos_types::{RequestHandler, SessionService};
 use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
@@ -16,7 +16,7 @@ use uuid::Uuid;
 pub enum CollaborationAgentStatus {
     Idle,
     Running,
-    Completed { output: String, stop_reason: String },
+    Completed { output: String, stop_reason: StopReason },
     Failed { error: String },
     Closed,
     NotFound,

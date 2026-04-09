@@ -1026,7 +1026,9 @@ impl ResponseProcessor for EventProjectionProcessor {
                         *is_error,
                     ));
                 }
-                TalosOutputItem::OutputText { .. } | TalosOutputItem::ToolCall { .. } => {}
+                TalosOutputItem::OutputText { .. }
+                | TalosOutputItem::ToolCall { .. }
+                | TalosOutputItem::UserInput { .. } => {}
             }
         }
 

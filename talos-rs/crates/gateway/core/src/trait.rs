@@ -11,5 +11,6 @@ pub trait Gateway: Send + Sync {
         &self,
         request: GatewayRequest,
     ) -> TalosResult<mpsc::Receiver<TalosEvent>>;
+    async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()>;
     async fn start(&self) -> TalosResult<()>;
 }

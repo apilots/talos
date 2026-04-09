@@ -435,6 +435,10 @@ impl MemoryStore {
         Self::new(Self::default_workspace_dir())
     }
 
+    pub async fn load_session_turns(&self, session_id: &str) -> talos_error::TalosResult<Vec<TalosTurn>> {
+        crate::session_store::load_turns(self, session_id).await
+    }
+
     pub fn default_workspace_dir() -> PathBuf {
         path_policy::default_workspace_dir()
     }

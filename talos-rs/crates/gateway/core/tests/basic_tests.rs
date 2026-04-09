@@ -6,7 +6,7 @@ mod basic_tests {
     use talos_error::TalosResult;
     use talos_gateway::{Gateway, GatewayImpl, GatewayRequest};
     use talos_types::talos::{
-        TalosContext, TalosInputItem, TalosOutputItem, TalosProvider, TalosReasoning,
+        StopReason, TalosContext, TalosInputItem, TalosOutputItem, TalosProvider, TalosReasoning,
         TalosSourceType, TalosUsage,
     };
     use talos_types::RequestHandler;
@@ -34,7 +34,7 @@ mod basic_tests {
                     reasoning: vec![TalosReasoning {
                         text: "mock reasoning".to_string(),
                     }],
-                    stop_reason: "end_turn".to_string(),
+                    stop_reason: StopReason::EndTurn,
                     usage: TalosUsage::default(),
                     success: true,
                     model: "test-model".to_string(),
@@ -69,6 +69,10 @@ mod basic_tests {
                     .await;
             });
             Ok(rx)
+        }
+
+        async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
+            Ok(())
         }
     }
 

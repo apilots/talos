@@ -264,6 +264,7 @@ fn create_agent_with_tool(state: Arc<IntegrationState>) -> AgentImpl {
 fn build_request(input: &str) -> OrchestratorRequest {
     OrchestratorRequest {
         session: TalosSession {
+            title: "Untitled Session".to_string(),
             context: SessionContext {
                 session_id: "integration-session".to_string(),
                 workspace_id: Some("default".to_string()),
@@ -354,7 +355,8 @@ async fn integration_stream_exposes_reasoning_output_and_tool_events() {
     assert!(events.iter().any(|event| {
         matches!(
             event,
-            OrchestratorEvent::MessageCompleted(payload) if payload.stop_reason == "end_turn"
+            OrchestratorEvent::MessageCompleted(payload)
+                if payload.stop_reason == talos_types::talos::StopReason::EndTurn
         )
     }));
 }

@@ -249,6 +249,13 @@ impl Storage for SqliteStorage {
                 info!("Rebuilding legacy sessions schema");
                 self.execute("DROP TABLE IF EXISTS messages", &[]).await?;
                 self.execute("DROP TABLE IF EXISTS sessions", &[]).await?;
+            } else if !existing.contains("title") {
+                info!("Adding title column to sessions schema");
+                self.execute(
+                    "ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT 'Untitled Session'",
+                    &[],
+                )
+                .await?;
             }
         }
 
@@ -266,6 +273,7 @@ impl Storage for SqliteStorage {
                 thread_id TEXT,
                 created_at INTEGER NOT NULL,
                 last_activity INTEGER NOT NULL,
+                title TEXT NOT NULL DEFAULT 'Untitled Session',
                 context_json TEXT,
                 model TEXT,
                 message_count INTEGER NOT NULL DEFAULT 0,
@@ -276,26 +284,6 @@ impl Storage for SqliteStorage {
 
         self.execute(create_sessions, &[]).await?;
         debug!("Sessions table created/verified");
-
-        // Messages table
-        let create_messages = r#"
-            CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_key TEXT NOT NULL,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                timestamp INTEGER NOT NULL,
-                FOREIGN KEY (session_key) REFERENCES sessions(session_key) ON DELETE CASCADE
-            )
-        "#;
-
-        self.execute(create_messages, &[]).await?;
-        debug!("Messages table created/verified");
-
-        // Create index for faster lookups
-        let create_index =
-            "CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_key)";
-        self.execute(create_index, &[]).await?;
 
         // Bindings table
         let create_bindings = r#"
@@ -355,5 +343,47 @@ mod tests {
         assert_eq!(rows.len(), 1);
         // Value is stored as JSON string, so it includes quotes
         assert!(rows[0].get_string("agent_id").unwrap().contains("main"));
+    }
+
+    #[tokio::test]
+    async fn test_init_schema_adds_title_column_to_legacy_sessions_table() {
+        let storage = SqliteStorage::new(":memory:").await.unwrap();
+
+        storage.execute("DROP TABLE IF EXISTS messages", &[]).await.unwrap();
+        storage.execute("DROP TABLE IF EXISTS sessions", &[]).await.unwrap();
+        storage
+            .execute(
+                r#"
+                CREATE TABLE sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_key TEXT UNIQUE NOT NULL,
+                    user_id TEXT NOT NULL,
+                    channel TEXT NOT NULL,
+                    scope TEXT NOT NULL,
+                    peer_id TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    account_id TEXT,
+                    thread_id TEXT,
+                    created_at INTEGER NOT NULL,
+                    last_activity INTEGER NOT NULL,
+                    context_json TEXT,
+                    model TEXT,
+                    message_count INTEGER NOT NULL DEFAULT 0,
+                    usage_json TEXT,
+                    conf_json TEXT
+                )
+                "#,
+                &[],
+            )
+            .await
+            .unwrap();
+
+        storage.init_schema().await.unwrap();
+
+        let session_columns = storage.query("PRAGMA table_info(sessions)", &[]).await.unwrap();
+        let has_title = session_columns
+            .iter()
+            .any(|row| row.get_string("name").as_deref() == Some("title"));
+        assert!(has_title, "sessions table should contain title column");
     }
 }

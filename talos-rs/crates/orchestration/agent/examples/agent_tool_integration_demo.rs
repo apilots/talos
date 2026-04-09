@@ -32,6 +32,7 @@ impl LlmProvider for DemoLlmProvider {
                 prompt_tokens: 10,
                 completion_tokens: 20,
                 total_tokens: 30,
+                ..Usage::default()
             },
             finish_reason: Some("stop".to_string()),
             tool_calls: None,
@@ -103,6 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match agent
         .run(OrchestratorRequest {
             session: TalosSession {
+                title: "Untitled Session".to_string(),
                 context: SessionContext {
                     session_id: "demo-session".to_string(),
                     workspace_id: Some("default".to_string()),

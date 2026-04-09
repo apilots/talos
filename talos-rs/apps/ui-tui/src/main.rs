@@ -95,6 +95,7 @@ async fn run_embedded(_args: Vec<String>) -> Result<(), Box<dyn std::error::Erro
     let llm_provider = create_llm_provider(&config)
         .await
         .expect("failed to create llm provider");
+    let agent_llm_provider = llm_provider.clone();
     let tool_registry = Arc::new(ToolRegistry::new());
     register_core_local_tools(tool_registry.as_ref());
     register_network_tools(tool_registry.as_ref());
@@ -103,17 +104,17 @@ async fn run_embedded(_args: Vec<String>) -> Result<(), Box<dyn std::error::Erro
         "default".to_string(),
         config.agent.name.clone(),
         "Default AI assistant".to_string(),
-        llm_provider,
+        agent_llm_provider,
         config.llm.model.clone(),
         tool_registry,
         config.agent.kernel.clone(),
     );
     let agent: Arc<dyn AgentOrchestrator> = Arc::new(agent);
 
-    let coordinator = Arc::new(
-        CoordinatorImpl::new(router, session_store, config.clone())
-            .with_default_workspace_id(config.agent.kernel.default_workspace_id.clone()),
-    );
+    let mut coordinator_builder = CoordinatorImpl::new(router, session_store, config.clone())
+        .with_default_workspace_id(config.agent.kernel.default_workspace_id.clone());
+    coordinator_builder = coordinator_builder.with_session_title_generator(llm_provider.clone());
+    let coordinator = Arc::new(coordinator_builder);
     coordinator
         .register_agent("default", agent)
         .await

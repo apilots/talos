@@ -163,3 +163,23 @@ fi
 echo "CASE messages_idempotency PASS message_id=${id1}"
 echo "DETAIL messages_idempotency_first_output=${first_output}"
 echo "DETAIL messages_idempotency_second_output=${second_output}"
+
+turns_json="$(curl -sS -H "Authorization: Bearer ${AUTH_TOKEN}" "${GATEWAY_URL}/v1/sessions/${session_id}/turns")"
+log_case_json "session_turns" "{\"session_id\":\"${session_id}\"}" "${turns_json}"
+TURNS_JSON="${turns_json}" python3 - <<'PY'
+import json, os, sys
+raw = os.environ.get("TURNS_JSON", "")
+try:
+    data = json.loads(raw)
+except Exception as e:
+    print(f"CASE session_turns FAIL parse_error={e}")
+    sys.exit(1)
+turns = data.get("data", [])
+turn_count = len(turns)
+has_user_input = any(item.get("type") == "user_input" for t in turns for item in t.get("output", []))
+has_output_text = any(item.get("type") == "output_text" for t in turns for item in t.get("output", []))
+if turn_count < 1 or not has_user_input or not has_output_text:
+    print(f"CASE session_turns FAIL turn_count={turn_count} has_user_input={has_user_input} has_output_text={has_output_text}")
+    sys.exit(1)
+print(f"CASE session_turns PASS turn_count={turn_count} has_user_input={has_user_input} has_output_text={has_output_text}")
+PY

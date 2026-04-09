@@ -330,7 +330,7 @@ mod tests {
                 reasoning: vec![TalosReasoning {
                     text: "mock reasoning".to_string(),
                 }],
-                stop_reason: "stop".to_string(),
+                stop_reason: talos_types::talos::StopReason::EndTurn,
                 usage: TalosUsage::default(),
                 success: true,
                 model: "mock-model".to_string(),
@@ -362,6 +362,10 @@ mod tests {
                     .await;
             });
             Ok(rx)
+        }
+
+        async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
+            Ok(())
         }
     }
 

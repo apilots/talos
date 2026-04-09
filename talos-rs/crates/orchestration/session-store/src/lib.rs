@@ -7,6 +7,7 @@ use talos_types::talos::TalosUsage;
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType};
 use talos_types::{
     SessionConfigOverridePolicy, SessionPatch, SessionPatchAck, SessionQuery, SessionRecord,
+    DEFAULT_SESSION_TITLE,
 };
 
 #[async_trait]
@@ -39,12 +40,7 @@ pub trait SessionStore: Send + Sync {
         patch: &SessionPatch,
     ) -> TalosResult<SessionPatchAck>;
 
-    async fn append_message_by_session_id(
-        &self,
-        session_id: &str,
-        role: &str,
-        content: &str,
-    ) -> TalosResult<()>;
+    async fn update_session_title(&self, session_id: &str, title: &str) -> TalosResult<()>;
 
     async fn record_session_progress(
         &self,
@@ -103,7 +99,7 @@ impl DatabaseSessionStore {
     }
 
     async fn fetch_session_row(&self, session_key: &str) -> TalosResult<Option<Row>> {
-        let sql = "SELECT session_key, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, usage_json, conf_json FROM sessions WHERE session_key = ?";
+        let sql = "SELECT session_key, title, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, usage_json, conf_json FROM sessions WHERE session_key = ?";
         let rows = self.storage.query(sql, &[session_key]).await?;
         Ok(rows.into_iter().next())
     }
@@ -139,6 +135,10 @@ impl DatabaseSessionStore {
 
         SessionRecord {
             id: row.get_string("session_key").unwrap_or_default(),
+            title: row
+                .get_string("title")
+                .filter(|title| !title.trim().is_empty())
+                .unwrap_or_else(|| DEFAULT_SESSION_TITLE.to_string()),
             context,
             model,
             created_at: row
@@ -205,6 +205,7 @@ impl SessionStore for DatabaseSessionStore {
 
         let record = SessionRecord {
             id: session_id.clone(),
+            title: DEFAULT_SESSION_TITLE.to_string(),
             context: context.clone(),
             model: model.clone(),
             created_at: now.try_into().unwrap_or_default(),
@@ -233,6 +234,7 @@ impl SessionStore for DatabaseSessionStore {
                 "thread_id".to_string(),
                 "created_at".to_string(),
                 "last_activity".to_string(),
+                "title".to_string(),
                 "context_json".to_string(),
                 "model".to_string(),
                 "message_count".to_string(),
@@ -258,6 +260,7 @@ impl SessionStore for DatabaseSessionStore {
                     .unwrap_or(Value::Null),
                 Value::Number(now.into()),
                 Value::Number(now.into()),
+                Value::String(record.title.clone()),
                 Value::String(context_json),
                 Value::String(model),
                 Value::Number(0.into()),
@@ -303,6 +306,7 @@ impl SessionStore for DatabaseSessionStore {
             let update_row = Row::new(
                 vec![
                     "last_activity".to_string(),
+                    "title".to_string(),
                     "context_json".to_string(),
                     "model".to_string(),
                     "message_count".to_string(),
@@ -311,6 +315,7 @@ impl SessionStore for DatabaseSessionStore {
                 ],
                 vec![
                     Value::Number(now.into()),
+                    Value::String(record.title.clone()),
                     Value::String(context_json),
                     Value::String(record.model.clone()),
                     Value::Number(serde_json::Number::from(record.message_count)),
@@ -340,6 +345,7 @@ impl SessionStore for DatabaseSessionStore {
         };
         let record = SessionRecord {
             id: session_key.clone(),
+            title: DEFAULT_SESSION_TITLE.to_string(),
             context: context.clone(),
             model: model.clone(),
             created_at: now.try_into().unwrap_or_default(),
@@ -368,6 +374,7 @@ impl SessionStore for DatabaseSessionStore {
                 "thread_id".to_string(),
                 "created_at".to_string(),
                 "last_activity".to_string(),
+                "title".to_string(),
                 "context_json".to_string(),
                 "model".to_string(),
                 "message_count".to_string(),
@@ -393,6 +400,7 @@ impl SessionStore for DatabaseSessionStore {
                     .unwrap_or(Value::Null),
                 Value::Number(now.into()),
                 Value::Number(now.into()),
+                Value::String(record.title.clone()),
                 Value::String(context_json),
                 Value::String(model),
                 Value::Number(0.into()),
@@ -410,7 +418,7 @@ impl SessionStore for DatabaseSessionStore {
     }
 
     async fn list_session_records(&self, query: &SessionQuery) -> TalosResult<Vec<SessionRecord>> {
-        let sql = "SELECT session_key, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, usage_json, conf_json FROM sessions ORDER BY last_activity DESC";
+        let sql = "SELECT session_key, title, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, usage_json, conf_json FROM sessions ORDER BY last_activity DESC";
         let rows = self.storage.query(sql, &[]).await?;
         let mut records = Vec::new();
         for row in rows {
@@ -469,6 +477,7 @@ impl SessionStore for DatabaseSessionStore {
         let update_row = Row::new(
             vec![
                 "last_activity".to_string(),
+                "title".to_string(),
                 "context_json".to_string(),
                 "model".to_string(),
                 "message_count".to_string(),
@@ -477,6 +486,7 @@ impl SessionStore for DatabaseSessionStore {
             ],
             vec![
                 Value::Number(serde_json::Number::from(record.last_activity)),
+                Value::String(record.title.clone()),
                 Value::String(context_json),
                 Value::String(record.model.clone()),
                 Value::Number(serde_json::Number::from(record.message_count)),
@@ -490,29 +500,28 @@ impl SessionStore for DatabaseSessionStore {
         Ok(SessionPatchAck { success: true })
     }
 
-    async fn append_message_by_session_id(
-        &self,
-        session_id: &str,
-        role: &str,
-        content: &str,
-    ) -> TalosResult<()> {
-        let now = chrono::Utc::now().timestamp_millis();
-        let msg_row = Row::new(
-            vec![
-                "session_key".to_string(),
-                "role".to_string(),
-                "content".to_string(),
-                "timestamp".to_string(),
-            ],
-            vec![
-                Value::String(session_id.to_string()),
-                Value::String(role.to_string()),
-                Value::String(content.to_string()),
-                Value::Number(now.into()),
-            ],
-        );
-        self.storage.insert("messages", &msg_row).await?;
+    async fn update_session_title(&self, session_id: &str, title: &str) -> TalosResult<()> {
+        let normalized = title.trim();
+        if normalized.is_empty() {
+            return Err(talos_error::TalosError::ValidationError(
+                "session title must not be empty".to_string(),
+            ));
+        }
 
+        let update_row = Row::new(
+            vec!["title".to_string()],
+            vec![Value::String(normalized.to_string())],
+        );
+        let affected = self
+            .storage
+            .update("sessions", &update_row, "session_key = ?", &[session_id])
+            .await?;
+        if affected == 0 {
+            return Err(talos_error::TalosError::ResourceNotFound(format!(
+                "session {}",
+                session_id
+            )));
+        }
         Ok(())
     }
 
@@ -552,6 +561,7 @@ impl SessionStore for DatabaseSessionStore {
         let update_row = Row::new(
             vec![
                 "last_activity".to_string(),
+                "title".to_string(),
                 "context_json".to_string(),
                 "model".to_string(),
                 "message_count".to_string(),
@@ -560,6 +570,7 @@ impl SessionStore for DatabaseSessionStore {
             ],
             vec![
                 Value::Number(now.into()),
+                Value::String(record.title.clone()),
                 Value::String(context_json),
                 Value::String(record.model.clone()),
                 Value::Number(serde_json::Number::from(record.message_count)),
@@ -596,6 +607,7 @@ impl SessionStore for MockSessionStore {
     ) -> TalosResult<SessionRecord> {
         Ok(SessionRecord {
             id: DatabaseSessionStore::new_session_id(),
+            title: DEFAULT_SESSION_TITLE.to_string(),
             context: context.clone(),
             model: requested_model.unwrap_or(default_model).to_string(),
             created_at: 0,
@@ -623,6 +635,7 @@ impl SessionStore for MockSessionStore {
         let dm_scope = DatabaseSessionStore::resolve_dm_scope(dm_scope.as_deref());
         Ok(SessionRecord {
             id: DatabaseSessionStore::stable_session_key(context, agent_id, &dm_scope),
+            title: DEFAULT_SESSION_TITLE.to_string(),
             context: context.clone(),
             model: requested_model.unwrap_or(default_model).to_string(),
             created_at: 0,
@@ -642,6 +655,7 @@ impl SessionStore for MockSessionStore {
     async fn get_session_record(&self, session_id: &str) -> TalosResult<Option<SessionRecord>> {
         Ok(Some(SessionRecord {
             id: session_id.to_string(),
+            title: DEFAULT_SESSION_TITLE.to_string(),
             context: TalosContext {
                 source_type: TalosSourceType::System,
                 provider: TalosProvider::System,
@@ -675,12 +689,7 @@ impl SessionStore for MockSessionStore {
         Ok(SessionPatchAck { success: true })
     }
 
-    async fn append_message_by_session_id(
-        &self,
-        _session_id: &str,
-        _role: &str,
-        _content: &str,
-    ) -> TalosResult<()> {
+    async fn update_session_title(&self, _session_id: &str, _title: &str) -> TalosResult<()> {
         Ok(())
     }
 
@@ -772,5 +781,25 @@ mod scope_tests {
             Err(talos_error::TalosError::ResourceNotFound(message))
             if message == "session missing-session"
         ));
+    }
+
+    #[tokio::test]
+    async fn test_create_session_sets_default_title() {
+        let storage = Arc::new(SqliteStorage::new("sqlite::memory:").await.unwrap());
+        let store = DatabaseSessionStore::new(storage).await.unwrap();
+
+        let session = store
+            .create_session(&sample_context(), "agent-a", "qwen-max", None, None)
+            .await
+            .expect("create session should succeed");
+
+        assert_eq!(session.title, DEFAULT_SESSION_TITLE);
+
+        let loaded = store
+            .get_session_record(&session.id)
+            .await
+            .expect("load session should succeed")
+            .expect("session should exist");
+        assert_eq!(loaded.title, DEFAULT_SESSION_TITLE);
     }
 }

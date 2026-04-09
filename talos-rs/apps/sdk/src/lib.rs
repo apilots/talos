@@ -11,10 +11,11 @@ use tokio::sync::mpsc;
 
 use talos_error::{TalosError, TalosResult};
 pub use talos_types::talos::{
-    TalosContentItem, TalosContext, TalosEvent, TalosEventPayload, TalosEventType, TalosInputItem,
-    TalosMessageCompletedEvent, TalosMessageErrorEvent, TalosMessageExecutionSummaryEvent,
-    TalosMessageOutputDeltaEvent, TalosMessageReasoningDeltaEvent, TalosMessageRequest,
-    TalosMessageResponse, TalosMessageStartedEvent, TalosMessageToolCallCompletedEvent,
+    StopReason, TalosContentItem, TalosContext, TalosEvent, TalosEventPayload, TalosEventType,
+    TalosInputItem, TalosMessageCompletedEvent, TalosMessageErrorEvent,
+    TalosMessageExecutionSummaryEvent, TalosMessageOutputDeltaEvent,
+    TalosMessageReasoningDeltaEvent, TalosMessageRequest, TalosMessageResponse,
+    TalosMessageStartedEvent, TalosMessageToolCallCompletedEvent,
     TalosMessageToolCallPendingApprovalEvent, TalosMessageToolCallStartedEvent, TalosOutputItem,
     TalosProvider, TalosSourceType, TalosThinkingSource, TalosThinkingStage,
 };
@@ -62,6 +63,11 @@ struct ListModelsResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ListSessionsResponse {
     data: Vec<TalosSession>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ListSessionTurnsResponse {
+    data: Vec<TalosMessageResponse>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -193,6 +199,39 @@ impl TalosClient {
         }
         Err(TalosError::ClientError(
             "session close did not succeed".to_string(),
+        ))
+    }
+
+    pub async fn get_session_turns(&self, session_id: &str) -> TalosResult<Vec<TalosMessageResponse>> {
+        let url = format!(
+            "{}/v1/sessions/{}/turns",
+            self.config.gateway_url, session_id
+        );
+        let response = self
+            .authorized(self.http_client.get(&url))
+            .send()
+            .await
+            .map_err(|e| Self::request_error("GET", &url, e))?;
+        let payload: ListSessionTurnsResponse = Self::decode_json(response, "GET", &url).await?;
+        Ok(payload.data)
+    }
+
+    pub async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()> {
+        let url = format!(
+            "{}/v1/sessions/{}/cancel",
+            self.config.gateway_url, session_id
+        );
+        let response = self
+            .authorized(self.http_client.post(&url))
+            .send()
+            .await
+            .map_err(|e| Self::request_error("POST", &url, e))?;
+        let payload: SessionPatchResponse = Self::decode_json(response, "POST", &url).await?;
+        if payload.success {
+            return Ok(());
+        }
+        Err(TalosError::ClientError(
+            "session turn cancel did not succeed".to_string(),
         ))
     }
 
@@ -401,6 +440,7 @@ mod tests {
         config.llm.model = "gpt-4o-mini".to_string();
 
         let session = TalosSession {
+            title: "Untitled Session".to_string(),
             context: talos_types::SessionContext {
                 session_id: "sess_1".to_string(),
                 workspace_id: None,

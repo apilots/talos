@@ -89,6 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let response = agent
         .run(OrchestratorRequest {
             session: TalosSession {
+                title: "Untitled Session".to_string(),
                 context: SessionContext {
                     session_id: "demo-session".to_string(),
                     workspace_id: Some("default".to_string()),

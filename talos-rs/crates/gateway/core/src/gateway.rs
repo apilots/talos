@@ -49,6 +49,10 @@ impl Gateway for GatewayImpl {
         self.handler.handle_stream(request).await
     }
 
+    async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()> {
+        self.handler.cancel_active_turn(session_id).await
+    }
+
     async fn start(&self) -> TalosResult<()> {
         info!("Starting gateway...");
         Ok(())

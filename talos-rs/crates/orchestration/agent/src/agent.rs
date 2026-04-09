@@ -1,8 +1,10 @@
 use async_trait::async_trait;
 use chrono::Utc;
+use dashmap::DashMap;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio::task::AbortHandle;
 use uuid::Uuid;
 
 use crate::{
@@ -35,8 +37,8 @@ use talos_memory::{
 };
 use talos_tools::ToolRegistry;
 use talos_types::talos::{
-    TalosContentItem, TalosInputItem, TalosOutputItem, TalosReasoning, TalosThinkingSource,
-    TalosThinkingStage, TalosUsage,
+    StopReason as TalosStopReason, TalosContentItem, TalosInputItem, TalosOutputItem,
+    TalosReasoning, TalosThinkingSource, TalosThinkingStage, TalosUsage,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +47,11 @@ enum KernelExecutionMode {
     Sequential,
     Parallel,
     Loop,
+}
+
+#[derive(Clone)]
+struct ActiveTurnHandle {
+    execution_task: AbortHandle,
 }
 
 #[derive(Clone)]
@@ -58,6 +65,7 @@ pub struct AgentImpl {
     pub tool_registry: Arc<ToolRegistry>,
     kernel_config: AgentKernelConfig,
     pub kernel_runtime: Arc<KernelRuntime>,
+    active_turns: Arc<DashMap<String, ActiveTurnHandle>>,
 }
 
 impl AgentImpl {
@@ -125,14 +133,24 @@ impl AgentImpl {
         Ok(())
     }
 
-    fn map_stop_reason(stop_reason: StopReason) -> &'static str {
+    fn map_stop_reason(stop_reason: StopReason) -> TalosStopReason {
         match stop_reason {
-            StopReason::EndTurn => "end_turn",
-            StopReason::ToolRoundLimit => "tool_round_limit",
-            StopReason::TransferUnresolved => "transfer_unresolved",
-            StopReason::BeforeModelCallbackStopped => "before_model_callback_stopped",
-            StopReason::AfterModelCallbackStopped => "after_model_callback_stopped",
+            StopReason::EndTurn => TalosStopReason::EndTurn,
+            StopReason::ToolRoundLimit => TalosStopReason::ToolRoundLimit,
+            StopReason::TransferUnresolved => TalosStopReason::TransferUnresolved,
+            StopReason::BeforeModelCallbackStopped => TalosStopReason::BeforeModelCallbackStopped,
+            StopReason::AfterModelCallbackStopped => TalosStopReason::AfterModelCallbackStopped,
         }
+    }
+
+    fn register_active_turn(&self, session_id: &str, handle: ActiveTurnHandle) {
+        if let Some(previous) = self.active_turns.insert(session_id.to_string(), handle) {
+            previous.execution_task.abort();
+        }
+    }
+
+    fn clear_active_turn(&self, session_id: &str) {
+        self.active_turns.remove(session_id);
     }
 
     fn extract_text_input(input: &[TalosInputItem]) -> String {
@@ -246,6 +264,7 @@ impl AgentImpl {
             tool_registry,
             kernel_config,
             kernel_runtime: Arc::new(KernelRuntime::new_default()),
+            active_turns: Arc::new(DashMap::new()),
         }
     }
 
@@ -767,6 +786,7 @@ impl AgentOrchestrator for AgentImpl {
         let agent_request = self.to_agent_request(request);
         let input = Self::extract_text_input(&agent_request.input);
         let invocation_id = format!("inv-{}", Utc::now().timestamp_millis());
+        let session_id = agent_request.session.context.session_id.clone();
         let model = if agent_request.session.config.llm.model.is_empty() {
             self.model.clone()
         } else {
@@ -776,41 +796,81 @@ impl AgentOrchestrator for AgentImpl {
         let planning_instruction = agent_request.planning_instruction.clone();
         let transfer_to = agent_request.transfer_to.clone();
         let kernel_agent = self.build_kernel_agent_for_request()?;
-        let result = self
-            .kernel_runtime
-            .run_turn(
-                kernel_agent,
-                RunRequest {
-                    session_id: agent_request.session.context.session_id.clone(),
-                    invocation_id,
-                    agent_id: self.id.clone(),
-                    workspace_id: agent_request
-                        .session
-                        .context
-                        .workspace_id
-                        .clone()
-                        .unwrap_or_default(),
-                    input,
-                    model,
-                    phase,
-                    planning_instruction,
-                    transfer_to,
-                    initial_state_bags: None,
-                    session_environment: agent_request.session.context.environment.clone(),
-                    kernel_config: Some(self.kernel_config.clone()),
-                    stream_tx: None,
-                },
-            )
-            .await?;
+        let runtime = self.kernel_runtime.clone();
+        let agent_id = self.id.clone();
+        let kernel_config = self.kernel_config.clone();
+        let run_session_id = session_id.clone();
+        let run_handle = tokio::spawn({
+            async move {
+                runtime
+                    .run_turn(
+                        kernel_agent,
+                        RunRequest {
+                            session_id: run_session_id,
+                            invocation_id,
+                            agent_id,
+                            workspace_id: agent_request
+                                .session
+                                .context
+                                .workspace_id
+                                .clone()
+                                .unwrap_or_default(),
+                            input,
+                            model,
+                            phase,
+                            planning_instruction,
+                            transfer_to,
+                            initial_state_bags: None,
+                            session_environment: agent_request.session.context.environment.clone(),
+                            kernel_config: Some(kernel_config),
+                            stream_tx: None,
+                        },
+                    )
+                    .await
+            }
+        });
+        self.register_active_turn(
+            &session_id,
+            ActiveTurnHandle {
+                execution_task: run_handle.abort_handle(),
+            },
+        );
+        let result = match run_handle.await {
+            Ok(Ok(result)) => result,
+            Ok(Err(err)) => {
+                self.clear_active_turn(&session_id);
+                return Err(err);
+            }
+            Err(err) if err.is_cancelled() => {
+                self.clear_active_turn(&session_id);
+                return Ok(OrchestratorExecution {
+                    output_text: String::new(),
+                    output_items: Vec::new(),
+                    reasoning: Vec::new(),
+                    stop_reason: TalosStopReason::Cancelled,
+                    usage: TalosUsage::default(),
+                    task_count: 0,
+                    session_id,
+                });
+            }
+            Err(err) => {
+                self.clear_active_turn(&session_id);
+                return Err(TalosError::InternalError(format!(
+                    "kernel task join failed: {}",
+                    err
+                )));
+            }
+        };
+        self.clear_active_turn(&session_id);
         let reasoning = Self::collect_reasoning(&result.output_items);
         Ok(OrchestratorExecution {
             output_text: result.output_text,
             output_items: result.output_items,
             reasoning,
-            stop_reason: Self::map_stop_reason(result.stop_reason).to_string(),
+            stop_reason: Self::map_stop_reason(result.stop_reason),
             usage: result.usage,
             task_count: result.task_results.len() as u32,
-            session_id: agent_request.session.context.session_id,
+            session_id,
         })
     }
 
@@ -820,11 +880,12 @@ impl AgentOrchestrator for AgentImpl {
     ) -> TalosResult<mpsc::Receiver<OrchestratorEvent>> {
         let (tx, rx) = mpsc::channel(256);
         let this = self.clone();
-        tokio::spawn(async move {
+        let stream_task = tokio::spawn(async move {
             let agent_request = this.to_agent_request(request);
             let input = Self::extract_text_input(&agent_request.input);
             let request_id = format!("req_{}", Uuid::new_v4().simple());
             let invocation_id = format!("inv-{}", Utc::now().timestamp_millis());
+            let session_id = agent_request.session.context.session_id.clone();
             let model = if agent_request.session.config.llm.model.is_empty() {
                 this.model.clone()
             } else {
@@ -884,6 +945,12 @@ impl AgentOrchestrator for AgentImpl {
 
             let run_handle =
                 tokio::spawn(async move { runtime.run_turn(kernel_agent, kernel_input).await });
+            this.register_active_turn(
+                &session_id,
+                ActiveTurnHandle {
+                    execution_task: run_handle.abort_handle(),
+                },
+            );
 
             let mut item_index = 0_u64;
             while let Some(kernel_event) = kernel_rx.recv().await {
@@ -900,12 +967,27 @@ impl AgentOrchestrator for AgentImpl {
                         .send(OrchestratorEvent::MessageCompleted(
                             OrchestratorMessageCompletedEvent {
                                 request_id: request_id.clone(),
-                                stop_reason: Self::map_stop_reason(result.stop_reason).to_string(),
+                                stop_reason: Self::map_stop_reason(result.stop_reason),
                                 usage: result.usage,
                                 total_output_items: item_index,
                                 iteration: item_index.saturating_add(1),
                                 step_id: "completed".to_string(),
                                 task_count: result.task_results.len() as u32,
+                            },
+                        ))
+                        .await;
+                }
+                Err(err) if err.is_cancelled() => {
+                    let _ = tx
+                        .send(OrchestratorEvent::MessageCompleted(
+                            OrchestratorMessageCompletedEvent {
+                                request_id: request_id.clone(),
+                                stop_reason: TalosStopReason::Cancelled,
+                                usage: TalosUsage::default(),
+                                total_output_items: item_index,
+                                iteration: item_index.saturating_add(1),
+                                step_id: "cancelled".to_string(),
+                                task_count: 0,
                             },
                         ))
                         .await;
@@ -931,7 +1013,9 @@ impl AgentOrchestrator for AgentImpl {
                         .await;
                 }
             }
+            this.clear_active_turn(&session_id);
         });
+        drop(stream_task);
         Ok(rx)
     }
 
@@ -952,6 +1036,14 @@ impl AgentOrchestrator for AgentImpl {
             self.kernel_config.memory.workspace_memory_flush_enabled,
         )
         .await
+    }
+
+    async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()> {
+        let Some((_, handle)) = self.active_turns.remove(session_id) else {
+            return Ok(());
+        };
+        handle.execution_task.abort();
+        Ok(())
     }
 
     async fn submit_tool_approval(
@@ -1066,7 +1158,7 @@ impl AgentOrchestrator for MockAgent {
                 text: "Mock response".to_string(),
             }],
             reasoning: Vec::new(),
-            stop_reason: "end_turn".to_string(),
+            stop_reason: TalosStopReason::EndTurn,
             usage: TalosUsage::default(),
             task_count: 1,
             session_id: request.session.context.session_id,
@@ -1124,6 +1216,10 @@ impl AgentOrchestrator for MockAgent {
         Ok(())
     }
 
+    async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
+        Ok(())
+    }
+
     async fn submit_tool_approval(
         &self,
         _session_id: &str,
@@ -1152,16 +1248,20 @@ mod tests {
     use super::*;
     use chrono::Local;
     use serde_json::json;
+    use std::future::pending;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use talos_agent_kernel::{KernelBuilder, RunRequest, RunResponse, Runner};
     use talos_config::AgentKernelConfig;
     use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Role, Usage};
     use talos_memory::{Memory, RecordHeader, TalosMessage, TalosMessageRole, TalosTurn};
     use talos_tools::{ReadFileTool, ToolRegistry, WebSearchTool};
     use talos_tools_policy::ToolPolicy;
-    use talos_types::talos::{TalosProvider, TalosSourceType};
+    use talos_types::talos::{StopReason as TalosStopReason, TalosProvider, TalosSourceType};
     use talos_types::{SessionContext, SessionState, TalosSession};
     use tempfile::TempDir;
     use tokio;
+    use tokio::sync::Notify;
 
     fn build_test_agent() -> AgentImpl {
         AgentImpl::new(
@@ -1173,6 +1273,42 @@ mod tests {
             Arc::new(ToolRegistry::new()),
             Default::default(),
         )
+    }
+
+    struct SequencedRunner {
+        started: Arc<Notify>,
+        calls: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl Runner for SequencedRunner {
+        async fn run_turn(
+            &self,
+            _agent: Arc<dyn talos_agent_kernel::Agent>,
+            _request: RunRequest,
+        ) -> TalosResult<RunResponse> {
+            let call_index = self.calls.fetch_add(1, Ordering::SeqCst);
+            if call_index == 0 {
+                self.started.notify_waiters();
+                pending::<()>().await;
+                unreachable!("pending future should not resolve");
+            }
+
+            Ok(RunResponse {
+                output_text: "runner ok".to_string(),
+                output_items: vec![TalosOutputItem::OutputText {
+                    text: "runner ok".to_string(),
+                }],
+                stop_reason: StopReason::EndTurn,
+                usage: TalosUsage::default(),
+                warnings: Vec::new(),
+                model: "mock-model".to_string(),
+                task_results: Vec::new(),
+                transfer_to: None,
+                iterations: 1,
+                events: Vec::new(),
+            })
+        }
     }
 
     fn build_temp_agent() -> (TempDir, AgentImpl) {
@@ -1194,6 +1330,7 @@ mod tests {
 
     fn build_test_session(session_id: &str, workspace_id: &str) -> TalosSession {
         TalosSession {
+            title: "Untitled Session".to_string(),
             context: SessionContext {
                 session_id: session_id.to_string(),
                 workspace_id: Some(workspace_id.to_string()),
@@ -1522,6 +1659,63 @@ mod tests {
         assert!(error.to_string().contains("timed out"));
     }
 
+    #[tokio::test]
+    async fn test_cancel_active_turn_aborts_only_current_session_turn() {
+        let mut agent = build_test_agent();
+        let started = Arc::new(Notify::new());
+        agent.kernel_runtime = Arc::new(
+            KernelBuilder::new()
+                .with_runner(Arc::new(SequencedRunner {
+                    started: started.clone(),
+                    calls: AtomicUsize::new(0),
+                }))
+                .build(),
+        );
+        let session = build_test_session("session-cancel", "workspace-a");
+
+        let mut first_stream = agent
+            .run_stream(OrchestratorRequest {
+                session: session.clone(),
+                input: vec![TalosInputItem::Text {
+                    text: "first".to_string(),
+                }],
+            })
+            .await
+            .expect("first stream should start");
+        started.notified().await;
+        agent
+            .cancel_active_turn(&session.context.session_id)
+            .await
+            .expect("cancel should succeed");
+
+        let mut first_stop_reason = None;
+        while let Some(event) = first_stream.recv().await {
+            if let OrchestratorEvent::MessageCompleted(payload) = event {
+                first_stop_reason = Some(payload.stop_reason);
+                break;
+            }
+        }
+        assert_eq!(first_stop_reason, Some(TalosStopReason::Cancelled));
+
+        let mut second_stream = agent
+            .run_stream(OrchestratorRequest {
+                session,
+                input: vec![TalosInputItem::Text {
+                    text: "second".to_string(),
+                }],
+            })
+            .await
+            .expect("second stream should start");
+        let mut second_stop_reason = None;
+        while let Some(event) = second_stream.recv().await {
+            if let OrchestratorEvent::MessageCompleted(payload) = event {
+                second_stop_reason = Some(payload.stop_reason);
+                break;
+            }
+        }
+        assert_eq!(second_stop_reason, Some(TalosStopReason::EndTurn));
+    }
+
     // Mock LLM provider for testing
     struct MockLlmProvider;
 
@@ -1549,11 +1743,7 @@ mod tests {
             Ok(ChatResponse {
                 content,
                 model: "mock-model".to_string(),
-                usage: Usage {
-                    prompt_tokens: 0,
-                    completion_tokens: 0,
-                    total_tokens: 0,
-                },
+                usage: Usage { ..Usage::default() },
                 finish_reason: None,
                 tool_calls: None,
             })

@@ -480,7 +480,7 @@ async fn send_and_render_message(
                 } => {
                     eprintln!("TOOL_RESULT call_id={} is_error={}", call_id, is_error);
                 }
-                TalosOutputItem::OutputText { .. } => {}
+                TalosOutputItem::OutputText { .. } | TalosOutputItem::UserInput { .. } => {}
             }
         }
         let text = extract_output_text(&response);

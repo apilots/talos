@@ -32,7 +32,8 @@ use std::{
 };
 use talos_client::{
     ModelInfo, SessionCreateParams, TalosClient, TalosContentItem, TalosContext, TalosEvent,
-    TalosEventPayload, TalosInputItem, TalosMessageRequest, TalosSession,
+    TalosEventPayload, TalosInputItem, TalosMessageRequest, TalosMessageResponse, TalosOutputItem,
+    TalosSession,
 };
 use talos_error::{TalosError, TalosResult};
 use talos_types::talos::{
@@ -49,9 +50,10 @@ const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 const SESSION_CLOSE_TIMEOUT: Duration = Duration::from_secs(4);
 const SPINNER_FRAMES: &[char] = &['|', '/', '-', '\\'];
 const CHAT_CONTENT_PADDING_LEFT: u16 = 2;
+const CHAT_BLOCK_BODY_INDENT: usize = 2;
 const TOOL_PREVIEW_CHAR_LIMIT: usize = 100;
 const COPY_ROUND_BUTTON_TEXT: &str = "  [ Copy Round ]";
-
+const PASTED_BLOCK_CHAR_THRESHOLD: usize = 800;
 #[derive(Debug, Clone)]
 struct CommandSuggestion {
     name: String,
@@ -246,6 +248,18 @@ struct ToolRenderData {
     output_lines: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PastedTextBlock {
+    marker: String,
+    text: String,
+}
+
+impl PastedTextBlock {
+    fn new(marker: String, text: String) -> Self {
+        Self { marker, text }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SelectionPoint {
     line_index: usize,
@@ -294,6 +308,10 @@ enum RemoteCommandUpdate {
         requested: String,
         result: TalosResult<TalosSession>,
     },
+    SessionTurnsLoaded {
+        session: TalosSession,
+        result: TalosResult<Vec<TalosMessageResponse>>,
+    },
 }
 
 #[async_trait]
@@ -303,6 +321,7 @@ pub trait GatewayClient: Send + Sync {
     async fn create_session(&self, params: &SessionCreateParams) -> TalosResult<TalosSession>;
     async fn get_session(&self, session_id: &str) -> TalosResult<TalosSession>;
     async fn close_session(&self, session_id: &str) -> TalosResult<()>;
+    async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()>;
     async fn update_session_model(
         &self,
         session_id: &str,
@@ -321,6 +340,7 @@ pub trait GatewayClient: Send + Sync {
         approved: bool,
         reason: Option<String>,
     ) -> TalosResult<()>;
+    async fn get_session_turns(&self, session_id: &str) -> TalosResult<Vec<TalosMessageResponse>>;
 }
 
 #[async_trait]
@@ -343,6 +363,10 @@ impl GatewayClient for TalosClient {
 
     async fn close_session(&self, session_id: &str) -> TalosResult<()> {
         TalosClient::close_session(self, session_id).await
+    }
+
+    async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()> {
+        TalosClient::cancel_active_turn(self, session_id).await
     }
 
     async fn update_session_model(
@@ -373,6 +397,10 @@ impl GatewayClient for TalosClient {
         TalosClient::submit_tool_approval(self, session_id, call_id, tool_name, approved, reason)
             .await
     }
+
+    async fn get_session_turns(&self, session_id: &str) -> TalosResult<Vec<TalosMessageResponse>> {
+        TalosClient::get_session_turns(self, session_id).await
+    }
 }
 
 /// Main TUI app.
@@ -380,6 +408,8 @@ pub struct TuiApp {
     current_state: AppState,
     input_buffer: String,
     cursor_index: usize,
+    pasted_blocks: Vec<PastedTextBlock>,
+    selected_pasted_block: Option<usize>,
     startup_directory: PathBuf,
     connection_mode: TalosConnectionMode,
     current_model: String,
@@ -470,6 +500,8 @@ impl TuiApp {
             current_state: AppState::Chat,
             input_buffer: String::new(),
             cursor_index: 0,
+            pasted_blocks: Vec::new(),
+            selected_pasted_block: None,
             startup_directory: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             connection_mode,
             current_model: DEFAULT_MODEL.to_string(),
@@ -626,6 +658,28 @@ impl TuiApp {
 
     pub fn get_tool_status(&self) -> &[String] {
         &self.right_panel_events
+    }
+
+    pub fn handle_paste(&mut self, text: String) {
+        if text.is_empty() {
+            return;
+        }
+
+        let text = text.replace('\r', "");
+        self.show_command_autocomplete = false;
+        self.command_input_buffer.clear();
+        if Self::should_store_as_pasted_block(&text) {
+            let marker = format!(
+                "[Pasted text #{} · {} lines]",
+                self.pasted_blocks.len() + 1,
+                text.lines().count().max(1)
+            );
+            self.insert_text(&marker);
+            self.pasted_blocks.push(PastedTextBlock::new(marker, text));
+            self.selected_pasted_block = Some(self.pasted_blocks.len().saturating_sub(1));
+        } else {
+            self.insert_text(&text);
+        }
     }
 
     pub async fn handle_input(&mut self, key_event: KeyEvent) -> Result<bool, Box<dyn Error>> {
@@ -811,7 +865,12 @@ impl TuiApp {
 
         match key_event.code {
             KeyCode::Esc => {
+                if self.in_flight {
+                    self.cancel_active_turn().await;
+                    return Ok(false);
+                }
                 self.chat_selection = None;
+                self.selected_pasted_block = None;
                 Ok(false)
             }
             KeyCode::Enter => {
@@ -834,18 +893,12 @@ impl TuiApp {
                 Ok(false)
             }
             KeyCode::Up => {
-                if self.input_buffer.is_empty() {
-                    self.navigate_message_history(-1);
-                } else {
-                    self.scroll_chat_up(1);
-                }
+                self.navigate_message_history(-1);
                 Ok(false)
             }
             KeyCode::Down => {
-                if self.input_buffer.is_empty() {
+                if self.message_history_index.is_some() {
                     self.navigate_message_history(1);
-                } else {
-                    self.scroll_chat_down(1);
                 }
                 Ok(false)
             }
@@ -866,6 +919,11 @@ impl TuiApp {
                 Ok(false)
             }
             KeyCode::Tab => {
+                self.toggle_last_tool_block();
+                self.rebuild_chat_render_state_if_rect();
+                Ok(false)
+            }
+            KeyCode::BackTab => {
                 self.toggle_last_tool_block();
                 self.rebuild_chat_render_state_if_rect();
                 Ok(false)
@@ -1160,6 +1218,69 @@ impl TuiApp {
                     self.push_right_event("model picker switch failed".to_string());
                 }
             },
+            RemoteCommandUpdate::SessionTurnsLoaded { session, result } => match result {
+                Ok(turns) => {
+                    let sid = &session.context.session_id;
+                    let model = &session.config.llm.model;
+                    let title = &session.title;
+                    self.push_block(
+                        ChatRole::System,
+                        format!("Session: {}  ({})\nModel: {}", title, sid, model),
+                    );
+                    for turn in &turns {
+                        for item in &turn.output {
+                            match item {
+                                TalosOutputItem::UserInput { text } => {
+                                    self.push_block(ChatRole::User, text.clone());
+                                    self.add_message_to_history(text.clone());
+                                }
+                                TalosOutputItem::OutputText { text } => {
+                                    self.push_block(ChatRole::Assistant, text.clone());
+                                }
+                                TalosOutputItem::Reasoning { text } => {
+                                    self.push_block(ChatRole::Thinking, text.clone());
+                                }
+                                TalosOutputItem::ToolCall { name, arguments, .. } => {
+                                    self.push_block(
+                                        ChatRole::Tool,
+                                        format!("{}\n{}", name, arguments),
+                                    );
+                                }
+                                TalosOutputItem::ToolResult { tool_name, content, is_error, .. } => {
+                                    let text = content
+                                        .iter()
+                                        .map(|c| match c {
+                                            TalosContentItem::Text { text } => text.clone(),
+                                            TalosContentItem::Json { value } => value.to_string(),
+                                        })
+                                        .collect::<Vec<_>>()
+                                        .join("\n");
+                                    self.push_block(
+                                        ChatRole::Tool,
+                                        format!(
+                                            "{}{}\n{}",
+                                            tool_name,
+                                            if *is_error { " [error]" } else { "" },
+                                            text
+                                        ),
+                                    );
+                                }
+                                TalosOutputItem::ExecutionSummary { .. } => {}
+                            }
+                        }
+                    }
+                    self.message_history_index = None;
+                    self.push_right_event(format!("turns loaded: {}", turns.len()));
+                }
+                Err(err) => {
+                    let sid = &session.context.session_id;
+                    self.push_block(
+                        ChatRole::System,
+                        format!("Session: {}  ({})\nFailed to load history: {}", session.title, sid, err),
+                    );
+                    self.push_right_event("turns load failed".to_string());
+                }
+            },
         }
     }
 
@@ -1320,23 +1441,26 @@ impl TuiApp {
     }
 
     async fn submit_input(&mut self) -> TalosResult<bool> {
-        let user_input = self.input_buffer.trim().to_string();
-        if user_input.is_empty() {
+        if !self.has_composer_input() {
             self.reset_input();
             return Ok(false);
         }
 
-        let result = if user_input.starts_with('/') {
-            self.push_block(ChatRole::User, user_input.clone());
+        let original_input = self.input_buffer.clone();
+        let original_pasted_blocks = self.pasted_blocks.clone();
+        let user_input = self.compose_user_input_text();
+
+        let result = if self.is_command_input() {
+            let command_line = self.input_buffer.trim().to_string();
+            self.push_block(ChatRole::User, command_line.clone());
             self.reset_input();
-            self.execute_command(&user_input).await
+            self.execute_command(&command_line).await
         } else {
             self.reset_input();
             match self.send_user_message(user_input.clone()).await {
                 Ok(true) => Ok(false),
                 Ok(false) => {
-                    self.input_buffer = user_input;
-                    self.cursor_index = self.input_buffer.chars().count();
+                    self.restore_input_state(original_input, original_pasted_blocks);
                     Ok(false)
                 }
                 Err(err) => Err(err),
@@ -1470,15 +1594,11 @@ impl TuiApp {
 
         match direction {
             -1 => {
-                // Up: go to previous message in history
-                let new_index = if let Some(idx) = self.message_history_index {
-                    if idx == 0 {
-                        self.sent_messages_history.len() - 1
-                    } else {
-                        idx - 1
-                    }
-                } else {
-                    self.sent_messages_history.len() - 1
+                // Up: go to previous (older) message, clamp at oldest
+                let new_index = match self.message_history_index {
+                    Some(0) => return, // already at oldest, do nothing
+                    Some(idx) => idx - 1,
+                    None => self.sent_messages_history.len() - 1,
                 };
                 self.message_history_index = Some(new_index);
                 if let Some(msg) = self.sent_messages_history.get(new_index) {
@@ -1489,13 +1609,13 @@ impl TuiApp {
             1 => {
                 // Down: go to next message in history or back to empty input
                 if let Some(idx) = self.message_history_index {
-                    let new_index = (idx + 1) % self.sent_messages_history.len();
-                    if new_index == 0 && idx > 0 {
-                        // Return to empty input
+                    if idx + 1 >= self.sent_messages_history.len() {
+                        // At the newest item — return to empty input
                         self.input_buffer.clear();
                         self.cursor_index = 0;
                         self.message_history_index = None;
                     } else {
+                        let new_index = idx + 1;
                         self.message_history_index = Some(new_index);
                         if let Some(msg) = self.sent_messages_history.get(new_index) {
                             self.input_buffer = msg.clone();
@@ -1974,17 +2094,8 @@ impl TuiApp {
         let Some(session) = self.history_sessions.get(self.history_selected).cloned() else {
             return;
         };
-        let session_id = session.context.session_id.clone();
-        let model = session.config.llm.model.clone();
-        self.session_id = Some(session_id.clone());
-        self.current_model = model.clone();
-        self.session_usage = session.state.usage.clone();
         self.current_state = AppState::Chat;
-        self.push_block(
-            ChatRole::System,
-            format!("Switched to session {} (model: {})", session_id, model),
-        );
-        self.push_right_event(format!("switched to history session: {}", session_id));
+        self.load_session_and_turns(session);
     }
 
     fn switch_to_sessions_picker(&mut self) {
@@ -1995,17 +2106,40 @@ impl TuiApp {
         else {
             return;
         };
+        self.show_sessions_picker = false;
+        self.load_session_and_turns(session);
+    }
+
+    fn load_session_and_turns(&mut self, session: TalosSession) {
         let session_id = session.context.session_id.clone();
         let model = session.config.llm.model.clone();
         self.session_id = Some(session_id.clone());
-        self.current_model = model.clone();
+        self.current_model = model;
         self.session_usage = session.state.usage.clone();
-        self.show_sessions_picker = false;
-        self.push_block(
-            ChatRole::System,
-            format!("Switched to session {} (model: {})", session_id, model),
-        );
-        self.push_right_event(format!("switched via /sessions: {}", session_id));
+        // Reset chat and input history for the new session
+        self.chat_blocks.clear();
+        self.rendered_chat_lines.clear();
+        self.sent_messages_history.clear();
+        self.message_history_index = None;
+        self.push_right_event(format!("switched to session: {}", session_id));
+
+        // Abort any in-flight command — session switch takes priority and the
+        // previous result is irrelevant now.
+        if let Some(task) = self.pending_command_task.take() {
+            task.abort();
+        }
+        self.pending_command_update = None;
+
+        let Some(client) = self.gateway_client.clone() else {
+            self.push_block(ChatRole::System, format!("Session: {}", session_id));
+            return;
+        };
+        let _ = self.spawn_remote_command_task("loading session turns", async move {
+            RemoteCommandUpdate::SessionTurnsLoaded {
+                result: client.get_session_turns(&session_id).await,
+                session,
+            }
+        });
     }
 
     fn delete_history_session(&mut self) {
@@ -2214,6 +2348,12 @@ impl TuiApp {
         self.cursor_index += 1;
     }
 
+    fn insert_text(&mut self, text: &str) {
+        let idx = byte_index_at_char(&self.input_buffer, self.cursor_index);
+        self.input_buffer.insert_str(idx, text);
+        self.cursor_index += text.chars().count();
+    }
+
     fn update_command_suggestions(&mut self) {
         self.command_suggestions = CommandSuggestion::filter(&self.command_input_buffer);
         self.command_autocomplete_selected = 0;
@@ -2233,10 +2373,64 @@ impl TuiApp {
     fn reset_input(&mut self) {
         self.input_buffer.clear();
         self.cursor_index = 0;
+        self.pasted_blocks.clear();
+        self.selected_pasted_block = None;
+    }
+
+    fn restore_input_state(&mut self, input_buffer: String, pasted_blocks: Vec<PastedTextBlock>) {
+        self.input_buffer = input_buffer;
+        self.cursor_index = self.input_buffer.chars().count();
+        self.pasted_blocks = pasted_blocks;
+        self.selected_pasted_block = if self.pasted_blocks.is_empty() {
+            None
+        } else {
+            Some(self.pasted_blocks.len().saturating_sub(1))
+        };
+    }
+
+    fn should_store_as_pasted_block(text: &str) -> bool {
+        text.chars().count() > PASTED_BLOCK_CHAR_THRESHOLD
+    }
+
+    fn has_composer_input(&self) -> bool {
+        self.input_buffer.chars().any(|ch| !ch.is_whitespace())
+    }
+
+    fn is_command_input(&self) -> bool {
+        self.pasted_blocks.is_empty() && self.input_buffer.trim().starts_with('/')
+    }
+
+    fn compose_user_input_text(&self) -> String {
+        let mut composed = self.input_buffer.clone();
+        for block in &self.pasted_blocks {
+            composed = composed.replacen(&block.marker, &block.text, 1);
+        }
+        composed
     }
 
     fn show_status_hint(&mut self, message: impl Into<String>, ttl: Duration) {
         self.status_hint = Some((message.into(), Instant::now() + ttl));
+    }
+
+    async fn cancel_active_turn(&mut self) {
+        let Some(session_id) = self.session_id.clone() else {
+            self.show_status_hint("No active session to cancel.", Duration::from_secs(2));
+            return;
+        };
+        let Some(client) = self.gateway_client.clone() else {
+            self.show_status_hint("Gateway client unavailable.", Duration::from_secs(2));
+            return;
+        };
+        match client.cancel_active_turn(&session_id).await {
+            Ok(()) => {
+                self.push_right_event(format!("cancel requested for session {}", session_id));
+                self.show_status_hint("Cancelling current turn...", Duration::from_secs(2));
+            }
+            Err(err) => {
+                self.push_block(ChatRole::System, format!("Failed to cancel turn: {}", err));
+                self.push_right_event("cancel request failed".to_string());
+            }
+        }
     }
 
     fn scroll_chat_up(&mut self, lines: u16) {
@@ -2882,14 +3076,19 @@ impl TuiApp {
         f.render_widget(left_block, area);
 
         let show_queue_panel = !self.message_queue.is_empty();
+        let input_panel_height = self
+            .composer_line_count(left_inner.width as usize)
+            .saturating_add(2)
+            .clamp(3, 8) as u16;
+        let bottom_gap_height = 3;
         let left_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Min(4),
                 Constraint::Length(if show_queue_panel { 5 } else { 0 }),
-                Constraint::Length(3),
+                Constraint::Length(input_panel_height),
                 Constraint::Length(1),
-                Constraint::Length(8),
+                Constraint::Length(bottom_gap_height),
             ])
             .split(left_inner);
 
@@ -2962,20 +3161,10 @@ impl TuiApp {
         } else {
             let input_bg_style = Style::default().bg(Color::Rgb(72, 76, 88));
             f.render_widget(Block::default().style(input_bg_style), input_inner);
-
-            let input_rows = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(1),
-                    Constraint::Length(1),
-                    Constraint::Length(1),
-                ])
-                .split(input_inner);
-
-            let blank = Paragraph::new(Line::from("")).style(input_bg_style);
-            f.render_widget(blank, input_rows[0]);
-            let input_row = Paragraph::new(self.input_line()).style(input_bg_style);
-            f.render_widget(input_row, input_rows[1]);
+            let content_lines =
+                self.input_lines(input_inner.width as usize, input_inner.height as usize);
+            let input_row = Paragraph::new(content_lines).style(input_bg_style);
+            f.render_widget(input_row, input_inner);
         }
 
         let wait_style = if self.in_flight {
@@ -3222,7 +3411,8 @@ impl TuiApp {
                 let sid = &s.context.session_id;
                 let model = &s.config.llm.model;
                 let msgs = s.state.message_count;
-                ListItem::new(format!(" {sid}  [{model}]  {msgs} msgs"))
+                let title = &s.title;
+                ListItem::new(format!(" {title}  [{model}]  {msgs} msgs  {sid}"))
             })
             .collect();
 
@@ -3322,16 +3512,13 @@ impl TuiApp {
             .iter()
             .enumerate()
             .map(|(idx, s)| {
-                let session_id = &s.context.session_id;
+                let title = s.title.trim();
                 let model = &s.config.llm.model;
                 let msgs = s.state.message_count;
                 let idx_display = (idx + 1) % 10;
                 ListItem::new(format!(
                     " [{}] {} [{}] {} msgs",
-                    idx_display,
-                    &session_id[0..8.min(session_id.len())],
-                    model,
-                    msgs
+                    idx_display, title, model, msgs
                 ))
             })
             .collect();
@@ -3636,37 +3823,110 @@ impl TuiApp {
         display
     }
 
-    fn input_line(&self) -> Line<'static> {
+    fn input_lines(&self, width: usize, height: usize) -> Vec<Line<'static>> {
+        let draft_lines = self.draft_input_lines(width);
+        let content_len = draft_lines.len();
+
+        if height == 0 {
+            return draft_lines;
+        }
+
+        if content_len > height {
+            return draft_lines
+                .into_iter()
+                .skip(content_len.saturating_sub(height))
+                .collect();
+        }
+
+        if content_len == 1 && height > 1 {
+            let top_padding = (height - 1) / 2;
+            let mut result: Vec<Line<'static>> = (0..top_padding).map(|_| Line::from("")).collect();
+            result.extend(draft_lines);
+            return result;
+        }
+
+        draft_lines
+    }
+
+    fn composer_line_count(&self, width: usize) -> usize {
+        self.draft_input_lines(width).len()
+    }
+
+    fn draft_input_lines(&self, width: usize) -> Vec<Line<'static>> {
         let chars: Vec<char> = self.input_buffer.chars().collect();
-        let mut spans = vec![Span::styled(
-            "❯ ",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )];
+        let mut display_text = String::new();
 
         for (idx, ch) in chars.iter().enumerate() {
             if idx == self.cursor_index {
-                spans.push(Span::styled(
-                    ch.to_string(),
-                    Style::default()
-                        .bg(Color::White)
-                        .fg(Color::Black)
-                        .add_modifier(Modifier::BOLD),
-                ));
-            } else {
-                spans.push(Span::raw(ch.to_string()));
+                display_text.push('█');
             }
+            display_text.push(*ch);
         }
 
         if self.cursor_index >= chars.len() {
-            spans.push(Span::styled(
-                " ",
-                Style::default().bg(Color::White).fg(Color::Black),
-            ));
+            display_text.push('█');
         }
 
-        Line::from(spans)
+        let first_prefix = "❯ ";
+        let continuation_prefix = "  ";
+        let first_prefix_width = text_display_width(first_prefix);
+        let continuation_prefix_width = text_display_width(continuation_prefix);
+        let mut rendered_lines = Vec::new();
+
+        for (logical_idx, logical_line) in display_text.split('\n').enumerate() {
+            let line_prefix = if logical_idx == 0 {
+                first_prefix
+            } else {
+                continuation_prefix
+            };
+            let mut current_line = line_prefix.to_string();
+            let mut current_width = text_display_width(line_prefix);
+
+            if logical_line.is_empty() {
+                rendered_lines.push(current_line);
+                continue;
+            }
+
+            for ch in logical_line.chars() {
+                let ch_width = char_display_width(ch).max(1);
+                let wrap_prefix_width = if current_line.starts_with(first_prefix) {
+                    first_prefix_width
+                } else {
+                    continuation_prefix_width
+                };
+                if width > 0
+                    && current_width + ch_width > width
+                    && current_width > wrap_prefix_width
+                {
+                    rendered_lines.push(current_line);
+                    current_line = continuation_prefix.to_string();
+                    current_width = continuation_prefix_width;
+                }
+                current_line.push(ch);
+                current_width += ch_width;
+            }
+
+            rendered_lines.push(current_line);
+        }
+
+        rendered_lines
+            .into_iter()
+            .map(|line| {
+                if let Some(rest) = line.strip_prefix(first_prefix) {
+                    Line::from(vec![
+                        Span::styled(
+                            first_prefix.to_string(),
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(rest.to_string()),
+                    ])
+                } else {
+                    Line::from(line)
+                }
+            })
+            .collect()
     }
 
     fn input_status_line(&self, width: usize) -> Line<'static> {
@@ -3683,23 +3943,35 @@ impl TuiApp {
         } else {
             String::new()
         };
-
+        let pasted_indicator = if self.pasted_blocks.is_empty() {
+            String::new()
+        } else {
+            format!("  [{} pasted]", self.pasted_blocks.len())
+        };
         let base = if self.close_in_progress {
             let session_id = self
                 .closing_session_id
                 .clone()
                 .unwrap_or_else(|| "unknown".to_string());
-            format!("closing {} · flushing memory · {}", session_id, directory)
+            format!(
+                "closing {} · flushing memory · {}{}{}",
+                session_id, directory, history_indicator, pasted_indicator
+            )
         } else if self.in_flight {
             let motion = self.stripe_line(6);
             format!(
-                "{} {} · {} · {}{}",
-                motion, self.current_model, token_left, directory, history_indicator
+                "{} {} · {} · {}{}{}",
+                motion,
+                self.current_model,
+                token_left,
+                directory,
+                history_indicator,
+                pasted_indicator
             )
         } else {
             format!(
-                "{} · {} · {}{}",
-                self.current_model, token_left, directory, history_indicator
+                "{} · {} · {}{}{}",
+                self.current_model, token_left, directory, history_indicator, pasted_indicator
             )
         };
         let mut text = if let Some((hint, expires_at)) = &self.status_hint {
@@ -3822,8 +4094,11 @@ impl TuiApp {
 
         // Content lines with wrapping
         for line in content_lines.iter() {
-            for wrapped in wrap_line_visual(line.clone(), content_width) {
-                lines.push(self.decorate_chat_line(wrapped, body_style, 0));
+            for wrapped in wrap_line_visual(
+                line.clone(),
+                content_width.saturating_sub(CHAT_BLOCK_BODY_INDENT),
+            ) {
+                lines.push(self.decorate_chat_line(wrapped, body_style, CHAT_BLOCK_BODY_INDENT));
             }
         }
 
@@ -4347,7 +4622,10 @@ impl TuiApp {
 
         // Content lines with wrapping and proper color
         for line in content_lines.iter() {
-            for wrapped in wrap_line_visual(line.clone(), content_width) {
+            for wrapped in wrap_line_visual(
+                line.clone(),
+                content_width.saturating_sub(CHAT_BLOCK_BODY_INDENT),
+            ) {
                 // Ensure all text is white by default, unless it has a specific color
                 let mut colored_spans = vec![];
                 for span in &wrapped.spans {
@@ -4359,10 +4637,14 @@ impl TuiApp {
                     colored_spans.push(Span::styled(span.content.to_string(), final_style));
                 }
                 lines.push(RenderedChatLine {
-                    display: Line::from(colored_spans),
+                    display: Line::from(
+                        std::iter::once(Span::raw(" ".repeat(CHAT_BLOCK_BODY_INDENT)))
+                            .chain(colored_spans.into_iter())
+                            .collect::<Vec<_>>(),
+                    ),
                     copy_projection: Some(CopyProjection {
                         text: line_plain_text(&wrapped),
-                        display_start_col: 0,
+                        display_start_col: CHAT_BLOCK_BODY_INDENT,
                     }),
                 });
             }
@@ -4410,8 +4692,11 @@ impl TuiApp {
 
         // Content lines with wrapping
         for line in content_lines.iter() {
-            for wrapped in wrap_line_visual(line.clone(), content_width) {
-                lines.push(self.decorate_chat_line(wrapped, body_style, 0));
+            for wrapped in wrap_line_visual(
+                line.clone(),
+                content_width.saturating_sub(CHAT_BLOCK_BODY_INDENT),
+            ) {
+                lines.push(self.decorate_chat_line(wrapped, body_style, CHAT_BLOCK_BODY_INDENT));
             }
         }
 
@@ -4604,7 +4889,7 @@ mod tests {
     use serde_json::json;
     use std::sync::Mutex;
     use talos_client::{
-        TalosEventPayload, TalosMessageCompletedEvent, TalosMessageOutputDeltaEvent,
+        StopReason, TalosEventPayload, TalosMessageCompletedEvent, TalosMessageOutputDeltaEvent,
         TalosMessageReasoningDeltaEvent, TalosMessageStartedEvent, TalosThinkingSource,
         TalosThinkingStage,
     };
@@ -4620,6 +4905,7 @@ mod tests {
         create_session_delay_ms: u64,
         stream_failures_remaining: u8,
         close_session_delay_ms: u64,
+        cancelled_sessions: Vec<String>,
     }
 
     struct MockGatewayClient {
@@ -4713,7 +4999,7 @@ mod tests {
             sequence,
             payload: TalosEventPayload::MessageCompleted(TalosMessageCompletedEvent {
                 request_id: "req-test".to_string(),
-                stop_reason: "end_turn".to_string(),
+                stop_reason: StopReason::EndTurn,
                 usage,
                 total_output_items: sequence.max(1),
                 iteration: sequence,
@@ -4739,6 +5025,7 @@ mod tests {
                     create_session_delay_ms: 0,
                     stream_failures_remaining: 0,
                     close_session_delay_ms: 0,
+                    cancelled_sessions: Vec::new(),
                 })),
             }
         }
@@ -4785,6 +5072,7 @@ mod tests {
             }
             let state = self.state.lock().unwrap();
             Ok(TalosSession {
+                title: "Untitled Session".to_string(),
                 context: talos_types::SessionContext {
                     session_id: state.session_id.clone(),
                     workspace_id: None,
@@ -4815,6 +5103,7 @@ mod tests {
         async fn get_session(&self, _session_id: &str) -> TalosResult<TalosSession> {
             let state = self.state.lock().unwrap();
             Ok(TalosSession {
+                title: "Untitled Session".to_string(),
                 context: talos_types::SessionContext {
                     session_id: state.session_id.clone(),
                     workspace_id: None,
@@ -4850,6 +5139,15 @@ mod tests {
             Ok(())
         }
 
+        async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()> {
+            self.state
+                .lock()
+                .unwrap()
+                .cancelled_sessions
+                .push(session_id.to_string());
+            Ok(())
+        }
+
         async fn update_session_model(
             &self,
             _session_id: &str,
@@ -4859,6 +5157,7 @@ mod tests {
             state.current_model = model.to_string();
             state.updated_model = Some(model.to_string());
             Ok(TalosSession {
+                title: "Untitled Session".to_string(),
                 context: talos_types::SessionContext {
                     session_id: state.session_id.clone(),
                     workspace_id: None,
@@ -4978,6 +5277,13 @@ mod tests {
         ) -> TalosResult<()> {
             Ok(())
         }
+
+        async fn get_session_turns(
+            &self,
+            _session_id: &str,
+        ) -> TalosResult<Vec<TalosMessageResponse>> {
+            Ok(vec![])
+        }
     }
 
     fn create_embedded_app() -> TuiApp {
@@ -5028,6 +5334,257 @@ mod tests {
         app.handle_backspace();
         assert_eq!(app.get_input_buffer(), "b");
         assert_eq!(app.input_line_plain(), "❯ █b");
+    }
+
+    #[test]
+    fn test_handle_paste_stores_long_multiline_text_as_block() {
+        let mut app = create_embedded_app();
+        let pasted = format!("{}\n{}", "A".repeat(420), "B".repeat(420));
+
+        app.handle_paste(pasted.clone());
+
+        assert_eq!(app.pasted_blocks.len(), 1);
+        assert_eq!(app.pasted_blocks[0].text, pasted);
+        assert_eq!(app.input_buffer, app.pasted_blocks[0].marker);
+    }
+
+    #[test]
+    fn test_handle_paste_stores_long_single_line_text_as_block() {
+        let mut app = create_embedded_app();
+        let pasted = "A".repeat(801);
+
+        app.handle_paste(pasted.clone());
+
+        assert_eq!(app.pasted_blocks.len(), 1);
+        assert_eq!(app.pasted_blocks[0].text, pasted);
+        assert_eq!(app.input_buffer, app.pasted_blocks[0].marker);
+    }
+
+    #[test]
+    fn test_handle_paste_inserts_short_multiline_text_into_draft() {
+        let mut app = create_embedded_app();
+
+        app.handle_paste("alpha\nbeta".to_string());
+
+        assert_eq!(app.input_buffer, "alpha\nbeta");
+        assert_eq!(app.cursor_index, "alpha\nbeta".chars().count());
+        assert!(app.pasted_blocks.is_empty());
+        let rendered = app
+            .input_lines(80, 5)
+            .into_iter()
+            .map(|line| line_plain_text(&line))
+            .collect::<Vec<_>>();
+        assert_eq!(rendered, vec!["❯ alpha", "  beta█"]);
+    }
+
+    #[test]
+    fn test_short_long_single_line_paste_wraps_inside_draft() {
+        let mut app = create_embedded_app();
+        let pasted = "A".repeat(120);
+
+        app.handle_paste(pasted);
+
+        assert!(app.pasted_blocks.is_empty());
+        assert_eq!(app.composer_line_count(24), 6);
+        let rendered = app
+            .input_lines(24, 8)
+            .into_iter()
+            .map(|line| line_plain_text(&line))
+            .collect::<Vec<_>>();
+        assert!(rendered.len() > 1);
+        let expected_first_line = format!("❯ {}", "A".repeat(22));
+        assert_eq!(
+            rendered.first().map(String::as_str),
+            Some(expected_first_line.as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_backspace_removes_last_character_when_input_is_not_empty() {
+        let mut app = create_embedded_app();
+        app.input_buffer = "ab".to_string();
+        app.cursor_index = 2;
+
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE))
+            .await
+            .unwrap();
+
+        assert_eq!(app.input_buffer, "a");
+        assert_eq!(app.cursor_index, 1);
+    }
+
+    #[tokio::test]
+    async fn test_tab_toggles_last_tool_block_without_pasted_behavior() {
+        let mut app = create_embedded_app();
+        let idx = app.push_block(
+            ChatRole::Tool,
+            "Tool: read_file\nstatus: completed\nresult: ok".to_string(),
+        );
+        if let Some(block) = app.chat_blocks.get_mut(idx) {
+            block.expanded = false;
+        }
+
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .await
+            .unwrap();
+        assert!(app.chat_blocks[idx].expanded);
+
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT))
+            .await
+            .unwrap();
+        assert!(!app.chat_blocks[idx].expanded);
+    }
+
+    #[tokio::test]
+    async fn test_backspace_at_empty_input_removes_last_pasted_block() {
+        let mut app = create_embedded_app();
+        app.handle_paste(format!("{}\n{}", "A".repeat(420), "B".repeat(420)));
+        app.handle_paste(format!("{}\n{}", "X".repeat(420), "Y".repeat(420)));
+        app.input_buffer = app.pasted_blocks[0].marker.clone();
+        app.cursor_index = app.input_buffer.chars().count();
+
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE))
+            .await
+            .unwrap();
+
+        assert_eq!(app.pasted_blocks.len(), 2);
+        assert_eq!(
+            app.input_buffer,
+            app.pasted_blocks[0]
+                .marker
+                .chars()
+                .take(
+                    app.pasted_blocks[0]
+                        .marker
+                        .chars()
+                        .count()
+                        .saturating_sub(1)
+                )
+                .collect::<String>()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_escape_cancels_in_flight_turn() {
+        let client = Arc::new(MockGatewayClient::new());
+        let state = client.state.clone();
+        let gateway_client: Arc<dyn GatewayClient> = client;
+        let mut app = TuiApp::new_with_gateway_client(gateway_client, TalosConnectionMode::Remote);
+        app.session_id = Some("sess-test".to_string());
+        app.in_flight = true;
+
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            state.lock().unwrap().cancelled_sessions,
+            vec!["sess-test".to_string()]
+        );
+        assert!(app
+            .status_hint
+            .as_ref()
+            .map(|(msg, _)| msg.contains("Cancelling current turn"))
+            .unwrap_or(false));
+    }
+
+    #[tokio::test]
+    async fn test_escape_without_in_flight_clears_local_selection_only() {
+        let client = Arc::new(MockGatewayClient::new());
+        let state = client.state.clone();
+        let gateway_client: Arc<dyn GatewayClient> = client;
+        let mut app = TuiApp::new_with_gateway_client(gateway_client, TalosConnectionMode::Remote);
+        app.chat_selection = Some(ChatSelection {
+            anchor: SelectionPoint {
+                line_index: 0,
+                column: 0,
+            },
+            focus: SelectionPoint {
+                line_index: 0,
+                column: 3,
+            },
+        });
+        app.selected_pasted_block = Some(0);
+
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .await
+            .unwrap();
+
+        assert!(app.chat_selection.is_none());
+        assert!(app.selected_pasted_block.is_none());
+        assert!(state.lock().unwrap().cancelled_sessions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_submit_input_composes_pasted_blocks_into_plain_text_message() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+        let pasted = format!("{}\n{}", "A".repeat(420), "B".repeat(420));
+        app.input_buffer = "Explain this log\n\n".to_string();
+        app.cursor_index = app.input_buffer.chars().count();
+        app.handle_paste(pasted.clone());
+        app.cursor_index = app.input_buffer.chars().count();
+
+        let should_quit = app.submit_input().await.unwrap();
+
+        assert!(!should_quit);
+        let user_messages = app
+            .chat_blocks
+            .iter()
+            .filter(|b| b.role == ChatRole::User)
+            .map(|b| b.content.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            user_messages,
+            vec![format!("Explain this log\n\n{}", pasted)]
+        );
+        assert!(app.pasted_blocks.is_empty());
+        assert!(app.input_buffer.is_empty());
+    }
+
+    #[test]
+    fn test_compose_user_input_text_expands_pasted_blocks_without_markers() {
+        let mut app = create_embedded_app();
+        let marker = "[Pasted text #1 · 2 lines]".to_string();
+        app.input_buffer = format!("Explain this log\n\n{}", marker);
+        app.cursor_index = app.input_buffer.chars().count();
+        app.pasted_blocks
+            .push(PastedTextBlock::new(marker, "line1\nline2".to_string()));
+
+        let composed = app.compose_user_input_text();
+
+        assert_eq!(composed, "Explain this log\n\nline1\nline2");
+    }
+
+    #[tokio::test]
+    async fn test_submit_input_restores_pasted_blocks_when_queue_is_full() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+
+        assert!(app.send_user_message("m1".to_string()).await.unwrap());
+        assert!(app.send_user_message("m2".to_string()).await.unwrap());
+        assert!(app.send_user_message("m3".to_string()).await.unwrap());
+        assert!(app.send_user_message("m4".to_string()).await.unwrap());
+        assert_eq!(app.message_queue.len(), 3);
+
+        let pasted = format!("{}\n{}", "A".repeat(420), "B".repeat(420));
+        app.input_buffer = "overflow\n\n".to_string();
+        app.cursor_index = app.input_buffer.chars().count();
+        app.handle_paste(pasted.clone());
+        app.cursor_index = app.input_buffer.chars().count();
+
+        let should_quit = app.submit_input().await.unwrap();
+
+        assert!(!should_quit);
+        assert!(app.input_buffer.starts_with("overflow\n\n[Pasted text #1"));
+        assert_eq!(app.pasted_blocks.len(), 1);
+        assert_eq!(app.pasted_blocks[0].text, pasted);
     }
 
     #[tokio::test]
@@ -5530,16 +6087,16 @@ mod tests {
         app.rebuild_chat_render_state(Rect::new(0, 0, 20, 8));
         app.chat_selection = Some(ChatSelection {
             anchor: SelectionPoint {
-                line_index: 1,
+                line_index: 2,
                 column: 0,
             },
             focus: SelectionPoint {
-                line_index: 1,
+                line_index: 2,
                 column: 10,
             },
         });
 
-        assert_eq!(app.selected_chat_text().as_deref(), Some("Alpha Beta"));
+        assert_eq!(app.selected_chat_text().as_deref(), Some("Alpha Bet"));
     }
 
     #[test]
@@ -5550,19 +6107,20 @@ mod tests {
             "abcdefghij".to_string(),
         )];
         app.rebuild_chat_render_state(Rect::new(0, 0, 8, 8));
-        // Line 0 is the assistant header, then content width = 6 wraps to ["abcdef", "ghij"].
+        // Line 0 is the assistant header, line 1 is the header gap, then body keeps
+        // an extra left indent and wraps to ["abcd", "efgh", "ij"].
         app.chat_selection = Some(ChatSelection {
             anchor: SelectionPoint {
-                line_index: 1,
-                column: 0,
+                line_index: 2,
+                column: 2,
             },
             focus: SelectionPoint {
-                line_index: 2,
-                column: 4,
+                line_index: 3,
+                column: 6,
             },
         });
 
-        assert_eq!(app.selected_chat_text().as_deref(), Some("abcdef\nghij"));
+        assert_eq!(app.selected_chat_text().as_deref(), Some("abcd\nefgh"));
     }
 
     #[test]
@@ -5682,7 +6240,7 @@ mod tests {
         assert_eq!(texts[3], "");
         assert_eq!(texts[4], "🤖 Assistant");
         assert_eq!(texts[5], "");
-        assert_eq!(texts[6], "Final answer");
+        assert_eq!(texts[6], "  Final answer");
     }
 
     #[test]
@@ -6557,11 +7115,11 @@ mod tests {
 
         assert_eq!(texts.first().map(String::as_str), Some("🤖 Assistant"));
         assert_eq!(texts.get(1).map(String::as_str), Some(""));
-        assert!(texts.iter().any(|line| line == "▌ Summary"));
-        assert!(texts.iter().any(|line| line == "1. First"));
-        assert!(texts.iter().any(|line| line == "2. Second"));
-        assert!(texts.iter().any(|line| line == "─── rust ───"));
-        assert!(texts.iter().any(|line| line == "let x = 1;"));
+        assert!(texts.iter().any(|line| line == "  ▌ Summary"));
+        assert!(texts.iter().any(|line| line == "  1. First"));
+        assert!(texts.iter().any(|line| line == "  2. Second"));
+        assert!(texts.iter().any(|line| line == "  ─── rust ───"));
+        assert!(texts.iter().any(|line| line == "  let x = 1;"));
         assert_eq!(
             texts
                 .iter()
@@ -6582,7 +7140,7 @@ mod tests {
             .map(|line| line_plain_text(&line.display))
             .collect::<Vec<_>>();
 
-        assert_eq!(texts, vec!["👤 User", "", "hello world"]);
+        assert_eq!(texts, vec!["👤 User", "", "  hello world"]);
     }
 
     #[test]
@@ -6596,7 +7154,7 @@ mod tests {
             .map(|line| line_plain_text(&line.display))
             .collect::<Vec<_>>();
 
-        assert_eq!(texts, vec!["💭 Thinking", "", "step one"]);
+        assert_eq!(texts, vec!["💭 Thinking", "", "  step one"]);
     }
 
     #[test]
@@ -6785,6 +7343,7 @@ mod tests {
         let mut config = talos_types::TalosConfig::default();
         config.llm.model = "claude-3".to_string();
         app.history_sessions = vec![TalosSession {
+            title: "Fix tui paste".to_string(),
             context: talos_types::SessionContext {
                 session_id: "hist-sess-1".to_string(),
                 workspace_id: None,
