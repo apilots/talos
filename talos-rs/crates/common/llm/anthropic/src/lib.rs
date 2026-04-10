@@ -407,7 +407,7 @@ impl AnthropicProvider {
         (text.join(""), reasoning, tool_calls)
     }
 
-    fn build_request(request: ChatRequest, stream: bool) -> AnthropicRequest {
+    fn build_request(request: ChatRequest, stream: Option<bool>) -> AnthropicRequest {
         let (system, messages) = Self::convert_messages(request.messages);
         AnthropicRequest {
             model: request.model,
@@ -423,7 +423,7 @@ impl AnthropicProvider {
                 .native_thinking
                 .as_ref()
                 .map(Self::convert_native_thinking),
-            stream: Some(stream),
+            stream,
         }
     }
 
@@ -443,7 +443,7 @@ impl AnthropicProvider {
     }
 
     async fn send_chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
-        let anthropic_req = Self::build_request(request, false);
+        let anthropic_req = Self::build_request(request, None);
         let url = format!("{}/messages", self.config.base_url);
         let headers = self.build_headers();
 
@@ -477,7 +477,8 @@ impl AnthropicProvider {
             .await
             .map_err(|e| TalosError::InternalError(format!("Failed to parse response: {}", e)))?;
 
-        let (content, reasoning, tool_calls) = Self::parse_response_content(&anthropic_resp.content);
+        let (content, reasoning, tool_calls) =
+            Self::parse_response_content(&anthropic_resp.content);
 
         Ok(ChatResponse {
             content,
@@ -497,7 +498,7 @@ impl AnthropicProvider {
     }
 
     async fn send_stream(&self, request: ChatRequest) -> TalosResult<reqwest::Response> {
-        let anthropic_req = Self::build_request(request, true);
+        let anthropic_req = Self::build_request(request, Some(true));
 
         let url = format!("{}/messages", self.config.base_url);
         let headers = self.build_headers();
@@ -754,7 +755,10 @@ impl LlmProvider for AnthropicProvider {
                                                 .and_then(|d| d.get("thinking"))
                                                 .and_then(|v| v.as_str())
                                             {
-                                                debug!("stream_with_tools: thinking_delta len={}", thinking.len());
+                                                debug!(
+                                                    "stream_with_tools: thinking_delta len={}",
+                                                    thinking.len()
+                                                );
                                                 if tx
                                                     .send(Ok(ToolStreamEvent::ReasoningDelta {
                                                         delta: thinking.to_string(),
@@ -1042,7 +1046,7 @@ mod tests {
             })
             .build();
 
-        let built = AnthropicProvider::build_request(request, false);
+        let built = AnthropicProvider::build_request(request, None);
 
         assert_eq!(
             built

@@ -1,4 +1,5 @@
 mod agent;
+mod flush_manager;
 mod service;
 mod r#trait;
 mod types;

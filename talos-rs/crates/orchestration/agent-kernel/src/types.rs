@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use talos_error::{TalosError, TalosResult};
-use talos_types::ModelInfo;
 use talos_types::talos::TalosSessionEnvironment;
 use talos_types::talos::{TalosContentItem, TalosOutputItem, TalosUsage};
+use talos_types::ModelInfo;
 use tokio::sync::mpsc;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

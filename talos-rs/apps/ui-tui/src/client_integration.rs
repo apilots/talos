@@ -61,7 +61,7 @@ impl TuiAppState {
             active_session: RwLock::new(None),
             available_models: RwLock::new(Vec::new()),
             available_sessions: RwLock::new(Vec::new()),
-            current_model: RwLock::new("qwen-plus".to_string()),
+            current_model: RwLock::new(String::new()),
             update_receiver: RwLock::new(Some(update_rx)),
             update_sender: Some(update_tx),
         })

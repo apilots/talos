@@ -84,10 +84,12 @@ if [[ "${close_success}" != "true" && "${close_success}" != "True" ]]; then
 fi
 
 post_size="${pre_size}"
-for _ in $(seq 1 40); do
+found_session_entry="false"
+for _ in $(seq 1 480); do
   if [[ -f "${DAY_FILE}" ]]; then
     post_size="$(wc -c < "${DAY_FILE}" | tr -d ' ')"
-    if [[ "${post_size}" -gt "${pre_size}" ]]; then
+    if grep -Fq "session: ${session_id}" "${DAY_FILE}"; then
+      found_session_entry="true"
       break
     fi
   fi
@@ -99,9 +101,9 @@ if [[ ! -f "${DAY_FILE}" ]]; then
   exit 1
 fi
 
-if [[ "${post_size}" -le "${pre_size}" ]]; then
-  echo "CASE close_session_for_memory_flush FAIL pre_size=${pre_size} post_size=${post_size}"
+if [[ "${found_session_entry}" != "true" ]]; then
+  echo "CASE close_session_for_memory_flush FAIL session_id=${session_id} pre_size=${pre_size} post_size=${post_size}"
   exit 1
 fi
 
-echo "CASE close_session_for_memory_flush PASS pre_size=${pre_size} post_size=${post_size}"
+echo "CASE close_session_for_memory_flush PASS session_id=${session_id} pre_size=${pre_size} post_size=${post_size}"

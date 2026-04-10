@@ -3,11 +3,14 @@ use chrono::Utc;
 use dashmap::DashMap;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::AbortHandle;
+use tracing::info;
 use uuid::Uuid;
 
 use crate::{
+    flush_manager::MemoryFlushManager,
     service::{
         OrchestratorMessageCompletedEvent, OrchestratorMessageErrorEvent,
         OrchestratorMessageExecutionSummaryEvent, OrchestratorMessageOutputDeltaEvent,
@@ -67,6 +70,7 @@ pub struct AgentImpl {
     kernel_config: AgentKernelConfig,
     pub kernel_runtime: Arc<KernelRuntime>,
     active_turns: Arc<DashMap<String, ActiveTurnHandle>>,
+    memory_flush_manager: Arc<MemoryFlushManager>,
 }
 
 impl AgentImpl {
@@ -79,7 +83,11 @@ impl AgentImpl {
         let provider_name = session.config.llm.provider.clone();
 
         if let Some(provider_config) = session.config.current_provider_config() {
-            if let Some(model) = provider_config.models.iter().find(|m| m.id == selected_model) {
+            if let Some(model) = provider_config
+                .models
+                .iter()
+                .find(|m| m.id == selected_model)
+            {
                 return ModelInfo {
                     id: model.id.clone(),
                     name: model.display_name().to_string(),
@@ -303,7 +311,16 @@ impl AgentImpl {
             kernel_config,
             kernel_runtime: Arc::new(KernelRuntime::new_default()),
             active_turns: Arc::new(DashMap::new()),
+            memory_flush_manager: Arc::new(MemoryFlushManager::new()),
         }
+    }
+
+    pub async fn drain_pending_memory_flushes(&self, timeout: Duration) -> TalosResult<()> {
+        self.memory_flush_manager.drain(timeout).await
+    }
+
+    pub fn pending_memory_flush_count(&self) -> usize {
+        self.memory_flush_manager.pending_count()
     }
 
     /// Add a tool to this agent's registry
@@ -1060,17 +1077,39 @@ impl AgentOrchestrator for AgentImpl {
         } else {
             session.config.llm.model.clone()
         };
-        flush_session_memory(
-            &session.context.session_id,
-            &selected_model,
-            self.llm_provider.clone(),
-            &self.memory_store,
-            &self.kernel_config,
-            false,
-            false,
-            self.kernel_config.memory.workspace_memory_flush_enabled,
-        )
-        .await
+        let session_id = session.context.session_id.clone();
+        let task_session_id = session_id.clone();
+        let llm_provider = self.llm_provider.clone();
+        let memory_store = self.memory_store.clone();
+        let kernel_config = self.kernel_config.clone();
+        let accepted = self
+            .memory_flush_manager
+            .spawn_flush(&session_id, async move {
+                flush_session_memory(
+                    &task_session_id,
+                    &selected_model,
+                    llm_provider,
+                    memory_store.as_ref(),
+                    &kernel_config,
+                    false,
+                    false,
+                    kernel_config.memory.workspace_memory_flush_enabled,
+                )
+                .await
+            })
+            .await;
+        if !accepted {
+            info!(session_id = %session_id, "memory flush deduplicated for session");
+        }
+        Ok(())
+    }
+
+    async fn drain_memory_flushes(&self, timeout: Duration) -> TalosResult<()> {
+        self.drain_pending_memory_flushes(timeout).await
+    }
+
+    fn pending_memory_flushes(&self) -> usize {
+        self.pending_memory_flush_count()
     }
 
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()> {
@@ -1251,6 +1290,14 @@ impl AgentOrchestrator for MockAgent {
         Ok(())
     }
 
+    async fn drain_memory_flushes(&self, _timeout: Duration) -> TalosResult<()> {
+        Ok(())
+    }
+
+    fn pending_memory_flushes(&self) -> usize {
+        0
+    }
+
     async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
         Ok(())
     }
@@ -1295,7 +1342,7 @@ mod tests {
     use talos_types::talos::{
         StopReason as TalosStopReason, TalosOutputItem, TalosProvider, TalosSourceType, TalosUsage,
     };
-use talos_types::{SessionContext, SessionState};
+    use talos_types::{SessionContext, SessionState};
     use tempfile::TempDir;
     use tokio;
     use tokio::sync::Notify;
@@ -1534,7 +1581,11 @@ use talos_types::{SessionContext, SessionState};
         agent
             .close_session(session)
             .await
-            .expect("session close should flush workspace memory");
+            .expect("session close should enqueue workspace memory flush");
+        agent
+            .drain_pending_memory_flushes(Duration::from_secs(5))
+            .await
+            .expect("memory flush should complete during drain");
 
         let file_path = _guard
             .path()

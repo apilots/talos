@@ -2,6 +2,7 @@ use crate::Coordinator;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use talos_agent::{AgentOrchestrator, OrchestratorEvent, OrchestratorRequest};
 use talos_error::TalosResult;
 use talos_llm_provider::{ChatMessage, ChatRequest, LlmProvider};
@@ -377,7 +378,7 @@ impl SessionManager {
         self.update_session_title(session_id, &title).await
     }
 
-    async fn close_session(&self, session_id: &str) -> TalosResult<Option<TalosSession>> {
+    async fn load_session_for_close(&self, session_id: &str) -> TalosResult<Option<TalosSession>> {
         let session = self
             .load_session(session_id, Some(self.default_workspace_id.clone()))
             .await?;
@@ -398,6 +399,44 @@ pub struct CoordinatorImpl {
 }
 
 impl CoordinatorImpl {
+    pub async fn pending_memory_flushes(&self) -> usize {
+        let agents = self
+            .agents
+            .read()
+            .await
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        agents
+            .iter()
+            .map(|agent| agent.pending_memory_flushes())
+            .sum()
+    }
+
+    pub async fn drain_memory_flushes(&self, timeout: Duration) -> TalosResult<()> {
+        let deadline = std::time::Instant::now() + timeout;
+        let agents = self
+            .agents
+            .read()
+            .await
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+
+        for agent in agents {
+            let remaining = deadline
+                .checked_duration_since(std::time::Instant::now())
+                .ok_or_else(|| {
+                    talos_error::TalosError::InternalError(
+                        "memory flush drain timed out before all agents were drained".to_string(),
+                    )
+                })?;
+            agent.drain_memory_flushes(remaining).await?;
+        }
+
+        Ok(())
+    }
+
     /// Create a new instance of CoordinatorImpl
     pub fn new(
         router: Arc<dyn Router>,
@@ -845,7 +884,7 @@ impl SessionService for CoordinatorImpl {
     }
 
     async fn close_session(&self, session_id: &str) -> TalosResult<()> {
-        let Some(session) = self.sessions.close_session(session_id).await? else {
+        let Some(session) = self.sessions.load_session_for_close(session_id).await? else {
             return Err(talos_error::TalosError::ResourceNotFound(format!(
                 "session {}",
                 session_id
@@ -854,11 +893,7 @@ impl SessionService for CoordinatorImpl {
 
         let (_target_agent, agent) = self.resolve_session_agent(&session).await?;
         self.sessions.invalidate_cached_session(session_id).await;
-        tokio::spawn(async move {
-            if let Err(e) = agent.close_session(session).await {
-                tracing::warn!("background memory flush failed: {}", e);
-            }
-        });
+        agent.close_session(session).await?;
         Ok(())
     }
 
@@ -973,6 +1008,7 @@ impl SessionService for CoordinatorImpl {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use talos_agent::{OrchestratorEvent, OrchestratorExecution, OrchestratorRequest};
     use talos_memory::{Memory, MemoryStore, TalosTurn};
@@ -1013,6 +1049,17 @@ mod tests {
 
     struct TitleTestSessionStore {
         sessions: Arc<Mutex<HashMap<String, SessionRecord>>>,
+    }
+
+    struct TrackingFlushAgent {
+        pending: usize,
+        drained: Arc<AtomicUsize>,
+    }
+
+    impl TrackingFlushAgent {
+        fn new(pending: usize, drained: Arc<AtomicUsize>) -> Self {
+            Self { pending, drained }
+        }
     }
 
     impl TitleTestSessionStore {
@@ -1076,6 +1123,14 @@ mod tests {
 
         async fn close_session(&self, _session: TalosSession) -> TalosResult<()> {
             Ok(())
+        }
+
+        async fn drain_memory_flushes(&self, _timeout: Duration) -> TalosResult<()> {
+            Ok(())
+        }
+
+        fn pending_memory_flushes(&self) -> usize {
+            0
         }
 
         async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()> {
@@ -1216,6 +1271,72 @@ mod tests {
         }
     }
 
+    #[async_trait]
+    impl AgentOrchestrator for TrackingFlushAgent {
+        fn id(&self) -> &str {
+            "tracking-flush"
+        }
+
+        async fn run(&self, request: OrchestratorRequest) -> TalosResult<OrchestratorExecution> {
+            Ok(OrchestratorExecution {
+                output_text: String::new(),
+                output_items: Vec::new(),
+                reasoning: Vec::new(),
+                stop_reason: StopReason::EndTurn,
+                usage: TalosUsage::default(),
+                task_count: 0,
+                session_id: request.session.context.session_id,
+            })
+        }
+
+        async fn run_stream(
+            &self,
+            _request: OrchestratorRequest,
+        ) -> TalosResult<mpsc::Receiver<OrchestratorEvent>> {
+            let (_tx, rx) = mpsc::channel(1);
+            Ok(rx)
+        }
+
+        async fn close_session(&self, _session: TalosSession) -> TalosResult<()> {
+            Ok(())
+        }
+
+        async fn drain_memory_flushes(&self, _timeout: Duration) -> TalosResult<()> {
+            self.drained.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn pending_memory_flushes(&self) -> usize {
+            self.pending
+        }
+
+        async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
+            Ok(())
+        }
+
+        async fn submit_tool_approval(
+            &self,
+            _session_id: &str,
+            _call_id: &str,
+            _tool_name: &str,
+            _approved: bool,
+            _reason: Option<String>,
+        ) -> TalosResult<()> {
+            Ok(())
+        }
+
+        async fn submit_dynamic_tool_result(
+            &self,
+            _session_id: &str,
+            _call_id: &str,
+            _tool_name: &str,
+            _output: String,
+            _success: bool,
+        ) -> TalosResult<()> {
+            Ok(())
+        }
+    }
+
     #[tokio::test]
     async fn test_coordinator_creation() {
         let mock_router = Arc::new(MockRouter::new());
@@ -1240,6 +1361,37 @@ mod tests {
 
         assert!(result.is_ok());
         assert_eq!(coordinator.agents.read().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_drain_memory_flushes_delegates_to_registered_agents() {
+        let mock_router = Arc::new(MockRouter::new());
+        let mock_session_store = Arc::new(talos_session_store::MockSessionStore::new());
+        let coordinator =
+            CoordinatorImpl::new(mock_router, mock_session_store, TalosConfig::default());
+
+        let drained = Arc::new(AtomicUsize::new(0));
+        coordinator
+            .register_agent(
+                "agent-a",
+                Arc::new(TrackingFlushAgent::new(1, drained.clone())),
+            )
+            .await
+            .expect("first agent should register");
+        coordinator
+            .register_agent(
+                "agent-b",
+                Arc::new(TrackingFlushAgent::new(2, drained.clone())),
+            )
+            .await
+            .expect("second agent should register");
+
+        assert_eq!(coordinator.pending_memory_flushes().await, 3);
+        coordinator
+            .drain_memory_flushes(Duration::from_secs(1))
+            .await
+            .expect("coordinator should drain all agents");
+        assert_eq!(drained.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]

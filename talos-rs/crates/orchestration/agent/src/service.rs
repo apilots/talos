@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use talos_agent_kernel::TurnPhase;
 use talos_error::TalosResult;
 use talos_types::talos::{
@@ -151,6 +152,8 @@ pub trait AgentOrchestrator: Send + Sync {
         request: OrchestratorRequest,
     ) -> TalosResult<mpsc::Receiver<OrchestratorEvent>>;
     async fn close_session(&self, session: TalosSession) -> TalosResult<()>;
+    async fn drain_memory_flushes(&self, timeout: Duration) -> TalosResult<()>;
+    fn pending_memory_flushes(&self) -> usize;
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()>;
     async fn submit_tool_approval(
         &self,

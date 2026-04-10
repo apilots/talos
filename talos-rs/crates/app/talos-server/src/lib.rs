@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use talos_agent::{AgentImpl, AgentOrchestrator};
 use talos_channel::{ChannelServer, TelegramChannel};
@@ -20,7 +21,7 @@ use talos_tools::{
 };
 use talos_types::{ModelInfo, RequestHandler, SessionService};
 use tokio::task::JoinSet;
-use tracing::error;
+use tracing::{error, warn};
 
 #[derive(Debug, Clone, Default)]
 pub struct TalosServerOptions {
@@ -34,8 +35,11 @@ pub struct TalosServerOptions {
 pub struct TalosServerRuntime {
     http_server: HttpServer,
     channel_server: Option<ChannelServer>,
+    coordinator: Arc<CoordinatorImpl>,
     gateway_url: String,
 }
+
+const MEMORY_FLUSH_DRAIN_TIMEOUT: Duration = Duration::from_secs(60);
 
 impl TalosServerRuntime {
     pub fn gateway_url(&self) -> &str {
@@ -52,7 +56,7 @@ impl TalosServerRuntime {
     }
 
     pub async fn run(self) -> TalosResult<()> {
-        match self.channel_server {
+        let result = match self.channel_server {
             Some(channel_server) => {
                 let http_server = self.http_server;
                 let mut tasks = JoinSet::new();
@@ -69,7 +73,25 @@ impl TalosServerRuntime {
                 }
             }
             None => self.http_server.run().await,
+        };
+
+        let pending_flushes = self.coordinator.pending_memory_flushes().await;
+        if pending_flushes > 0 {
+            tracing::info!(
+                pending_flushes,
+                timeout_secs = MEMORY_FLUSH_DRAIN_TIMEOUT.as_secs(),
+                "draining pending memory flush tasks before shutdown"
+            );
+            if let Err(err) = self
+                .coordinator
+                .drain_memory_flushes(MEMORY_FLUSH_DRAIN_TIMEOUT)
+                .await
+            {
+                warn!(error = %err, "memory flush drain failed on shutdown");
+            }
         }
+
+        result
     }
 }
 
@@ -194,6 +216,7 @@ pub async fn start_server(
     };
 
     Ok(TalosServerRuntime {
+        coordinator,
         gateway_url: format!("http://{}:{}", config.gateway.host, config.gateway.port),
         http_server,
         channel_server,

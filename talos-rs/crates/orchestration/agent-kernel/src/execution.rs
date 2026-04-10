@@ -6,8 +6,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use talos_error::TalosResult;
 use talos_llm_provider::{ChatMessage, NativeThinkingConfig, ToolDefinition};
-use talos_types::ModelInfo;
 use talos_types::talos::TalosOutputItem;
+use talos_types::ModelInfo;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

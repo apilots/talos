@@ -44,7 +44,7 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
 use tracing::error;
 
-const DEFAULT_MODEL: &str = "qwen-plus";
+const WELCOME_MODEL_PLACEHOLDER: &str = "(connecting...)";
 const MAX_RIGHT_EVENTS: usize = 120;
 const MAX_QUEUE_LEN: usize = 3;
 const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(60);
@@ -532,7 +532,7 @@ impl TuiApp {
             selected_pasted_block: None,
             startup_directory: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             connection_mode,
-            current_model: DEFAULT_MODEL.to_string(),
+            current_model: String::new(),
             session_usage: TalosUsage::default(),
             available_model_info: vec![],
             available_models: vec![],
@@ -606,7 +606,7 @@ impl TuiApp {
             ChatRole::System,
             build_welcome_card(
                 APP_VERSION,
-                &app.current_model,
+                WELCOME_MODEL_PLACEHOLDER,
                 &app.startup_directory,
                 app.connection_mode,
             ),
@@ -1995,10 +1995,13 @@ impl TuiApp {
         }
         self.available_model_info = models;
         self.available_models = ids;
-        if !self
-            .available_models
-            .iter()
-            .any(|m| m == &self.current_model)
+        // Only correct the model when user already has one selected that's no longer available.
+        // Empty means "not yet set" — let the server determine the default via session creation.
+        if !self.current_model.is_empty()
+            && !self
+                .available_models
+                .iter()
+                .any(|m| m == &self.current_model)
         {
             self.current_model = self.available_models[0].clone();
         }
@@ -2276,9 +2279,14 @@ impl TuiApp {
         };
 
         let context = self.build_session_context();
+        let model = if self.current_model.is_empty() {
+            None
+        } else {
+            Some(self.current_model.clone())
+        };
         let params = SessionCreateParams {
             context: Some(context),
-            model: Some(self.current_model.clone()),
+            model,
         };
 
         let created = client.create_session(&params).await?;
@@ -2297,7 +2305,11 @@ impl TuiApp {
             return;
         };
 
-        let current_model = self.current_model.clone();
+        let model = if self.current_model.is_empty() {
+            None
+        } else {
+            Some(self.current_model.clone())
+        };
         let context = self.build_session_context();
         let (tx, rx) = mpsc::channel(1);
         self.pending_session_connect = Some(rx);
@@ -2308,7 +2320,7 @@ impl TuiApp {
             let result = client
                 .create_session(&SessionCreateParams {
                     context: Some(context),
-                    model: Some(current_model),
+                    model,
                 })
                 .await
                 .map(|created| created.context.session_id);
@@ -4042,6 +4054,18 @@ impl TuiApp {
         self.session_id = Some(session.context.session_id.clone());
         self.current_model = session.config.llm.model.clone();
         self.session_usage = session.state.usage.clone();
+        // Refresh the welcome card so it shows the real model from server config.
+        if let Some(welcome_block) = self.chat_blocks.first_mut() {
+            if welcome_block.content.starts_with('╭') {
+                welcome_block.content = build_welcome_card(
+                    APP_VERSION,
+                    &self.current_model,
+                    &self.startup_directory,
+                    self.connection_mode,
+                );
+            }
+        }
+        self.rebuild_chat_render_state_if_rect();
     }
 
     fn token_left_percent(&self) -> Option<u8> {
