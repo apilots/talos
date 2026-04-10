@@ -34,6 +34,7 @@ impl LlmProvider for DemoLlmProvider {
                 total_tokens: 30,
                 ..Usage::default()
             },
+            reasoning: Vec::new(),
             finish_reason: Some("stop".to_string()),
             tool_calls: None,
         })

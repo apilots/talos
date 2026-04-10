@@ -6,6 +6,7 @@ use reqwest::{header, Client};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::env;
 use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
@@ -22,6 +23,7 @@ pub struct AnthropicConfig {
     pub api_key: String,
     pub base_url: String,
     pub timeout_secs: u64,
+    pub default_model: Option<String>,
 }
 
 impl AnthropicConfig {
@@ -29,7 +31,8 @@ impl AnthropicConfig {
         Self {
             api_key: api_key.into(),
             base_url: "https://api.anthropic.com/v1".to_string(),
-            timeout_secs: 60,
+            timeout_secs: 120,
+            default_model: None,
         }
     }
 
@@ -40,6 +43,11 @@ impl AnthropicConfig {
 
     pub fn with_timeout(mut self, secs: u64) -> Self {
         self.timeout_secs = secs;
+        self
+    }
+
+    pub fn with_default_model(mut self, model: impl Into<String>) -> Self {
+        self.default_model = Some(model.into());
         self
     }
 }
@@ -117,6 +125,8 @@ struct AnthropicContent {
     #[serde(default)]
     text: Option<String>,
     #[serde(default)]
+    thinking: Option<String>,
+    #[serde(default)]
     id: Option<String>,
     #[serde(default)]
     name: Option<String>,
@@ -143,6 +153,13 @@ struct AnthropicTextBlock {
     cache_control: Option<CacheControl>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AnthropicEndpointKind {
+    Official,
+    AliyunCodingPlan,
+    Compatible,
+}
+
 /// Anthropic LLM provider.
 pub struct AnthropicProvider {
     config: AnthropicConfig,
@@ -151,24 +168,100 @@ pub struct AnthropicProvider {
 
 impl AnthropicProvider {
     pub fn new(config: AnthropicConfig) -> Self {
-        let client = Client::builder()
+        let mut builder = Client::builder()
             .timeout(Duration::from_secs(config.timeout_secs))
-            .build()
-            .expect("Failed to build HTTP client");
+            .referer(false);
+
+        if Self::endpoint_kind_for_base_url(&config.base_url)
+            == AnthropicEndpointKind::AliyunCodingPlan
+        {
+            builder = builder.no_gzip().no_brotli().no_zstd().no_deflate();
+        }
+
+        let client = builder.build().expect("Failed to build HTTP client");
 
         Self { config, client }
     }
 
+    fn endpoint_kind_for_base_url(base_url: &str) -> AnthropicEndpointKind {
+        let base_url = base_url.trim_end_matches('/');
+        if base_url.contains("api.anthropic.com") {
+            AnthropicEndpointKind::Official
+        } else if base_url.contains("coding.dashscope.aliyuncs.com/apps/anthropic")
+            || base_url.contains("coding-intl.dashscope.aliyuncs.com/apps/anthropic")
+        {
+            AnthropicEndpointKind::AliyunCodingPlan
+        } else {
+            AnthropicEndpointKind::Compatible
+        }
+    }
+
+    fn endpoint_kind(&self) -> AnthropicEndpointKind {
+        Self::endpoint_kind_for_base_url(&self.config.base_url)
+    }
+
+    fn claude_code_user_agent() -> String {
+        let entrypoint = env::var("CLAUDE_CODE_ENTRYPOINT").unwrap_or_else(|_| "cli".to_string());
+        let user_type = env::var("USER_TYPE").unwrap_or_else(|_| "external".to_string());
+        let agent_sdk_version = env::var("CLAUDE_AGENT_SDK_VERSION")
+            .ok()
+            .map(|value| format!(", agent-sdk/{}", value))
+            .unwrap_or_default();
+        let client_app = env::var("CLAUDE_AGENT_SDK_CLIENT_APP")
+            .ok()
+            .map(|value| format!(", client-app/{}", value))
+            .unwrap_or_default();
+
+        format!(
+            "claude-cli/{} ({}, {}{}{})",
+            env!("CARGO_PKG_VERSION"),
+            user_type,
+            entrypoint,
+            agent_sdk_version,
+            client_app
+        )
+    }
+
     fn build_headers(&self) -> header::HeaderMap {
         let mut headers = header::HeaderMap::new();
-        headers.insert(
-            "x-api-key",
-            header::HeaderValue::from_str(&self.config.api_key).unwrap(),
-        );
-        headers.insert(
-            "anthropic-version",
-            header::HeaderValue::from_static("2023-06-01"),
-        );
+        headers.insert(header::ACCEPT, header::HeaderValue::from_static("*/*"));
+
+        match self.endpoint_kind() {
+            AnthropicEndpointKind::Official => {
+                headers.insert(
+                    "x-api-key",
+                    header::HeaderValue::from_str(&self.config.api_key).unwrap(),
+                );
+                headers.insert(
+                    "anthropic-version",
+                    header::HeaderValue::from_static("2023-06-01"),
+                );
+            }
+            AnthropicEndpointKind::AliyunCodingPlan => {
+                headers.insert(
+                    header::AUTHORIZATION,
+                    header::HeaderValue::from_str(&format!("Bearer {}", self.config.api_key))
+                        .unwrap(),
+                );
+                headers.insert(
+                    "anthropic-beta",
+                    header::HeaderValue::from_static("claude-code-20250219"),
+                );
+                headers.insert("x-app", header::HeaderValue::from_static("cli"));
+                headers.insert(
+                    header::USER_AGENT,
+                    header::HeaderValue::from_str(&Self::claude_code_user_agent()).unwrap(),
+                );
+            }
+            AnthropicEndpointKind::Compatible => {
+                headers.insert(
+                    header::AUTHORIZATION,
+                    header::HeaderValue::from_str(&format!("Bearer {}", self.config.api_key))
+                        .unwrap(),
+                );
+            }
+        }
+
         headers.insert(
             header::CONTENT_TYPE,
             header::HeaderValue::from_static("application/json"),
@@ -280,8 +373,11 @@ impl AnthropicProvider {
         (system_blocks, anthropic_messages)
     }
 
-    fn parse_response_content(content: &[AnthropicContent]) -> (String, Option<Vec<FunctionCall>>) {
+    fn parse_response_content(
+        content: &[AnthropicContent],
+    ) -> (String, Vec<String>, Option<Vec<FunctionCall>>) {
         let mut text = Vec::new();
+        let mut reasoning = Vec::new();
         let mut calls = Vec::new();
 
         for block in content {
@@ -289,6 +385,11 @@ impl AnthropicProvider {
                 "text" => {
                     if let Some(fragment) = block.text.as_ref() {
                         text.push(fragment.clone());
+                    }
+                }
+                "thinking" => {
+                    if let Some(fragment) = block.thinking.as_ref() {
+                        reasoning.push(fragment.clone());
                     }
                 }
                 "tool_use" => {
@@ -303,7 +404,7 @@ impl AnthropicProvider {
         }
 
         let tool_calls = if calls.is_empty() { None } else { Some(calls) };
-        (text.join(""), tool_calls)
+        (text.join(""), reasoning, tool_calls)
     }
 
     fn build_request(request: ChatRequest, stream: bool) -> AnthropicRequest {
@@ -376,10 +477,11 @@ impl AnthropicProvider {
             .await
             .map_err(|e| TalosError::InternalError(format!("Failed to parse response: {}", e)))?;
 
-        let (content, tool_calls) = Self::parse_response_content(&anthropic_resp.content);
+        let (content, reasoning, tool_calls) = Self::parse_response_content(&anthropic_resp.content);
 
         Ok(ChatResponse {
             content,
+            reasoning,
             model: anthropic_resp.model,
             usage: Usage {
                 prompt_tokens: anthropic_resp.usage.input_tokens,
@@ -432,7 +534,10 @@ impl LlmProvider for AnthropicProvider {
     }
 
     fn default_model(&self) -> &str {
-        "claude-3-5-sonnet-20241022"
+        self.config
+            .default_model
+            .as_deref()
+            .unwrap_or("claude-3-5-sonnet-20241022")
     }
 
     fn native_thinking_support(&self, model: &str) -> NativeThinkingSupport {
@@ -463,15 +568,16 @@ impl LlmProvider for AnthropicProvider {
 
         tokio::spawn(async move {
             let mut stream = response.bytes_stream();
+            let mut stop_reason: Option<String> = None;
+            let mut line_buf = String::new();
             while let Some(chunk_result) = stream.next().await {
                 match chunk_result {
                     Ok(bytes) => {
-                        let text = String::from_utf8_lossy(&bytes);
-                        for line in text.lines() {
-                            if !line.starts_with("data: ") {
+                        for line in drain_sse_lines(&mut line_buf, &bytes) {
+                            let Some(data) = line.strip_prefix("data:") else {
                                 continue;
-                            }
-                            let data = &line[6..];
+                            };
+                            let data = data.trim_start();
                             let Ok(event) = serde_json::from_str::<Value>(data) else {
                                 continue;
                             };
@@ -479,6 +585,20 @@ impl LlmProvider for AnthropicProvider {
                             let event_type =
                                 event.get("type").and_then(|v| v.as_str()).unwrap_or("");
                             match event_type {
+                                "error" => {
+                                    let msg = event
+                                        .get("error")
+                                        .and_then(|e| e.get("message"))
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("unknown error");
+                                    let _ = tx
+                                        .send(Err(TalosError::InternalError(format!(
+                                            "Anthropic stream error: {}",
+                                            msg
+                                        ))))
+                                        .await;
+                                    return;
+                                }
                                 "content_block_delta" => {
                                     if let Some(delta) = event
                                         .get("delta")
@@ -493,16 +613,24 @@ impl LlmProvider for AnthropicProvider {
                                             .await;
                                     }
                                 }
-                                "message_stop" => {
-                                    let finish_reason = event
-                                        .get("stop_reason")
+                                "message_delta" => {
+                                    if let Some(reason) = event
+                                        .get("delta")
+                                        .and_then(|d| d.get("stop_reason"))
                                         .and_then(|v| v.as_str())
-                                        .unwrap_or("stop")
-                                        .to_string();
+                                    {
+                                        stop_reason = Some(reason.to_string());
+                                    }
+                                }
+                                "message_stop" => {
                                     let _ = tx
                                         .send(Ok(ChatChunk {
                                             delta: String::new(),
-                                            finish_reason: Some(finish_reason),
+                                            finish_reason: Some(
+                                                stop_reason
+                                                    .take()
+                                                    .unwrap_or_else(|| "stop".to_string()),
+                                            ),
                                         }))
                                         .await;
                                     return;
@@ -542,16 +670,18 @@ impl LlmProvider for AnthropicProvider {
 
             let mut stream = response.bytes_stream();
             let mut tool_acc: HashMap<usize, ToolAcc> = HashMap::new();
+            let mut stop_reason: Option<String> = None;
+            let mut output_tokens: Option<u32> = None;
+            let mut line_buf = String::new();
 
             while let Some(chunk_result) = stream.next().await {
                 match chunk_result {
                     Ok(bytes) => {
-                        let text = String::from_utf8_lossy(&bytes);
-                        for line in text.lines() {
-                            if !line.starts_with("data: ") {
+                        for line in drain_sse_lines(&mut line_buf, &bytes) {
+                            let Some(data) = line.strip_prefix("data:") else {
                                 continue;
-                            }
-                            let data = &line[6..];
+                            };
+                            let data = data.trim_start();
                             let Ok(event) = serde_json::from_str::<Value>(data) else {
                                 continue;
                             };
@@ -559,6 +689,20 @@ impl LlmProvider for AnthropicProvider {
                             let event_type =
                                 event.get("type").and_then(|v| v.as_str()).unwrap_or("");
                             match event_type {
+                                "error" => {
+                                    let msg = event
+                                        .get("error")
+                                        .and_then(|e| e.get("message"))
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("unknown error");
+                                    let _ = tx
+                                        .send(Err(TalosError::InternalError(format!(
+                                            "Anthropic stream error: {}",
+                                            msg
+                                        ))))
+                                        .await;
+                                    return;
+                                }
                                 "content_block_start" => {
                                     let index =
                                         event.get("index").and_then(|v| v.as_u64()).unwrap_or(0)
@@ -597,62 +741,83 @@ impl LlmProvider for AnthropicProvider {
                                     let index =
                                         event.get("index").and_then(|v| v.as_u64()).unwrap_or(0)
                                             as usize;
+                                    let delta = event.get("delta");
 
-                                    if let Some(reasoning_delta) = event
-                                        .get("delta")
-                                        .and_then(|d| d.get("thinking"))
+                                    let delta_type = delta
+                                        .and_then(|d| d.get("type"))
                                         .and_then(|v| v.as_str())
-                                        .or_else(|| {
-                                            event
-                                                .get("delta")
-                                                .and_then(|d| d.get("reasoning"))
+                                        .unwrap_or("");
+
+                                    match delta_type {
+                                        "thinking_delta" => {
+                                            if let Some(thinking) = delta
+                                                .and_then(|d| d.get("thinking"))
                                                 .and_then(|v| v.as_str())
-                                        })
-                                    {
-                                        if tx
-                                            .send(Ok(ToolStreamEvent::ReasoningDelta {
-                                                delta: reasoning_delta.to_string(),
-                                            }))
-                                            .await
-                                            .is_err()
-                                        {
-                                            return;
+                                            {
+                                                debug!("stream_with_tools: thinking_delta len={}", thinking.len());
+                                                if tx
+                                                    .send(Ok(ToolStreamEvent::ReasoningDelta {
+                                                        delta: thinking.to_string(),
+                                                    }))
+                                                    .await
+                                                    .is_err()
+                                                {
+                                                    return;
+                                                }
+                                            }
                                         }
-                                    }
-
-                                    if let Some(text_delta) = event
-                                        .get("delta")
-                                        .and_then(|d| d.get("text"))
-                                        .and_then(|v| v.as_str())
-                                    {
-                                        if tx
-                                            .send(Ok(ToolStreamEvent::TextDelta {
-                                                delta: text_delta.to_string(),
-                                            }))
-                                            .await
-                                            .is_err()
-                                        {
-                                            return;
+                                        "signature_delta" => {
+                                            if let Some(sig) = delta
+                                                .and_then(|d| d.get("signature"))
+                                                .and_then(|v| v.as_str())
+                                            {
+                                                if tx
+                                                    .send(Ok(ToolStreamEvent::ReasoningSignature {
+                                                        signature: sig.to_string(),
+                                                    }))
+                                                    .await
+                                                    .is_err()
+                                                {
+                                                    return;
+                                                }
+                                            }
                                         }
-                                    }
-
-                                    if let Some(partial_json) = event
-                                        .get("delta")
-                                        .and_then(|d| d.get("partial_json"))
-                                        .and_then(|v| v.as_str())
-                                    {
-                                        let entry = tool_acc.entry(index).or_default();
-                                        entry.arguments.push_str(partial_json);
-                                        if tx
-                                            .send(Ok(ToolStreamEvent::ToolCallDelta {
-                                                index,
-                                                arguments_delta: partial_json.to_string(),
-                                            }))
-                                            .await
-                                            .is_err()
-                                        {
-                                            return;
+                                        "text_delta" => {
+                                            if let Some(text) = delta
+                                                .and_then(|d| d.get("text"))
+                                                .and_then(|v| v.as_str())
+                                            {
+                                                if tx
+                                                    .send(Ok(ToolStreamEvent::TextDelta {
+                                                        delta: text.to_string(),
+                                                    }))
+                                                    .await
+                                                    .is_err()
+                                                {
+                                                    return;
+                                                }
+                                            }
                                         }
+                                        "input_json_delta" => {
+                                            if let Some(partial_json) = delta
+                                                .and_then(|d| d.get("partial_json"))
+                                                .and_then(|v| v.as_str())
+                                            {
+                                                let entry = tool_acc.entry(index).or_default();
+                                                entry.arguments.push_str(partial_json);
+                                                if tx
+                                                    .send(Ok(ToolStreamEvent::ToolCallDelta {
+                                                        index,
+                                                        arguments_delta: partial_json.to_string(),
+                                                    }))
+                                                    .await
+                                                    .is_err()
+                                                {
+                                                    return;
+                                                }
+                                            }
+                                        }
+                                        _ => {}
                                     }
                                 }
                                 "content_block_stop" => {
@@ -677,16 +842,36 @@ impl LlmProvider for AnthropicProvider {
                                         }
                                     }
                                 }
-                                "message_stop" => {
-                                    let finish_reason = event
-                                        .get("stop_reason")
+                                "message_delta" => {
+                                    if let Some(reason) = event
+                                        .get("delta")
+                                        .and_then(|d| d.get("stop_reason"))
                                         .and_then(|v| v.as_str())
-                                        .map(|v| v.to_string())
-                                        .or_else(|| Some("stop".to_string()));
+                                    {
+                                        stop_reason = Some(reason.to_string());
+                                    }
+                                    if let Some(tokens) = event
+                                        .get("usage")
+                                        .and_then(|u| u.get("output_tokens"))
+                                        .and_then(|v| v.as_u64())
+                                    {
+                                        output_tokens = Some(tokens as u32);
+                                    }
+                                }
+                                "message_stop" => {
+                                    let usage = output_tokens.map(|out| Usage {
+                                        prompt_tokens: 0,
+                                        completion_tokens: out,
+                                        total_tokens: out,
+                                        cache_creation_input_tokens: None,
+                                        cache_read_input_tokens: None,
+                                    });
                                     let _ = tx
                                         .send(Ok(ToolStreamEvent::Done {
-                                            finish_reason,
-                                            usage: None,
+                                            finish_reason: stop_reason
+                                                .take()
+                                                .or_else(|| Some("stop".to_string())),
+                                            usage,
                                         }))
                                         .await;
                                     return;
@@ -710,6 +895,19 @@ impl LlmProvider for AnthropicProvider {
 
         Ok(ToolStream::new(rx))
     }
+}
+
+/// Accumulates raw SSE bytes into `buf` and returns all complete lines,
+/// retaining any trailing incomplete fragment in `buf` for the next call.
+fn drain_sse_lines(buf: &mut String, bytes: &[u8]) -> Vec<String> {
+    buf.push_str(&String::from_utf8_lossy(bytes));
+    let mut lines = Vec::new();
+    while let Some(pos) = buf.find('\n') {
+        let line = buf[..pos].trim_end_matches('\r').to_string();
+        buf.drain(..=pos);
+        lines.push(line);
+    }
+    lines
 }
 
 #[cfg(test)]
@@ -789,7 +987,36 @@ mod tests {
 
         assert!(headers.contains_key("x-api-key"));
         assert!(headers.contains_key("anthropic-version"));
+        assert!(headers.contains_key("accept"));
         assert!(headers.contains_key("content-type"));
+    }
+
+    #[test]
+    fn test_build_headers_for_aliyun_coding_plan() {
+        let config = AnthropicConfig::new("test-api-key")
+            .with_base_url("https://coding.dashscope.aliyuncs.com/apps/anthropic/v1");
+        let provider = AnthropicProvider::new(config);
+        let headers = provider.build_headers();
+
+        assert!(!headers.contains_key("x-api-key"));
+        assert_eq!(
+            headers.get("accept").and_then(|v| v.to_str().ok()),
+            Some("*/*")
+        );
+        assert!(headers.contains_key("authorization"));
+        assert!(headers.contains_key("anthropic-beta"));
+        assert_eq!(
+            headers.get("x-app").and_then(|v| v.to_str().ok()),
+            Some("cli")
+        );
+        assert_eq!(
+            headers.get("user-agent").and_then(|v| v.to_str().ok()),
+            Some("claude-cli/0.1.0 (external, cli)")
+        );
+        assert_eq!(
+            headers.get("anthropic-beta").and_then(|v| v.to_str().ok()),
+            Some("claude-code-20250219")
+        );
     }
 
     #[test]

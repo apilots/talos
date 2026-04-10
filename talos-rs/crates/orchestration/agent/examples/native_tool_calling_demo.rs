@@ -36,6 +36,7 @@ impl LlmProvider for NativeToolMockProvider {
         if has_tool_result {
             return Ok(ChatResponse {
                 content: "I used the tool result and produced the final answer.".to_string(),
+                reasoning: Vec::new(),
                 model: "mock-model".to_string(),
                 usage: Usage::default(),
                 finish_reason: Some("stop".to_string()),
@@ -45,6 +46,7 @@ impl LlmProvider for NativeToolMockProvider {
 
         Ok(ChatResponse {
             content: "Let me call web_search first.".to_string(),
+            reasoning: Vec::new(),
             model: "mock-model".to_string(),
             usage: Usage::default(),
             finish_reason: Some("tool_calls".to_string()),

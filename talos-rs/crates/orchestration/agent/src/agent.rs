@@ -40,6 +40,7 @@ use talos_types::talos::{
     StopReason as TalosStopReason, TalosContentItem, TalosInputItem, TalosOutputItem,
     TalosReasoning, TalosThinkingSource, TalosThinkingStage, TalosUsage,
 };
+use talos_types::{ModelInfo, TalosSession};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum KernelExecutionMode {
@@ -69,6 +70,43 @@ pub struct AgentImpl {
 }
 
 impl AgentImpl {
+    fn resolve_selected_model_info(&self, session: &TalosSession) -> ModelInfo {
+        let selected_model = if session.config.llm.model.trim().is_empty() {
+            self.model.clone()
+        } else {
+            session.config.llm.model.clone()
+        };
+        let provider_name = session.config.llm.provider.clone();
+
+        if let Some(provider_config) = session.config.current_provider_config() {
+            if let Some(model) = provider_config.models.iter().find(|m| m.id == selected_model) {
+                return ModelInfo {
+                    id: model.id.clone(),
+                    name: model.display_name().to_string(),
+                    provider: provider_name,
+                    context_window: model.context_window,
+                    max_tokens: model.max_tokens,
+                    reasoning: model.reasoning,
+                    input: model.input.clone(),
+                    cost: model.cost.clone(),
+                    compat: model.compat.clone(),
+                };
+            }
+        }
+
+        ModelInfo {
+            id: selected_model.clone(),
+            name: selected_model,
+            provider: provider_name,
+            context_window: 0,
+            max_tokens: 0,
+            reasoning: false,
+            input: Vec::new(),
+            cost: Default::default(),
+            compat: Default::default(),
+        }
+    }
+
     async fn validate_dynamic_tool_submission(
         &self,
         session_id: &str,
@@ -787,11 +825,7 @@ impl AgentOrchestrator for AgentImpl {
         let input = Self::extract_text_input(&agent_request.input);
         let invocation_id = format!("inv-{}", Utc::now().timestamp_millis());
         let session_id = agent_request.session.context.session_id.clone();
-        let model = if agent_request.session.config.llm.model.is_empty() {
-            self.model.clone()
-        } else {
-            agent_request.session.config.llm.model.clone()
-        };
+        let selected_model_info = self.resolve_selected_model_info(&agent_request.session);
         let phase = agent_request.phase.clone();
         let planning_instruction = agent_request.planning_instruction.clone();
         let transfer_to = agent_request.transfer_to.clone();
@@ -816,7 +850,7 @@ impl AgentOrchestrator for AgentImpl {
                                 .clone()
                                 .unwrap_or_default(),
                             input,
-                            model,
+                            selected_model_info,
                             phase,
                             planning_instruction,
                             transfer_to,
@@ -891,6 +925,7 @@ impl AgentOrchestrator for AgentImpl {
             } else {
                 agent_request.session.config.llm.model.clone()
             };
+            let selected_model_info = this.resolve_selected_model_info(&agent_request.session);
             let phase = agent_request.phase.clone();
             let planning_instruction = agent_request.planning_instruction.clone();
             let transfer_to = agent_request.transfer_to.clone();
@@ -921,7 +956,7 @@ impl AgentOrchestrator for AgentImpl {
                     .clone()
                     .unwrap_or_default(),
                 input,
-                model: model.clone(),
+                selected_model_info,
                 phase,
                 planning_instruction,
                 transfer_to,
@@ -1254,11 +1289,13 @@ mod tests {
     use talos_agent_kernel::{KernelBuilder, RunRequest, RunResponse, Runner};
     use talos_config::AgentKernelConfig;
     use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Role, Usage};
-    use talos_memory::{Memory, RecordHeader, TalosMessage, TalosMessageRole, TalosTurn};
+    use talos_memory::{Memory, TalosTurn};
     use talos_tools::{ReadFileTool, ToolRegistry, WebSearchTool};
     use talos_tools_policy::ToolPolicy;
-    use talos_types::talos::{StopReason as TalosStopReason, TalosProvider, TalosSourceType};
-    use talos_types::{SessionContext, SessionState, TalosSession};
+    use talos_types::talos::{
+        StopReason as TalosStopReason, TalosOutputItem, TalosProvider, TalosSourceType, TalosUsage,
+    };
+use talos_types::{SessionContext, SessionState};
     use tempfile::TempDir;
     use tokio;
     use tokio::sync::Notify;
@@ -1476,31 +1513,16 @@ mod tests {
             session_id: session_id.to_string(),
             seq: 1,
             timestamp,
-            messages: vec![
-                TalosMessage {
-                    header: RecordHeader {
-                        id: "msg-user".to_string(),
-                        session_id: session_id.to_string(),
-                        turn_id: Some("turn-1".to_string()),
-                        timestamp,
-                    },
-                    role: TalosMessageRole::User,
+            items: vec![
+                TalosOutputItem::UserInput {
                     text: "Remember that I prefer tea over coffee.".to_string(),
                 },
-                TalosMessage {
-                    header: RecordHeader {
-                        id: "msg-assistant".to_string(),
-                        session_id: session_id.to_string(),
-                        turn_id: Some("turn-1".to_string()),
-                        timestamp,
-                    },
-                    role: TalosMessageRole::Assistant,
+                TalosOutputItem::OutputText {
                     text: "Noted. You prefer tea over coffee.".to_string(),
                 },
             ],
-            reasoning: Vec::new(),
-            tool_calls: Vec::new(),
-            tool_results: Vec::new(),
+            usage: TalosUsage::default(),
+            stop_reason: TalosStopReason::EndTurn,
         };
 
         agent
@@ -1742,6 +1764,7 @@ mod tests {
             };
             Ok(ChatResponse {
                 content,
+                reasoning: Vec::new(),
                 model: "mock-model".to_string(),
                 usage: Usage { ..Usage::default() },
                 finish_reason: None,

@@ -1233,7 +1233,17 @@ mod tests {
             agent_id: "a1".to_string(),
             workspace_id: "w1".to_string(),
             input: "hello".to_string(),
-            model: "m1".to_string(),
+            selected_model_info: talos_types::ModelInfo {
+                id: "m1".to_string(),
+                name: "m1".to_string(),
+                provider: "p1".to_string(),
+                context_window: 0,
+                max_tokens: 0,
+                reasoning: false,
+                input: Vec::new(),
+                cost: Default::default(),
+                compat: Default::default(),
+            },
             phase: TurnPhase::Execution,
             planning_instruction: None,
             transfer_to: None,
@@ -1293,7 +1303,17 @@ mod tests {
         let mut ctx = mock_ctx();
         let mut request = LlmRequestEnvelope {
             branch: ExecutionBranch::ModelThinking,
-            native_thinking_support: talos_llm_provider::NativeThinkingSupport::Supported,
+            selected_model_info: Some(talos_types::ModelInfo {
+                id: "m1".to_string(),
+                name: "m1".to_string(),
+                provider: "p1".to_string(),
+                context_window: 0,
+                max_tokens: 0,
+                reasoning: true,
+                input: Vec::new(),
+                cost: Default::default(),
+                compat: Default::default(),
+            }),
             ..LlmRequestEnvelope::default()
         };
 

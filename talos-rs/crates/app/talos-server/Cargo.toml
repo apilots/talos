@@ -1,0 +1,26 @@
+[package]
+name = "talos-server"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }
+talos-agent = { path = "../../orchestration/agent" }
+talos-channel = { workspace = true }
+talos-config = { workspace = true }
+talos-coordinator = { path = "../../orchestration/coordinator" }
+talos-error = { workspace = true }
+talos-gateway = { workspace = true }
+talos-gateway-http = { path = "../../gateway/http" }
+talos-llm-anthropic = { workspace = true }
+talos-llm-bailian = { workspace = true }
+talos-llm-openai = { workspace = true }
+talos-llm-provider = { workspace = true }
+talos-logging = { workspace = true }
+talos-router = { path = "../../orchestration/router" }
+talos-session-store = { path = "../../orchestration/session-store" }
+talos-storage = { workspace = true }
+talos-tools = { workspace = true }
+talos-types = { workspace = true }
+

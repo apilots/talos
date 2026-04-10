@@ -20,7 +20,7 @@ use talos_llm_provider::{
 use talos_memory::{
     strip_json_fences, Memory, MemoryGetResult, MemorySearchResponse, MemoryStore, RecordHeader,
     RetrievedMemoryItem, SessionMemorySummary, SessionPromptContextConfig, SummaryRecord,
-    TalosMessage, TalosMessageRole, TalosTurn, ToolCallRecord, ToolResultRecord,
+    TalosMessageRole, TalosTurn, ToolCallRecord,
 };
 use talos_prompt::{
     render_prompt_assembly, PromptBudget, PromptBuildConfig, PromptBuilder, PromptDiagnostics,
@@ -29,7 +29,9 @@ use talos_prompt::{
 use talos_tools::{
     ToolDefinitionProvider, ToolDispatchOutcome, ToolExecutorPort, ToolOutputPayload, ToolPending,
 };
-use talos_types::talos::{TalosContentItem, TalosOutputItem, TalosUsage};
+use talos_types::talos::{
+    StopReason as TalosApiStopReason, TalosContentItem, TalosOutputItem, TalosUsage,
+};
 use tokio::sync::mpsc;
 use tracing::warn;
 use uuid::Uuid;
@@ -80,6 +82,16 @@ fn render_session_summary_content(summary: &SessionMemorySummary) -> String {
     let body = render_summary_body(summary);
     out.push_str(body.trim());
     out.trim().to_string()
+}
+
+fn to_api_stop_reason(reason: StopReason) -> TalosApiStopReason {
+    match reason {
+        StopReason::EndTurn => TalosApiStopReason::EndTurn,
+        StopReason::ToolRoundLimit => TalosApiStopReason::ToolRoundLimit,
+        StopReason::TransferUnresolved => TalosApiStopReason::TransferUnresolved,
+        StopReason::BeforeModelCallbackStopped => TalosApiStopReason::BeforeModelCallbackStopped,
+        StopReason::AfterModelCallbackStopped => TalosApiStopReason::AfterModelCallbackStopped,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -449,6 +461,7 @@ struct StreamRound {
     usage: TalosUsage,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ToolResultLog {
     call_id: String,
@@ -578,6 +591,7 @@ mod tests {
         async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
             Ok(ChatResponse {
                 content: "ok".to_string(),
+                reasoning: Vec::new(),
                 model: "noop".to_string(),
                 usage: Usage {
                     prompt_tokens: 1,
@@ -616,6 +630,7 @@ mod tests {
             match round {
                 0 => Ok(ChatResponse {
                     content: "Open a shell session first.".to_string(),
+                    reasoning: Vec::new(),
                     model: request.model,
                     usage: Usage::default(),
                     finish_reason: Some("tool_calls".to_string()),
@@ -652,6 +667,7 @@ mod tests {
                     assert!(payload.get("output").and_then(Value::as_str).is_some());
                     Ok(ChatResponse {
                         content: "Write stdin to finish.".to_string(),
+                        reasoning: Vec::new(),
                         model: request.model,
                         usage: Usage::default(),
                         finish_reason: Some("tool_calls".to_string()),
@@ -684,6 +700,7 @@ mod tests {
                         .to_string();
                     Ok(ChatResponse {
                         content: format!("Final answer after stdin write: {}", output.trim()),
+                        reasoning: Vec::new(),
                         model: request.model,
                         usage: Usage::default(),
                         finish_reason: Some("stop".to_string()),
@@ -718,6 +735,7 @@ mod tests {
             match round {
                 0 => Ok(ChatResponse {
                     content: "Request escalated shell access.".to_string(),
+                    reasoning: Vec::new(),
                     model: request.model,
                     usage: Usage::default(),
                     finish_reason: Some("tool_calls".to_string()),
@@ -804,6 +822,7 @@ mod tests {
         async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
             Ok(ChatResponse {
                 content: self.response.clone(),
+                reasoning: Vec::new(),
                 model: "summary-model".to_string(),
                 usage: Usage::default(),
                 finish_reason: Some("stop".to_string()),
@@ -830,7 +849,17 @@ mod tests {
             agent_id: "a1".to_string(),
             workspace_id: "w1".to_string(),
             input: "hello".to_string(),
-            model: "m1".to_string(),
+            selected_model_info: talos_types::ModelInfo {
+                id: "m1".to_string(),
+                name: "m1".to_string(),
+                provider: "p1".to_string(),
+                context_window: 0,
+                max_tokens: 0,
+                reasoning: false,
+                input: Vec::new(),
+                cost: Default::default(),
+                compat: Default::default(),
+            },
             phase: TurnPhase::Execution,
             planning_instruction: None,
             transfer_to: None,
@@ -861,19 +890,11 @@ mod tests {
                     .await
                     .expect("seq should load"),
                 timestamp,
-                messages: vec![TalosMessage {
-                    header: RecordHeader {
-                        id: "turn-1:u".to_string(),
-                        session_id: "s1".to_string(),
-                        turn_id: Some("turn-1".to_string()),
-                        timestamp,
-                    },
-                    role: TalosMessageRole::User,
+                items: vec![TalosOutputItem::UserInput {
                     text: "history that should be dropped".to_string(),
                 }],
-                reasoning: Vec::new(),
-                tool_calls: Vec::new(),
-                tool_results: Vec::new(),
+                usage: TalosUsage::default(),
+                stop_reason: TalosApiStopReason::EndTurn,
             })
             .await
             .expect("append should succeed");
@@ -1159,11 +1180,11 @@ mod tests {
             "threshold zero should skip workspace writes"
         );
         assert!(
-            !workspace_dir
-                .join("sessions")
-                .join("s1")
-                .join("summary.md")
-                .exists(),
+            memory_store
+                .load_summaries("s1", 1)
+                .await
+                .expect("summary load should succeed")
+                .is_empty(),
             "threshold zero should skip session summary writes"
         );
     }
@@ -1183,19 +1204,11 @@ mod tests {
                     .await
                     .expect("seq should load"),
                 timestamp,
-                messages: vec![TalosMessage {
-                    header: RecordHeader {
-                        id: "turn-blank:u".to_string(),
-                        session_id: "s1".to_string(),
-                        turn_id: Some("turn-blank".to_string()),
-                        timestamp,
-                    },
-                    role: TalosMessageRole::User,
+                items: vec![TalosOutputItem::UserInput {
                     text: "   ".to_string(),
                 }],
-                reasoning: Vec::new(),
-                tool_calls: Vec::new(),
-                tool_results: Vec::new(),
+                usage: TalosUsage::default(),
+                stop_reason: TalosApiStopReason::EndTurn,
             })
             .await
             .expect("append should succeed");
@@ -1223,11 +1236,11 @@ mod tests {
             "blank transcript should not persist workspace writes"
         );
         assert!(
-            !workspace_dir
-                .join("sessions")
-                .join("s1")
-                .join("summary.md")
-                .exists(),
+            memory_store
+                .load_summaries("s1", 1)
+                .await
+                .expect("summary load should succeed")
+                .is_empty(),
             "blank transcript should not persist session summary"
         );
     }
@@ -1327,6 +1340,9 @@ async fn stream_round(
                 )
                 .await;
             }
+            ToolStreamEvent::ReasoningSignature { .. } => {
+                // thinking block integrity signature — no action needed at kernel level
+            }
             ToolStreamEvent::ReasoningDelta { delta } => {
                 reasoning.push_str(&delta);
                 emit_stream_event(
@@ -1422,7 +1438,7 @@ async fn chat_round(
     let tool_calls = response.get_tool_calls().to_vec();
     Ok(StreamRound {
         content: response.content,
-        reasoning: String::new(),
+        reasoning: response.reasoning.join(""),
         tool_calls,
         finish_reason: response.finish_reason,
         saw_output_delta: false,
@@ -1901,7 +1917,7 @@ pub async fn prepare_general_turn(
     let session_id = ctx.session_id.clone();
     let invocation_id = ctx.invocation_id.clone();
     let agent_id = ctx.agent_id.clone();
-    let selected_model = ctx.model.clone();
+    let selected_model = ctx.selected_model_id().to_string();
     let stream_tx = ctx.stream_tx.clone();
 
     let phase = match ctx.phase {
@@ -2070,53 +2086,19 @@ pub async fn persist_general_turn_artifacts(
     };
     let turn_id = Uuid::new_v4().to_string();
     let now = Utc::now();
+    let mut items = Vec::with_capacity(executed.output_items.len().saturating_add(1));
+    items.push(TalosOutputItem::UserInput {
+        text: input.to_string(),
+    });
+    items.extend(executed.output_items.clone());
     let talos_turn = TalosTurn {
         turn_id: turn_id.clone(),
         session_id: prepared.session_id.to_string(),
         seq,
         timestamp: now,
-        messages: vec![
-            TalosMessage {
-                header: RecordHeader {
-                    id: format!("{}:u", turn_id),
-                    session_id: prepared.session_id.to_string(),
-                    turn_id: Some(turn_id.clone()),
-                    timestamp: now,
-                },
-                role: TalosMessageRole::User,
-                text: input.to_string(),
-            },
-            TalosMessage {
-                header: RecordHeader {
-                    id: format!("{}:a", turn_id),
-                    session_id: prepared.session_id.to_string(),
-                    turn_id: Some(turn_id.clone()),
-                    timestamp: now,
-                },
-                role: TalosMessageRole::Assistant,
-                text: executed.output_text.clone(),
-            },
-        ],
-        reasoning: executed.reasoning_log.clone(),
-        tool_calls: executed.tool_call_log.clone(),
-        tool_results: executed
-            .tool_result_log
-            .iter()
-            .map(|item| ToolResultRecord {
-                header: RecordHeader {
-                    id: format!("{}:tool:{}", turn_id, item.call_id),
-                    session_id: prepared.session_id.to_string(),
-                    turn_id: Some(turn_id.clone()),
-                    timestamp: now,
-                },
-                call_id: item.call_id.clone(),
-                tool: item.tool.clone(),
-                payload: item.payload.clone(),
-                is_error: item.is_error,
-                truncated: item.truncated,
-                size_bytes: item.size_bytes,
-            })
-            .collect(),
+        items,
+        usage: executed.usage.clone(),
+        stop_reason: to_api_stop_reason(executed.stop_reason),
     };
     if let Err(err) = memory_store.append_turn(&talos_turn).await {
         warn!(

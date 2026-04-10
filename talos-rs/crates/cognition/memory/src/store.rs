@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use talos_config::{AgentKernelConfig, TalosTimezone};
 use talos_llm_provider::{ChatMessage, LlmProvider};
+use talos_types::talos::{StopReason, TalosOutputItem, TalosUsage};
 
 use crate::path_policy;
 
@@ -62,13 +63,11 @@ pub struct TalosTurn {
     pub seq: u64,
     pub timestamp: DateTime<Utc>,
     #[serde(default)]
-    pub messages: Vec<TalosMessage>,
+    pub items: Vec<TalosOutputItem>,
     #[serde(default)]
-    pub reasoning: Vec<String>,
+    pub usage: TalosUsage,
     #[serde(default)]
-    pub tool_calls: Vec<ToolCallRecord>,
-    #[serde(default)]
-    pub tool_results: Vec<ToolResultRecord>,
+    pub stop_reason: StopReason,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -435,7 +434,10 @@ impl MemoryStore {
         Self::new(Self::default_workspace_dir())
     }
 
-    pub async fn load_session_turns(&self, session_id: &str) -> talos_error::TalosResult<Vec<TalosTurn>> {
+    pub async fn load_session_turns(
+        &self,
+        session_id: &str,
+    ) -> talos_error::TalosResult<Vec<TalosTurn>> {
         crate::session_store::load_turns(self, session_id).await
     }
 
@@ -455,20 +457,12 @@ impl MemoryStore {
         path_policy::resolve_workspace_dir(path)
     }
 
-    pub(crate) fn session_dir(&self, session_id: &str) -> PathBuf {
-        path_policy::session_dir(self, session_id)
-    }
-
     pub(crate) fn workspace_memory_dir(&self) -> PathBuf {
         path_policy::workspace_memory_dir(self)
     }
 
     pub(crate) fn workspace_memory_file_for(&self, timestamp: DateTime<Utc>) -> PathBuf {
         path_policy::workspace_memory_file_for(self, timestamp)
-    }
-
-    pub(crate) fn summary_file(&self, session_id: &str) -> PathBuf {
-        self.session_dir(session_id).join("summary.md")
     }
 
     pub fn llm_provider(&self) -> Option<Arc<dyn LlmProvider>> {
@@ -486,9 +480,13 @@ mod tests {
     use crate::Memory;
 
     use super::{
-        MemorySearchQuery, MemoryStore, RecordHeader, SessionPromptContextConfig, SummaryRecord,
-        TalosMessage, TalosMessageRole, TalosTurn, WorkspaceMemoryRecord,
+        MemorySearchQuery, MemoryStore, RecordHeader, SessionPromptContextConfig,
+        SessionTranscriptActions, SessionTranscriptAuthor, SessionTranscriptBranch,
+        SessionTranscriptEventKind, SessionTranscriptHeader, SessionTranscriptPayload,
+        SessionTranscriptRecord, SummaryRecord, TalosTurn, WorkspaceMemoryRecord,
     };
+    use crate::TalosMessageRole;
+    use talos_types::talos::{StopReason, TalosContentItem, TalosOutputItem, TalosUsage};
 
     fn new_temp_store() -> (TempDir, MemoryStore) {
         let temp_dir = tempfile::tempdir().expect("temp dir should be created");
@@ -511,31 +509,16 @@ mod tests {
             session_id: session_id.to_string(),
             seq: seq1,
             timestamp: Utc::now(),
-            messages: vec![
-                TalosMessage {
-                    header: RecordHeader {
-                        id: "t1:u".to_string(),
-                        session_id: session_id.to_string(),
-                        turn_id: Some("t1".to_string()),
-                        timestamp: Utc::now(),
-                    },
-                    role: TalosMessageRole::User,
+            items: vec![
+                TalosOutputItem::UserInput {
                     text: "hello".to_string(),
                 },
-                TalosMessage {
-                    header: RecordHeader {
-                        id: "t1:a".to_string(),
-                        session_id: session_id.to_string(),
-                        turn_id: Some("t1".to_string()),
-                        timestamp: Utc::now(),
-                    },
-                    role: TalosMessageRole::Assistant,
+                TalosOutputItem::OutputText {
                     text: "world".to_string(),
                 },
             ],
-            reasoning: Vec::new(),
-            tool_calls: Vec::new(),
-            tool_results: Vec::new(),
+            usage: TalosUsage::default(),
+            stop_reason: StopReason::EndTurn,
         };
 
         store
@@ -562,6 +545,87 @@ mod tests {
             .await
             .expect("context should build");
         assert_eq!(context.recent_messages.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_turn_schema_items_roundtrip() {
+        let (_guard, store) = new_temp_store();
+        let session_id = "roundtrip-items";
+        let turn = TalosTurn {
+            turn_id: "turn-items-1".to_string(),
+            session_id: session_id.to_string(),
+            seq: store
+                .next_turn_seq(session_id)
+                .await
+                .expect("seq should load"),
+            timestamp: Utc::now(),
+            items: vec![
+                TalosOutputItem::UserInput {
+                    text: "user".to_string(),
+                },
+                TalosOutputItem::Reasoning {
+                    text: "think".to_string(),
+                },
+                TalosOutputItem::ToolCall {
+                    call_id: "call-1".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: serde_json::json!({"path":"/tmp/a.txt"}),
+                },
+                TalosOutputItem::ToolResult {
+                    call_id: "call-1".to_string(),
+                    tool_name: "read_file".to_string(),
+                    content: vec![TalosContentItem::Text {
+                        text: "contents".to_string(),
+                    }],
+                    is_error: false,
+                },
+                TalosOutputItem::OutputText {
+                    text: "first answer".to_string(),
+                },
+                TalosOutputItem::OutputText {
+                    text: "second answer".to_string(),
+                },
+            ],
+            usage: TalosUsage::default(),
+            stop_reason: StopReason::EndTurn,
+        };
+
+        store
+            .append_turn(&turn)
+            .await
+            .expect("append turn should succeed");
+
+        let turns = store
+            .load_session_turns(session_id)
+            .await
+            .expect("turns should load");
+
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].items.len(), 6);
+        assert!(matches!(
+            turns[0].items.first(),
+            Some(TalosOutputItem::UserInput { text }) if text == "user"
+        ));
+        assert!(matches!(
+            turns[0].items.get(1),
+            Some(TalosOutputItem::Reasoning { text }) if text == "think"
+        ));
+        assert!(matches!(
+            turns[0].items.get(2),
+            Some(TalosOutputItem::ToolCall { name, .. }) if name == "read_file"
+        ));
+        assert!(matches!(
+            turns[0].items.get(3),
+            Some(TalosOutputItem::ToolResult { tool_name, .. }) if tool_name == "read_file"
+        ));
+        assert!(matches!(
+            turns[0].items.get(4),
+            Some(TalosOutputItem::OutputText { text }) if text == "first answer"
+        ));
+        assert!(matches!(
+            turns[0].items.get(5),
+            Some(TalosOutputItem::OutputText { text }) if text == "second answer"
+        ));
     }
 
     #[tokio::test]
@@ -593,6 +657,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_transcript_records_roundtrip_from_jsonl_artifacts() {
+        let (_guard, store) = new_temp_store();
+        let timestamp = Utc::now();
+        let record = SessionTranscriptRecord {
+            header: SessionTranscriptHeader {
+                id: "transcript-1".to_string(),
+                session_id: "s1".to_string(),
+                invocation_id: "inv-1".to_string(),
+                branch: SessionTranscriptBranch::ModelThinking,
+                timestamp,
+            },
+            author: SessionTranscriptAuthor::Agent,
+            kind: SessionTranscriptEventKind::AgentMessage,
+            payload: SessionTranscriptPayload::StateOnly,
+            actions: SessionTranscriptActions::default(),
+            partial: false,
+        };
+
+        store
+            .append_transcript_record(&record)
+            .await
+            .expect("append transcript should succeed");
+
+        let loaded = store
+            .load_transcript_records("s1", Some("inv-1"), SessionTranscriptBranch::ModelThinking)
+            .await
+            .expect("load transcript should succeed");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].header.id, "transcript-1");
+
+        let session_files = std::fs::read_dir(_guard.path().join("sessions").join("s1"))
+            .expect("session dir should exist")
+            .map(|entry| entry.expect("dir entry should load").path())
+            .collect::<Vec<_>>();
+        assert_eq!(session_files.len(), 1);
+        assert_eq!(
+            session_files[0].extension().and_then(|ext| ext.to_str()),
+            Some("jsonl")
+        );
+    }
+
+    #[tokio::test]
     async fn test_build_prompt_context_includes_summary() {
         let (_guard, store) = new_temp_store();
         let session_id = "s1";
@@ -607,19 +713,11 @@ mod tests {
                     .await
                     .expect("seq should load"),
                 timestamp,
-                messages: vec![TalosMessage {
-                    header: RecordHeader {
-                        id: "turn-1:u".to_string(),
-                        session_id: session_id.to_string(),
-                        turn_id: Some("turn-1".to_string()),
-                        timestamp,
-                    },
-                    role: TalosMessageRole::User,
+                items: vec![TalosOutputItem::UserInput {
                     text: "remember this".to_string(),
                 }],
-                reasoning: Vec::new(),
-                tool_calls: Vec::new(),
-                tool_results: Vec::new(),
+                usage: TalosUsage::default(),
+                stop_reason: StopReason::EndTurn,
             })
             .await
             .expect("append turn should succeed");
@@ -659,6 +757,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_prompt_context_still_builds_after_schema_change() {
+        let (_guard, store) = new_temp_store();
+        let session_id = "prompt-context-items";
+        let timestamp = Utc::now();
+
+        store
+            .append_turn(&TalosTurn {
+                turn_id: "turn-items-context".to_string(),
+                session_id: session_id.to_string(),
+                seq: store
+                    .next_turn_seq(session_id)
+                    .await
+                    .expect("seq should load"),
+                timestamp,
+                items: vec![
+                    TalosOutputItem::UserInput {
+                        text: "hello".to_string(),
+                    },
+                    TalosOutputItem::Reasoning {
+                        text: "internal".to_string(),
+                    },
+                    TalosOutputItem::ToolCall {
+                        call_id: "call-context".to_string(),
+                        name: "read_file".to_string(),
+                        arguments: serde_json::json!({"path":"/tmp/example.txt"}),
+                    },
+                    TalosOutputItem::ToolResult {
+                        call_id: "call-context".to_string(),
+                        tool_name: "read_file".to_string(),
+                        content: vec![TalosContentItem::Text {
+                            text: "result".to_string(),
+                        }],
+                        is_error: false,
+                    },
+                    TalosOutputItem::OutputText {
+                        text: "world".to_string(),
+                    },
+                ],
+                usage: TalosUsage::default(),
+                stop_reason: StopReason::EndTurn,
+            })
+            .await
+            .expect("append turn should succeed");
+
+        let context = store
+            .build_session_prompt_context(
+                session_id,
+                &SessionPromptContextConfig {
+                    recent_messages_limit: 10,
+                    include_summary: false,
+                    summary_recent_count: 0,
+                    summary_max_chars: 0,
+                },
+            )
+            .await
+            .expect("context should build");
+
+        assert_eq!(context.recent_messages.len(), 2);
+        assert_eq!(context.recent_messages[0].text, "hello");
+        assert_eq!(context.recent_messages[1].text, "world");
+        assert!(context.recent_messages.iter().all(|message| {
+            matches!(
+                message.role,
+                TalosMessageRole::User | TalosMessageRole::Assistant
+            )
+        }));
+    }
+
+    #[tokio::test]
     async fn test_session_size_bytes_after_append_and_summary() {
         let (_guard, store) = new_temp_store();
         let session_id = "s-size";
@@ -673,19 +840,11 @@ mod tests {
                     .await
                     .expect("seq should load"),
                 timestamp,
-                messages: vec![TalosMessage {
-                    header: RecordHeader {
-                        id: "turn-size:u".to_string(),
-                        session_id: session_id.to_string(),
-                        turn_id: Some("turn-size".to_string()),
-                        timestamp,
-                    },
-                    role: TalosMessageRole::User,
+                items: vec![TalosOutputItem::UserInput {
                     text: "payload".to_string(),
                 }],
-                reasoning: Vec::new(),
-                tool_calls: Vec::new(),
-                tool_results: Vec::new(),
+                usage: TalosUsage::default(),
+                stop_reason: StopReason::EndTurn,
             })
             .await
             .expect("append turn should succeed");
@@ -729,10 +888,9 @@ mod tests {
                         .await
                         .expect("seq should load"),
                     timestamp,
-                    messages: Vec::new(),
-                    reasoning: Vec::new(),
-                    tool_calls: Vec::new(),
-                    tool_results: Vec::new(),
+                    items: Vec::new(),
+                    usage: TalosUsage::default(),
+                    stop_reason: StopReason::EndTurn,
                 })
                 .await
                 .expect("append turn should succeed");

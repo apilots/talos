@@ -523,6 +523,7 @@ impl BailianProvider {
 
         Ok(ChatResponse {
             content: Self::parse_message_content(choice.message.content)?,
+            reasoning: Vec::new(),
             model: bailian_resp.model,
             usage: Self::usage_from_bailian(usage)?,
             finish_reason: choice.finish_reason,

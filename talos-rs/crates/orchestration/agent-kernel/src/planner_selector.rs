@@ -249,6 +249,7 @@ mod tests {
         async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
             Ok(ChatResponse {
                 content: format!(r#"{{"mode":"{}"}}"#, self.mode),
+                reasoning: Vec::new(),
                 model: "mock".to_string(),
                 usage: Usage::default(),
                 finish_reason: Some("stop".to_string()),

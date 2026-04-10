@@ -91,13 +91,13 @@ impl LlmKernelAgent {
                 input: ctx.input.clone(),
                 recent_events,
                 tool_names,
-                model: ctx.model.clone(),
+                model: ctx.selected_model_id().to_string(),
             };
             let response = self.planner_selector.select(request, fallback).await;
             info!(
                 selected_planner = ?response.planner_kind,
                 selection_status = ?response.status,
-                model = %ctx.model,
+                model = %ctx.selected_model_id(),
                 session_id = %ctx.session_id,
                 invocation_id = %ctx.invocation_id,
                 "planner selector resolved planner in auto mode"
@@ -382,6 +382,7 @@ mod tests {
         async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
             Ok(ChatResponse {
                 content: String::new(),
+                reasoning: Vec::new(),
                 model: "noop".to_string(),
                 usage: Usage::default(),
                 finish_reason: Some("stop".to_string()),
@@ -410,6 +411,7 @@ mod tests {
         async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
             Ok(ChatResponse {
                 content: "ok".to_string(),
+                reasoning: Vec::new(),
                 model: "usage-stream".to_string(),
                 usage: Usage {
                     prompt_tokens: 11,
@@ -534,6 +536,7 @@ mod tests {
             if call_index == 0 {
                 Ok(ChatResponse {
                     content: String::new(),
+                    reasoning: Vec::new(),
                     model: "tool-calling-failure".to_string(),
                     usage: Usage::default(),
                     finish_reason: Some("tool_calls".to_string()),
@@ -636,7 +639,17 @@ mod tests {
             agent_id: "a1".to_string(),
             workspace_id: "w1".to_string(),
             input: "hello".to_string(),
-            model: "m1".to_string(),
+            selected_model_info: talos_types::ModelInfo {
+                id: "m1".to_string(),
+                name: "m1".to_string(),
+                provider: "p1".to_string(),
+                context_window: 0,
+                max_tokens: 0,
+                reasoning: false,
+                input: Vec::new(),
+                cost: Default::default(),
+                compat: Default::default(),
+            },
             phase: TurnPhase::Execution,
             planning_instruction: None,
             transfer_to: None,
@@ -787,6 +800,7 @@ mod tests {
 
             Ok(ChatResponse {
                 content,
+                reasoning: Vec::new(),
                 model: "selector".to_string(),
                 usage: Usage::default(),
                 finish_reason: Some("stop".to_string()),

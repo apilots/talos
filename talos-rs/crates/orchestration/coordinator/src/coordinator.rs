@@ -383,7 +383,6 @@ impl SessionManager {
             .await?;
         Ok(session)
     }
-
 }
 
 /// Implementation of the Coordinator trait
@@ -947,61 +946,22 @@ impl SessionService for CoordinatorImpl {
         &self,
         session_id: &str,
     ) -> TalosResult<Vec<talos_types::talos::TalosMessageResponse>> {
-        use talos_memory::store::TalosMessageRole;
-        use talos_types::talos::{
-            StopReason, TalosMessageResponse, TalosOutputItem, TalosReasoning, TalosUsage,
-        };
+        use talos_types::talos::TalosMessageResponse;
 
         let memory_store = talos_memory::MemoryStore::new_default();
         let turns = memory_store.load_session_turns(session_id).await?;
 
         let responses = turns
             .into_iter()
-            .map(|turn| {
-                let mut output: Vec<TalosOutputItem> = Vec::new();
-
-                for msg in &turn.messages {
-                    match msg.role {
-                        TalosMessageRole::User => {
-                            output.push(TalosOutputItem::UserInput {
-                                text: msg.text.clone(),
-                            });
-                        }
-                        TalosMessageRole::Assistant => {
-                            output.push(TalosOutputItem::OutputText {
-                                text: msg.text.clone(),
-                            });
-                        }
-                        TalosMessageRole::System => {}
-                    }
-                }
-
-                for text in &turn.reasoning {
-                    output.push(TalosOutputItem::Reasoning { text: text.clone() });
-                }
-
-                for tc in &turn.tool_calls {
-                    output.push(TalosOutputItem::ToolCall {
-                        call_id: tc.call_id.clone(),
-                        name: tc.name.clone(),
-                        arguments: tc.arguments.clone(),
-                    });
-                }
-
-                TalosMessageResponse {
-                    request_id: turn.turn_id.clone(),
-                    message_id: turn.turn_id.clone(),
-                    session_id: turn.session_id.clone(),
-                    model: String::new(),
-                    output,
-                    reasoning: turn
-                        .reasoning
-                        .iter()
-                        .map(|t| TalosReasoning { text: t.clone() })
-                        .collect(),
-                    stop_reason: StopReason::EndTurn,
-                    usage: TalosUsage::default(),
-                }
+            .map(|turn| TalosMessageResponse {
+                request_id: turn.turn_id.clone(),
+                message_id: turn.turn_id.clone(),
+                session_id: turn.session_id.clone(),
+                model: String::new(),
+                reasoning: Vec::new(),
+                output: turn.items,
+                stop_reason: turn.stop_reason,
+                usage: turn.usage,
             })
             .collect();
 
@@ -1015,8 +975,16 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
     use talos_agent::{OrchestratorEvent, OrchestratorExecution, OrchestratorRequest};
-    use talos_types::talos::{StopReason, TalosInputItem, TalosSourceType};
+    use talos_memory::{Memory, MemoryStore, TalosTurn};
+    use talos_types::talos::{
+        StopReason, TalosContentItem, TalosInputItem, TalosOutputItem, TalosSourceType,
+    };
     use tokio;
+    use uuid::Uuid;
+
+    fn test_timestamp() -> serde_json::Value {
+        serde_json::json!("2026-04-09T00:00:00Z")
+    }
 
     // Define mock implementations for testing
     struct MockRouter;
@@ -1468,5 +1436,148 @@ mod tests {
             cancelled_sessions.as_slice(),
             ["session-cancel".to_string(), "session-cancel".to_string()]
         );
+    }
+
+    #[tokio::test]
+    async fn test_get_session_turns_returns_ordered_items() {
+        let session_id = format!("history-{}", Uuid::new_v4());
+        let store = MemoryStore::new_default();
+        let expected_items = vec![
+            TalosOutputItem::UserInput {
+                text: "user question".to_string(),
+            },
+            TalosOutputItem::Reasoning {
+                text: "think first".to_string(),
+            },
+            TalosOutputItem::ToolCall {
+                call_id: "call-1".to_string(),
+                name: "read_file".to_string(),
+                arguments: serde_json::json!({"path":"/tmp/demo.txt"}),
+            },
+            TalosOutputItem::ToolResult {
+                call_id: "call-1".to_string(),
+                tool_name: "read_file".to_string(),
+                content: vec![TalosContentItem::Text {
+                    text: "demo".to_string(),
+                }],
+                is_error: false,
+            },
+            TalosOutputItem::OutputText {
+                text: "final answer".to_string(),
+            },
+        ];
+        let turn: TalosTurn = serde_json::from_value(serde_json::json!({
+            "turn_id": format!("turn-{}", Uuid::new_v4()),
+            "session_id": session_id,
+            "seq": 1,
+            "timestamp": test_timestamp(),
+            "items": expected_items.clone(),
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 12,
+                "total_tokens": 22
+            },
+            "stop_reason": "end_turn"
+        }))
+        .expect("turn should deserialize");
+        store
+            .append_turn(&turn)
+            .await
+            .expect("append turn should succeed");
+
+        let coordinator = CoordinatorImpl::new(
+            Arc::new(MockRouter::new()),
+            Arc::new(talos_session_store::MockSessionStore::new()),
+            TalosConfig::default(),
+        );
+
+        let turns = coordinator
+            .get_session_turns(&session_id)
+            .await
+            .expect("session turns should load");
+
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].output.len(), expected_items.len());
+        assert!(matches!(
+            turns[0].output.first(),
+            Some(TalosOutputItem::UserInput { text }) if text == "user question"
+        ));
+        assert!(matches!(
+            turns[0].output.get(1),
+            Some(TalosOutputItem::Reasoning { text }) if text == "think first"
+        ));
+        assert!(matches!(
+            turns[0].output.get(2),
+            Some(TalosOutputItem::ToolCall { name, .. }) if name == "read_file"
+        ));
+        assert!(matches!(
+            turns[0].output.get(3),
+            Some(TalosOutputItem::ToolResult { tool_name, .. }) if tool_name == "read_file"
+        ));
+        assert!(matches!(
+            turns[0].output.get(4),
+            Some(TalosOutputItem::OutputText { text }) if text == "final answer"
+        ));
+        assert_eq!(turns[0].usage.total_tokens, 22);
+        assert_eq!(turns[0].stop_reason, StopReason::EndTurn);
+    }
+
+    #[tokio::test]
+    async fn test_get_session_turns_includes_tool_results() {
+        let session_id = format!("history-tool-{}", Uuid::new_v4());
+        let store = MemoryStore::new_default();
+        let turn: TalosTurn = serde_json::from_value(serde_json::json!({
+            "turn_id": format!("turn-{}", Uuid::new_v4()),
+            "session_id": session_id,
+            "seq": 1,
+            "timestamp": test_timestamp(),
+            "items": [
+                {
+                    "type": "tool_call",
+                    "call_id": "call-tool",
+                    "name": "exec_command",
+                    "arguments": {"cmd": "pwd"}
+                },
+                {
+                    "type": "tool_result",
+                    "call_id": "call-tool",
+                    "tool_name": "exec_command",
+                    "content": [
+                        {
+                            "type": "json",
+                            "value": {"output": "/tmp\n", "exit_code": 0}
+                        }
+                    ],
+                    "is_error": false
+                }
+            ],
+            "usage": {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0
+            },
+            "stop_reason": "end_turn"
+        }))
+        .expect("turn should deserialize");
+        store
+            .append_turn(&turn)
+            .await
+            .expect("append turn should succeed");
+
+        let coordinator = CoordinatorImpl::new(
+            Arc::new(MockRouter::new()),
+            Arc::new(talos_session_store::MockSessionStore::new()),
+            TalosConfig::default(),
+        );
+
+        let turns = coordinator
+            .get_session_turns(&session_id)
+            .await
+            .expect("session turns should load");
+
+        assert!(matches!(
+            turns[0].output.get(1),
+            Some(TalosOutputItem::ToolResult { tool_name, .. }) if tool_name == "exec_command"
+        ));
     }
 }

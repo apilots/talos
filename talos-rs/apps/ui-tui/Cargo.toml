@@ -10,22 +10,9 @@ crossterm = "0.28"
 tokio = { version = "1.0", features = ["full"] }
 talos-error = { workspace = true }
 talos-types = { workspace = true }
-talos-llm-provider = { workspace = true }
-talos-llm-anthropic = { path = "../../crates/common/llm/anthropic" }
-talos-llm-bailian = { path = "../../crates/common/llm/bailian" }
-talos-llm-openai = { path = "../../crates/common/llm/openai" }
-talos-agent = { path = "../../crates/orchestration/agent" }
-talos-memory = { path = "../../crates/cognition/memory" }
-talos-tools = { path = "../../crates/action/tools" }
 talos-tools-policy = { workspace = true }
-talos-gateway = { path = "../../crates/gateway/core" }
-talos-gateway-http = { path = "../../crates/gateway/http" }
-talos-coordinator = { path = "../../crates/orchestration/coordinator" }
-talos-router = { path = "../../crates/orchestration/router" }
-talos-session-store = { path = "../../crates/orchestration/session-store" }
-talos-storage = { path = "../../crates/infra/storage" }
 talos-config = { path = "../../crates/infra/config" }
-talos-logging = { path = "../../crates/infra/logging" }
+talos-server = { workspace = true }
 talos-client = { path = "../sdk" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

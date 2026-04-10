@@ -1,10 +1,12 @@
 //! Talos Logging - 基于 tracing 的日志系统
 
+use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use talos_error::TalosResult;
 use tracing::Dispatch;
 use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
+use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::fmt::writer::{BoxMakeWriter, MakeWriterExt};
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -19,6 +21,9 @@ pub struct LoggingConfig {
     pub file: Option<String>,
     #[serde(default = "default_true")]
     pub stdout: bool,
+    /// IANA timezone name for log timestamps (e.g. "Asia/Shanghai"). Defaults to UTC.
+    #[serde(default)]
+    pub timezone: Option<String>,
 }
 
 impl Default for LoggingConfig {
@@ -28,7 +33,18 @@ impl Default for LoggingConfig {
             format: default_format(),
             file: None,
             stdout: default_true(),
+            timezone: None,
         }
+    }
+}
+
+/// Custom timer that formats timestamps in a specific IANA timezone.
+struct TzTimer(Tz);
+
+impl FormatTime for TzTimer {
+    fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
+        let now = chrono::Utc::now().with_timezone(&self.0);
+        write!(w, "{}", now.format("%Y-%m-%dT%H:%M:%S%.3f%:z"))
     }
 }
 
@@ -85,21 +101,44 @@ fn build_dispatch(config: &LoggingConfig) -> TalosResult<(Dispatch, LogGuard)> {
         ));
     }
 
+    let tz: Option<Tz> = config
+        .timezone
+        .as_deref()
+        .filter(|s| !s.is_empty() && *s != "UTC")
+        .and_then(|s| s.parse::<Tz>().ok());
+
     let filter = EnvFilter::try_new(&config.level)
         .map_err(|e| TalosError::InvalidConfiguration(format!("invalid logging.level: {}", e)))?;
     let (writer, guard) = build_writer(config)?;
     let enable_ansi = config.stdout && config.file.is_none() && config.format != "json";
-    let builder = fmt()
-        .with_target(true)
-        .with_file(false)
-        .with_line_number(false)
-        .with_ansi(enable_ansi)
-        .with_env_filter(filter)
-        .with_writer(writer);
-    let dispatch = if config.format == "json" {
-        Dispatch::new(builder.json().finish())
+
+    let dispatch = if let Some(tz) = tz {
+        let builder = fmt()
+            .with_target(true)
+            .with_file(false)
+            .with_line_number(false)
+            .with_ansi(enable_ansi)
+            .with_env_filter(filter)
+            .with_writer(writer)
+            .with_timer(TzTimer(tz));
+        if config.format == "json" {
+            Dispatch::new(builder.json().finish())
+        } else {
+            Dispatch::new(builder.finish())
+        }
     } else {
-        Dispatch::new(builder.finish())
+        let builder = fmt()
+            .with_target(true)
+            .with_file(false)
+            .with_line_number(false)
+            .with_ansi(enable_ansi)
+            .with_env_filter(filter)
+            .with_writer(writer);
+        if config.format == "json" {
+            Dispatch::new(builder.json().finish())
+        } else {
+            Dispatch::new(builder.finish())
+        }
     };
 
     Ok((dispatch, guard))
@@ -171,6 +210,7 @@ mod tests {
             format: "text".to_string(),
             file: None,
             stdout: false,
+            ..Default::default()
         };
 
         let err = build_dispatch(&config).expect_err("empty logging outputs should fail");
@@ -186,6 +226,7 @@ mod tests {
             format: "text".to_string(),
             file: Some(log_path.to_string_lossy().to_string()),
             stdout: false,
+            ..Default::default()
         };
 
         let (dispatch, guard) = build_dispatch(&config).expect("dispatch should build");
@@ -207,6 +248,7 @@ mod tests {
             format: "json".to_string(),
             file: Some(log_path.to_string_lossy().to_string()),
             stdout: false,
+            ..Default::default()
         };
 
         let (dispatch, guard) = build_dispatch(&config).expect("dispatch should build");
@@ -230,6 +272,7 @@ mod tests {
             format: "text".to_string(),
             file: Some(log_path.to_string_lossy().to_string()),
             stdout: false,
+            ..Default::default()
         };
 
         assert!(!parent.exists(), "test precondition failed");

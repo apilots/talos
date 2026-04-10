@@ -502,6 +502,7 @@ mod tests {
             let content = responses.remove(0);
             Ok(ChatResponse {
                 content,
+                reasoning: Vec::new(),
                 model: "mock".to_string(),
                 usage: Usage::default(),
                 finish_reason: Some("stop".to_string()),

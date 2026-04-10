@@ -7,6 +7,7 @@ use tokio::fs;
 use crate::store::MemoryStore;
 
 const DAY_FILE_PATTERN_LEN: usize = 10; // YYYY-MM-DD
+const SESSION_DAILY_FILE_EXTENSION: &str = ".jsonl";
 
 pub(crate) fn default_workspace_dir() -> PathBuf {
     TalosPaths::resolve().workspace_dir_for_agent("talos")
@@ -66,7 +67,7 @@ pub(crate) async fn list_daily_files(
         let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
             continue;
         };
-        if !is_daily_file_name(name) {
+        if !is_session_daily_file_name(name) {
             continue;
         }
         files.push(path);
@@ -101,7 +102,7 @@ pub(crate) async fn list_workspace_memory_files(store: &MemoryStore) -> TalosRes
         let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
             continue;
         };
-        if !is_daily_file_name(name) {
+        if !is_workspace_daily_file_name(name) {
             continue;
         }
         files.push(path);
@@ -111,7 +112,32 @@ pub(crate) async fn list_workspace_memory_files(store: &MemoryStore) -> TalosRes
     Ok(files)
 }
 
-pub(crate) fn is_daily_file_name(file_name: &str) -> bool {
+pub(crate) fn is_session_daily_file_name(file_name: &str) -> bool {
+    if !file_name.ends_with(SESSION_DAILY_FILE_EXTENSION) {
+        return false;
+    }
+
+    let date = &file_name[..file_name.len() - SESSION_DAILY_FILE_EXTENSION.len()];
+    if date.len() != DAY_FILE_PATTERN_LEN {
+        return false;
+    }
+
+    let chars: Vec<char> = date.chars().collect();
+    for (idx, ch) in chars.iter().enumerate() {
+        let is_dash = idx == 4 || idx == 7;
+        if is_dash {
+            if *ch != '-' {
+                return false;
+            }
+        } else if !ch.is_ascii_digit() {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn is_workspace_daily_file_name(file_name: &str) -> bool {
     if !file_name.ends_with(".md") {
         return false;
     }
@@ -182,7 +208,11 @@ pub(crate) fn normalize_memory_path(path: &str) -> TalosResult<PathBuf> {
             Ok(clean)
         }
         (Some(Component::Normal(dir)), Some(Component::Normal(file_name)), None)
-            if dir == "memory" && file_name.to_str().map(is_daily_file_name).unwrap_or(false) =>
+            if dir == "memory"
+                && file_name
+                    .to_str()
+                    .map(is_workspace_daily_file_name)
+                    .unwrap_or(false) =>
         {
             Ok(clean)
         }

@@ -865,7 +865,6 @@ pub struct SessionPatchAck {
     pub success: bool,
 }
 
-
 #[async_trait]
 pub trait SessionService: Send + Sync {
     async fn create_session(
@@ -906,7 +905,10 @@ pub trait SessionService: Send + Sync {
         success: bool,
     ) -> TalosResult<()>;
 
-    async fn get_session_turns(&self, session_id: &str) -> TalosResult<Vec<talos::TalosMessageResponse>>;
+    async fn get_session_turns(
+        &self,
+        session_id: &str,
+    ) -> TalosResult<Vec<talos::TalosMessageResponse>>;
 }
 
 pub fn now() -> u64 {

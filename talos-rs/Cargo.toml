@@ -49,6 +49,8 @@ members = [
     "crates/gateway/health",
     "crates/gateway/http",
     "crates/gateway/event-bus",
+    # App
+    "crates/app/talos-server",
     # Meta
     "crates/meta/monitor",
     "crates/meta/learner",
@@ -131,3 +133,4 @@ talos-logging = { path = "crates/infra/logging" }
 talos-storage = { path = "crates/infra/storage" }
 talos-channel = { path = "crates/perception/channels" }
 talos-client = { path = "apps/sdk" }
+talos-server = { path = "crates/app/talos-server" }

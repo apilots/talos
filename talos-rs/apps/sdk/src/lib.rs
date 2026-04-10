@@ -202,7 +202,10 @@ impl TalosClient {
         ))
     }
 
-    pub async fn get_session_turns(&self, session_id: &str) -> TalosResult<Vec<TalosMessageResponse>> {
+    pub async fn get_session_turns(
+        &self,
+        session_id: &str,
+    ) -> TalosResult<Vec<TalosMessageResponse>> {
         let url = format!(
             "{}/v1/sessions/{}/turns",
             self.config.gateway_url, session_id

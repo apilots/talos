@@ -83,7 +83,12 @@ impl Planner for BuiltInPlanner {
         _ctx: &InvocationContext,
         request: &LlmRequestEnvelope,
     ) -> PlanningRequestEffect {
-        let native_thinking = if request.native_thinking_support.is_supported() {
+        let native_thinking = if request
+            .selected_model_info
+            .as_ref()
+            .map(|model| model.reasoning)
+            .unwrap_or(false)
+        {
             Some(NativeThinkingConfig {
                 effort: NativeThinkingEffort::Medium,
                 budget_tokens: Some(2048),
@@ -211,7 +216,17 @@ mod tests {
             agent_id: "a1".to_string(),
             workspace_id: "w1".to_string(),
             input: input.to_string(),
-            model: "m1".to_string(),
+            selected_model_info: talos_types::ModelInfo {
+                id: "m1".to_string(),
+                name: "m1".to_string(),
+                provider: "p1".to_string(),
+                context_window: 0,
+                max_tokens: 0,
+                reasoning: false,
+                input: Vec::new(),
+                cost: Default::default(),
+                compat: Default::default(),
+            },
             phase: TurnPhase::Execution,
             planning_instruction: None,
             transfer_to: None,
@@ -243,8 +258,17 @@ mod tests {
         let ctx = mock_ctx("hello");
 
         let mut supported_request = crate::LlmRequestEnvelope::default();
-        supported_request.native_thinking_support =
-            talos_llm_provider::NativeThinkingSupport::Supported;
+        supported_request.selected_model_info = Some(talos_types::ModelInfo {
+            id: "m1".to_string(),
+            name: "m1".to_string(),
+            provider: "p1".to_string(),
+            context_window: 0,
+            max_tokens: 0,
+            reasoning: true,
+            input: Vec::new(),
+            cost: Default::default(),
+            compat: Default::default(),
+        });
         assert!(planner
             .build_request_effect(&ctx, &supported_request)
             .native_thinking

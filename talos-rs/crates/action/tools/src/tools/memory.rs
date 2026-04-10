@@ -178,6 +178,7 @@ mod tests {
             let mut responses = self.responses.lock().await;
             Ok(ChatResponse {
                 content: responses.remove(0),
+                reasoning: Vec::new(),
                 model: "mock-model".to_string(),
                 usage: Usage::default(),
                 finish_reason: Some("stop".to_string()),

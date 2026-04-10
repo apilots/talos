@@ -11,6 +11,7 @@ pub use run::run_tui_app_with_client;
 use utils::*;
 
 use async_trait::async_trait;
+use chrono::{Datelike, Local, TimeZone};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -54,6 +55,33 @@ const CHAT_BLOCK_BODY_INDENT: usize = 2;
 const TOOL_PREVIEW_CHAR_LIMIT: usize = 100;
 const COPY_ROUND_BUTTON_TEXT: &str = "  [ Copy Round ]";
 const PASTED_BLOCK_CHAR_THRESHOLD: usize = 800;
+
+fn format_session_timestamp(timestamp_ms: u64) -> String {
+    let Some(local_dt) = timestamp_ms
+        .try_into()
+        .ok()
+        .and_then(|millis| Local.timestamp_millis_opt(millis).single())
+    else {
+        return "unknown time".to_string();
+    };
+
+    let now = Local::now();
+    if now.date_naive() == local_dt.date_naive() {
+        return local_dt.format("%H:%M").to_string();
+    }
+
+    if now.year() == local_dt.year() {
+        return local_dt.format("%m-%d %H:%M").to_string();
+    }
+
+    local_dt.format("%Y-%m-%d %H:%M").to_string()
+}
+
+fn session_list_label(session: &TalosSession) -> String {
+    let title = session.title.trim();
+    let time_text = format_session_timestamp(session.state.last_activity);
+    format!(" {}  {}", title, time_text)
+}
 #[derive(Debug, Clone)]
 struct CommandSuggestion {
     name: String,
@@ -1190,6 +1218,14 @@ impl TuiApp {
             },
             RemoteCommandUpdate::HistoryLoaded(result) => match result {
                 Ok(sessions) => {
+                    let mut sessions = sessions;
+                    sessions.sort_by(|left, right| {
+                        right
+                            .state
+                            .last_activity
+                            .cmp(&left.state.last_activity)
+                            .then(right.state.created_at.cmp(&left.state.created_at))
+                    });
                     self.history_sessions = sessions;
                     self.history_selected = 0;
                     self.push_right_event(format!(
@@ -1227,46 +1263,9 @@ impl TuiApp {
                         ChatRole::System,
                         format!("Session: {}  ({})\nModel: {}", title, sid, model),
                     );
-                    for turn in &turns {
-                        for item in &turn.output {
-                            match item {
-                                TalosOutputItem::UserInput { text } => {
-                                    self.push_block(ChatRole::User, text.clone());
-                                    self.add_message_to_history(text.clone());
-                                }
-                                TalosOutputItem::OutputText { text } => {
-                                    self.push_block(ChatRole::Assistant, text.clone());
-                                }
-                                TalosOutputItem::Reasoning { text } => {
-                                    self.push_block(ChatRole::Thinking, text.clone());
-                                }
-                                TalosOutputItem::ToolCall { name, arguments, .. } => {
-                                    self.push_block(
-                                        ChatRole::Tool,
-                                        format!("{}\n{}", name, arguments),
-                                    );
-                                }
-                                TalosOutputItem::ToolResult { tool_name, content, is_error, .. } => {
-                                    let text = content
-                                        .iter()
-                                        .map(|c| match c {
-                                            TalosContentItem::Text { text } => text.clone(),
-                                            TalosContentItem::Json { value } => value.to_string(),
-                                        })
-                                        .collect::<Vec<_>>()
-                                        .join("\n");
-                                    self.push_block(
-                                        ChatRole::Tool,
-                                        format!(
-                                            "{}{}\n{}",
-                                            tool_name,
-                                            if *is_error { " [error]" } else { "" },
-                                            text
-                                        ),
-                                    );
-                                }
-                                TalosOutputItem::ExecutionSummary { .. } => {}
-                            }
+                    for (turn_index, turn) in turns.iter().enumerate() {
+                        for (item_index, item) in turn.output.iter().enumerate() {
+                            self.replay_history_item(item, turn_index as u64, item_index as u64);
                         }
                     }
                     self.message_history_index = None;
@@ -1276,7 +1275,10 @@ impl TuiApp {
                     let sid = &session.context.session_id;
                     self.push_block(
                         ChatRole::System,
-                        format!("Session: {}  ({})\nFailed to load history: {}", session.title, sid, err),
+                        format!(
+                            "Session: {}  ({})\nFailed to load history: {}",
+                            session.title, sid, err
+                        ),
                     );
                     self.push_right_event("turns load failed".to_string());
                 }
@@ -2790,6 +2792,60 @@ impl TuiApp {
             .collect();
     }
 
+    fn tool_result_output_text(content: &[TalosContentItem]) -> String {
+        content
+            .iter()
+            .map(|item| match item {
+                TalosContentItem::Text { text } => text.clone(),
+                TalosContentItem::Json { value } => value.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn replay_history_item(&mut self, item: &TalosOutputItem, turn_index: u64, item_index: u64) {
+        match item {
+            TalosOutputItem::UserInput { text } => {
+                self.push_block(ChatRole::User, text.clone());
+                self.add_message_to_history(text.clone());
+            }
+            TalosOutputItem::OutputText { text } => {
+                self.push_block(ChatRole::Assistant, text.clone());
+            }
+            TalosOutputItem::Reasoning { text } => {
+                self.push_block(ChatRole::Thinking, text.clone());
+            }
+            TalosOutputItem::ToolCall {
+                call_id,
+                name,
+                arguments,
+            } => {
+                self.push_tool_call_block(
+                    call_id.clone(),
+                    name.clone(),
+                    arguments.clone(),
+                    turn_index,
+                    item_index,
+                    None,
+                );
+            }
+            TalosOutputItem::ToolResult {
+                call_id,
+                tool_name: _,
+                content,
+                is_error,
+            } => {
+                self.complete_tool_call_block(
+                    call_id,
+                    Self::tool_result_output_text(content),
+                    !is_error,
+                    None,
+                );
+            }
+            TalosOutputItem::ExecutionSummary { .. } => {}
+        }
+    }
+
     fn push_tool_call_block(
         &mut self,
         call_id: String,
@@ -3391,8 +3447,7 @@ impl TuiApp {
 
     fn render_history_panel(&self, f: &mut Frame, area: Rect) {
         let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Rgb(80, 130, 200)))
+            .style(Style::default().bg(Color::Rgb(24, 28, 36)))
             .title(" History  [Enter] switch  [d] delete  [Esc] back ");
         let inner = block.inner(area);
         f.render_widget(block, area);
@@ -3407,22 +3462,21 @@ impl TuiApp {
         let items: Vec<ListItem> = self
             .history_sessions
             .iter()
-            .map(|s| {
-                let sid = &s.context.session_id;
-                let model = &s.config.llm.model;
-                let msgs = s.state.message_count;
-                let title = &s.title;
-                ListItem::new(format!(" {title}  [{model}]  {msgs} msgs  {sid}"))
-            })
+            .map(|s| ListItem::new(session_list_label(s)))
             .collect();
 
         let mut list_state = ListState::default();
         list_state.select(Some(self.history_selected));
 
         let list = List::new(items)
+            .style(
+                Style::default()
+                    .bg(Color::Rgb(24, 28, 36))
+                    .fg(Color::Rgb(212, 218, 228)),
+            )
             .highlight_style(
                 Style::default()
-                    .bg(Color::Rgb(50, 80, 130))
+                    .bg(Color::Rgb(62, 96, 150))
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
             )
@@ -3501,37 +3555,30 @@ impl TuiApp {
         f.render_widget(Clear, popup_rect);
 
         let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Rgb(100, 180, 240)))
-            .title(" Recent Sessions  [↑↓] navigate  [1-9] quick  [Enter] switch  [Esc] cancel ");
+            .style(Style::default().bg(Color::Rgb(28, 32, 40)))
+            .title(" Recent Sessions  [↑↓] navigate  [Enter] switch  [Esc] cancel ");
         let inner = block.inner(popup_rect);
         f.render_widget(block, popup_rect);
 
         let items: Vec<ListItem> = self
             .history_sessions
             .iter()
-            .enumerate()
-            .map(|(idx, s)| {
-                let title = s.title.trim();
-                let model = &s.config.llm.model;
-                let msgs = s.state.message_count;
-                let idx_display = (idx + 1) % 10;
-                ListItem::new(format!(
-                    " [{}] {} [{}] {} msgs",
-                    idx_display, title, model, msgs
-                ))
-            })
+            .map(|s| ListItem::new(session_list_label(s)))
             .collect();
 
         let mut list_state = ListState::default();
         list_state.select(Some(self.sessions_picker_selected));
 
         let list = List::new(items)
+            .style(
+                Style::default()
+                    .bg(Color::Rgb(28, 32, 40))
+                    .fg(Color::Rgb(220, 225, 233)),
+            )
             .highlight_style(
                 Style::default()
-                    .bg(Color::Rgb(40, 80, 140))
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
+                    .bg(Color::Rgb(70, 88, 118))
+                    .fg(Color::Rgb(242, 245, 248)),
             )
             .highlight_symbol("▶ ");
 
@@ -6997,6 +7044,100 @@ mod tests {
         );
         assert_eq!(app.chat_blocks[shifted_idx].timing_ms, Some(15));
         assert!(!app.active_tool_calls.contains_key("call-shift"));
+    }
+
+    #[test]
+    fn test_replay_full_mixed_turn_matches_streaming_order() {
+        let mut history_app = create_embedded_app();
+        history_app.chat_blocks.clear();
+        let items = vec![
+            TalosOutputItem::UserInput {
+                text: "open the file".to_string(),
+            },
+            TalosOutputItem::Reasoning {
+                text: "need to inspect the workspace".to_string(),
+            },
+            TalosOutputItem::ToolCall {
+                call_id: "call-history".to_string(),
+                name: "read_file".to_string(),
+                arguments: serde_json::json!({"path":"/tmp/demo.txt"}),
+            },
+            TalosOutputItem::ToolResult {
+                call_id: "call-history".to_string(),
+                tool_name: "read_file".to_string(),
+                content: vec![TalosContentItem::Text {
+                    text: "demo contents".to_string(),
+                }],
+                is_error: false,
+            },
+            TalosOutputItem::OutputText {
+                text: "done".to_string(),
+            },
+        ];
+
+        for (index, item) in items.iter().enumerate() {
+            history_app.replay_history_item(item, 0, index as u64);
+        }
+
+        let mut stream_app = create_embedded_app();
+        stream_app.chat_blocks.clear();
+        stream_app.push_block(ChatRole::User, "open the file".to_string());
+        stream_app.add_message_to_history("open the file".to_string());
+        stream_app.push_block(
+            ChatRole::Thinking,
+            "need to inspect the workspace".to_string(),
+        );
+        stream_app.push_tool_call_block(
+            "call-history".to_string(),
+            "read_file".to_string(),
+            serde_json::json!({"path":"/tmp/demo.txt"}),
+            0,
+            2,
+            None,
+        );
+        stream_app.complete_tool_call_block(
+            "call-history",
+            "demo contents".to_string(),
+            true,
+            None,
+        );
+        stream_app.push_block(ChatRole::Assistant, "done".to_string());
+
+        assert_eq!(history_app.chat_blocks.len(), stream_app.chat_blocks.len());
+
+        let history_roles = history_app
+            .chat_blocks
+            .iter()
+            .map(|block| block.role.clone())
+            .collect::<Vec<_>>();
+        let stream_roles = stream_app
+            .chat_blocks
+            .iter()
+            .map(|block| block.role.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(history_roles, stream_roles);
+
+        let history_tool = history_app
+            .chat_blocks
+            .iter()
+            .find(|block| block.role == ChatRole::Tool)
+            .expect("history replay should keep a tool block");
+        let stream_tool = stream_app
+            .chat_blocks
+            .iter()
+            .find(|block| block.role == ChatRole::Tool)
+            .expect("stream replay should keep a tool block");
+
+        assert_eq!(history_tool.tool_name, stream_tool.tool_name);
+        assert_eq!(history_tool.tool_input, stream_tool.tool_input);
+        assert_eq!(history_tool.tool_status, stream_tool.tool_status);
+        assert_eq!(history_tool.content, stream_tool.content);
+        assert_eq!(history_app.chat_blocks[0].content, "open the file");
+        assert_eq!(
+            history_app.chat_blocks[1].content,
+            "need to inspect the workspace"
+        );
+        assert_eq!(history_app.chat_blocks[3].content, "done");
     }
 
     #[test]

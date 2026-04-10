@@ -208,15 +208,16 @@ impl SingleFlow {
 }
 
 fn build_flow_step_model_request(
+    selected_model_info: Option<talos_types::ModelInfo>,
     planning_instruction: Option<String>,
     native_thinking: Option<talos_llm_provider::NativeThinkingConfig>,
-    native_thinking_support: talos_llm_provider::NativeThinkingSupport,
     branch: ExecutionBranch,
     prepared: &crate::general_turn::PreparedGeneralTurn,
     state: &GeneralTurnLoopState,
     settings: &KernelExecutionSettings,
 ) -> LlmRequestEnvelope {
     LlmRequestEnvelope {
+        selected_model_info,
         prompt_prefix_messages: prepared.prompt_prefix_messages.clone(),
         transient_messages: state.messages.clone(),
         planning_instruction,
@@ -225,7 +226,6 @@ fn build_flow_step_model_request(
         contents_mode: ContentsMode::FullSession,
         branch,
         native_thinking,
-        native_thinking_support,
         ..LlmRequestEnvelope::default()
     }
 }
@@ -295,7 +295,6 @@ impl BaseLlmFlow for SingleFlow {
         ctx.plugin_manager = Arc::new(ctx.plugin_manager.merged_with(&self.plugin_manager));
         let mut events = Vec::new();
         let branch = self.current_branch();
-        let native_thinking_support = self.llm_provider.native_thinking_support(&ctx.model);
         let session_service = ctx
             .session_service
             .clone()
@@ -312,10 +311,10 @@ impl BaseLlmFlow for SingleFlow {
             false,
         ));
         let mut request = LlmRequestEnvelope {
+            selected_model_info: Some(ctx.selected_model_info.clone()),
             planning_instruction: ctx.planning_instruction.clone(),
             contents_mode: ContentsMode::FullSession,
             branch,
-            native_thinking_support,
             ..LlmRequestEnvelope::default()
         };
         events.extend(self.request_pipeline.run(ctx, &mut request).await?);
@@ -388,9 +387,9 @@ impl BaseLlmFlow for SingleFlow {
             }
             let mut step_request = build_general_turn_step_request(&prepared, &state);
             let mut step_model_request = build_flow_step_model_request(
+                request.selected_model_info.clone(),
                 request.planning_instruction.clone(),
                 request.native_thinking.clone(),
-                request.native_thinking_support,
                 request.branch,
                 &prepared,
                 &state,
@@ -1142,6 +1141,7 @@ mod tests {
         async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
             Ok(ChatResponse {
                 content: String::new(),
+                reasoning: Vec::new(),
                 model: "noop".to_string(),
                 usage: Usage::default(),
                 finish_reason: Some("stop".to_string()),
@@ -1250,6 +1250,7 @@ mod tests {
             if round == 0 {
                 return Ok(ChatResponse {
                     content: "Need tool data first.".to_string(),
+                    reasoning: Vec::new(),
                     model: request.model,
                     usage: Usage::default(),
                     finish_reason: Some("tool_calls".to_string()),
@@ -1275,6 +1276,7 @@ mod tests {
 
             Ok(ChatResponse {
                 content: "Final answer after tool.".to_string(),
+                reasoning: Vec::new(),
                 model: request.model,
                 usage: Usage::default(),
                 finish_reason: Some("stop".to_string()),
@@ -1312,6 +1314,7 @@ mod tests {
             match round {
                 0 => Ok(ChatResponse {
                     content: "Need approval first.".to_string(),
+                    reasoning: Vec::new(),
                     model: request.model,
                     usage: Usage::default(),
                     finish_reason: Some("tool_calls".to_string()),
@@ -1349,7 +1352,17 @@ mod tests {
             agent_id: "a1".to_string(),
             workspace_id: "w1".to_string(),
             input: "hello".to_string(),
-            model: "m1".to_string(),
+            selected_model_info: talos_types::ModelInfo {
+                id: "m1".to_string(),
+                name: "m1".to_string(),
+                provider: "p1".to_string(),
+                context_window: 0,
+                max_tokens: 0,
+                reasoning: false,
+                input: Vec::new(),
+                cost: Default::default(),
+                compat: Default::default(),
+            },
             phase: TurnPhase::Execution,
             planning_instruction: None,
             transfer_to: None,
@@ -1425,7 +1438,7 @@ mod tests {
         let request = build_flow_step_model_request(
             None,
             None,
-            talos_llm_provider::NativeThinkingSupport::Unsupported,
+            None,
             ExecutionBranch::ReactiveLoop,
             &prepared,
             &state,
@@ -1466,11 +1479,11 @@ mod tests {
         let state = GeneralTurnLoopState::new(&prepared);
         let request = build_flow_step_model_request(
             None,
+            None,
             Some(talos_llm_provider::NativeThinkingConfig {
                 effort: talos_llm_provider::NativeThinkingEffort::High,
                 budget_tokens: Some(1024),
             }),
-            talos_llm_provider::NativeThinkingSupport::Supported,
             ExecutionBranch::ModelThinking,
             &prepared,
             &state,

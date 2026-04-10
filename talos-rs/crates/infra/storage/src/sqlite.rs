@@ -349,8 +349,14 @@ mod tests {
     async fn test_init_schema_adds_title_column_to_legacy_sessions_table() {
         let storage = SqliteStorage::new(":memory:").await.unwrap();
 
-        storage.execute("DROP TABLE IF EXISTS messages", &[]).await.unwrap();
-        storage.execute("DROP TABLE IF EXISTS sessions", &[]).await.unwrap();
+        storage
+            .execute("DROP TABLE IF EXISTS messages", &[])
+            .await
+            .unwrap();
+        storage
+            .execute("DROP TABLE IF EXISTS sessions", &[])
+            .await
+            .unwrap();
         storage
             .execute(
                 r#"
@@ -380,7 +386,10 @@ mod tests {
 
         storage.init_schema().await.unwrap();
 
-        let session_columns = storage.query("PRAGMA table_info(sessions)", &[]).await.unwrap();
+        let session_columns = storage
+            .query("PRAGMA table_info(sessions)", &[])
+            .await
+            .unwrap();
         let has_title = session_columns
             .iter()
             .any(|row| row.get_string("name").as_deref() == Some("title"));

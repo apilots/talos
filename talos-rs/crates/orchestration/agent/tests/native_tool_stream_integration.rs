@@ -88,6 +88,7 @@ impl LlmProvider for IntegrationMockProvider {
                 .is_some_and(|items| !items.is_empty()));
             return Ok(ChatResponse {
                 content: "I should call a tool first.".to_string(),
+                reasoning: Vec::new(),
                 model: request.model,
                 usage: Usage::default(),
                 finish_reason: Some("tool_calls".to_string()),
@@ -130,6 +131,7 @@ impl LlmProvider for IntegrationMockProvider {
 
         Ok(ChatResponse {
             content: format!("Final answer after tool execution: {tool_result}"),
+            reasoning: Vec::new(),
             model: request.model,
             usage: Usage::default(),
             finish_reason: Some("stop".to_string()),

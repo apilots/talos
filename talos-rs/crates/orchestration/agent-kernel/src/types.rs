@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use talos_error::{TalosError, TalosResult};
+use talos_types::ModelInfo;
 use talos_types::talos::TalosSessionEnvironment;
 use talos_types::talos::{TalosContentItem, TalosOutputItem, TalosUsage};
 use tokio::sync::mpsc;
@@ -340,7 +341,7 @@ pub struct InvocationContext {
     pub agent_id: String,
     pub workspace_id: String,
     pub input: String,
-    pub model: String,
+    pub selected_model_info: ModelInfo,
     #[serde(default)]
     pub phase: TurnPhase,
     pub planning_instruction: Option<String>,
@@ -366,6 +367,10 @@ pub struct InvocationContext {
 }
 
 impl InvocationContext {
+    pub fn selected_model_id(&self) -> &str {
+        self.selected_model_info.id.as_str()
+    }
+
     pub fn set_planning_response(&mut self, value: impl Into<String>) {
         self.execution_state.planning_response = Some(value.into());
     }
@@ -573,7 +578,7 @@ pub struct RunRequest {
     pub agent_id: String,
     pub workspace_id: String,
     pub input: String,
-    pub model: String,
+    pub selected_model_info: ModelInfo,
     #[serde(default)]
     pub phase: TurnPhase,
     pub planning_instruction: Option<String>,
@@ -616,7 +621,17 @@ mod tests {
             agent_id: "a1".to_string(),
             workspace_id: "w1".to_string(),
             input: "hello".to_string(),
-            model: "m1".to_string(),
+            selected_model_info: ModelInfo {
+                id: "m1".to_string(),
+                name: "m1".to_string(),
+                provider: "p1".to_string(),
+                context_window: 0,
+                max_tokens: 0,
+                reasoning: false,
+                input: Vec::new(),
+                cost: Default::default(),
+                compat: Default::default(),
+            },
             phase: TurnPhase::Execution,
             planning_instruction: None,
             transfer_to: None,

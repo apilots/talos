@@ -18,3 +18,7 @@ talos-error = { path = "../error" }
 
 # Config
 serde = { workspace = true }
+
+# Timezone-aware log timestamps
+chrono = { workspace = true }
+chrono-tz = { workspace = true }

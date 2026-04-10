@@ -447,6 +447,7 @@ impl OllamaProvider {
 
         Ok(ChatResponse {
             content: ollama_resp.message.content,
+            reasoning: Vec::new(),
             model: ollama_resp.model,
             usage: Usage {
                 prompt_tokens: ollama_resp.prompt_eval_count.unwrap_or(0),
@@ -515,6 +516,7 @@ impl OllamaProvider {
 
         Ok(ChatResponse {
             content: choice.message.content.unwrap_or_default(),
+            reasoning: Vec::new(),
             model: compat_resp.model,
             usage: Usage {
                 prompt_tokens: usage.prompt_tokens,

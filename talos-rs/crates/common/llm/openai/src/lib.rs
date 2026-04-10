@@ -404,6 +404,7 @@ impl OpenAIProvider {
 
         Ok(ChatResponse {
             content: choice.message.content.unwrap_or_default(),
+            reasoning: Vec::new(),
             model: openai_resp.model,
             usage: Usage {
                 prompt_tokens: usage.prompt_tokens,

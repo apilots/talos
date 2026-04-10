@@ -8,7 +8,7 @@ source "${ROOT_DIR}/tests/integration/scripts/common.sh"
 load_env
 require_command "${ROOT_DIR}/target/debug/talos-client"
 
-if [[ -z "${BAILIAN_API_KEY:-}" && -z "${OPENAI_API_KEY:-}" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
+if [[ -z "${BAILIAN_API_KEY:-}" && -z "${BAILIAN_CODINGPLAN_API_KEY:-}" && -z "${OPENAI_API_KEY:-}" && -z "${ANTHROPIC_API_KEY:-}" ]]; then
   echo "CASE cli_stream_real_llm_precheck FAIL missing provider key in .env"
   exit 1
 fi

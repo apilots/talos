@@ -5,9 +5,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use talos_error::TalosResult;
-use talos_llm_provider::{
-    ChatMessage, NativeThinkingConfig, NativeThinkingSupport, ToolDefinition,
-};
+use talos_llm_provider::{ChatMessage, NativeThinkingConfig, ToolDefinition};
+use talos_types::ModelInfo;
 use talos_types::talos::TalosOutputItem;
 use uuid::Uuid;
 
@@ -329,6 +328,7 @@ pub struct ReplayDynamicToolResult {
 #[derive(Debug, Clone, Default)]
 pub struct LlmRequestEnvelope {
     pub messages: Vec<ChatMessage>,
+    pub selected_model_info: Option<ModelInfo>,
     pub prompt_prefix_messages: Vec<ChatMessage>,
     pub transient_messages: Vec<ChatMessage>,
     pub planning_instruction: Option<String>,
@@ -341,7 +341,6 @@ pub struct LlmRequestEnvelope {
     pub replay_dynamic_tool_results: HashMap<String, ReplayDynamicToolResult>,
     pub branch: ExecutionBranch,
     pub native_thinking: Option<NativeThinkingConfig>,
-    pub native_thinking_support: NativeThinkingSupport,
     pub cache_context: Option<RequestCacheContext>,
     pub interaction_context: Option<RequestInteractionContext>,
     pub output_contract: RequestOutputContract,
@@ -504,7 +503,17 @@ mod tests {
             agent_id: "a1".to_string(),
             workspace_id: "w1".to_string(),
             input: "hello".to_string(),
-            model: "m1".to_string(),
+            selected_model_info: talos_types::ModelInfo {
+                id: "m1".to_string(),
+                name: "m1".to_string(),
+                provider: "p1".to_string(),
+                context_window: 0,
+                max_tokens: 0,
+                reasoning: false,
+                input: Vec::new(),
+                cost: Default::default(),
+                compat: Default::default(),
+            },
             phase: TurnPhase::Execution,
             planning_instruction: None,
             transfer_to: None,

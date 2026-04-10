@@ -372,6 +372,8 @@ pub enum Role {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatResponse {
     pub content: String,
+    #[serde(default)]
+    pub reasoning: Vec<String>,
     pub model: String,
     pub usage: Usage,
     pub finish_reason: Option<String>,
@@ -435,6 +437,9 @@ pub enum ToolStreamEvent {
     },
     ReasoningDelta {
         delta: String,
+    },
+    ReasoningSignature {
+        signature: String,
     },
     ToolCallStart {
         index: usize,
@@ -713,6 +718,7 @@ mod tests {
     fn test_chat_response_tool_calls_helper() {
         let response = ChatResponse {
             content: String::new(),
+            reasoning: Vec::new(),
             model: "mock".to_string(),
             usage: Usage::default(),
             finish_reason: Some("tool_calls".to_string()),
