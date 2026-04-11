@@ -21,6 +21,7 @@ scenarios=(
   "05_chat_bilingual_and_tools.sh"
   "06_cli_stream_thinking_and_tools.sh"
   "07_session_close_flushes_memory.sh"
+  "08_embedded_tui_quit_flushes_memory.sh"
 )
 
 pass_count=0
@@ -38,9 +39,16 @@ fail_count=0
   echo
 } > "${report_file}"
 
+export TALOS_BINARIES_READY=1
+
 for scenario in "${scenarios[@]}"; do
   script_path="${ROOT_DIR}/tests/integration/scenarios/${scenario}"
   log_file="${ROOT_DIR}/tests/integration/reports/${scenario%.sh}.log"
+  scenario_started_at="$(python3 - <<'PY'
+import time
+print(time.time())
+PY
+)"
   chmod +x "${script_path}"
   echo "Running ${scenario}..."
   if "${script_path}" >"${log_file}" 2>&1; then
@@ -50,11 +58,20 @@ for scenario in "${scenarios[@]}"; do
     status="FAIL"
     fail_count=$((fail_count + 1))
   fi
+  scenario_elapsed_secs="$(SCENARIO_STARTED_AT="${scenario_started_at}" python3 - <<'PY'
+import os
+import time
+started = float(os.environ["SCENARIO_STARTED_AT"])
+print(f"{time.time() - started:.2f}")
+PY
+)"
+  echo "Finished ${scenario} (${status}) in ${scenario_elapsed_secs}s"
 
   {
     echo "### 场景 ${scenario}"
     echo
     echo "- 状态: ${status}"
+    echo "- 耗时(秒): ${scenario_elapsed_secs}"
     echo "- 日志: \`${log_file}\`"
     echo
     echo '```text'

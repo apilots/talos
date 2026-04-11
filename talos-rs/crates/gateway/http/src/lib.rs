@@ -4,4 +4,4 @@
 
 mod server;
 
-pub use server::HttpServer;
+pub use server::{HttpServer, ServerLifecycle, ServerLifecycleState};

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
@@ -12,8 +13,9 @@ use axum::Router;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::signal;
-use tokio::sync::RwLock;
+use tokio::sync::{watch, RwLock};
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+use tokio_util::sync::CancellationToken;
 use tower_http::cors::CorsLayer;
 use tracing::{error, info};
 use uuid::Uuid;
@@ -69,9 +71,11 @@ struct HttpApiState {
     auth_disabled: bool,
     idempotency_cache: Arc<RwLock<HashMap<String, TalosMessageResponse>>>,
     models: Arc<Vec<ModelInfo>>,
+    lifecycle: Arc<ServerLifecycle>,
 }
 
 impl HttpApiState {
+    #[cfg(test)]
     fn new(
         gateway: Arc<dyn Gateway>,
         session_service: Arc<dyn SessionService>,
@@ -79,6 +83,26 @@ impl HttpApiState {
         static_token: Option<String>,
         auth_disabled: bool,
         models: Vec<ModelInfo>,
+    ) -> Self {
+        Self::new_with_lifecycle(
+            gateway,
+            session_service,
+            jwt_secret,
+            static_token,
+            auth_disabled,
+            models,
+            Arc::new(ServerLifecycle::new()),
+        )
+    }
+
+    fn new_with_lifecycle(
+        gateway: Arc<dyn Gateway>,
+        session_service: Arc<dyn SessionService>,
+        jwt_secret: String,
+        static_token: Option<String>,
+        auth_disabled: bool,
+        models: Vec<ModelInfo>,
+        lifecycle: Arc<ServerLifecycle>,
     ) -> Self {
         Self {
             gateway,
@@ -88,7 +112,65 @@ impl HttpApiState {
             auth_disabled,
             idempotency_cache: Arc::new(RwLock::new(HashMap::new())),
             models: Arc::new(models),
+            lifecycle,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ServerLifecycleState {
+    Running = 0,
+    Quiescing = 1,
+    Draining = 2,
+    Stopped = 3,
+}
+
+impl ServerLifecycleState {
+    fn from_u8(value: u8) -> Self {
+        match value {
+            0 => Self::Running,
+            1 => Self::Quiescing,
+            2 => Self::Draining,
+            3 => Self::Stopped,
+            _ => Self::Stopped,
+        }
+    }
+
+    pub fn is_quiescing_or_later(self) -> bool {
+        matches!(self, Self::Quiescing | Self::Draining | Self::Stopped)
+    }
+}
+
+pub struct ServerLifecycle {
+    state: AtomicU8,
+    updates_tx: watch::Sender<ServerLifecycleState>,
+}
+
+impl ServerLifecycle {
+    pub fn new() -> Self {
+        let (updates_tx, _updates_rx) = watch::channel(ServerLifecycleState::Running);
+        Self {
+            state: AtomicU8::new(ServerLifecycleState::Running as u8),
+            updates_tx,
+        }
+    }
+
+    pub fn current(&self) -> ServerLifecycleState {
+        ServerLifecycleState::from_u8(self.state.load(Ordering::SeqCst))
+    }
+
+    pub fn store(&self, next: ServerLifecycleState) {
+        self.state.store(next as u8, Ordering::SeqCst);
+        let _ = self.updates_tx.send(next);
+    }
+
+    pub fn subscribe(&self) -> watch::Receiver<ServerLifecycleState> {
+        self.updates_tx.subscribe()
+    }
+
+    pub fn is_quiescing_or_later(&self) -> bool {
+        self.current().is_quiescing_or_later()
     }
 }
 
@@ -102,6 +184,7 @@ pub struct HttpServer {
     static_token: Option<String>,
     auth_disabled: bool,
     models: Vec<ModelInfo>,
+    lifecycle: Arc<ServerLifecycle>,
 }
 
 impl HttpServer {
@@ -123,6 +206,7 @@ impl HttpServer {
             static_token: None,
             auth_disabled: false,
             models,
+            lifecycle: Arc::new(ServerLifecycle::new()),
         }
     }
 
@@ -144,17 +228,34 @@ impl HttpServer {
         self
     }
 
+    pub fn lifecycle(&self) -> Arc<ServerLifecycle> {
+        self.lifecycle.clone()
+    }
+
     /// Start the HTTP server.
     pub async fn run(&self) -> TalosResult<()> {
+        let shutdown = CancellationToken::new();
+        let signal_shutdown = shutdown.clone();
+        let signal_task = tokio::spawn(async move {
+            shutdown_signal().await;
+            signal_shutdown.cancel();
+        });
+        let result = self.run_with_shutdown(shutdown).await;
+        signal_task.abort();
+        result
+    }
+
+    pub async fn run_with_shutdown(&self, shutdown: CancellationToken) -> TalosResult<()> {
         info!("Starting HTTP server on {}:{}", self.host, self.port);
 
-        let state = Arc::new(HttpApiState::new(
+        let state = Arc::new(HttpApiState::new_with_lifecycle(
             self.gateway.clone(),
             self.session_service.clone(),
             self.jwt_secret.clone(),
             self.static_token.clone(),
             self.auth_disabled,
             self.models.clone(),
+            self.lifecycle.clone(),
         ));
 
         let app = Router::new()
@@ -191,6 +292,10 @@ impl HttpServer {
                 post(submit_dynamic_tool_result_handler),
             )
             .with_state(state.clone())
+            .layer(middleware::from_fn_with_state(
+                state.clone(),
+                lifecycle_gate_middleware,
+            ))
             .layer(middleware::from_fn_with_state(state, auth_middleware))
             .layer(CorsLayer::permissive());
 
@@ -204,7 +309,9 @@ impl HttpServer {
         info!("HTTP server listening on {}:{}", self.host, self.port);
 
         axum::serve(listener, app)
-            .with_graceful_shutdown(shutdown_signal())
+            .with_graceful_shutdown(async move {
+                shutdown.cancelled().await;
+            })
             .await
             .map_err(|e| {
                 error!("Server error: {}", e);
@@ -217,6 +324,27 @@ impl HttpServer {
     fn listen_addr(&self) -> String {
         format!("{}:{}", self.host, self.port)
     }
+}
+
+async fn lifecycle_gate_middleware(
+    State(state): State<Arc<HttpApiState>>,
+    req: axum::extract::Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    if req.uri().path() == "/health" {
+        return Ok(next.run(req).await);
+    }
+
+    if state.lifecycle.is_quiescing_or_later() {
+        return Ok(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "server_shutting_down",
+            "server is shutting down",
+        )
+        .into_response());
+    }
+
+    Ok(next.run(req).await)
 }
 
 async fn auth_middleware(
@@ -1232,6 +1360,74 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/v1/models")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_lifecycle_gate_rejects_new_requests_when_quiescing() {
+        let lifecycle = Arc::new(ServerLifecycle::new());
+        lifecycle.store(ServerLifecycleState::Quiescing);
+        let state = Arc::new(HttpApiState::new_with_lifecycle(
+            Arc::new(MockGateway),
+            Arc::new(MockSessionService),
+            "test-secret".to_string(),
+            None,
+            true,
+            vec![test_model_info()],
+            lifecycle,
+        ));
+        let app = Router::new()
+            .route("/v1/models", get(list_models_handler))
+            .with_state(state.clone())
+            .layer(middleware::from_fn_with_state(
+                state.clone(),
+                lifecycle_gate_middleware,
+            ))
+            .layer(middleware::from_fn_with_state(state, auth_middleware));
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/models")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn test_lifecycle_gate_allows_health_when_quiescing() {
+        let lifecycle = Arc::new(ServerLifecycle::new());
+        lifecycle.store(ServerLifecycleState::Quiescing);
+        let state = Arc::new(HttpApiState::new_with_lifecycle(
+            Arc::new(MockGateway),
+            Arc::new(MockSessionService),
+            "test-secret".to_string(),
+            None,
+            true,
+            vec![test_model_info()],
+            lifecycle,
+        ));
+        let app = Router::new()
+            .route("/health", get(health_handler))
+            .with_state(state.clone())
+            .layer(middleware::from_fn_with_state(
+                state.clone(),
+                lifecycle_gate_middleware,
+            ))
+            .layer(middleware::from_fn_with_state(state, auth_middleware));
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
                     .body(Body::empty())
                     .expect("request should build"),
             )

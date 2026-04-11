@@ -28,6 +28,8 @@ if [[ -f "${DAY_FILE}" ]]; then
   pre_size="$(wc -c < "${DAY_FILE}" | tr -d ' ')"
 fi
 
+message_marker="close-flush-$(date '+%Y%m%d%H%M%S')-$$"
+
 create_payload='{
   "context": {
     "source_type": "http",
@@ -56,12 +58,13 @@ message_payload='{
   "input": [
     {
       "type": "text",
-      "text": "Please remember that this session should be flushed on close."
+      "text": "__MESSAGE_MARKER__ Please remember that this session should be flushed on close."
     }
   ],
   "stream": false,
   "workspace_id": null
 }'
+message_payload="${message_payload/__MESSAGE_MARKER__/${message_marker}}"
 message_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
@@ -85,13 +88,19 @@ fi
 
 post_size="${pre_size}"
 found_session_entry="false"
+flush_log_seen="false"
 for _ in $(seq 1 480); do
   if [[ -f "${DAY_FILE}" ]]; then
     post_size="$(wc -c < "${DAY_FILE}" | tr -d ' ')"
     if grep -Fq "session: ${session_id}" "${DAY_FILE}"; then
       found_session_entry="true"
-      break
     fi
+  fi
+  if grep -Fq "memory flush completed session_id=${session_id}" "${SERVER_LOG}"; then
+    flush_log_seen="true"
+  fi
+  if [[ "${found_session_entry}" == "true" && "${flush_log_seen}" == "true" ]]; then
+    break
   fi
   sleep 0.25
 done
@@ -102,8 +111,13 @@ if [[ ! -f "${DAY_FILE}" ]]; then
 fi
 
 if [[ "${found_session_entry}" != "true" ]]; then
-  echo "CASE close_session_for_memory_flush FAIL session_id=${session_id} pre_size=${pre_size} post_size=${post_size}"
+  echo "CASE close_session_for_memory_flush FAIL session_id=${session_id} marker=${message_marker} pre_size=${pre_size} post_size=${post_size}"
   exit 1
 fi
 
-echo "CASE close_session_for_memory_flush PASS session_id=${session_id} pre_size=${pre_size} post_size=${post_size}"
+if [[ "${flush_log_seen}" != "true" ]]; then
+  echo "CASE close_session_for_memory_flush FAIL missing_flush_log session_id=${session_id}"
+  exit 1
+fi
+
+echo "CASE close_session_for_memory_flush PASS session_id=${session_id} marker=${message_marker} pre_size=${pre_size} post_size=${post_size}"

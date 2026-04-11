@@ -7,7 +7,7 @@ use talos_config::Config;
 use talos_coordinator::{Coordinator, CoordinatorImpl};
 use talos_error::{TalosError, TalosResult};
 use talos_gateway::{Gateway, GatewayImpl};
-use talos_gateway_http::HttpServer;
+use talos_gateway_http::{HttpServer, ServerLifecycle, ServerLifecycleState};
 use talos_llm_anthropic::AnthropicProvider;
 use talos_llm_bailian::BailianProvider;
 use talos_llm_openai::OpenAIProvider;
@@ -20,7 +20,9 @@ use talos_tools::{
     CollaborationRuntime, ToolRegistry,
 };
 use talos_types::{ModelInfo, RequestHandler, SessionService};
+use tokio::signal;
 use tokio::task::JoinSet;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, warn};
 
 #[derive(Debug, Clone, Default)]
@@ -37,62 +39,152 @@ pub struct TalosServerRuntime {
     channel_server: Option<ChannelServer>,
     coordinator: Arc<CoordinatorImpl>,
     gateway_url: String,
+    shutdown_token: CancellationToken,
+    lifecycle: Arc<ServerLifecycle>,
 }
 
 const MEMORY_FLUSH_DRAIN_TIMEOUT: Duration = Duration::from_secs(60);
+const SERVER_SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(75);
+
+#[derive(Clone)]
+pub struct TalosServerHandle {
+    shutdown_token: CancellationToken,
+    lifecycle: Arc<ServerLifecycle>,
+    wait_timeout: Duration,
+}
+
+impl TalosServerHandle {
+    pub async fn shutdown(&self) -> TalosResult<()> {
+        if self.lifecycle.current() == ServerLifecycleState::Stopped {
+            return Ok(());
+        }
+
+        self.shutdown_token.cancel();
+
+        let mut updates = self.lifecycle.subscribe();
+        let wait_timeout = self.wait_timeout;
+        tokio::time::timeout(wait_timeout, async move {
+            loop {
+                if *updates.borrow_and_update() == ServerLifecycleState::Stopped {
+                    return Ok(());
+                }
+                updates.changed().await.map_err(|_| {
+                    TalosError::InternalError(
+                        "server runtime stopped before reporting shutdown completion".to_string(),
+                    )
+                })?;
+            }
+        })
+        .await
+        .map_err(|_| {
+            TalosError::InternalError(format!(
+                "server shutdown timed out after {} secs",
+                wait_timeout.as_secs()
+            ))
+        })?
+    }
+}
 
 impl TalosServerRuntime {
+    pub fn handle(&self) -> TalosServerHandle {
+        TalosServerHandle {
+            shutdown_token: self.shutdown_token.clone(),
+            lifecycle: self.lifecycle.clone(),
+            wait_timeout: SERVER_SHUTDOWN_WAIT_TIMEOUT,
+        }
+    }
+
     pub fn gateway_url(&self) -> &str {
         &self.gateway_url
     }
 
-    pub fn into_http_server(self) -> TalosResult<HttpServer> {
-        if self.channel_server.is_some() {
-            return Err(TalosError::InvalidConfiguration(
-                "cannot extract HTTP server while channels are enabled".to_string(),
-            ));
-        }
-        Ok(self.http_server)
-    }
-
     pub async fn run(self) -> TalosResult<()> {
-        let result = match self.channel_server {
+        let TalosServerRuntime {
+            http_server,
+            channel_server,
+            coordinator,
+            gateway_url: _,
+            shutdown_token,
+            lifecycle,
+        } = self;
+
+        let signal_shutdown = shutdown_token.clone();
+        let signal_task = tokio::spawn(async move {
+            shutdown_signal().await;
+            signal_shutdown.cancel();
+        });
+
+        let quiesce_lifecycle = lifecycle.clone();
+        let quiesce_shutdown = shutdown_token.clone();
+        let quiesce_task = tokio::spawn(async move {
+            quiesce_shutdown.cancelled().await;
+            if !quiesce_lifecycle.current().is_quiescing_or_later() {
+                quiesce_lifecycle.store(ServerLifecycleState::Quiescing);
+            }
+        });
+
+        let result = match channel_server {
             Some(channel_server) => {
-                let http_server = self.http_server;
                 let mut tasks = JoinSet::new();
-                tasks.spawn(async move { http_server.run().await });
+                let shutdown_token_for_http = shutdown_token.clone();
+                tasks.spawn(async move {
+                    http_server
+                        .run_with_shutdown(shutdown_token_for_http.clone())
+                        .await
+                });
                 tasks.spawn(async move { channel_server.run().await });
 
-                match tasks.join_next().await {
+                let result = match tasks.join_next().await {
                     Some(Ok(result)) => result,
                     Some(Err(err)) => Err(TalosError::InternalError(format!(
                         "server task join error: {}",
                         err
                     ))),
                     None => Ok(()),
-                }
+                };
+                shutdown_token.cancel();
+                tasks.abort_all();
+                while tasks.join_next().await.is_some() {}
+                result
             }
-            None => self.http_server.run().await,
+            None => http_server.run_with_shutdown(shutdown_token.clone()).await,
         };
 
-        let pending_flushes = self.coordinator.pending_memory_flushes().await;
-        if pending_flushes > 0 {
-            tracing::info!(
-                pending_flushes,
-                timeout_secs = MEMORY_FLUSH_DRAIN_TIMEOUT.as_secs(),
-                "draining pending memory flush tasks before shutdown"
-            );
-            if let Err(err) = self
-                .coordinator
-                .drain_memory_flushes(MEMORY_FLUSH_DRAIN_TIMEOUT)
-                .await
-            {
-                warn!(error = %err, "memory flush drain failed on shutdown");
-            }
-        }
+        signal_task.abort();
+        quiesce_task.abort();
+
+        perform_shutdown(&coordinator, &lifecycle).await;
 
         result
     }
+}
+
+async fn perform_shutdown(coordinator: &Arc<CoordinatorImpl>, lifecycle: &Arc<ServerLifecycle>) {
+    if lifecycle.current() == ServerLifecycleState::Stopped {
+        return;
+    }
+
+    if !lifecycle.current().is_quiescing_or_later() {
+        lifecycle.store(ServerLifecycleState::Quiescing);
+    }
+    lifecycle.store(ServerLifecycleState::Draining);
+
+    let pending_flushes = coordinator.pending_memory_flushes().await;
+    if pending_flushes > 0 {
+        tracing::info!(
+            pending_flushes,
+            timeout_secs = MEMORY_FLUSH_DRAIN_TIMEOUT.as_secs(),
+            "draining pending memory flush tasks before shutdown"
+        );
+        if let Err(err) = coordinator
+            .drain_background_tasks(MEMORY_FLUSH_DRAIN_TIMEOUT)
+            .await
+        {
+            warn!(error = %err, "memory flush drain failed on shutdown");
+        }
+    }
+
+    lifecycle.store(ServerLifecycleState::Stopped);
 }
 
 pub fn init_logging(
@@ -218,6 +310,8 @@ pub async fn start_server(
     Ok(TalosServerRuntime {
         coordinator,
         gateway_url: format!("http://{}:{}", config.gateway.host, config.gateway.port),
+        shutdown_token: CancellationToken::new(),
+        lifecycle: http_server.lifecycle(),
         http_server,
         channel_server,
     })
@@ -239,6 +333,30 @@ fn apply_runtime_options(mut config: Config, options: Option<&TalosServerOptions
     }
 
     config
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("Failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("Failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
 }
 
 async fn create_llm_provider(
@@ -345,8 +463,14 @@ fn resolve_model_catalog(config: &Config, default_model: &str) -> Vec<ModelInfo>
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_runtime_options, TalosServerOptions};
+    use super::{
+        apply_runtime_options, TalosServerHandle, TalosServerOptions, SERVER_SHUTDOWN_WAIT_TIMEOUT,
+    };
+    use std::sync::Arc;
     use talos_config::Config;
+    use talos_gateway_http::{ServerLifecycle, ServerLifecycleState};
+    use tokio::time::Duration;
+    use tokio_util::sync::CancellationToken;
 
     #[test]
     fn apply_runtime_options_updates_gateway_and_logging() {
@@ -364,5 +488,76 @@ mod tests {
         assert_eq!(updated.gateway.host, "127.0.0.1");
         assert_eq!(updated.gateway.port, 18080);
         assert!(!updated.logging.stdout);
+    }
+
+    #[tokio::test]
+    async fn handle_shutdown_waits_for_stopped_state() {
+        let lifecycle = Arc::new(ServerLifecycle::new());
+        let handle = TalosServerHandle {
+            shutdown_token: CancellationToken::new(),
+            lifecycle: lifecycle.clone(),
+            wait_timeout: Duration::from_secs(1),
+        };
+
+        let token = handle.shutdown_token.clone();
+        let lifecycle_for_task = lifecycle.clone();
+        let waiter = tokio::spawn(async move { handle.shutdown().await });
+        token.cancelled().await;
+        lifecycle_for_task.store(ServerLifecycleState::Quiescing);
+        lifecycle_for_task.store(ServerLifecycleState::Draining);
+        lifecycle_for_task.store(ServerLifecycleState::Stopped);
+
+        waiter
+            .await
+            .expect("task should join")
+            .expect("shutdown should finish");
+    }
+
+    #[tokio::test]
+    async fn handle_shutdown_times_out_without_stopped_state() {
+        let lifecycle = Arc::new(ServerLifecycle::new());
+        let handle = TalosServerHandle {
+            shutdown_token: CancellationToken::new(),
+            lifecycle,
+            wait_timeout: Duration::from_millis(50),
+        };
+
+        let err = handle
+            .shutdown()
+            .await
+            .expect_err("shutdown should time out");
+        assert!(matches!(err, talos_error::TalosError::InternalError(_)));
+    }
+
+    #[tokio::test]
+    async fn lifecycle_watch_reports_expected_state_order() {
+        let lifecycle = Arc::new(ServerLifecycle::new());
+        let mut updates = lifecycle.subscribe();
+
+        lifecycle.store(ServerLifecycleState::Quiescing);
+        updates
+            .changed()
+            .await
+            .expect("quiescing update should arrive");
+        assert_eq!(
+            *updates.borrow_and_update(),
+            ServerLifecycleState::Quiescing
+        );
+
+        lifecycle.store(ServerLifecycleState::Draining);
+        updates
+            .changed()
+            .await
+            .expect("draining update should arrive");
+        assert_eq!(*updates.borrow_and_update(), ServerLifecycleState::Draining);
+
+        lifecycle.store(ServerLifecycleState::Stopped);
+        updates
+            .changed()
+            .await
+            .expect("stopped update should arrive");
+        assert_eq!(*updates.borrow_and_update(), ServerLifecycleState::Stopped);
+
+        assert!(SERVER_SHUTDOWN_WAIT_TIMEOUT > Duration::from_secs(0));
     }
 }

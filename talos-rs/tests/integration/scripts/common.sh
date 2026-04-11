@@ -20,7 +20,7 @@ load_env() {
 
 prepare_talos_home() {
   local test_home="${HOME}/.talos"
-  local config_src="${ROOT_DIR}/talos.yaml"
+  local config_src="${ROOT_DIR}/conf/talos.yaml"
   local config_dst="${test_home}/conf/talos.yaml"
 
   mkdir -p "${test_home}/conf" "${test_home}/logs" "${test_home}/data"
@@ -84,9 +84,16 @@ stop_server() {
 }
 
 build_binaries() {
+  if [[ "${TALOS_BINARIES_READY:-}" == "1" ]] \
+    && [[ -x "${ROOT_DIR}/target/debug/talos" ]] \
+    && [[ -x "${ROOT_DIR}/target/debug/talos-client" ]] \
+    && [[ -x "${ROOT_DIR}/target/debug/talos-ui-tui" ]]; then
+    return 0
+  fi
+
   mkdir -p "${ROOT_DIR}/tests/integration/reports"
-  (cd "${ROOT_DIR}" && cargo build -p talos >/dev/null)
-  (cd "${ROOT_DIR}" && cargo build -p talos-cli >/dev/null)
+  (cd "${ROOT_DIR}" && cargo build -p talos -p talos-cli -p talos-ui-tui >/dev/null)
+  export TALOS_BINARIES_READY=1
 }
 
 json_get() {

@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 tracing = { workspace = true }
 talos-agent = { path = "../../orchestration/agent" }
 talos-channel = { workspace = true }
@@ -23,4 +24,3 @@ talos-session-store = { path = "../../orchestration/session-store" }
 talos-storage = { workspace = true }
 talos-tools = { workspace = true }
 talos-types = { workspace = true }
-

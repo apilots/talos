@@ -399,6 +399,10 @@ pub struct CoordinatorImpl {
 }
 
 impl CoordinatorImpl {
+    pub async fn drain_background_tasks(&self, timeout: Duration) -> TalosResult<()> {
+        self.drain_memory_flushes(timeout).await
+    }
+
     pub async fn pending_memory_flushes(&self) -> usize {
         let agents = self
             .agents

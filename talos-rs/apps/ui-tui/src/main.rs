@@ -61,14 +61,9 @@ async fn run_embedded() -> Result<(), Box<dyn std::error::Error>> {
     let server = start_server(config, Some(options))
         .await
         .expect("failed to start embedded server runtime");
+    let handle = server.handle();
     let gateway_url = server.gateway_url().to_string();
-    let http_server = server.into_http_server()?;
-
-    tokio::spawn(async move {
-        if let Err(err) = http_server.run().await {
-            error!("embedded gateway error: {}", err);
-        }
-    });
+    let server_task = tokio::spawn(async move { server.run().await });
 
     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
@@ -78,7 +73,18 @@ async fn run_embedded() -> Result<(), Box<dyn std::error::Error>> {
         timeout: 30,
     };
     let client = Arc::new(TalosClient::new(client_config)?);
-    run_tui_app_with_client(client, TalosConnectionMode::Embedded).await?;
+    let tui_result = run_tui_app_with_client(client, TalosConnectionMode::Embedded).await;
+
+    if let Err(err) = handle.shutdown().await {
+        error!("embedded gateway shutdown failed: {}", err);
+    }
+    match server_task.await {
+        Ok(Ok(())) => {}
+        Ok(Err(err)) => error!("embedded gateway error: {}", err),
+        Err(err) => error!("embedded gateway task join failed: {}", err),
+    }
+
+    tui_result?;
 
     Ok(())
 }
