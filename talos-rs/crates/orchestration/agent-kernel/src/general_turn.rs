@@ -48,7 +48,8 @@ Schema:
   "risks": ["..."]
 }
 
-Omit any field whose array would be empty. Keep total under 200 words."#;
+Omit any field whose array would be empty. Keep total under 200 words.
+Use the same language as the conversation transcript for all field values."#;
 
 fn render_summary_body(summary: &SessionMemorySummary) -> String {
     let mut out = String::new();
