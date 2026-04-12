@@ -4,7 +4,6 @@ use crate::types::{ChatBlock, ChatRole, ToolCallStatus};
 use crate::TuiApp;
 
 impl TuiApp {
-
     pub(crate) fn push_block(&mut self, role: ChatRole, content: String) -> usize {
         self.chat_blocks.push(ChatBlock::new(role, content));
         let idx = self.chat_blocks.len() - 1;
@@ -12,7 +11,6 @@ impl TuiApp {
         self.request_follow_bottom();
         idx
     }
-
 
     pub(crate) fn remove_chat_block(&mut self, idx: usize) {
         if idx >= self.chat_blocks.len() {
@@ -36,7 +34,6 @@ impl TuiApp {
             .collect();
     }
 
-
     pub(crate) fn rebuild_chat_history(&mut self) {
         self.chat_history = self
             .chat_blocks
@@ -44,7 +41,6 @@ impl TuiApp {
             .map(|block| format!("{}\n{}", block.role.as_str(), block.content))
             .collect();
     }
-
 
     pub(crate) fn shift_tool_indices_on_insert(&mut self, inserted_idx: usize) {
         self.active_tool_calls = self
@@ -60,7 +56,6 @@ impl TuiApp {
             .collect();
     }
 
-
     pub(crate) fn tool_result_output_text(content: &[TalosContentItem]) -> String {
         content
             .iter()
@@ -72,8 +67,12 @@ impl TuiApp {
             .join("\n")
     }
 
-
-    pub(crate) fn replay_history_item(&mut self, item: &TalosOutputItem, turn_index: u64, item_index: u64) {
+    pub(crate) fn replay_history_item(
+        &mut self,
+        item: &TalosOutputItem,
+        turn_index: u64,
+        item_index: u64,
+    ) {
         match item {
             TalosOutputItem::UserInput { text } => {
                 self.push_block(ChatRole::User, text.clone());
@@ -116,7 +115,6 @@ impl TuiApp {
         }
     }
 
-
     pub(crate) fn push_tool_call_block(
         &mut self,
         call_id: String,
@@ -153,7 +151,6 @@ impl TuiApp {
         idx
     }
 
-
     pub(crate) fn resolve_tool_call_block_idx(&mut self, call_id: &str) -> Option<usize> {
         if let Some(&idx) = self.active_tool_calls.get(call_id) {
             if self
@@ -173,7 +170,6 @@ impl TuiApp {
         self.active_tool_calls.insert(call_id.to_string(), idx);
         Some(idx)
     }
-
 
     pub(crate) fn complete_tool_call_block(
         &mut self,
@@ -195,7 +191,6 @@ impl TuiApp {
         }
     }
 
-
     pub(crate) fn toggle_last_tool_block(&mut self) {
         let last_tool_idx = self
             .chat_blocks
@@ -209,11 +204,9 @@ impl TuiApp {
         }
     }
 
-
     pub(crate) fn toggle_right_panel(&mut self) {
         self.right_panel_visible = !self.right_panel_visible;
     }
-
 
     pub(crate) fn discard_active_pending_blocks(&mut self) {
         let mut remove_indices = vec![];
@@ -242,5 +235,4 @@ impl TuiApp {
         self.active_thinking_idx = None;
         self.active_assistant_idx = None;
     }
-
 }

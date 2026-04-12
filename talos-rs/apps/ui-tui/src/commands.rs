@@ -5,14 +5,12 @@ use talos_error::{TalosError, TalosResult};
 use tokio::sync::mpsc;
 use tracing::error;
 
-use talos_client::TalosSession;
 use crate::types::{AppState, ChatRole, QueuedMessage, RemoteCommandUpdate};
 use crate::utils::summarize_for_queue;
 use crate::{TuiApp, MAX_QUEUE_LEN, SESSION_CLOSE_TIMEOUT};
+use talos_client::TalosSession;
 
 impl TuiApp {
-
-
     pub(crate) async fn submit_input(&mut self) -> TalosResult<bool> {
         if !self.has_composer_input() {
             self.reset_input();
@@ -49,7 +47,6 @@ impl TuiApp {
             }
         }
     }
-
 
     pub(crate) async fn execute_command(&mut self, command_line: &str) -> TalosResult<bool> {
         let trimmed = command_line.trim_start_matches('/').trim();
@@ -161,7 +158,6 @@ impl TuiApp {
         }
     }
 
-
     pub(crate) fn navigate_message_history(&mut self, direction: i32) {
         if self.sent_messages_history.is_empty() {
             return;
@@ -203,7 +199,6 @@ impl TuiApp {
         }
     }
 
-
     pub(crate) fn add_message_to_history(&mut self, message: String) {
         const MAX_HISTORY: usize = 100;
         self.sent_messages_history.push_back(message);
@@ -212,7 +207,6 @@ impl TuiApp {
         }
         self.message_history_index = None;
     }
-
 
     pub(crate) async fn send_user_message(&mut self, user_message: String) -> TalosResult<bool> {
         if self.close_in_progress {
@@ -261,7 +255,6 @@ impl TuiApp {
         self.dispatch_next_queued_message().await;
         Ok(true)
     }
-
 
     pub(crate) async fn dispatch_next_queued_message(&mut self) {
         if self.in_flight {
@@ -313,7 +306,6 @@ impl TuiApp {
         }
     }
 
-
     pub(crate) async fn refresh_models_from_gateway(&mut self) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {
             return Err(TalosError::ClientError(
@@ -348,7 +340,6 @@ impl TuiApp {
         Ok(())
     }
 
-
     pub(crate) fn refresh_models_command(&mut self) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {
             return Err(TalosError::ClientError(
@@ -361,7 +352,6 @@ impl TuiApp {
             RemoteCommandUpdate::ModelsLoaded(result)
         })
     }
-
 
     pub(crate) fn status_command(&mut self) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {
@@ -379,7 +369,6 @@ impl TuiApp {
             RemoteCommandUpdate::StatusLoaded(result)
         })
     }
-
 
     pub(crate) fn switch_remote_model_command(&mut self, requested: String) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {
@@ -404,7 +393,6 @@ impl TuiApp {
         })
     }
 
-
     pub(crate) fn open_history(&mut self) {
         let Some(client) = self.gateway_client.clone() else {
             self.push_block(ChatRole::System, "No gateway client connected.".to_string());
@@ -415,7 +403,6 @@ impl TuiApp {
             RemoteCommandUpdate::HistoryLoaded(client.list_sessions().await)
         });
     }
-
 
     #[allow(dead_code)]
     pub(crate) fn toggle_model_picker(&mut self) {
@@ -439,7 +426,6 @@ impl TuiApp {
         self.show_model_picker = true;
     }
 
-
     pub(crate) fn switch_to_history_session(&mut self) {
         let Some(session) = self.history_sessions.get(self.history_selected).cloned() else {
             return;
@@ -447,7 +433,6 @@ impl TuiApp {
         self.current_state = AppState::Chat;
         self.load_session_and_turns(session);
     }
-
 
     pub(crate) fn switch_to_sessions_picker(&mut self) {
         let Some(session) = self
@@ -460,7 +445,6 @@ impl TuiApp {
         self.show_sessions_picker = false;
         self.load_session_and_turns(session);
     }
-
 
     pub(crate) fn load_session_and_turns(&mut self, session: TalosSession) {
         let session_id = session.context.session_id.clone();
@@ -494,7 +478,6 @@ impl TuiApp {
         });
     }
 
-
     pub(crate) fn delete_history_session(&mut self) {
         let Some(session) = self.history_sessions.get(self.history_selected).cloned() else {
             return;
@@ -513,7 +496,6 @@ impl TuiApp {
         });
         self.push_right_event(format!("deleted session: {}", sid_log));
     }
-
 
     pub(crate) fn confirm_model_picker(&mut self) {
         let Some(model) = self
@@ -547,7 +529,6 @@ impl TuiApp {
             },
         );
     }
-
 
     pub(crate) fn close_remote_session_command(&mut self) -> TalosResult<()> {
         if self.close_in_progress {
@@ -592,8 +573,11 @@ impl TuiApp {
         Ok(())
     }
 
-
-    pub(crate) fn spawn_remote_command_task<F>(&mut self, event: impl Into<String>, fut: F) -> TalosResult<()>
+    pub(crate) fn spawn_remote_command_task<F>(
+        &mut self,
+        event: impl Into<String>,
+        fut: F,
+    ) -> TalosResult<()>
     where
         F: std::future::Future<Output = RemoteCommandUpdate> + Send + 'static,
     {
@@ -617,7 +601,6 @@ impl TuiApp {
         self.pending_command_task = Some(handle);
         Ok(())
     }
-
 
     pub(crate) async fn ensure_remote_session(&mut self) -> TalosResult<String> {
         if let Some(session_id) = self.session_id.clone() {
@@ -646,7 +629,6 @@ impl TuiApp {
         self.connection_status = "connected".to_string();
         Ok(created.context.session_id)
     }
-
 
     pub(crate) fn start_remote_session_connect(&mut self) {
         if self.session_id.is_some() || self.pending_session_connect.is_some() {
@@ -684,11 +666,9 @@ impl TuiApp {
         self.pending_session_task = Some(handle);
     }
 
-
     pub(crate) fn is_close_timed_out(&self) -> bool {
         self.close_started_at
             .map(|started_at| started_at.elapsed() >= SESSION_CLOSE_TIMEOUT)
             .unwrap_or(false)
     }
-
 }

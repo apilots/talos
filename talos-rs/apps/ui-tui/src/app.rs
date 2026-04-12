@@ -8,12 +8,13 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use talos_client::{TalosClient, TalosContext, TalosSession};
-use talos_types::talos::{TalosConnectionMode, TalosEventType, TalosSessionEnvironment, TalosUsage};
+use talos_types::talos::{
+    TalosConnectionMode, TalosEventType, TalosSessionEnvironment, TalosUsage,
+};
 
 use crate::client::GatewayClient;
 use crate::render;
-use crate::types::{AppState, ChatRole, CopyProjection,
-    RenderedChatLine};
+use crate::types::{AppState, ChatRole, CopyProjection, RenderedChatLine};
 use crate::utils::{build_welcome_card, APP_VERSION};
 use crate::{TuiApp, CHAT_CONTENT_PADDING_LEFT, WELCOME_MODEL_PLACEHOLDER};
 
@@ -26,7 +27,6 @@ impl TuiApp {
                 | TalosEventType::MessageToolCallPendingApproval
         )
     }
-
 
     pub(crate) fn build(
         gateway_client: Option<Arc<dyn GatewayClient>>,
@@ -127,12 +127,10 @@ impl TuiApp {
         app
     }
 
-
     pub fn new_with_client(client: Arc<TalosClient>, connection_mode: TalosConnectionMode) -> Self {
         let gateway_client: Arc<dyn GatewayClient> = client;
         Self::build(Some(gateway_client), connection_mode)
     }
-
 
     pub fn new_with_gateway_client(
         gateway_client: Arc<dyn GatewayClient>,
@@ -141,7 +139,6 @@ impl TuiApp {
         Self::build(Some(gateway_client), connection_mode)
     }
 
-
     pub(crate) fn session_environment(&self) -> TalosSessionEnvironment {
         TalosSessionEnvironment {
             directory: self.startup_directory.clone(),
@@ -149,13 +146,11 @@ impl TuiApp {
         }
     }
 
-
     pub(crate) fn build_session_context(&self) -> TalosContext {
         TalosContext::cli(env::var("USER").unwrap_or_else(|_| "local-user".to_string()))
             .with_channel_id("terminal")
             .with_environment(self.session_environment())
     }
-
 
     pub async fn initialize_remote(&mut self) {
         self.connection_status = "connecting".to_string();
@@ -185,27 +180,21 @@ impl TuiApp {
         }
     }
 
-
     pub fn get_current_state(&self) -> &AppState {
         &self.current_state
     }
-
 
     pub fn get_chat_history(&self) -> &[String] {
         &self.chat_history
     }
 
-
     pub fn get_input_buffer(&self) -> &String {
         &self.input_buffer
     }
 
-
     pub fn get_tool_status(&self) -> &[String] {
         &self.right_panel_events
     }
-
-
 
     pub(crate) fn is_agent_working(&self) -> bool {
         // Show spinner only if there's an empty Thinking block (streaming not yet started outputting content)
@@ -214,7 +203,6 @@ impl TuiApp {
             .map(|b| b.role == ChatRole::Thinking && b.content.is_empty())
             .unwrap_or(false)
     }
-
 
     pub(crate) fn thinking_spinner_line(&self, spinner_index: usize) -> RenderedChatLine {
         let color = render::helpers::spinning_color(spinner_index);
@@ -230,7 +218,6 @@ impl TuiApp {
             }),
         }
     }
-
 
     pub(crate) fn apply_session_snapshot(&mut self, session: &TalosSession) {
         self.session_id = Some(session.context.session_id.clone());
@@ -249,7 +236,6 @@ impl TuiApp {
         self.rebuild_chat_render_state_if_rect();
     }
 
-
     pub(crate) fn stripe_line(&self, width: usize) -> String {
         if width == 0 {
             return String::new();
@@ -264,7 +250,6 @@ impl TuiApp {
         result
     }
 
-
     pub(crate) fn chat_content_columns(&self, chat_inner: Rect) -> (Rect, Rect) {
         let chat_columns = Layout::default()
             .direction(Direction::Horizontal)
@@ -276,5 +261,4 @@ impl TuiApp {
             .split(chat_inner);
         (chat_columns[1], chat_columns[2])
     }
-
 }

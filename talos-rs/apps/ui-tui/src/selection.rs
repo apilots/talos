@@ -1,13 +1,12 @@
 use std::time::Duration;
 
-
 use crate::types::{ChatBlock, ChatRole, SelectionPoint};
-use crate::utils::{copy_to_system_clipboard, line_display_width,
-    slice_text_by_display_columns, text_display_width};
+use crate::utils::{
+    copy_to_system_clipboard, line_display_width, slice_text_by_display_columns, text_display_width,
+};
 use crate::TuiApp;
 
 impl TuiApp {
-
     pub(crate) fn copy_chat_to_clipboard(&mut self) {
         let text = self
             .chat_blocks
@@ -28,7 +27,6 @@ impl TuiApp {
             }
         };
     }
-
 
     pub(crate) fn format_block_for_round_copy(block: &ChatBlock) -> String {
         match block.role {
@@ -64,7 +62,6 @@ impl TuiApp {
         }
     }
 
-
     #[cfg(test)]
     pub(crate) fn round_bounds_for_block(&self, block_index: usize) -> Option<(usize, usize)> {
         if block_index >= self.chat_blocks.len() {
@@ -82,13 +79,11 @@ impl TuiApp {
         Some((start, end_exclusive))
     }
 
-
     #[cfg(test)]
     pub(crate) fn round_text_for_block(&self, block_index: usize) -> Option<String> {
         let (start, end_exclusive) = self.round_bounds_for_block(block_index)?;
         self.round_markdown(start, end_exclusive)
     }
-
 
     pub(crate) fn round_markdown(&self, start: usize, end_exclusive: usize) -> Option<String> {
         let text = self.chat_blocks[start..end_exclusive]
@@ -98,7 +93,6 @@ impl TuiApp {
             .join("\n\n");
         (!text.trim().is_empty()).then_some(text)
     }
-
 
     pub(crate) fn copy_round_for_start_block(&mut self, start_block_index: usize) {
         let end_exclusive = ((start_block_index + 1)..self.chat_blocks.len())
@@ -117,7 +111,6 @@ impl TuiApp {
             ),
         }
     }
-
 
     pub(crate) fn copy_selection_to_clipboard(&mut self) {
         let Some(text) = self.selected_chat_text() else {
@@ -139,7 +132,6 @@ impl TuiApp {
         }
         self.chat_selection = None;
     }
-
 
     pub(crate) fn selected_chat_text(&self) -> Option<String> {
         let (start, end) = self.normalized_selection_points()?;
@@ -180,7 +172,6 @@ impl TuiApp {
         }
     }
 
-
     pub(crate) fn normalized_selection_points(&self) -> Option<(SelectionPoint, SelectionPoint)> {
         let selection = self.chat_selection?;
         if (selection.anchor.line_index, selection.anchor.column)
@@ -191,7 +182,6 @@ impl TuiApp {
             Some((selection.focus, selection.anchor))
         }
     }
-
 
     pub(crate) fn selection_display_range_for_line(
         &self,
@@ -219,5 +209,4 @@ impl TuiApp {
 
         Some((range.0.min(width), range.1.min(width)))
     }
-
 }

@@ -4,8 +4,9 @@ use ratatui::{
 };
 use std::time::Instant;
 
-use crate::utils::{char_display_width, compact_directory_path, summarize_for_queue,
-    text_display_width};
+use crate::utils::{
+    char_display_width, compact_directory_path, summarize_for_queue, text_display_width,
+};
 use crate::TuiApp;
 use crate::MAX_QUEUE_LEN;
 

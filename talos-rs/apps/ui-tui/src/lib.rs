@@ -4,19 +4,19 @@
 
 mod app;
 mod chat;
+mod client;
 mod commands;
 mod input;
 mod markdown;
+mod render;
 pub mod run;
 mod selection;
 mod stream;
 mod types;
-mod client;
 mod utils;
-mod render;
 
-pub use run::run_tui_app_with_client;
 pub use client::GatewayClient;
+pub use run::run_tui_app_with_client;
 use types::*;
 
 use chrono::{Datelike, Local, TimeZone};
@@ -27,14 +27,9 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use talos_client::{
-    ModelInfo, TalosEvent,
-    TalosSession,
-};
+use talos_client::{ModelInfo, TalosEvent, TalosSession};
 use talos_error::TalosResult;
-use talos_types::talos::{
-    TalosConnectionMode, TalosUsage,
-};
+use talos_types::talos::{TalosConnectionMode, TalosUsage};
 use tokio::sync::mpsc;
 
 pub(crate) const WELCOME_MODEL_PLACEHOLDER: &str = "(connecting...)";
@@ -116,7 +111,8 @@ pub struct TuiApp {
     pub(crate) active_assistant_idx: Option<usize>,
     pub(crate) pending_session_connect: Option<mpsc::Receiver<TalosResult<String>>>,
     pub(crate) pending_session_task: Option<tokio::task::JoinHandle<()>>,
-    pub(crate) pending_stream_connect: Option<mpsc::Receiver<TalosResult<mpsc::Receiver<TalosEvent>>>>,
+    pub(crate) pending_stream_connect:
+        Option<mpsc::Receiver<TalosResult<mpsc::Receiver<TalosEvent>>>>,
     pub(crate) pending_stream_task: Option<tokio::task::JoinHandle<()>>,
     pub(crate) pending_stream: Option<mpsc::Receiver<TalosEvent>>,
     pub(crate) pending_command_update: Option<mpsc::Receiver<RemoteCommandUpdate>>,
@@ -156,7 +152,6 @@ pub struct TuiApp {
 }
 
 impl TuiApp {
-
     #[cfg(test)]
     fn input_line_plain(&self) -> String {
         let chars: Vec<char> = self.input_buffer.chars().collect();
@@ -174,6 +169,11 @@ impl TuiApp {
     }
 }
 
+#[cfg(test)]
+mod test_support;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
+
+#[cfg(test)]
+mod e2e_tests;

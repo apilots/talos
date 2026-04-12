@@ -9,4 +9,4 @@ load_env
 build_binaries
 
 cd "${ROOT_DIR}"
-cargo test -p talos-ui-tui test_embedded_quit_flushes_memory_after_runtime_shutdown -- --ignored --nocapture
+cargo test -p talos-ui-tui e2e_tests::embedded_quit_flush_tests::test_embedded_quit_flushes_memory_after_runtime_shutdown -- --ignored --nocapture

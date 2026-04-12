@@ -3,12 +3,13 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
-use crate::types::{AppState, ChatRole, ChatSelection, CommandSuggestion, PastedTextBlock, SelectionPoint};
+use crate::types::{
+    AppState, ChatRole, ChatSelection, CommandSuggestion, PastedTextBlock, SelectionPoint,
+};
 use crate::utils::byte_index_at_char;
 use crate::{TuiApp, PASTED_BLOCK_CHAR_THRESHOLD};
 
 impl TuiApp {
-
     pub fn handle_paste(&mut self, text: String) {
         if text.is_empty() {
             return;
@@ -30,7 +31,6 @@ impl TuiApp {
             self.insert_text(&text);
         }
     }
-
 
     pub async fn handle_input(&mut self, key_event: KeyEvent) -> Result<bool, Box<dyn Error>> {
         // Approval mode intercepts y/n/Enter/Esc
@@ -291,7 +291,6 @@ impl TuiApp {
         }
     }
 
-
     pub(crate) fn sync_command_input_to_main_buffer(&mut self) {
         self.input_buffer = if self.command_input_buffer.is_empty() {
             "/".to_string()
@@ -300,7 +299,6 @@ impl TuiApp {
         };
         self.cursor_index = self.input_buffer.chars().count();
     }
-
 
     pub(crate) fn insert_char(&mut self, c: char) {
         // Trigger command autocomplete when typing /
@@ -318,19 +316,16 @@ impl TuiApp {
         self.cursor_index += 1;
     }
 
-
     pub(crate) fn insert_text(&mut self, text: &str) {
         let idx = byte_index_at_char(&self.input_buffer, self.cursor_index);
         self.input_buffer.insert_str(idx, text);
         self.cursor_index += text.chars().count();
     }
 
-
     pub(crate) fn update_command_suggestions(&mut self) {
         self.command_suggestions = CommandSuggestion::filter(&self.command_input_buffer);
         self.command_autocomplete_selected = 0;
     }
-
 
     pub(crate) fn handle_backspace(&mut self) {
         if self.cursor_index == 0 {
@@ -343,7 +338,6 @@ impl TuiApp {
         self.cursor_index -= 1;
     }
 
-
     pub(crate) fn reset_input(&mut self) {
         self.input_buffer.clear();
         self.cursor_index = 0;
@@ -351,8 +345,11 @@ impl TuiApp {
         self.selected_pasted_block = None;
     }
 
-
-    pub(crate) fn restore_input_state(&mut self, input_buffer: String, pasted_blocks: Vec<PastedTextBlock>) {
+    pub(crate) fn restore_input_state(
+        &mut self,
+        input_buffer: String,
+        pasted_blocks: Vec<PastedTextBlock>,
+    ) {
         self.input_buffer = input_buffer;
         self.cursor_index = self.input_buffer.chars().count();
         self.pasted_blocks = pasted_blocks;
@@ -363,21 +360,17 @@ impl TuiApp {
         };
     }
 
-
     pub(crate) fn should_store_as_pasted_block(text: &str) -> bool {
         text.chars().count() > PASTED_BLOCK_CHAR_THRESHOLD
     }
-
 
     pub(crate) fn has_composer_input(&self) -> bool {
         self.input_buffer.chars().any(|ch| !ch.is_whitespace())
     }
 
-
     pub(crate) fn is_command_input(&self) -> bool {
         self.pasted_blocks.is_empty() && self.input_buffer.trim().starts_with('/')
     }
-
 
     pub(crate) fn compose_user_input_text(&self) -> String {
         let mut composed = self.input_buffer.clone();
@@ -387,11 +380,9 @@ impl TuiApp {
         composed
     }
 
-
     pub(crate) fn show_status_hint(&mut self, message: impl Into<String>, ttl: Duration) {
         self.status_hint = Some((message.into(), Instant::now() + ttl));
     }
-
 
     pub(crate) async fn cancel_active_turn(&mut self) {
         let Some(session_id) = self.session_id.clone() else {
@@ -414,36 +405,30 @@ impl TuiApp {
         }
     }
 
-
     pub(crate) fn scroll_chat_up(&mut self, lines: u16) {
         self.chat_manual_scroll = true;
         self.chat_scroll = self.chat_scroll.saturating_sub(lines);
     }
-
 
     pub(crate) fn scroll_chat_down(&mut self, lines: u16) {
         self.chat_manual_scroll = true;
         self.chat_scroll = self.chat_scroll.saturating_add(lines);
     }
 
-
     pub(crate) fn scroll_chat_top(&mut self) {
         self.chat_manual_scroll = true;
         self.chat_scroll = 0;
     }
 
-
     pub(crate) fn scroll_chat_bottom(&mut self) {
         self.chat_manual_scroll = false;
     }
-
 
     pub(crate) fn request_follow_bottom(&mut self) {
         if !self.chat_manual_scroll {
             self.chat_scroll = u16::MAX;
         }
     }
-
 
     pub(crate) fn handle_mouse(&mut self, mouse_event: MouseEvent) {
         match mouse_event.kind {
@@ -497,8 +482,10 @@ impl TuiApp {
         }
     }
 
-
-    pub(crate) fn selection_point_from_mouse(&self, mouse_event: MouseEvent) -> Option<SelectionPoint> {
+    pub(crate) fn selection_point_from_mouse(
+        &self,
+        mouse_event: MouseEvent,
+    ) -> Option<SelectionPoint> {
         let rect = self.chat_content_rect?;
         if rect.width == 0 || rect.height == 0 {
             return None;
@@ -522,5 +509,4 @@ impl TuiApp {
             column: mouse_event.column.saturating_sub(rect.x) as usize,
         })
     }
-
 }

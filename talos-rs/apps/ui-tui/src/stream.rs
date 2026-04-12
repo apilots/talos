@@ -1,7 +1,8 @@
 use std::time::{Duration, Instant};
 
-use talos_client::{TalosContentItem, TalosEvent, TalosEventPayload, TalosInputItem,
-    TalosMessageRequest};
+use talos_client::{
+    TalosContentItem, TalosEvent, TalosEventPayload, TalosInputItem, TalosMessageRequest,
+};
 use talos_error::{TalosError, TalosResult};
 use talos_types::talos::TalosEventType;
 use tokio::sync::mpsc;
@@ -13,7 +14,6 @@ use crate::utils::{canonical_event_label, summarize_for_queue};
 use crate::{TuiApp, MAX_RIGHT_EVENTS, SPINNER_FRAMES, STREAM_STALL_TIMEOUT};
 
 impl TuiApp {
-
     pub fn poll_stream_events(&mut self) {
         let mut should_drop_stream = false;
 
@@ -39,7 +39,6 @@ impl TuiApp {
             self.finish_active_stream("stream disconnected", true, false);
         }
     }
-
 
     pub(crate) async fn poll_stream_connect(&mut self) {
         let mut connect_result: Option<TalosResult<mpsc::Receiver<TalosEvent>>> = None;
@@ -108,7 +107,6 @@ impl TuiApp {
         }
     }
 
-
     pub(crate) fn poll_session_connect(&mut self) {
         let mut connect_result: Option<TalosResult<String>> = None;
         let mut should_clear = false;
@@ -151,7 +149,6 @@ impl TuiApp {
             None => {}
         }
     }
-
 
     pub(crate) fn poll_command_updates(&mut self) {
         let mut update: Option<RemoteCommandUpdate> = None;
@@ -334,7 +331,6 @@ impl TuiApp {
         }
     }
 
-
     pub(crate) fn poll_close_updates(&mut self) {
         let mut result: Option<TalosResult<String>> = None;
         let mut should_clear = false;
@@ -389,7 +385,6 @@ impl TuiApp {
         }
     }
 
-
     pub(crate) fn poll_close_timeout(&mut self) {
         if !self.close_in_progress || self.close_timeout_reported {
             return;
@@ -404,7 +399,6 @@ impl TuiApp {
             self.push_right_event("session close timed out".to_string());
         }
     }
-
 
     pub async fn on_tick(&mut self) {
         self.spinner_index = (self.spinner_index + 1) % SPINNER_FRAMES.len();
@@ -466,12 +460,13 @@ impl TuiApp {
         }
     }
 
-
-    pub(crate) async fn start_stream_for_message(&mut self, user_message: String) -> TalosResult<()> {
+    pub(crate) async fn start_stream_for_message(
+        &mut self,
+        user_message: String,
+    ) -> TalosResult<()> {
         self.start_stream_for_message_internal(user_message, true)
             .await
     }
-
 
     pub(crate) async fn start_stream_for_message_internal(
         &mut self,
@@ -538,7 +533,6 @@ impl TuiApp {
 
         Ok(())
     }
-
 
     pub(crate) fn handle_stream_event(&mut self, event: TalosEvent) {
         self.trace_event_count = self.trace_event_count.saturating_add(1);
@@ -707,7 +701,6 @@ impl TuiApp {
         }
     }
 
-
     pub(crate) fn start_tool_output_buffering(&mut self) {
         if self.stream_has_tool_calls {
             return;
@@ -733,7 +726,6 @@ impl TuiApp {
         }
     }
 
-
     pub(crate) fn flush_pending_assistant_output(&mut self) {
         if self.pending_assistant_output.is_empty() {
             return;
@@ -741,7 +733,6 @@ impl TuiApp {
         let buffered = std::mem::take(&mut self.pending_assistant_output);
         self.append_assistant(&buffered);
     }
-
 
     pub(crate) fn append_assistant(&mut self, text: &str) {
         if text.is_empty() {
@@ -762,7 +753,6 @@ impl TuiApp {
         self.request_follow_bottom();
     }
 
-
     pub(crate) fn append_thinking(&mut self, text: &str) {
         let idx = if let Some(idx) = self.active_thinking_idx {
             idx
@@ -779,7 +769,6 @@ impl TuiApp {
         self.request_follow_bottom();
     }
 
-
     pub(crate) fn push_right_event(&mut self, event: String) {
         self.right_panel_events.push(event);
         if self.right_panel_events.len() > MAX_RIGHT_EVENTS {
@@ -792,15 +781,18 @@ impl TuiApp {
         }
     }
 
-
     pub(crate) fn abort_pending_stream_task(&mut self) {
         if let Some(handle) = self.pending_stream_task.take() {
             handle.abort();
         }
     }
 
-
-    pub(crate) fn finish_active_stream(&mut self, reason: &str, is_error: bool, keep_active_payload: bool) {
+    pub(crate) fn finish_active_stream(
+        &mut self,
+        reason: &str,
+        is_error: bool,
+        keep_active_payload: bool,
+    ) {
         let completed_round_timing_ms = if !is_error {
             self.stream_started_at
                 .map(|started_at| started_at.elapsed().as_millis() as u64)
@@ -842,7 +834,6 @@ impl TuiApp {
         });
     }
 
-
     pub(crate) fn sync_history_entry(&mut self, idx: usize) {
         if let Some(block) = self.chat_blocks.get(idx) {
             let entry = format!("{}\n{}", block.role.as_str(), block.content);
@@ -853,5 +844,4 @@ impl TuiApp {
             }
         }
     }
-
 }

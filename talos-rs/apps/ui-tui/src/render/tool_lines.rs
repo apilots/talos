@@ -50,7 +50,9 @@ impl TuiApp {
         let render_data = Self::build_tool_render_data(block, tool_name);
         let (summary_text, summary_color) = match block.tool_status {
             Some(ToolCallStatus::Running) => (render_data.summary, Color::Yellow),
-            Some(ToolCallStatus::Completed { exit_ok: true }) => (render_data.summary, Color::Green),
+            Some(ToolCallStatus::Completed { exit_ok: true }) => {
+                (render_data.summary, Color::Green)
+            }
             Some(ToolCallStatus::Completed { exit_ok: false }) => (render_data.summary, Color::Red),
             None => (render_data.summary, Color::Gray),
         };

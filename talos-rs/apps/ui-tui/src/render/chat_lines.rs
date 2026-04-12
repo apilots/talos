@@ -6,9 +6,7 @@ use ratatui::{
 
 use crate::markdown::render_markdown_lines;
 use crate::render::helpers;
-use crate::types::{
-    ChatBlock, ChatRole, CopyProjection, RenderedChatLine, RoundFooterButton,
-};
+use crate::types::{ChatBlock, ChatRole, CopyProjection, RenderedChatLine, RoundFooterButton};
 use crate::utils::{
     highlight_line_columns, line_display_width, line_plain_text, text_display_width,
     wrap_line_visual,
