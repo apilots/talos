@@ -44,7 +44,7 @@ pub struct TalosServerRuntime {
 }
 
 const MEMORY_FLUSH_DRAIN_TIMEOUT: Duration = Duration::from_secs(60);
-const SERVER_SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(75);
+const SERVER_SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(180);
 
 #[derive(Clone)]
 pub struct TalosServerHandle {
@@ -243,7 +243,7 @@ pub async fn start_server(
     let agent: Arc<dyn AgentOrchestrator> = Arc::new(agent);
 
     let mut coordinator_builder = CoordinatorImpl::new(router, session_store, config.clone())
-        .with_channel_dm_scope("telegram", config.channels.telegram.dm_scope.clone())
+        .with_channel_dm_scope("telegram", config.channels.telegram.dm_scope.to_string())
         .with_default_workspace_id(config.agent.kernel.default_workspace_id.clone());
     coordinator_builder = coordinator_builder.with_session_title_generator(llm_provider.clone());
     let coordinator = Arc::new(coordinator_builder);

@@ -3,6 +3,9 @@
 **版本**: v2.0  
 **最后更新**: 2026-03-14
 
+> 说明：本文档描述 Talos 的目标架构与设计意图，不作为实时 crate 清单。
+> 当前实际挂载模块以 `Cargo.toml` workspace members 与 `README.md` 为准。
+
 ---
 
 ## 项目背景

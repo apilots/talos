@@ -6,56 +6,33 @@ members = [
     "crates/common/llm/anthropic",
     "crates/common/llm/bailian",
     "crates/common/llm/openai",
-    "crates/common/llm/ollama",
     "crates/common/prompt",
     "crates/common/types",
     # Infra
     "crates/infra/error",
     "crates/infra/config",
     "crates/infra/logging",
-    "crates/infra/runtime",
     "crates/infra/storage",
     "crates/infra/auth",
     # Perception
-    "crates/perception/input",
     "crates/perception/channels",
-    "crates/perception/listener",
-    "crates/perception/transport",
     # Cognition
     "crates/cognition/memory",
-    "crates/cognition/memory-store",
-    "crates/cognition/knowledge",
-    "crates/cognition/reasoning",
-    "crates/cognition/decision",
     # Action
     "crates/action/tools",
     "crates/action/tools-policy",
     "crates/action/tools-sandbox",
-    "crates/action/output",
-    "crates/action/skill",
     # Orchestration
     "crates/orchestration/agent-kernel",
     "crates/orchestration/agent",
-    "crates/orchestration/agent-workspace",
     "crates/orchestration/session-store",
     "crates/orchestration/router",
-    "crates/orchestration/scheduler",
-    "crates/orchestration/planner",
     "crates/orchestration/coordinator",
-    "crates/orchestration/queue",
     # Gateway
     "crates/gateway/core",
-    "crates/gateway/ws",
-    "crates/gateway/health",
     "crates/gateway/http",
-    "crates/gateway/event-bus",
     # App
     "crates/app/talos-server",
-    # Meta
-    "crates/meta/monitor",
-    "crates/meta/learner",
-    "crates/meta/personality",
-    "crates/meta/maintenance",
     # Apps
     "apps/sdk",
     "apps/cli",
@@ -98,9 +75,7 @@ toml = "0.8"
 sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio"] }
 redis = "0.24"
 
-# WebSocket
-tokio-tungstenite = "0.21"
-warp = "0.3"
+# Networking
 futures-util = "0.3"
 
 # Utils
@@ -120,14 +95,12 @@ talos-tools-sandbox = { path = "crates/action/tools-sandbox" }
 talos-memory = { path = "crates/cognition/memory" }
 talos-auth = { path = "crates/infra/auth" }
 talos-gateway = { path = "crates/gateway/core" }
-talos-event-bus = { path = "crates/gateway/event-bus" }
 talos-agent-kernel = { path = "crates/orchestration/agent-kernel" }
 talos-llm-provider = { path = "crates/common/llm/provider" }
 talos-prompt = { path = "crates/common/prompt" }
 talos-llm-anthropic = { path = "crates/common/llm/anthropic" }
 talos-llm-bailian = { path = "crates/common/llm/bailian" }
 talos-llm-openai = { path = "crates/common/llm/openai" }
-talos-llm-ollama = { path = "crates/common/llm/ollama" }
 talos-config = { path = "crates/infra/config" }
 talos-logging = { path = "crates/infra/logging" }
 talos-storage = { path = "crates/infra/storage" }

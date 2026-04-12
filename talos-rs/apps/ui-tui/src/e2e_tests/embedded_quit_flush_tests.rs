@@ -1,5 +1,22 @@
 use super::*;
 
+struct ScopedFileCleanup {
+    path: PathBuf,
+}
+
+impl ScopedFileCleanup {
+    fn new(path: PathBuf) -> Self {
+        let _ = std::fs::remove_file(&path);
+        Self { path }
+    }
+}
+
+impl Drop for ScopedFileCleanup {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
 #[tokio::test]
 #[ignore = "slow real-llm embedded flow"]
 async fn test_embedded_quit_flushes_memory_after_runtime_shutdown() {
@@ -7,6 +24,10 @@ async fn test_embedded_quit_flushes_memory_after_runtime_shutdown() {
     if !real_llm_env_available() {
         return;
     }
+    let cwd_memory = std::env::current_dir()
+        .expect("current dir should resolve")
+        .join("MEMORY.md");
+    let _cleanup_guard = ScopedFileCleanup::new(cwd_memory);
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let config_path = manifest_dir.join("../../conf/talos.yaml");
@@ -60,7 +81,8 @@ async fn test_embedded_quit_flushes_memory_after_runtime_shutdown() {
     app.initialize_remote().await;
 
     app.input_buffer =
-        "Please remember that embedded quit should flush memory on shutdown.".to_string();
+        "Remember this stable preference: I prefer oolong tea over coffee. Reply with exactly: embedded-quit-ok"
+            .to_string();
     app.cursor_index = app.input_buffer.chars().count();
     let should_quit = app
         .submit_input()
@@ -68,7 +90,7 @@ async fn test_embedded_quit_flushes_memory_after_runtime_shutdown() {
         .expect("message submit should succeed");
     assert!(!should_quit);
 
-    let message_deadline = tokio::time::Instant::now() + Duration::from_secs(90);
+    let message_deadline = tokio::time::Instant::now() + Duration::from_secs(180);
     while tokio::time::Instant::now() < message_deadline {
         app.on_tick().await;
         if !app.in_flight
@@ -81,8 +103,15 @@ async fn test_embedded_quit_flushes_memory_after_runtime_shutdown() {
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
     assert!(
-        !app.in_flight && app.message_queue.is_empty(),
-        "embedded app should finish the turn before quit"
+        !app.in_flight
+            && app.message_queue.is_empty()
+            && app.pending_stream.is_none()
+            && app.pending_stream_connect.is_none(),
+        "embedded app should finish the turn before quit (in_flight={}, queue_len={}, pending_stream={}, pending_connect={})",
+        app.in_flight,
+        app.message_queue.len(),
+        app.pending_stream.is_some(),
+        app.pending_stream_connect.is_some()
     );
 
     app.input_buffer = "/quit".to_string();
@@ -114,6 +143,7 @@ async fn test_embedded_quit_flushes_memory_after_runtime_shutdown() {
 
     let memory_dir = workspace_dir.join("memory");
     let mut found_session_entry = false;
+    let mut markdown_files = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&memory_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -122,6 +152,11 @@ async fn test_embedded_quit_flushes_memory_after_runtime_shutdown() {
             }
             let content =
                 std::fs::read_to_string(&path).expect("workspace memory file should be readable");
+            markdown_files.push(format!(
+                "{} => {}",
+                path.display(),
+                content.lines().take(8).collect::<Vec<_>>().join(" | ")
+            ));
             if content.contains("session:") {
                 found_session_entry = true;
                 break;
@@ -131,6 +166,8 @@ async fn test_embedded_quit_flushes_memory_after_runtime_shutdown() {
 
     assert!(
         found_session_entry,
-        "embedded quit should flush workspace memory into markdown files"
+        "embedded quit should flush workspace memory into markdown files; memory_dir={}, files={:?}",
+        memory_dir.display(),
+        markdown_files
     );
 }

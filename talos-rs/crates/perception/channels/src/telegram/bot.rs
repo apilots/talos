@@ -2,7 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use talos_config::TelegramAccountConfig as ConfigAccountConfig;
+use talos_config::{
+    DmPolicy as ConfigDmPolicy, GroupPolicy as ConfigGroupPolicy,
+    TelegramAccountConfig as ConfigAccountConfig, TelegramMode as ConfigTelegramMode,
+};
 use talos_error::{TalosError, TalosResult};
 use tokio::sync::RwLock;
 use tracing::info;
@@ -70,11 +73,11 @@ impl TelegramChannel {
                     id: "default".to_string(),
                     token: token.clone(),
                     token_file: None,
-                    dm_policy: parse_dm_policy(&config.dm_policy),
-                    group_policy: parse_group_policy(&config.group_policy),
+                    dm_policy: map_dm_policy(config.dm_policy),
+                    group_policy: map_group_policy(config.group_policy),
                     allow_from: config.allow_from.clone(),
                     group_allow_from: config.group_allow_from.clone(),
-                    mode: parse_mode(&config.mode),
+                    mode: map_mode(config.mode),
                     webhook_url: config.webhook_url.clone(),
                     groups: vec![],
                 });
@@ -275,11 +278,11 @@ impl AccountConfig {
             id: cfg.id.clone(),
             token: cfg.token.clone().unwrap_or_default(),
             token_file: cfg.token_file.clone(),
-            dm_policy: parse_dm_policy(&cfg.dm_policy),
-            group_policy: parse_group_policy(&cfg.group_policy),
+            dm_policy: map_dm_policy(cfg.dm_policy),
+            group_policy: map_group_policy(cfg.group_policy),
             allow_from: cfg.allow_from.clone(),
             group_allow_from: cfg.group_allow_from.clone(),
-            mode: parse_mode(&cfg.mode),
+            mode: map_mode(cfg.mode),
             webhook_url: cfg.webhook_url.clone(),
             groups: cfg.groups.iter().map(GroupConfig::from_config).collect(),
         }
@@ -328,33 +331,36 @@ pub enum Mode {
     Webhook,
 }
 
-fn parse_dm_policy(s: &str) -> DmPolicy {
-    match s {
-        "pairing" => DmPolicy::Pairing,
-        "allowlist" => DmPolicy::Allowlist,
-        _ => DmPolicy::Open,
+fn map_dm_policy(policy: ConfigDmPolicy) -> DmPolicy {
+    match policy {
+        ConfigDmPolicy::Open => DmPolicy::Open,
+        ConfigDmPolicy::Pairing => DmPolicy::Pairing,
+        ConfigDmPolicy::Allowlist => DmPolicy::Allowlist,
     }
 }
 
-fn parse_group_policy(s: &str) -> GroupPolicy {
-    match s {
-        "open" => GroupPolicy::Open,
-        "allowlist" => GroupPolicy::Allowlist,
-        _ => GroupPolicy::Mention,
+fn map_group_policy(policy: ConfigGroupPolicy) -> GroupPolicy {
+    match policy {
+        ConfigGroupPolicy::Open => GroupPolicy::Open,
+        ConfigGroupPolicy::Mention => GroupPolicy::Mention,
+        ConfigGroupPolicy::Allowlist => GroupPolicy::Allowlist,
     }
 }
 
-fn parse_mode(s: &str) -> Mode {
-    match s {
-        "webhook" => Mode::Webhook,
-        _ => Mode::Polling,
+fn map_mode(mode: ConfigTelegramMode) -> Mode {
+    match mode {
+        ConfigTelegramMode::Polling => Mode::Polling,
+        ConfigTelegramMode::Webhook => Mode::Webhook,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use talos_config::{Config, TelegramAccountConfig, TelegramChannelsConfig};
+    use talos_config::{
+        Config, DmPolicy as ConfigDmPolicy, GroupPolicy as ConfigGroupPolicy,
+        TelegramAccountConfig, TelegramChannelsConfig, TelegramMode as ConfigTelegramMode,
+    };
 
     #[test]
     fn test_channel_definition() {
@@ -368,25 +374,31 @@ mod tests {
 
     #[test]
     fn test_parse_dm_policy() {
-        assert_eq!(parse_dm_policy("open"), DmPolicy::Open);
-        assert_eq!(parse_dm_policy("pairing"), DmPolicy::Pairing);
-        assert_eq!(parse_dm_policy("allowlist"), DmPolicy::Allowlist);
-        assert_eq!(parse_dm_policy("unknown"), DmPolicy::Open);
+        assert_eq!(map_dm_policy(ConfigDmPolicy::Open), DmPolicy::Open);
+        assert_eq!(map_dm_policy(ConfigDmPolicy::Pairing), DmPolicy::Pairing);
+        assert_eq!(
+            map_dm_policy(ConfigDmPolicy::Allowlist),
+            DmPolicy::Allowlist
+        );
     }
 
     #[test]
     fn test_parse_group_policy() {
-        assert_eq!(parse_group_policy("open"), GroupPolicy::Open);
-        assert_eq!(parse_group_policy("mention"), GroupPolicy::Mention);
-        assert_eq!(parse_group_policy("allowlist"), GroupPolicy::Allowlist);
-        assert_eq!(parse_group_policy("unknown"), GroupPolicy::Mention);
+        assert_eq!(map_group_policy(ConfigGroupPolicy::Open), GroupPolicy::Open);
+        assert_eq!(
+            map_group_policy(ConfigGroupPolicy::Mention),
+            GroupPolicy::Mention
+        );
+        assert_eq!(
+            map_group_policy(ConfigGroupPolicy::Allowlist),
+            GroupPolicy::Allowlist
+        );
     }
 
     #[test]
     fn test_parse_mode() {
-        assert_eq!(parse_mode("polling"), Mode::Polling);
-        assert_eq!(parse_mode("webhook"), Mode::Webhook);
-        assert_eq!(parse_mode("unknown"), Mode::Polling);
+        assert_eq!(map_mode(ConfigTelegramMode::Polling), Mode::Polling);
+        assert_eq!(map_mode(ConfigTelegramMode::Webhook), Mode::Webhook);
     }
 
     #[test]
