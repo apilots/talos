@@ -1,0 +1,660 @@
+    use super::*;
+
+    #[test]
+    fn test_input_cursor_and_backspace() {
+        let mut app = create_embedded_app();
+        app.insert_char('a');
+        app.insert_char('b');
+        app.cursor_index = 1;
+        app.handle_backspace();
+        assert_eq!(app.get_input_buffer(), "b");
+        assert_eq!(app.input_line_plain(), "❯ █b");
+    }
+
+    #[test]
+    fn test_handle_paste_stores_long_multiline_text_as_block() {
+        let mut app = create_embedded_app();
+        let pasted = format!("{}\n{}", "A".repeat(420), "B".repeat(420));
+
+        app.handle_paste(pasted.clone());
+
+        assert_eq!(app.pasted_blocks.len(), 1);
+        assert_eq!(app.pasted_blocks[0].text, pasted);
+        assert_eq!(app.input_buffer, app.pasted_blocks[0].marker);
+    }
+
+    #[test]
+    fn test_handle_paste_stores_long_single_line_text_as_block() {
+        let mut app = create_embedded_app();
+        let pasted = "A".repeat(801);
+
+        app.handle_paste(pasted.clone());
+
+        assert_eq!(app.pasted_blocks.len(), 1);
+        assert_eq!(app.pasted_blocks[0].text, pasted);
+        assert_eq!(app.input_buffer, app.pasted_blocks[0].marker);
+    }
+
+    #[test]
+    fn test_handle_paste_inserts_short_multiline_text_into_draft() {
+        let mut app = create_embedded_app();
+
+        app.handle_paste("alpha\nbeta".to_string());
+
+        assert_eq!(app.input_buffer, "alpha\nbeta");
+        assert_eq!(app.cursor_index, "alpha\nbeta".chars().count());
+        assert!(app.pasted_blocks.is_empty());
+        let rendered = app
+            .input_lines(80, 5)
+            .into_iter()
+            .map(|line| line_plain_text(&line))
+            .collect::<Vec<_>>();
+        assert_eq!(rendered, vec!["❯ alpha", "  beta█"]);
+    }
+
+    #[test]
+    fn test_short_long_single_line_paste_wraps_inside_draft() {
+        let mut app = create_embedded_app();
+        let pasted = "A".repeat(120);
+
+        app.handle_paste(pasted);
+
+        assert!(app.pasted_blocks.is_empty());
+        assert_eq!(app.composer_line_count(24), 6);
+        let rendered = app
+            .input_lines(24, 8)
+            .into_iter()
+            .map(|line| line_plain_text(&line))
+            .collect::<Vec<_>>();
+        assert!(rendered.len() > 1);
+        let expected_first_line = format!("❯ {}", "A".repeat(22));
+        assert_eq!(
+            rendered.first().map(String::as_str),
+            Some(expected_first_line.as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_backspace_removes_last_character_when_input_is_not_empty() {
+        let mut app = create_embedded_app();
+        app.input_buffer = "ab".to_string();
+        app.cursor_index = 2;
+
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE))
+            .await
+            .unwrap();
+
+        assert_eq!(app.input_buffer, "a");
+        assert_eq!(app.cursor_index, 1);
+    }
+
+    #[tokio::test]
+    async fn test_tab_toggles_last_tool_block_without_pasted_behavior() {
+        let mut app = create_embedded_app();
+        let idx = app.push_block(
+            ChatRole::Tool,
+            "Tool: read_file\nstatus: completed\nresult: ok".to_string(),
+        );
+        if let Some(block) = app.chat_blocks.get_mut(idx) {
+            block.expanded = false;
+        }
+
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .await
+            .unwrap();
+        assert!(app.chat_blocks[idx].expanded);
+
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT))
+            .await
+            .unwrap();
+        assert!(!app.chat_blocks[idx].expanded);
+    }
+
+    #[tokio::test]
+    async fn test_backspace_at_empty_input_removes_last_pasted_block() {
+        let mut app = create_embedded_app();
+        app.handle_paste(format!("{}\n{}", "A".repeat(420), "B".repeat(420)));
+        app.handle_paste(format!("{}\n{}", "X".repeat(420), "Y".repeat(420)));
+        app.input_buffer = app.pasted_blocks[0].marker.clone();
+        app.cursor_index = app.input_buffer.chars().count();
+
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE))
+            .await
+            .unwrap();
+
+        assert_eq!(app.pasted_blocks.len(), 2);
+        assert_eq!(
+            app.input_buffer,
+            app.pasted_blocks[0]
+                .marker
+                .chars()
+                .take(
+                    app.pasted_blocks[0]
+                        .marker
+                        .chars()
+                        .count()
+                        .saturating_sub(1)
+                )
+                .collect::<String>()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_escape_cancels_in_flight_turn() {
+        let client = Arc::new(MockGatewayClient::new());
+        let state = client.state.clone();
+        let gateway_client: Arc<dyn GatewayClient> = client;
+        let mut app = TuiApp::new_with_gateway_client(gateway_client, TalosConnectionMode::Remote);
+        app.session_id = Some("sess-test".to_string());
+        app.in_flight = true;
+
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            state.lock().unwrap().cancelled_sessions,
+            vec!["sess-test".to_string()]
+        );
+        assert!(app
+            .status_hint
+            .as_ref()
+            .map(|(msg, _)| msg.contains("Cancelling current turn"))
+            .unwrap_or(false));
+    }
+
+    #[tokio::test]
+    async fn test_escape_without_in_flight_clears_local_selection_only() {
+        let client = Arc::new(MockGatewayClient::new());
+        let state = client.state.clone();
+        let gateway_client: Arc<dyn GatewayClient> = client;
+        let mut app = TuiApp::new_with_gateway_client(gateway_client, TalosConnectionMode::Remote);
+        app.chat_selection = Some(ChatSelection {
+            anchor: SelectionPoint {
+                line_index: 0,
+                column: 0,
+            },
+            focus: SelectionPoint {
+                line_index: 0,
+                column: 3,
+            },
+        });
+        app.selected_pasted_block = Some(0);
+
+        let _ = app
+            .handle_input(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .await
+            .unwrap();
+
+        assert!(app.chat_selection.is_none());
+        assert!(app.selected_pasted_block.is_none());
+        assert!(state.lock().unwrap().cancelled_sessions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_submit_input_composes_pasted_blocks_into_plain_text_message() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+        let pasted = format!("{}\n{}", "A".repeat(420), "B".repeat(420));
+        app.input_buffer = "Explain this log\n\n".to_string();
+        app.cursor_index = app.input_buffer.chars().count();
+        app.handle_paste(pasted.clone());
+        app.cursor_index = app.input_buffer.chars().count();
+
+        let should_quit = app.submit_input().await.unwrap();
+
+        assert!(!should_quit);
+        let user_messages = app
+            .chat_blocks
+            .iter()
+            .filter(|b| b.role == ChatRole::User)
+            .map(|b| b.content.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            user_messages,
+            vec![format!("Explain this log\n\n{}", pasted)]
+        );
+        assert!(app.pasted_blocks.is_empty());
+        assert!(app.input_buffer.is_empty());
+    }
+
+    #[test]
+    fn test_compose_user_input_text_expands_pasted_blocks_without_markers() {
+        let mut app = create_embedded_app();
+        let marker = "[Pasted text #1 · 2 lines]".to_string();
+        app.input_buffer = format!("Explain this log\n\n{}", marker);
+        app.cursor_index = app.input_buffer.chars().count();
+        app.pasted_blocks
+            .push(PastedTextBlock::new(marker, "line1\nline2".to_string()));
+
+        let composed = app.compose_user_input_text();
+
+        assert_eq!(composed, "Explain this log\n\nline1\nline2");
+    }
+
+    #[tokio::test]
+    async fn test_submit_input_restores_pasted_blocks_when_queue_is_full() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+
+        assert!(app.send_user_message("m1".to_string()).await.unwrap());
+        assert!(app.send_user_message("m2".to_string()).await.unwrap());
+        assert!(app.send_user_message("m3".to_string()).await.unwrap());
+        assert!(app.send_user_message("m4".to_string()).await.unwrap());
+        assert_eq!(app.message_queue.len(), 3);
+
+        let pasted = format!("{}\n{}", "A".repeat(420), "B".repeat(420));
+        app.input_buffer = "overflow\n\n".to_string();
+        app.cursor_index = app.input_buffer.chars().count();
+        app.handle_paste(pasted.clone());
+        app.cursor_index = app.input_buffer.chars().count();
+
+        let should_quit = app.submit_input().await.unwrap();
+
+        assert!(!should_quit);
+        assert!(app.input_buffer.starts_with("overflow\n\n[Pasted text #1"));
+        assert_eq!(app.pasted_blocks.len(), 1);
+        assert_eq!(app.pasted_blocks[0].text, pasted);
+    }
+
+    #[tokio::test]
+    async fn test_remote_initialize_creates_session_and_models() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+        assert_eq!(app.session_id.as_deref(), Some("sess-test"));
+        assert!(app.available_models.iter().any(|m| m == "qwen-plus"));
+        assert_eq!(app.connection_status, "connected");
+    }
+
+    #[tokio::test]
+    async fn test_model_command_updates_remote_session_model() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+        app.input_buffer = "/model gpt-5.3 medium".to_string();
+        app.cursor_index = app.input_buffer.chars().count();
+        let should_quit = app.submit_input().await.unwrap();
+        for _ in 0..10 {
+            app.on_tick().await;
+            tokio::task::yield_now().await;
+            if app.pending_command_update.is_none() {
+                break;
+            }
+        }
+        assert!(!should_quit);
+        assert_eq!(app.current_model, "gpt-5.3 medium");
+    }
+
+    #[tokio::test]
+    async fn test_send_message_stream_updates_assistant_block() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+        assert!(app.send_user_message("hello".to_string()).await.unwrap());
+
+        for _ in 0..40 {
+            app.on_tick().await;
+            tokio::task::yield_now().await;
+            if !app.in_flight && app.message_queue.is_empty() {
+                break;
+            }
+        }
+
+        let assistant = app
+            .chat_blocks
+            .iter()
+            .find(|b| b.role == ChatRole::Assistant)
+            .map(|b| b.content.clone())
+            .unwrap_or_default();
+        assert!(assistant.contains("# Title"));
+        assert!(assistant.contains("- item"));
+        let user_messages = app
+            .chat_blocks
+            .iter()
+            .filter(|b| b.role == ChatRole::User)
+            .map(|b| b.content.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(user_messages, vec!["hello".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn test_thinking_block_is_initialized_before_first_delta() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+        assert!(app.send_user_message("hello".to_string()).await.unwrap());
+
+        assert!(app.in_flight);
+        assert!(!app.received_output_delta);
+        let thinking = app
+            .chat_blocks
+            .iter()
+            .find(|b| b.role == ChatRole::Thinking)
+            .map(|b| b.content.clone())
+            .unwrap_or_default();
+        assert!(thinking.is_empty());
+        assert!(!app
+            .chat_blocks
+            .iter()
+            .any(|b| b.role == ChatRole::Assistant));
+        assert!(app.active_assistant_idx.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_reasoning_delta_renders_plain_text_and_preserves_paragraphs() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+        app.session_id = Some("sess-test".to_string());
+
+        app.handle_stream_event(reasoning_delta_event(
+            "msg-think",
+            "sess-test",
+            1,
+            "First line",
+        ));
+        app.handle_stream_event(reasoning_delta_event("msg-think", "sess-test", 2, "\n\n"));
+        app.handle_stream_event(reasoning_delta_event(
+            "msg-think",
+            "sess-test",
+            3,
+            "Second paragraph",
+        ));
+
+        let thinking = app
+            .chat_blocks
+            .iter()
+            .find(|b| b.role == ChatRole::Thinking)
+            .map(|b| b.content.clone())
+            .unwrap_or_default();
+
+        assert_eq!(thinking, "First line\n\nSecond paragraph");
+        assert!(!thinking.contains("model"));
+        assert!(!thinking.contains("step-"));
+        assert!(!thinking.contains("#1"));
+    }
+
+    #[tokio::test]
+    async fn test_modes_alias_works_as_models() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+        app.input_buffer = "/modes".to_string();
+        app.cursor_index = app.input_buffer.chars().count();
+        let _ = app.submit_input().await.unwrap();
+        for _ in 0..10 {
+            app.on_tick().await;
+            tokio::task::yield_now().await;
+            if app.pending_command_update.is_none() {
+                break;
+            }
+        }
+        assert!(app
+            .chat_history
+            .iter()
+            .any(|line| line.contains("Available models")));
+    }
+
+    #[tokio::test]
+    async fn test_queue_limit_and_serial_dispatch() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+
+        assert!(app.send_user_message("m1".to_string()).await.unwrap());
+        assert!(app.send_user_message("m2".to_string()).await.unwrap());
+        assert!(app.send_user_message("m3".to_string()).await.unwrap());
+        assert!(app.send_user_message("m4".to_string()).await.unwrap());
+        assert!(!app.send_user_message("m5".to_string()).await.unwrap());
+
+        assert_eq!(app.message_queue.len(), 3);
+        assert!(app.in_flight);
+
+        for _ in 0..120 {
+            app.on_tick().await;
+            tokio::task::yield_now().await;
+            if !app.in_flight && app.message_queue.is_empty() {
+                break;
+            }
+        }
+
+        assert!(app.message_queue.is_empty());
+        assert!(!app.in_flight);
+        let user_messages = app
+            .chat_blocks
+            .iter()
+            .filter(|b| b.role == ChatRole::User)
+            .map(|b| b.content.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(user_messages, vec!["m1", "m2", "m3", "m4"]);
+    }
+
+    #[tokio::test]
+    async fn test_queued_messages_do_not_add_system_noise_blocks() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+
+        assert!(app.send_user_message("m1".to_string()).await.unwrap());
+        let before = app.chat_blocks.len();
+        assert!(app.send_user_message("m2".to_string()).await.unwrap());
+        assert_eq!(app.chat_blocks.len(), before);
+    }
+
+    #[tokio::test]
+    async fn test_submit_input_queues_without_adding_user_block() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+
+        app.input_buffer = "m1".to_string();
+        app.cursor_index = app.input_buffer.chars().count();
+        let _ = app.submit_input().await.unwrap();
+
+        app.input_buffer = "m2".to_string();
+        app.cursor_index = app.input_buffer.chars().count();
+        let before = app.chat_blocks.len();
+        let _ = app.submit_input().await.unwrap();
+
+        assert_eq!(app.chat_blocks.len(), before);
+        assert_eq!(app.message_queue.len(), 1);
+        assert_eq!(
+            app.message_queue.front().map(|msg| msg.text.as_str()),
+            Some("m2")
+        );
+        let user_messages = app
+            .chat_blocks
+            .iter()
+            .filter(|b| b.role == ChatRole::User)
+            .map(|b| b.content.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(user_messages, vec!["m1"]);
+    }
+
+    #[tokio::test]
+    async fn test_submit_input_keeps_text_when_queue_is_full() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+
+        assert!(app.send_user_message("m1".to_string()).await.unwrap());
+        assert!(app.send_user_message("m2".to_string()).await.unwrap());
+        assert!(app.send_user_message("m3".to_string()).await.unwrap());
+        assert!(app.send_user_message("m4".to_string()).await.unwrap());
+        assert_eq!(app.message_queue.len(), 3);
+
+        let before_blocks = app.chat_blocks.len();
+        app.input_buffer = "overflow".to_string();
+        app.cursor_index = app.input_buffer.chars().count();
+
+        let should_quit = app.submit_input().await.unwrap();
+        assert!(!should_quit);
+        assert_eq!(app.chat_blocks.len(), before_blocks);
+        assert_eq!(app.input_buffer, "overflow");
+        assert_eq!(app.message_queue.len(), 3);
+        assert!(app
+            .status_hint
+            .as_ref()
+            .map(|(msg, _)| msg.contains("Queue is full"))
+            .unwrap_or(false));
+    }
+
+    #[tokio::test]
+    async fn test_timeout_uses_status_hint_not_chat_block() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+        app.in_flight = true;
+        app.active_message_raw = Some("slow request".to_string());
+        app.active_retry_count = 1;
+        app.last_stream_event_at =
+            Some(Instant::now() - STREAM_STALL_TIMEOUT - Duration::from_millis(1));
+
+        let before_blocks = app.chat_blocks.len();
+        app.on_tick().await;
+
+        assert_eq!(app.chat_blocks.len(), before_blocks);
+        assert!(app
+            .status_hint
+            .as_ref()
+            .map(|(msg, _)| msg.contains("timed out"))
+            .unwrap_or(false));
+    }
+
+    #[tokio::test]
+    async fn test_stale_message_events_are_ignored() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+        app.in_flight = true;
+        app.active_stream_message_id = Some("msg-current".to_string());
+        app.last_stream_sequence = Some(3);
+        app.active_assistant_idx = Some(app.push_block(ChatRole::Assistant, String::new()));
+
+        let stale_message_id = format!(
+            "{}-stale",
+            app.active_stream_message_id
+                .as_deref()
+                .expect("active stream message id should exist")
+        );
+        app.handle_stream_event(output_delta_event(
+            stale_message_id,
+            "sess-test",
+            4,
+            "stale",
+        ));
+
+        let assistant = app
+            .chat_blocks
+            .iter()
+            .find(|b| b.role == ChatRole::Assistant)
+            .map(|b| b.content.clone())
+            .unwrap_or_default();
+        assert!(!assistant.contains("stale"));
+        assert!(app
+            .right_panel_events
+            .iter()
+            .any(|line| line.contains("ignored stale event")));
+    }
+
+    #[tokio::test]
+    async fn test_message_completed_finishes_stream_without_output_delta() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+        app.in_flight = true;
+        app.received_output_delta = false;
+        app.session_id = Some("sess-test".to_string());
+
+        app.handle_stream_event(completed_event(
+            "msg-new",
+            "sess-test",
+            1,
+            TalosUsage::default(),
+        ));
+
+        assert!(!app.in_flight);
+        assert!(!app
+            .chat_blocks
+            .iter()
+            .any(|b| b.role == ChatRole::Assistant));
+    }
+
+    #[tokio::test]
+    async fn test_tool_using_stream_buffers_assistant_output_until_completion() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+        app.in_flight = true;
+        app.session_id = Some("sess-test".to_string());
+
+        app.handle_stream_event(output_delta_event(
+            "msg-tools",
+            "sess-test",
+            1,
+            "Draft summary",
+        ));
+        let assistant_before_tool = app
+            .chat_blocks
+            .iter()
+            .find(|b| b.role == ChatRole::Assistant)
+            .map(|b| b.content.clone())
+            .unwrap_or_default();
+        assert_eq!(assistant_before_tool, "Draft summary");
+
+        app.handle_stream_event(TalosEvent {
+            event_type: TalosEventType::MessageToolCallStarted,
+            message_id: "msg-tools".to_string(),
+            session_id: "sess-test".to_string(),
+            sequence: 2,
+            payload: TalosEventPayload::MessageToolCallStarted(
+                talos_client::TalosMessageToolCallStartedEvent {
+                    request_id: "req-test".to_string(),
+                    call_id: "call-buffer".to_string(),
+                    name: "read_file".to_string(),
+                    arguments: serde_json::json!({"path":"/tmp/example.txt"}),
+                    item_index: 0,
+                    iteration: 1,
+                    step_id: "step-1".to_string(),
+                    timing_ms: None,
+                },
+            ),
+        });
+        app.handle_stream_event(output_delta_event(
+            "msg-tools",
+            "sess-test",
+            3,
+            "\nFinal answer",
+        ));
+
+        let assistant_during_tool = app
+            .chat_blocks
+            .iter()
+            .find(|b| b.role == ChatRole::Assistant)
+            .map(|b| b.content.clone())
+            .unwrap_or_default();
+        assert!(assistant_during_tool.is_empty());
+
+        app.handle_stream_event(completed_event(
+            "msg-tools",
+            "sess-test",
+            4,
+            TalosUsage::default(),
+        ));
+
+        let assistant_after_complete = app
+            .chat_blocks
+            .iter()
+            .find(|b| b.role == ChatRole::Assistant)
+            .map(|b| b.content.clone())
+            .unwrap_or_default();
+        assert_eq!(assistant_after_complete, "Draft summary\nFinal answer");
+    }
+
+    #[tokio::test]
+    async fn test_stream_event_preserves_manual_scroll_mode() {
+        let mut app = create_remote_app();
+        app.initialize_remote().await;
+        app.in_flight = true;
+        app.chat_manual_scroll = true;
+        app.chat_scroll = 5;
+        app.session_id = Some("sess-test".to_string());
+
+        app.handle_stream_event(output_delta_event("msg-follow", "sess-test", 1, "hello"));
+
+        assert!(app.chat_manual_scroll);
+        assert_eq!(app.chat_scroll, 5);
+    }
+

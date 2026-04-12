@@ -9,7 +9,7 @@ gateway:
 
 agent:
   name: "talos"
-  model: "qwen3.5-plus"
+  model: "kimi-k2.5"
   kernel:
     max_iters: 1
     max_task_per_turn: 3
@@ -116,7 +116,7 @@ channels:
 
 llm:
   provider: "anthropic"
-  model: "qwen3.5-plus"
+  model: "kimi-k2.5"
   anthropic:
     api_key: ${BAILIAN_CODINGPLAN_API_KEY}
     base_url: "https://coding.dashscope.aliyuncs.com/apps/anthropic/v1"
@@ -127,6 +127,30 @@ llm:
         context_window: 32768
         max_tokens: 8192
         reasoning: true
+        input: ["text", "image"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
+      - id: "qwen3-max-2026-01-23"
+        name: "Qwen Max"
+        context_window: 32768
+        max_tokens: 8192
+        reasoning: true
+        input: ["text", "image"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
+      - id: "qwen3-coder-next"
+        name: "Qwen Coder Next"
+        context_window: 32768
+        max_tokens: 8192
+        reasoning: false 
         input: ["text"]
         cost:
           input: 0
@@ -134,11 +158,11 @@ llm:
           cache_read: 0
           cache_write: 0
         compat: {}
-      - id: "qwen-max"
-        name: "Qwen Max"
+      - id: "qwen3-coder-plus"
+        name: "Qwen Coder Plus"
         context_window: 32768
         max_tokens: 8192
-        reasoning: true
+        reasoning: false 
         input: ["text"]
         cost:
           input: 0
@@ -163,7 +187,7 @@ llm:
         context_window: 128000
         max_tokens: 8192
         reasoning: true
-        input: ["text"]
+        input: ["text", "image"]
         cost:
           input: 0
           output: 0
@@ -192,18 +216,30 @@ llm:
         context_window: 32768
         max_tokens: 8192
         reasoning: true
-        input: ["text"]
+        input: ["text", "image"]
         cost:
           input: 0
           output: 0
           cache_read: 0
           cache_write: 0
         compat: {}
-      - id: "qwen-max"
+      - id: "qwen3-max-2026-01-23"
         name: "Qwen Max"
         context_window: 32768
         max_tokens: 8192
-        reasoning: false
+        reasoning: true
+        input: ["text", "image"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
+      - id: "qwen3-coder-next"
+        name: "Qwen Coder Next"
+        context_window: 32768
+        max_tokens: 8192
+        reasoning: false 
         input: ["text"]
         cost:
           input: 0
@@ -211,11 +247,11 @@ llm:
           cache_read: 0
           cache_write: 0
         compat: {}
-      - id: "qwen-plus"
-        name: "Qwen Plus"
+      - id: "qwen3-coder-plus"
+        name: "Qwen Coder Plus"
         context_window: 32768
         max_tokens: 8192
-        reasoning: false
+        reasoning: false 
         input: ["text"]
         cost:
           input: 0
@@ -227,7 +263,7 @@ llm:
         name: "GLM-5"
         context_window: 128000
         max_tokens: 8192
-        reasoning: false
+        reasoning: true
         input: ["text"]
         cost:
           input: 0
@@ -239,8 +275,8 @@ llm:
         name: "Kimi K2.5"
         context_window: 128000
         max_tokens: 8192
-        reasoning: false
-        input: ["text"]
+        reasoning: true
+        input: ["text", "image"]
         cost:
           input: 0
           output: 0
