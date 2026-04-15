@@ -1,14 +1,12 @@
 use std::collections::HashMap;
 
 use crate::types::ChatBlock;
-use talos_types::talos::TalosToolProgressKind;
 
 #[derive(Debug, Default)]
 pub(crate) struct TranscriptState {
     pub(crate) live_thinking_idx: Option<usize>,
     pub(crate) live_assistant_idx: Option<usize>,
     pub(crate) active_tool_calls: HashMap<String, usize>,
-    pub(crate) live_progress_idx: HashMap<(String, String), usize>,
     pub(crate) stream_key_to_call_id: HashMap<(u32, usize), String>,
     pub(crate) has_visible_activity: bool,
 }
@@ -18,7 +16,6 @@ impl TranscriptState {
         self.live_thinking_idx = None;
         self.live_assistant_idx = None;
         self.active_tool_calls.clear();
-        self.live_progress_idx.clear();
         self.stream_key_to_call_id.clear();
         self.has_visible_activity = false;
     }
@@ -43,18 +40,6 @@ impl TranscriptState {
                     (call_id, block_idx + 1)
                 } else {
                     (call_id, block_idx)
-                }
-            })
-            .collect();
-
-        self.live_progress_idx = self
-            .live_progress_idx
-            .drain()
-            .map(|(key, block_idx)| {
-                if block_idx >= inserted_idx {
-                    (key, block_idx + 1)
-                } else {
-                    (key, block_idx)
                 }
             })
             .collect();
@@ -85,35 +70,6 @@ impl TranscriptState {
                 }
             })
             .collect();
-
-        self.live_progress_idx = self
-            .live_progress_idx
-            .drain()
-            .filter_map(|(key, block_idx)| {
-                if block_idx == removed_idx {
-                    None
-                } else if block_idx > removed_idx {
-                    Some((key, block_idx - 1))
-                } else {
-                    Some((key, block_idx))
-                }
-            })
-            .collect();
-    }
-
-    pub(crate) fn progress_key(call_id: &str, kind: TalosToolProgressKind) -> (String, String) {
-        (
-            call_id.to_string(),
-            Self::progress_kind_key(kind).to_string(),
-        )
-    }
-
-    pub(crate) fn progress_kind_key(kind: TalosToolProgressKind) -> &'static str {
-        match kind {
-            TalosToolProgressKind::Status => "status",
-            TalosToolProgressKind::Stdout => "stdout",
-            TalosToolProgressKind::Stderr => "stderr",
-        }
     }
 
     pub(crate) fn resolve_tool_call_idx(
@@ -143,10 +99,6 @@ impl TranscriptState {
             .insert((round, index), call_id.to_string());
     }
 
-    pub(crate) fn resolve_stream_key_call_id(&self, round: u32, index: usize) -> Option<&String> {
-        self.stream_key_to_call_id.get(&(round, index))
-    }
-
     pub(crate) fn finalize(&mut self, chat_blocks: &mut Vec<ChatBlock>) {
         let mut remove_indices = Vec::new();
 
@@ -170,17 +122,6 @@ impl TranscriptState {
             }
         }
 
-        let live_progress_indices = self.live_progress_idx.values().copied().collect::<Vec<_>>();
-        for idx in live_progress_indices {
-            if chat_blocks
-                .get(idx)
-                .map(|block| block.content.trim().is_empty())
-                .unwrap_or(false)
-            {
-                remove_indices.push(idx);
-            }
-        }
-
         remove_indices.sort_unstable();
         remove_indices.dedup();
         for idx in remove_indices.into_iter().rev() {
@@ -192,7 +133,6 @@ impl TranscriptState {
 
         self.live_thinking_idx = None;
         self.live_assistant_idx = None;
-        self.live_progress_idx.clear();
         self.active_tool_calls.clear();
         self.stream_key_to_call_id.clear();
         self.has_visible_activity = false;

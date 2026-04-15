@@ -862,9 +862,7 @@ impl TuiApp {
     }
 
     pub(crate) fn clear_live_tool_progress(&mut self, call_id: &str) {
-        self.transcript
-            .live_progress_idx
-            .retain(|(tracked_call_id, _), _| tracked_call_id != call_id);
+        let _ = call_id;
     }
 
     pub(crate) fn push_right_event(&mut self, event: String) {

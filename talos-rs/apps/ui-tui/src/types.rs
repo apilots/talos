@@ -2,7 +2,6 @@ use ratatui::text::Line;
 use serde_json;
 use talos_client::{ModelInfo, TalosMessageResponse, TalosSession};
 use talos_error::TalosResult;
-use talos_types::talos::TalosToolProgressKind;
 
 // ── Suggestions ──────────────────────────────────────────────────────────────
 
@@ -105,7 +104,6 @@ pub(crate) enum ChatRole {
     Assistant,
     System,
     Tool,
-    ToolProgress,
 }
 
 impl ChatRole {
@@ -116,7 +114,6 @@ impl ChatRole {
             Self::Assistant => "Assistant",
             Self::System => "System",
             Self::Tool => "Tool",
-            Self::ToolProgress => "Tool Progress",
         }
     }
 }
@@ -139,7 +136,6 @@ pub(crate) struct ChatBlock {
     pub(crate) tool_input: Option<serde_json::Value>,
     pub(crate) tool_status: Option<ToolCallStatus>,
     pub(crate) tool_progress: Vec<String>,
-    pub(crate) tool_progress_kind: Option<TalosToolProgressKind>,
     pub(crate) tool_iteration: Option<u64>,
     pub(crate) tool_item_index: Option<u64>,
     pub(crate) expanded: bool,
@@ -157,7 +153,6 @@ impl ChatBlock {
             tool_input: None,
             tool_status: None,
             tool_progress: Vec::new(),
-            tool_progress_kind: None,
             tool_iteration: None,
             tool_item_index: None,
             expanded: false,
@@ -182,34 +177,10 @@ impl ChatBlock {
             tool_input: Some(tool_input),
             tool_status: Some(ToolCallStatus::Queued),
             tool_progress: Vec::new(),
-            tool_progress_kind: None,
             tool_iteration: Some(iteration),
             tool_item_index: Some(item_index),
             expanded: false,
             timing_ms,
-            round_timing_ms: None,
-        }
-    }
-
-    pub(crate) fn new_tool_progress(
-        call_id: String,
-        tool_name: String,
-        kind: TalosToolProgressKind,
-        content: String,
-    ) -> Self {
-        Self {
-            role: ChatRole::ToolProgress,
-            content,
-            tool_call_id: Some(call_id),
-            tool_name: Some(tool_name),
-            tool_input: None,
-            tool_status: None,
-            tool_progress: Vec::new(),
-            tool_progress_kind: Some(kind),
-            tool_iteration: None,
-            tool_item_index: None,
-            expanded: false,
-            timing_ms: None,
             round_timing_ms: None,
         }
     }

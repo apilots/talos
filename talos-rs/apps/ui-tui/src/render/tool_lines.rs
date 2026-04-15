@@ -2,63 +2,13 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
 };
-use talos_types::talos::TalosToolProgressKind;
 
-use crate::render::helpers::push_block_header_gap;
 use crate::types::{ChatBlock, CopyProjection, RenderedChatLine, ToolCallStatus, ToolRenderData};
 use crate::utils::{line_plain_text, wrap_line_visual};
 use crate::TuiApp;
 use crate::TOOL_PREVIEW_CHAR_LIMIT;
 
 impl TuiApp {
-    pub(crate) fn tool_progress_block_lines(
-        &self,
-        block: &ChatBlock,
-        content_width: usize,
-    ) -> Vec<RenderedChatLine> {
-        let tool_name = block.tool_name.as_deref().unwrap_or("unknown");
-        let (label, color) = match block.tool_progress_kind {
-            Some(TalosToolProgressKind::Status) => ("⏳ Progress", Color::Yellow),
-            Some(TalosToolProgressKind::Stdout) => ("↳ Stdout", Color::Cyan),
-            Some(TalosToolProgressKind::Stderr) => ("↳ Stderr", Color::LightRed),
-            None => ("⏳ Progress", Color::Gray),
-        };
-
-        let mut lines = vec![RenderedChatLine {
-            display: Line::from(Span::styled(
-                format!("{label} · {tool_name}"),
-                Style::default().fg(color).add_modifier(Modifier::BOLD),
-            )),
-            copy_projection: Some(CopyProjection {
-                text: format!("{label} · {tool_name}"),
-                display_start_col: 0,
-            }),
-        }];
-        push_block_header_gap(&mut lines);
-
-        for line in block.content.lines() {
-            let wrapped = wrap_line_visual(
-                Line::from(line.to_string()),
-                content_width.saturating_sub(2),
-            );
-            for wrapped_line in wrapped {
-                let mut spans = vec![Span::raw("  ")];
-                spans.extend(wrapped_line.spans.iter().map(|span| {
-                    Span::styled(span.content.to_string(), span.style.fg(Color::White))
-                }));
-                lines.push(RenderedChatLine {
-                    display: Line::from(spans),
-                    copy_projection: Some(CopyProjection {
-                        text: format!("  {}", line_plain_text(&wrapped_line)),
-                        display_start_col: 0,
-                    }),
-                });
-            }
-        }
-
-        lines
-    }
-
     pub(crate) fn tool_block_lines(
         &self,
         block: &ChatBlock,
@@ -96,8 +46,6 @@ impl TuiApp {
                 display_start_col: 0,
             }),
         });
-        push_block_header_gap(&mut lines);
-
         let render_data = Self::build_tool_render_data(block, tool_name);
         let (summary_text, summary_color) = match block.tool_status {
             Some(ToolCallStatus::Queued) => (render_data.summary, Color::Blue),
@@ -112,24 +60,31 @@ impl TuiApp {
 
         let summary_style = Style::default().fg(summary_color);
         lines.push(RenderedChatLine {
-            display: Line::from(Span::styled(summary_text.clone(), summary_style)),
+            display: Line::from(Span::styled(format!("  {summary_text}"), summary_style)),
             copy_projection: Some(CopyProjection {
-                text: summary_text,
+                text: format!("  {summary_text}"),
                 display_start_col: 0,
             }),
         });
 
         let detail_style = Style::default().fg(Color::Gray);
         let output_style = Style::default().fg(Color::White);
-        let mut detail_lines = render_data.detail_lines;
-        detail_lines.extend(block.tool_progress.iter().map(|line| format!("  {}", line)));
+        let detail_lines = render_data.detail_lines;
         let preview_lines = render_data.preview_lines;
         let output_lines = render_data.output_lines;
         let has_output = !output_lines.is_empty();
-        let has_extra_details = !detail_lines.is_empty() || !preview_lines.is_empty() || has_output;
+        let progress_lines = block
+            .tool_progress
+            .iter()
+            .map(|line| format!("  {}", line))
+            .collect::<Vec<_>>();
+        let collapsed_lines =
+            Self::build_collapsed_tool_lines(block, tool_name, &detail_lines, &preview_lines);
+        let has_extra_details =
+            !detail_lines.is_empty() || !preview_lines.is_empty() || !progress_lines.is_empty() || has_output;
 
         if !block.expanded {
-            for detail_line in detail_lines.iter() {
+            for detail_line in collapsed_lines.iter() {
                 lines.push(RenderedChatLine {
                     display: Line::from(Span::styled(detail_line.clone(), detail_style)),
                     copy_projection: Some(CopyProjection {
@@ -137,26 +92,6 @@ impl TuiApp {
                         display_start_col: 0,
                     }),
                 });
-            }
-
-            for preview_line in preview_lines.iter().take(3) {
-                let line = Line::from(preview_line.to_string());
-                for wrapped in wrap_line_visual(line, content_width.saturating_sub(2)) {
-                    let mut spans = vec![Span::raw("  ")];
-                    for span in &wrapped.spans {
-                        spans.push(Span::styled(
-                            span.content.to_string(),
-                            span.style.patch(output_style),
-                        ));
-                    }
-                    lines.push(RenderedChatLine {
-                        display: Line::from(spans),
-                        copy_projection: Some(CopyProjection {
-                            text: format!("  {}", line_plain_text(&wrapped)),
-                            display_start_col: 0,
-                        }),
-                    });
-                }
             }
 
             if has_extra_details {
@@ -178,6 +113,16 @@ impl TuiApp {
                     display: Line::from(Span::styled(detail_line.clone(), detail_style)),
                     copy_projection: Some(CopyProjection {
                         text: detail_line.clone(),
+                        display_start_col: 0,
+                    }),
+                });
+            }
+
+            for progress_line in progress_lines.iter() {
+                lines.push(RenderedChatLine {
+                    display: Line::from(Span::styled(progress_line.clone(), detail_style)),
+                    copy_projection: Some(CopyProjection {
+                        text: progress_line.clone(),
                         display_start_col: 0,
                     }),
                 });
@@ -237,6 +182,8 @@ impl TuiApp {
             "memory_search" => Self::build_memory_search_render_data(block),
             "exec_command" => Self::build_exec_command_render_data(block),
             "read_file" | "write_file" => Self::build_read_file_render_data(block),
+            "list_dir" => Self::build_list_dir_render_data(block),
+            "grep_files" => Self::build_grep_files_render_data(block),
             _ => Self::build_fallback_tool_render_data(block, tool_name),
         }
     }
@@ -301,16 +248,16 @@ impl TuiApp {
         let hit_count = results.len();
         let timing = Self::timing_suffix(block.timing_ms);
         let summary = match block.tool_status {
-            Some(ToolCallStatus::Queued) => "└ Queued…".to_string(),
-            Some(ToolCallStatus::Running) => "└ Running…".to_string(),
-            Some(ToolCallStatus::PendingApproval) => "└ Approval needed".to_string(),
+            Some(ToolCallStatus::Queued) => "Queued…".to_string(),
+            Some(ToolCallStatus::Running) => "Running…".to_string(),
+            Some(ToolCallStatus::PendingApproval) => "Approval needed".to_string(),
             Some(ToolCallStatus::Completed { exit_ok: true }) => {
-                format!("└ Done ({} hits{})", hit_count, timing)
+                format!("Done ({} hits{})", hit_count, timing)
             }
             Some(ToolCallStatus::Completed { exit_ok: false }) => {
-                format!("└ Error ({} hits{})", hit_count, timing)
+                format!("Error ({} hits{})", hit_count, timing)
             }
-            None => "└ Unknown".to_string(),
+            None => "Unknown".to_string(),
         };
 
         let mut detail_lines = vec![];
@@ -384,24 +331,24 @@ impl TuiApp {
         let timing = Self::timing_suffix(block.timing_ms);
 
         let summary = match block.tool_status {
-            Some(ToolCallStatus::Queued) => "└ Queued…".to_string(),
-            Some(ToolCallStatus::Running) => "└ Running…".to_string(),
-            Some(ToolCallStatus::PendingApproval) => "└ Approval needed".to_string(),
+            Some(ToolCallStatus::Queued) => "Queued…".to_string(),
+            Some(ToolCallStatus::Running) => "Running…".to_string(),
+            Some(ToolCallStatus::PendingApproval) => "Approval needed".to_string(),
             Some(ToolCallStatus::Completed { exit_ok: true }) => {
                 if let Some(exit) = exit_code {
-                    format!("└ Done (exit:{}{})", exit, timing)
+                    format!("Done (exit:{}{})", exit, timing)
                 } else {
-                    format!("└ Done{}", timing)
+                    format!("Done{}", timing)
                 }
             }
             Some(ToolCallStatus::Completed { exit_ok: false }) => {
                 if let Some(exit) = exit_code {
-                    format!("└ Error (exit:{}{})", exit, timing)
+                    format!("Error (exit:{}{})", exit, timing)
                 } else {
-                    format!("└ Error{}", timing)
+                    format!("Error{}", timing)
                 }
             }
-            None => "└ Unknown".to_string(),
+            None => "Unknown".to_string(),
         };
 
         let mut detail_lines = vec![];
@@ -457,16 +404,16 @@ impl TuiApp {
         let line_count = primary_text.lines().count();
         let timing = Self::timing_suffix(block.timing_ms);
         let summary = match block.tool_status {
-            Some(ToolCallStatus::Queued) => "└ Queued…".to_string(),
-            Some(ToolCallStatus::Running) => "└ Running…".to_string(),
-            Some(ToolCallStatus::PendingApproval) => "└ Approval needed".to_string(),
+            Some(ToolCallStatus::Queued) => "Queued…".to_string(),
+            Some(ToolCallStatus::Running) => "Running…".to_string(),
+            Some(ToolCallStatus::PendingApproval) => "Approval needed".to_string(),
             Some(ToolCallStatus::Completed { exit_ok: true }) => {
-                format!("└ Done ({} lines{})", line_count, timing)
+                format!("Done ({} lines{})", line_count, timing)
             }
             Some(ToolCallStatus::Completed { exit_ok: false }) => {
-                format!("└ Error ({} lines{})", line_count, timing)
+                format!("Error ({} lines{})", line_count, timing)
             }
-            None => "└ Unknown".to_string(),
+            None => "Unknown".to_string(),
         };
 
         let mut detail_lines = if path.is_empty() {
@@ -494,6 +441,92 @@ impl TuiApp {
         }
     }
 
+    fn build_list_dir_render_data(block: &ChatBlock) -> ToolRenderData {
+        let parsed = Self::parse_tool_output_json(&block.content);
+        let content = parsed
+            .as_ref()
+            .and_then(|value| value.get("result"))
+            .and_then(|value| value.as_str())
+            .unwrap_or_else(|| block.content.as_str());
+        let entries = content
+            .lines()
+            .filter(|line| {
+                let trimmed = line.trim();
+                !trimmed.is_empty()
+                    && !trimmed.starts_with("Absolute path:")
+                    && !trimmed.starts_with("More than ")
+            })
+            .map(|line| line.trim().to_string())
+            .collect::<Vec<_>>();
+        let timing = Self::timing_suffix(block.timing_ms);
+        let summary = match block.tool_status {
+            Some(ToolCallStatus::Queued) => "Queued…".to_string(),
+            Some(ToolCallStatus::Running) => "Running…".to_string(),
+            Some(ToolCallStatus::PendingApproval) => "Approval needed".to_string(),
+            Some(ToolCallStatus::Completed { exit_ok: true }) => {
+                format!("Done ({} entries{})", entries.len(), timing)
+            }
+            Some(ToolCallStatus::Completed { exit_ok: false }) => {
+                format!("Error ({} entries{})", entries.len(), timing)
+            }
+            None => "Unknown".to_string(),
+        };
+        let preview_lines = entries
+            .iter()
+            .take(2)
+            .map(|entry| format!("entry: {}", entry))
+            .collect::<Vec<_>>();
+        let output_lines = Self::tool_output_lines(content);
+
+        ToolRenderData {
+            summary,
+            detail_lines: Vec::new(),
+            preview_lines,
+            output_lines,
+        }
+    }
+
+    fn build_grep_files_render_data(block: &ChatBlock) -> ToolRenderData {
+        let parsed = Self::parse_tool_output_json(&block.content);
+        let content = parsed
+            .as_ref()
+            .and_then(|value| value.get("content"))
+            .and_then(|value| value.as_str())
+            .unwrap_or_else(|| block.content.as_str());
+        let matches_found = parsed
+            .as_ref()
+            .and_then(|value| value.get("matches_found"))
+            .and_then(|value| value.as_u64())
+            .unwrap_or_else(|| content.lines().filter(|line| !line.trim().is_empty()).count() as u64);
+        let timing = Self::timing_suffix(block.timing_ms);
+        let summary = match block.tool_status {
+            Some(ToolCallStatus::Queued) => "Queued…".to_string(),
+            Some(ToolCallStatus::Running) => "Running…".to_string(),
+            Some(ToolCallStatus::PendingApproval) => "Approval needed".to_string(),
+            Some(ToolCallStatus::Completed { exit_ok: true }) => {
+                format!("Done ({} matches{})", matches_found, timing)
+            }
+            Some(ToolCallStatus::Completed { exit_ok: false }) => {
+                format!("Error ({} matches{})", matches_found, timing)
+            }
+            None => "Unknown".to_string(),
+        };
+        let preview_lines = content
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .take(2)
+            .map(|line| format!("match: {}", line.trim()))
+            .collect::<Vec<_>>();
+        let output_lines = Self::tool_output_lines(content);
+
+        ToolRenderData {
+            summary,
+            detail_lines: Vec::new(),
+            preview_lines,
+            output_lines,
+        }
+    }
+
     fn build_fallback_tool_render_data(block: &ChatBlock, tool_name: &str) -> ToolRenderData {
         let parsed = Self::parse_tool_output_json(&block.content);
         let detail_lines = block
@@ -507,12 +540,12 @@ impl TuiApp {
         let output_lines = Self::tool_output_lines(&block.content);
         let timing = Self::timing_suffix(block.timing_ms);
         let summary = match block.tool_status {
-            Some(ToolCallStatus::Queued) => "└ Queued…".to_string(),
-            Some(ToolCallStatus::Running) => "└ Running…".to_string(),
-            Some(ToolCallStatus::PendingApproval) => "└ Approval needed".to_string(),
-            Some(ToolCallStatus::Completed { exit_ok: true }) => format!("└ Done{}", timing),
-            Some(ToolCallStatus::Completed { exit_ok: false }) => format!("└ Error{}", timing),
-            None => "└ Unknown".to_string(),
+            Some(ToolCallStatus::Queued) => "Queued…".to_string(),
+            Some(ToolCallStatus::Running) => "Running…".to_string(),
+            Some(ToolCallStatus::PendingApproval) => "Approval needed".to_string(),
+            Some(ToolCallStatus::Completed { exit_ok: true }) => format!("Done{}", timing),
+            Some(ToolCallStatus::Completed { exit_ok: false }) => format!("Error{}", timing),
+            None => "Unknown".to_string(),
         };
 
         ToolRenderData {
@@ -521,6 +554,38 @@ impl TuiApp {
             preview_lines,
             output_lines,
         }
+    }
+
+    fn build_collapsed_tool_lines(
+        block: &ChatBlock,
+        tool_name: &str,
+        detail_lines: &[String],
+        preview_lines: &[String],
+    ) -> Vec<String> {
+        let mut lines = Vec::new();
+
+        if tool_name == "exec_command" {
+            if let Some(dir_line) = detail_lines.iter().find(|line| line.trim_start().starts_with("dir:")) {
+                lines.push(dir_line.clone());
+            }
+        }
+
+        if Self::is_live_tool_status(block.tool_status.as_ref()) {
+            if let Some(progress_line) = block.tool_progress.last() {
+                lines.push(format!("  {}", progress_line));
+            }
+        } else if let Some(preview_line) = preview_lines.first() {
+            lines.push(format!("  {}", preview_line));
+        }
+
+        lines
+    }
+
+    fn is_live_tool_status(status: Option<&ToolCallStatus>) -> bool {
+        matches!(
+            status,
+            Some(ToolCallStatus::Queued | ToolCallStatus::Running | ToolCallStatus::PendingApproval)
+        )
     }
 
     fn fallback_tool_detail_lines(tool_name: &str, input: &serde_json::Value) -> Vec<String> {

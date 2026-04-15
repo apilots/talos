@@ -373,10 +373,13 @@ fn test_tool_progress_event_appends_to_existing_tool_block() {
         .tool_progress
         .iter()
         .any(|line| line == "status: running pwd"));
-    assert!(!app
-        .chat_blocks
-        .iter()
-        .any(|block| block.role == ChatRole::ToolProgress));
+    assert_eq!(
+        app.chat_blocks
+            .iter()
+            .filter(|block| block.tool_call_id.as_deref() == Some("call-progress"))
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -439,10 +442,13 @@ fn test_tool_progress_events_append_to_same_tool_block() {
         .tool_progress
         .iter()
         .any(|line| line == "stdout: line two"));
-    assert!(!app
-        .chat_blocks
-        .iter()
-        .any(|block| block.role == ChatRole::ToolProgress));
+    assert_eq!(
+        app.chat_blocks
+            .iter()
+            .filter(|block| block.tool_call_id.as_deref() == Some("call-progress-append"))
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -701,10 +707,8 @@ fn test_tool_block_folded_shows_details_and_output_preview() {
     assert!(texts
         .iter()
         .any(|line| line == "● exec_command(git diff HEAD~1)"));
-    assert_eq!(texts.get(1).map(String::as_str), Some(""));
-    assert!(texts.iter().any(|line| line == "└ Done (exit:0 · 1.2s)"));
+    assert!(texts.iter().any(|line| line == "  Done (exit:0 · 1.2s)"));
     assert!(texts.iter().any(|line| line == "  dir:  /tmp/work"));
-    assert!(texts.iter().any(|line| line == "  status: success"));
     assert!(texts.iter().any(|line| line == "  stdout: line1"));
     assert!(texts.iter().any(|line| line == "  (ctrl+o to expand)"));
 }
@@ -798,8 +802,7 @@ fn test_read_file_folded_truncates_json_preview() {
         .map(|line| line_plain_text(&line.display))
         .collect::<Vec<_>>();
 
-    assert!(texts.iter().any(|line| line == "  path:  /tmp/example.txt"));
-    assert!(texts.iter().any(|line| line == "  truncated: false"));
+    assert!(texts.iter().any(|line| line == "  Done (1 lines)"));
     let preview = texts
         .iter()
         .find(|line| line.starts_with("  preview: "))
@@ -871,14 +874,109 @@ fn test_memory_search_folded_shows_query_and_hits() {
     assert!(texts
         .iter()
         .any(|line| line == "● memory_search(talos 项目结构)"));
-    assert!(texts.iter().any(|line| line == "└ Done (2 hits · 0.8s)"));
-    assert!(texts.iter().any(|line| line == "  query: talos 项目结构"));
+    assert!(texts.iter().any(|line| line == "  Done (2 hits · 0.8s)"));
     assert!(texts
         .iter()
         .any(|line| line == "  hit: spec/tui-improvement.md"));
-    assert!(texts
+    assert!(!texts
         .iter()
         .any(|line| line == "  hit: spec/tui-claude-code-style.md"));
+}
+
+#[test]
+fn test_running_tool_folded_shows_latest_progress_only() {
+    let app = create_embedded_app();
+    let mut block = ChatBlock::new(ChatRole::Tool, String::new());
+    block.tool_name = Some("exec_command".to_string());
+    block.tool_input = Some(serde_json::json!({
+        "cmd": "cargo test -p talos-ui-tui --lib",
+        "workdir": "/tmp/work"
+    }));
+    block.tool_status = Some(ToolCallStatus::Running);
+    block.tool_progress = vec![
+        "status: spawned".to_string(),
+        "stdout: running session_tool_tests".to_string(),
+    ];
+
+    let texts = app
+        .tool_block_lines(&block, 120)
+        .into_iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>();
+
+    assert!(texts
+        .iter()
+        .any(|line| line == "⏳ exec_command(cargo test -p talos-ui-tui --lib)"));
+    assert!(texts.iter().any(|line| line == "  Running…"));
+    assert!(texts.iter().any(|line| line == "  dir:  /tmp/work"));
+    assert!(texts
+        .iter()
+        .any(|line| line == "  stdout: running session_tool_tests"));
+    assert!(!texts.iter().any(|line| line == "  status: spawned"));
+}
+
+#[test]
+fn test_list_dir_folded_shows_entry_preview() {
+    let app = create_embedded_app();
+    let mut block = ChatBlock::new(
+        ChatRole::Tool,
+        serde_json::json!({
+            "ok": true,
+            "tool": "list_dir",
+            "result": "Absolute path: /tmp/project\nsrc/\nCargo.toml\nREADME.md",
+            "truncated": false
+        })
+        .to_string(),
+    );
+    block.tool_name = Some("list_dir".to_string());
+    block.tool_input = Some(serde_json::json!({
+        "dir_path": "/tmp/project"
+    }));
+    block.tool_status = Some(ToolCallStatus::Completed { exit_ok: true });
+
+    let texts = app
+        .tool_block_lines(&block, 100)
+        .into_iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>();
+
+    assert!(texts.iter().any(|line| line == "● list_dir(/tmp/project)"));
+    assert!(texts.iter().any(|line| line == "  Done (3 entries)"));
+    assert!(texts.iter().any(|line| line == "  entry: src/"));
+}
+
+#[test]
+fn test_grep_files_folded_shows_match_preview() {
+    let app = create_embedded_app();
+    let mut block = ChatBlock::new(
+        ChatRole::Tool,
+        serde_json::json!({
+            "content": "crates/orchestration/agent-kernel/src/planner.rs\ncrates/orchestration/agent/src/agent.rs",
+            "matches_found": 2
+        })
+        .to_string(),
+    );
+    block.tool_name = Some("grep_files".to_string());
+    block.tool_input = Some(serde_json::json!({
+        "pattern": "AgentKernel",
+        "path": "crates/orchestration",
+        "include": "*.rs"
+    }));
+    block.tool_status = Some(ToolCallStatus::Completed { exit_ok: true });
+
+    let texts = app
+        .tool_block_lines(&block, 120)
+        .into_iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>();
+
+    assert!(texts
+        .iter()
+        .any(|line| line == "● grep_files(\"AgentKernel\", path=crates/orchestration, include=*.rs)"));
+    assert!(texts.iter().any(|line| line == "  Done (2 matches)"));
+    assert!(texts
+        .iter()
+        .any(|line| line == "  match: crates/orchestration/agent-kernel/src/planner.rs"));
 }
 
 #[test]
