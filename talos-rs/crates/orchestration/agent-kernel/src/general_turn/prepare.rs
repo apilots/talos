@@ -1,0 +1,306 @@
+use super::*;
+
+fn split_prompt_prefix_messages(messages: &[ChatMessage], input: &str) -> Vec<ChatMessage> {
+    let Some(last_message) = messages.last() else {
+        return Vec::new();
+    };
+    if last_message.role == talos_llm_provider::Role::User && last_message.content == input {
+        return messages[..messages.len().saturating_sub(1)].to_vec();
+    }
+    messages.to_vec()
+}
+
+async fn emit_prompt_warning_events(ctx: &mut InvocationContext, warnings: &[KernelWarning]) {
+    for warning in warnings {
+        let payload = PromptWarningEventData {
+            warning: warning.clone(),
+            agent_id: ctx.agent_id.clone(),
+            session_id: ctx.session_id.clone(),
+            phase: ctx.phase.clone(),
+        };
+        ctx.events.push(KernelEvent::new(
+            KernelEventType::PromptWarning,
+            KernelEventLabel::PromptWarning,
+            KernelEventData::PromptWarning(payload.clone()),
+        ));
+        emit_stream_event(
+            ctx.stream_tx.as_ref(),
+            KernelStreamEventType::PromptWarning,
+            KernelStreamEventData::PromptWarning(payload),
+        )
+        .await;
+    }
+}
+
+pub async fn prepare_general_turn(
+    ctx: &mut InvocationContext,
+    agent_name: &str,
+    agent_description: &str,
+    input: &str,
+    tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
+    memory_store: Arc<MemoryStore>,
+    kernel_config: &AgentKernelConfig,
+) -> TalosResult<PreparedGeneralTurn> {
+    let session_id = ctx.session_id.clone();
+    let invocation_id = ctx.invocation_id.clone();
+    let agent_id = ctx.agent_id.clone();
+    let selected_model = ctx.selected_model_id().to_string();
+    let stream_tx = ctx.stream_tx.clone();
+
+    let phase = match ctx.phase {
+        crate::TurnPhase::Planning => PromptPhase::Planning,
+        crate::TurnPhase::Execution => PromptPhase::Execution,
+    };
+
+    let prompt_builder = PromptBuilder::new()
+        .agent(agent_name.to_string(), agent_description.to_string())
+        .phase(phase)
+        .planner_mode(kernel_config.planner_mode.as_str())?
+        .planning_instruction(ctx.planning_instruction.clone())
+        .config(PromptBuildConfig {
+            budget: PromptBudget {
+                max_static_tokens: kernel_config.prompt.max_static_tokens,
+                max_dynamic_tokens: kernel_config.prompt.max_dynamic_tokens,
+            },
+            load_policy: PromptLoadPolicy {
+                include_session_summary: kernel_config.prompt.include_session_summary,
+                include_recent_messages: kernel_config.prompt.include_recent_messages,
+                include_retrieved_memories: kernel_config.prompt.include_retrieved_memories,
+                session_recent_limit: kernel_config.memory.session_recent_messages_limit,
+                retrieved_memory_max_items: kernel_config.prompt.retrieved_memory_max_items,
+                retrieved_memory_max_chars: kernel_config.prompt.retrieved_memory_max_chars,
+                unified_recent_limit: 10,
+            },
+            prompt: kernel_config.prompt.clone(),
+            memory: kernel_config.memory.clone(),
+        })
+        .tools(tool_definition_provider.as_ref())
+        .memory_store(&session_id, memory_store.as_ref())
+        .session_environment(ctx.session_environment.clone())
+        .user_input(input.to_string());
+    let prompt_assembly = prompt_builder.assemble().await?;
+    let prompt_diagnostics = prompt_assembly.diagnostics.clone();
+    let warnings = derive_prompt_warnings(&prompt_diagnostics, kernel_config);
+    tracing::debug!(
+        session_id = %session_id,
+        agent_id = %agent_id,
+        prompt_mode = ?prompt_diagnostics.mode,
+        included_sections = ?prompt_diagnostics.included_sections,
+        dropped_sections = ?prompt_diagnostics.dropped_sections,
+        truncated_sections = ?prompt_diagnostics.truncated_sections,
+        static_estimated_tokens = prompt_diagnostics.static_estimated_tokens,
+        dynamic_estimated_tokens = prompt_diagnostics.dynamic_estimated_tokens,
+        total_estimated_tokens = prompt_diagnostics.total_estimated_tokens,
+        bootstrap_files = ?prompt_diagnostics.bootstrap_files,
+        "prompt diagnostics"
+    );
+    if !warnings.is_empty() {
+        warn!(
+            session_id = %session_id,
+            agent_id = %agent_id,
+            warnings = ?warnings,
+            "prompt warnings emitted"
+        );
+    }
+    emit_prompt_warning_events(ctx, &warnings).await;
+
+    Ok(PreparedGeneralTurn {
+        session_id,
+        invocation_id,
+        agent_id,
+        selected_model,
+        prompt_prefix_messages: split_prompt_prefix_messages(
+            &render_prompt_assembly(&prompt_assembly),
+            input,
+        ),
+        messages: render_prompt_assembly(&prompt_assembly),
+        tool_definitions: tool_definition_provider.get_tool_definitions(),
+        prompt_diagnostics,
+        warnings,
+        stream_tx,
+    })
+}
+
+pub async fn execute_general_turn_loop(
+    prepared: PreparedGeneralTurn,
+    agent_name: &str,
+    llm_provider: Arc<dyn LlmProvider>,
+    tool_executor_port: Arc<dyn ToolExecutorPort>,
+    memory_store: Arc<MemoryStore>,
+    kernel_config: &AgentKernelConfig,
+) -> TalosResult<ExecutedTurnArtifacts> {
+    let max_tool_rounds = kernel_config.max_tool_rounds.max(1);
+    let mut state = GeneralTurnLoopState::new(&prepared);
+    let execution_settings =
+        crate::KernelExecutionSettings::try_from(kernel_config).unwrap_or_default();
+    let tool_executor = crate::ToolExecutorFactory::build(execution_settings.tool_execution_mode);
+    let kernel_config = Arc::new(kernel_config.clone());
+
+    let (final_text, stop_reason) = loop {
+        let step_request = build_general_turn_step_request(&prepared, &state);
+        let step = execute_general_turn_step(step_request, llm_provider.clone()).await?;
+        let step_text = step.text.clone();
+        let step_disposition = step.disposition;
+        apply_general_turn_step(&mut state, &step);
+
+        if matches!(step_disposition, GeneralTurnStepDisposition::FinalResponse) {
+            state
+                .messages
+                .push(ChatMessage::assistant(step_text.clone()));
+            break (step_text, StopReason::EndTurn);
+        }
+
+        let tool_batch = execute_general_turn_tool_batch(
+            &prepared,
+            tool_executor.clone(),
+            tool_executor_port.clone(),
+            memory_store.clone(),
+            kernel_config.clone(),
+            agent_name,
+            &step.tool_calls,
+            std::collections::HashSet::new(),
+            std::collections::HashMap::new(),
+            prepared.stream_tx.as_ref(),
+        )
+        .await?;
+        apply_general_turn_tool_batch(&mut state, &tool_batch, kernel_config.as_ref());
+
+        if !tool_batch.pending_confirmations.is_empty()
+            || !tool_batch.pending_dynamic_requests.is_empty()
+        {
+            break (
+                if !tool_batch.pending_confirmations.is_empty() {
+                    "Tool confirmation pending.".to_string()
+                } else {
+                    "Dynamic tool response pending.".to_string()
+                },
+                StopReason::EndTurn,
+            );
+        }
+
+        if state.round >= max_tool_rounds {
+            break (
+                "[tool-call rounds exceeded]".to_string(),
+                StopReason::ToolRoundLimit,
+            );
+        }
+    };
+
+    let executed = finalize_general_turn_artifacts(state, final_text, stop_reason);
+    emit_general_turn_finalization_stream(&prepared, &executed).await;
+    Ok(executed)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn persist_general_turn_artifacts(
+    prepared: &PreparedGeneralTurn,
+    input: &str,
+    executed: &ExecutedTurnArtifacts,
+    llm_provider: Arc<dyn LlmProvider>,
+    memory_store: Arc<MemoryStore>,
+    kernel_config: &AgentKernelConfig,
+) {
+    let seq = match memory_store.next_turn_seq(&prepared.session_id).await {
+        Ok(seq) => seq,
+        Err(err) => {
+            warn!(
+                session_id = %prepared.session_id,
+                error = %err,
+                "failed to allocate next turn seq"
+            );
+            return;
+        }
+    };
+    let turn_id = Uuid::new_v4().to_string();
+    let now = Utc::now();
+    let mut items = Vec::with_capacity(executed.output_items.len().saturating_add(1));
+    items.push(TalosOutputItem::UserInput {
+        text: input.to_string(),
+    });
+    items.extend(executed.output_items.clone());
+    let talos_turn = TalosTurn {
+        turn_id: turn_id.clone(),
+        session_id: prepared.session_id.to_string(),
+        seq,
+        timestamp: now,
+        items,
+        usage: executed.usage.clone(),
+        stop_reason: to_api_stop_reason(executed.stop_reason),
+    };
+    if let Err(err) = memory_store.append_turn(&talos_turn).await {
+        warn!(
+            session_id = %prepared.session_id,
+            error = %err,
+            "failed to append memory store turn"
+        );
+    }
+
+    if let Err(err) = compact_workspace_context_if_needed(
+        &prepared.session_id,
+        &prepared.selected_model,
+        llm_provider.clone(),
+        memory_store.as_ref(),
+        kernel_config,
+    )
+    .await
+    {
+        warn!(
+            session_id = %prepared.session_id,
+            error = %err,
+            "failed to compact workspace memory context"
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn run_general_turn(
+    ctx: &mut InvocationContext,
+    agent_name: &str,
+    agent_description: &str,
+    input: &str,
+    llm_provider: Arc<dyn LlmProvider>,
+    tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
+    tool_executor_port: Arc<dyn ToolExecutorPort>,
+    memory_store: Arc<MemoryStore>,
+    kernel_config: &AgentKernelConfig,
+) -> TalosResult<GeneralTurnResult> {
+    let prepared = prepare_general_turn(
+        ctx,
+        agent_name,
+        agent_description,
+        input,
+        tool_definition_provider,
+        memory_store.clone(),
+        kernel_config,
+    )
+    .await?;
+    let prompt_diagnostics = prepared.prompt_diagnostics.clone();
+    let warnings = prepared.warnings.clone();
+    let executed = execute_general_turn_loop(
+        prepared.clone(),
+        agent_name,
+        llm_provider.clone(),
+        tool_executor_port,
+        memory_store.clone(),
+        kernel_config,
+    )
+    .await?;
+    persist_general_turn_artifacts(
+        &prepared,
+        input,
+        &executed,
+        llm_provider.clone(),
+        memory_store,
+        kernel_config,
+    )
+    .await;
+
+    Ok(GeneralTurnResult {
+        output_text: executed.output_text,
+        output_items: executed.output_items,
+        stop_reason: executed.stop_reason,
+        usage: executed.usage,
+        prompt_diagnostics,
+        warnings,
+    })
+}

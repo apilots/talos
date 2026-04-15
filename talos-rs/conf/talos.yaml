@@ -338,7 +338,7 @@ llm:
           cache_write: 0
         compat: {}
   ollama:
-    api_key: null
+    api_key: ${OLLAMA_API_KEY}
     enabled: false
     base_url: "http://localhost:11434"
 

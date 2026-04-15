@@ -3,12 +3,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use talos_llm_provider::{ChatMessage, ChatRequest, LlmProvider};
-use talos_memory::{
-    Memory, MemoryStore, RecordHeader, SessionPromptContextConfig, TalosMessage, TalosMessageRole,
-    TalosTurn,
-};
+use talos_memory::{Memory, MemoryStore, SessionPromptContextConfig, TalosMessageRole, TalosTurn};
 use talos_prompt::{PromptManager, PromptTemplate};
 use talos_tools::{Tool, ToolRegistry};
+use talos_types::talos::{StopReason, TalosOutputItem, TalosUsage};
 
 const DEFAULT_SESSION_ID: &str = "default";
 
@@ -140,31 +138,16 @@ Based on the request and available tools, decide if a tool should be used. If ye
             session_id: DEFAULT_SESSION_ID.to_string(),
             seq,
             timestamp,
-            messages: vec![
-                TalosMessage {
-                    header: RecordHeader {
-                        id: format!("{turn_id}:u"),
-                        session_id: DEFAULT_SESSION_ID.to_string(),
-                        turn_id: Some(turn_id.clone()),
-                        timestamp,
-                    },
-                    role: TalosMessageRole::User,
+            items: vec![
+                TalosOutputItem::UserInput {
                     text: user_message.to_string(),
                 },
-                TalosMessage {
-                    header: RecordHeader {
-                        id: format!("{turn_id}:a"),
-                        session_id: DEFAULT_SESSION_ID.to_string(),
-                        turn_id: Some(turn_id.clone()),
-                        timestamp,
-                    },
-                    role: TalosMessageRole::Assistant,
+                TalosOutputItem::OutputText {
                     text: response.content.clone(),
                 },
             ],
-            reasoning: Vec::new(),
-            tool_calls: Vec::new(),
-            tool_results: Vec::new(),
+            usage: TalosUsage::default(),
+            stop_reason: StopReason::EndTurn,
         };
         self.memory.append_turn(&talos_turn).await?;
 

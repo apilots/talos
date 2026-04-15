@@ -1,0 +1,100 @@
+use crate::gateway;
+use crate::talos;
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+pub mod agents {
+    use super::*;
+
+    /// Information about an agent.
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct AgentInfo {
+        pub id: String,
+        pub name: String,
+        pub description: String,
+        pub agent_type: String,
+        pub status: String,
+        pub capabilities: Vec<String>,
+    }
+}
+
+pub mod messages {
+    use super::*;
+
+    /// Different types of message payloads.
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(tag = "type", content = "data")]
+    pub enum MessagePayload {
+        Text(String),
+        Command {
+            name: String,
+            args: HashMap<String, String>,
+        },
+        ToolResult(super::tools::ToolResult),
+    }
+
+    /// A message in the system.
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct Message {
+        pub id: String,
+        pub agent_id: String,
+        pub content: String,
+        pub timestamp: std::time::SystemTime,
+        pub payload: MessagePayload,
+    }
+}
+
+pub mod tools {
+    use super::*;
+
+    /// A tool call to be executed.
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ToolCall {
+        pub id: String,
+        pub name: String,
+        pub arguments: serde_json::Value,
+    }
+
+    /// Result of a tool execution.
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ToolResult {
+        pub id: String,
+        pub tool_call_id: String,
+        pub result: String,
+        pub success: bool,
+    }
+}
+
+pub use agents::AgentInfo;
+pub use messages::{Message, MessagePayload};
+pub use tools::{ToolCall, ToolResult};
+
+/// Return a millisecond timestamp.
+pub fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+}
+
+/// RequestHandler trait for decoupling Gateway from Orchestration.
+///
+/// This trait defines the interface that Gateway uses to communicate
+/// with the orchestration layer without direct dependency.
+#[async_trait]
+pub trait RequestHandler: Send + Sync {
+    /// Handle a gateway request and return a response.
+    async fn handle(
+        &self,
+        request: gateway::GatewayRequest,
+    ) -> crate::TalosResult<gateway::GatewayResponse>;
+
+    async fn handle_stream(
+        &self,
+        request: gateway::GatewayRequest,
+    ) -> crate::TalosResult<tokio::sync::mpsc::Receiver<talos::TalosEvent>>;
+
+    async fn cancel_active_turn(&self, session_id: &str) -> crate::TalosResult<()>;
+}

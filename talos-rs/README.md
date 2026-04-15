@@ -13,33 +13,27 @@ Talos is an AI Agent Framework designed to serve as the software brain for AI as
 
 ### Cognitive Layer
 - **Memory System**: Short-term and long-term memory with unified interface
-- **LLM Providers**: Support for Anthropic, OpenAI, Bailian, and Ollama providers
-- **Reasoning Engine**: Task planning and logical inference capabilities
-- **Knowledge Management**: RAG (Retrieval Augmented Generation) and knowledge graphs
+- **Prompt Builder**: Shared prompt composition with configurable planner modes
+- **LLM Providers**: Support for Anthropic, OpenAI, Bailian, and Ollama-compatible endpoints
 
 ### Action Layer
 - **Tool System**: Built-in tools (read, write, edit, exec, web_search)
 - **Tool Policy**: Allow/deny list policies for tool access control
 - **Sandbox Execution**: Isolated execution environments for security
-- **Skills Framework**: Extensible skill system for complex operations
 
 ### Orchestration Layer
 - **Agent Core**: Main agent functionality with LLM integration
 - **Session Management**: Database-backed session storage with multi-channel support
 - **Routing System**: Message routing to appropriate agents
 - **Coordination**: Multi-agent coordination and management
-- **Workflow Engine**: Task decomposition and execution planning
 
 ### Gateway Layer
 - **HTTP Server**: Session-first REST API (`/v1/sessions` + `/v1/sessions/{id}/messages`)
-- **WebSocket Server**: Real-time communication support
 - **Authentication Middleware**: Bearer token validation
-- **Event System**: Publish/subscribe messaging
 
 ### Perception Layer
-- **Multi-channel Interface**: Support for various communication channels
+- **Channel Integration**: Unified interface for IM platforms (Telegram, Discord, etc.)
 - **TUI (Terminal UI)**: Rich terminal-based interface with keyboard navigation
-- **Channel Abstraction**: Unified interface for IM platforms (Telegram, Discord, etc.)
 
 ### Unified Client Interface
 - **Standardized API**: All clients (TUI, CLI, mobile apps, third-party) use same interface
@@ -148,7 +142,7 @@ Talos follows an eight-layer architecture with clear separation of concerns:
 └─────────────────────────────────────────────────────────────────────────────┘
                                     ⬇
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  Gateway Layer - HTTP/WS API, Authentication, Rate Limiting               │
+│  Gateway Layer - HTTP API, Authentication, Rate Limiting                  │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     ⬇
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -156,15 +150,15 @@ Talos follows an eight-layer architecture with clear separation of concerns:
 └─────────────────────────────────────────────────────────────────────────────┘
                                     ⬇
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  Cognition Layer - Memory, Knowledge, Reasoning, Decision Making           │
+│  Cognition Layer - Memory, Prompting, Model Selection                      │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     ⬇
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  Action Layer - Tool Execution, Skill Execution, Output Generation         │
+│  Action Layer - Tool Execution, Policy, Sandbox                            │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     ⬇
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  Perception Layer - Channels, Input Processing, Multi-modal Support        │
+│  Perception Layer - Channels And TUI                                       │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     ⬇
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -176,11 +170,11 @@ Talos follows an eight-layer architecture with clear separation of concerns:
 
 - `crates/common/` - Shared utilities and LLM abstractions
 - `crates/infra/` - Infrastructure components (config, logging, storage, auth)
-- `crates/perception/` - Channel and input processing (includes ui-tui and channels)
-- `crates/cognition/` - Memory, knowledge, reasoning systems
-- `crates/action/` - Tools, skills, execution
-- `crates/orchestration/` - Agent coordination, sessions, routing
-- `crates/gateway/` - HTTP/WS gateways and client interfaces
+- `crates/perception/` - Channel integrations
+- `crates/cognition/` - Memory-related services
+- `crates/action/` - Tools, policy, sandbox execution
+- `crates/orchestration/` - Agent coordination, kernel, sessions, routing
+- `crates/gateway/` - HTTP gateway interfaces
 - `bin/talos/` - Main binary executable
 
 ## ⚙️ Configuration Options
@@ -211,7 +205,6 @@ Future enhancements include:
 - Multi-agent collaboration
 - Additional integration channels (WhatsApp, Slack, Discord)
 - Web-based administration interface
-- Monitoring and observability features
 
 ## 🤝 Contributing
 

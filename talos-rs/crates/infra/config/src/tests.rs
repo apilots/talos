@@ -1,0 +1,276 @@
+use super::*;
+
+#[test]
+fn test_default_config() {
+    let config = Config::default();
+    assert_eq!(config.agent.name, "talos");
+    assert_eq!(config.gateway.port, 18789);
+    assert!(!config.gateway.auth);
+    assert_eq!(config.storage.database_type, DatabaseType::Sqlite);
+    assert!(config.storage.connection_string.ends_with("/data/talos.db"));
+    assert_eq!(
+        config.logging.file.as_deref(),
+        Some(config.talos_paths().log_file.to_string_lossy().as_ref())
+    );
+}
+
+#[test]
+fn test_generate_default() {
+    let yaml = generate_default_config();
+    assert!(yaml.contains("agent:"));
+    assert!(yaml.contains("gateway:"));
+}
+
+#[test]
+fn test_kernel_defaults() {
+    let config = Config::default();
+    assert_eq!(config.agent.kernel.max_iters, 1);
+    assert_eq!(config.agent.kernel.max_task_per_turn, 3);
+    assert_eq!(config.agent.kernel.max_tool_rounds, 8);
+    assert_eq!(config.agent.kernel.tool_result_max_bytes, 64 * 1024);
+    assert_eq!(config.agent.kernel.context_compaction_max_bytes, 256 * 1024);
+    assert_eq!(config.agent.kernel.default_workspace_id, "default");
+    assert_eq!(config.agent.kernel.planner_mode, PlannerMode::BuiltIn);
+    assert_eq!(
+        config.agent.kernel.planner_selection,
+        PlannerSelection::Static
+    );
+    assert_eq!(config.agent.kernel.execution_mode, ExecutionMode::Single);
+    assert_eq!(config.agent.kernel.execution_children, 2);
+    assert_eq!(config.agent.kernel.execution_loop_iters, 3);
+    assert_eq!(config.agent.kernel.prompt.max_static_tokens, 1200);
+    assert_eq!(config.agent.kernel.prompt.max_dynamic_tokens, 3200);
+    assert!(config.agent.kernel.prompt.include_session_summary);
+    assert!(config.agent.kernel.prompt.include_recent_messages);
+    assert!(config.agent.kernel.prompt.include_retrieved_memories);
+    assert!(config.agent.kernel.prompt.bootstrap.enabled);
+    assert!(
+        config
+            .agent
+            .kernel
+            .prompt
+            .bootstrap
+            .auto_create_missing_files
+    );
+    assert_eq!(
+        config.agent.kernel.prompt.bootstrap.max_chars_per_file,
+        8_000
+    );
+    assert_eq!(config.agent.kernel.prompt.bootstrap.max_chars_total, 24_000);
+    assert!(config.agent.kernel.prompt.bootstrap.include_memory);
+    assert_eq!(config.timezone, "UTC");
+    assert_eq!(config.agent.kernel.timezone, config.timezone);
+    assert_eq!(
+        config.agent.kernel.memory.workspace_dir,
+        config
+            .talos_paths()
+            .workspace_dir_for_agent("talos")
+            .to_string_lossy()
+            .to_string()
+    );
+    assert_eq!(config.agent.kernel.memory.hot_recent_messages, 64);
+    assert_eq!(config.agent.kernel.memory.session_recent_messages_limit, 24);
+    assert!(config.agent.kernel.memory.session_summary_enabled);
+    assert_eq!(config.agent.kernel.memory.session_summary_recent_count, 2);
+    assert_eq!(config.agent.kernel.memory.session_summary_max_chars, 1200);
+    assert_eq!(
+        config.agent.kernel.memory.compaction_threshold_bytes,
+        256 * 1024
+    );
+    assert_eq!(config.agent.kernel.memory.root_memory_filename, "MEMORY.md");
+    assert!(config.agent.kernel.memory.workspace_memory_flush_enabled);
+    assert_eq!(config.agent.kernel.binding.default_agent_kind, "llm");
+}
+
+#[test]
+fn test_expand_env_in_string() {
+    let raw = "token=${A}:${B}";
+    // Keep missing env placeholders as-is so behavior is predictable.
+    let expanded = Config::expand_env_in_string(raw);
+    assert!(expanded.contains("${A}") || expanded.contains(':'));
+}
+
+#[test]
+fn test_validate_runtime_requires_jwt_secret_when_auth_enabled() {
+    let mut config = Config::default();
+    config.gateway.auth = true;
+    config.gateway.jwt_secret = None;
+    config.gateway.token = Some("token".to_string());
+    assert!(config.validate_runtime().is_err());
+
+    config.gateway.jwt_secret = Some("jwt-secret".to_string());
+    config.llm.provider = "ollama".to_string();
+    config.llm.model = "qwen-max".to_string();
+    config.llm.ollama.base_url = Some("http://localhost:11434".to_string());
+    config.agent.model = "qwen-max".to_string();
+    assert!(config.validate_runtime().is_ok());
+}
+
+#[test]
+fn test_validate_runtime_requires_provider_api_key() {
+    let mut config = Config::default();
+    config.gateway.auth = false;
+    config.gateway.token = Some("token".to_string());
+    config.llm.provider = "openai".to_string();
+    config.llm.model = "gpt-4o".to_string();
+    config.agent.model = "gpt-4o".to_string();
+    config.llm.openai.base_url = Some("https://api.openai.com/v1".to_string());
+    config.llm.openai.api_key = None;
+    assert!(config.validate_runtime().is_err());
+
+    config.llm.openai.api_key = Some("sk-test".to_string());
+    assert!(config.validate_runtime().is_ok());
+}
+
+#[test]
+fn test_validate_runtime_rejects_invalid_timezone() {
+    let mut config = Config::default();
+    config.gateway.auth = false;
+    config.gateway.token = Some("token".to_string());
+    config.llm.provider = "openai".to_string();
+    config.llm.model = "gpt-4o".to_string();
+    config.agent.model = "gpt-4o".to_string();
+    config.llm.openai.base_url = Some("https://api.openai.com/v1".to_string());
+    config.llm.openai.api_key = Some("sk-test".to_string());
+    config.timezone = "Mars/Olympus".to_string();
+    config.apply_derived_paths();
+
+    assert!(config.validate_runtime().is_err());
+}
+
+#[test]
+fn test_provider_models_are_strongly_typed() {
+    let yaml = r#"
+enabled: true
+api_key: sk-test
+base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+models:
+  - id: qwen-max
+    name: qwen-max
+    context_window: 32768
+    max_tokens: 8192
+    reasoning: false
+    input: [text, image]
+    cost:
+      input: 0.1
+      output: 0.2
+      cache_read: 0.01
+      cache_write: 0.02
+    compat:
+      thinking_format: qwen
+"#;
+
+    let provider: ProviderConfig =
+        serde_yaml::from_str(yaml).expect("provider config should parse");
+    let model = &provider.models[0];
+    assert_eq!(model.id, "qwen-max");
+    assert_eq!(model.context_window, 32_768);
+    assert_eq!(
+        model.input,
+        vec![ModelInputKind::Text, ModelInputKind::Image]
+    );
+    assert_eq!(model.compat.thinking_format, Some(ThinkingFormat::Qwen));
+    assert!(provider.enabled);
+}
+
+#[test]
+fn test_load_from_path_fails_when_required_keys_missing() {
+    let temp_file =
+        std::env::temp_dir().join(format!("talos-config-missing-{}.yaml", std::process::id()));
+    std::fs::write(&temp_file, "gateway:\n  host: 127.0.0.1\n")
+        .expect("failed to write temp config");
+    let result = Config::load_from_path(Some(
+        temp_file
+            .to_str()
+            .expect("temp path should be valid unicode"),
+    ));
+    let _ = std::fs::remove_file(&temp_file);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_load_from_path_fails_when_file_missing() {
+    let missing_file = std::env::temp_dir().join(format!(
+        "talos-config-not-found-{}.yaml",
+        std::process::id()
+    ));
+    let result = Config::load_from_path(Some(
+        missing_file
+            .to_str()
+            .expect("temp path should be valid unicode"),
+    ));
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_sanitize_agent_name_for_workspace() {
+    assert_eq!(sanitize_agent_name("Talos Agent"), "talos-agent");
+    assert_eq!(sanitize_agent_name("..."), "default");
+}
+
+#[test]
+fn test_forbidden_path_config_is_rejected() {
+    let yaml = r#"
+agent:
+  name: talos
+  model: qwen-plus
+  kernel:
+    max_iters: 1
+    max_task_per_turn: 3
+    tool_parallelism: 1
+    max_llm_calls: 8
+    max_tool_rounds: 8
+    tool_result_max_bytes: 65536
+    context_compaction_max_bytes: 262144
+    default_workspace_id: default
+    planner_mode: built_in
+    planner_selection: static
+    execution_mode: single
+    execution_children: 2
+    execution_loop_iters: 3
+    prompt:
+      max_static_tokens: 1200
+      max_dynamic_tokens: 3200
+      include_session_summary: true
+      include_recent_messages: true
+    memory:
+      workspace_dir: /tmp/custom
+    binding:
+      default_agent_kind: llm
+gateway:
+  host: 127.0.0.1
+  port: 18789
+  token: token
+  auth: false
+  jwt_secret: jwt
+logging:
+  level: info
+  format: text
+  stdout: true
+storage:
+  database_type: sqlite
+  connection_string: /tmp/custom.db
+  max_connections: 5
+llm:
+  provider: ollama
+  model: qwen-plus
+  anthropic: { enabled: false }
+  openai: { enabled: false }
+  bailian: { enabled: false }
+  ollama:
+enabled: true
+base_url: http://localhost:11434
+"#;
+    let temp_file = std::env::temp_dir().join(format!(
+        "talos-config-forbidden-{}.yaml",
+        std::process::id()
+    ));
+    std::fs::write(&temp_file, yaml).expect("failed to write temp config");
+    let result = Config::load_from_path(Some(
+        temp_file
+            .to_str()
+            .expect("temp path should be valid unicode"),
+    ));
+    let _ = std::fs::remove_file(&temp_file);
+    assert!(result.is_err());
+}

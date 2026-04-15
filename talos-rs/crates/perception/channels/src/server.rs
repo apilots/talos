@@ -479,8 +479,11 @@ mod tests {
     #[test]
     fn test_telegram_dm_scope_is_loaded_from_config() {
         let mut config = Config::default();
-        config.channels.telegram.dm_scope = "per_channel_peer".to_string();
-        assert_eq!(config.channels.telegram.dm_scope, "per_channel_peer");
+        config.channels.telegram.dm_scope = talos_config::DmScope::PerChannelPeer;
+        assert_eq!(
+            config.channels.telegram.dm_scope,
+            talos_config::DmScope::PerChannelPeer
+        );
     }
 
     fn extract_text_input(input: &[TalosInputItem]) -> String {
