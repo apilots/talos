@@ -1,6 +1,7 @@
 use dashmap::DashMap;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 use talos_memory::MemoryStore;
@@ -20,6 +21,8 @@ pub struct ToolContext {
 }
 
 impl ToolContext {
+    const PROJECT_ROOT_STATE_KEY: &'static str = "__project_root";
+
     pub fn new(session_id: impl Into<String>, user_id: impl Into<String>) -> Self {
         Self::new_with_kernel_config(session_id, user_id, None)
     }
@@ -59,6 +62,14 @@ impl ToolContext {
         self
     }
 
+    pub fn with_project_root(self, project_root: impl Into<PathBuf>) -> Self {
+        self.set_state(
+            Self::PROJECT_ROOT_STATE_KEY,
+            Value::String(project_root.into().display().to_string()),
+        );
+        self
+    }
+
     pub fn anonymous() -> Self {
         Self::new("anonymous-session", "anonymous-user")
     }
@@ -93,6 +104,11 @@ impl ToolContext {
 
     pub fn memory_store(&self) -> Option<Arc<MemoryStore>> {
         self.memory_store.clone()
+    }
+
+    pub fn project_root(&self) -> Option<PathBuf> {
+        self.get_state(Self::PROJECT_ROOT_STATE_KEY)
+            .and_then(|value| value.as_str().map(PathBuf::from))
     }
 
     pub fn state_snapshot(&self) -> HashMap<String, Value> {

@@ -12,6 +12,7 @@ mod render;
 pub mod run;
 mod selection;
 mod stream;
+mod transcript;
 mod types;
 mod utils;
 
@@ -31,6 +32,7 @@ use talos_client::{ModelInfo, TalosEvent, TalosSession};
 use talos_error::TalosResult;
 use talos_types::talos::{TalosConnectionMode, TalosUsage};
 use tokio::sync::mpsc;
+use transcript::TranscriptState;
 
 pub(crate) const WELCOME_MODEL_PLACEHOLDER: &str = "(connecting...)";
 pub(crate) const MAX_RIGHT_EVENTS: usize = 120;
@@ -79,6 +81,7 @@ pub struct TuiApp {
     pub(crate) pasted_blocks: Vec<PastedTextBlock>,
     pub(crate) selected_pasted_block: Option<usize>,
     pub(crate) startup_directory: PathBuf,
+    pub(crate) current_project_root: Option<PathBuf>,
     pub(crate) connection_mode: TalosConnectionMode,
     pub(crate) current_model: String,
     pub(crate) session_usage: TalosUsage,
@@ -89,7 +92,7 @@ pub struct TuiApp {
     pub(crate) chat_blocks: Vec<ChatBlock>,
     pub(crate) chat_history: Vec<String>,
     pub(crate) right_panel_events: Vec<String>,
-    pub(crate) tool_events: Vec<String>,
+    pub(crate) tool_events: Vec<ToolPanelEvent>,
     pub(crate) rendered_chat_lines: Vec<RenderedChatLine>,
     pub(crate) rendered_round_footer_buttons: HashMap<usize, RoundFooterButton>,
     pub(crate) chat_content_rect: Option<Rect>,
@@ -104,11 +107,8 @@ pub struct TuiApp {
     pub(crate) active_message: Option<String>,
     pub(crate) active_message_raw: Option<String>,
     pub(crate) active_retry_count: u8,
-    pub(crate) pending_assistant_output: String,
-    pub(crate) stream_has_tool_calls: bool,
     pub(crate) active_user_idx: Option<usize>,
-    pub(crate) active_thinking_idx: Option<usize>,
-    pub(crate) active_assistant_idx: Option<usize>,
+    pub(crate) transcript: TranscriptState,
     pub(crate) pending_session_connect: Option<mpsc::Receiver<TalosResult<String>>>,
     pub(crate) pending_session_task: Option<tokio::task::JoinHandle<()>>,
     pub(crate) pending_stream_connect:
@@ -128,7 +128,6 @@ pub struct TuiApp {
     pub(crate) last_stream_event_at: Option<Instant>,
     pub(crate) gateway_client: Option<Arc<dyn GatewayClient>>,
     pub(crate) pending_approval: Option<PendingApprovalState>,
-    pub(crate) active_tool_calls: HashMap<String, usize>,
     pub(crate) history_sessions: Vec<TalosSession>,
     pub(crate) history_selected: usize,
     pub(crate) show_model_picker: bool,

@@ -40,6 +40,7 @@ fn mock_ctx() -> InvocationContext {
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
         workspace_id: "w1".to_string(),
+        project_root: None,
         input: "hello".to_string(),
         selected_model_info: talos_types::ModelInfo {
             id: "m1".to_string(),

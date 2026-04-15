@@ -14,7 +14,6 @@ use talos_llm_provider::{
     ChatChunk, ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, Role, ToolStream,
     ToolStreamEvent, Usage,
 };
-use talos_memory::ToolCallRecord;
 use talos_tools::{Tool, ToolContext, ToolOutput, ToolRegistry};
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -118,6 +117,15 @@ struct ApprovalFlowState {
 
 struct ApprovalMockProvider {
     state: Arc<ApprovalFlowState>,
+}
+
+#[derive(Default)]
+struct StreamingFlowState {
+    round: AtomicUsize,
+}
+
+struct StreamingFlowMockProvider {
+    state: Arc<StreamingFlowState>,
 }
 
 #[async_trait]
@@ -234,12 +242,102 @@ impl LlmProvider for ApprovalMockProvider {
     }
 }
 
+#[async_trait]
+impl LlmProvider for StreamingFlowMockProvider {
+    fn name(&self) -> &str {
+        "streaming-flow-mock"
+    }
+
+    fn default_model(&self) -> &str {
+        "mock-model"
+    }
+
+    async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
+        panic!("streaming flow should use stream_with_tools")
+    }
+
+    async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
+        let (_tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(1);
+        Ok(ChatStream::new(rx))
+    }
+
+    async fn stream_with_tools(&self, request: ChatRequest) -> TalosResult<ToolStream> {
+        let round = self.state.round.fetch_add(1, Ordering::SeqCst);
+        let (tx, rx) = mpsc::channel::<TalosResult<ToolStreamEvent>>(16);
+        tokio::spawn(async move {
+            if round == 0 {
+                tx.send(Ok(ToolStreamEvent::ReasoningDelta {
+                    delta: "Inspecting repository layout.".to_string(),
+                }))
+                .await
+                .expect("reasoning delta should send");
+                tx.send(Ok(ToolStreamEvent::TextDelta {
+                    delta: "I will inspect the file first.".to_string(),
+                }))
+                .await
+                .expect("text delta should send");
+                tx.send(Ok(ToolStreamEvent::ToolCallStart {
+                    index: 0,
+                    id: Some("call_echo".to_string()),
+                    name: Some("echo_test".to_string()),
+                }))
+                .await
+                .expect("tool start should send");
+                tx.send(Ok(ToolStreamEvent::ToolCallDelta {
+                    index: 0,
+                    arguments_delta: "{\"message\":\"ping\"}".to_string(),
+                }))
+                .await
+                .expect("tool delta should send");
+                tx.send(Ok(ToolStreamEvent::ToolCallEnd {
+                    index: 0,
+                    id: Some("call_echo".to_string()),
+                    name: Some("echo_test".to_string()),
+                    arguments: json!({ "message": "ping" }),
+                }))
+                .await
+                .expect("tool end should send");
+                tx.send(Ok(ToolStreamEvent::Done {
+                    finish_reason: Some("tool_calls".to_string()),
+                    usage: None,
+                }))
+                .await
+                .expect("done event should send");
+                return;
+            }
+
+            let saw_tool_message = request.messages.iter().any(|message| {
+                message.role == Role::Tool
+                    && message.tool_call_id.as_deref() == Some("call_echo")
+                    && message.name.as_deref() == Some("echo_test")
+            });
+            assert!(
+                saw_tool_message,
+                "tool result message should be available in round 2"
+            );
+            tx.send(Ok(ToolStreamEvent::TextDelta {
+                delta: "Final answer after streaming tool execution.".to_string(),
+            }))
+            .await
+            .expect("final text delta should send");
+            tx.send(Ok(ToolStreamEvent::Done {
+                finish_reason: Some("stop".to_string()),
+                usage: None,
+            }))
+            .await
+            .expect("done event should send");
+        });
+        Ok(ToolStream::new(rx))
+    }
+}
+
 fn build_ctx() -> InvocationContext {
     InvocationContext {
         session_id: "s1".to_string(),
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
         workspace_id: "w1".to_string(),
+        project_root: None,
         input: "hello".to_string(),
         selected_model_info: talos_types::ModelInfo {
             id: "m1".to_string(),
@@ -271,6 +369,12 @@ fn build_ctx() -> InvocationContext {
     }
 }
 
+fn build_ctx_with_stream(stream_tx: mpsc::Sender<crate::KernelStreamEvent>) -> InvocationContext {
+    let mut ctx = build_ctx();
+    ctx.stream_tx = Some(stream_tx);
+    ctx
+}
+
 #[test]
 fn test_project_events_includes_final_response() {
     let ctx = build_ctx();
@@ -299,6 +403,7 @@ fn test_build_flow_step_model_request_preserves_state_messages() {
         session_id: "s1".to_string(),
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
+        project_root: None,
         selected_model: "m1".to_string(),
         prompt_prefix_messages: vec![talos_llm_provider::ChatMessage::system("prefix")],
         messages: vec![
@@ -348,6 +453,7 @@ fn test_build_flow_step_model_request_preserves_native_thinking() {
         session_id: "s1".to_string(),
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
+        project_root: None,
         selected_model: "m1".to_string(),
         prompt_prefix_messages: Vec::new(),
         messages: Vec::new(),
@@ -566,6 +672,64 @@ async fn test_single_flow_stages_confirmation_event_for_pending_tool_approval() 
     )));
 }
 
+#[tokio::test]
+async fn test_single_flow_streaming_path_emits_streaming_tool_lifecycle_events() {
+    let state = Arc::new(StreamingFlowState::default());
+    let tool_registry = Arc::new(ToolRegistry::new());
+    tool_registry.register(Arc::new(EchoTool));
+    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    let (tx, mut rx) = mpsc::channel(64);
+    let mut ctx = build_ctx_with_stream(tx);
+    let flow = SingleFlow::new(
+        "agent-1",
+        "test agent",
+        Arc::new(StreamingFlowMockProvider {
+            state: state.clone(),
+        }),
+        tool_registry.clone(),
+        tool_registry,
+        Arc::new(MemoryStore::new(workspace_dir)),
+        AgentKernelConfig::default(),
+        Arc::new(BuiltInPlanner::new()),
+    );
+
+    let result = flow
+        .run_events(&mut ctx, "hello")
+        .await
+        .expect("flow should succeed");
+
+    let mut saw_queued = false;
+    let mut saw_executing = false;
+    let mut saw_progress = false;
+    let mut saw_completed = false;
+    let mut saw_output = false;
+    let mut saw_thinking = false;
+
+    while let Ok(event) = rx.try_recv() {
+        match event.data {
+            crate::KernelStreamEventData::ToolQueued(_) => saw_queued = true,
+            crate::KernelStreamEventData::ToolExecuting(_) => saw_executing = true,
+            crate::KernelStreamEventData::ToolProgressDelta(_) => saw_progress = true,
+            crate::KernelStreamEventData::ToolResult(_) => saw_completed = true,
+            crate::KernelStreamEventData::OutputDelta(_) => saw_output = true,
+            crate::KernelStreamEventData::ThinkingDelta(_) => saw_thinking = true,
+            _ => {}
+        }
+    }
+
+    assert_eq!(
+        result.summary.output_text,
+        "Final answer after streaming tool execution."
+    );
+    assert_eq!(state.round.load(Ordering::SeqCst), 2);
+    assert!(saw_thinking, "thinking delta should be streamed");
+    assert!(saw_output, "assistant text delta should be streamed");
+    assert!(saw_queued, "tool queued event should be emitted");
+    assert!(saw_executing, "tool executing event should be emitted");
+    assert!(saw_progress, "tool progress delta should be emitted");
+    assert!(saw_completed, "tool result should be emitted");
+}
+
 #[test]
 fn test_single_flow_current_branch_uses_profile() {
     let built_in_direct = SingleFlow::new(
@@ -725,30 +889,6 @@ fn test_should_replan_false_when_tool_errors_but_replan_budget_exhausted() {
     assert!(!should_replan(&state, Some(&tool_batch), &policy));
 }
 
-fn test_loop_state(tool_names: &[&str]) -> GeneralTurnLoopState {
-    GeneralTurnLoopState {
-        messages: Vec::new(),
-        round: 0,
-        output_items: Vec::new(),
-        usage: talos_types::talos::TalosUsage::default(),
-        reasoning_log: Vec::new(),
-        tool_call_log: tool_names
-            .iter()
-            .enumerate()
-            .map(|(index, name)| ToolCallRecord {
-                call_id: format!("call-{index}"),
-                name: (*name).to_string(),
-                arguments: json!({}),
-            })
-            .collect(),
-        tool_result_log: Vec::new(),
-        retrieved_memories: Vec::new(),
-        tool_call_count: tool_names.len(),
-        tool_error_count: 0,
-        saw_output_delta: false,
-    }
-}
-
 #[test]
 fn test_is_local_path_analysis_request_true_for_absolute_path_prompt() {
     assert!(is_local_path_analysis_request(
@@ -770,106 +910,6 @@ fn test_is_local_path_analysis_request_false_without_analysis_intent() {
 }
 
 #[test]
-fn test_should_require_local_path_file_probe_until_file_tool_runs() {
-    let mut embedded_ctx = build_ctx();
-    embedded_ctx.session_environment = Some(talos_types::talos::TalosSessionEnvironment {
-        directory: std::path::PathBuf::from("/Users/xujiang/data/ailabs/talos"),
-        connection_mode: talos_types::talos::TalosConnectionMode::Embedded,
-    });
-    let empty_state = test_loop_state(&[]);
-    assert!(should_require_local_path_file_probe(
-        &embedded_ctx,
-        "分析 /Users/xujiang/data/ailabs/PageIndex 项目架构",
-        &empty_state,
-    ));
-
-    let probed_state = test_loop_state(&["memory_search", "list_dir"]);
-    assert!(!should_require_local_path_file_probe(
-        &embedded_ctx,
-        "分析 /Users/xujiang/data/ailabs/PageIndex 项目架构",
-        &probed_state,
-    ));
-}
-
-#[test]
-fn test_should_not_require_local_path_file_probe_for_remote_or_missing_environment() {
-    let remote_ctx = InvocationContext {
-        session_environment: Some(talos_types::talos::TalosSessionEnvironment {
-            directory: std::path::PathBuf::from("/Users/xujiang/data/ailabs/talos"),
-            connection_mode: talos_types::talos::TalosConnectionMode::Remote,
-        }),
-        ..build_ctx()
-    };
-    let none_ctx = build_ctx();
-    let state = test_loop_state(&[]);
-
-    assert!(!should_require_local_path_file_probe(
-        &remote_ctx,
-        "分析 /Users/xujiang/data/ailabs/PageIndex 项目架构",
-        &state,
-    ));
-    assert!(!should_require_local_path_file_probe(
-        &none_ctx,
-        "分析 /Users/xujiang/data/ailabs/PageIndex 项目架构",
-        &state,
-    ));
-}
-
-#[test]
-fn test_should_require_structure_probe_for_embedded_without_grep_files() {
-    let embedded_ctx = InvocationContext {
-        session_environment: Some(talos_types::talos::TalosSessionEnvironment {
-            directory: std::path::PathBuf::from("/Users/xujiang/data/ailabs/talos"),
-            connection_mode: talos_types::talos::TalosConnectionMode::Embedded,
-        }),
-        ..build_ctx()
-    };
-    let state = test_loop_state(&["list_dir", "read_file"]);
-
-    assert!(should_require_structure_probe(
-        &embedded_ctx,
-        "分析 /Users/xujiang/data/ailabs/PageIndex 项目架构",
-        &state,
-    ));
-}
-
-#[test]
-fn test_should_not_require_structure_probe_after_grep_files() {
-    let embedded_ctx = InvocationContext {
-        session_environment: Some(talos_types::talos::TalosSessionEnvironment {
-            directory: std::path::PathBuf::from("/Users/xujiang/data/ailabs/talos"),
-            connection_mode: talos_types::talos::TalosConnectionMode::Embedded,
-        }),
-        ..build_ctx()
-    };
-    let state = test_loop_state(&["list_dir", "grep_files", "read_file"]);
-
-    assert!(!should_require_structure_probe(
-        &embedded_ctx,
-        "分析 /Users/xujiang/data/ailabs/PageIndex 项目架构",
-        &state,
-    ));
-}
-
-#[test]
-fn test_should_require_structure_probe_for_remote_when_file_probe_exists() {
-    let remote_ctx = InvocationContext {
-        session_environment: Some(talos_types::talos::TalosSessionEnvironment {
-            directory: std::path::PathBuf::from("/Users/xujiang/data/ailabs/talos"),
-            connection_mode: talos_types::talos::TalosConnectionMode::Remote,
-        }),
-        ..build_ctx()
-    };
-    let state = test_loop_state(&["list_dir", "read_file"]);
-
-    assert!(should_require_structure_probe(
-        &remote_ctx,
-        "分析 /Users/xujiang/data/ailabs/PageIndex 项目架构",
-        &state,
-    ));
-}
-
-#[test]
 fn test_is_read_only_tool_round_true_for_read_only_calls() {
     let step = GeneralTurnStepResult {
         text: String::new(),
@@ -878,6 +918,7 @@ fn test_is_read_only_tool_round_true_for_read_only_calls() {
             FunctionCall::new("1", "read_file", json!({"path":"a"})),
             FunctionCall::new("2", "web_search", json!({"query":"x"})),
         ],
+        streamed_tool_outputs: Vec::new(),
         output_items: Vec::new(),
         usage: talos_types::talos::TalosUsage::default(),
         saw_output_delta: false,
@@ -892,6 +933,7 @@ fn test_is_read_only_tool_round_false_for_exec_command() {
         text: String::new(),
         reasoning: Vec::new(),
         tool_calls: vec![FunctionCall::new("1", "exec_command", json!({"cmd":"ls"}))],
+        streamed_tool_outputs: Vec::new(),
         output_items: Vec::new(),
         usage: talos_types::talos::TalosUsage::default(),
         saw_output_delta: false,

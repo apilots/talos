@@ -49,6 +49,7 @@ fn test_session_context_and_state_from_record() {
             trace_id: "trace-1".to_string(),
             channel_id: Some("channel-1".to_string()),
             thread_id: Some("thread-1".to_string()),
+            project_root: Some(std::path::PathBuf::from("/repo")),
             environment: None,
         },
         model: "qwen-max".to_string(),
@@ -64,6 +65,10 @@ fn test_session_context_and_state_from_record() {
 
     assert_eq!(context.session_id, "session-1");
     assert_eq!(context.workspace_id.as_deref(), Some("workspace-1"));
+    assert_eq!(
+        context.project_root.as_deref(),
+        Some(std::path::Path::new("/repo"))
+    );
     assert_eq!(context.provider, talos::TalosProvider::Telegram);
     assert_eq!(state.created_at, 100);
     assert_eq!(state.last_activity, 200);
@@ -84,6 +89,7 @@ fn test_talos_session_from_record_applies_conf_override() {
             trace_id: "trace-1".to_string(),
             channel_id: Some("default".to_string()),
             thread_id: None,
+            project_root: None,
             environment: None,
         },
         model: "qwen-max".to_string(),
@@ -125,4 +131,24 @@ fn test_session_override_policy_builds_model_conf() {
         .expect("conf extraction should succeed");
 
     assert_eq!(model.as_deref(), Some("gpt-4o"));
+}
+
+#[test]
+fn test_session_patch_roundtrip_with_project_root() {
+    let patch = SessionPatch {
+        conf: HashMap::new(),
+        project_root: Some(SessionProjectRootPatch::Set {
+            path: std::path::PathBuf::from("/repo"),
+        }),
+    };
+
+    let encoded = serde_json::to_string(&patch).unwrap();
+    let decoded: SessionPatch = serde_json::from_str(&encoded).unwrap();
+
+    assert_eq!(
+        decoded.project_root,
+        Some(SessionProjectRootPatch::Set {
+            path: std::path::PathBuf::from("/repo"),
+        })
+    );
 }

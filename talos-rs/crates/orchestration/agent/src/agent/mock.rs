@@ -2,7 +2,10 @@ use super::AgentImpl;
 use crate::{
     service::{
         OrchestratorEvent, OrchestratorExecution, OrchestratorMessageCompletedEvent,
-        OrchestratorMessageOutputDeltaEvent, OrchestratorMessageStartedEvent, OrchestratorRequest,
+        OrchestratorMessageOutputDeltaEvent, OrchestratorMessageStartedEvent,
+        OrchestratorMessageToolCallExecutingEvent, OrchestratorMessageToolCallProgressDeltaEvent,
+        OrchestratorMessageToolCallQueuedEvent, OrchestratorRequest, OrchestratorToolProgressKind,
+        OrchestratorToolStreamKey,
     },
     Agent, AgentOrchestrator, AgentResponse,
 };
@@ -142,13 +145,54 @@ impl AgentOrchestrator for MockAgent {
                 ))
                 .await;
             let _ = tx
+                .send(OrchestratorEvent::MessageToolCallQueued(
+                    OrchestratorMessageToolCallQueuedEvent {
+                        request_id: request_id.clone(),
+                        stream_key: OrchestratorToolStreamKey { round: 0, index: 0 },
+                        call_id: "call-1".to_string(),
+                        tool_name: "exec_command".to_string(),
+                        item_index: 1,
+                        iteration: 2,
+                        step_id: "step-2".to_string(),
+                    },
+                ))
+                .await;
+            let _ = tx
+                .send(OrchestratorEvent::MessageToolCallExecuting(
+                    OrchestratorMessageToolCallExecutingEvent {
+                        request_id: request_id.clone(),
+                        stream_key: OrchestratorToolStreamKey { round: 0, index: 0 },
+                        call_id: "call-1".to_string(),
+                        tool_name: "exec_command".to_string(),
+                        item_index: 2,
+                        iteration: 3,
+                        step_id: "step-3".to_string(),
+                    },
+                ))
+                .await;
+            let _ = tx
+                .send(OrchestratorEvent::MessageToolCallProgressDelta(
+                    OrchestratorMessageToolCallProgressDeltaEvent {
+                        request_id: request_id.clone(),
+                        stream_key: OrchestratorToolStreamKey { round: 0, index: 0 },
+                        call_id: "call-1".to_string(),
+                        tool_name: "exec_command".to_string(),
+                        message: "execution started".to_string(),
+                        progress_kind: OrchestratorToolProgressKind::Status,
+                        item_index: 3,
+                        iteration: 4,
+                        step_id: "step-4".to_string(),
+                    },
+                ))
+                .await;
+            let _ = tx
                 .send(OrchestratorEvent::MessageCompleted(
                     OrchestratorMessageCompletedEvent {
                         request_id,
                         stop_reason: execution.stop_reason,
                         usage: execution.usage,
-                        total_output_items: 1,
-                        iteration: 2,
+                        total_output_items: 4,
+                        iteration: 5,
                         step_id: "completed".to_string(),
                         task_count: execution.task_count,
                     },

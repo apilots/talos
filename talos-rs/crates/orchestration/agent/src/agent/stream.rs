@@ -2,13 +2,16 @@ use super::AgentImpl;
 use crate::service::{
     OrchestratorEvent, OrchestratorMessageExecutionSummaryEvent,
     OrchestratorMessageOutputDeltaEvent, OrchestratorMessageReasoningDeltaEvent,
-    OrchestratorMessageToolCallCompletedEvent, OrchestratorMessageToolCallPendingApprovalEvent,
-    OrchestratorMessageToolCallStartedEvent,
+    OrchestratorMessageToolCallArgsDeltaEvent, OrchestratorMessageToolCallCompletedEvent,
+    OrchestratorMessageToolCallExecutingEvent, OrchestratorMessageToolCallPendingApprovalEvent,
+    OrchestratorMessageToolCallProgressDeltaEvent, OrchestratorMessageToolCallQueuedEvent,
+    OrchestratorMessageToolCallStartedEvent, OrchestratorToolProgressKind,
+    OrchestratorToolStreamKey,
 };
 use serde_json::Value;
 use talos_agent_kernel::{
     ConfirmationRequestStreamData, KernelStreamEvent, KernelStreamEventData, KernelStreamEventType,
-    KernelThinkingSource, KernelThinkingStage,
+    KernelThinkingSource, KernelThinkingStage, ToolProgressKind,
 };
 use talos_types::talos::{TalosContentItem, TalosThinkingSource, TalosThinkingStage};
 
@@ -70,6 +73,60 @@ impl AgentImpl {
                     },
                 ))
             }
+            (KernelStreamEventType::ToolArgsDelta, KernelStreamEventData::ToolArgsDelta(data)) => {
+                Some(OrchestratorEvent::MessageToolCallArgsDelta(
+                    OrchestratorMessageToolCallArgsDeltaEvent {
+                        request_id: request_id.to_string(),
+                        stream_key: map_tool_stream_key(data.stream_key),
+                        call_id: data.call_id,
+                        tool_name: data.tool_name,
+                        delta: data.delta,
+                        item_index: current_index,
+                        iteration,
+                        step_id,
+                    },
+                ))
+            }
+            (KernelStreamEventType::ToolQueued, KernelStreamEventData::ToolQueued(data)) => Some(
+                OrchestratorEvent::MessageToolCallQueued(OrchestratorMessageToolCallQueuedEvent {
+                    request_id: request_id.to_string(),
+                    stream_key: map_tool_stream_key(data.stream_key),
+                    call_id: data.call_id,
+                    tool_name: data.tool_name,
+                    item_index: current_index,
+                    iteration,
+                    step_id,
+                }),
+            ),
+            (KernelStreamEventType::ToolExecuting, KernelStreamEventData::ToolExecuting(data)) => {
+                Some(OrchestratorEvent::MessageToolCallExecuting(
+                    OrchestratorMessageToolCallExecutingEvent {
+                        request_id: request_id.to_string(),
+                        stream_key: map_tool_stream_key(data.stream_key),
+                        call_id: data.call_id,
+                        tool_name: data.tool_name,
+                        item_index: current_index,
+                        iteration,
+                        step_id,
+                    },
+                ))
+            }
+            (
+                KernelStreamEventType::ToolProgressDelta,
+                KernelStreamEventData::ToolProgressDelta(data),
+            ) => Some(OrchestratorEvent::MessageToolCallProgressDelta(
+                OrchestratorMessageToolCallProgressDeltaEvent {
+                    request_id: request_id.to_string(),
+                    stream_key: map_tool_stream_key(data.stream_key),
+                    call_id: data.call_id,
+                    tool_name: data.tool_name,
+                    message: data.message,
+                    progress_kind: map_tool_progress_kind(data.progress_kind),
+                    item_index: current_index,
+                    iteration,
+                    step_id,
+                },
+            )),
             (KernelStreamEventType::ToolResult, KernelStreamEventData::ToolResult(data)) => {
                 Some(OrchestratorEvent::MessageToolCallCompleted(
                     OrchestratorMessageToolCallCompletedEvent {
@@ -143,5 +200,20 @@ fn map_thinking_stage(stage: KernelThinkingStage) -> TalosThinkingStage {
         KernelThinkingStage::FrameworkAct => TalosThinkingStage::FrameworkAct,
         KernelThinkingStage::FrameworkObserve => TalosThinkingStage::FrameworkObserve,
         KernelThinkingStage::FrameworkReflect => TalosThinkingStage::FrameworkReflect,
+    }
+}
+
+fn map_tool_stream_key(stream_key: talos_agent_kernel::ToolStreamKey) -> OrchestratorToolStreamKey {
+    OrchestratorToolStreamKey {
+        round: stream_key.round,
+        index: stream_key.index,
+    }
+}
+
+fn map_tool_progress_kind(kind: ToolProgressKind) -> OrchestratorToolProgressKind {
+    match kind {
+        ToolProgressKind::Status => OrchestratorToolProgressKind::Status,
+        ToolProgressKind::Stdout => OrchestratorToolProgressKind::Stdout,
+        ToolProgressKind::Stderr => OrchestratorToolProgressKind::Stderr,
     }
 }

@@ -27,6 +27,7 @@ pub(crate) fn should_replan(
     state.consecutive_no_progress_rounds < policy.max_no_progress_rounds
 }
 
+#[cfg(test)]
 fn trim_path_token(token: &str) -> &str {
     token.trim_matches(|ch: char| {
         matches!(
@@ -49,6 +50,7 @@ fn trim_path_token(token: &str) -> &str {
     })
 }
 
+#[cfg(test)]
 fn contains_local_absolute_path(input: &str) -> bool {
     input
         .split_whitespace()
@@ -56,6 +58,7 @@ fn contains_local_absolute_path(input: &str) -> bool {
         .any(|token| token.starts_with('/') && token.len() > 1)
 }
 
+#[cfg(test)]
 fn contains_analysis_keyword(input: &str) -> bool {
     let lowered = input.to_ascii_lowercase();
     [
@@ -78,78 +81,13 @@ fn contains_analysis_keyword(input: &str) -> bool {
         .any(|keyword| input.contains(keyword))
 }
 
+#[cfg(test)]
 pub(crate) fn is_local_path_analysis_request(input: &str) -> bool {
     contains_local_absolute_path(input) && contains_analysis_keyword(input)
 }
 
-fn is_file_probe_tool_name(tool_name: &str) -> bool {
-    matches!(tool_name, "list_dir" | "read_file" | "grep_files")
-}
-
-fn has_file_probe_tool_call(state: &GeneralTurnLoopState) -> bool {
-    state
-        .tool_call_log
-        .iter()
-        .any(|record| is_file_probe_tool_name(&record.name))
-}
-
-fn can_use_local_directory_probe(ctx: &InvocationContext) -> bool {
-    ctx.session_environment
-        .as_ref()
-        .map(|environment| matches!(environment.connection_mode, TalosConnectionMode::Embedded))
-        .unwrap_or(false)
-}
-
-fn has_structure_probe_tool_call(state: &GeneralTurnLoopState) -> bool {
-    state
-        .tool_call_log
-        .iter()
-        .any(|record| record.name == "grep_files")
-}
-
-pub(crate) fn should_require_local_path_file_probe(
-    ctx: &InvocationContext,
-    input: &str,
-    state: &GeneralTurnLoopState,
-) -> bool {
-    can_use_local_directory_probe(ctx)
-        && is_local_path_analysis_request(input)
-        && !has_file_probe_tool_call(state)
-}
-
-pub(crate) fn should_require_structure_probe(
-    _ctx: &InvocationContext,
-    input: &str,
-    state: &GeneralTurnLoopState,
-) -> bool {
-    is_local_path_analysis_request(input)
-        && has_file_probe_tool_call(state)
-        && !has_structure_probe_tool_call(state)
-}
-
-fn is_read_only_tool_name(tool_name: &str) -> bool {
-    matches!(
-        tool_name,
-        "read"
-            | "read_file"
-            | "list_dir"
-            | "grep_files"
-            | "memory_search"
-            | "memory_get"
-            | "web_search"
-            | "web_fetch"
-            | "http_request"
-            | "list_mcp_resources"
-            | "list_mcp_resource_templates"
-    )
-}
-
 pub(crate) fn is_read_only_tool_round(step: &GeneralTurnStepResult) -> bool {
-    !step.tool_calls.is_empty()
-        && step
-            .tool_calls
-            .iter()
-            .all(|call| is_read_only_tool_name(&call.name))
+    crate::general_turn::is_read_only_tool_round(step)
 }
 
 pub(crate) fn select_flow_profile(

@@ -44,7 +44,7 @@ pub use general_turn::{
     persist_general_turn_artifacts, prepare_general_turn, run_general_turn, ExecutedTurnArtifacts,
     GeneralTurnLoopState, GeneralTurnResult, GeneralTurnStepDisposition, GeneralTurnStepRequest,
     GeneralTurnStepResult, GeneralTurnToolBatch, ModelFinishReason, PlanReActLoopState,
-    PreparedGeneralTurn,
+    PreparedGeneralTurn, StreamingToolExecutionConfig,
 };
 pub use llm_agent::LlmKernelAgent;
 pub use planner::{BuiltInPlanner, PlanReActPlanner};
@@ -67,8 +67,9 @@ pub use session::{
     SessionEventPayload, SessionService, SessionState,
 };
 pub use tool_execution::{
-    ParallelToolExecutor, SequentialToolExecutor, ToolExecutionContext, ToolExecutionInput,
-    ToolExecutionOutput, ToolExecutor, ToolExecutorFactory,
+    ParallelToolExecutor, SequentialToolExecutor, StreamingToolExecutionOutput,
+    StreamingToolScheduler, ToolExecutionContext, ToolExecutionInput, ToolExecutionOutput,
+    ToolExecutor, ToolExecutorFactory,
 };
 pub use traits::{Agent, BaseKernelAgent, Planner, Plugin, Runner};
 pub use types::{
@@ -79,9 +80,10 @@ pub use types::{
     KernelOutputDeltaSource, KernelStreamEvent, KernelStreamEventData, KernelStreamEventType,
     KernelThinkingSource, KernelThinkingStage, OutputDeltaStreamData, PlannerKind,
     PromptWarningEventData, RunRequest, RunResponse, StopReason, TaskCompletedEventData, TaskKind,
-    TaskResult, TaskStatus, ThinkingDeltaStreamData, ThinkingMode, ToolCallStartStreamData,
-    ToolExecutionMode, ToolResultStreamData, TransferRequestedEventData, TurnPhase,
-    UserInputEventData,
+    TaskResult, TaskStatus, ThinkingDeltaStreamData, ThinkingMode, ToolArgsDeltaStreamData,
+    ToolCallStartStreamData, ToolExecutingStreamData, ToolExecutionMode,
+    ToolProgressDeltaStreamData, ToolProgressKind, ToolQueuedStreamData, ToolResultStreamData,
+    ToolStreamKey, TransferRequestedEventData, TurnPhase, UserInputEventData,
 };
 pub use warnings::{
     KernelWarning, PromptBootstrapDropReason, PromptBootstrapFileDroppedWarning,

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
@@ -9,7 +10,7 @@ use serde_json::{json, Value};
 
 use talos_auth::AuthResult;
 use talos_types::talos::TalosContext;
-use talos_types::{SessionPatch, SessionQuery};
+use talos_types::{SessionPatch, SessionProjectRootPatch, SessionQuery};
 
 use super::errors::ApiError;
 use super::misc::{validate_auth_context, validate_model_supported};
@@ -25,6 +26,15 @@ pub(super) struct CreateSessionRequest {
 pub(super) struct PatchSessionRequest {
     #[serde(default)]
     conf: HashMap<String, Value>,
+    #[serde(default)]
+    project_root: Option<ProjectRootPatchRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(super) enum ProjectRootPatchRequest {
+    Set { path: PathBuf },
+    Clear,
 }
 
 pub(super) async fn create_session_handler(
@@ -129,7 +139,13 @@ pub(super) async fn patch_session_handler(
     Path(session_id): Path<String>,
     Json(request): Json<PatchSessionRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let patch = SessionPatch { conf: request.conf };
+    let patch = SessionPatch {
+        conf: request.conf,
+        project_root: request.project_root.map(|value| match value {
+            ProjectRootPatchRequest::Set { path } => SessionProjectRootPatch::Set { path },
+            ProjectRootPatchRequest::Clear => SessionProjectRootPatch::Clear,
+        }),
+    };
     if let Some(model) = patch
         .agent_model()
         .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, "invalid_request", e.to_string()))?

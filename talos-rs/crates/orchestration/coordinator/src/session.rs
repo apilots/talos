@@ -1,14 +1,16 @@
 use crate::CoordinatorImpl;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
+use talos_config::resolve_runtime_path;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{ChatMessage, ChatRequest, LlmProvider};
 use talos_session_store::SessionStore;
 use talos_types::gateway::GatewayRequest;
 use talos_types::talos::{TalosContext, TalosInputItem, TalosProvider, TalosUsage};
 use talos_types::{
-    SessionPatch, SessionPatchAck, SessionQuery, SessionRecord, TalosConfig, TalosSession,
-    DEFAULT_SESSION_TITLE,
+    SessionPatch, SessionPatchAck, SessionProjectRootPatch, SessionQuery, SessionRecord,
+    TalosConfig, TalosSession, DEFAULT_SESSION_TITLE,
 };
 use tokio::sync::RwLock;
 
@@ -168,6 +170,20 @@ impl SessionManager {
         TalosSession::restore(record, &self.base_config, workspace_id)
     }
 
+    fn resolve_initial_project_root(&self, context: &TalosContext) -> Option<PathBuf> {
+        if let Some(project_root) = context.project_root.clone() {
+            return Some(project_root);
+        }
+
+        let workspace_dir = self.base_config.agent.kernel.memory.workspace_dir.trim();
+        if workspace_dir.is_empty() {
+            return None;
+        }
+
+        let candidate = resolve_runtime_path(workspace_dir);
+        candidate.exists().then_some(candidate)
+    }
+
     async fn cache_session(&self, session: TalosSession) -> TalosSession {
         let session_id = session.context.session_id.clone();
         self.session_cache
@@ -280,6 +296,8 @@ impl SessionManager {
         target_agent: &str,
         model: Option<String>,
     ) -> TalosResult<TalosSession> {
+        let mut context = context;
+        context.project_root = self.resolve_initial_project_root(&context);
         let record = self
             .session_store
             .create_session(
@@ -336,6 +354,10 @@ impl SessionManager {
         session_id: &str,
         patch: SessionPatch,
     ) -> TalosResult<SessionPatchAck> {
+        let patch = self.normalize_session_patch(patch);
+        if let Some(project_root_patch) = &patch.project_root {
+            self.validate_project_root_patch(project_root_patch)?;
+        }
         let ack = self
             .session_store
             .patch_session_record(session_id, &patch)
@@ -344,6 +366,37 @@ impl SessionManager {
             self.invalidate_cached_session(session_id).await;
         }
         Ok(ack)
+    }
+
+    fn normalize_session_patch(&self, mut patch: SessionPatch) -> SessionPatch {
+        if matches!(patch.project_root, Some(SessionProjectRootPatch::Clear)) {
+            patch.project_root = self
+                .resolve_initial_project_root(&TalosContext::system("session-patch"))
+                .map(|path| SessionProjectRootPatch::Set { path });
+        }
+        patch
+    }
+
+    fn validate_project_root_patch(&self, patch: &SessionProjectRootPatch) -> TalosResult<()> {
+        match patch {
+            SessionProjectRootPatch::Set { path } => {
+                let candidate = PathBuf::from(path);
+                if !candidate.exists() {
+                    return Err(TalosError::ValidationError(format!(
+                        "configured project root does not exist on the server: {}",
+                        candidate.display()
+                    )));
+                }
+                if !candidate.is_dir() {
+                    return Err(TalosError::ValidationError(format!(
+                        "configured project root is not a directory: {}",
+                        candidate.display()
+                    )));
+                }
+                Ok(())
+            }
+            SessionProjectRootPatch::Clear => Ok(()),
+        }
     }
 
     async fn update_session_title(&self, session_id: &str, title: &str) -> TalosResult<()> {

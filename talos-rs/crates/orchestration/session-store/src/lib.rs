@@ -6,8 +6,8 @@ use talos_storage::{Row, Storage};
 use talos_types::talos::TalosUsage;
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType};
 use talos_types::{
-    SessionConfigOverridePolicy, SessionPatch, SessionPatchAck, SessionQuery, SessionRecord,
-    DEFAULT_SESSION_TITLE,
+    SessionConfigOverridePolicy, SessionPatch, SessionPatchAck, SessionProjectRootPatch,
+    SessionQuery, SessionRecord, DEFAULT_SESSION_TITLE,
 };
 
 #[async_trait]
@@ -467,6 +467,16 @@ impl SessionStore for DatabaseSessionStore {
                 .into_iter()
                 .collect();
         }
+        if let Some(project_root_patch) = &patch.project_root {
+            match project_root_patch {
+                SessionProjectRootPatch::Set { path } => {
+                    record.context.project_root = Some(path.clone());
+                }
+                SessionProjectRootPatch::Clear => {
+                    record.context.project_root = None;
+                }
+            }
+        }
         record.last_activity = chrono::Utc::now()
             .timestamp_millis()
             .try_into()
@@ -664,6 +674,7 @@ impl SessionStore for MockSessionStore {
                 trace_id: "trace-mock".to_string(),
                 channel_id: Some("default".to_string()),
                 thread_id: None,
+                project_root: None,
                 environment: None,
             },
             model: "default".to_string(),
@@ -719,6 +730,7 @@ mod scope_tests {
             trace_id: "trace-1".to_string(),
             channel_id: Some("group-1".to_string()),
             thread_id: Some("topic-1".to_string()),
+            project_root: None,
             environment: None,
         }
     }

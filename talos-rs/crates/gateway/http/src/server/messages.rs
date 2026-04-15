@@ -70,6 +70,7 @@ pub(super) async fn stream_session_message(
         trace_id: session.context.trace_id.clone(),
         channel_id: session.context.channel_id.clone(),
         thread_id: session.context.thread_id.clone(),
+        project_root: session.context.project_root.clone(),
         environment: session.context.environment.clone(),
     };
     validate_auth_context(&auth, &context, super::DEFAULT_SCOPE_MESSAGES_WRITE)?;
@@ -147,6 +148,7 @@ pub(super) async fn process_session_message(
         trace_id: session.context.trace_id.clone(),
         channel_id: session.context.channel_id.clone(),
         thread_id: session.context.thread_id.clone(),
+        project_root: session.context.project_root.clone(),
         environment: session.context.environment.clone(),
     };
     validate_auth_context(&auth, &context, super::DEFAULT_SCOPE_MESSAGES_WRITE)?;

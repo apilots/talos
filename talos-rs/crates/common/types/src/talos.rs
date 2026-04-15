@@ -148,6 +148,8 @@ pub struct TalosContext {
     #[serde(default)]
     pub thread_id: Option<String>,
     #[serde(default)]
+    pub project_root: Option<PathBuf>,
+    #[serde(default)]
     pub environment: Option<TalosSessionEnvironment>,
 }
 
@@ -167,6 +169,7 @@ impl TalosContext {
             trace_id: trace_id.into(),
             channel_id: None,
             thread_id: None,
+            project_root: None,
             environment: None,
         }
     }
@@ -178,6 +181,11 @@ impl TalosContext {
 
     pub fn with_thread_id(mut self, thread_id: impl Into<String>) -> Self {
         self.thread_id = Some(thread_id.into());
+        self
+    }
+
+    pub fn with_project_root(mut self, project_root: impl Into<PathBuf>) -> Self {
+        self.project_root = Some(project_root.into());
         self
     }
 
@@ -345,6 +353,10 @@ pub enum TalosEventType {
     MessageExecutionSummary,
     MessageOutputDelta,
     MessageToolCallStarted,
+    MessageToolCallArgsDelta,
+    MessageToolCallQueued,
+    MessageToolCallExecuting,
+    MessageToolCallProgressDelta,
     MessageToolCallCompleted,
     MessageToolCallPendingApproval,
     MessageCompleted,
@@ -419,6 +431,67 @@ pub struct TalosMessageToolCallStartedEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TalosToolStreamKey {
+    pub round: u32,
+    pub index: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TalosToolProgressKind {
+    Status,
+    Stdout,
+    Stderr,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TalosMessageToolCallArgsDeltaEvent {
+    pub request_id: String,
+    pub stream_key: TalosToolStreamKey,
+    pub call_id: Option<String>,
+    pub tool_name: Option<String>,
+    pub delta: String,
+    pub item_index: u64,
+    pub iteration: u64,
+    pub step_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TalosMessageToolCallQueuedEvent {
+    pub request_id: String,
+    pub stream_key: TalosToolStreamKey,
+    pub call_id: String,
+    pub tool_name: String,
+    pub item_index: u64,
+    pub iteration: u64,
+    pub step_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TalosMessageToolCallExecutingEvent {
+    pub request_id: String,
+    pub stream_key: TalosToolStreamKey,
+    pub call_id: String,
+    pub tool_name: String,
+    pub item_index: u64,
+    pub iteration: u64,
+    pub step_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TalosMessageToolCallProgressDeltaEvent {
+    pub request_id: String,
+    pub stream_key: TalosToolStreamKey,
+    pub call_id: String,
+    pub tool_name: String,
+    pub message: String,
+    pub progress_kind: TalosToolProgressKind,
+    pub item_index: u64,
+    pub iteration: u64,
+    pub step_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TalosMessageToolCallCompletedEvent {
     pub request_id: String,
     pub call_id: String,
@@ -466,6 +539,10 @@ pub enum TalosEventPayload {
     MessageExecutionSummary(TalosMessageExecutionSummaryEvent),
     MessageOutputDelta(TalosMessageOutputDeltaEvent),
     MessageToolCallStarted(TalosMessageToolCallStartedEvent),
+    MessageToolCallArgsDelta(TalosMessageToolCallArgsDeltaEvent),
+    MessageToolCallQueued(TalosMessageToolCallQueuedEvent),
+    MessageToolCallExecuting(TalosMessageToolCallExecutingEvent),
+    MessageToolCallProgressDelta(TalosMessageToolCallProgressDeltaEvent),
     MessageToolCallCompleted(TalosMessageToolCallCompletedEvent),
     MessageToolCallPendingApproval(TalosMessageToolCallPendingApprovalEvent),
     MessageCompleted(TalosMessageCompletedEvent),

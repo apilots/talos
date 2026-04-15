@@ -5,6 +5,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use talos_error::{TalosError, TalosResult};
 use talos_types::talos::TalosSessionEnvironment;
 use talos_types::talos::{TalosContentItem, TalosOutputItem, TalosUsage};
@@ -219,6 +220,10 @@ pub enum KernelStreamEventType {
     ThinkingDelta,
     ExecutionSummary,
     ToolCallStart,
+    ToolArgsDelta,
+    ToolQueued,
+    ToolExecuting,
+    ToolProgressDelta,
     ToolResult,
     PromptWarning,
     ConfirmationRequest,
@@ -248,9 +253,19 @@ pub enum KernelStreamEventData {
     ThinkingDelta(ThinkingDeltaStreamData),
     ExecutionSummary(ExecutionSummaryStreamData),
     ToolCallStart(ToolCallStartStreamData),
+    ToolArgsDelta(ToolArgsDeltaStreamData),
+    ToolQueued(ToolQueuedStreamData),
+    ToolExecuting(ToolExecutingStreamData),
+    ToolProgressDelta(ToolProgressDeltaStreamData),
     ToolResult(ToolResultStreamData),
     PromptWarning(PromptWarningEventData),
     ConfirmationRequest(ConfirmationRequestStreamData),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ToolStreamKey {
+    pub round: u32,
+    pub index: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -289,6 +304,45 @@ pub struct ToolCallStartStreamData {
     pub tool_name: Option<String>,
     pub arguments: Value,
     pub round: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolArgsDeltaStreamData {
+    pub stream_key: ToolStreamKey,
+    pub call_id: Option<String>,
+    pub tool_name: Option<String>,
+    pub delta: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolQueuedStreamData {
+    pub stream_key: ToolStreamKey,
+    pub call_id: String,
+    pub tool_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolExecutingStreamData {
+    pub stream_key: ToolStreamKey,
+    pub call_id: String,
+    pub tool_name: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolProgressKind {
+    Status,
+    Stdout,
+    Stderr,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolProgressDeltaStreamData {
+    pub stream_key: ToolStreamKey,
+    pub call_id: String,
+    pub tool_name: String,
+    pub message: String,
+    pub progress_kind: ToolProgressKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -340,6 +394,8 @@ pub struct InvocationContext {
     pub invocation_id: String,
     pub agent_id: String,
     pub workspace_id: String,
+    #[serde(default)]
+    pub project_root: Option<PathBuf>,
     pub input: String,
     pub selected_model_info: ModelInfo,
     #[serde(default)]
@@ -577,6 +633,8 @@ pub struct RunRequest {
     pub invocation_id: String,
     pub agent_id: String,
     pub workspace_id: String,
+    #[serde(default)]
+    pub project_root: Option<PathBuf>,
     pub input: String,
     pub selected_model_info: ModelInfo,
     #[serde(default)]
@@ -620,6 +678,7 @@ mod tests {
             invocation_id: "i1".to_string(),
             agent_id: "a1".to_string(),
             workspace_id: "w1".to_string(),
+            project_root: None,
             input: "hello".to_string(),
             selected_model_info: ModelInfo {
                 id: "m1".to_string(),

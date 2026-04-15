@@ -4,13 +4,13 @@ use talos_client::{
     TalosContentItem, TalosEvent, TalosEventPayload, TalosInputItem, TalosMessageRequest,
 };
 use talos_error::{TalosError, TalosResult};
-use talos_types::talos::TalosEventType;
+use talos_types::talos::{TalosEventType, TalosToolProgressKind};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
 use tracing::error;
 
-use crate::types::{AppState, ChatRole, PendingApprovalState, RemoteCommandUpdate};
-use crate::utils::{canonical_event_label, summarize_for_queue};
+use crate::types::{AppState, ChatRole, PendingApprovalState, RemoteCommandUpdate, ToolCallStatus};
+use crate::utils::summarize_for_queue;
 use crate::{TuiApp, MAX_RIGHT_EVENTS, SPINNER_FRAMES, STREAM_STALL_TIMEOUT};
 
 impl TuiApp {
@@ -215,10 +215,21 @@ impl TuiApp {
             },
             RemoteCommandUpdate::StatusLoaded(result) => match result {
                 Ok(session_info) => {
+                    let project_root = session_info
+                        .as_ref()
+                        .and_then(|session| session.context.project_root.as_ref())
+                        .cloned()
+                        .or_else(|| self.current_project_root.clone());
                     let mut lines = vec![
                         "mode: Gateway".to_string(),
                         format!("model: {}", self.current_model),
-                        format!("directory: {}", self.startup_directory.display()),
+                        format!("client_directory: {}", self.startup_directory.display()),
+                        format!(
+                            "project_root: {}",
+                            project_root
+                                .map(|path| path.display().to_string())
+                                .unwrap_or_else(|| "(unset)".to_string())
+                        ),
                         format!("connection_mode: {}", self.connection_mode),
                         format!(
                             "session: {}",
@@ -297,6 +308,35 @@ impl TuiApp {
                     self.show_model_picker = false;
                     self.push_block(ChatRole::System, format!("Failed to switch model: {}", err));
                     self.push_right_event("model picker switch failed".to_string());
+                }
+            },
+            RemoteCommandUpdate::ProjectRootSwitched { requested, result } => match result {
+                Ok(info) => {
+                    self.apply_session_snapshot(&info);
+                    let resolved = info
+                        .context
+                        .project_root
+                        .as_ref()
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_else(|| "(unset)".to_string());
+                    let message = if requested == "clear" {
+                        if info.context.project_root.is_some() {
+                            format!("Project root reset to `{}`.", resolved)
+                        } else {
+                            "Project root cleared.".to_string()
+                        }
+                    } else {
+                        format!("Project root switched to `{}`.", resolved)
+                    };
+                    self.push_block(ChatRole::System, message);
+                    self.push_right_event(format!("project root updated: {}", resolved));
+                }
+                Err(err) => {
+                    self.push_block(
+                        ChatRole::System,
+                        format!("Failed to update project root: {}", err),
+                    );
+                    self.push_right_event("project root update failed".to_string());
                 }
             },
             RemoteCommandUpdate::SessionTurnsLoaded { session, result } => match result {
@@ -493,8 +533,7 @@ impl TuiApp {
         self.abort_pending_stream_task();
         self.in_flight = true;
         self.received_output_delta = false;
-        self.pending_assistant_output.clear();
-        self.stream_has_tool_calls = false;
+        self.transcript.reset_for_new_stream();
         self.active_message = Some(active_summary);
         if reset_retry_state {
             self.active_retry_count = 0;
@@ -511,10 +550,6 @@ impl TuiApp {
             let user_idx = self.push_block(ChatRole::User, user_message.clone());
             self.active_user_idx = Some(user_idx);
         }
-
-        let thinking_idx = self.push_block(ChatRole::Thinking, String::new());
-        self.active_thinking_idx = Some(thinking_idx);
-        self.active_assistant_idx = None;
 
         let (tx, rx) = mpsc::channel(1);
         self.pending_stream_connect = Some(rx);
@@ -536,7 +571,6 @@ impl TuiApp {
 
     pub(crate) fn handle_stream_event(&mut self, event: TalosEvent) {
         self.trace_event_count = self.trace_event_count.saturating_add(1);
-        let is_tool_lifecycle_event = Self::is_tool_lifecycle_event(&event.event_type);
 
         if let Some(session_id) = self.session_id.as_deref() {
             if event.session_id != session_id {
@@ -549,7 +583,7 @@ impl TuiApp {
         }
 
         match self.active_stream_message_id.as_deref() {
-            Some(active_id) if event.message_id != active_id && !is_tool_lifecycle_event => {
+            Some(active_id) if event.message_id != active_id => {
                 self.push_right_event(format!(
                     "ignored stale event for {} (active {})",
                     event.message_id, active_id
@@ -563,7 +597,7 @@ impl TuiApp {
         }
 
         if let Some(last_seq) = self.last_stream_sequence {
-            if event.sequence < last_seq && !is_tool_lifecycle_event {
+            if event.sequence < last_seq {
                 self.push_right_event(format!(
                     "ignored out-of-order event seq {} < {}",
                     event.sequence, last_seq
@@ -574,14 +608,6 @@ impl TuiApp {
         self.last_stream_sequence = Some(event.sequence);
         self.request_follow_bottom();
 
-        if event.event_type != TalosEventType::MessageOutputDelta {
-            self.push_right_event(format!(
-                "{} #{}",
-                canonical_event_label(&event.event_type),
-                event.sequence
-            ));
-        }
-
         match (&event.event_type, &event.payload) {
             (TalosEventType::MessageStarted, TalosEventPayload::MessageStarted(_)) => {}
             (
@@ -589,6 +615,7 @@ impl TuiApp {
                 TalosEventPayload::MessageReasoningDelta(payload),
             ) => {
                 if !payload.delta.is_empty() {
+                    self.transcript.note_visible_activity();
                     self.append_thinking(&payload.delta);
                 }
             }
@@ -597,37 +624,31 @@ impl TuiApp {
                 TalosEventPayload::MessageExecutionSummary(payload),
             ) => {
                 if !payload.text.trim().is_empty() {
-                    self.push_block(
-                        ChatRole::System,
-                        format!(
-                            "Execution summary [{} #{}]: {}",
-                            payload.step_id, payload.iteration, payload.text
-                        ),
-                    );
+                    self.push_right_event(format!("execution summary: {}", payload.text.trim()));
                 }
             }
             (
                 TalosEventType::MessageOutputDelta,
                 TalosEventPayload::MessageOutputDelta(payload),
             ) => {
-                if self.stream_has_tool_calls {
-                    self.pending_assistant_output.push_str(&payload.delta);
-                } else {
-                    self.append_assistant(&payload.delta);
-                }
+                self.transcript.note_visible_activity();
+                self.append_assistant(&payload.delta);
                 self.received_output_delta = true;
             }
             (
                 TalosEventType::MessageToolCallStarted,
                 TalosEventPayload::MessageToolCallStarted(payload),
             ) => {
-                self.start_tool_output_buffering();
+                self.transcript.note_visible_activity();
+                self.finish_live_text_blocks();
                 self.push_right_event(format!(
                     "tool started [{}]: {}",
                     payload.step_id, payload.name
                 ));
-                self.tool_events
-                    .push(format!("started [{}]: {}", payload.step_id, payload.name));
+                self.upsert_tool_event(
+                    payload.call_id.clone(),
+                    format!("queued: {}", payload.name),
+                );
                 self.push_tool_call_block(
                     payload.call_id.clone(),
                     payload.name.clone(),
@@ -635,6 +656,71 @@ impl TuiApp {
                     payload.iteration,
                     payload.item_index,
                     payload.timing_ms,
+                );
+                self.transcript
+                    .record_stream_key(0, payload.item_index as usize, &payload.call_id);
+                self.update_tool_call_status(&payload.call_id, ToolCallStatus::Queued);
+            }
+            (
+                TalosEventType::MessageToolCallArgsDelta,
+                TalosEventPayload::MessageToolCallArgsDelta(payload),
+            ) => {
+                if let Some(call_id) = payload.call_id.as_deref() {
+                    self.transcript.record_stream_key(
+                        payload.stream_key.round,
+                        payload.stream_key.index,
+                        call_id,
+                    );
+                }
+            }
+            (
+                TalosEventType::MessageToolCallQueued,
+                TalosEventPayload::MessageToolCallQueued(payload),
+            ) => {
+                self.transcript.note_visible_activity();
+                self.push_right_event(format!(
+                    "tool queued: {} ({})",
+                    payload.call_id, payload.tool_name
+                ));
+                self.upsert_tool_event(
+                    payload.call_id.clone(),
+                    format!("queued: {}", payload.tool_name),
+                );
+                self.transcript.record_stream_key(
+                    payload.stream_key.round,
+                    payload.stream_key.index,
+                    &payload.call_id,
+                );
+                self.update_tool_call_status(&payload.call_id, ToolCallStatus::Queued);
+            }
+            (
+                TalosEventType::MessageToolCallExecuting,
+                TalosEventPayload::MessageToolCallExecuting(payload),
+            ) => {
+                self.transcript.note_visible_activity();
+                self.push_right_event(format!(
+                    "tool executing: {} ({})",
+                    payload.call_id, payload.tool_name
+                ));
+                self.upsert_tool_event(
+                    payload.call_id.clone(),
+                    format!("running: {}", payload.tool_name),
+                );
+                self.transcript.record_stream_key(
+                    payload.stream_key.round,
+                    payload.stream_key.index,
+                    &payload.call_id,
+                );
+                self.update_tool_call_status(&payload.call_id, ToolCallStatus::Running);
+            }
+            (
+                TalosEventType::MessageToolCallProgressDelta,
+                TalosEventPayload::MessageToolCallProgressDelta(payload),
+            ) => {
+                self.transcript.note_visible_activity();
+                self.append_tool_call_progress(
+                    &payload.call_id,
+                    Self::format_tool_progress_line(payload.progress_kind, &payload.message),
                 );
             }
             (
@@ -645,8 +731,7 @@ impl TuiApp {
                     "tool completed: {} ({})",
                     payload.call_id, payload.tool
                 ));
-                self.tool_events
-                    .push(format!("completed: {} ({})", payload.call_id, payload.tool));
+                self.upsert_tool_event(payload.call_id.clone(), format!("done: {}", payload.tool));
                 let output = payload
                     .content
                     .iter()
@@ -662,21 +747,43 @@ impl TuiApp {
                     !payload.is_error,
                     payload.timing_ms,
                 );
+                self.clear_live_tool_progress(&payload.call_id);
             }
             (
                 TalosEventType::MessageToolCallPendingApproval,
                 TalosEventPayload::MessageToolCallPendingApproval(payload),
             ) => {
+                self.transcript.note_visible_activity();
                 self.push_right_event(format!(
                     "approval needed: {} ({})",
                     payload.tool_name, payload.call_id
                 ));
+                self.upsert_tool_event(
+                    payload.call_id.clone(),
+                    format!("approval: {}", payload.tool_name),
+                );
                 self.pending_approval = Some(PendingApprovalState {
                     call_id: payload.call_id.clone(),
                     tool_name: payload.tool_name.clone(),
                     prompt: payload.prompt.clone(),
                     arguments: payload.arguments.clone(),
                 });
+                self.push_tool_call_block(
+                    payload.call_id.clone(),
+                    payload.tool_name.clone(),
+                    payload.arguments.clone(),
+                    0,
+                    0,
+                    None,
+                );
+                self.update_tool_call_status(&payload.call_id, ToolCallStatus::PendingApproval);
+                self.append_tool_call_progress(
+                    &payload.call_id,
+                    Self::format_tool_progress_line(
+                        TalosToolProgressKind::Status,
+                        "waiting for approval",
+                    ),
+                );
             }
             (TalosEventType::MessageCompleted, TalosEventPayload::MessageCompleted(payload)) => {
                 self.session_usage.input_tokens = self
@@ -701,48 +808,30 @@ impl TuiApp {
         }
     }
 
-    pub(crate) fn start_tool_output_buffering(&mut self) {
-        if self.stream_has_tool_calls {
-            return;
-        }
-
-        self.stream_has_tool_calls = true;
-        if let Some(idx) = self.active_assistant_idx {
-            let mut should_remove = false;
-            if let Some(block) = self.chat_blocks.get_mut(idx) {
-                if !block.content.is_empty() {
-                    self.pending_assistant_output.push_str(&block.content);
-                    block.content.clear();
-                }
-                should_remove = block.content.is_empty();
-            }
+    pub(crate) fn finish_live_text_blocks(&mut self) {
+        if let Some(idx) = self.transcript.live_assistant_idx.take() {
+            let should_remove = self
+                .chat_blocks
+                .get(idx)
+                .map(|block| block.content.trim().is_empty())
+                .unwrap_or(false);
             if should_remove {
                 self.remove_chat_block(idx);
                 self.rebuild_chat_history();
-                self.active_assistant_idx = None;
-            } else {
-                self.sync_history_entry(idx);
             }
         }
-    }
-
-    pub(crate) fn flush_pending_assistant_output(&mut self) {
-        if self.pending_assistant_output.is_empty() {
-            return;
-        }
-        let buffered = std::mem::take(&mut self.pending_assistant_output);
-        self.append_assistant(&buffered);
+        self.transcript.live_thinking_idx = None;
     }
 
     pub(crate) fn append_assistant(&mut self, text: &str) {
         if text.is_empty() {
             return;
         }
-        let idx = if let Some(idx) = self.active_assistant_idx {
+        let idx = if let Some(idx) = self.transcript.live_assistant_idx {
             idx
         } else {
             let idx = self.push_block(ChatRole::Assistant, String::new());
-            self.active_assistant_idx = Some(idx);
+            self.transcript.live_assistant_idx = Some(idx);
             idx
         };
 
@@ -754,11 +843,14 @@ impl TuiApp {
     }
 
     pub(crate) fn append_thinking(&mut self, text: &str) {
-        let idx = if let Some(idx) = self.active_thinking_idx {
+        if text.is_empty() {
+            return;
+        }
+        let idx = if let Some(idx) = self.transcript.live_thinking_idx {
             idx
         } else {
             let idx = self.push_block(ChatRole::Thinking, String::new());
-            self.active_thinking_idx = Some(idx);
+            self.transcript.live_thinking_idx = Some(idx);
             idx
         };
 
@@ -769,12 +861,58 @@ impl TuiApp {
         self.request_follow_bottom();
     }
 
+    pub(crate) fn clear_live_tool_progress(&mut self, call_id: &str) {
+        self.transcript
+            .live_progress_idx
+            .retain(|(tracked_call_id, _), _| tracked_call_id != call_id);
+    }
+
     pub(crate) fn push_right_event(&mut self, event: String) {
+        if self
+            .right_panel_events
+            .last()
+            .map(|last| last == &event)
+            .unwrap_or(false)
+        {
+            return;
+        }
+
+        let coalesced_prefixes = ["model load retry", "session create retry"];
+        if let Some(prefix) = coalesced_prefixes
+            .iter()
+            .find(|prefix| event.starts_with(**prefix))
+        {
+            if let Some(last) = self.right_panel_events.last_mut() {
+                if last.starts_with(prefix) {
+                    *last = event;
+                    return;
+                }
+            }
+        }
+
         self.right_panel_events.push(event);
         if self.right_panel_events.len() > MAX_RIGHT_EVENTS {
             let overflow = self.right_panel_events.len() - MAX_RIGHT_EVENTS;
             self.right_panel_events.drain(0..overflow);
         }
+        if self.tool_events.len() > MAX_RIGHT_EVENTS {
+            let overflow = self.tool_events.len() - MAX_RIGHT_EVENTS;
+            self.tool_events.drain(0..overflow);
+        }
+    }
+
+    pub(crate) fn upsert_tool_event(&mut self, call_id: String, summary: String) {
+        if let Some(existing) = self
+            .tool_events
+            .iter_mut()
+            .find(|event| event.call_id == call_id)
+        {
+            existing.summary = summary;
+            return;
+        }
+
+        self.tool_events
+            .push(crate::types::ToolPanelEvent { call_id, summary });
         if self.tool_events.len() > MAX_RIGHT_EVENTS {
             let overflow = self.tool_events.len() - MAX_RIGHT_EVENTS;
             self.tool_events.drain(0..overflow);
@@ -799,11 +937,6 @@ impl TuiApp {
         } else {
             None
         };
-        if !is_error {
-            self.flush_pending_assistant_output();
-        } else {
-            self.pending_assistant_output.clear();
-        }
         if let (Some(idx), Some(duration_ms)) = (self.active_user_idx, completed_round_timing_ms) {
             if let Some(block) = self.chat_blocks.get_mut(idx) {
                 block.round_timing_ms = Some(duration_ms);
@@ -814,15 +947,13 @@ impl TuiApp {
         self.pending_stream = None;
         self.abort_pending_stream_task();
         self.active_user_idx = None;
-        self.active_thinking_idx = None;
-        self.active_assistant_idx = None;
         self.active_stream_message_id = None;
         self.last_stream_sequence = None;
         self.stream_started_at = None;
         self.last_stream_event_at = None;
         self.active_message = None;
-        self.active_tool_calls.clear();
-        self.stream_has_tool_calls = false;
+        self.transcript.finalize(&mut self.chat_blocks);
+        self.rebuild_chat_history();
         if !keep_active_payload {
             self.active_message_raw = None;
             self.active_retry_count = 0;
@@ -832,6 +963,14 @@ impl TuiApp {
         } else {
             format!("stream finished: {}", reason)
         });
+    }
+
+    fn format_tool_progress_line(kind: TalosToolProgressKind, message: &str) -> String {
+        match kind {
+            TalosToolProgressKind::Status => format!("status: {}", message),
+            TalosToolProgressKind::Stdout => format!("stdout: {}", message),
+            TalosToolProgressKind::Stderr => format!("stderr: {}", message),
+        }
     }
 
     pub(crate) fn sync_history_entry(&mut self, idx: usize) {

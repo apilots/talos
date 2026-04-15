@@ -12,5 +12,6 @@ pub fn build_general_turn_step_request(
         parallel_tool_calls: true,
         native_thinking: None,
         stream_tx: prepared.stream_tx.clone(),
+        streaming_tool_execution: None,
     }
 }

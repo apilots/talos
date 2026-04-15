@@ -15,7 +15,7 @@ impl TuiApp {
         let right_block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Rgb(106, 111, 123)))
-            .title("Runtime / Tools");
+            .title("Runtime");
         let right_inner = right_block.inner(area);
         f.render_widget(right_block, area);
 
@@ -40,6 +40,13 @@ impl TuiApp {
                 .unwrap_or_else(|| "none".to_string())
         )));
         lines.push(Line::from(format!(
+            "project: {}",
+            self.current_project_root
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "(unset)".to_string())
+        )));
+        lines.push(Line::from(format!(
             "queue: {}/{}",
             self.message_queue.len(),
             MAX_QUEUE_LEN
@@ -57,32 +64,7 @@ impl TuiApp {
         lines.push(Line::from(""));
 
         lines.push(Line::from(Span::styled(
-            "Tools",
-            Style::default()
-                .add_modifier(Modifier::BOLD)
-                .fg(Color::White),
-        )));
-        if self.tool_events.is_empty() {
-            lines.push(Line::from("- none"));
-        } else {
-            for event in self.tool_events.iter().rev().take(4).rev() {
-                lines.push(Line::from(format!("- {}", event)));
-            }
-        }
-        lines.push(Line::from(""));
-
-        lines.push(Line::from(Span::styled(
-            "LSP",
-            Style::default()
-                .add_modifier(Modifier::BOLD)
-                .fg(Color::White),
-        )));
-        lines.push(Line::from("- pyright Connected"));
-        lines.push(Line::from("- root: ../../talos-rs"));
-        lines.push(Line::from(""));
-
-        lines.push(Line::from(Span::styled(
-            "Todos",
+            "Active",
             Style::default()
                 .add_modifier(Modifier::BOLD)
                 .fg(Color::White),
@@ -92,34 +74,79 @@ impl TuiApp {
                 .closing_session_id
                 .clone()
                 .unwrap_or_else(|| "unknown".to_string());
-            lines.push(Line::from(format!("[~] closing {}", session_id)));
+            lines.push(Line::from(format!("~ closing {}", session_id)));
         } else if let Some(active) = &self.active_message {
-            lines.push(Line::from(format!("[~] {}", active)));
+            lines.push(Line::from(format!("~ {}", active)));
         } else {
-            lines.push(Line::from("[ ] idle"));
+            lines.push(Line::from("~ idle"));
         }
         if self.message_queue.is_empty() {
-            lines.push(Line::from("[ ] queue empty"));
+            lines.push(Line::from("queue: empty"));
         } else {
-            for queued in self.message_queue.iter() {
+            for queued in self.message_queue.iter().take(2) {
                 lines.push(Line::from(format!(
-                    "[ ] {}",
+                    "queue: {}",
                     summarize_for_queue(&queued.text)
+                )));
+            }
+            if self.message_queue.len() > 2 {
+                lines.push(Line::from(format!(
+                    "queue: +{} more",
+                    self.message_queue.len() - 2
                 )));
             }
         }
         lines.push(Line::from(""));
-        lines.push(Line::from("/help /model /history /sessions /status /quit"));
-        lines.push(Line::from("↑/↓/PgUp/PgDn scroll  Ctrl+O expand tool"));
-        lines.push(Line::from("Ctrl+B panel  Ctrl+Y copy  Ctrl+U clear"));
+
+        lines.push(Line::from(Span::styled(
+            "Tools",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::White),
+        )));
+        if self.tool_events.is_empty() {
+            lines.push(Line::from("- none"));
+        } else {
+            for event in self.tool_events.iter().rev().take(4).rev() {
+                lines.push(Line::from(format!("- {}", event.summary)));
+            }
+        }
+        lines.push(Line::from(""));
+
+        lines.push(Line::from(Span::styled(
+            "Recent",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::White),
+        )));
+        let recent_events = self.right_panel_events.iter().rev().take(4).rev();
+        let mut has_recent_event = false;
+        for event in recent_events {
+            has_recent_event = true;
+            lines.push(Line::from(format!("- {}", event)));
+        }
+        if !has_recent_event {
+            lines.push(Line::from("- none"));
+        }
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Keys",
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::White),
+        )));
         lines.push(Line::from(
-            "Click [ Copy Round ] on a block to copy that turn",
+            "/help /model /project /history /sessions /status /quit",
         ));
+        lines.push(Line::from("↑/↓ scroll  Ctrl+O expand tool"));
+        lines.push(Line::from("Ctrl+B panel  Ctrl+Y copy"));
+        lines.push(Line::from("Click [ Copy Round ] to copy a turn"));
 
         let right = Paragraph::new(lines).wrap(Wrap { trim: false });
         f.render_widget(right, right_inner);
     }
-
+}
+impl TuiApp {
     pub(crate) fn render_history_panel(&self, f: &mut Frame, area: Rect) {
         let block = Block::default()
             .style(Style::default().bg(Color::Rgb(24, 28, 36)))

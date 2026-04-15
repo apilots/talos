@@ -4,6 +4,20 @@ use crate::types::{ChatBlock, ChatRole, ToolCallStatus};
 use crate::TuiApp;
 
 impl TuiApp {
+    fn should_replace_tool_input(
+        existing: Option<&serde_json::Value>,
+        incoming: &serde_json::Value,
+    ) -> bool {
+        let incoming_has_detail = match incoming {
+            serde_json::Value::Null => false,
+            serde_json::Value::Object(map) => !map.is_empty(),
+            serde_json::Value::Array(items) => !items.is_empty(),
+            serde_json::Value::String(value) => !value.trim().is_empty(),
+            _ => true,
+        };
+        incoming_has_detail || existing.is_none()
+    }
+
     pub(crate) fn push_block(&mut self, role: ChatRole, content: String) -> usize {
         self.chat_blocks.push(ChatBlock::new(role, content));
         let idx = self.chat_blocks.len() - 1;
@@ -18,20 +32,7 @@ impl TuiApp {
         }
 
         self.chat_blocks.remove(idx);
-
-        self.active_tool_calls = self
-            .active_tool_calls
-            .drain()
-            .filter_map(|(call_id, block_idx)| {
-                if block_idx == idx {
-                    None
-                } else if block_idx > idx {
-                    Some((call_id, block_idx - 1))
-                } else {
-                    Some((call_id, block_idx))
-                }
-            })
-            .collect();
+        self.transcript.on_remove(idx);
     }
 
     pub(crate) fn rebuild_chat_history(&mut self) {
@@ -42,18 +43,8 @@ impl TuiApp {
             .collect();
     }
 
-    pub(crate) fn shift_tool_indices_on_insert(&mut self, inserted_idx: usize) {
-        self.active_tool_calls = self
-            .active_tool_calls
-            .drain()
-            .map(|(call_id, block_idx)| {
-                if block_idx >= inserted_idx {
-                    (call_id, block_idx + 1)
-                } else {
-                    (call_id, block_idx)
-                }
-            })
-            .collect();
+    pub(crate) fn shift_live_indices_on_insert(&mut self, inserted_idx: usize) {
+        self.transcript.on_insert(inserted_idx);
     }
 
     pub(crate) fn tool_result_output_text(content: &[TalosContentItem]) -> String {
@@ -124,6 +115,22 @@ impl TuiApp {
         item_index: u64,
         timing_ms: Option<u64>,
     ) -> usize {
+        if let Some(idx) = self.resolve_tool_call_block_idx(&call_id) {
+            if let Some(block) = self.chat_blocks.get_mut(idx) {
+                block.tool_name = Some(tool_name);
+                if Self::should_replace_tool_input(block.tool_input.as_ref(), &tool_input) {
+                    block.tool_input = Some(tool_input);
+                }
+                block.tool_iteration = Some(iteration);
+                block.tool_item_index = Some(item_index);
+                if timing_ms.is_some() {
+                    block.timing_ms = timing_ms;
+                }
+            }
+            self.request_follow_bottom();
+            return idx;
+        }
+
         let block = ChatBlock::new_tool_call(
             call_id.clone(),
             tool_name,
@@ -145,30 +152,52 @@ impl TuiApp {
             })
             .unwrap_or(self.chat_blocks.len());
         self.chat_blocks.insert(idx, block);
-        self.shift_tool_indices_on_insert(idx);
-        self.active_tool_calls.insert(call_id, idx);
+        self.shift_live_indices_on_insert(idx);
+        self.transcript.active_tool_calls.insert(call_id, idx);
+        self.rebuild_chat_history();
         self.request_follow_bottom();
         idx
     }
 
     pub(crate) fn resolve_tool_call_block_idx(&mut self, call_id: &str) -> Option<usize> {
-        if let Some(&idx) = self.active_tool_calls.get(call_id) {
-            if self
-                .chat_blocks
-                .get(idx)
-                .and_then(|block| block.tool_call_id.as_deref())
-                == Some(call_id)
-            {
-                return Some(idx);
+        self.transcript
+            .resolve_tool_call_idx(&self.chat_blocks, call_id)
+    }
+
+    pub(crate) fn update_tool_call_status(&mut self, call_id: &str, status: ToolCallStatus) {
+        if let Some(idx) = self.resolve_tool_call_block_idx(call_id) {
+            if let Some(block) = self.chat_blocks.get_mut(idx) {
+                block.tool_status = Some(status);
             }
+            self.request_follow_bottom();
+        }
+    }
+
+    pub(crate) fn append_tool_call_progress(&mut self, call_id: &str, line: String) {
+        if line.trim().is_empty() {
+            return;
         }
 
-        let idx = self
-            .chat_blocks
-            .iter()
-            .position(|block| block.tool_call_id.as_deref() == Some(call_id))?;
-        self.active_tool_calls.insert(call_id.to_string(), idx);
-        Some(idx)
+        if let Some(idx) = self.resolve_tool_call_block_idx(call_id) {
+            if let Some(block) = self.chat_blocks.get_mut(idx) {
+                if block
+                    .tool_progress
+                    .last()
+                    .map(|existing| existing == &line)
+                    .unwrap_or(false)
+                {
+                    self.request_follow_bottom();
+                    return;
+                }
+                block.tool_progress.push(line);
+                const MAX_PROGRESS_LINES: usize = 8;
+                if block.tool_progress.len() > MAX_PROGRESS_LINES {
+                    let overflow = block.tool_progress.len() - MAX_PROGRESS_LINES;
+                    block.tool_progress.drain(0..overflow);
+                }
+            }
+            self.request_follow_bottom();
+        }
     }
 
     pub(crate) fn complete_tool_call_block(
@@ -186,7 +215,7 @@ impl TuiApp {
                     block.timing_ms = timing_ms;
                 }
             }
-            self.active_tool_calls.remove(call_id);
+            self.transcript.active_tool_calls.remove(call_id);
             self.request_follow_bottom();
         }
     }
@@ -210,10 +239,10 @@ impl TuiApp {
 
     pub(crate) fn discard_active_pending_blocks(&mut self) {
         let mut remove_indices = vec![];
-        if let Some(idx) = self.active_assistant_idx {
+        if let Some(idx) = self.transcript.live_assistant_idx {
             remove_indices.push(idx);
         }
-        if let Some(idx) = self.active_thinking_idx {
+        if let Some(idx) = self.transcript.live_thinking_idx {
             remove_indices.push(idx);
         }
         if let Some(idx) = self.active_user_idx {
@@ -232,7 +261,7 @@ impl TuiApp {
             .map(|block| format!("{}\n{}", block.role.as_str(), block.content))
             .collect();
         self.active_user_idx = None;
-        self.active_thinking_idx = None;
-        self.active_assistant_idx = None;
+        self.transcript.live_thinking_idx = None;
+        self.transcript.live_assistant_idx = None;
     }
 }

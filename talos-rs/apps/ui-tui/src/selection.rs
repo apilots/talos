@@ -55,6 +55,10 @@ impl TuiApp {
                 }
                 lines.join("\n")
             }
+            ChatRole::ToolProgress => {
+                let tool_name = block.tool_name.as_deref().unwrap_or("unknown");
+                format!("### Tool Progress `{}`\n\n{}", tool_name, block.content)
+            }
             ChatRole::User => format!("## User\n\n{}", block.content),
             ChatRole::Assistant => format!("## Assistant\n\n{}", block.content),
             ChatRole::Thinking => format!("## Thinking\n\n{}", block.content),

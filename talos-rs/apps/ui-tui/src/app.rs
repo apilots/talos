@@ -2,15 +2,14 @@ use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use talos_client::{TalosClient, TalosContext, TalosSession};
-use talos_types::talos::{
-    TalosConnectionMode, TalosEventType, TalosSessionEnvironment, TalosUsage,
-};
+use talos_types::talos::{TalosConnectionMode, TalosSessionEnvironment, TalosUsage};
 
 use crate::client::GatewayClient;
 use crate::render;
@@ -18,16 +17,10 @@ use crate::types::{AppState, ChatRole, CopyProjection, RenderedChatLine};
 use crate::utils::{build_welcome_card, APP_VERSION};
 use crate::{TuiApp, CHAT_CONTENT_PADDING_LEFT, WELCOME_MODEL_PLACEHOLDER};
 
-impl TuiApp {
-    pub(crate) fn is_tool_lifecycle_event(event_type: &TalosEventType) -> bool {
-        matches!(
-            event_type,
-            TalosEventType::MessageToolCallStarted
-                | TalosEventType::MessageToolCallCompleted
-                | TalosEventType::MessageToolCallPendingApproval
-        )
-    }
+const REMOTE_INIT_MAX_ATTEMPTS: usize = 5;
+const REMOTE_INIT_RETRY_DELAY_MS: u64 = 250;
 
+impl TuiApp {
     pub(crate) fn build(
         gateway_client: Option<Arc<dyn GatewayClient>>,
         connection_mode: TalosConnectionMode,
@@ -39,6 +32,7 @@ impl TuiApp {
             pasted_blocks: Vec::new(),
             selected_pasted_block: None,
             startup_directory: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            current_project_root: None,
             connection_mode,
             current_model: String::new(),
             session_usage: TalosUsage::default(),
@@ -64,11 +58,8 @@ impl TuiApp {
             active_message: None,
             active_message_raw: None,
             active_retry_count: 0,
-            pending_assistant_output: String::new(),
-            stream_has_tool_calls: false,
             active_user_idx: None,
-            active_thinking_idx: None,
-            active_assistant_idx: None,
+            transcript: Default::default(),
             pending_session_connect: None,
             pending_session_task: None,
             pending_stream_connect: None,
@@ -87,7 +78,6 @@ impl TuiApp {
             last_stream_event_at: None,
             gateway_client,
             pending_approval: None,
-            active_tool_calls: HashMap::new(),
             history_sessions: vec![],
             history_selected: 0,
             show_model_picker: false,
@@ -110,18 +100,24 @@ impl TuiApp {
             input_area: None,
         };
 
+        if matches!(app.connection_mode, TalosConnectionMode::Embedded) {
+            app.current_project_root = Some(app.startup_directory.clone());
+        }
+
         app.push_block(
             ChatRole::System,
             build_welcome_card(
                 APP_VERSION,
                 WELCOME_MODEL_PLACEHOLDER,
+                app.current_project_root.as_deref(),
                 &app.startup_directory,
                 app.connection_mode,
             ),
         );
         app.push_block(
             ChatRole::System,
-            "Type a message or use /help /model /history /sessions /status /quit".to_string(),
+            "Type a message or use /help /model /project /history /sessions /status /quit"
+                .to_string(),
         );
         app.push_right_event("tui initialized".to_string());
         app
@@ -147,16 +143,21 @@ impl TuiApp {
     }
 
     pub(crate) fn build_session_context(&self) -> TalosContext {
-        TalosContext::cli(env::var("USER").unwrap_or_else(|_| "local-user".to_string()))
-            .with_channel_id("terminal")
-            .with_environment(self.session_environment())
+        let context =
+            TalosContext::cli(env::var("USER").unwrap_or_else(|_| "local-user".to_string()))
+                .with_channel_id("terminal")
+                .with_environment(self.session_environment());
+        if matches!(self.connection_mode, TalosConnectionMode::Embedded) {
+            return context.with_project_root(self.startup_directory.clone());
+        }
+        context
     }
 
     pub async fn initialize_remote(&mut self) {
         self.connection_status = "connecting".to_string();
         self.push_right_event("connecting to gateway".to_string());
 
-        if let Err(err) = self.refresh_models_from_gateway().await {
+        if let Err(err) = self.refresh_models_with_retry().await {
             self.push_block(
                 ChatRole::System,
                 format!("Failed to load models from gateway: {}", err),
@@ -165,7 +166,7 @@ impl TuiApp {
             return;
         }
 
-        match self.ensure_remote_session().await {
+        match self.ensure_remote_session_with_retry().await {
             Ok(session_id) => {
                 self.connection_status = "connected".to_string();
                 self.push_right_event(format!("session ready: {}", session_id));
@@ -178,6 +179,54 @@ impl TuiApp {
                 self.connection_status = "error".to_string();
             }
         }
+    }
+
+    async fn refresh_models_with_retry(&mut self) -> talos_error::TalosResult<()> {
+        let mut last_error = None;
+        for attempt in 1..=REMOTE_INIT_MAX_ATTEMPTS {
+            match self.refresh_models_from_gateway().await {
+                Ok(()) => return Ok(()),
+                Err(err) => {
+                    last_error = Some(err);
+                    if attempt == REMOTE_INIT_MAX_ATTEMPTS {
+                        break;
+                    }
+                    self.push_right_event(format!(
+                        "model load retry {}/{}",
+                        attempt + 1,
+                        REMOTE_INIT_MAX_ATTEMPTS
+                    ));
+                    tokio::time::sleep(Self::remote_init_retry_delay(attempt)).await;
+                }
+            }
+        }
+        Err(last_error.expect("retry loop should capture the final model load error"))
+    }
+
+    async fn ensure_remote_session_with_retry(&mut self) -> talos_error::TalosResult<String> {
+        let mut last_error = None;
+        for attempt in 1..=REMOTE_INIT_MAX_ATTEMPTS {
+            match self.ensure_remote_session().await {
+                Ok(session_id) => return Ok(session_id),
+                Err(err) => {
+                    last_error = Some(err);
+                    if attempt == REMOTE_INIT_MAX_ATTEMPTS {
+                        break;
+                    }
+                    self.push_right_event(format!(
+                        "session create retry {}/{}",
+                        attempt + 1,
+                        REMOTE_INIT_MAX_ATTEMPTS
+                    ));
+                    tokio::time::sleep(Self::remote_init_retry_delay(attempt)).await;
+                }
+            }
+        }
+        Err(last_error.expect("retry loop should capture the final session create error"))
+    }
+
+    fn remote_init_retry_delay(attempt: usize) -> Duration {
+        Duration::from_millis(REMOTE_INIT_RETRY_DELAY_MS.saturating_mul(attempt as u64))
     }
 
     pub fn get_current_state(&self) -> &AppState {
@@ -197,11 +246,7 @@ impl TuiApp {
     }
 
     pub(crate) fn is_agent_working(&self) -> bool {
-        // Show spinner only if there's an empty Thinking block (streaming not yet started outputting content)
-        self.chat_blocks
-            .last()
-            .map(|b| b.role == ChatRole::Thinking && b.content.is_empty())
-            .unwrap_or(false)
+        self.in_flight && !self.transcript.has_visible_activity
     }
 
     pub(crate) fn thinking_spinner_line(&self, spinner_index: usize) -> RenderedChatLine {
@@ -223,11 +268,16 @@ impl TuiApp {
         self.session_id = Some(session.context.session_id.clone());
         self.current_model = session.config.llm.model.clone();
         self.session_usage = session.state.usage.clone();
+        self.current_project_root = session.context.project_root.clone().or_else(|| {
+            matches!(self.connection_mode, TalosConnectionMode::Embedded)
+                .then(|| self.startup_directory.clone())
+        });
         if let Some(welcome_block) = self.chat_blocks.first_mut() {
             if welcome_block.content.starts_with('╭') {
                 welcome_block.content = build_welcome_card(
                     APP_VERSION,
                     &self.current_model,
+                    self.current_project_root.as_deref(),
                     &self.startup_directory,
                     self.connection_mode,
                 );
@@ -260,5 +310,43 @@ impl TuiApp {
             ])
             .split(chat_inner);
         (chat_columns[1], chat_columns[2])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedded_session_context_uses_startup_directory_as_project_root() {
+        let app = TuiApp::build(None, TalosConnectionMode::Embedded);
+        let context = app.build_session_context();
+
+        assert_eq!(
+            context.project_root.as_deref(),
+            Some(app.startup_directory.as_path())
+        );
+        assert_eq!(
+            context
+                .environment
+                .as_ref()
+                .map(|env| env.directory.as_path()),
+            Some(app.startup_directory.as_path())
+        );
+    }
+
+    #[test]
+    fn remote_session_context_keeps_client_directory_but_not_project_root() {
+        let app = TuiApp::build(None, TalosConnectionMode::Remote);
+        let context = app.build_session_context();
+
+        assert_eq!(context.project_root, None);
+        assert_eq!(
+            context
+                .environment
+                .as_ref()
+                .map(|env| env.directory.as_path()),
+            Some(app.startup_directory.as_path())
+        );
     }
 }

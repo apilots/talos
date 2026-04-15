@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     ContextStateBags, InvocationExecutionState, InvocationLimits, KernelEventData,
-    KernelStreamEventData, KernelStreamEventType, TurnPhase,
+    KernelStreamEventData, KernelStreamEventType, ToolExecutionMode, TurnPhase,
 };
 use async_trait::async_trait;
 use serde_json::json;
@@ -28,6 +28,9 @@ struct ApprovalLoopProvider {
 }
 
 struct StreamingToolCallIdProvider;
+struct StreamingToolExecutionProvider {
+    path: String,
+}
 
 struct SummaryProvider {
     response: String,
@@ -265,6 +268,66 @@ impl LlmProvider for StreamingToolCallIdProvider {
 }
 
 #[async_trait]
+impl LlmProvider for StreamingToolExecutionProvider {
+    fn name(&self) -> &str {
+        "streaming-tool-execution"
+    }
+
+    async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
+        panic!("chat should not be called in stream_round test");
+    }
+
+    async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
+        let (_tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(1);
+        Ok(ChatStream::new(rx))
+    }
+
+    async fn stream_with_tools(&self, _request: ChatRequest) -> TalosResult<ToolStream> {
+        let (tx, rx) = mpsc::channel::<TalosResult<ToolStreamEvent>>(8);
+        let path = self.path.clone();
+        tokio::spawn(async move {
+            tx.send(Ok(ToolStreamEvent::TextDelta {
+                delta: "Inspecting a file.".to_string(),
+            }))
+            .await
+            .expect("text delta should send");
+            tx.send(Ok(ToolStreamEvent::ToolCallStart {
+                index: 0,
+                id: Some("call_read".to_string()),
+                name: Some("read_file".to_string()),
+            }))
+            .await
+            .expect("tool start should send");
+            tx.send(Ok(ToolStreamEvent::ToolCallDelta {
+                index: 0,
+                arguments_delta: format!("{{\"path\":\"{}\"}}", path),
+            }))
+            .await
+            .expect("tool delta should send");
+            tx.send(Ok(ToolStreamEvent::ToolCallEnd {
+                index: 0,
+                id: Some("call_read".to_string()),
+                name: Some("read_file".to_string()),
+                arguments: json!({ "path": path }),
+            }))
+            .await
+            .expect("tool end should send");
+            tx.send(Ok(ToolStreamEvent::Done {
+                finish_reason: Some("tool_calls".to_string()),
+                usage: None,
+            }))
+            .await
+            .expect("done event should send");
+        });
+        Ok(ToolStream::new(rx))
+    }
+
+    fn default_model(&self) -> &str {
+        "streaming-tool-execution"
+    }
+}
+
+#[async_trait]
 impl LlmProvider for SummaryProvider {
     fn name(&self) -> &str {
         "summary-provider"
@@ -299,6 +362,7 @@ fn build_ctx_with_stream(
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
         workspace_id: "w1".to_string(),
+        project_root: None,
         input: "hello".to_string(),
         selected_model_info: talos_types::ModelInfo {
             id: "m1".to_string(),
@@ -551,7 +615,7 @@ async fn test_stream_round_normalizes_empty_tool_call_id_before_emitting_start_e
     let request = ChatRequest::new_user("Search workspace memory", "streaming-tool-call-id");
     let (tx, mut rx) = mpsc::channel(8);
 
-    let result = stream_round(provider, request, 0, Some(&tx))
+    let result = stream_round(provider, request, 0, Some(&tx), None)
         .await
         .expect("stream round should succeed");
 
@@ -567,6 +631,68 @@ async fn test_stream_round_normalizes_empty_tool_call_id_before_emitting_start_e
     }
 
     assert_eq!(started_call_id.as_deref(), Some("tool-0-0"));
+}
+
+#[tokio::test]
+async fn test_stream_round_executes_tools_during_stream_and_emits_lifecycle_events() {
+    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+    let file_path = workspace_dir.join("sample.txt");
+    std::fs::write(&file_path, "streamed content").expect("sample file should exist");
+
+    let provider = Arc::new(StreamingToolExecutionProvider {
+        path: file_path.to_string_lossy().to_string(),
+    });
+    let request = ChatRequest::new_user("Read the sample file", "streaming-tool-execution");
+    let registry = Arc::new(ToolRegistry::new());
+    register_core_local_tools(registry.as_ref());
+    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    let execution_context = ToolExecutionContext {
+        session_id: "agent-a1".to_string(),
+        user_id: "talos".to_string(),
+        project_root: None,
+        kernel_config: Arc::new(AgentKernelConfig::default()),
+        memory_store,
+        pre_approved_call_ids: std::collections::HashSet::new(),
+        dynamic_tool_results: std::collections::HashMap::new(),
+    };
+    let (tx, mut rx) = mpsc::channel(16);
+
+    let result = stream_round(
+        provider,
+        request,
+        0,
+        Some(&tx),
+        Some(StreamingToolExecutionConfig {
+            execution_mode: ToolExecutionMode::Parallel,
+            execution_context,
+            tool_registry: registry,
+        }),
+    )
+    .await
+    .expect("stream round should succeed");
+
+    assert_eq!(result.tool_calls.len(), 1);
+    assert_eq!(result.streamed_tool_outputs.len(), 1);
+
+    let mut saw_args_delta = false;
+    let mut saw_queued = false;
+    let mut saw_executing = false;
+    let mut saw_result = false;
+    while let Ok(event) = rx.try_recv() {
+        match event.data {
+            KernelStreamEventData::ToolArgsDelta(_) => saw_args_delta = true,
+            KernelStreamEventData::ToolQueued(_) => saw_queued = true,
+            KernelStreamEventData::ToolExecuting(_) => saw_executing = true,
+            KernelStreamEventData::ToolResult(_) => saw_result = true,
+            _ => {}
+        }
+    }
+
+    assert!(saw_args_delta);
+    assert!(saw_queued);
+    assert!(saw_executing);
+    assert!(saw_result);
 }
 
 #[tokio::test]

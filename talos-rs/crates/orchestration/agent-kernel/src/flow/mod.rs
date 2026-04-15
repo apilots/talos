@@ -1,8 +1,8 @@
 use crate::execution::ContentsMode;
 use crate::general_turn::{
     apply_general_turn_step, apply_general_turn_tool_batch, build_general_turn_step_request,
-    emit_general_turn_finalization_stream, execute_general_turn_step,
-    execute_general_turn_tool_batch, finalize_general_turn_artifacts,
+    collect_general_turn_tool_batch, emit_general_turn_finalization_stream,
+    execute_general_turn_step, execute_general_turn_tool_batch, finalize_general_turn_artifacts,
     persist_general_turn_artifacts, prepare_general_turn, GeneralTurnLoopState,
     GeneralTurnStepDisposition, GeneralTurnStepResult, GeneralTurnToolBatch, PlanReActLoopState,
 };
@@ -24,12 +24,13 @@ use talos_error::TalosResult;
 use talos_llm_provider::LlmProvider;
 use talos_memory::MemoryStore;
 use talos_tools::{ToolDefinitionProvider, ToolExecutorPort};
-use talos_types::talos::TalosConnectionMode;
 use talos_types::talos::{TalosOutputItem, TalosUsage};
 use tokio::sync::mpsc;
 
 mod auto;
 mod callbacks;
+#[cfg(test)]
+mod convergence_tests;
 mod factory;
 mod single;
 #[cfg(test)]
@@ -47,7 +48,4 @@ pub(crate) use callbacks::{
 };
 #[cfg(test)]
 pub(crate) use factory::is_local_path_analysis_request;
-pub(crate) use factory::{
-    is_read_only_tool_round, select_flow_profile, should_replan,
-    should_require_local_path_file_probe, should_require_structure_probe,
-};
+pub(crate) use factory::{is_read_only_tool_round, select_flow_profile, should_replan};

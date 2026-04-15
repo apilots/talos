@@ -95,6 +95,7 @@ impl CollaborationRuntime {
                     trace_id: Uuid::new_v4().to_string(),
                     channel_id: None,
                     thread_id: None,
+                    project_root: None,
                     environment: None,
                 },
                 None,
@@ -163,6 +164,7 @@ impl CollaborationRuntime {
                 trace_id: Uuid::new_v4().to_string(),
                 channel_id: session.context.channel_id.clone(),
                 thread_id: session.context.thread_id.clone(),
+                project_root: session.context.project_root.clone(),
                 environment: session.context.environment.clone(),
             },
         };

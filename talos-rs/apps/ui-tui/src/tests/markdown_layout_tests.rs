@@ -270,6 +270,7 @@ async fn test_history_enter_switches_session() {
             trace_id: "t".to_string(),
             channel_id: None,
             thread_id: None,
+            project_root: None,
             environment: None,
         },
         config,

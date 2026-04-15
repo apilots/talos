@@ -27,9 +27,13 @@ pub(crate) struct MockGatewayState {
     pub(crate) models: Vec<ModelInfo>,
     pub(crate) session_id: String,
     pub(crate) current_model: String,
+    pub(crate) default_project_root: Option<PathBuf>,
+    pub(crate) current_project_root: Option<PathBuf>,
     pub(crate) updated_model: Option<String>,
     pub(crate) stream_counter: u64,
+    pub(crate) list_models_failures_remaining: u8,
     pub(crate) connect_delay_ms: u64,
+    pub(crate) create_session_failures_remaining: u8,
     pub(crate) create_session_delay_ms: u64,
     pub(crate) stream_failures_remaining: u8,
     pub(crate) close_session_delay_ms: u64,
@@ -147,9 +151,13 @@ impl MockGatewayClient {
                 ],
                 session_id: "sess-test".to_string(),
                 current_model: "qwen-plus".to_string(),
+                default_project_root: Some(PathBuf::from("/mock/workspace")),
+                current_project_root: None,
                 updated_model: None,
                 stream_counter: 0,
+                list_models_failures_remaining: 0,
                 connect_delay_ms: 0,
+                create_session_failures_remaining: 0,
                 create_session_delay_ms: 0,
                 stream_failures_remaining: 0,
                 close_session_delay_ms: 0,
@@ -164,9 +172,26 @@ impl MockGatewayClient {
         client
     }
 
+    pub(crate) fn with_list_models_failures(list_models_failures_remaining: u8) -> Self {
+        let client = Self::new();
+        client.state.lock().unwrap().list_models_failures_remaining =
+            list_models_failures_remaining;
+        client
+    }
+
     pub(crate) fn with_session_delay(create_session_delay_ms: u64) -> Self {
         let client = Self::new();
         client.state.lock().unwrap().create_session_delay_ms = create_session_delay_ms;
+        client
+    }
+
+    pub(crate) fn with_create_session_failures(create_session_failures_remaining: u8) -> Self {
+        let client = Self::new();
+        client
+            .state
+            .lock()
+            .unwrap()
+            .create_session_failures_remaining = create_session_failures_remaining;
         client
     }
 
@@ -186,17 +211,46 @@ impl MockGatewayClient {
 #[async_trait]
 impl GatewayClient for MockGatewayClient {
     async fn list_models(&self) -> TalosResult<Vec<ModelInfo>> {
-        Ok(self.state.lock().unwrap().models.clone())
+        let mut state = self.state.lock().unwrap();
+        if state.list_models_failures_remaining > 0 {
+            state.list_models_failures_remaining -= 1;
+            return Err(TalosError::ClientError(
+                "mock list_models failure".to_string(),
+            ));
+        }
+        Ok(state.models.clone())
     }
 
     async fn list_sessions(&self) -> TalosResult<Vec<TalosSession>> {
         Ok(vec![])
     }
 
-    async fn create_session(&self, _params: &SessionCreateParams) -> TalosResult<TalosSession> {
-        let delay = self.state.lock().unwrap().create_session_delay_ms;
+    async fn create_session(&self, params: &SessionCreateParams) -> TalosResult<TalosSession> {
+        let (delay, should_fail) = {
+            let mut state = self.state.lock().unwrap();
+            let should_fail = if state.create_session_failures_remaining > 0 {
+                state.create_session_failures_remaining -= 1;
+                true
+            } else {
+                false
+            };
+            if let Some(context) = &params.context {
+                state.current_project_root = context
+                    .project_root
+                    .clone()
+                    .or_else(|| state.default_project_root.clone());
+            } else if state.current_project_root.is_none() {
+                state.current_project_root = state.default_project_root.clone();
+            }
+            (state.create_session_delay_ms, should_fail)
+        };
         if delay > 0 {
             tokio::time::sleep(Duration::from_millis(delay)).await;
+        }
+        if should_fail {
+            return Err(TalosError::ClientError(
+                "mock create_session failure".to_string(),
+            ));
         }
         let state = self.state.lock().unwrap();
         Ok(TalosSession {
@@ -211,6 +265,7 @@ impl GatewayClient for MockGatewayClient {
                 trace_id: "trace-1".to_string(),
                 channel_id: Some("terminal".to_string()),
                 thread_id: None,
+                project_root: state.current_project_root.clone(),
                 environment: None,
             },
             config: {
@@ -242,6 +297,7 @@ impl GatewayClient for MockGatewayClient {
                 trace_id: "trace-1".to_string(),
                 channel_id: Some("terminal".to_string()),
                 thread_id: None,
+                project_root: state.current_project_root.clone(),
                 environment: None,
             },
             config: {
@@ -296,6 +352,77 @@ impl GatewayClient for MockGatewayClient {
                 trace_id: "trace-1".to_string(),
                 channel_id: Some("terminal".to_string()),
                 thread_id: None,
+                project_root: state.current_project_root.clone(),
+                environment: None,
+            },
+            config: {
+                let mut config = talos_types::TalosConfig::default();
+                config.agent.model = state.current_model.clone();
+                config.llm.model = state.current_model.clone();
+                config
+            },
+            state: talos_types::SessionState {
+                created_at: 1,
+                last_activity: 2,
+                message_count: 3,
+                usage: talos_types::talos::TalosUsage::default(),
+            },
+        })
+    }
+
+    async fn update_session_project_root(
+        &self,
+        _session_id: &str,
+        path: &std::path::Path,
+    ) -> TalosResult<TalosSession> {
+        let mut state = self.state.lock().unwrap();
+        state.current_project_root = Some(path.to_path_buf());
+        Ok(TalosSession {
+            title: "Untitled Session".to_string(),
+            context: talos_types::SessionContext {
+                session_id: state.session_id.clone(),
+                workspace_id: None,
+                source_type: talos_types::talos::TalosSourceType::Http,
+                provider: talos_types::talos::TalosProvider::Sdk,
+                user_id: "test-user".to_string(),
+                message_id: "message-1".to_string(),
+                trace_id: "trace-1".to_string(),
+                channel_id: Some("terminal".to_string()),
+                thread_id: None,
+                project_root: state.current_project_root.clone(),
+                environment: None,
+            },
+            config: {
+                let mut config = talos_types::TalosConfig::default();
+                config.agent.model = state.current_model.clone();
+                config.llm.model = state.current_model.clone();
+                config
+            },
+            state: talos_types::SessionState {
+                created_at: 1,
+                last_activity: 2,
+                message_count: 3,
+                usage: talos_types::talos::TalosUsage::default(),
+            },
+        })
+    }
+
+    async fn clear_session_project_root(&self, _session_id: &str) -> TalosResult<TalosSession> {
+        let mut state = self.state.lock().unwrap();
+        state.current_project_root = state.default_project_root.clone();
+        Ok(TalosSession {
+            title: "Untitled Session".to_string(),
+            context: talos_types::SessionContext {
+                session_id: state.session_id.clone(),
+                workspace_id: None,
+                source_type: talos_types::talos::TalosSourceType::Http,
+                provider: talos_types::talos::TalosProvider::Sdk,
+                user_id: "test-user".to_string(),
+                message_id: "message-1".to_string(),
+                trace_id: "trace-1".to_string(),
+                channel_id: Some("terminal".to_string()),
+                thread_id: None,
+                project_root: state.current_project_root.clone(),
                 environment: None,
             },
             config: {
@@ -426,8 +553,20 @@ pub(crate) fn create_remote_app_with_connect_delay(delay_ms: u64) -> TuiApp {
     TuiApp::new_with_gateway_client(client, TalosConnectionMode::Remote)
 }
 
+pub(crate) fn create_remote_app_with_model_list_failures(failures: u8) -> TuiApp {
+    let client: Arc<dyn GatewayClient> =
+        Arc::new(MockGatewayClient::with_list_models_failures(failures));
+    TuiApp::new_with_gateway_client(client, TalosConnectionMode::Remote)
+}
+
 pub(crate) fn create_remote_app_with_session_delay(delay_ms: u64) -> TuiApp {
     let client: Arc<dyn GatewayClient> = Arc::new(MockGatewayClient::with_session_delay(delay_ms));
+    TuiApp::new_with_gateway_client(client, TalosConnectionMode::Remote)
+}
+
+pub(crate) fn create_remote_app_with_create_session_failures(failures: u8) -> TuiApp {
+    let client: Arc<dyn GatewayClient> =
+        Arc::new(MockGatewayClient::with_create_session_failures(failures));
     TuiApp::new_with_gateway_client(client, TalosConnectionMode::Remote)
 }
 

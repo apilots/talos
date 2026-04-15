@@ -10,26 +10,12 @@ use std::{
     path::Path,
     process::{Command, Stdio},
 };
-use talos_types::talos::{TalosConnectionMode, TalosEventType};
+use talos_types::talos::TalosConnectionMode;
 use unicode_width::UnicodeWidthChar;
 
 pub(crate) const APP_VERSION: &str = "v0.1.0";
 
 // ── Event labels ────────────────────────────────────────────────────────────
-
-pub(crate) fn canonical_event_label(event_type: &TalosEventType) -> &'static str {
-    match event_type {
-        TalosEventType::MessageStarted => "message.started",
-        TalosEventType::MessageReasoningDelta => "message.reasoning.delta",
-        TalosEventType::MessageExecutionSummary => "message.execution.summary",
-        TalosEventType::MessageOutputDelta => "message.output.delta",
-        TalosEventType::MessageToolCallStarted => "message.tool_call.started",
-        TalosEventType::MessageToolCallCompleted => "message.tool_call.completed",
-        TalosEventType::MessageToolCallPendingApproval => "message.tool_call.pending_approval",
-        TalosEventType::MessageCompleted => "message.completed",
-        TalosEventType::MessageError => "message.error",
-    }
-}
 
 // ── Text / display width ─────────────────────────────────────────────────────
 
@@ -242,6 +228,7 @@ pub(crate) fn copy_to_system_clipboard(text: &str) -> Result<(), String> {
 pub(crate) fn build_welcome_card(
     version: &str,
     model: &str,
+    project_root: Option<&Path>,
     directory: &Path,
     connection_mode: TalosConnectionMode,
 ) -> String {
@@ -261,7 +248,10 @@ pub(crate) fn build_welcome_card(
         card_line(&format!("{}{}", " ".repeat(indent), content))
     }
 
-    let directory_line = format!("directory: {}", compact_directory_path(directory));
+    let project_root_line = project_root
+        .map(|path| format!("project_root: {}", compact_directory_path(path)))
+        .unwrap_or_else(|| "project_root: (unset)".to_string());
+    let directory_line = format!("client_directory: {}", compact_directory_path(directory));
     let connection_line = format!("connection: {}", connection_mode);
     [
         "╭──────────────────────────────────────────────────╮".to_string(),
@@ -273,6 +263,7 @@ pub(crate) fn build_welcome_card(
             &format!("model:     {:<12} /model to change", model),
             INFO_BLOCK_INDENT,
         ),
+        indented_card_line(&project_root_line, INFO_BLOCK_INDENT),
         indented_card_line(&directory_line, INFO_BLOCK_INDENT),
         indented_card_line(&connection_line, INFO_BLOCK_INDENT),
         "╰──────────────────────────────────────────────────╯".to_string(),
@@ -291,6 +282,7 @@ mod tests {
         let card = build_welcome_card(
             "v0.1.0",
             "qwen-plus",
+            Some(Path::new("/Users/xujiang/data/ailabs/talos/talos-rs")),
             Path::new("/Users/xujiang/data/ailabs/talos/talos-rs"),
             TalosConnectionMode::Embedded,
         );
@@ -309,7 +301,8 @@ mod tests {
             "│                                                  │"
         );
         assert!(lines[5].starts_with("│  model:"));
-        assert!(lines[6].starts_with("│  directory:"));
-        assert!(lines[7].starts_with("│  connection:"));
+        assert!(lines[6].starts_with("│  project_root:"));
+        assert!(lines[7].starts_with("│  client_directory:"));
+        assert!(lines[8].starts_with("│  connection:"));
     }
 }

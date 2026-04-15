@@ -51,7 +51,10 @@ Schema:
 Omit any field whose array would be empty. Keep total under 200 words.
 Use the same language as the conversation transcript for all field values."#;
 
+#[cfg(test)]
+mod convergence_tests;
 mod finalize;
+mod guard;
 mod memory_summary;
 mod prepare;
 mod step_execute;
@@ -63,6 +66,10 @@ mod types;
 
 pub(crate) use finalize::to_api_stop_reason;
 pub use finalize::{emit_general_turn_finalization_stream, finalize_general_turn_artifacts};
+pub(crate) use guard::{
+    is_read_only_tool_round, run_forced_finalization_step, should_force_finalization_for_step,
+    stop_reason_for_forced_finalization,
+};
 pub(crate) use memory_summary::compact_workspace_context_if_needed;
 pub use memory_summary::flush_session_memory;
 pub use prepare::{
@@ -74,12 +81,16 @@ pub(crate) use step_execute::emit_stream_event;
 pub(crate) use step_execute::stream_round;
 pub use step_execute::{apply_general_turn_step, execute_general_turn_step};
 pub use step_request::build_general_turn_step_request;
+pub(crate) use tool_batch::collect_general_turn_tool_batch;
 #[cfg(test)]
 pub(crate) use tool_batch::parse_retrieved_memory_items;
 pub use tool_batch::{apply_general_turn_tool_batch, execute_general_turn_tool_batch};
 pub use types::{
     ExecutedTurnArtifacts, GeneralTurnLoopState, GeneralTurnResult, GeneralTurnStepDisposition,
     GeneralTurnStepRequest, GeneralTurnStepResult, GeneralTurnToolBatch, ModelFinishReason,
-    PlanReActLoopState, PreparedGeneralTurn,
+    PlanReActLoopState, PreparedGeneralTurn, StreamingToolExecutionConfig,
 };
-pub(crate) use types::{PendingDynamicToolRequest, PendingToolConfirmation, ToolResultLog};
+pub(crate) use types::{
+    ForcedFinalizationCause, PendingDynamicToolRequest, PendingToolConfirmation,
+    ReadOnlyRoundFingerprint, ToolCallFingerprint, ToolLoopGuardState, ToolResultLog,
+};

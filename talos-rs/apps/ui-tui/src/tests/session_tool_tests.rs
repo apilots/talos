@@ -49,8 +49,8 @@ fn test_tool_call_block_pushed_on_started_event() {
     assert!(tool_block.is_some(), "expected tool block to be added");
     let block = tool_block.unwrap();
     assert_eq!(block.tool_name.as_deref(), Some("bash"));
-    assert_eq!(block.tool_status, Some(ToolCallStatus::Running));
-    assert!(app.active_tool_calls.contains_key("call-1"));
+    assert_eq!(block.tool_status, Some(ToolCallStatus::Queued));
+    assert!(app.transcript.active_tool_calls.contains_key("call-1"));
 }
 
 #[test]
@@ -112,11 +112,11 @@ fn test_tool_call_block_completed_on_event() {
     assert_eq!(block.content, "file contents");
     assert_eq!(block.timing_ms, Some(42));
     // Should be removed from active after completion
-    assert!(!app.active_tool_calls.contains_key("call-2"));
+    assert!(!app.transcript.active_tool_calls.contains_key("call-2"));
 }
 
 #[test]
-fn test_tool_completed_event_updates_block_even_with_different_message_id() {
+fn test_tool_completed_event_with_different_message_id_is_ignored() {
     let mut app = create_remote_app();
     app.session_id = Some("sess".to_string());
     app.active_stream_message_id = Some("msg-active".to_string());
@@ -161,14 +161,15 @@ fn test_tool_completed_event_updates_block_even_with_different_message_id() {
         .unwrap();
     assert_eq!(
         app.chat_blocks[idx].tool_status,
-        Some(ToolCallStatus::Completed { exit_ok: true })
+        Some(ToolCallStatus::Queued)
     );
-    assert_eq!(app.chat_blocks[idx].timing_ms, Some(120));
-    assert!(!app.active_tool_calls.contains_key("call-stale"));
+    assert_eq!(app.chat_blocks[idx].timing_ms, None);
+    assert!(app.transcript.active_tool_calls.contains_key("call-stale"));
+    assert_eq!(app.last_stream_sequence, Some(10));
 }
 
 #[test]
-fn test_tool_completed_event_updates_block_even_when_sequence_is_older() {
+fn test_tool_completed_event_with_older_sequence_is_ignored() {
     let mut app = create_remote_app();
     app.session_id = Some("sess".to_string());
     app.active_stream_message_id = Some("msg-active".to_string());
@@ -219,9 +220,361 @@ fn test_tool_completed_event_updates_block_even_when_sequence_is_older() {
         .unwrap();
     assert_eq!(
         app.chat_blocks[idx].tool_status,
-        Some(ToolCallStatus::Completed { exit_ok: true })
+        Some(ToolCallStatus::Queued)
     );
-    assert!(!app.active_tool_calls.contains_key("call-older"));
+    assert!(app.transcript.active_tool_calls.contains_key("call-older"));
+    assert_eq!(app.last_stream_sequence, Some(20));
+}
+
+#[test]
+fn test_tool_panel_events_are_upserted_per_call_id() {
+    let mut app = create_remote_app();
+    app.session_id = Some("sess".to_string());
+
+    app.handle_stream_event(TalosEvent {
+        event_type: TalosEventType::MessageToolCallStarted,
+        message_id: "msg-tools".to_string(),
+        session_id: "sess".to_string(),
+        sequence: 1,
+        payload: TalosEventPayload::MessageToolCallStarted(
+            talos_client::TalosMessageToolCallStartedEvent {
+                request_id: "req1".to_string(),
+                call_id: "call-tools".to_string(),
+                name: "exec_command".to_string(),
+                arguments: serde_json::json!({"cmd": "pwd"}),
+                item_index: 0,
+                iteration: 1,
+                step_id: "step-1".to_string(),
+                timing_ms: None,
+            },
+        ),
+    });
+    app.handle_stream_event(TalosEvent {
+        event_type: TalosEventType::MessageToolCallQueued,
+        message_id: "msg-tools".to_string(),
+        session_id: "sess".to_string(),
+        sequence: 2,
+        payload: TalosEventPayload::MessageToolCallQueued(
+            talos_types::talos::TalosMessageToolCallQueuedEvent {
+                request_id: "req1".to_string(),
+                stream_key: talos_types::talos::TalosToolStreamKey { round: 0, index: 0 },
+                call_id: "call-tools".to_string(),
+                tool_name: "exec_command".to_string(),
+                item_index: 0,
+                iteration: 1,
+                step_id: "step-1".to_string(),
+            },
+        ),
+    });
+    app.handle_stream_event(TalosEvent {
+        event_type: TalosEventType::MessageToolCallExecuting,
+        message_id: "msg-tools".to_string(),
+        session_id: "sess".to_string(),
+        sequence: 3,
+        payload: TalosEventPayload::MessageToolCallExecuting(
+            talos_types::talos::TalosMessageToolCallExecutingEvent {
+                request_id: "req1".to_string(),
+                stream_key: talos_types::talos::TalosToolStreamKey { round: 0, index: 0 },
+                call_id: "call-tools".to_string(),
+                tool_name: "exec_command".to_string(),
+                item_index: 0,
+                iteration: 1,
+                step_id: "step-1".to_string(),
+            },
+        ),
+    });
+    app.handle_stream_event(TalosEvent {
+        event_type: TalosEventType::MessageToolCallCompleted,
+        message_id: "msg-tools".to_string(),
+        session_id: "sess".to_string(),
+        sequence: 4,
+        payload: TalosEventPayload::MessageToolCallCompleted(
+            talos_client::TalosMessageToolCallCompletedEvent {
+                request_id: "req1".to_string(),
+                call_id: "call-tools".to_string(),
+                tool: "exec_command".to_string(),
+                content: vec![TalosContentItem::Text {
+                    text: "/tmp".to_string(),
+                }],
+                is_error: false,
+                item_index: 0,
+                iteration: 1,
+                step_id: "step-1".to_string(),
+                timing_ms: Some(8),
+            },
+        ),
+    });
+
+    assert_eq!(app.tool_events.len(), 1);
+    assert_eq!(app.tool_events[0].call_id, "call-tools");
+    assert_eq!(app.tool_events[0].summary, "done: exec_command");
+
+    let tool_block = app
+        .chat_blocks
+        .iter()
+        .find(|block| block.tool_call_id.as_deref() == Some("call-tools"))
+        .expect("tool block should exist");
+    assert_eq!(
+        tool_block.tool_input,
+        Some(serde_json::json!({"cmd": "pwd"}))
+    );
+}
+
+#[test]
+fn test_tool_progress_event_appends_to_existing_tool_block() {
+    let mut app = create_remote_app();
+    app.session_id = Some("sess".to_string());
+
+    app.handle_stream_event(TalosEvent {
+        event_type: TalosEventType::MessageToolCallStarted,
+        message_id: "msg-progress".to_string(),
+        session_id: "sess".to_string(),
+        sequence: 1,
+        payload: TalosEventPayload::MessageToolCallStarted(
+            talos_client::TalosMessageToolCallStartedEvent {
+                request_id: "req1".to_string(),
+                call_id: "call-progress".to_string(),
+                name: "exec_command".to_string(),
+                arguments: serde_json::json!({"cmd": "pwd"}),
+                item_index: 0,
+                iteration: 1,
+                step_id: "step-1".to_string(),
+                timing_ms: None,
+            },
+        ),
+    });
+    app.handle_stream_event(TalosEvent {
+        event_type: TalosEventType::MessageToolCallProgressDelta,
+        message_id: "msg-progress".to_string(),
+        session_id: "sess".to_string(),
+        sequence: 2,
+        payload: TalosEventPayload::MessageToolCallProgressDelta(
+            talos_types::talos::TalosMessageToolCallProgressDeltaEvent {
+                request_id: "req1".to_string(),
+                stream_key: talos_types::talos::TalosToolStreamKey { round: 0, index: 0 },
+                call_id: "call-progress".to_string(),
+                tool_name: "exec_command".to_string(),
+                message: "running pwd".to_string(),
+                progress_kind: talos_types::talos::TalosToolProgressKind::Status,
+                item_index: 0,
+                iteration: 1,
+                step_id: "step-1".to_string(),
+            },
+        ),
+    });
+
+    let tool_block = app
+        .chat_blocks
+        .iter()
+        .find(|block| block.tool_call_id.as_deref() == Some("call-progress"))
+        .expect("tool block should exist");
+    assert_eq!(tool_block.tool_name.as_deref(), Some("exec_command"));
+    assert!(tool_block
+        .tool_progress
+        .iter()
+        .any(|line| line == "status: running pwd"));
+    assert!(!app
+        .chat_blocks
+        .iter()
+        .any(|block| block.role == ChatRole::ToolProgress));
+}
+
+#[test]
+fn test_tool_progress_events_append_to_same_tool_block() {
+    let mut app = create_remote_app();
+    app.session_id = Some("sess".to_string());
+
+    app.handle_stream_event(TalosEvent {
+        event_type: TalosEventType::MessageToolCallStarted,
+        message_id: "msg-progress-append".to_string(),
+        session_id: "sess".to_string(),
+        sequence: 0,
+        payload: TalosEventPayload::MessageToolCallStarted(
+            talos_client::TalosMessageToolCallStartedEvent {
+                request_id: "req1".to_string(),
+                call_id: "call-progress-append".to_string(),
+                name: "exec_command".to_string(),
+                arguments: serde_json::json!({"cmd": "pwd"}),
+                item_index: 0,
+                iteration: 1,
+                step_id: "step-1".to_string(),
+                timing_ms: None,
+            },
+        ),
+    });
+
+    for (sequence, message) in [(1, "line one"), (2, "line two")] {
+        app.handle_stream_event(TalosEvent {
+            event_type: TalosEventType::MessageToolCallProgressDelta,
+            message_id: "msg-progress-append".to_string(),
+            session_id: "sess".to_string(),
+            sequence,
+            payload: TalosEventPayload::MessageToolCallProgressDelta(
+                talos_types::talos::TalosMessageToolCallProgressDeltaEvent {
+                    request_id: "req1".to_string(),
+                    stream_key: talos_types::talos::TalosToolStreamKey { round: 0, index: 0 },
+                    call_id: "call-progress-append".to_string(),
+                    tool_name: "exec_command".to_string(),
+                    message: message.to_string(),
+                    progress_kind: talos_types::talos::TalosToolProgressKind::Stdout,
+                    item_index: 0,
+                    iteration: 1,
+                    step_id: "step-1".to_string(),
+                },
+            ),
+        });
+    }
+
+    let tool_block = app
+        .chat_blocks
+        .iter()
+        .find(|block| block.tool_call_id.as_deref() == Some("call-progress-append"))
+        .expect("tool block should exist");
+
+    assert!(tool_block
+        .tool_progress
+        .iter()
+        .any(|line| line == "stdout: line one"));
+    assert!(tool_block
+        .tool_progress
+        .iter()
+        .any(|line| line == "stdout: line two"));
+    assert!(!app
+        .chat_blocks
+        .iter()
+        .any(|block| block.role == ChatRole::ToolProgress));
+}
+
+#[test]
+fn test_pending_approval_updates_existing_tool_block() {
+    let mut app = create_remote_app();
+    app.session_id = Some("sess".to_string());
+
+    app.handle_stream_event(TalosEvent {
+        event_type: TalosEventType::MessageToolCallStarted,
+        message_id: "msg-approval".to_string(),
+        session_id: "sess".to_string(),
+        sequence: 1,
+        payload: TalosEventPayload::MessageToolCallStarted(
+            talos_client::TalosMessageToolCallStartedEvent {
+                request_id: "req1".to_string(),
+                call_id: "call-approval".to_string(),
+                name: "exec_command".to_string(),
+                arguments: serde_json::json!({"cmd": "git push"}),
+                item_index: 0,
+                iteration: 1,
+                step_id: "step-1".to_string(),
+                timing_ms: None,
+            },
+        ),
+    });
+
+    app.handle_stream_event(TalosEvent {
+        event_type: TalosEventType::MessageToolCallPendingApproval,
+        message_id: "msg-approval".to_string(),
+        session_id: "sess".to_string(),
+        sequence: 2,
+        payload: TalosEventPayload::MessageToolCallPendingApproval(
+            talos_types::talos::TalosMessageToolCallPendingApprovalEvent {
+                request_id: "req1".to_string(),
+                call_id: "call-approval".to_string(),
+                tool_name: "exec_command".to_string(),
+                prompt: "Need approval".to_string(),
+                arguments: serde_json::json!({"cmd": "git push"}),
+                step_id: "step-1".to_string(),
+            },
+        ),
+    });
+
+    let tool_block = app
+        .chat_blocks
+        .iter()
+        .find(|block| block.tool_call_id.as_deref() == Some("call-approval"))
+        .expect("tool block should exist");
+    assert_eq!(
+        tool_block.tool_status,
+        Some(ToolCallStatus::PendingApproval)
+    );
+    assert!(tool_block
+        .tool_progress
+        .iter()
+        .any(|line| line == "status: waiting for approval"));
+}
+
+#[test]
+fn test_assistant_output_remains_interleaved_with_tool_blocks() {
+    let mut app = create_remote_app();
+    app.session_id = Some("sess".to_string());
+
+    app.handle_stream_event(TalosEvent {
+        event_type: TalosEventType::MessageOutputDelta,
+        message_id: "msg-interleave".to_string(),
+        session_id: "sess".to_string(),
+        sequence: 1,
+        payload: TalosEventPayload::MessageOutputDelta(
+            talos_client::TalosMessageOutputDeltaEvent {
+                request_id: "req1".to_string(),
+                delta: "I will inspect the repo first.".to_string(),
+                item_index: 0,
+                iteration: 1,
+                step_id: "step-1".to_string(),
+            },
+        ),
+    });
+    app.handle_stream_event(TalosEvent {
+        event_type: TalosEventType::MessageToolCallStarted,
+        message_id: "msg-interleave".to_string(),
+        session_id: "sess".to_string(),
+        sequence: 2,
+        payload: TalosEventPayload::MessageToolCallStarted(
+            talos_client::TalosMessageToolCallStartedEvent {
+                request_id: "req1".to_string(),
+                call_id: "call-interleave".to_string(),
+                name: "list_dir".to_string(),
+                arguments: serde_json::json!({"dir_path": "/tmp/demo"}),
+                item_index: 0,
+                iteration: 1,
+                step_id: "step-1".to_string(),
+                timing_ms: None,
+            },
+        ),
+    });
+    app.handle_stream_event(TalosEvent {
+        event_type: TalosEventType::MessageOutputDelta,
+        message_id: "msg-interleave".to_string(),
+        session_id: "sess".to_string(),
+        sequence: 3,
+        payload: TalosEventPayload::MessageOutputDelta(
+            talos_client::TalosMessageOutputDeltaEvent {
+                request_id: "req1".to_string(),
+                delta: "Next I will summarize what I found.".to_string(),
+                item_index: 1,
+                iteration: 1,
+                step_id: "step-1".to_string(),
+            },
+        ),
+    });
+
+    let visible_blocks = app
+        .chat_blocks
+        .iter()
+        .filter(|block| matches!(block.role, ChatRole::Assistant | ChatRole::Tool))
+        .map(|block| {
+            (
+                block.role.clone(),
+                block.content.clone(),
+                block.tool_name.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(visible_blocks.len(), 3);
+    assert!(matches!(visible_blocks[0].0, ChatRole::Assistant));
+    assert_eq!(visible_blocks[0].1, "I will inspect the repo first.");
+    assert!(matches!(visible_blocks[1].0, ChatRole::Tool));
+    assert_eq!(visible_blocks[1].2.as_deref(), Some("list_dir"));
+    assert!(matches!(visible_blocks[2].0, ChatRole::Assistant));
+    assert_eq!(visible_blocks[2].1, "Next I will summarize what I found.");
 }
 
 #[test]
@@ -239,7 +592,7 @@ fn test_tool_block_tab_toggle_expand() {
         None,
     );
 
-    let idx = *app.active_tool_calls.get("call-3").unwrap();
+    let idx = *app.transcript.active_tool_calls.get("call-3").unwrap();
     assert!(!app.chat_blocks[idx].expanded);
 
     app.toggle_last_tool_block();
@@ -260,7 +613,7 @@ async fn test_ctrl_o_toggles_last_tool_block() {
         0,
         None,
     );
-    let idx = *app.active_tool_calls.get("call-ctrl-o").unwrap();
+    let idx = *app.transcript.active_tool_calls.get("call-ctrl-o").unwrap();
     assert!(!app.chat_blocks[idx].expanded);
 
     let _ = app
@@ -350,7 +703,6 @@ fn test_tool_block_folded_shows_details_and_output_preview() {
         .any(|line| line == "● exec_command(git diff HEAD~1)"));
     assert_eq!(texts.get(1).map(String::as_str), Some(""));
     assert!(texts.iter().any(|line| line == "└ Done (exit:0 · 1.2s)"));
-    assert!(texts.iter().any(|line| line == "  cmd:  git diff HEAD~1"));
     assert!(texts.iter().any(|line| line == "  dir:  /tmp/work"));
     assert!(texts.iter().any(|line| line == "  status: success"));
     assert!(texts.iter().any(|line| line == "  stdout: line1"));
@@ -377,6 +729,48 @@ fn test_tool_block_expanded_shows_details_without_output() {
     assert!(texts.iter().any(|line| line == "  path:  /tmp/example.txt"));
     assert!(!texts.iter().any(|line| line == "  ─────────────────"));
     assert!(texts.iter().any(|line| line == "  (ctrl+o to collapse)"));
+}
+
+#[test]
+fn test_list_dir_tool_header_uses_path_summary() {
+    let app = create_embedded_app();
+    let mut block = ChatBlock::new(ChatRole::Tool, String::new());
+    block.tool_name = Some("list_dir".to_string());
+    block.tool_input = Some(serde_json::json!({
+        "dir_path": "/tmp/project"
+    }));
+    block.tool_status = Some(ToolCallStatus::Queued);
+
+    let texts = app
+        .tool_block_lines(&block, 80)
+        .into_iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>();
+
+    assert!(texts.iter().any(|line| line == "◌ list_dir(/tmp/project)"));
+}
+
+#[test]
+fn test_grep_files_tool_header_uses_pattern_and_path_summary() {
+    let app = create_embedded_app();
+    let mut block = ChatBlock::new(ChatRole::Tool, String::new());
+    block.tool_name = Some("grep_files".to_string());
+    block.tool_input = Some(serde_json::json!({
+        "pattern": "AgentKernel",
+        "path": "crates/orchestration",
+        "include": "*.rs"
+    }));
+    block.tool_status = Some(ToolCallStatus::Running);
+
+    let texts = app
+        .tool_block_lines(&block, 100)
+        .into_iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>();
+
+    assert!(texts.iter().any(|line| {
+        line == "⏳ grep_files(\"AgentKernel\", path=crates/orchestration, include=*.rs)"
+    }));
 }
 
 #[test]
@@ -503,11 +897,12 @@ fn test_complete_tool_call_recovers_after_block_index_shift() {
     );
 
     app.active_user_idx = Some(user_idx);
-    app.active_thinking_idx = Some(thinking_idx);
-    app.active_assistant_idx = Some(assistant_idx);
+    app.transcript.live_thinking_idx = Some(thinking_idx);
+    app.transcript.live_assistant_idx = Some(assistant_idx);
     app.discard_active_pending_blocks();
 
     let shifted_idx = *app
+        .transcript
         .active_tool_calls
         .get("call-shift")
         .expect("tool block index should be remapped");
@@ -525,7 +920,7 @@ fn test_complete_tool_call_recovers_after_block_index_shift() {
         Some(ToolCallStatus::Completed { exit_ok: true })
     );
     assert_eq!(app.chat_blocks[shifted_idx].timing_ms, Some(15));
-    assert!(!app.active_tool_calls.contains_key("call-shift"));
+    assert!(!app.transcript.active_tool_calls.contains_key("call-shift"));
 }
 
 #[test]

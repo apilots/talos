@@ -191,6 +191,7 @@ impl TuiApp {
         match block.role {
             ChatRole::User => self.user_block_lines(block, content_width),
             ChatRole::Tool => self.tool_block_lines(block, content_width),
+            ChatRole::ToolProgress => self.tool_progress_block_lines(block, content_width),
             ChatRole::Assistant => self.assistant_block_lines(block, content_width),
             ChatRole::Thinking => self.thinking_block_lines(block, content_width),
             ChatRole::System => self.system_block_lines(block, content_width),

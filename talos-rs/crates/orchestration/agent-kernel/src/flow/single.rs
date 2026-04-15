@@ -1,4 +1,11 @@
 use super::*;
+use crate::{
+    general_turn::{
+        run_forced_finalization_step, should_force_finalization_for_step,
+        stop_reason_for_forced_finalization, ForcedFinalizationCause, ToolLoopGuardState,
+    },
+    StreamingToolExecutionConfig, ToolExecutionContext,
+};
 
 pub struct SingleFlow {
     agent_name: String,
@@ -243,8 +250,10 @@ impl BaseLlmFlow for SingleFlow {
         let is_plan_react = matches!(self.settings.planner_kind, crate::PlannerKind::PlanReAct);
         let mut state = GeneralTurnLoopState::new(&prepared);
         let mut plan_react_state = PlanReActLoopState::default();
+        let mut tool_loop_guard = ToolLoopGuardState::default();
         let mut last_tool_batch: Option<GeneralTurnToolBatch> = None;
         let mut final_text = String::new();
+        let kernel_config = Arc::new(self.kernel_config.clone());
         let stop_reason = loop {
             if matches!(self.flow_profile, FlowProfile::ReactiveLoop) {
                 let stage = if state.round == 0 {
@@ -261,6 +270,21 @@ impl BaseLlmFlow for SingleFlow {
                     .await;
             }
             let mut step_request = build_general_turn_step_request(&prepared, &state);
+            if prepared.stream_tx.is_some() {
+                step_request.streaming_tool_execution = Some(StreamingToolExecutionConfig {
+                    execution_mode: self.settings.tool_execution_mode,
+                    execution_context: ToolExecutionContext {
+                        session_id: format!("agent-{}", prepared.agent_id),
+                        user_id: self.agent_name.clone(),
+                        project_root: prepared.project_root.clone(),
+                        kernel_config: kernel_config.clone(),
+                        memory_store: self.memory_store.clone(),
+                        pre_approved_call_ids: std::collections::HashSet::new(),
+                        dynamic_tool_results: std::collections::HashMap::new(),
+                    },
+                    tool_registry: self.tool_executor_port.clone(),
+                });
+            }
             let mut step_model_request = build_flow_step_model_request(
                 request.selected_model_info.clone(),
                 request.planning_instruction.clone(),
@@ -354,10 +378,12 @@ impl BaseLlmFlow for SingleFlow {
                     },
                 });
             }
+            let step_messages = step_model_request.messages.clone();
+            let step_native_thinking = step_model_request.native_thinking.clone();
             step_request.messages = step_model_request.messages;
             step_request.tool_definitions = step_model_request.tool_definitions.clone();
             step_request.parallel_tool_calls = step_model_request.parallel_tool_calls;
-            step_request.native_thinking = step_model_request.native_thinking.clone();
+            step_request.native_thinking = step_native_thinking.clone();
             let mut step =
                 execute_general_turn_step(step_request, self.llm_provider.clone()).await?;
             let mut step_response = LlmResponseEnvelope {
@@ -417,22 +443,29 @@ impl BaseLlmFlow for SingleFlow {
                 stage_session_event(ctx, planning_event);
                 request.branch = projected_step_response.branch;
             }
+            if let Some(cause) = should_force_finalization_for_step(&mut tool_loop_guard, &step) {
+                let forced_step = run_forced_finalization_step(
+                    step_messages,
+                    prepared.selected_model.clone(),
+                    self.llm_provider.clone(),
+                    step_native_thinking,
+                    cause.clone(),
+                )
+                .await?;
+                apply_general_turn_step(&mut state, &forced_step);
+                final_text = forced_step.text.clone();
+                break stop_reason_for_forced_finalization(cause);
+            }
             self.observe_tool_callbacks(ctx, &step.output_items).await?;
             apply_general_turn_step(&mut state, &step);
 
             if matches!(step.disposition, GeneralTurnStepDisposition::FinalResponse) {
-                let missing_local_path_probe =
-                    is_plan_react && should_require_local_path_file_probe(ctx, input, &state);
-                let missing_structure_probe =
-                    is_plan_react && should_require_structure_probe(ctx, input, &state);
                 // PlanReAct mode: when require_final_answer_tag is enabled, only accept a
                 // FinalResponse that carries a confirmed FINAL_ANSWER tag. A response without
                 // the tag is treated as a no-progress round and may trigger a replan.
                 if is_plan_react
-                    && ((self.kernel_config.plan_react.require_final_answer_tag
-                        && !ctx.execution_state.plan_react_has_final_answer)
-                        || missing_local_path_probe
-                        || missing_structure_probe)
+                    && self.kernel_config.plan_react.require_final_answer_tag
+                    && !ctx.execution_state.plan_react_has_final_answer
                 {
                     plan_react_state.consecutive_no_progress_rounds += 1;
                     if should_replan(
@@ -445,15 +478,7 @@ impl BaseLlmFlow for SingleFlow {
                             continue;
                         }
                     }
-                    final_text = if missing_local_path_probe {
-                        "[plan-react stalled: local path analysis requires file tool verification]"
-                            .to_string()
-                    } else if missing_structure_probe {
-                        "[plan-react stalled: repository analysis requires at least one grep/search pass]"
-                            .to_string()
-                    } else {
-                        "[plan-react stalled: no final answer]".to_string()
-                    };
+                    final_text = "[plan-react stalled: no final answer]".to_string();
                     break StopReason::ToolRoundLimit;
                 }
                 final_text = step.text.clone();
@@ -492,10 +517,19 @@ impl BaseLlmFlow for SingleFlow {
                             round = state.round,
                             "plan-react terminated after repeated read-only investigation rounds"
                         );
-                        final_text =
-                            "[plan-react investigation limit reached: repeated read-only tool rounds]"
-                                .to_string();
-                        break StopReason::ToolRoundLimit;
+                        let forced_step = run_forced_finalization_step(
+                            step_messages.clone(),
+                            prepared.selected_model.clone(),
+                            self.llm_provider.clone(),
+                            step_native_thinking.clone(),
+                            ForcedFinalizationCause::RepeatedReadOnlyInvestigation,
+                        )
+                        .await?;
+                        apply_general_turn_step(&mut state, &forced_step);
+                        final_text = forced_step.text.clone();
+                        break stop_reason_for_forced_finalization(
+                            ForcedFinalizationCause::RepeatedReadOnlyInvestigation,
+                        );
                     }
                 } else {
                     plan_react_state.consecutive_read_only_rounds = 0;
@@ -533,19 +567,23 @@ impl BaseLlmFlow for SingleFlow {
                 ),
             );
 
-            let tool_batch = execute_general_turn_tool_batch(
-                &prepared,
-                self.tool_executor.clone(),
-                self.tool_executor_port.clone(),
-                self.memory_store.clone(),
-                Arc::new(self.kernel_config.clone()),
-                &self.agent_name,
-                &step.tool_calls,
-                std::collections::HashSet::new(),
-                std::collections::HashMap::new(),
-                prepared.stream_tx.as_ref(),
-            )
-            .await?;
+            let tool_batch = if prepared.stream_tx.is_some() {
+                collect_general_turn_tool_batch(step.streamed_tool_outputs.clone())
+            } else {
+                execute_general_turn_tool_batch(
+                    &prepared,
+                    self.tool_executor.clone(),
+                    self.tool_executor_port.clone(),
+                    self.memory_store.clone(),
+                    kernel_config.clone(),
+                    &self.agent_name,
+                    &step.tool_calls,
+                    std::collections::HashSet::new(),
+                    std::collections::HashMap::new(),
+                    prepared.stream_tx.as_ref(),
+                )
+                .await?
+            };
             let mut tool_response = LlmResponseEnvelope {
                 output_text: String::new(),
                 output_items: tool_batch.output_items.clone(),
@@ -691,8 +729,29 @@ impl BaseLlmFlow for SingleFlow {
             }
 
             if state.round >= max_tool_rounds {
-                final_text = "[tool-call rounds exceeded]".to_string();
-                break StopReason::ToolRoundLimit;
+                let mut forced_request = build_flow_step_model_request(
+                    request.selected_model_info.clone(),
+                    request.planning_instruction.clone(),
+                    request.native_thinking.clone(),
+                    request.branch,
+                    &prepared,
+                    &state,
+                    &self.settings,
+                );
+                events.extend(self.request_pipeline.run(ctx, &mut forced_request).await?);
+                let forced_step = run_forced_finalization_step(
+                    forced_request.messages.clone(),
+                    prepared.selected_model.clone(),
+                    self.llm_provider.clone(),
+                    forced_request.native_thinking.clone(),
+                    ForcedFinalizationCause::ToolRoundBudget,
+                )
+                .await?;
+                apply_general_turn_step(&mut state, &forced_step);
+                final_text = forced_step.text.clone();
+                break stop_reason_for_forced_finalization(
+                    ForcedFinalizationCause::ToolRoundBudget,
+                );
             }
         };
 

@@ -268,6 +268,7 @@ impl RequestHandler for CoordinatorImpl {
             trace_id: session.context.trace_id.clone(),
             channel_id: session.context.channel_id.clone(),
             thread_id: session.context.thread_id.clone(),
+            project_root: session.context.project_root.clone(),
             environment: session.context.environment.clone(),
         };
         let route_channel = Self::route_channel(&route_context);

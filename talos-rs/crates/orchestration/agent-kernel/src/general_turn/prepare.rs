@@ -108,6 +108,7 @@ pub async fn prepare_general_turn(
         session_id,
         invocation_id,
         agent_id,
+        project_root: ctx.project_root.clone(),
         selected_model,
         prompt_prefix_messages: split_prompt_prefix_messages(
             &render_prompt_assembly(&prompt_assembly),
@@ -135,12 +136,45 @@ pub async fn execute_general_turn_loop(
         crate::KernelExecutionSettings::try_from(kernel_config).unwrap_or_default();
     let tool_executor = crate::ToolExecutorFactory::build(execution_settings.tool_execution_mode);
     let kernel_config = Arc::new(kernel_config.clone());
+    let mut tool_loop_guard = ToolLoopGuardState::default();
 
     let (final_text, stop_reason) = loop {
-        let step_request = build_general_turn_step_request(&prepared, &state);
+        let mut step_request = build_general_turn_step_request(&prepared, &state);
+        if prepared.stream_tx.is_some() {
+            step_request.streaming_tool_execution = Some(StreamingToolExecutionConfig {
+                execution_mode: execution_settings.tool_execution_mode,
+                execution_context: ToolExecutionContext {
+                    session_id: format!("agent-{}", prepared.agent_id),
+                    user_id: agent_name.to_string(),
+                    project_root: prepared.project_root.clone(),
+                    kernel_config: kernel_config.clone(),
+                    memory_store: memory_store.clone(),
+                    pre_approved_call_ids: std::collections::HashSet::new(),
+                    dynamic_tool_results: std::collections::HashMap::new(),
+                },
+                tool_registry: tool_executor_port.clone(),
+            });
+        }
         let step = execute_general_turn_step(step_request, llm_provider.clone()).await?;
         let step_text = step.text.clone();
         let step_disposition = step.disposition;
+        if let Some(cause) = should_force_finalization_for_step(&mut tool_loop_guard, &step) {
+            let mut messages = prepared.messages.clone();
+            messages.extend(state.messages.clone());
+            let forced_step = run_forced_finalization_step(
+                messages,
+                prepared.selected_model.clone(),
+                llm_provider.clone(),
+                None,
+                cause.clone(),
+            )
+            .await?;
+            apply_general_turn_step(&mut state, &forced_step);
+            break (
+                forced_step.text.clone(),
+                stop_reason_for_forced_finalization(cause),
+            );
+        }
         apply_general_turn_step(&mut state, &step);
 
         if matches!(step_disposition, GeneralTurnStepDisposition::FinalResponse) {
@@ -150,19 +184,23 @@ pub async fn execute_general_turn_loop(
             break (step_text, StopReason::EndTurn);
         }
 
-        let tool_batch = execute_general_turn_tool_batch(
-            &prepared,
-            tool_executor.clone(),
-            tool_executor_port.clone(),
-            memory_store.clone(),
-            kernel_config.clone(),
-            agent_name,
-            &step.tool_calls,
-            std::collections::HashSet::new(),
-            std::collections::HashMap::new(),
-            prepared.stream_tx.as_ref(),
-        )
-        .await?;
+        let tool_batch = if prepared.stream_tx.is_some() {
+            super::tool_batch::collect_general_turn_tool_batch(step.streamed_tool_outputs.clone())
+        } else {
+            execute_general_turn_tool_batch(
+                &prepared,
+                tool_executor.clone(),
+                tool_executor_port.clone(),
+                memory_store.clone(),
+                kernel_config.clone(),
+                agent_name,
+                &step.tool_calls,
+                std::collections::HashSet::new(),
+                std::collections::HashMap::new(),
+                prepared.stream_tx.as_ref(),
+            )
+            .await?
+        };
         apply_general_turn_tool_batch(&mut state, &tool_batch, kernel_config.as_ref());
 
         if !tool_batch.pending_confirmations.is_empty()
@@ -179,9 +217,20 @@ pub async fn execute_general_turn_loop(
         }
 
         if state.round >= max_tool_rounds {
+            let mut messages = prepared.messages.clone();
+            messages.extend(state.messages.clone());
+            let forced_step = run_forced_finalization_step(
+                messages,
+                prepared.selected_model.clone(),
+                llm_provider.clone(),
+                None,
+                ForcedFinalizationCause::ToolRoundBudget,
+            )
+            .await?;
+            apply_general_turn_step(&mut state, &forced_step);
             break (
-                "[tool-call rounds exceeded]".to_string(),
-                StopReason::ToolRoundLimit,
+                forced_step.text.clone(),
+                stop_reason_for_forced_finalization(ForcedFinalizationCause::ToolRoundBudget),
             );
         }
     };

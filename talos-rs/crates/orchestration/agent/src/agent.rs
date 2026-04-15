@@ -189,6 +189,7 @@ impl AgentOrchestrator for AgentImpl {
                                 .workspace_id
                                 .clone()
                                 .unwrap_or_default(),
+                            project_root: agent_request.session.context.project_root.clone(),
                             input,
                             selected_model_info,
                             phase,
@@ -295,6 +296,7 @@ impl AgentOrchestrator for AgentImpl {
                     .workspace_id
                     .clone()
                     .unwrap_or_default(),
+                project_root: agent_request.session.context.project_root.clone(),
                 input,
                 selected_model_info,
                 phase,

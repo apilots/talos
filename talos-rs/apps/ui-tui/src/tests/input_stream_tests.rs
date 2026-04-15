@@ -272,6 +272,34 @@ async fn test_remote_initialize_creates_session_and_models() {
 }
 
 #[tokio::test]
+async fn test_remote_initialize_retries_model_loading_before_succeeding() {
+    let mut app = create_remote_app_with_model_list_failures(1);
+
+    app.initialize_remote().await;
+
+    assert_eq!(app.session_id.as_deref(), Some("sess-test"));
+    assert_eq!(app.connection_status, "connected");
+    assert!(app
+        .right_panel_events
+        .iter()
+        .any(|event| event.contains("model load retry 2/5")));
+}
+
+#[tokio::test]
+async fn test_remote_initialize_retries_session_creation_before_succeeding() {
+    let mut app = create_remote_app_with_create_session_failures(1);
+
+    app.initialize_remote().await;
+
+    assert_eq!(app.session_id.as_deref(), Some("sess-test"));
+    assert_eq!(app.connection_status, "connected");
+    assert!(app
+        .right_panel_events
+        .iter()
+        .any(|event| event.contains("session create retry 2/5")));
+}
+
+#[tokio::test]
 async fn test_model_command_updates_remote_session_model() {
     let mut app = create_remote_app();
     app.initialize_remote().await;
@@ -287,6 +315,75 @@ async fn test_model_command_updates_remote_session_model() {
     }
     assert!(!should_quit);
     assert_eq!(app.current_model, "gpt-5.3 medium");
+}
+
+#[tokio::test]
+async fn test_project_command_updates_remote_session_project_root() {
+    let mut app = create_remote_app();
+    app.initialize_remote().await;
+    app.input_buffer = "/project /server/project".to_string();
+    app.cursor_index = app.input_buffer.chars().count();
+
+    let should_quit = app.submit_input().await.unwrap();
+
+    for _ in 0..10 {
+        app.on_tick().await;
+        tokio::task::yield_now().await;
+        if app.pending_command_update.is_none() {
+            break;
+        }
+    }
+
+    assert!(!should_quit);
+    assert_eq!(
+        app.current_project_root.as_deref(),
+        Some(PathBuf::from("/server/project").as_path())
+    );
+}
+
+#[tokio::test]
+async fn test_project_clear_command_restores_remote_default_project_root() {
+    let mut app = create_remote_app();
+    app.initialize_remote().await;
+    app.current_project_root = Some(PathBuf::from("/server/project"));
+    app.input_buffer = "/project clear".to_string();
+    app.cursor_index = app.input_buffer.chars().count();
+
+    let should_quit = app.submit_input().await.unwrap();
+
+    for _ in 0..10 {
+        app.on_tick().await;
+        tokio::task::yield_now().await;
+        if app.pending_command_update.is_none() {
+            break;
+        }
+    }
+
+    assert!(!should_quit);
+    assert_eq!(
+        app.current_project_root.as_deref(),
+        Some(PathBuf::from("/mock/workspace").as_path())
+    );
+}
+
+#[tokio::test]
+async fn test_project_command_reports_embedded_project_root_without_switching() {
+    let mut app = create_embedded_app();
+    app.input_buffer = "/project".to_string();
+    app.cursor_index = app.input_buffer.chars().count();
+
+    let should_quit = app.submit_input().await.unwrap();
+
+    assert!(!should_quit);
+    let system_messages = app
+        .chat_blocks
+        .iter()
+        .filter(|block| block.role == ChatRole::System)
+        .map(|block| block.content.as_str())
+        .collect::<Vec<_>>();
+    assert!(system_messages
+        .iter()
+        .any(|message| message.contains("Embedded project root:")));
 }
 
 #[tokio::test]
@@ -321,25 +418,20 @@ async fn test_send_message_stream_updates_assistant_block() {
 }
 
 #[tokio::test]
-async fn test_thinking_block_is_initialized_before_first_delta() {
+async fn test_thinking_block_is_not_created_before_first_delta() {
     let mut app = create_remote_app();
     app.initialize_remote().await;
     assert!(app.send_user_message("hello".to_string()).await.unwrap());
 
     assert!(app.in_flight);
     assert!(!app.received_output_delta);
-    let thinking = app
-        .chat_blocks
-        .iter()
-        .find(|b| b.role == ChatRole::Thinking)
-        .map(|b| b.content.clone())
-        .unwrap_or_default();
-    assert!(thinking.is_empty());
+    assert!(!app.chat_blocks.iter().any(|b| b.role == ChatRole::Thinking));
     assert!(!app
         .chat_blocks
         .iter()
         .any(|b| b.role == ChatRole::Assistant));
-    assert!(app.active_assistant_idx.is_none());
+    assert!(app.transcript.live_assistant_idx.is_none());
+    assert!(app.is_agent_working());
 }
 
 #[tokio::test]
@@ -523,7 +615,7 @@ async fn test_stale_message_events_are_ignored() {
     app.in_flight = true;
     app.active_stream_message_id = Some("msg-current".to_string());
     app.last_stream_sequence = Some(3);
-    app.active_assistant_idx = Some(app.push_block(ChatRole::Assistant, String::new()));
+    app.transcript.live_assistant_idx = Some(app.push_block(ChatRole::Assistant, String::new()));
 
     let stale_message_id = format!(
         "{}-stale",
@@ -552,6 +644,64 @@ async fn test_stale_message_events_are_ignored() {
 }
 
 #[tokio::test]
+async fn test_stale_tool_event_does_not_advance_sequence_or_block_valid_output() {
+    let mut app = create_remote_app();
+    app.initialize_remote().await;
+    app.in_flight = true;
+    app.session_id = Some("sess-test".to_string());
+    app.active_stream_message_id = Some("msg-current".to_string());
+    app.last_stream_sequence = Some(3);
+
+    app.push_tool_call_block(
+        "call-current".to_string(),
+        "exec_command".to_string(),
+        serde_json::json!({"cmd": "pwd"}),
+        1,
+        0,
+        None,
+    );
+
+    app.handle_stream_event(TalosEvent {
+        event_type: TalosEventType::MessageToolCallCompleted,
+        message_id: "msg-stale".to_string(),
+        session_id: "sess-test".to_string(),
+        sequence: 99,
+        payload: TalosEventPayload::MessageToolCallCompleted(
+            talos_client::TalosMessageToolCallCompletedEvent {
+                request_id: "req1".to_string(),
+                call_id: "call-current".to_string(),
+                tool: "exec_command".to_string(),
+                content: vec![TalosContentItem::Text {
+                    text: "stale".to_string(),
+                }],
+                is_error: false,
+                item_index: 0,
+                iteration: 1,
+                step_id: "step-1".to_string(),
+                timing_ms: Some(1),
+            },
+        ),
+    });
+
+    assert_eq!(app.last_stream_sequence, Some(3));
+
+    app.handle_stream_event(output_delta_event(
+        "msg-current".to_string(),
+        "sess-test",
+        4,
+        "final answer",
+    ));
+
+    let assistant = app
+        .chat_blocks
+        .iter()
+        .filter(|b| b.role == ChatRole::Assistant)
+        .map(|b| b.content.clone())
+        .collect::<String>();
+    assert!(assistant.contains("final answer"));
+}
+
+#[tokio::test]
 async fn test_message_completed_finishes_stream_without_output_delta() {
     let mut app = create_remote_app();
     app.initialize_remote().await;
@@ -574,7 +724,40 @@ async fn test_message_completed_finishes_stream_without_output_delta() {
 }
 
 #[tokio::test]
-async fn test_tool_using_stream_buffers_assistant_output_until_completion() {
+async fn test_execution_summary_stays_in_right_panel_not_transcript() {
+    let mut app = create_remote_app();
+    app.initialize_remote().await;
+    app.in_flight = true;
+    app.session_id = Some("sess-test".to_string());
+
+    app.handle_stream_event(TalosEvent {
+        event_type: TalosEventType::MessageExecutionSummary,
+        message_id: "msg-summary".to_string(),
+        session_id: "sess-test".to_string(),
+        sequence: 1,
+        payload: TalosEventPayload::MessageExecutionSummary(
+            talos_client::TalosMessageExecutionSummaryEvent {
+                request_id: "req-test".to_string(),
+                text: "Kernel summary: executed 1 tool call(s).".to_string(),
+                item_index: 0,
+                iteration: 1,
+                step_id: "step-1".to_string(),
+            },
+        ),
+    });
+
+    assert!(!app
+        .chat_blocks
+        .iter()
+        .any(|b| b.role == ChatRole::System && b.content.contains("Execution summary")));
+    assert!(app
+        .right_panel_events
+        .iter()
+        .any(|line| line.contains("execution summary: Kernel summary: executed 1 tool call(s).")));
+}
+
+#[tokio::test]
+async fn test_tool_using_stream_keeps_assistant_output_interleaved() {
     let mut app = create_remote_app();
     app.initialize_remote().await;
     app.in_flight = true;
@@ -622,10 +805,13 @@ async fn test_tool_using_stream_buffers_assistant_output_until_completion() {
     let assistant_during_tool = app
         .chat_blocks
         .iter()
-        .find(|b| b.role == ChatRole::Assistant)
+        .filter(|b| b.role == ChatRole::Assistant)
         .map(|b| b.content.clone())
-        .unwrap_or_default();
-    assert!(assistant_during_tool.is_empty());
+        .collect::<Vec<_>>();
+    assert_eq!(
+        assistant_during_tool,
+        vec!["Draft summary".to_string(), "\nFinal answer".to_string()]
+    );
 
     app.handle_stream_event(completed_event(
         "msg-tools",
@@ -637,10 +823,13 @@ async fn test_tool_using_stream_buffers_assistant_output_until_completion() {
     let assistant_after_complete = app
         .chat_blocks
         .iter()
-        .find(|b| b.role == ChatRole::Assistant)
+        .filter(|b| b.role == ChatRole::Assistant)
         .map(|b| b.content.clone())
-        .unwrap_or_default();
-    assert_eq!(assistant_after_complete, "Draft summary\nFinal answer");
+        .collect::<Vec<_>>();
+    assert_eq!(
+        assistant_after_complete,
+        vec!["Draft summary".to_string(), "\nFinal answer".to_string()]
+    );
 }
 
 #[tokio::test]

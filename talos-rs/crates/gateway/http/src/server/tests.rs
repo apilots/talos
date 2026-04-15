@@ -10,7 +10,9 @@ use talos_gateway::GatewayRequest;
 use talos_types::talos::{
     StopReason, TalosContext, TalosEvent, TalosEventPayload, TalosEventType, TalosInputItem,
     TalosMessageCompletedEvent, TalosMessageOutputDeltaEvent, TalosMessageRequest,
-    TalosMessageStartedEvent, TalosOutputItem, TalosProvider, TalosReasoning, TalosSourceType,
+    TalosMessageStartedEvent, TalosMessageToolCallExecutingEvent,
+    TalosMessageToolCallProgressDeltaEvent, TalosMessageToolCallQueuedEvent, TalosOutputItem,
+    TalosProvider, TalosReasoning, TalosSourceType, TalosToolProgressKind, TalosToolStreamKey,
     TalosUsage,
 };
 use talos_types::SessionQuery;
@@ -93,17 +95,76 @@ impl Gateway for MockGateway {
             };
             let _ = tx.send(output).await;
 
+            let queued = TalosEvent {
+                event_type: TalosEventType::MessageToolCallQueued,
+                message_id: "msg_mock".to_string(),
+                session_id: "mock-session".to_string(),
+                sequence: 2,
+                payload: TalosEventPayload::MessageToolCallQueued(
+                    TalosMessageToolCallQueuedEvent {
+                        request_id: "req_mock".to_string(),
+                        stream_key: TalosToolStreamKey { round: 0, index: 0 },
+                        call_id: "call-1".to_string(),
+                        tool_name: "exec_command".to_string(),
+                        item_index: 1,
+                        iteration: 2,
+                        step_id: "step-2".to_string(),
+                    },
+                ),
+            };
+            let _ = tx.send(queued).await;
+
+            let executing = TalosEvent {
+                event_type: TalosEventType::MessageToolCallExecuting,
+                message_id: "msg_mock".to_string(),
+                session_id: "mock-session".to_string(),
+                sequence: 3,
+                payload: TalosEventPayload::MessageToolCallExecuting(
+                    TalosMessageToolCallExecutingEvent {
+                        request_id: "req_mock".to_string(),
+                        stream_key: TalosToolStreamKey { round: 0, index: 0 },
+                        call_id: "call-1".to_string(),
+                        tool_name: "exec_command".to_string(),
+                        item_index: 2,
+                        iteration: 3,
+                        step_id: "step-3".to_string(),
+                    },
+                ),
+            };
+            let _ = tx.send(executing).await;
+
+            let progress = TalosEvent {
+                event_type: TalosEventType::MessageToolCallProgressDelta,
+                message_id: "msg_mock".to_string(),
+                session_id: "mock-session".to_string(),
+                sequence: 4,
+                payload: TalosEventPayload::MessageToolCallProgressDelta(
+                    TalosMessageToolCallProgressDeltaEvent {
+                        request_id: "req_mock".to_string(),
+                        stream_key: TalosToolStreamKey { round: 0, index: 0 },
+                        call_id: "call-1".to_string(),
+                        tool_name: "exec_command".to_string(),
+                        message: "execution started".to_string(),
+                        progress_kind: TalosToolProgressKind::Status,
+                        item_index: 3,
+                        iteration: 4,
+                        step_id: "step-4".to_string(),
+                    },
+                ),
+            };
+            let _ = tx.send(progress).await;
+
             let completed = TalosEvent {
                 event_type: TalosEventType::MessageCompleted,
                 message_id: "msg_mock".to_string(),
                 session_id: "mock-session".to_string(),
-                sequence: 2,
+                sequence: 5,
                 payload: TalosEventPayload::MessageCompleted(TalosMessageCompletedEvent {
                     request_id: "req_mock".to_string(),
                     stop_reason: StopReason::EndTurn,
                     usage: TalosUsage::default(),
-                    total_output_items: 1,
-                    iteration: 2,
+                    total_output_items: 4,
+                    iteration: 5,
                     step_id: "completed".to_string(),
                     task_count: 1,
                 }),
@@ -141,6 +202,7 @@ impl SessionService for MockSessionService {
                 trace_id: context.trace_id,
                 channel_id: context.channel_id,
                 thread_id: context.thread_id,
+                project_root: context.project_root,
                 environment: context.environment,
             },
             config: {
@@ -180,6 +242,7 @@ impl SessionService for MockSessionService {
                 trace_id: "trace-1".to_string(),
                 channel_id: Some("test-channel".to_string()),
                 thread_id: None,
+                project_root: None,
                 environment: None,
             },
             config: {
@@ -265,6 +328,7 @@ fn test_context() -> TalosContext {
         "trace-1",
     )
     .with_channel_id("test-channel")
+    .with_project_root("/server/project")
 }
 
 #[tokio::test]
@@ -342,6 +406,7 @@ async fn test_create_session_handler_returns_session_payload() {
     .expect("create session should succeed");
 
     assert_eq!(response.0["context"]["session_id"], "mock-session");
+    assert_eq!(response.0["context"]["project_root"], "/server/project");
     assert_eq!(response.0["config"]["llm"]["model"], "qwen-plus");
 }
 
@@ -641,6 +706,9 @@ async fn test_stream_session_message_uses_gateway_stream_path() {
         .expect("stream body should be readable");
     let body_text = String::from_utf8_lossy(&body);
     assert!(body_text.contains("stream only content"));
+    assert!(body_text.contains("event: message.tool_call.queued"));
+    assert!(body_text.contains("event: message.tool_call.executing"));
+    assert!(body_text.contains("event: message.tool_call.progress_delta"));
 }
 
 #[tokio::test]

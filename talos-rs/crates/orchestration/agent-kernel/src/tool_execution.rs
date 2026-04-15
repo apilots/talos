@@ -2,18 +2,21 @@ use crate::ToolExecutionMode;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::PathBuf;
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult};
 use talos_memory::MemoryStore;
 use talos_tools::{ToolDispatchOutcome, ToolExecutorPort, ToolInvocation, ToolOutputPayload};
+use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
 #[derive(Debug, Clone)]
 pub struct ToolExecutionContext {
     pub session_id: String,
     pub user_id: String,
+    pub project_root: Option<PathBuf>,
     pub kernel_config: Arc<AgentKernelConfig>,
     pub memory_store: Arc<MemoryStore>,
     pub pre_approved_call_ids: HashSet<String>,
@@ -64,6 +67,11 @@ fn build_tool_context(
         execution_context.user_id.clone(),
         Some(execution_context.kernel_config.clone()),
     );
+    let ctx = if let Some(project_root) = execution_context.project_root.clone() {
+        ctx.with_project_root(project_root)
+    } else {
+        ctx
+    };
     let ctx = ctx.with_memory_store(execution_context.memory_store.clone());
     if let Some(result) = execution_context.dynamic_tool_results.get(call_id) {
         ctx.set_state(
@@ -256,6 +264,270 @@ impl ToolExecutionInput {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamingToolSchedulingClass {
+    ParallelSafe,
+    SerialOnly,
+}
+
+#[derive(Debug, Clone)]
+struct ScheduledStreamingToolCall {
+    stream_key: crate::ToolStreamKey,
+    input: ToolExecutionInput,
+    scheduling_class: StreamingToolSchedulingClass,
+}
+
+#[derive(Debug, Clone)]
+struct RunningStreamingToolCall {
+    stream_key: crate::ToolStreamKey,
+    scheduling_class: StreamingToolSchedulingClass,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamingToolExecutionOutput {
+    pub stream_key: crate::ToolStreamKey,
+    pub output: ToolExecutionOutput,
+}
+
+pub struct StreamingToolScheduler {
+    execution_mode: ToolExecutionMode,
+    execution_context: ToolExecutionContext,
+    registry: Arc<dyn ToolExecutorPort>,
+    stream_tx: Option<mpsc::Sender<crate::KernelStreamEvent>>,
+    pending_calls: VecDeque<ScheduledStreamingToolCall>,
+    running_tasks: JoinSet<(RunningStreamingToolCall, ToolExecutionOutput)>,
+    parallel_running: usize,
+    serial_running: bool,
+}
+
+impl StreamingToolScheduler {
+    pub fn new(
+        execution_mode: ToolExecutionMode,
+        execution_context: ToolExecutionContext,
+        registry: Arc<dyn ToolExecutorPort>,
+        stream_tx: Option<mpsc::Sender<crate::KernelStreamEvent>>,
+    ) -> Self {
+        Self {
+            execution_mode,
+            execution_context,
+            registry,
+            stream_tx,
+            pending_calls: VecDeque::new(),
+            running_tasks: JoinSet::new(),
+            parallel_running: 0,
+            serial_running: false,
+        }
+    }
+
+    pub async fn push_call(
+        &mut self,
+        stream_key: crate::ToolStreamKey,
+        input: ToolExecutionInput,
+    ) -> TalosResult<()> {
+        let scheduled = ScheduledStreamingToolCall {
+            stream_key: stream_key.clone(),
+            scheduling_class: self.classify_call(&input.tool_name),
+            input,
+        };
+        self.emit_queued_event(&scheduled).await;
+        self.pending_calls.push_back(scheduled);
+        self.schedule_ready_calls().await;
+        Ok(())
+    }
+
+    pub async fn drain_completed(&mut self) -> TalosResult<Vec<StreamingToolExecutionOutput>> {
+        let mut completed = Vec::new();
+        while let Some(result) = self.running_tasks.try_join_next() {
+            let (running_call, output) = result.map_err(|error| {
+                TalosError::InternalError(format!("streaming tool execution task failed: {error}"))
+            })?;
+            self.mark_completed(&running_call);
+            completed.push(StreamingToolExecutionOutput {
+                stream_key: running_call.stream_key,
+                output,
+            });
+        }
+        if !completed.is_empty() {
+            self.schedule_ready_calls().await;
+        }
+        Ok(completed)
+    }
+
+    pub async fn finish(&mut self) -> TalosResult<Vec<StreamingToolExecutionOutput>> {
+        let mut completed = self.drain_completed().await?;
+        loop {
+            if self.pending_calls.is_empty() && self.parallel_running == 0 && !self.serial_running {
+                break;
+            }
+            if self.parallel_running == 0 && !self.serial_running {
+                self.schedule_ready_calls().await;
+                continue;
+            }
+            let Some(result) = self.running_tasks.join_next().await else {
+                break;
+            };
+            let (running_call, output) = result.map_err(|error| {
+                TalosError::InternalError(format!("streaming tool execution task failed: {error}"))
+            })?;
+            self.mark_completed(&running_call);
+            completed.push(StreamingToolExecutionOutput {
+                stream_key: running_call.stream_key,
+                output,
+            });
+            self.schedule_ready_calls().await;
+            completed.extend(self.drain_completed().await?);
+        }
+        Ok(completed)
+    }
+
+    fn classify_call(&self, tool_name: &str) -> StreamingToolSchedulingClass {
+        if self.execution_mode == ToolExecutionMode::Sequential {
+            return StreamingToolSchedulingClass::SerialOnly;
+        }
+        if self.registry.tool_supports_parallel(tool_name)
+            && !self.registry.tool_is_mutating(tool_name)
+        {
+            StreamingToolSchedulingClass::ParallelSafe
+        } else {
+            StreamingToolSchedulingClass::SerialOnly
+        }
+    }
+
+    async fn schedule_ready_calls(&mut self) {
+        loop {
+            if self.serial_running {
+                return;
+            }
+
+            let Some(next_call) = self.pending_calls.front().cloned() else {
+                return;
+            };
+
+            match next_call.scheduling_class {
+                StreamingToolSchedulingClass::SerialOnly => {
+                    if self.parallel_running > 0 {
+                        return;
+                    }
+                    let next_call = self
+                        .pending_calls
+                        .pop_front()
+                        .expect("front item must exist when scheduling serial tool");
+                    self.spawn_call(next_call).await;
+                    return;
+                }
+                StreamingToolSchedulingClass::ParallelSafe => {
+                    let next_call = self
+                        .pending_calls
+                        .pop_front()
+                        .expect("front item must exist when scheduling parallel tool");
+                    self.spawn_call(next_call).await;
+                }
+            }
+        }
+    }
+
+    async fn spawn_call(&mut self, scheduled: ScheduledStreamingToolCall) {
+        self.emit_executing_event(&scheduled).await;
+        match scheduled.scheduling_class {
+            StreamingToolSchedulingClass::ParallelSafe => {
+                self.parallel_running += 1;
+            }
+            StreamingToolSchedulingClass::SerialOnly => {
+                self.serial_running = true;
+            }
+        }
+
+        let registry = self.registry.clone();
+        let execution_context = self.execution_context.clone();
+        let running_call = RunningStreamingToolCall {
+            stream_key: scheduled.stream_key.clone(),
+            scheduling_class: scheduled.scheduling_class,
+        };
+        self.running_tasks.spawn(async move {
+            let output =
+                execute_single_tool_call(registry, &execution_context, scheduled.input).await;
+            (running_call, output)
+        });
+    }
+
+    fn mark_completed(&mut self, running_call: &RunningStreamingToolCall) {
+        match running_call.scheduling_class {
+            StreamingToolSchedulingClass::ParallelSafe => {
+                self.parallel_running = self.parallel_running.saturating_sub(1);
+            }
+            StreamingToolSchedulingClass::SerialOnly => {
+                self.serial_running = false;
+            }
+        }
+    }
+
+    async fn emit_queued_event(&self, scheduled: &ScheduledStreamingToolCall) {
+        emit_stream_event(
+            self.stream_tx.as_ref(),
+            crate::KernelStreamEventType::ToolQueued,
+            crate::KernelStreamEventData::ToolQueued(crate::ToolQueuedStreamData {
+                stream_key: scheduled.stream_key.clone(),
+                call_id: scheduled.input.call_id.clone(),
+                tool_name: scheduled.input.tool_name.clone(),
+            }),
+        )
+        .await;
+        if self.parallel_running > 0 || self.serial_running {
+            emit_stream_event(
+                self.stream_tx.as_ref(),
+                crate::KernelStreamEventType::ToolProgressDelta,
+                crate::KernelStreamEventData::ToolProgressDelta(
+                    crate::ToolProgressDeltaStreamData {
+                        stream_key: scheduled.stream_key.clone(),
+                        call_id: scheduled.input.call_id.clone(),
+                        tool_name: scheduled.input.tool_name.clone(),
+                        message: "waiting for execution slot".to_string(),
+                        progress_kind: crate::ToolProgressKind::Status,
+                    },
+                ),
+            )
+            .await;
+        }
+    }
+
+    async fn emit_executing_event(&self, scheduled: &ScheduledStreamingToolCall) {
+        emit_stream_event(
+            self.stream_tx.as_ref(),
+            crate::KernelStreamEventType::ToolExecuting,
+            crate::KernelStreamEventData::ToolExecuting(crate::ToolExecutingStreamData {
+                stream_key: scheduled.stream_key.clone(),
+                call_id: scheduled.input.call_id.clone(),
+                tool_name: scheduled.input.tool_name.clone(),
+            }),
+        )
+        .await;
+        emit_stream_event(
+            self.stream_tx.as_ref(),
+            crate::KernelStreamEventType::ToolProgressDelta,
+            crate::KernelStreamEventData::ToolProgressDelta(crate::ToolProgressDeltaStreamData {
+                stream_key: scheduled.stream_key.clone(),
+                call_id: scheduled.input.call_id.clone(),
+                tool_name: scheduled.input.tool_name.clone(),
+                message: "execution started".to_string(),
+                progress_kind: crate::ToolProgressKind::Status,
+            }),
+        )
+        .await;
+    }
+}
+
+async fn emit_stream_event(
+    stream_tx: Option<&mpsc::Sender<crate::KernelStreamEvent>>,
+    event_type: crate::KernelStreamEventType,
+    data: crate::KernelStreamEventData,
+) {
+    if let Some(tx) = stream_tx {
+        let _ = tx
+            .send(crate::KernelStreamEvent::new(event_type, data))
+            .await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,6 +601,7 @@ mod tests {
         let execution_context = ToolExecutionContext {
             session_id: "s1".to_string(),
             user_id: "u1".to_string(),
+            project_root: None,
             kernel_config: Arc::new(AgentKernelConfig::default()),
             memory_store: Arc::new(MemoryStore::new(
                 std::env::temp_dir().join("tool-executor-1"),
@@ -388,6 +661,7 @@ mod tests {
         let execution_context = ToolExecutionContext {
             session_id: "s1".to_string(),
             user_id: "u1".to_string(),
+            project_root: None,
             kernel_config: Arc::new(AgentKernelConfig::default()),
             memory_store: Arc::new(MemoryStore::new(
                 std::env::temp_dir().join("tool-executor-2"),

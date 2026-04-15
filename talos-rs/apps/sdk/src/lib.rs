@@ -7,6 +7,7 @@ use reqwest::{Client, RequestBuilder, Response};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 use tokio::sync::mpsc;
 
 use talos_error::{TalosError, TalosResult};
@@ -19,7 +20,7 @@ pub use talos_types::talos::{
     TalosMessageToolCallPendingApprovalEvent, TalosMessageToolCallStartedEvent, TalosOutputItem,
     TalosProvider, TalosSourceType, TalosThinkingSource, TalosThinkingStage,
 };
-pub use talos_types::{ModelInfo, TalosSession};
+pub use talos_types::{ModelInfo, SessionProjectRootPatch, TalosSession};
 
 #[derive(Clone, Debug)]
 pub struct ClientConfig {
@@ -47,6 +48,7 @@ pub struct SessionCreateParams {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionUpdate {
     pub conf: HashMap<String, serde_json::Value>,
+    pub project_root: Option<SessionProjectRootPatch>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -182,7 +184,32 @@ impl TalosClient {
             "agent.model".to_string(),
             serde_json::Value::String(model.to_string()),
         );
-        let update = SessionUpdate { conf };
+        let update = SessionUpdate {
+            conf,
+            project_root: None,
+        };
+        self.update_session(session_id, &update).await
+    }
+
+    pub async fn update_session_project_root(
+        &self,
+        session_id: &str,
+        path: &Path,
+    ) -> TalosResult<()> {
+        let update = SessionUpdate {
+            conf: HashMap::new(),
+            project_root: Some(SessionProjectRootPatch::Set {
+                path: path.to_path_buf(),
+            }),
+        };
+        self.update_session(session_id, &update).await
+    }
+
+    pub async fn clear_session_project_root(&self, session_id: &str) -> TalosResult<()> {
+        let update = SessionUpdate {
+            conf: HashMap::new(),
+            project_root: Some(SessionProjectRootPatch::Clear),
+        };
         self.update_session(session_id, &update).await
     }
 

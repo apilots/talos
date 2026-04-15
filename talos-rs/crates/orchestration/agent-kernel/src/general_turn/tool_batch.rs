@@ -1,4 +1,5 @@
 use super::*;
+use crate::ToolExecutionOutput;
 
 pub(crate) fn parse_retrieved_memory_items(
     tool_name: &str,
@@ -188,6 +189,132 @@ fn build_tool_result_payload(
     }
 }
 
+struct ReducedToolExecutionOutput {
+    payload: Value,
+    is_error: bool,
+    pending_arguments: Option<Value>,
+    memory_payload: Value,
+}
+
+fn reduce_tool_execution_output(output: &ToolExecutionOutput) -> ReducedToolExecutionOutput {
+    let (payload, is_error, pending_arguments) =
+        build_tool_result_payload(&output.tool_name, &output.outcome);
+    let memory_payload = output
+        .outcome
+        .payload()
+        .and_then(|payload| payload.structured_content())
+        .cloned()
+        .unwrap_or_else(|| payload.clone());
+    ReducedToolExecutionOutput {
+        payload,
+        is_error,
+        pending_arguments,
+        memory_payload,
+    }
+}
+
+pub(crate) async fn emit_tool_result_stream_event(
+    stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
+    output: &ToolExecutionOutput,
+) {
+    let reduced = reduce_tool_execution_output(output);
+    emit_stream_event(
+        stream_tx,
+        KernelStreamEventType::ToolResult,
+        KernelStreamEventData::ToolResult(ToolResultStreamData {
+            call_id: output.call_id.clone(),
+            tool_name: output.tool_name.clone(),
+            content: vec![TalosContentItem::Json {
+                value: reduced.payload,
+            }],
+            is_error: reduced.is_error,
+        }),
+    )
+    .await;
+}
+
+pub(crate) fn collect_general_turn_tool_batch(
+    outputs: Vec<ToolExecutionOutput>,
+) -> GeneralTurnToolBatch {
+    let mut output_items = Vec::new();
+    let mut tool_messages = Vec::new();
+    let mut pending_confirmations = Vec::new();
+    let mut pending_dynamic_requests = Vec::new();
+    let mut retrieved_memories = Vec::new();
+    let mut logs = Vec::new();
+    let mut error_count = 0_usize;
+
+    for output in outputs {
+        let reduced = reduce_tool_execution_output(&output);
+        if reduced.is_error {
+            error_count += 1;
+        }
+        output_items.push(TalosOutputItem::ToolResult {
+            call_id: output.call_id.clone(),
+            tool_name: output.tool_name.clone(),
+            content: vec![TalosContentItem::Json {
+                value: reduced.payload.clone(),
+            }],
+            is_error: reduced.is_error,
+        });
+        logs.push(ToolResultLog {
+            call_id: output.call_id.clone(),
+            tool: output.tool_name.clone(),
+            payload: reduced.payload.clone(),
+            is_error: reduced.is_error,
+            truncated: reduced
+                .payload
+                .get("truncated")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            size_bytes: serde_json::to_vec(&reduced.payload)
+                .map(|buf| buf.len())
+                .unwrap_or(0),
+        });
+        retrieved_memories.extend(parse_retrieved_memory_items(
+            &output.tool_name,
+            &reduced.memory_payload,
+        ));
+        if let ToolDispatchOutcome::Pending {
+            pending: ToolPending::Approval { prompt, .. },
+            ..
+        } = &output.outcome
+        {
+            pending_confirmations.push(PendingToolConfirmation {
+                tool_name: output.tool_name.clone(),
+                call_id: output.call_id.clone(),
+                prompt: prompt.clone(),
+                arguments: reduced.pending_arguments.unwrap_or(Value::Null),
+            });
+        } else if let ToolDispatchOutcome::Pending {
+            pending: ToolPending::Dynamic { .. },
+            ..
+        } = &output.outcome
+        {
+            pending_dynamic_requests.push(PendingDynamicToolRequest {
+                tool_name: output.tool_name.clone(),
+                call_id: output.call_id.clone(),
+                arguments: reduced.pending_arguments.unwrap_or(Value::Null),
+            });
+        }
+        tool_messages.push(ChatMessage::tool(
+            output.call_id,
+            output.tool_name,
+            reduced.payload.to_string(),
+        ));
+    }
+
+    GeneralTurnToolBatch {
+        output_items,
+        tool_messages,
+        pending_confirmations,
+        pending_dynamic_requests,
+        retrieved_memories,
+        logs,
+        error_count,
+    }
+}
+
 pub async fn execute_general_turn_tool_batch(
     prepared: &PreparedGeneralTurn,
     tool_executor: Arc<dyn ToolExecutor>,
@@ -203,6 +330,7 @@ pub async fn execute_general_turn_tool_batch(
     let execution_context = ToolExecutionContext {
         session_id: format!("agent-{}", prepared.agent_id),
         user_id: user_id.to_string(),
+        project_root: prepared.project_root.clone(),
         kernel_config,
         memory_store,
         pre_approved_call_ids,
@@ -220,102 +348,11 @@ pub async fn execute_general_turn_tool_batch(
         .execute(&execution_context, tool_registry, &inputs)
         .await?;
 
-    let mut output_items = Vec::new();
-    let mut tool_messages = Vec::new();
-    let mut pending_confirmations = Vec::new();
-    let mut pending_dynamic_requests = Vec::new();
-    let mut retrieved_memories = Vec::new();
-    let mut logs = Vec::new();
-    let mut error_count = 0_usize;
-
-    for output in outputs {
-        let (payload, is_error, pending_arguments) =
-            build_tool_result_payload(&output.tool_name, &output.outcome);
-        if is_error {
-            error_count += 1;
-        }
-        let memory_payload = output
-            .outcome
-            .payload()
-            .and_then(|payload| payload.structured_content())
-            .cloned()
-            .unwrap_or_else(|| payload.clone());
-        output_items.push(TalosOutputItem::ToolResult {
-            call_id: output.call_id.clone(),
-            tool_name: output.tool_name.clone(),
-            content: vec![TalosContentItem::Json {
-                value: payload.clone(),
-            }],
-            is_error,
-        });
-        emit_stream_event(
-            stream_tx,
-            KernelStreamEventType::ToolResult,
-            KernelStreamEventData::ToolResult(ToolResultStreamData {
-                call_id: output.call_id.clone(),
-                tool_name: output.tool_name.clone(),
-                content: vec![TalosContentItem::Json {
-                    value: payload.clone(),
-                }],
-                is_error,
-            }),
-        )
-        .await;
-        logs.push(ToolResultLog {
-            call_id: output.call_id.clone(),
-            tool: output.tool_name.clone(),
-            payload: payload.clone(),
-            is_error,
-            truncated: payload
-                .get("truncated")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-            size_bytes: serde_json::to_vec(&payload)
-                .map(|buf| buf.len())
-                .unwrap_or(0),
-        });
-        retrieved_memories.extend(parse_retrieved_memory_items(
-            &output.tool_name,
-            &memory_payload,
-        ));
-        if let ToolDispatchOutcome::Pending {
-            pending: ToolPending::Approval { prompt, .. },
-            ..
-        } = &output.outcome
-        {
-            pending_confirmations.push(PendingToolConfirmation {
-                tool_name: output.tool_name.clone(),
-                call_id: output.call_id.clone(),
-                prompt: prompt.clone(),
-                arguments: pending_arguments.unwrap_or(Value::Null),
-            });
-        } else if let ToolDispatchOutcome::Pending {
-            pending: ToolPending::Dynamic { .. },
-            ..
-        } = &output.outcome
-        {
-            pending_dynamic_requests.push(PendingDynamicToolRequest {
-                tool_name: output.tool_name.clone(),
-                call_id: output.call_id.clone(),
-                arguments: pending_arguments.unwrap_or(Value::Null),
-            });
-        }
-        tool_messages.push(ChatMessage::tool(
-            output.call_id,
-            output.tool_name,
-            payload.to_string(),
-        ));
+    for output in &outputs {
+        emit_tool_result_stream_event(stream_tx, output).await;
     }
 
-    Ok(GeneralTurnToolBatch {
-        output_items,
-        tool_messages,
-        pending_confirmations,
-        pending_dynamic_requests,
-        retrieved_memories,
-        logs,
-        error_count,
-    })
+    Ok(collect_general_turn_tool_batch(outputs))
 }
 
 pub fn apply_general_turn_tool_batch(

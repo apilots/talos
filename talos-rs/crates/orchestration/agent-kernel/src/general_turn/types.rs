@@ -1,4 +1,7 @@
 use super::*;
+use crate::{ToolExecutionMode, ToolExecutionOutput};
+use std::fmt;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct GeneralTurnResult {
@@ -15,6 +18,7 @@ pub struct PreparedGeneralTurn {
     pub session_id: String,
     pub invocation_id: String,
     pub agent_id: String,
+    pub project_root: Option<PathBuf>,
     pub selected_model: String,
     pub prompt_prefix_messages: Vec<ChatMessage>,
     pub messages: Vec<ChatMessage>,
@@ -79,6 +83,29 @@ pub struct GeneralTurnLoopState {
     pub saw_output_delta: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ForcedFinalizationCause {
+    ToolRoundBudget,
+    RepeatedReadOnlyInvestigation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolCallFingerprint {
+    pub tool_name: String,
+    pub canonical_arguments: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadOnlyRoundFingerprint {
+    pub calls: Vec<ToolCallFingerprint>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ToolLoopGuardState {
+    pub last_read_only_round: Option<ReadOnlyRoundFingerprint>,
+    pub consecutive_equivalent_read_only_rounds: u32,
+}
+
 /// Per-turn loop control state for PlanReAct mode.
 /// Lives only within a single `general_turn` execution; not persisted to session.
 #[derive(Debug, Clone, Default)]
@@ -115,6 +142,7 @@ pub struct GeneralTurnStepRequest {
     pub parallel_tool_calls: bool,
     pub native_thinking: Option<NativeThinkingConfig>,
     pub stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
+    pub streaming_tool_execution: Option<StreamingToolExecutionConfig>,
 }
 
 impl GeneralTurnStepRequest {
@@ -143,10 +171,28 @@ pub struct GeneralTurnStepResult {
     pub text: String,
     pub reasoning: Vec<String>,
     pub tool_calls: Vec<FunctionCall>,
+    pub streamed_tool_outputs: Vec<ToolExecutionOutput>,
     pub output_items: Vec<TalosOutputItem>,
     pub usage: TalosUsage,
     pub saw_output_delta: bool,
     pub disposition: GeneralTurnStepDisposition,
+}
+
+#[derive(Clone)]
+pub struct StreamingToolExecutionConfig {
+    pub execution_mode: ToolExecutionMode,
+    pub execution_context: ToolExecutionContext,
+    pub tool_registry: Arc<dyn ToolExecutorPort>,
+}
+
+impl fmt::Debug for StreamingToolExecutionConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StreamingToolExecutionConfig")
+            .field("execution_mode", &self.execution_mode)
+            .field("execution_context", &self.execution_context)
+            .field("tool_registry", &"<dyn ToolExecutorPort>")
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]

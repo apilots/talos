@@ -538,6 +538,49 @@ async fn send_and_render_message(
                 );
             }
             (
+                TalosEventType::MessageToolCallArgsDelta,
+                TalosEventPayload::MessageToolCallArgsDelta(payload),
+            ) => {
+                eprintln!(
+                    "TOOL_CALL_ARGS_DELTA tool={} call_id={} step={} delta={}",
+                    payload.tool_name.as_deref().unwrap_or("unknown"),
+                    payload.call_id.as_deref().unwrap_or("pending"),
+                    payload.step_id,
+                    payload.delta
+                );
+            }
+            (
+                TalosEventType::MessageToolCallQueued,
+                TalosEventPayload::MessageToolCallQueued(payload),
+            ) => {
+                eprintln!(
+                    "TOOL_CALL_QUEUED tool={} call_id={} step={}",
+                    payload.tool_name, payload.call_id, payload.step_id
+                );
+            }
+            (
+                TalosEventType::MessageToolCallExecuting,
+                TalosEventPayload::MessageToolCallExecuting(payload),
+            ) => {
+                eprintln!(
+                    "TOOL_CALL_EXECUTING tool={} call_id={} step={}",
+                    payload.tool_name, payload.call_id, payload.step_id
+                );
+            }
+            (
+                TalosEventType::MessageToolCallProgressDelta,
+                TalosEventPayload::MessageToolCallProgressDelta(payload),
+            ) => {
+                eprintln!(
+                    "TOOL_CALL_PROGRESS tool={} call_id={} kind={:?} step={} message={}",
+                    payload.tool_name,
+                    payload.call_id,
+                    payload.progress_kind,
+                    payload.step_id,
+                    payload.message
+                );
+            }
+            (
                 TalosEventType::MessageToolCallCompleted,
                 TalosEventPayload::MessageToolCallCompleted(payload),
             ) => {

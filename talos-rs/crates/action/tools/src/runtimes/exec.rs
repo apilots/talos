@@ -374,7 +374,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_exec_runtime_supports_sessionized_stdin() {
-        let context = crate::ToolContext::default();
+        let context = crate::ToolContext::default()
+            .with_project_root(std::env::current_dir().expect("cwd should exist"));
         let exec = exec_command(
             &ExecCommandRequest {
                 cmd: "printf 'ready\\n'; read line; printf 'done:%s\\n' \"$line\"".to_string(),
@@ -415,7 +416,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_exec_runtime_allows_escalated_command_when_called_directly() {
-        let context = crate::ToolContext::default();
+        let context = crate::ToolContext::default()
+            .with_project_root(std::env::current_dir().expect("cwd should exist"));
         let result = exec_command(
             &ExecCommandRequest {
                 cmd: "echo hi".to_string(),
@@ -439,7 +441,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_pre_approved_context_bypasses_escalation_check() {
-        let context = crate::ToolContext::default().with_pre_approved();
+        let context = crate::ToolContext::default()
+            .with_project_root(std::env::current_dir().expect("cwd should exist"))
+            .with_pre_approved();
         let result = exec_command(
             &ExecCommandRequest {
                 cmd: "echo approved".to_string(),
@@ -463,8 +467,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_write_stdin_rejects_cross_session_access() {
-        let owner_context = crate::ToolContext::new("session-owner", "user-1");
-        let foreign_context = crate::ToolContext::new("session-foreign", "user-2");
+        let owner_context = crate::ToolContext::new("session-owner", "user-1")
+            .with_project_root(std::env::current_dir().expect("cwd should exist"));
+        let foreign_context = crate::ToolContext::new("session-foreign", "user-2")
+            .with_project_root(std::env::current_dir().expect("cwd should exist"));
         let exec = exec_command(
             &ExecCommandRequest {
                 cmd: "printf 'ready\\n'; sleep 1".to_string(),

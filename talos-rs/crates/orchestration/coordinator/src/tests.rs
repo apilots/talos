@@ -7,12 +7,12 @@ use talos_agent::{OrchestratorEvent, OrchestratorExecution, OrchestratorRequest}
 use talos_memory::{Memory, MemoryStore, TalosTurn};
 use talos_session_store::SessionStore;
 use talos_types::talos::{
-    StopReason, TalosContentItem, TalosContext, TalosInputItem, TalosOutputItem, TalosProvider,
-    TalosSourceType, TalosUsage,
+    StopReason, TalosConnectionMode, TalosContentItem, TalosContext, TalosInputItem,
+    TalosOutputItem, TalosProvider, TalosSessionEnvironment, TalosSourceType, TalosUsage,
 };
 use talos_types::{
-    SessionPatch, SessionPatchAck, SessionQuery, SessionRecord, TalosConfig, TalosSession,
-    DEFAULT_SESSION_TITLE,
+    SessionPatch, SessionPatchAck, SessionProjectRootPatch, SessionQuery, SessionRecord,
+    TalosConfig, TalosSession, DEFAULT_SESSION_TITLE,
 };
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -222,10 +222,25 @@ impl talos_session_store::SessionStore for TitleTestSessionStore {
         session_id: &str,
         patch: &SessionPatch,
     ) -> TalosResult<SessionPatchAck> {
-        let _ = patch.agent_model()?;
-        Ok(SessionPatchAck {
-            success: self.sessions.lock().unwrap().contains_key(session_id),
-        })
+        let requested_model = patch.agent_model()?;
+        let mut sessions = self.sessions.lock().unwrap();
+        let Some(record) = sessions.get_mut(session_id) else {
+            return Ok(SessionPatchAck { success: false });
+        };
+        if let Some(model) = requested_model {
+            record.model = model;
+        }
+        if let Some(project_root_patch) = &patch.project_root {
+            match project_root_patch {
+                SessionProjectRootPatch::Set { path } => {
+                    record.context.project_root = Some(path.clone());
+                }
+                SessionProjectRootPatch::Clear => {
+                    record.context.project_root = None;
+                }
+            }
+        }
+        Ok(SessionPatchAck { success: true })
     }
 
     async fn update_session_title(&self, session_id: &str, title: &str) -> TalosResult<()> {
@@ -411,6 +426,7 @@ async fn test_handle_stream_returns_orchestrator_events() {
                 trace_id: "trace-1".to_string(),
                 channel_id: Some("test-channel".to_string()),
                 thread_id: None,
+                project_root: None,
                 environment: None,
             },
         })
@@ -427,6 +443,9 @@ async fn test_handle_stream_returns_orchestrator_events() {
 
     assert!(event_types.contains(&talos_types::talos::TalosEventType::MessageStarted));
     assert!(event_types.contains(&talos_types::talos::TalosEventType::MessageOutputDelta));
+    assert!(event_types.contains(&talos_types::talos::TalosEventType::MessageToolCallQueued));
+    assert!(event_types.contains(&talos_types::talos::TalosEventType::MessageToolCallExecuting));
+    assert!(event_types.contains(&talos_types::talos::TalosEventType::MessageToolCallProgressDelta));
     assert!(event_types.contains(&talos_types::talos::TalosEventType::MessageCompleted));
 }
 
@@ -487,6 +506,7 @@ async fn test_first_turn_assigns_deterministic_session_title() {
             trace_id: "trace-1".to_string(),
             channel_id: Some("test-channel".to_string()),
             thread_id: None,
+            project_root: None,
             environment: None,
         },
         model: "test-model".to_string(),
@@ -519,6 +539,7 @@ async fn test_first_turn_assigns_deterministic_session_title() {
                 trace_id: "trace-1".to_string(),
                 channel_id: Some("test-channel".to_string()),
                 thread_id: None,
+                project_root: None,
                 environment: None,
             },
         })
@@ -548,6 +569,7 @@ async fn test_cancel_active_turn_routes_to_session_agent_and_is_noop_safe() {
             trace_id: "trace-1".to_string(),
             channel_id: Some("test-channel".to_string()),
             thread_id: None,
+            project_root: None,
             environment: None,
         },
         model: "test-model".to_string(),
@@ -662,6 +684,99 @@ async fn test_get_session_turns_returns_ordered_items() {
     ));
     assert_eq!(turns[0].usage.total_tokens, 22);
     assert_eq!(turns[0].stop_reason, StopReason::EndTurn);
+}
+
+#[tokio::test]
+async fn test_remote_session_defaults_project_root_to_workspace_dir() {
+    let workspace_dir = std::env::temp_dir().join(format!("talos-coordinator-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&workspace_dir).expect("workspace dir should be created");
+
+    let mut config = TalosConfig::default();
+    config.agent.kernel.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+
+    let mock_router = Arc::new(MockRouter::new());
+    let session_store = Arc::new(talos_session_store::MockSessionStore::new());
+    let coordinator = CoordinatorImpl::new(mock_router, session_store, config);
+    coordinator
+        .register_agent("default", Arc::new(talos_agent::MockAgent::new()))
+        .await
+        .expect("default agent should register");
+
+    let session = talos_types::SessionService::create_session(
+        &coordinator,
+        TalosContext::new(
+            TalosSourceType::Cli,
+            TalosProvider::Cli,
+            "user-1",
+            "message-1",
+            "trace-1",
+        )
+        .with_environment(TalosSessionEnvironment {
+            directory: std::path::PathBuf::from("/client/path"),
+            connection_mode: TalosConnectionMode::Remote,
+        }),
+        None,
+    )
+    .await
+    .expect("session creation should succeed");
+
+    assert_eq!(
+        session.context.project_root.as_deref(),
+        Some(workspace_dir.as_path())
+    );
+}
+
+#[tokio::test]
+async fn test_clear_project_root_resets_remote_session_to_workspace_dir_default() {
+    let workspace_dir = std::env::temp_dir().join(format!("talos-coordinator-{}", Uuid::new_v4()));
+    let custom_dir = std::env::temp_dir().join(format!("talos-project-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&workspace_dir).expect("workspace dir should be created");
+    std::fs::create_dir_all(&custom_dir).expect("custom dir should be created");
+
+    let mut config = TalosConfig::default();
+    config.agent.kernel.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+
+    let mock_router = Arc::new(MockRouter::new());
+    let session_store = Arc::new(TitleTestSessionStore::new(SessionRecord {
+        id: "session-1".to_string(),
+        title: DEFAULT_SESSION_TITLE.to_string(),
+        context: TalosContext::new(
+            TalosSourceType::Cli,
+            TalosProvider::Cli,
+            "user-1",
+            "message-1",
+            "trace-1",
+        )
+        .with_project_root(custom_dir.clone()),
+        model: config.llm.model.clone(),
+        created_at: 0,
+        last_activity: 0,
+        message_count: 0,
+        usage: TalosUsage::default(),
+        conf: HashMap::new(),
+    }));
+    let coordinator = CoordinatorImpl::new(mock_router, session_store, config);
+
+    talos_types::SessionService::patch_session(
+        &coordinator,
+        "session-1",
+        SessionPatch {
+            conf: HashMap::new(),
+            project_root: Some(SessionProjectRootPatch::Clear),
+        },
+    )
+    .await
+    .expect("patch should succeed");
+
+    let session = talos_types::SessionService::get_session(&coordinator, "session-1")
+        .await
+        .expect("get session should succeed")
+        .expect("session should exist");
+
+    assert_eq!(
+        session.context.project_root.as_deref(),
+        Some(workspace_dir.as_path())
+    );
 }
 
 #[tokio::test]

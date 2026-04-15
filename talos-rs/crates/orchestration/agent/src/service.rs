@@ -47,10 +47,28 @@ pub enum OrchestratorEvent {
     MessageExecutionSummary(OrchestratorMessageExecutionSummaryEvent),
     MessageOutputDelta(OrchestratorMessageOutputDeltaEvent),
     MessageToolCallStarted(OrchestratorMessageToolCallStartedEvent),
+    MessageToolCallArgsDelta(OrchestratorMessageToolCallArgsDeltaEvent),
+    MessageToolCallQueued(OrchestratorMessageToolCallQueuedEvent),
+    MessageToolCallExecuting(OrchestratorMessageToolCallExecutingEvent),
+    MessageToolCallProgressDelta(OrchestratorMessageToolCallProgressDeltaEvent),
     MessageToolCallCompleted(OrchestratorMessageToolCallCompletedEvent),
     MessageToolCallPendingApproval(OrchestratorMessageToolCallPendingApprovalEvent),
     MessageCompleted(OrchestratorMessageCompletedEvent),
     MessageError(OrchestratorMessageErrorEvent),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OrchestratorToolStreamKey {
+    pub round: u32,
+    pub index: usize,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OrchestratorToolProgressKind {
+    Status,
+    Stdout,
+    Stderr,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,6 +129,53 @@ pub struct OrchestratorMessageToolCallStartedEvent {
     pub iteration: u64,
     pub step_id: String,
     pub timing_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrchestratorMessageToolCallArgsDeltaEvent {
+    pub request_id: String,
+    pub stream_key: OrchestratorToolStreamKey,
+    pub call_id: Option<String>,
+    pub tool_name: Option<String>,
+    pub delta: String,
+    pub item_index: u64,
+    pub iteration: u64,
+    pub step_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrchestratorMessageToolCallQueuedEvent {
+    pub request_id: String,
+    pub stream_key: OrchestratorToolStreamKey,
+    pub call_id: String,
+    pub tool_name: String,
+    pub item_index: u64,
+    pub iteration: u64,
+    pub step_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrchestratorMessageToolCallExecutingEvent {
+    pub request_id: String,
+    pub stream_key: OrchestratorToolStreamKey,
+    pub call_id: String,
+    pub tool_name: String,
+    pub item_index: u64,
+    pub iteration: u64,
+    pub step_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrchestratorMessageToolCallProgressDeltaEvent {
+    pub request_id: String,
+    pub stream_key: OrchestratorToolStreamKey,
+    pub call_id: String,
+    pub tool_name: String,
+    pub message: String,
+    pub progress_kind: OrchestratorToolProgressKind,
+    pub item_index: u64,
+    pub iteration: u64,
+    pub step_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

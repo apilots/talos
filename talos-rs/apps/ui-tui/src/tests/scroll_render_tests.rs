@@ -40,7 +40,7 @@ async fn test_message_completed_updates_session_usage() {
     app.current_model = "qwen-max".to_string();
     app.in_flight = true;
     app.received_output_delta = false;
-    app.active_assistant_idx = Some(app.push_block(ChatRole::Assistant, String::new()));
+    app.transcript.live_assistant_idx = Some(app.push_block(ChatRole::Assistant, String::new()));
     app.session_id = Some("sess-test".to_string());
 
     app.handle_stream_event(completed_event(

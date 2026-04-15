@@ -243,6 +243,9 @@ log_case_json "messages_tool_exec_stream" "${stream_tool_payload}" "$(cat "${str
 stream_started_count="$(grep -c '^event: message.started' "${stream_tool_log}" || true)"
 stream_reasoning_count="$(grep -c '^event: message.reasoning.delta' "${stream_tool_log}" || true)"
 stream_summary_count="$(grep -c '^event: message.execution.summary' "${stream_tool_log}" || true)"
+stream_tool_queued_count="$(grep -c '^event: message.tool_call.queued' "${stream_tool_log}" || true)"
+stream_tool_executing_count="$(grep -c '^event: message.tool_call.executing' "${stream_tool_log}" || true)"
+stream_tool_progress_count="$(grep -c '^event: message.tool_call.progress_delta' "${stream_tool_log}" || true)"
 stream_tool_started_count="$(grep -c '^event: message.tool_call.started' "${stream_tool_log}" || true)"
 stream_tool_completed_count="$(grep -c '^event: message.tool_call.completed' "${stream_tool_log}" || true)"
 stream_output_count="$(grep -c '^event: message.output.delta' "${stream_tool_log}" || true)"
@@ -250,8 +253,8 @@ stream_completed_count="$(grep -c '^event: message.completed' "${stream_tool_log
 stream_step_id_count="$(grep -c '"step_id"' "${stream_tool_log}" || true)"
 stream_iteration_count="$(grep -c '"iteration"' "${stream_tool_log}" || true)"
 stream_request_id_count="$(grep -c '"request_id"' "${stream_tool_log}" || true)"
-if [[ "${stream_started_count}" -lt 1 || "${stream_tool_started_count}" -lt 1 || "${stream_tool_completed_count}" -lt 1 || "${stream_output_count}" -lt 1 || "${stream_completed_count}" -lt 1 || "${stream_step_id_count}" -lt 1 || "${stream_iteration_count}" -lt 1 || "${stream_request_id_count}" -lt 1 ]]; then
-  echo "CASE messages_tool_exec_stream FAIL started=${stream_started_count} tool_started=${stream_tool_started_count} tool_completed=${stream_tool_completed_count} output=${stream_output_count} completed=${stream_completed_count}"
+if [[ "${stream_started_count}" -lt 1 || "${stream_tool_queued_count}" -lt 1 || "${stream_tool_executing_count}" -lt 1 || "${stream_tool_progress_count}" -lt 1 || "${stream_tool_started_count}" -lt 1 || "${stream_tool_completed_count}" -lt 1 || "${stream_output_count}" -lt 1 || "${stream_completed_count}" -lt 1 || "${stream_step_id_count}" -lt 1 || "${stream_iteration_count}" -lt 1 || "${stream_request_id_count}" -lt 1 ]]; then
+  echo "CASE messages_tool_exec_stream FAIL started=${stream_started_count} tool_queued=${stream_tool_queued_count} tool_executing=${stream_tool_executing_count} tool_progress=${stream_tool_progress_count} tool_started=${stream_tool_started_count} tool_completed=${stream_tool_completed_count} output=${stream_output_count} completed=${stream_completed_count}"
   exit 1
 fi
 if [[ "${stream_reasoning_count}" -lt 1 && "${stream_summary_count}" -lt 1 ]]; then
@@ -290,7 +293,7 @@ if [[ "${stream_started_call_id}" != "${stream_completed_call_id}" ]]; then
   echo "CASE messages_tool_exec_stream FAIL call_id_mismatch started=${stream_started_call_id} completed=${stream_completed_call_id}"
   exit 1
 fi
-echo "CASE messages_tool_exec_stream PASS started=${stream_started_count} reasoning=${stream_reasoning_count} summary=${stream_summary_count} tool_started=${stream_tool_started_count} tool_completed=${stream_tool_completed_count} output=${stream_output_count} completed=${stream_completed_count} step_id=${stream_step_id_count} iteration=${stream_iteration_count} request_id=${stream_request_id_count}"
+echo "CASE messages_tool_exec_stream PASS started=${stream_started_count} reasoning=${stream_reasoning_count} summary=${stream_summary_count} tool_queued=${stream_tool_queued_count} tool_executing=${stream_tool_executing_count} tool_progress=${stream_tool_progress_count} tool_started=${stream_tool_started_count} tool_completed=${stream_tool_completed_count} output=${stream_output_count} completed=${stream_completed_count} step_id=${stream_step_id_count} iteration=${stream_iteration_count} request_id=${stream_request_id_count}"
 
 memory_stream_session_payload="$(create_session "memory-user-stream")"
 memory_stream_session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \

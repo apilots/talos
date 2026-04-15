@@ -5,8 +5,11 @@ use talos_error::TalosResult;
 use talos_types::talos::{
     TalosContext, TalosEventPayload, TalosEventType, TalosMessageCompletedEvent,
     TalosMessageErrorEvent, TalosMessageExecutionSummaryEvent, TalosMessageOutputDeltaEvent,
-    TalosMessageReasoningDeltaEvent, TalosMessageStartedEvent, TalosMessageToolCallCompletedEvent,
-    TalosMessageToolCallPendingApprovalEvent, TalosMessageToolCallStartedEvent,
+    TalosMessageReasoningDeltaEvent, TalosMessageStartedEvent, TalosMessageToolCallArgsDeltaEvent,
+    TalosMessageToolCallCompletedEvent, TalosMessageToolCallExecutingEvent,
+    TalosMessageToolCallPendingApprovalEvent, TalosMessageToolCallProgressDeltaEvent,
+    TalosMessageToolCallQueuedEvent, TalosMessageToolCallStartedEvent, TalosToolProgressKind,
+    TalosToolStreamKey,
 };
 use talos_types::TalosSession;
 
@@ -30,6 +33,7 @@ impl CoordinatorImpl {
             trace_id: session.context.trace_id.clone(),
             channel_id: session.context.channel_id.clone(),
             thread_id: session.context.thread_id.clone(),
+            project_root: session.context.project_root.clone(),
             environment: session.context.environment.clone(),
         };
         let route_channel = route_channel(&route_context);
@@ -106,6 +110,59 @@ pub(super) fn map_orchestrator_event(
                 timing_ms: payload.timing_ms,
             }),
         ),
+        OrchestratorEvent::MessageToolCallArgsDelta(payload) => (
+            TalosEventType::MessageToolCallArgsDelta,
+            TalosEventPayload::MessageToolCallArgsDelta(TalosMessageToolCallArgsDeltaEvent {
+                request_id: payload.request_id,
+                stream_key: map_tool_stream_key(payload.stream_key),
+                call_id: payload.call_id,
+                tool_name: payload.tool_name,
+                delta: payload.delta,
+                item_index: payload.item_index,
+                iteration: payload.iteration,
+                step_id: payload.step_id,
+            }),
+        ),
+        OrchestratorEvent::MessageToolCallQueued(payload) => (
+            TalosEventType::MessageToolCallQueued,
+            TalosEventPayload::MessageToolCallQueued(TalosMessageToolCallQueuedEvent {
+                request_id: payload.request_id,
+                stream_key: map_tool_stream_key(payload.stream_key),
+                call_id: payload.call_id,
+                tool_name: payload.tool_name,
+                item_index: payload.item_index,
+                iteration: payload.iteration,
+                step_id: payload.step_id,
+            }),
+        ),
+        OrchestratorEvent::MessageToolCallExecuting(payload) => (
+            TalosEventType::MessageToolCallExecuting,
+            TalosEventPayload::MessageToolCallExecuting(TalosMessageToolCallExecutingEvent {
+                request_id: payload.request_id,
+                stream_key: map_tool_stream_key(payload.stream_key),
+                call_id: payload.call_id,
+                tool_name: payload.tool_name,
+                item_index: payload.item_index,
+                iteration: payload.iteration,
+                step_id: payload.step_id,
+            }),
+        ),
+        OrchestratorEvent::MessageToolCallProgressDelta(payload) => (
+            TalosEventType::MessageToolCallProgressDelta,
+            TalosEventPayload::MessageToolCallProgressDelta(
+                TalosMessageToolCallProgressDeltaEvent {
+                    request_id: payload.request_id,
+                    stream_key: map_tool_stream_key(payload.stream_key),
+                    call_id: payload.call_id,
+                    tool_name: payload.tool_name,
+                    message: payload.message,
+                    progress_kind: map_tool_progress_kind(payload.progress_kind),
+                    item_index: payload.item_index,
+                    iteration: payload.iteration,
+                    step_id: payload.step_id,
+                },
+            ),
+        ),
         OrchestratorEvent::MessageToolCallCompleted(payload) => (
             TalosEventType::MessageToolCallCompleted,
             TalosEventPayload::MessageToolCallCompleted(TalosMessageToolCallCompletedEvent {
@@ -152,5 +209,22 @@ pub(super) fn map_orchestrator_event(
                 error: payload.error,
             }),
         ),
+    }
+}
+
+fn map_tool_stream_key(stream_key: talos_agent::OrchestratorToolStreamKey) -> TalosToolStreamKey {
+    TalosToolStreamKey {
+        round: stream_key.round,
+        index: stream_key.index,
+    }
+}
+
+fn map_tool_progress_kind(
+    kind: talos_agent::OrchestratorToolProgressKind,
+) -> TalosToolProgressKind {
+    match kind {
+        talos_agent::OrchestratorToolProgressKind::Status => TalosToolProgressKind::Status,
+        talos_agent::OrchestratorToolProgressKind::Stdout => TalosToolProgressKind::Stdout,
+        talos_agent::OrchestratorToolProgressKind::Stderr => TalosToolProgressKind::Stderr,
     }
 }

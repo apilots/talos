@@ -1,4 +1,5 @@
 use super::*;
+use crate::{ToolArgsDeltaStreamData, ToolExecutionOutput, ToolStreamKey};
 
 pub(crate) async fn emit_stream_event(
     stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
@@ -23,6 +24,7 @@ pub(crate) struct StreamRound {
     pub(crate) content: String,
     pub(crate) reasoning: String,
     pub(crate) tool_calls: Vec<FunctionCall>,
+    pub(crate) streamed_tool_outputs: Vec<ToolExecutionOutput>,
     pub(crate) finish_reason: Option<String>,
     pub(crate) saw_output_delta: bool,
     pub(crate) usage: TalosUsage,
@@ -65,14 +67,24 @@ pub(crate) async fn stream_round(
     request: ChatRequest,
     round: u32,
     stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
+    streaming_tool_execution: Option<StreamingToolExecutionConfig>,
 ) -> TalosResult<StreamRound> {
     let mut stream = llm_provider.stream_with_tools(request).await?;
     let mut content = String::new();
     let mut reasoning = String::new();
     let mut finish_reason = None;
     let mut pending_calls: BTreeMap<usize, PendingToolCall> = BTreeMap::new();
+    let mut streamed_tool_outputs = Vec::new();
     let mut saw_output_delta = false;
     let mut usage = TalosUsage::default();
+    let mut scheduler = streaming_tool_execution.map(|config| {
+        crate::tool_execution::StreamingToolScheduler::new(
+            config.execution_mode,
+            config.execution_context,
+            config.tool_registry,
+            stream_tx.cloned(),
+        )
+    });
 
     while let Some(event) = stream.next().await {
         match event? {
@@ -122,6 +134,17 @@ pub(crate) async fn stream_round(
             } => {
                 let entry = pending_calls.entry(index).or_default();
                 entry.arguments_buffer.push_str(&arguments_delta);
+                emit_stream_event(
+                    stream_tx,
+                    KernelStreamEventType::ToolArgsDelta,
+                    KernelStreamEventData::ToolArgsDelta(ToolArgsDeltaStreamData {
+                        stream_key: ToolStreamKey { round, index },
+                        call_id: entry.id.clone(),
+                        tool_name: entry.name.clone(),
+                        delta: arguments_delta,
+                    }),
+                )
+                .await;
             }
             ToolStreamEvent::ToolCallEnd {
                 index,
@@ -145,13 +168,28 @@ pub(crate) async fn stream_round(
                     KernelStreamEventType::ToolCallStart,
                     KernelStreamEventData::ToolCallStart(ToolCallStartStreamData {
                         index,
-                        call_id: Some(stable_call_id),
+                        call_id: Some(stable_call_id.clone()),
                         tool_name: entry.name.clone(),
-                        arguments: arguments_copy,
+                        arguments: arguments_copy.clone(),
                         round,
                     }),
                 )
                 .await;
+                if let Some(scheduler) = scheduler.as_mut() {
+                    scheduler
+                        .push_call(
+                            ToolStreamKey { round, index },
+                            ToolExecutionInput {
+                                call_id: stable_call_id,
+                                tool_name: entry
+                                    .name
+                                    .clone()
+                                    .unwrap_or_else(|| "unknown".to_string()),
+                                arguments: arguments_copy,
+                            },
+                        )
+                        .await?;
+                }
             }
             ToolStreamEvent::Done {
                 finish_reason: final_reason,
@@ -168,12 +206,28 @@ pub(crate) async fn stream_round(
                 break;
             }
         }
+
+        if let Some(scheduler) = scheduler.as_mut() {
+            for completed in scheduler.drain_completed().await? {
+                super::tool_batch::emit_tool_result_stream_event(stream_tx, &completed.output)
+                    .await;
+                streamed_tool_outputs.push(completed.output);
+            }
+        }
+    }
+
+    if let Some(scheduler) = scheduler.as_mut() {
+        for completed in scheduler.finish().await? {
+            super::tool_batch::emit_tool_result_stream_event(stream_tx, &completed.output).await;
+            streamed_tool_outputs.push(completed.output);
+        }
     }
 
     Ok(StreamRound {
         content,
         reasoning,
         tool_calls: finalize_tool_calls(round, pending_calls),
+        streamed_tool_outputs,
         finish_reason,
         saw_output_delta,
         usage,
@@ -190,6 +244,7 @@ async fn chat_round(
         content: response.content,
         reasoning: response.reasoning.join(""),
         tool_calls,
+        streamed_tool_outputs: Vec::new(),
         finish_reason: response.finish_reason,
         saw_output_delta: false,
         usage: TalosUsage {
@@ -206,12 +261,14 @@ pub async fn execute_general_turn_step(
 ) -> TalosResult<GeneralTurnStepResult> {
     let round = step.round;
     let stream_tx = step.stream_tx.clone();
+    let streaming_tool_execution = step.streaming_tool_execution.clone();
     let round_response = if stream_tx.is_some() {
         stream_round(
             llm_provider,
             step.into_chat_request(),
             round,
             stream_tx.as_ref(),
+            streaming_tool_execution,
         )
         .await?
     } else {
@@ -250,6 +307,7 @@ pub async fn execute_general_turn_step(
         text: round_response.content,
         reasoning,
         tool_calls: round_response.tool_calls,
+        streamed_tool_outputs: round_response.streamed_tool_outputs,
         output_items,
         usage: round_response.usage,
         saw_output_delta: round_response.saw_output_delta,

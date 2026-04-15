@@ -3,6 +3,7 @@ use crate::talos;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 /// Session record stored by the gateway.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +39,7 @@ impl SessionRecord {
                 trace_id: session.context.trace_id.clone(),
                 channel_id: session.context.channel_id.clone(),
                 thread_id: session.context.thread_id.clone(),
+                project_root: session.context.project_root.clone(),
                 environment: session.context.environment.clone(),
             },
             model: effective_model,
@@ -70,6 +72,8 @@ pub struct SessionContext {
     #[serde(default)]
     pub thread_id: Option<String>,
     #[serde(default)]
+    pub project_root: Option<PathBuf>,
+    #[serde(default)]
     pub environment: Option<talos::TalosSessionEnvironment>,
 }
 
@@ -85,6 +89,7 @@ impl SessionContext {
             trace_id: record.context.trace_id.clone(),
             channel_id: record.context.channel_id.clone(),
             thread_id: record.context.thread_id.clone(),
+            project_root: record.context.project_root.clone(),
             environment: record.context.environment.clone(),
         }
     }
@@ -234,12 +239,21 @@ pub struct SessionQuery {
 pub struct SessionPatch {
     #[serde(default)]
     pub conf: HashMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub project_root: Option<SessionProjectRootPatch>,
 }
 
 impl SessionPatch {
     pub fn agent_model(&self) -> crate::TalosResult<Option<String>> {
         SessionConfigOverridePolicy::extract_agent_model(&self.conf)
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SessionProjectRootPatch {
+    Set { path: PathBuf },
+    Clear,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

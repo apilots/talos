@@ -2,6 +2,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
 };
+use talos_types::talos::TalosToolProgressKind;
 
 use crate::render::helpers::push_block_header_gap;
 use crate::types::{ChatBlock, CopyProjection, RenderedChatLine, ToolCallStatus, ToolRenderData};
@@ -10,6 +11,54 @@ use crate::TuiApp;
 use crate::TOOL_PREVIEW_CHAR_LIMIT;
 
 impl TuiApp {
+    pub(crate) fn tool_progress_block_lines(
+        &self,
+        block: &ChatBlock,
+        content_width: usize,
+    ) -> Vec<RenderedChatLine> {
+        let tool_name = block.tool_name.as_deref().unwrap_or("unknown");
+        let (label, color) = match block.tool_progress_kind {
+            Some(TalosToolProgressKind::Status) => ("⏳ Progress", Color::Yellow),
+            Some(TalosToolProgressKind::Stdout) => ("↳ Stdout", Color::Cyan),
+            Some(TalosToolProgressKind::Stderr) => ("↳ Stderr", Color::LightRed),
+            None => ("⏳ Progress", Color::Gray),
+        };
+
+        let mut lines = vec![RenderedChatLine {
+            display: Line::from(Span::styled(
+                format!("{label} · {tool_name}"),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            )),
+            copy_projection: Some(CopyProjection {
+                text: format!("{label} · {tool_name}"),
+                display_start_col: 0,
+            }),
+        }];
+        push_block_header_gap(&mut lines);
+
+        for line in block.content.lines() {
+            let wrapped = wrap_line_visual(
+                Line::from(line.to_string()),
+                content_width.saturating_sub(2),
+            );
+            for wrapped_line in wrapped {
+                let mut spans = vec![Span::raw("  ")];
+                spans.extend(wrapped_line.spans.iter().map(|span| {
+                    Span::styled(span.content.to_string(), span.style.fg(Color::White))
+                }));
+                lines.push(RenderedChatLine {
+                    display: Line::from(spans),
+                    copy_projection: Some(CopyProjection {
+                        text: format!("  {}", line_plain_text(&wrapped_line)),
+                        display_start_col: 0,
+                    }),
+                });
+            }
+        }
+
+        lines
+    }
+
     pub(crate) fn tool_block_lines(
         &self,
         block: &ChatBlock,
@@ -25,7 +74,9 @@ impl TuiApp {
         };
 
         let (icon_str, icon_color) = match block.tool_status {
+            Some(ToolCallStatus::Queued) => ("◌", Color::Blue),
             Some(ToolCallStatus::Running) => ("⏳", Color::Yellow),
+            Some(ToolCallStatus::PendingApproval) => ("! ", Color::LightYellow),
             Some(ToolCallStatus::Completed { exit_ok: true }) => ("●", Color::Green),
             Some(ToolCallStatus::Completed { exit_ok: false }) => ("●", Color::Red),
             None => ("●", Color::Gray),
@@ -49,7 +100,9 @@ impl TuiApp {
 
         let render_data = Self::build_tool_render_data(block, tool_name);
         let (summary_text, summary_color) = match block.tool_status {
+            Some(ToolCallStatus::Queued) => (render_data.summary, Color::Blue),
             Some(ToolCallStatus::Running) => (render_data.summary, Color::Yellow),
+            Some(ToolCallStatus::PendingApproval) => (render_data.summary, Color::LightYellow),
             Some(ToolCallStatus::Completed { exit_ok: true }) => {
                 (render_data.summary, Color::Green)
             }
@@ -68,7 +121,8 @@ impl TuiApp {
 
         let detail_style = Style::default().fg(Color::Gray);
         let output_style = Style::default().fg(Color::White);
-        let detail_lines = render_data.detail_lines;
+        let mut detail_lines = render_data.detail_lines;
+        detail_lines.extend(block.tool_progress.iter().map(|line| format!("  {}", line)));
         let preview_lines = render_data.preview_lines;
         let output_lines = render_data.output_lines;
         let has_output = !output_lines.is_empty();
@@ -247,7 +301,9 @@ impl TuiApp {
         let hit_count = results.len();
         let timing = Self::timing_suffix(block.timing_ms);
         let summary = match block.tool_status {
+            Some(ToolCallStatus::Queued) => "└ Queued…".to_string(),
             Some(ToolCallStatus::Running) => "└ Running…".to_string(),
+            Some(ToolCallStatus::PendingApproval) => "└ Approval needed".to_string(),
             Some(ToolCallStatus::Completed { exit_ok: true }) => {
                 format!("└ Done ({} hits{})", hit_count, timing)
             }
@@ -305,12 +361,6 @@ impl TuiApp {
 
     fn build_exec_command_render_data(block: &ChatBlock) -> ToolRenderData {
         let input = block.tool_input.as_ref();
-        let cmd = input.and_then(|value| {
-            value
-                .get("cmd")
-                .or_else(|| value.get("command"))
-                .and_then(|value| value.as_str())
-        });
         let dir = input.and_then(|value| {
             value
                 .get("workdir")
@@ -334,7 +384,9 @@ impl TuiApp {
         let timing = Self::timing_suffix(block.timing_ms);
 
         let summary = match block.tool_status {
+            Some(ToolCallStatus::Queued) => "└ Queued…".to_string(),
             Some(ToolCallStatus::Running) => "└ Running…".to_string(),
+            Some(ToolCallStatus::PendingApproval) => "└ Approval needed".to_string(),
             Some(ToolCallStatus::Completed { exit_ok: true }) => {
                 if let Some(exit) = exit_code {
                     format!("└ Done (exit:{}{})", exit, timing)
@@ -353,9 +405,6 @@ impl TuiApp {
         };
 
         let mut detail_lines = vec![];
-        if let Some(cmd) = cmd {
-            detail_lines.push(format!("  cmd:  {}", cmd));
-        }
         if let Some(dir) = dir {
             detail_lines.push(format!("  dir:  {}", dir));
         }
@@ -389,7 +438,7 @@ impl TuiApp {
         let path = block
             .tool_input
             .as_ref()
-            .and_then(|input| input.get("path"))
+            .and_then(|input| input.get("file_path").or_else(|| input.get("path")))
             .and_then(|value| value.as_str())
             .unwrap_or_default()
             .to_string();
@@ -408,7 +457,9 @@ impl TuiApp {
         let line_count = primary_text.lines().count();
         let timing = Self::timing_suffix(block.timing_ms);
         let summary = match block.tool_status {
+            Some(ToolCallStatus::Queued) => "└ Queued…".to_string(),
             Some(ToolCallStatus::Running) => "└ Running…".to_string(),
+            Some(ToolCallStatus::PendingApproval) => "└ Approval needed".to_string(),
             Some(ToolCallStatus::Completed { exit_ok: true }) => {
                 format!("└ Done ({} lines{})", line_count, timing)
             }
@@ -456,7 +507,9 @@ impl TuiApp {
         let output_lines = Self::tool_output_lines(&block.content);
         let timing = Self::timing_suffix(block.timing_ms);
         let summary = match block.tool_status {
+            Some(ToolCallStatus::Queued) => "└ Queued…".to_string(),
             Some(ToolCallStatus::Running) => "└ Running…".to_string(),
+            Some(ToolCallStatus::PendingApproval) => "└ Approval needed".to_string(),
             Some(ToolCallStatus::Completed { exit_ok: true }) => format!("└ Done{}", timing),
             Some(ToolCallStatus::Completed { exit_ok: false }) => format!("└ Error{}", timing),
             None => "└ Unknown".to_string(),
@@ -506,6 +559,14 @@ impl TuiApp {
             .unwrap_or_default()
     }
 
+    fn join_tool_summary_parts(parts: Vec<String>) -> String {
+        parts
+            .into_iter()
+            .filter(|part| !part.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
     pub(crate) fn tool_arg_summary(tool_name: &str, input: &serde_json::Value) -> String {
         let summary = match tool_name {
             "exec_command" => input
@@ -514,8 +575,38 @@ impl TuiApp {
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
                 .unwrap_or_default(),
-            "read_file" | "write_file" => input
+            "read_file" => input
+                .get("file_path")
+                .or_else(|| input.get("path"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_default(),
+            "write_file" => input
                 .get("path")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_default(),
+            "list_dir" => input
+                .get("dir_path")
+                .or_else(|| input.get("path"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_default(),
+            "grep_files" => {
+                let mut parts = vec![];
+                if let Some(pattern) = input.get("pattern").and_then(|v| v.as_str()) {
+                    parts.push(format!("{:?}", pattern));
+                }
+                if let Some(path) = input.get("path").and_then(|v| v.as_str()) {
+                    parts.push(format!("path={}", path));
+                }
+                if let Some(include) = input.get("include").and_then(|v| v.as_str()) {
+                    parts.push(format!("include={}", include));
+                }
+                Self::join_tool_summary_parts(parts)
+            }
+            "memory_search" => input
+                .get("query")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
                 .unwrap_or_default(),
@@ -531,8 +622,16 @@ impl TuiApp {
                 .unwrap_or_default(),
             _ => input
                 .as_object()
-                .and_then(|m| m.values().find_map(|v| v.as_str()))
-                .map(|s| s.to_string())
+                .and_then(|m| {
+                    let parts = m
+                        .iter()
+                        .filter_map(|(key, value)| {
+                            value.as_str().map(|value| format!("{}={}", key, value))
+                        })
+                        .take(2)
+                        .collect::<Vec<_>>();
+                    (!parts.is_empty()).then(|| Self::join_tool_summary_parts(parts))
+                })
                 .unwrap_or_default(),
         };
         if summary.len() > 70 {

@@ -1,7 +1,9 @@
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use talos_client::SessionCreateParams;
 use talos_error::{TalosError, TalosResult};
+use talos_types::talos::TalosConnectionMode;
 use tokio::sync::mpsc;
 use tracing::error;
 
@@ -66,7 +68,7 @@ impl TuiApp {
             "help" => {
                 self.push_block(
                     ChatRole::System,
-                    "Commands: /help /model /models /history /sessions /status /quit\nKeys: ↑/↓/PgUp/PgDn scroll, Ctrl+O expand tool, Ctrl+B toggle panel, Ctrl+Y copy, Ctrl+U clear input"
+                    "Commands: /help /model /models /project /history /sessions /status /quit\nKeys: ↑/↓/PgUp/PgDn scroll, Ctrl+O expand tool, Ctrl+B toggle panel, Ctrl+Y copy, Ctrl+U clear input"
                         .to_string(),
                 );
                 Ok(false)
@@ -126,6 +128,10 @@ impl TuiApp {
                 self.status_command()?;
                 Ok(false)
             }
+            "project" => {
+                self.project_command(args.trim())?;
+                Ok(false)
+            }
             "quit" => {
                 if self.close_in_progress {
                     if self.is_close_timed_out() {
@@ -156,6 +162,49 @@ impl TuiApp {
                 Ok(false)
             }
         }
+    }
+
+    fn render_project_root_status(&self) -> String {
+        let project_root = self
+            .current_project_root
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "(unset)".to_string());
+        match self.connection_mode {
+            TalosConnectionMode::Embedded => format!(
+                "Embedded project root: {}\nTalos workspace remains server-managed.\nRestart TUI from another directory to change the default project root.",
+                project_root
+            ),
+            TalosConnectionMode::Remote => format!(
+                "Server project root: {}\nUse /project <server-path> to switch, or /project clear to reset to the server default root.",
+                project_root
+            ),
+        }
+    }
+
+    pub(crate) fn project_command(&mut self, args: &str) -> TalosResult<()> {
+        let requested = args.trim();
+        if requested.is_empty() {
+            self.push_block(ChatRole::System, self.render_project_root_status());
+            return Ok(());
+        }
+
+        if matches!(self.connection_mode, TalosConnectionMode::Embedded) {
+            self.push_block(
+                ChatRole::System,
+                format!(
+                    "{}\nEmbedded mode does not switch roots at runtime.",
+                    self.render_project_root_status()
+                ),
+            );
+            return Ok(());
+        }
+
+        if requested == "clear" {
+            return self.clear_remote_project_root_command();
+        }
+
+        self.switch_remote_project_root_command(PathBuf::from(requested))
     }
 
     pub(crate) fn navigate_message_history(&mut self, direction: i32) {
@@ -390,6 +439,69 @@ impl TuiApp {
                     .await
             };
             RemoteCommandUpdate::ModelSwitched { requested, result }
+        })
+    }
+
+    pub(crate) fn switch_remote_project_root_command(
+        &mut self,
+        requested: PathBuf,
+    ) -> TalosResult<()> {
+        let Some(client) = self.gateway_client.clone() else {
+            return Err(TalosError::ClientError(
+                "missing gateway client in remote mode".to_string(),
+            ));
+        };
+        let session_id = self.session_id.clone();
+        let context = self
+            .build_session_context()
+            .with_project_root(requested.clone());
+        let requested_label = requested.display().to_string();
+        self.spawn_remote_command_task(
+            format!("project root update started: {}", requested_label),
+            async move {
+                let result = if let Some(session_id) = session_id {
+                    client
+                        .update_session_project_root(&session_id, requested.as_path())
+                        .await
+                } else {
+                    client
+                        .create_session(&SessionCreateParams {
+                            context: Some(context),
+                            model: None,
+                        })
+                        .await
+                };
+                RemoteCommandUpdate::ProjectRootSwitched {
+                    requested: requested_label,
+                    result,
+                }
+            },
+        )
+    }
+
+    pub(crate) fn clear_remote_project_root_command(&mut self) -> TalosResult<()> {
+        let Some(client) = self.gateway_client.clone() else {
+            return Err(TalosError::ClientError(
+                "missing gateway client in remote mode".to_string(),
+            ));
+        };
+        let session_id = self.session_id.clone();
+        let context = self.build_session_context();
+        self.spawn_remote_command_task("project root reset started", async move {
+            let result = if let Some(session_id) = session_id {
+                client.clear_session_project_root(&session_id).await
+            } else {
+                client
+                    .create_session(&SessionCreateParams {
+                        context: Some(context),
+                        model: None,
+                    })
+                    .await
+            };
+            RemoteCommandUpdate::ProjectRootSwitched {
+                requested: "clear".to_string(),
+                result,
+            }
         })
     }
 
