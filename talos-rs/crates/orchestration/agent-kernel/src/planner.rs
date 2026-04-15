@@ -11,59 +11,22 @@ const PLAN_REACT_REASONING_TAG: &str = "/*REASONING*/";
 const PLAN_REACT_ACTION_TAG: &str = "/*ACTION*/";
 const PLAN_REACT_FINAL_ANSWER_TAG: &str = "/*FINAL_ANSWER*/";
 
-const TOOL_USAGE_GUIDANCE: &str = "Tool usage guidance:\n- Prefer one tool call at a time unless the \
-calls are clearly independent.\n- Tool choice stays model-driven: pick the tool that best matches \
-the task rather than following a rigid checklist.\n- When the user provides a local absolute path, \
-verify it with file tools before making environment claims about that path.\n- For a user-provided \
-absolute directory path, list_dir is usually the best first look. For a user-provided absolute file \
-path, read_file is usually the best first look.\n- Do not claim a path is outside the sandbox, \
-outside the workspace, on the host filesystem, unmounted, or inaccessible until a file tool has \
-actually failed on that path.\n- For codebase or repository investigation, prefer dedicated file \
-tools over shell probes: use list_dir to map structure, grep_files to locate symbols or entrypoints, \
-and read_file to inspect the specific files you narrowed down.\n- Avoid jumping into repeated \
-read_file calls when grep_files can narrow the search first, and avoid repeating an equivalent \
-read-only tool call unless you are verifying changed state or narrowing scope with materially \
-different parameters.\n- Do not use exec_command as a substitute for file inspection or search when \
-list_dir, read_file, or grep_files can answer the question directly. Reserve exec_command for cases \
-where shell execution itself is the task.\n- Separate verified facts from inference. If the \
-investigation is still shallow, present the result as a preliminary assessment rather than a full \
-architecture conclusion.\n- When multiple tool calls are needed and their inputs do not depend on \
-each other, call them in parallel in a single response. When a later call depends on the output of \
-an earlier one, call them sequentially.\n- Before taking actions that are hard to reverse, confirm \
-with the user: deleting files or directories, force-pushing or hard-resetting git history, or \
-running commands that affect external services or shared state. Never use --no-verify, --force, or \
-similar bypass flags unless the user explicitly requests it.";
-
-const USER_FACING_PROGRESS_GUIDANCE: &str = "User-facing progress rules:\n- All normal text you \
-output is shown to the user.\n- Before your first tool call, briefly state what you are about to \
-do in one short sentence.\n- While working, give short progress updates when you find something \
-load-bearing, when you change direction, or when enough time has passed without a visible update.\n- \
-Keep these updates concise, concrete, and written for a human reader rather than as log lines.\n- \
-After the tool-assisted exploration is complete, end with a clear final answer or summary.";
-
 fn plan_react_instruction() -> String {
-    format!(
-        "When answering, prefer available tools over memorized knowledge.\n\nFollow this process:\n\
-1. Start with a natural-language plan.\n2. Use tools to execute the plan and interleave tool use \
-with reasoning updates.\n3. End with one final answer.\n\n{}\n\n{}\n\nUse this format:\n- planning under \
-/*PLANNING*/\n- replanning under /*REPLANNING*/ when needed\n- reasoning under /*REASONING*/\n- \
-tool actions under /*ACTION*/\n- final answer under /*FINAL_ANSWER*/.\n\nThe plan should be \
-coherent, tool-grounded, and decomposed into numbered steps. If execution fails, revise the plan \
-under /*REPLANNING*/. The final answer must be precise and explicitly state when the task cannot \
-be completed with the available context.",
-        TOOL_USAGE_GUIDANCE,
-        USER_FACING_PROGRESS_GUIDANCE
-    )
+    "Use tools when needed and keep the response grounded in observed results.\n\nFollow this \
+process:\n1. Start with a concise natural-language plan.\n2. Interleave tool use with short \
+reasoning updates.\n3. Revise the plan only when evidence changes.\n4. End with one final answer.\n\n\
+Use this format:\n- planning under /*PLANNING*/\n- replanning under /*REPLANNING*/ when needed\n- \
+reasoning under /*REASONING*/\n- tool actions under /*ACTION*/\n- final answer under \
+/*FINAL_ANSWER*/.\n\nThe final answer must be precise and explicitly state when the task cannot be \
+completed with the available context."
+        .to_string()
 }
 
 fn built_in_tool_guidance() -> String {
-    format!(
-        "Use available tools whenever they can verify facts, inspect the workspace, execute \
-commands, or fetch concrete results. Do not answer from memory when a tool can check the answer.\n\n\
-{}\n\n{}\n\nUse a direct answer only when no tool is needed.",
-        TOOL_USAGE_GUIDANCE,
-        USER_FACING_PROGRESS_GUIDANCE
-    )
+    "Use available tools whenever they can verify facts, inspect the workspace, execute commands, \
+or fetch concrete results. Do not answer from memory when a tool can check the answer. Use a direct \
+answer only when no tool is needed."
+        .to_string()
 }
 
 pub struct BuiltInPlanner;
@@ -306,14 +269,8 @@ mod tests {
             .planning_instruction
             .expect("instruction should exist");
         assert!(instruction.contains("Use available tools"));
-        assert!(instruction.contains("Prefer one tool call at a time"));
-        assert!(instruction.contains("Tool choice stays model-driven"));
-        assert!(instruction.contains("prefer dedicated file tools over shell probes"));
-        assert!(instruction.contains("Separate verified facts from inference"));
-        assert!(instruction.contains("Avoid jumping into repeated"));
-        assert!(instruction.contains("Reserve exec_command for cases"));
-        assert!(instruction.contains("Before your first tool call"));
-        assert!(instruction.contains("give short progress updates"));
+        assert!(instruction.contains("Do not answer from memory"));
+        assert!(instruction.contains("Use a direct answer only when no tool is needed"));
     }
 
     #[test]
@@ -327,14 +284,9 @@ mod tests {
             .expect("instruction should exist");
         assert!(instruction.contains("/*PLANNING*/"));
         assert!(instruction.contains("/*FINAL_ANSWER*/"));
-        assert!(instruction.contains("Prefer one tool call at a time"));
-        assert!(instruction.contains("Tool choice stays model-driven"));
-        assert!(instruction.contains("prefer dedicated file tools over shell probes"));
-        assert!(instruction.contains("preliminary assessment"));
-        assert!(instruction.contains("Avoid jumping into repeated"));
-        assert!(instruction.contains("Reserve exec_command for cases"));
-        assert!(instruction.contains("Before your first tool call"));
-        assert!(instruction.contains("give short progress updates"));
+        assert!(instruction.contains("Interleave tool use with short reasoning updates"));
+        assert!(instruction.contains("Revise the plan only when evidence changes"));
+        assert!(instruction.contains("completed with the available context"));
 
         let empty_response = crate::LlmResponseEnvelope {
             output_text: "   ".to_string(),

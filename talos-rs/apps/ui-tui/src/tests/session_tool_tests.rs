@@ -970,9 +970,9 @@ fn test_grep_files_folded_shows_match_preview() {
         .map(|line| line_plain_text(&line.display))
         .collect::<Vec<_>>();
 
-    assert!(texts
-        .iter()
-        .any(|line| line == "● grep_files(\"AgentKernel\", path=crates/orchestration, include=*.rs)"));
+    assert!(texts.iter().any(
+        |line| line == "● grep_files(\"AgentKernel\", path=crates/orchestration, include=*.rs)"
+    ));
     assert!(texts.iter().any(|line| line == "  Done (2 matches)"));
     assert!(texts
         .iter()

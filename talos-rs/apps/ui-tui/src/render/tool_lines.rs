@@ -80,8 +80,10 @@ impl TuiApp {
             .collect::<Vec<_>>();
         let collapsed_lines =
             Self::build_collapsed_tool_lines(block, tool_name, &detail_lines, &preview_lines);
-        let has_extra_details =
-            !detail_lines.is_empty() || !preview_lines.is_empty() || !progress_lines.is_empty() || has_output;
+        let has_extra_details = !detail_lines.is_empty()
+            || !preview_lines.is_empty()
+            || !progress_lines.is_empty()
+            || has_output;
 
         if !block.expanded {
             for detail_line in collapsed_lines.iter() {
@@ -497,7 +499,12 @@ impl TuiApp {
             .as_ref()
             .and_then(|value| value.get("matches_found"))
             .and_then(|value| value.as_u64())
-            .unwrap_or_else(|| content.lines().filter(|line| !line.trim().is_empty()).count() as u64);
+            .unwrap_or_else(|| {
+                content
+                    .lines()
+                    .filter(|line| !line.trim().is_empty())
+                    .count() as u64
+            });
         let timing = Self::timing_suffix(block.timing_ms);
         let summary = match block.tool_status {
             Some(ToolCallStatus::Queued) => "Queued…".to_string(),
@@ -565,7 +572,10 @@ impl TuiApp {
         let mut lines = Vec::new();
 
         if tool_name == "exec_command" {
-            if let Some(dir_line) = detail_lines.iter().find(|line| line.trim_start().starts_with("dir:")) {
+            if let Some(dir_line) = detail_lines
+                .iter()
+                .find(|line| line.trim_start().starts_with("dir:"))
+            {
                 lines.push(dir_line.clone());
             }
         }
@@ -584,7 +594,9 @@ impl TuiApp {
     fn is_live_tool_status(status: Option<&ToolCallStatus>) -> bool {
         matches!(
             status,
-            Some(ToolCallStatus::Queued | ToolCallStatus::Running | ToolCallStatus::PendingApproval)
+            Some(
+                ToolCallStatus::Queued | ToolCallStatus::Running | ToolCallStatus::PendingApproval
+            )
         )
     }
 

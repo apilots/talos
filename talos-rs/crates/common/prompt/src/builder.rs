@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use talos_error::TalosResult;
 use talos_llm_provider::ChatMessage;
 use talos_memory::{MemoryStore, RetrievedMemoryItem};
@@ -22,6 +23,7 @@ pub struct PromptBuilder<'a> {
     pub(crate) session_id: Option<&'a str>,
     pub(crate) retrieved_memories: Vec<RetrievedMemoryItem>,
     pub(crate) session_environment: Option<TalosSessionEnvironment>,
+    pub(crate) project_root: Option<PathBuf>,
     pub(crate) config: PromptBuildConfig,
 }
 
@@ -46,6 +48,7 @@ impl<'a> PromptBuilder<'a> {
             session_id: None,
             retrieved_memories: Vec::new(),
             session_environment: None,
+            project_root: None,
             config: PromptBuildConfig::default(),
         }
     }
@@ -107,6 +110,11 @@ impl<'a> PromptBuilder<'a> {
         self
     }
 
+    pub fn project_root(mut self, project_root: Option<PathBuf>) -> Self {
+        self.project_root = project_root;
+        self
+    }
+
     pub fn budget(mut self, max_static_tokens: usize, max_dynamic_tokens: usize) -> Self {
         self.config.budget.max_static_tokens = max_static_tokens.max(1);
         self.config.budget.max_dynamic_tokens = max_dynamic_tokens.max(1);
@@ -153,6 +161,28 @@ impl<'a> PromptBuilder<'a> {
             .join("\n")
     }
 
+    async fn read_bootstrap_file(
+        path: &Path,
+        kind: WorkspaceBootstrapFileKind,
+    ) -> TalosResult<WorkspaceBootstrapFile> {
+        let content = match fs::read_to_string(path).await {
+            Ok(content) => Some(content),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+            Err(err) => {
+                return Err(talos_error::TalosError::StorageError(format!(
+                    "read bootstrap file {}: {}",
+                    path.display(),
+                    err
+                )));
+            }
+        };
+        Ok(WorkspaceBootstrapFile {
+            kind,
+            path: path.to_path_buf(),
+            content,
+        })
+    }
+
     pub(crate) async fn load_workspace_bootstrap_files(
         &self,
     ) -> TalosResult<Vec<WorkspaceBootstrapFile>> {
@@ -169,30 +199,36 @@ impl<'a> PromptBuilder<'a> {
         })?;
 
         let mut files = Vec::new();
-        for kind in WorkspaceBootstrapFileKind::all() {
+        for kind in WorkspaceBootstrapFileKind::workspace_files() {
             if !kind.should_load_in_mode(self.mode, &self.config.prompt) {
                 continue;
             }
             let path = workspace_dir.join(kind.file_name());
-            if self.config.prompt.bootstrap.auto_create_missing_files {
+            if self.config.prompt.bootstrap.auto_create_missing_files && kind.should_auto_create() {
                 bootstrap::ensure_bootstrap_file(&path, kind.default_template()).await?;
             }
-            let content = match fs::read_to_string(&path).await {
-                Ok(content) => Some(content),
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
-                Err(err) => {
-                    return Err(talos_error::TalosError::StorageError(format!(
-                        "read bootstrap file {}: {}",
-                        path.display(),
-                        err
-                    )));
-                }
-            };
-            files.push(WorkspaceBootstrapFile {
-                kind: *kind,
-                path,
-                content,
-            });
+            files.push(Self::read_bootstrap_file(&path, *kind).await?);
+        }
+        Ok(files)
+    }
+
+    pub(crate) async fn load_project_bootstrap_files(
+        &self,
+    ) -> TalosResult<Vec<WorkspaceBootstrapFile>> {
+        if !self.config.prompt.bootstrap.enabled {
+            return Ok(Vec::new());
+        }
+        let Some(project_root) = self.project_root.as_ref() else {
+            return Ok(Vec::new());
+        };
+
+        let mut files = Vec::new();
+        for kind in WorkspaceBootstrapFileKind::project_files() {
+            if !kind.should_load_in_mode(self.mode, &self.config.prompt) {
+                continue;
+            }
+            let path = project_root.join(kind.file_name());
+            files.push(Self::read_bootstrap_file(&path, *kind).await?);
         }
         Ok(files)
     }

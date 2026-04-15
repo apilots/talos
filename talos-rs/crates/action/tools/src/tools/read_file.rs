@@ -14,7 +14,7 @@ impl Tool for ReadFileTool {
     }
 
     fn description(&self) -> &str {
-        "Read a specific local file from a user-provided absolute path and return numbered lines. Prefer this after list_dir or grep_files has narrowed the target file, or when the user already named an exact file to inspect. Use it before editing to verify the current contents."
+        "Read a specific local file and return numbered lines. Prefer this after grep_files or list_dir has narrowed the target file, or when the user already named an exact file to inspect. Use read_file to inspect real code, configuration, or generated artifacts before making claims or edits. Use list_dir first when the path may be a directory. Do not replace search with repeated broad read_file calls when grep_files can narrow the target first. Do not read the same file again with identical arguments unless you need a different offset or limit to verify a specific detail."
     }
 
     fn parameters_schema(&self) -> Option<Value> {

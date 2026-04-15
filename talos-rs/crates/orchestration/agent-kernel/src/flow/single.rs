@@ -1,8 +1,9 @@
 use super::*;
 use crate::{
     general_turn::{
-        run_forced_finalization_step, should_force_finalization_for_step,
-        stop_reason_for_forced_finalization, ForcedFinalizationCause, ToolLoopGuardState,
+        run_forced_finalization_step, should_force_finalization_for_empty_response,
+        should_force_finalization_for_step, stop_reason_for_forced_finalization,
+        ForcedFinalizationCause, ToolLoopGuardState,
     },
     StreamingToolExecutionConfig, ToolExecutionContext,
 };
@@ -458,6 +459,25 @@ impl BaseLlmFlow for SingleFlow {
             }
             self.observe_tool_callbacks(ctx, &step.output_items).await?;
             apply_general_turn_step(&mut state, &step);
+
+            if should_force_finalization_for_empty_response(
+                state.tool_call_count.saturating_sub(step.tool_calls.len()),
+                &step,
+            ) {
+                let forced_step = run_forced_finalization_step(
+                    step_messages.clone(),
+                    prepared.selected_model.clone(),
+                    self.llm_provider.clone(),
+                    step_native_thinking.clone(),
+                    ForcedFinalizationCause::EmptyFinalResponseAfterTools,
+                )
+                .await?;
+                apply_general_turn_step(&mut state, &forced_step);
+                final_text = forced_step.text.clone();
+                break stop_reason_for_forced_finalization(
+                    ForcedFinalizationCause::EmptyFinalResponseAfterTools,
+                );
+            }
 
             if matches!(step.disposition, GeneralTurnStepDisposition::FinalResponse) {
                 // PlanReAct mode: when require_final_answer_tag is enabled, only accept a

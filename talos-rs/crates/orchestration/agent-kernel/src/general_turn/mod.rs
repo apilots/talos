@@ -67,11 +67,12 @@ mod types;
 pub(crate) use finalize::to_api_stop_reason;
 pub use finalize::{emit_general_turn_finalization_stream, finalize_general_turn_artifacts};
 pub(crate) use guard::{
-    is_read_only_tool_round, run_forced_finalization_step, should_force_finalization_for_step,
+    is_read_only_tool_round, run_forced_finalization_step,
+    should_force_finalization_for_empty_response, should_force_finalization_for_step,
     stop_reason_for_forced_finalization,
 };
 pub(crate) use memory_summary::compact_workspace_context_if_needed;
-pub use memory_summary::flush_session_memory;
+pub use memory_summary::{flush_session_memory, MemoryFlushPolicy};
 pub use prepare::{
     execute_general_turn_loop, persist_general_turn_artifacts, prepare_general_turn,
     run_general_turn,

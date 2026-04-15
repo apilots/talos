@@ -780,6 +780,7 @@ pub trait AgentRegistry: Send + Sync {
 pub struct AgentRunTurnRequest {
     pub session_id: String,
     pub invocation_id: String,
+    pub project_root: Option<PathBuf>,
     pub input: Vec<TalosInputItem>,
     pub profile: LlmAgentProfile,
 }
@@ -794,6 +795,7 @@ pub struct AgentRunTurnResult {
 说明：
 
 - `AgentRunTurnRequest` / `AgentRunTurnResult` 是 `AgentRuntime::run_turn()` 的最小闭包，不再留空到实现阶段。
+- `project_root` 必须进入 `AgentRunTurnRequest`，因为现有 `InvocationContext` 已显式承载该字段；`Fresh` child context 不能在 runner 层丢失 workspace/project 绑定。
 - `input` 直接复用现有 `TalosInputItem`，而不是重新造一套 agent 输入 block。
 - `output_items` 直接复用现有 `TalosOutputItem`，让 `general_turn`、memory、tool result 投影都能共用已有输出模型。
 
@@ -834,8 +836,17 @@ model emits tool_call transfer_to_agent(target=x)
   -> TransferToolHandler validates target
   -> outcome writes EventActions.transfer_to = x
   -> current general_turn ends
-  -> runner activates target agent for subsequent continuation
+  -> AgentImpl.run() observes result.transfer_to
+  -> coordinator-level registry resolves target runtime
+  -> current turn records target as next active agent
+  -> subsequent continuation tail-calls or resumes target agent
 ```
+
+实现落点：
+
+- 当前 `transfer_to` 已能写入 `EventActions.transfer_to`，但结果侧路由还未闭合；Phase 1 必须在 `orchestration/agent/src/agent.rs` 的 `AgentImpl::run()` 中消费 `result.transfer_to`。
+- `Transfer` 的语义是“把控制权交给另一个已注册 agent”，因此路由点应位于 coordinator / orchestrator 层，而不是下沉到单个 `LlmKernelAgent` 内部。
+- 在 Phase 1c 完成前，`Transfer` 仍属于“请求侧可表达、结果侧未真正生效”的死链路。
 
 ### 10.3 继续执行规则
 
@@ -1040,6 +1051,20 @@ pub struct DelegationConfig {
 }
 ```
 
+最小配置变更：
+
+```rust
+pub struct AgentKernelConfig {
+    // existing fields...
+    pub agent_graph: Option<AgentGraphConfig>,
+}
+```
+
+说明：
+
+- `agent_graph: Option<AgentGraphConfig>` 是 Phase 1 的最小配置入口。
+- `build_kernel_agent_for_request()` 先检查 `agent_graph`，命中则走 graph-based 构建；旧 `execution_mode` 分支仅作为兼容路径暂时保留。
+
 ### 14.2 当前配置兼容策略
 
 `binding.default_agent_kind` 当前仅是占位，后续应迁移到 graph-based 配置。
@@ -1171,6 +1196,19 @@ User Input
 | `gateway/http` | A2A 入站端点、dynamic/session collaboration 提交接口 | 协议适配 |
 | `common/prompt` | delegation prompt sections | 不感知 transport |
 
+### 16.1 最小实现插入点
+
+- `orchestration/agent/src/agent/kernel.rs`
+  在 `build_kernel_agent_for_request()` 增加 `agent_graph` 分支；第一版允许先只构建 graph root 对应的单节点 runtime，再逐步接入 workflow node。
+- `orchestration/agent/src/agent.rs`
+  在 `AgentImpl::run()` 中补 `result.transfer_to` 的结果侧路由；该处应依赖 coordinator 持有的 registry/active-agent 状态做 tail-call 或下一轮恢复决策。
+- `orchestration/agent-kernel/src/runner.rs`
+  在 `DefaultRunner::run_turn()` 用 `AgentExecutionContextFactory::build_child_context()` 替换直接手工铺开的 `InvocationContext` 构造，至少先覆盖 `Fresh` 路径。
+- `orchestration/agent/src`
+  `AgentRunMetadataStore` 以依赖注入方式挂到 `AgentImpl`，初始实现可采用 in-memory `DashMap`；后续如需持久化再替换后端。
+- `common/types::SessionService`
+  现有 `submit_dynamic_tool_result(...)` 作为 `DynamicToolResultSubmitter` 的首个宿主实现，不额外引入第二套 resume 提交接口。
+
 ---
 
 ## 17. 核心接口清单
@@ -1188,7 +1226,7 @@ User Input
 | `AgentToolHandler` | 执行 agent-as-tool | `handle` |
 | `RemoteA2aAgentAdapter` | 远程 agent adapter | `run_turn` |
 | `TalosA2aExecutor` | Talos 对外 A2A 服务 | `execute` |
-| `CollaborationRuntime` | child session 生命周期 | `spawn/send/wait/close` |
+| `CollaborationRuntime` | legacy child session 任务句柄 | `spawn` / `send` / `close`；`wait` 进入删除路径 |
 
 ---
 
@@ -1302,6 +1340,11 @@ async fn propagate_child_completion(
 }
 ```
 
+说明：
+
+- `DynamicToolResultSubmitter` 的首个实现应直接包装现有 `AgentImpl::submit_dynamic_tool_result(...)`，不在 spec 中假设新的 session 恢复 API。
+- `SpawnSession` 语义下父 agent 不再同步等待 child；child 终态通过 `DynamicToolResultSubmitter` 主动回传，因此 `CollaborationRuntime::wait()` 的 watch-based 逻辑进入删除路径，而不是继续扩展。
+
 ---
 
 ## 19. 分阶段落地顺序
@@ -1322,6 +1365,19 @@ async fn propagate_child_completion(
 - 不新增第二条执行主路径
 - `execution_mode` 与 `workflow node` 的 source of truth 已明确并落到配置校验
 
+建议拆成 3 个代码级子步骤：
+
+- `1a. AgentKernelConfig + 配置校验`
+  在 `AgentKernelConfig` 增加 `agent_graph: Option<AgentGraphConfig>`，并用 `MultiAgentConfigMode` 在配置反序列化后、`KernelBuilder` 前执行冲突校验。
+- `1b. build_kernel_agent_for_request() graph 分支`
+  在 `orchestration/agent/src/agent/kernel.rs` 先加 graph 分支；第一版只要求能从 graph root 构建单节点 runtime，旧 `execution_mode` 分支暂作为 deprecated path 保留。
+- `1c. AgentImpl.run() transfer 路由闭环`
+  在 `orchestration/agent/src/agent.rs` 中消费 `result.transfer_to` 并路由到 target agent。
+
+补充：
+
+- `1c` 是当前最高优先级，因为现状下 `transfer_to` 已能进入 kernel request / event，但结果侧被丢弃，属于死代码链路。
+
 ### 阶段 2: LlmAgent Runtime Refine
 
 目标：
@@ -1341,11 +1397,11 @@ async fn propagate_child_completion(
 建议拆成 4 个可独立验收的子步骤：
 
 - `2a. LlmAgentProfile`
-  从 config / agent graph 构造 `LlmAgentProfile`，补 profile 解析单测。
+  从 config / agent graph 构造 `LlmAgentProfile`；`LlmKernelAgent` 构造函数改为显式接收 profile（或只从 profile 派生执行配置），不再直接透传整份全局 `AgentKernelConfig` 作为 agent 身份配置来源。
 - `2b. Fresh ContextFactory`
-  先只实现 `Fresh` 路径；`AgentToolPolicy` 生效，tool 过滤和 inheritance 单测通过。
+  先只实现 `Fresh` 路径；在 `orchestration/agent-kernel/src/runner.rs` 的 `DefaultRunner::run_turn()` 用 `AgentExecutionContextFactory` 生成 child context，`AgentToolPolicy` 生效，tool 过滤和 inheritance 单测通过。
 - `2c. MetadataStore`
-  实现 `write / update_completion / read / list_by_session`，补 child run 终态与查询单测。
+  在 `orchestration/agent/src` 通过依赖注入挂入 `AgentRunMetadataStore`；初始实现采用 in-memory `DashMap`，补 `write / update_completion / read / list_by_session` 与 child run 终态查询单测。
 - `2d. ForkLike`
   最后实现 `ForkLike` 路径，补 prompt prefix、replacement state、workspace 继承边界单测。
 
@@ -1377,6 +1433,18 @@ async fn propagate_child_completion(
 - `wait_agent` 不再只是进程内等待
 - child session 结果可驱动 parent turn 恢复
 
+建议拆成 2 个子步骤：
+
+- `4a. DynamicToolResultSubmitter 接线`
+  以 `AgentImpl` 为 `DynamicToolResultSubmitter` 的首个实现，直接包装现有 `submit_dynamic_tool_result(...)`；`SpawnSession` child completion 通过该接口回传到父 session。
+- `4b. 删除 watch-based wait`
+  `CollaborationRuntime.wait()` 不再作为长期语义保留；在 `SpawnSession` transcript-driven completion 路径稳定后删除现有 watch 轮询逻辑。
+
+执行顺序说明：
+
+- 代码级落地顺序建议为 `1a -> 1b -> 1c -> 2a -> 2b -> 2c -> 4a -> 2d -> 4b -> 5`。
+- 这样可以先打通 `Transfer` 和 `Fresh` child runtime 的最小闭环，再补 `ForkLike` 与旧 `wait()` 的删除收尾。
+
 ### 阶段 5: Remote A2A
 
 目标：
@@ -1402,6 +1470,8 @@ async fn propagate_child_completion(
 - `AgentGraph`：唯一命名、父子关系、查找、目标推导
 - 配置校验：`LegacyExecutionMode` / `AgentGraph` 冲突检测
 - `AgentTransferRequestProcessor`：prompt/tool 注入正确
+- `AgentImpl.run()`：`transfer_to` 命中后能更新 active agent 或路由到目标 runtime
+- `build_kernel_agent_for_request()`：配置 `agent_graph` 时优先走 graph 分支，兼容模式下仍可解释 legacy `execution_mode`
 - `TransferToolHandler`：合法目标、非法目标、peer/parent 限制
 - `AgentToolHandler`：输入输出 schema、深度限制、上下文继承
 - `RemoteA2aAgentAdapter`：请求映射、错误映射、超时映射
@@ -1438,6 +1508,7 @@ async fn propagate_child_completion(
 6. 当前测试和 e2e 大多围绕单 agent 与工具调用，workflow node 引入后需要补足恢复态与多 turn 场景覆盖，否则很容易只在 happy path 上成立。
 7. `InvocationContext.transfer_to` 当前同时承载“请求侧 hint”和“执行侧 decision”两种语义；迁移到 `DelegationDecision` 时必须拆成两个独立字段，避免提示值覆盖执行结果或反向污染 prompt 注入。
 8. `AgentRunMetadataStore` 与现有 session/transcript 存储的边界需要明确，避免 child run metadata 重复散落到多个模块。
+9. `LlmKernelAgent` 当前大量直接消费 `AgentKernelConfig`；迁移到 `LlmAgentProfile` 时需要明确哪些字段保留为 runtime-wide config，哪些字段必须下沉为 per-agent profile，避免 profile 与 global config 双写。
 
 ---
 

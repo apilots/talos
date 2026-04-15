@@ -87,6 +87,7 @@ pub struct GeneralTurnLoopState {
 pub enum ForcedFinalizationCause {
     ToolRoundBudget,
     RepeatedReadOnlyInvestigation,
+    EmptyFinalResponseAfterTools,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

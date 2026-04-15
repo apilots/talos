@@ -184,9 +184,9 @@ impl AgentImpl {
                     llm_provider,
                     memory_store.as_ref(),
                     &kernel_config,
-                    false,
-                    false,
-                    kernel_config.memory.workspace_memory_flush_enabled,
+                    talos_agent_kernel::MemoryFlushPolicy::for_session_close(
+                        kernel_config.memory.workspace_memory_flush_enabled,
+                    ),
                 )
                 .await
             })

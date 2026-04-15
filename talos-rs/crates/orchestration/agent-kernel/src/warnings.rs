@@ -161,7 +161,7 @@ mod tests {
     fn base_diagnostics() -> PromptDiagnostics {
         PromptDiagnostics {
             mode: PromptMode::Full,
-            included_sections: vec![PromptSectionKind::System],
+            included_sections: vec![PromptSectionKind::IdentityMission],
             dropped_sections: Vec::new(),
             truncated_sections: Vec::new(),
             bootstrap_files: Vec::new(),
@@ -188,14 +188,6 @@ mod tests {
                 path: PathBuf::from("/tmp/SOUL.md"),
                 raw_chars: 100,
                 injected_chars: 20,
-                truncated: true,
-                missing: false,
-            },
-            BootstrapFileDiagnostic {
-                kind: WorkspaceBootstrapFileKind::Tools,
-                path: PathBuf::from("/tmp/TOOLS.md"),
-                raw_chars: 100,
-                injected_chars: 0,
                 truncated: true,
                 missing: false,
             },

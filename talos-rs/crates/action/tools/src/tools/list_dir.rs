@@ -14,7 +14,7 @@ impl Tool for ListDirTool {
     }
 
     fn description(&self) -> &str {
-        "List a local directory from a user-provided absolute path with bounded depth to map the top-level structure before reading files. Prefer this over shell ls or find when exploring a repository, subsystem, or unfamiliar path."
+        "List a local directory with bounded depth to map repository or subsystem structure before reading files. Prefer this over shell ls or find when exploring an unfamiliar project area. Use list_dir to confirm top-level layout, then switch to grep_files or read_file once the search scope is clear. If you are unsure whether a path is a file or directory, call list_dir before read_file."
     }
 
     fn parameters_schema(&self) -> Option<Value> {

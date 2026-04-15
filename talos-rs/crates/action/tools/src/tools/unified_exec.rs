@@ -18,7 +18,7 @@ impl Tool for ExecCommandTool {
     }
 
     fn description(&self) -> &str {
-        "Run a shell command in the workspace when shell execution itself is the task, such as running tests, build tools, git commands, REPLs, scripts, or interactive programs. Do not use this as a substitute for file inspection or search.\n\nUsage:\n- Prefer read_file over exec_command with cat, head, or tail\n- Prefer list_dir over exec_command with ls or find\n- Prefer grep_files over exec_command with grep or rg\n- Prefer edit or write over exec_command with sed, awk, or heredoc writes\n- workdir defaults to the session workspace root when omitted\n- For commands that require elevated permissions, set sandbox_permissions to require_escalated and provide a justification\n\nIMPORTANT: Reserve exec_command for cases where running a command is genuinely necessary."
+        "Run a shell command when shell execution itself is the task, such as running tests, build tools, git commands, scripts, REPLs, or interactive programs. Do not use this as a substitute for repository search or file inspection.\n\nUsage:\n- Prefer read_file over exec_command with cat, head, or tail\n- Prefer list_dir over exec_command with ls or find\n- Prefer grep_files over exec_command with grep or rg\n- Prefer edit or write over exec_command with sed, awk, or heredoc writes\n- workdir defaults to the session project root when omitted\n- For commands that require elevated permissions, set sandbox_permissions to require_escalated and provide a justification\n\nIMPORTANT: Reserve exec_command for cases where running a command is genuinely necessary."
     }
 
     fn parameters_schema(&self) -> Option<Value> {

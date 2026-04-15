@@ -53,7 +53,20 @@ pub(crate) fn should_force_finalization_for_step(
 }
 
 pub(crate) fn stop_reason_for_forced_finalization(_cause: ForcedFinalizationCause) -> StopReason {
-    StopReason::ToolRoundLimit
+    match _cause {
+        ForcedFinalizationCause::EmptyFinalResponseAfterTools => StopReason::EndTurn,
+        ForcedFinalizationCause::ToolRoundBudget
+        | ForcedFinalizationCause::RepeatedReadOnlyInvestigation => StopReason::ToolRoundLimit,
+    }
+}
+
+pub(crate) fn should_force_finalization_for_empty_response(
+    prior_tool_call_count: usize,
+    step: &GeneralTurnStepResult,
+) -> bool {
+    prior_tool_call_count > 0
+        && matches!(step.disposition, GeneralTurnStepDisposition::FinalResponse)
+        && step.text.trim().is_empty()
 }
 
 pub(crate) async fn run_forced_finalization_step(
@@ -69,6 +82,9 @@ pub(crate) async fn run_forced_finalization_step(
         }
         ForcedFinalizationCause::RepeatedReadOnlyInvestigation => {
             "Reason: the model repeated an equivalent read-only investigation."
+        }
+        ForcedFinalizationCause::EmptyFinalResponseAfterTools => {
+            "Reason: the model returned an empty final response after using tools."
         }
     };
     messages.push(ChatMessage::system(format!(

@@ -6,18 +6,10 @@ use crate::{
 use talos_error::{TalosError, TalosResult};
 use talos_memory::{Memory, SessionPromptContextConfig};
 
-pub(crate) fn build_identity_prompt(builder: &PromptBuilder<'_>) -> String {
+fn build_identity_mission_prompt(builder: &PromptBuilder<'_>) -> String {
     let phase_label = match builder.phase {
         PromptPhase::Planning => "planning",
         PromptPhase::Execution => "execution",
-    };
-    let phase_instruction = match builder.phase {
-        PromptPhase::Planning => {
-            "Focus on clear decomposition, constraints, and an executable next-step plan."
-        }
-        PromptPhase::Execution => {
-            "Use native tool calling when needed, then produce the final response."
-        }
     };
     let planner_mode = builder.planner_mode.as_str();
     let prompt_mode = match builder.mode {
@@ -25,36 +17,100 @@ pub(crate) fn build_identity_prompt(builder: &PromptBuilder<'_>) -> String {
         PromptMode::Minimal => "minimal",
         PromptMode::None => "none",
     };
-
     let environment_summary = builder
         .session_environment
         .as_ref()
         .map(|environment| {
             format!(
-                "Session environment:\n- directory: {}\n- connection_mode: {}",
+                "- session_directory: {}\n- connection_mode: {}",
                 environment.directory.display(),
                 environment.connection_mode
             )
         })
-        .unwrap_or_else(|| "Session environment:\n- none".to_string());
+        .unwrap_or_else(|| "- session_directory: none\n- connection_mode: unknown".to_string());
+    let project_root_summary = builder
+        .project_root
+        .as_ref()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "unset".to_string());
 
     format!(
-        r#"You are {}, {}
+        r#"Identity and mission:
+- You are {name}, {description}.
+- Operate as a long-running intelligent steward, not a one-shot chatbot.
+- Move the task forward with minimal user supervision while staying evidence-driven.
+- Prefer a small number of high-value tool calls over broad or repetitive exploration.
+- Separate verified facts from inference and say when evidence is still incomplete.
+- Finish with a concrete result, or clearly state the remaining blocker.
 
-Phase: {}
-Planner mode: {}
-Prompt mode: {}
-{}
-
-{}"#,
-        builder.agent_name,
-        builder.agent_description,
-        phase_label,
-        planner_mode,
-        prompt_mode,
-        phase_instruction,
-        environment_summary
+Runtime context:
+- phase: {phase}
+- planner_mode: {planner_mode}
+- prompt_mode: {prompt_mode}
+- project_root: {project_root}
+{environment_summary}"#,
+        name = builder.agent_name,
+        description = builder.agent_description,
+        phase = phase_label,
+        planner_mode = planner_mode,
+        prompt_mode = prompt_mode,
+        project_root = project_root_summary,
+        environment_summary = environment_summary,
     )
+}
+
+fn build_evidence_tooling_policy_prompt() -> String {
+    r#"Evidence and tooling policy:
+- Treat source code, local files, command output, and tool results as primary evidence.
+- Treat README files, architecture documents, and design notes as secondary evidence unless the user explicitly asks for documentation analysis.
+- If the user asks for code-based analysis, first inspect code structure and only use documents as supplemental context.
+- Prefer dedicated tools over shell commands for repository exploration.
+- Use grep_files to locate symbols, entrypoints, exports, routes, and module boundaries before reading files.
+- Use read_file only after the target file has been named by the user or narrowed by grep_files or list_dir.
+- When a path might be a directory, verify it with list_dir before calling read_file.
+- Use list_dir to map unfamiliar directories or confirm high-level structure.
+- Do not use exec_command as a substitute for grep_files, read_file, or list_dir when those tools can answer directly.
+- Do not repeat an equivalent read-only tool call unless parameters materially narrow scope or verify changed state.
+- Do not re-read the same file with the same arguments. If the earlier read was insufficient, change offset or limit and briefly explain why you need the second read.
+- If a tool already provides enough evidence to answer, stop exploring and synthesize the answer."#
+        .to_string()
+}
+
+fn build_task_protocol_library_prompt() -> String {
+    r#"Task protocol library:
+- Codebase analysis protocol:
+  1. Start from code anchors such as workspace members, crate roots, exports, traits, entrypoints, and key module declarations.
+  2. Prefer grep_files before read_file when you still need to narrow candidate files.
+  3. Read Cargo.toml, crate root files, and a small set of key modules before describing architecture.
+  4. Avoid repeated reads of the same file unless you need a different offset or limit to confirm a specific detail.
+  5. Treat architecture documents as target design or background unless code confirms they are current.
+  6. Cite concrete code evidence in the answer instead of giving a documentation-only summary.
+  7. Stop once you can explain the actual implemented structure with enough evidence.
+  8. Mark any extrapolation as inference instead of verified fact.
+- Bug investigation protocol:
+  1. Reproduce or localize the failure signal first.
+  2. Narrow likely ownership with grep_files, then inspect the smallest relevant files.
+  3. Do not propose a fix until the failure path is evidenced.
+- Change planning protocol:
+  1. Inspect the current implementation before suggesting edits.
+  2. Prefer existing abstractions and repository patterns over new layers.
+  3. Call out missing information instead of inventing hidden requirements.
+- Environment verification protocol:
+  1. Use dedicated file or runtime tools to verify environment claims.
+  2. Do not speculate about sandbox, mount, or path visibility without an observed tool result."#
+        .to_string()
+}
+
+fn build_communication_policy_prompt() -> String {
+    r#"Communication policy:
+- All normal text is user-visible.
+- Before the first tool call, say in one short sentence what you are about to check.
+- During tool-assisted work, provide short progress updates only when you discover a load-bearing fact, change direction, or need to explain why you are doing the next step.
+- Keep progress updates human-readable, concise, and free of log-like noise.
+- If the user requires an exact word, phrase, tag, or output wrapper, include that literal text exactly as requested in the final answer.
+- When the task is complete, end with a clear answer that distinguishes verified findings from inference.
+- If evidence is incomplete, say what is known, what is uncertain, and what additional step would resolve it."#
+        .to_string()
 }
 
 pub(crate) fn build_tooling_prompt(builder: &PromptBuilder<'_>) -> Option<String> {
@@ -74,17 +130,52 @@ pub(crate) async fn assemble(builder: &PromptBuilder<'_>) -> TalosResult<PromptA
         TalosError::ValidationError("PromptBuilder requires user input".to_string())
     })?;
 
-    let mut static_sections = vec![PromptSection {
-        kind: PromptSectionKind::System,
-        title: Some("System".to_string()),
-        content: build_identity_prompt(builder),
-        role: None,
-        cache_scope: CacheScope::Static,
-        tier: BudgetTier::Critical,
-        required: true,
-        estimated_tokens: 0,
-        truncation_mode: TruncationMode::TrimTail,
-    }];
+    let mut static_sections = vec![
+        PromptSection {
+            kind: PromptSectionKind::IdentityMission,
+            title: Some("Identity and mission".to_string()),
+            content: build_identity_mission_prompt(builder),
+            role: None,
+            cache_scope: CacheScope::Static,
+            tier: BudgetTier::Critical,
+            required: true,
+            estimated_tokens: 0,
+            truncation_mode: TruncationMode::TrimTail,
+        },
+        PromptSection {
+            kind: PromptSectionKind::EvidenceToolingPolicy,
+            title: Some("Evidence and tooling policy".to_string()),
+            content: build_evidence_tooling_policy_prompt(),
+            role: None,
+            cache_scope: CacheScope::Static,
+            tier: BudgetTier::Critical,
+            required: true,
+            estimated_tokens: 0,
+            truncation_mode: TruncationMode::TrimTail,
+        },
+        PromptSection {
+            kind: PromptSectionKind::TaskProtocolLibrary,
+            title: Some("Task protocol library".to_string()),
+            content: build_task_protocol_library_prompt(),
+            role: None,
+            cache_scope: CacheScope::Static,
+            tier: BudgetTier::Important,
+            required: true,
+            estimated_tokens: 0,
+            truncation_mode: TruncationMode::TrimTail,
+        },
+        PromptSection {
+            kind: PromptSectionKind::CommunicationPolicy,
+            title: Some("Communication policy".to_string()),
+            content: build_communication_policy_prompt(),
+            role: None,
+            cache_scope: CacheScope::Static,
+            tier: BudgetTier::Important,
+            required: true,
+            estimated_tokens: 0,
+            truncation_mode: TruncationMode::TrimTail,
+        },
+    ];
     if let Some(tooling_prompt) = build_tooling_prompt(builder) {
         static_sections.push(PromptSection {
             kind: PromptSectionKind::Tooling,
@@ -92,7 +183,7 @@ pub(crate) async fn assemble(builder: &PromptBuilder<'_>) -> TalosResult<PromptA
             content: tooling_prompt,
             role: None,
             cache_scope: CacheScope::Static,
-            tier: BudgetTier::Critical,
+            tier: BudgetTier::Important,
             required: true,
             estimated_tokens: 0,
             truncation_mode: TruncationMode::TrimTail,
@@ -153,6 +244,14 @@ pub(crate) async fn assemble(builder: &PromptBuilder<'_>) -> TalosResult<PromptA
     })
 }
 
+fn format_bootstrap_heading(file: &WorkspaceBootstrapFile) -> String {
+    if file.kind.is_project_file() {
+        format!("## {} (project root)", file.kind.file_name())
+    } else {
+        format!("## {} (workspace)", file.kind.file_name())
+    }
+}
+
 pub(crate) fn build_project_context_section(
     builder: &PromptBuilder<'_>,
     files: &[WorkspaceBootstrapFile],
@@ -166,7 +265,7 @@ pub(crate) fn build_project_context_section(
     let mut sections = Vec::new();
     let mut diagnostics = Vec::new();
 
-    for file in files.iter().filter(|file| file.kind.is_project_context()) {
+    for file in files {
         let Some(content) = file.content.as_ref() else {
             diagnostics.push(BootstrapFileDiagnostic {
                 kind: file.kind,
@@ -193,7 +292,7 @@ pub(crate) fn build_project_context_section(
         let limited = bootstrap::truncate_chars(trimmed, per_file_limit);
         let injected_chars = limited.chars().count();
         let raw_chars = trimmed.chars().count();
-        let file_block = format!("## {}\n{}", file.kind.file_name(), limited);
+        let file_block = format!("{}\n{}", format_bootstrap_heading(file), limited);
         let next_chars = file_block.chars().count() + 2;
         let accepted = total_chars + next_chars <= total_limit;
         diagnostics.push(BootstrapFileDiagnostic {
@@ -217,11 +316,11 @@ pub(crate) fn build_project_context_section(
         Some((
             PromptSection {
                 kind: PromptSectionKind::ProjectContext,
-                title: Some("Project Context".to_string()),
+                title: Some("Project context".to_string()),
                 content: format!("# Project Context\n\n{}", sections.join("\n\n")),
                 role: None,
                 cache_scope: CacheScope::Workspace,
-                tier: BudgetTier::Critical,
+                tier: BudgetTier::Important,
                 required: false,
                 estimated_tokens: 0,
                 truncation_mode: TruncationMode::TrimTail,
@@ -244,11 +343,12 @@ pub(crate) async fn load_dynamic_sections(
     let memory_enable_summary = builder.config.memory.session_summary_enabled;
     let retrieved_memory_max_items = builder.config.load_policy.retrieved_memory_max_items;
     let retrieved_memory_max_chars = builder.config.load_policy.retrieved_memory_max_chars;
-    let bootstrap_files = if builder.memory_store.is_some() {
+    let mut bootstrap_files = if builder.memory_store.is_some() {
         builder.load_workspace_bootstrap_files().await?
     } else {
         Vec::new()
     };
+    bootstrap_files.extend(builder.load_project_bootstrap_files().await?);
     let mut bootstrap_diagnostics = Vec::new();
 
     if let Some((project_context, diagnostics)) =

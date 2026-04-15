@@ -132,18 +132,25 @@ fn test_prompt_context() {
 
 #[tokio::test]
 async fn test_prompt_builder_basic() {
-    let messages = PromptBuilder::new()
+    let assembly = PromptBuilder::new()
         .agent("talos", "assistant")
         .phase(PromptPhase::Execution)
         .user_input("hello")
-        .build()
+        .assemble()
         .await
         .expect("prompt build should succeed");
 
-    assert_eq!(messages.len(), 2);
-    assert_eq!(messages[0].role, Role::System);
-    assert_eq!(messages[1].role, Role::User);
-    assert_eq!(messages[1].content, "hello");
+    assert!(assembly.system_sections.len() >= 4);
+    assert_eq!(assembly.user_input, "hello");
+    let messages = render_prompt_assembly(&assembly);
+    assert_eq!(
+        messages.last().expect("user message should exist").role,
+        Role::User
+    );
+    assert_eq!(
+        messages.last().expect("user message should exist").content,
+        "hello"
+    );
 }
 
 #[tokio::test]
@@ -226,7 +233,7 @@ async fn test_prompt_builder_dynamic_budget_trims_history() {
 
 #[tokio::test]
 async fn test_prompt_builder_uses_explicit_budget_configuration() {
-    let messages = PromptBuilder::new()
+    let assembly = PromptBuilder::new()
         .agent("talos", "assistant")
         .planning_instruction(Some("keep it short".to_string()))
         .config(PromptBuildConfig {
@@ -237,14 +244,14 @@ async fn test_prompt_builder_uses_explicit_budget_configuration() {
             ..PromptBuildConfig::default()
         })
         .user_input("latest")
-        .build()
+        .assemble()
         .await
         .expect("prompt build should succeed");
 
-    assert!(messages.len() >= 2);
-    assert!(messages
-        .iter()
-        .any(|message| message.content.contains("[truncated]")));
+    assert!(
+        !assembly.diagnostics.truncated_sections.is_empty()
+            || !assembly.diagnostics.dropped_sections.is_empty()
+    );
 }
 
 #[tokio::test]
@@ -287,7 +294,14 @@ async fn test_prompt_builder_normalizes_memory_prefix() {
 #[tokio::test]
 async fn test_prompt_builder_creates_and_injects_bootstrap_files() {
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    let project_root = std::env::temp_dir().join(Uuid::new_v4().to_string());
     let memory = MemoryStore::new(workspace_dir.clone());
+    std::fs::create_dir_all(&project_root).expect("project root should exist");
+    std::fs::write(
+        project_root.join("AGENTS.md"),
+        "# AGENTS\n\n- Prefer crate roots before docs.\n",
+    )
+    .expect("agents file should write");
 
     let mut config = PromptBuildConfig::default();
     config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
@@ -297,42 +311,49 @@ async fn test_prompt_builder_creates_and_injects_bootstrap_files() {
     let messages = PromptBuilder::new()
         .agent("talos", "assistant")
         .memory_store("s1", &memory)
+        .project_root(Some(project_root))
         .config(config)
         .user_input("bootstrap")
         .build()
         .await
         .expect("prompt build should succeed");
 
-    for name in [
-        "AGENTS.md",
-        "SOUL.md",
-        "TOOLS.md",
-        "IDENTITY.md",
-        "USER.md",
-        "HEARTBEAT.md",
-        "BOOTSTRAP.md",
-        "MEMORY.md",
-    ] {
+    for name in ["SOUL.md", "USER.md", "MEMORY.md"] {
         assert!(
             workspace_dir.join(name).exists(),
             "expected {} to exist",
             name
         );
     }
+    assert!(!workspace_dir.join("AGENTS.md").exists());
+    assert!(!workspace_dir.join("TOOLS.md").exists());
+    assert!(!workspace_dir.join("BOOTSTRAP.md").exists());
+    assert!(!workspace_dir.join("IDENTITY.md").exists());
+    assert!(!workspace_dir.join("HEARTBEAT.md").exists());
 
     let project_context = messages
         .iter()
         .find(|msg| msg.content.contains("# Project Context"))
         .expect("should include project context");
-    assert!(project_context.content.contains("## AGENTS.md"));
-    assert!(project_context.content.contains("## SOUL.md"));
-    assert!(project_context.content.contains("## MEMORY.md"));
+    assert!(project_context
+        .content
+        .contains("## AGENTS.md (project root)"));
+    assert!(project_context.content.contains("## SOUL.md (workspace)"));
+    assert!(project_context.content.contains("## MEMORY.md (workspace)"));
 }
 
 #[tokio::test]
 async fn test_prompt_builder_minimal_mode_filters_bootstrap_files() {
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    let project_root = std::env::temp_dir().join(Uuid::new_v4().to_string());
     let memory = MemoryStore::new(workspace_dir.clone());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace dir should exist");
+    std::fs::create_dir_all(&project_root).expect("project root should exist");
+    std::fs::write(
+        project_root.join("AGENTS.md"),
+        "# AGENTS\n\n- Project rule.\n",
+    )
+    .expect("agents file should write");
 
     let mut config = PromptBuildConfig::default();
     config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
@@ -342,6 +363,7 @@ async fn test_prompt_builder_minimal_mode_filters_bootstrap_files() {
     let messages = PromptBuilder::new()
         .mode(PromptMode::Minimal)
         .memory_store("s1", &memory)
+        .project_root(Some(project_root))
         .config(config)
         .user_input("bootstrap")
         .build()
@@ -352,25 +374,52 @@ async fn test_prompt_builder_minimal_mode_filters_bootstrap_files() {
         .iter()
         .find(|msg| msg.content.contains("# Project Context"))
         .expect("should include project context");
-    assert!(project_context.content.contains("## AGENTS.md"));
-    assert!(project_context.content.contains("## SOUL.md"));
-    assert!(!project_context.content.contains("## HEARTBEAT.md"));
-    assert!(!project_context.content.contains("## BOOTSTRAP.md"));
+    assert!(project_context
+        .content
+        .contains("## AGENTS.md (project root)"));
+    assert!(project_context.content.contains("## SOUL.md (workspace)"));
+    assert!(project_context.content.contains("## USER.md (workspace)"));
+    assert!(project_context.content.contains("## MEMORY.md (workspace)"));
+    assert!(!project_context
+        .content
+        .contains("## HEARTBEAT.md (workspace)"));
+    assert!(!project_context
+        .content
+        .contains("## IDENTITY.md (workspace)"));
 }
 
 #[tokio::test]
 async fn test_prompt_builder_full_mode_includes_bootstrap_extensions() {
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    let project_root = std::env::temp_dir().join(Uuid::new_v4().to_string());
     let memory = MemoryStore::new(workspace_dir.clone());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace dir should exist");
+    std::fs::create_dir_all(&project_root).expect("project root should exist");
+    std::fs::write(
+        project_root.join("AGENTS.md"),
+        "# AGENTS\n\n- Project rule.\n",
+    )
+    .expect("agents file should write");
 
     let mut config = PromptBuildConfig::default();
     config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
     config.load_policy.include_session_summary = false;
     config.load_policy.include_recent_messages = false;
+    std::fs::write(
+        workspace_dir.join("IDENTITY.md"),
+        "# IDENTITY\n\n- Override mission details.\n",
+    )
+    .expect("identity file should write");
+    std::fs::write(
+        workspace_dir.join("HEARTBEAT.md"),
+        "# HEARTBEAT\n\n- Report major milestones.\n",
+    )
+    .expect("heartbeat file should write");
 
     let assembly = PromptBuilder::new()
         .mode(PromptMode::Full)
         .memory_store("s1", &memory)
+        .project_root(Some(project_root))
         .config(config)
         .user_input("bootstrap")
         .assemble()
@@ -380,14 +429,21 @@ async fn test_prompt_builder_full_mode_includes_bootstrap_extensions() {
     assert!(assembly
         .system_sections
         .iter()
-        .any(|section| section.kind == PromptSectionKind::System));
+        .any(|section| section.kind == PromptSectionKind::IdentityMission));
     let project_context = assembly
         .context_sections
         .iter()
         .find(|section| section.kind == PromptSectionKind::ProjectContext)
         .expect("full mode should include project context");
-    assert!(project_context.content.contains("## HEARTBEAT.md"));
-    assert!(project_context.content.contains("## BOOTSTRAP.md"));
+    assert!(project_context
+        .content
+        .contains("## HEARTBEAT.md (workspace)"));
+    assert!(project_context
+        .content
+        .contains("## IDENTITY.md (workspace)"));
+    assert!(project_context
+        .content
+        .contains("## AGENTS.md (project root)"));
 }
 
 #[tokio::test]
@@ -432,7 +488,19 @@ async fn test_prompt_assembly_splits_system_and_tooling_sections() {
     assert!(assembly
         .system_sections
         .iter()
-        .any(|section| section.kind == PromptSectionKind::System));
+        .any(|section| section.kind == PromptSectionKind::IdentityMission));
+    assert!(assembly
+        .system_sections
+        .iter()
+        .any(|section| section.kind == PromptSectionKind::EvidenceToolingPolicy));
+    assert!(assembly
+        .system_sections
+        .iter()
+        .any(|section| section.kind == PromptSectionKind::TaskProtocolLibrary));
+    assert!(assembly
+        .system_sections
+        .iter()
+        .any(|section| section.kind == PromptSectionKind::CommunicationPolicy));
     let tooling = assembly
         .system_sections
         .iter()

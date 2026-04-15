@@ -38,9 +38,6 @@ pub struct AgentKernelBootstrapPromptConfig {
     pub include_soul: bool,
 
     #[serde(default = "default_true")]
-    pub include_tools: bool,
-
-    #[serde(default = "default_true")]
     pub include_identity: bool,
 
     #[serde(default = "default_true")]
@@ -48,9 +45,6 @@ pub struct AgentKernelBootstrapPromptConfig {
 
     #[serde(default = "default_true")]
     pub include_heartbeat: bool,
-
-    #[serde(default = "default_true")]
-    pub include_bootstrap: bool,
 
     #[serde(default = "default_true")]
     pub include_memory: bool,
@@ -78,11 +72,9 @@ impl Default for AgentKernelBootstrapPromptConfig {
             warning_mode: default_bootstrap_prompt_warning_mode(),
             include_agents: true,
             include_soul: true,
-            include_tools: true,
             include_identity: true,
             include_user: true,
             include_heartbeat: true,
-            include_bootstrap: true,
             include_memory: true,
         }
     }

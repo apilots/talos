@@ -77,6 +77,7 @@ pub async fn prepare_general_turn(
         .tools(tool_definition_provider.as_ref())
         .memory_store(&session_id, memory_store.as_ref())
         .session_environment(ctx.session_environment.clone())
+        .project_root(ctx.project_root.clone())
         .user_input(input.to_string());
     let prompt_assembly = prompt_builder.assemble().await?;
     let prompt_diagnostics = prompt_assembly.diagnostics.clone();
@@ -176,6 +177,26 @@ pub async fn execute_general_turn_loop(
             );
         }
         apply_general_turn_step(&mut state, &step);
+
+        if should_force_finalization_for_empty_response(state.tool_call_count, &step) {
+            let mut messages = prepared.messages.clone();
+            messages.extend(state.messages.clone());
+            let forced_step = run_forced_finalization_step(
+                messages,
+                prepared.selected_model.clone(),
+                llm_provider.clone(),
+                None,
+                ForcedFinalizationCause::EmptyFinalResponseAfterTools,
+            )
+            .await?;
+            apply_general_turn_step(&mut state, &forced_step);
+            break (
+                forced_step.text.clone(),
+                stop_reason_for_forced_finalization(
+                    ForcedFinalizationCause::EmptyFinalResponseAfterTools,
+                ),
+            );
+        }
 
         if matches!(step_disposition, GeneralTurnStepDisposition::FinalResponse) {
             state

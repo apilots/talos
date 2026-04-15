@@ -92,6 +92,7 @@ fn build_test_session(session_id: &str, workspace_id: &str) -> TalosSession {
         context: SessionContext {
             session_id: session_id.to_string(),
             workspace_id: Some(workspace_id.to_string()),
+            project_root: None,
             source_type: TalosSourceType::Cli,
             provider: TalosProvider::Cli,
             user_id: "local-user".to_string(),

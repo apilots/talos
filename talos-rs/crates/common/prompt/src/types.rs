@@ -58,37 +58,34 @@ impl PlannerMode {
 pub enum WorkspaceBootstrapFileKind {
     Agents,
     Soul,
-    Tools,
     Identity,
     User,
     Heartbeat,
-    Bootstrap,
     Memory,
 }
 
 impl WorkspaceBootstrapFileKind {
-    pub(crate) fn all() -> &'static [Self] {
+    pub(crate) fn workspace_files() -> &'static [Self] {
         &[
-            Self::Agents,
             Self::Soul,
-            Self::Tools,
             Self::Identity,
             Self::User,
             Self::Heartbeat,
-            Self::Bootstrap,
             Self::Memory,
         ]
+    }
+
+    pub(crate) fn project_files() -> &'static [Self] {
+        &[Self::Agents]
     }
 
     pub(crate) fn file_name(self) -> &'static str {
         match self {
             Self::Agents => "AGENTS.md",
             Self::Soul => "SOUL.md",
-            Self::Tools => "TOOLS.md",
             Self::Identity => "IDENTITY.md",
             Self::User => "USER.md",
             Self::Heartbeat => "HEARTBEAT.md",
-            Self::Bootstrap => "BOOTSTRAP.md",
             Self::Memory => "MEMORY.md",
         }
     }
@@ -96,25 +93,19 @@ impl WorkspaceBootstrapFileKind {
     pub(crate) fn default_template(self) -> &'static str {
         match self {
             Self::Agents => {
-                "# AGENTS\n\nUse this file for workspace collaboration rules.\n\n## Rules\n- Add stable implementation rules here.\n"
+                "# AGENTS\n\nUse this file for repository-local collaboration rules.\n\n## Rules\n- Add durable implementation rules for this project.\n- Document repository-specific constraints, workflows, and review expectations.\n"
             }
             Self::Soul => {
-                "# SOUL\n\nUse this file for persona, tone, and style.\n\n## Style\n- Add voice and tone guidance here.\n"
-            }
-            Self::Tools => {
-                "# TOOLS\n\nUse this file for local tool usage guidance.\n\n## Guidance\n- Add tool-specific operating notes here.\n"
+                "# SOUL\n\nTalos is a long-running intelligent steward. Stay evidence-driven, proactive, and calm.\n\n## Behavior\n- Prefer verified facts over confident guesses.\n- Progress tasks with minimal user supervision.\n- Surface uncertainty clearly and avoid pretending incomplete work is complete.\n- Keep responses concise, useful, and grounded in observable evidence.\n"
             }
             Self::Identity => {
-                "# IDENTITY\n\nUse this file for project or agent identity.\n\n## Identity\n- Add mission and identity notes here.\n"
+                "# IDENTITY\n\nUse this file to override Talos identity details for this workspace.\n\n## Identity\n- Add mission or role details only when they differ from the built-in Talos identity.\n"
             }
             Self::User => {
                 "# USER\n\nUse this file for long-term user preferences.\n\n## Preferences\n- Add communication preferences here.\n"
             }
             Self::Heartbeat => {
-                "# HEARTBEAT\n\nUse this file for heartbeat expectations.\n\n## Policy\n- Add heartbeat acknowledgement rules here.\n"
-            }
-            Self::Bootstrap => {
-                "# BOOTSTRAP\n\nUse this file for first-run notes and workspace initialization.\n\n## Checklist\n- Add setup tasks here.\n"
+                "# HEARTBEAT\n\nUse this file for long-running task update expectations.\n\n## Policy\n- Add cadence or escalation expectations for long tasks.\n"
             }
             Self::Memory => {
                 "# MEMORY\n\nUse this file for durable user-written memory.\n\n## Preferences\n- Add long-term user preferences here.\n\n## Constraints\n- Add important constraints and rules here.\n\n## Ongoing Goals\n- Track current long-running goals here.\n\n## Notes\n- Keep stable facts and project context here.\n"
@@ -130,11 +121,9 @@ impl WorkspaceBootstrapFileKind {
         let include_by_kind = match self {
             Self::Agents => prompt_config.bootstrap.include_agents,
             Self::Soul => prompt_config.bootstrap.include_soul,
-            Self::Tools => prompt_config.bootstrap.include_tools,
             Self::Identity => prompt_config.bootstrap.include_identity,
             Self::User => prompt_config.bootstrap.include_user,
             Self::Heartbeat => prompt_config.bootstrap.include_heartbeat,
-            Self::Bootstrap => prompt_config.bootstrap.include_bootstrap,
             Self::Memory => prompt_config.bootstrap.include_memory,
         };
         if !include_by_kind {
@@ -142,16 +131,19 @@ impl WorkspaceBootstrapFileKind {
         }
         match mode {
             PromptMode::Full => true,
-            PromptMode::Minimal => matches!(
-                self,
-                Self::Agents | Self::Soul | Self::Tools | Self::Identity | Self::User
-            ),
+            PromptMode::Minimal => {
+                matches!(self, Self::Agents | Self::Soul | Self::User | Self::Memory)
+            }
             PromptMode::None => false,
         }
     }
 
-    pub(crate) fn is_project_context(self) -> bool {
-        true
+    pub(crate) fn should_auto_create(self) -> bool {
+        matches!(self, Self::Soul | Self::User | Self::Memory)
+    }
+
+    pub(crate) fn is_project_file(self) -> bool {
+        matches!(self, Self::Agents)
     }
 }
 
@@ -165,8 +157,11 @@ pub struct WorkspaceBootstrapFile {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PromptSectionKind {
-    System,
+    IdentityMission,
+    EvidenceToolingPolicy,
     Tooling,
+    TaskProtocolLibrary,
+    CommunicationPolicy,
     PlanningInstruction,
     ProjectContext,
     SessionSummary,
