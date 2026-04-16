@@ -32,6 +32,7 @@ pub trait Memory: Send + Sync {
     ) -> TalosResult<Vec<SummaryRecord>>;
     async fn latest_seq(&self, session_id: &str) -> TalosResult<u64>;
     async fn session_size_bytes(&self, session_id: &str) -> TalosResult<u64>;
+    async fn reset_session(&self, session_id: &str) -> TalosResult<()>;
     async fn search_memory(
         &self,
         query: &MemorySearchQuery,

@@ -199,6 +199,60 @@ pub(super) async fn close_session_handler(
     Ok(Json(json!({ "success": true })))
 }
 
+pub(super) async fn compact_session_handler(
+    State(state): State<Arc<HttpApiState>>,
+    _auth: axum::extract::Extension<AuthResult>,
+    Path(session_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let session = state
+        .session_service
+        .compact_session(&session_id)
+        .await
+        .map_err(|err| match err {
+            talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
+                StatusCode::NOT_FOUND,
+                "invalid_request",
+                "session not found",
+            ),
+            talos_error::TalosError::ValidationError(message) => {
+                ApiError::new(StatusCode::CONFLICT, "invalid_request", message)
+            }
+            other => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                other.to_string(),
+            ),
+        })?;
+    Ok(Json(json!(session)))
+}
+
+pub(super) async fn clear_session_handler(
+    State(state): State<Arc<HttpApiState>>,
+    _auth: axum::extract::Extension<AuthResult>,
+    Path(session_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let session = state
+        .session_service
+        .clear_session(&session_id)
+        .await
+        .map_err(|err| match err {
+            talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
+                StatusCode::NOT_FOUND,
+                "invalid_request",
+                "session not found",
+            ),
+            talos_error::TalosError::ValidationError(message) => {
+                ApiError::new(StatusCode::CONFLICT, "invalid_request", message)
+            }
+            other => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                other.to_string(),
+            ),
+        })?;
+    Ok(Json(json!(session)))
+}
+
 pub(super) async fn cancel_active_turn_handler(
     State(state): State<Arc<HttpApiState>>,
     _auth: axum::extract::Extension<AuthResult>,

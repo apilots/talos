@@ -7,6 +7,7 @@ use talos_llm_provider::Role;
 use talos_memory::{Memory, MemoryStore, TalosTurn};
 use talos_tools::{GrepFilesTool, Tool, ToolContext, ToolOutput, ToolRegistry};
 use talos_types::talos::{StopReason, TalosOutputItem, TalosUsage};
+use talos_types::ModelInfo;
 use uuid::Uuid;
 
 use super::*;
@@ -21,6 +22,34 @@ impl Tool for EchoTool {
 
     fn description(&self) -> &str {
         "Echo input for testing"
+    }
+
+    async fn execute(
+        &self,
+        _input: Value,
+        _context: ToolContext,
+    ) -> talos_error::TalosResult<ToolOutput> {
+        Ok(ToolOutput {
+            success: true,
+            output: "ok".to_string(),
+            error: None,
+        })
+    }
+}
+
+struct VerboseTool {
+    name: &'static str,
+    description: &'static str,
+}
+
+#[async_trait]
+impl Tool for VerboseTool {
+    fn name(&self) -> &str {
+        self.name
+    }
+
+    fn description(&self) -> &str {
+        self.description
     }
 
     async fn execute(
@@ -140,7 +169,7 @@ async fn test_prompt_builder_basic() {
         .await
         .expect("prompt build should succeed");
 
-    assert!(assembly.system_sections.len() >= 4);
+    assert!(assembly.static_prefix_sections.len() >= 4);
     assert_eq!(assembly.user_input, "hello");
     let messages = render_prompt_assembly(&assembly);
     assert_eq!(
@@ -179,7 +208,7 @@ async fn test_prompt_builder_includes_tool_summary_and_planning_instruction() {
 }
 
 #[tokio::test]
-async fn test_prompt_builder_dynamic_budget_trims_history() {
+async fn test_prompt_builder_keeps_history_without_legacy_budget_caps() {
     let memory = MemoryStore::new(std::env::temp_dir().join(Uuid::new_v4().to_string()));
     for idx in 0..6 {
         let turn_id = format!("turn-{idx}");
@@ -205,53 +234,177 @@ async fn test_prompt_builder_dynamic_budget_trims_history() {
             .expect("append should succeed");
     }
 
-    let messages = PromptBuilder::new()
+    let assembly = PromptBuilder::new()
         .agent("talos", "assistant")
         .memory_store("s1", &memory)
-        .config(PromptBuildConfig {
-            budget: PromptBudget {
-                max_static_tokens: 1200,
-                max_dynamic_tokens: 8,
-            },
-            ..PromptBuildConfig::default()
-        })
         .user_input("latest")
-        .build()
+        .assemble()
         .await
         .expect("prompt build should succeed");
 
-    let dynamic_count = messages
+    assert!(assembly
+        .dynamic_suffix_sections
         .iter()
-        .filter(|msg| msg.role != Role::System && msg.role != Role::User)
-        .count();
-    assert!(dynamic_count <= 1);
-    assert_eq!(
-        messages.last().expect("must have user message").role,
-        Role::User
-    );
+        .any(|section| section.kind == PromptSectionKind::RecentMessages));
+    assert!(assembly.diagnostics.dropped_sections.is_empty());
+    assert!(assembly.diagnostics.truncated_sections.is_empty());
 }
 
 #[tokio::test]
-async fn test_prompt_builder_uses_explicit_budget_configuration() {
+async fn test_prompt_builder_keeps_static_sections_without_legacy_budget_caps() {
     let assembly = PromptBuilder::new()
         .agent("talos", "assistant")
         .planning_instruction(Some("keep it short".to_string()))
-        .config(PromptBuildConfig {
-            budget: PromptBudget {
-                max_static_tokens: 12,
-                max_dynamic_tokens: 3200,
-            },
-            ..PromptBuildConfig::default()
+        .user_input("latest")
+        .assemble()
+        .await
+        .expect("prompt build should succeed");
+
+    assert!(assembly
+        .dynamic_suffix_sections
+        .iter()
+        .any(|section| section.kind == PromptSectionKind::PlanningInstruction));
+    assert!(assembly.diagnostics.dropped_sections.is_empty());
+    assert!(assembly.diagnostics.truncated_sections.is_empty());
+}
+
+#[tokio::test]
+async fn test_prompt_builder_resolves_effective_prompt_budget_from_model_info() {
+    let assembly = PromptBuilder::new()
+        .agent("talos", "assistant")
+        .model_info(ModelInfo {
+            id: "qwen-max".to_string(),
+            name: "qwen-max".to_string(),
+            provider: "bailian".to_string(),
+            context_window: 32_768,
+            max_tokens: 8_192,
+            reasoning: false,
+            input: Vec::new(),
+            cost: Default::default(),
+            compat: Default::default(),
         })
         .user_input("latest")
         .assemble()
         .await
         .expect("prompt build should succeed");
 
-    assert!(
-        !assembly.diagnostics.truncated_sections.is_empty()
-            || !assembly.diagnostics.dropped_sections.is_empty()
+    let window_usage = &assembly.diagnostics.window_usage;
+    assert!(window_usage.window_resolved);
+    assert_eq!(window_usage.context_window, 32_768);
+    assert_eq!(window_usage.reserved_output_tokens, 8_192);
+    assert_eq!(window_usage.compaction_buffer_tokens, 4_096);
+    assert_eq!(window_usage.effective_prompt_budget, 20_480);
+    assert_eq!(
+        window_usage.total_tokens,
+        assembly.diagnostics.total_estimated_tokens
     );
+}
+
+#[tokio::test]
+async fn test_prompt_builder_caps_compaction_buffer_for_small_context_windows() {
+    let assembly = PromptBuilder::new()
+        .agent("talos", "assistant")
+        .model_info(ModelInfo {
+            id: "minimax-m2.5".to_string(),
+            name: "minimax-m2.5".to_string(),
+            provider: "minimax".to_string(),
+            context_window: 4_096,
+            max_tokens: 2_048,
+            reasoning: false,
+            input: Vec::new(),
+            cost: Default::default(),
+            compat: Default::default(),
+        })
+        .user_input("latest")
+        .assemble()
+        .await
+        .expect("prompt build should succeed");
+
+    let window_usage = &assembly.diagnostics.window_usage;
+    assert!(window_usage.window_resolved);
+    assert_eq!(window_usage.context_window, 4_096);
+    assert_eq!(window_usage.reserved_output_tokens, 2_048);
+    assert_eq!(window_usage.compaction_buffer_tokens, 1_024);
+    assert_eq!(window_usage.effective_prompt_budget, 1_024);
+}
+
+#[tokio::test]
+async fn test_prompt_builder_drops_expanded_tool_catalog_before_compaction() {
+    let mut config = PromptBuildConfig::default();
+    config.prompt.window.reserved_output_tokens =
+        talos_config::ReservedOutputPolicy::Fixed { tokens: 256 };
+    config.prompt.window.compaction_buffer_tokens = 128;
+    config.load_policy.include_session_summary = false;
+    config.load_policy.include_recent_messages = false;
+
+    let baseline = PromptBuilder::new()
+        .agent("talos", "assistant")
+        .config(config.clone())
+        .model_info(ModelInfo {
+            id: "baseline".to_string(),
+            name: "baseline".to_string(),
+            provider: "test".to_string(),
+            context_window: 16_384,
+            max_tokens: 256,
+            reasoning: false,
+            input: Vec::new(),
+            cost: Default::default(),
+            compat: Default::default(),
+        })
+        .user_input("hello")
+        .assemble()
+        .await
+        .expect("baseline prompt should build");
+
+    let effective_budget = baseline.diagnostics.total_estimated_tokens + 32;
+    let registry = ToolRegistry::new();
+    for index in 0..6 {
+        registry.register(Arc::new(VerboseTool {
+            name: match index {
+                0 => "alpha_tool",
+                1 => "beta_tool",
+                2 => "gamma_tool",
+                3 => "delta_tool",
+                4 => "epsilon_tool",
+                _ => "zeta_tool",
+            },
+            description: "Inspect repository structure, ownership boundaries, runtime behavior, test surfaces, deployment assumptions, and implementation drift across subsystems with detailed evidence requirements.",
+        }));
+    }
+
+    let assembly = PromptBuilder::new()
+        .agent("talos", "assistant")
+        .tools(&registry)
+        .config(config)
+        .model_info(ModelInfo {
+            id: "tight-window".to_string(),
+            name: "tight-window".to_string(),
+            provider: "test".to_string(),
+            context_window: (effective_budget + 256 + 128) as u32,
+            max_tokens: 256,
+            reasoning: false,
+            input: Vec::new(),
+            cost: Default::default(),
+            compat: Default::default(),
+        })
+        .user_input("hello")
+        .assemble()
+        .await
+        .expect("prompt should build");
+
+    assert!(assembly.diagnostics.window_usage.within_effective_budget);
+    assert!(assembly
+        .diagnostics
+        .dropped_sections
+        .contains(&PromptSectionKind::ExpandedToolCatalog));
+    assert!(assembly
+        .dynamic_suffix_sections
+        .iter()
+        .all(|section| section.kind != PromptSectionKind::ExpandedToolCatalog));
+    assert!(assembly
+        .dynamic_suffix_sections
+        .iter()
+        .any(|section| section.kind == PromptSectionKind::RuntimeSessionContext));
 }
 
 #[tokio::test]
@@ -416,13 +569,11 @@ async fn test_prompt_builder_falls_back_to_workspace_agents_when_project_agents_
         .expect("prompt assembly should succeed");
 
     let project_context = assembly
-        .context_sections
+        .dynamic_suffix_sections
         .iter()
         .find(|section| section.kind == PromptSectionKind::ProjectContext)
         .expect("project context should exist");
-    assert!(project_context
-        .content
-        .contains("## AGENTS.md (workspace)"));
+    assert!(project_context.content.contains("## AGENTS.md (workspace)"));
     assert!(project_context.content.contains("Workspace fallback rule"));
 }
 
@@ -465,11 +616,15 @@ async fn test_prompt_builder_full_mode_includes_bootstrap_extensions() {
         .expect("prompt assembly should succeed");
 
     assert!(assembly
-        .system_sections
+        .static_prefix_sections
         .iter()
-        .any(|section| section.kind == PromptSectionKind::IdentityMission));
+        .any(|section| section.kind == PromptSectionKind::IdentityCore));
+    assert!(assembly
+        .dynamic_suffix_sections
+        .iter()
+        .any(|section| section.kind == PromptSectionKind::RuntimeSessionContext));
     let project_context = assembly
-        .context_sections
+        .dynamic_suffix_sections
         .iter()
         .find(|section| section.kind == PromptSectionKind::ProjectContext)
         .expect("full mode should include project context");
@@ -492,7 +647,7 @@ async fn test_prompt_builder_includes_recent_task_continuity_section() {
             recent_successful_tools: vec!["grep_files".to_string(), "read_file".to_string()],
             recent_failed_tools: vec!["exec_command".to_string()],
             recent_unhelpful_patterns: vec![
-                "avoid retrying the same failing path or command".to_string(),
+                "avoid retrying the same failing path or command".to_string()
             ],
             recent_answer_mode: Some(ContinuityAnswerMode::CodeFirst),
         }))
@@ -502,7 +657,7 @@ async fn test_prompt_builder_includes_recent_task_continuity_section() {
         .expect("prompt assembly should succeed");
 
     let continuity = assembly
-        .context_sections
+        .dynamic_suffix_sections
         .iter()
         .find(|section| section.kind == PromptSectionKind::RecentTaskContinuity)
         .expect("continuity section should exist");
@@ -530,14 +685,14 @@ async fn test_prompt_builder_none_mode_skips_bootstrap_context() {
         .expect("prompt assembly should succeed");
 
     assert!(assembly
-        .context_sections
+        .dynamic_suffix_sections
         .iter()
         .all(|section| section.kind != PromptSectionKind::ProjectContext));
     assert!(assembly.diagnostics.bootstrap_files.is_empty());
 }
 
 #[tokio::test]
-async fn test_prompt_assembly_splits_system_and_tooling_sections() {
+async fn test_prompt_assembly_splits_static_prefix_and_dynamic_suffix_sections() {
     let registry = ToolRegistry::new();
     registry.register(Arc::new(EchoTool));
 
@@ -550,42 +705,50 @@ async fn test_prompt_assembly_splits_system_and_tooling_sections() {
         .expect("prompt assembly should succeed");
 
     assert!(assembly
-        .system_sections
+        .static_prefix_sections
         .iter()
-        .any(|section| section.kind == PromptSectionKind::IdentityMission));
+        .any(|section| section.kind == PromptSectionKind::IdentityCore));
     assert!(assembly
-        .system_sections
+        .static_prefix_sections
         .iter()
         .any(|section| section.kind == PromptSectionKind::EvidenceToolingPolicy));
     assert!(assembly
-        .system_sections
+        .static_prefix_sections
         .iter()
         .any(|section| section.kind == PromptSectionKind::ToolChoicePriority));
     assert!(assembly
-        .system_sections
+        .static_prefix_sections
         .iter()
         .any(|section| section.kind == PromptSectionKind::FailureRecoveryPolicy));
     assert!(assembly
-        .system_sections
+        .static_prefix_sections
         .iter()
         .any(|section| section.kind == PromptSectionKind::CompactToolRouting));
     assert!(assembly
-        .system_sections
+        .static_prefix_sections
         .iter()
         .any(|section| section.kind == PromptSectionKind::TaskProtocolLibrary));
     assert!(assembly
-        .system_sections
+        .static_prefix_sections
         .iter()
         .any(|section| section.kind == PromptSectionKind::CommunicationPolicy));
+    assert!(assembly
+        .static_prefix_sections
+        .iter()
+        .any(|section| section.kind == PromptSectionKind::RequestedToolPreferenceTemplate));
+    assert!(assembly
+        .dynamic_suffix_sections
+        .iter()
+        .any(|section| section.kind == PromptSectionKind::RuntimeSessionContext));
     let tool_choice = assembly
-        .system_sections
+        .static_prefix_sections
         .iter()
         .find(|section| section.kind == PromptSectionKind::ToolChoicePriority)
         .expect("tool choice priority should exist");
     assert!(tool_choice.content.contains("honor that tool"));
     assert!(tool_choice.content.contains("prefer grep_files first"));
     let compact_tool_routing = assembly
-        .system_sections
+        .static_prefix_sections
         .iter()
         .find(|section| section.kind == PromptSectionKind::CompactToolRouting)
         .expect("compact tool routing should exist");
@@ -596,18 +759,18 @@ async fn test_prompt_assembly_splits_system_and_tooling_sections() {
         .content
         .contains("instead of cat, head, or tail"));
     let tooling = assembly
-        .context_sections
+        .dynamic_suffix_sections
         .iter()
-        .find(|section| section.kind == PromptSectionKind::Tooling)
+        .find(|section| section.kind == PromptSectionKind::ExpandedToolCatalog)
         .expect("tooling section should exist");
     assert!(tooling.content.contains("Available tools:"));
     assert!(tooling.content.contains("echo"));
-    assert_eq!(tooling.cache_scope, CacheScope::Static);
-    assert!(!assembly.context_sections.is_empty());
+    assert_eq!(tooling.cache_scope, CacheScope::None);
+    assert!(!assembly.dynamic_suffix_sections.is_empty());
 }
 
 #[tokio::test]
-async fn test_prompt_builder_adds_requested_tool_preference_for_explicit_grep_request() {
+async fn test_prompt_builder_splits_requested_tool_preference_template_and_hint() {
     let registry = ToolRegistry::new();
     registry.register(Arc::new(GrepFilesTool));
 
@@ -619,18 +782,26 @@ async fn test_prompt_builder_adds_requested_tool_preference_for_explicit_grep_re
         .await
         .expect("prompt assembly should succeed");
 
-    let requested_tool_preference = assembly
-        .system_sections
+    let requested_tool_preference_template = assembly
+        .static_prefix_sections
         .iter()
-        .find(|section| section.kind == PromptSectionKind::RequestedToolPreference)
-        .expect("requested tool preference section should exist");
-    assert!(requested_tool_preference.content.contains("grep_files"));
-    assert!(requested_tool_preference
+        .find(|section| section.kind == PromptSectionKind::RequestedToolPreferenceTemplate)
+        .expect("requested tool preference template should exist");
+    assert!(requested_tool_preference_template
+        .content
+        .contains("explicitly names a tool"));
+
+    let requested_tool_preference_hint = assembly
+        .dynamic_suffix_sections
+        .iter()
+        .find(|section| section.kind == PromptSectionKind::RequestedToolPreferenceHint)
+        .expect("requested tool preference hint should exist");
+    assert!(requested_tool_preference_hint
+        .content
+        .contains("grep_files"));
+    assert!(requested_tool_preference_hint
         .content
         .contains("start with grep_files rather than list_dir"));
-    assert!(requested_tool_preference
-        .content
-        .contains("switch to the next best dedicated tool"));
 }
 
 #[tokio::test]
@@ -670,7 +841,7 @@ async fn test_rendered_cache_breakpoints_stay_before_user_input() {
 }
 
 #[tokio::test]
-async fn test_rendered_cache_breakpoints_cover_tooling_and_workspace_sections() {
+async fn test_rendered_cache_breakpoints_cover_static_prefix_and_workspace_sections() {
     let registry = ToolRegistry::new();
     registry.register(Arc::new(EchoTool));
 
@@ -693,17 +864,15 @@ async fn test_rendered_cache_breakpoints_cover_tooling_and_workspace_sections() 
         .expect("prompt assembly should succeed");
 
     let rendered = render_prompt_assembly(&assembly);
-    let tooling_index = assembly
-        .system_sections
-        .len()
+    let project_context_index = assembly.static_prefix_sections.len()
         + assembly
-            .context_sections
+            .dynamic_suffix_sections
             .iter()
-            .position(|section| section.kind == PromptSectionKind::Tooling)
-        .expect("tooling section should exist");
-    assert!(rendered[tooling_index].cache_control.is_some());
+            .position(|section| section.kind == PromptSectionKind::ProjectContext)
+            .expect("project context should exist");
+    assert!(rendered[project_context_index].cache_control.is_some());
     assert!(assembly
-        .context_sections
+        .dynamic_suffix_sections
         .iter()
         .any(|section| section.kind == PromptSectionKind::ProjectContext));
     assert!(rendered

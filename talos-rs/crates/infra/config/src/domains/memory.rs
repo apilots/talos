@@ -4,6 +4,7 @@ use crate::TalosPaths;
 
 /// Memory defaults under agent.kernel
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AgentKernelMemoryConfig {
     /// Workspace root directory for memory and session markdown files.
     #[serde(default = "default_kernel_memory_workspace_dir")]
@@ -12,22 +13,6 @@ pub struct AgentKernelMemoryConfig {
     /// In-memory hot recent message capacity.
     #[serde(default = "default_kernel_memory_hot_recent_messages")]
     pub hot_recent_messages: usize,
-
-    /// Target message count when building session prompt context.
-    #[serde(default = "default_kernel_memory_session_recent_messages_limit")]
-    pub session_recent_messages_limit: usize,
-
-    /// Enable session summary injection in prompt context.
-    #[serde(default = "default_true")]
-    pub session_summary_enabled: bool,
-
-    /// Number of latest summaries to inject.
-    #[serde(default = "default_kernel_memory_session_summary_recent_count")]
-    pub session_summary_recent_count: usize,
-
-    /// Maximum characters retained per summary item.
-    #[serde(default = "default_kernel_memory_session_summary_max_chars")]
-    pub session_summary_max_chars: usize,
 
     /// Trigger summary compaction when session memory exceeds this threshold.
     #[serde(default = "default_kernel_memory_compaction_threshold_bytes")]
@@ -89,18 +74,6 @@ fn default_kernel_memory_hot_recent_messages() -> usize {
     64
 }
 
-fn default_kernel_memory_session_recent_messages_limit() -> usize {
-    24
-}
-
-fn default_kernel_memory_session_summary_recent_count() -> usize {
-    2
-}
-
-fn default_kernel_memory_session_summary_max_chars() -> usize {
-    1200
-}
-
 fn default_kernel_memory_compaction_threshold_bytes() -> usize {
     256 * 1024
 }
@@ -126,10 +99,6 @@ impl Default for AgentKernelMemoryConfig {
         Self {
             workspace_dir: default_kernel_memory_workspace_dir(),
             hot_recent_messages: default_kernel_memory_hot_recent_messages(),
-            session_recent_messages_limit: default_kernel_memory_session_recent_messages_limit(),
-            session_summary_enabled: true,
-            session_summary_recent_count: default_kernel_memory_session_summary_recent_count(),
-            session_summary_max_chars: default_kernel_memory_session_summary_max_chars(),
             compaction_threshold_bytes: default_kernel_memory_compaction_threshold_bytes(),
             root_memory_filename: default_kernel_memory_root_memory_filename(),
             memory_dirname: default_kernel_memory_memory_dirname(),

@@ -47,6 +47,7 @@ async fn test_embedded_quit_flushes_memory_after_runtime_shutdown() {
     config.gateway.auth = false;
     config.gateway.token = Some("embedded-test-token".to_string());
     config.logging.stdout = false;
+    config.llm.model = "glm-5".to_string();
     config.storage.connection_string = db_path.to_string_lossy().to_string();
     config.agent.kernel.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
     config
@@ -112,6 +113,19 @@ async fn test_embedded_quit_flushes_memory_after_runtime_shutdown() {
         app.message_queue.len(),
         app.pending_stream.is_some(),
         app.pending_stream_connect.is_some()
+    );
+    let assistant_blocks = app
+        .chat_blocks
+        .iter()
+        .filter(|block| block.role == ChatRole::Assistant)
+        .map(|block| block.content.clone())
+        .collect::<Vec<_>>();
+    assert!(
+        assistant_blocks
+            .iter()
+            .any(|content| content.contains("embedded-quit-ok")),
+        "embedded app should receive assistant output before quit; assistant_blocks={:?}",
+        assistant_blocks
     );
 
     app.input_buffer = "/quit".to_string();

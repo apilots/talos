@@ -1,12 +1,27 @@
 use crate::{
     bootstrap, budget, diagnostics, BootstrapFileDiagnostic, BootstrapFileScope, BudgetTier,
     CacheScope, ContinuityAnswerMode, PromptAssembly, PromptBuilder, PromptDiagnostics, PromptMode,
-    PromptPhase, PromptSection, PromptSectionKind, TruncationMode, WorkspaceBootstrapFile,
+    PromptPhase, PromptSection, PromptSectionKind, PromptWindowUsage, TruncationMode,
+    WorkspaceBootstrapFile,
 };
 use talos_error::{TalosError, TalosResult};
 use talos_memory::{Memory, SessionPromptContextConfig};
 
-fn build_identity_mission_prompt(builder: &PromptBuilder<'_>) -> String {
+fn build_identity_core_prompt(builder: &PromptBuilder<'_>) -> String {
+    format!(
+        r#"Identity and mission:
+- You are {name}, {description}.
+- Operate as a long-running intelligent steward, not a one-shot chatbot.
+- Move the task forward with minimal user supervision while staying evidence-driven.
+- Prefer a small number of high-value tool calls over broad or repetitive exploration.
+- Separate verified facts from inference and say when evidence is still incomplete.
+- Finish with a concrete result, or clearly state the remaining blocker."#,
+        name = builder.agent_name,
+        description = builder.agent_description,
+    )
+}
+
+fn build_runtime_session_context_prompt(builder: &PromptBuilder<'_>) -> String {
     let phase_label = match builder.phase {
         PromptPhase::Planning => "planning",
         PromptPhase::Execution => "execution",
@@ -35,22 +50,12 @@ fn build_identity_mission_prompt(builder: &PromptBuilder<'_>) -> String {
         .unwrap_or_else(|| "unset".to_string());
 
     format!(
-        r#"Identity and mission:
-- You are {name}, {description}.
-- Operate as a long-running intelligent steward, not a one-shot chatbot.
-- Move the task forward with minimal user supervision while staying evidence-driven.
-- Prefer a small number of high-value tool calls over broad or repetitive exploration.
-- Separate verified facts from inference and say when evidence is still incomplete.
-- Finish with a concrete result, or clearly state the remaining blocker.
-
-Runtime context:
+        r#"Runtime session context:
 - phase: {phase}
 - planner_mode: {planner_mode}
 - prompt_mode: {prompt_mode}
 - project_root: {project_root}
 {environment_summary}"#,
-        name = builder.agent_name,
-        description = builder.agent_description,
         phase = phase_label,
         planner_mode = planner_mode,
         prompt_mode = prompt_mode,
@@ -100,7 +105,15 @@ fn build_failure_recovery_policy_prompt() -> String {
         .to_string()
 }
 
-fn build_requested_tool_preference_prompt(builder: &PromptBuilder<'_>) -> Option<String> {
+fn build_requested_tool_preference_template_prompt() -> String {
+    r#"Requested tool preference policy:
+- When the user explicitly names a tool and that tool can satisfy the next verification step, prefer it before adjacent tools.
+- Ignore the requested tool only when it cannot answer the next step directly.
+- After the requested tool narrows scope, switch to the next best dedicated tool instead of repeating low-value searches."#
+        .to_string()
+}
+
+fn build_requested_tool_preference_hint_prompt(builder: &PromptBuilder<'_>) -> Option<String> {
     let user_input = builder.user_input.as_deref()?.to_ascii_lowercase();
     let tool_registry = builder.tool_registry?;
     let mut requested_tools = tool_registry
@@ -119,7 +132,7 @@ fn build_requested_tool_preference_prompt(builder: &PromptBuilder<'_>) -> Option
     }
 
     Some(format!(
-        "Requested tool preference:\n- The user explicitly asked for these tools: {}.\n- If a requested tool can satisfy the next verification step, use it before adjacent tools.\n- Ignore the requested tool only when it cannot answer the next step directly.\n- Example: if the requested tool is grep_files for code investigation, start with grep_files rather than list_dir when grep_files can narrow the first files to inspect.\n- After the requested tool narrows scope, switch to the next best dedicated tool instead of repeating low-value searches.",
+        "Requested tool preference hint:\n- The user explicitly asked for these tools: {}.\n- Example: if the requested tool is grep_files for code investigation, start with grep_files rather than list_dir when grep_files can narrow the first files to inspect.",
         requested_tools.join(", "),
     ))
 }
@@ -173,7 +186,7 @@ fn build_communication_policy_prompt() -> String {
         .to_string()
 }
 
-pub(crate) fn build_tooling_prompt(builder: &PromptBuilder<'_>) -> Option<String> {
+pub(crate) fn build_expanded_tool_catalog_prompt(builder: &PromptBuilder<'_>) -> Option<String> {
     let Some(tool_registry) = builder.tool_registry else {
         return None;
     };
@@ -183,6 +196,101 @@ pub(crate) fn build_tooling_prompt(builder: &PromptBuilder<'_>) -> Option<String
 
     let tool_summary = PromptBuilder::render_tool_summary(tool_registry);
     Some(format!("Available tools:\n{}", tool_summary))
+}
+
+fn build_static_prefix_sections(builder: &PromptBuilder<'_>) -> Vec<PromptSection> {
+    let mut sections = vec![
+        PromptSection {
+            kind: PromptSectionKind::IdentityCore,
+            title: Some("Identity core".to_string()),
+            content: build_identity_core_prompt(builder),
+            role: None,
+            cache_scope: CacheScope::Static,
+            tier: BudgetTier::Critical,
+            required: true,
+            estimated_tokens: 0,
+            truncation_mode: TruncationMode::TrimTail,
+        },
+        PromptSection {
+            kind: PromptSectionKind::EvidenceToolingPolicy,
+            title: Some("Evidence and tooling policy".to_string()),
+            content: build_evidence_tooling_policy_prompt(),
+            role: None,
+            cache_scope: CacheScope::Static,
+            tier: BudgetTier::Critical,
+            required: true,
+            estimated_tokens: 0,
+            truncation_mode: TruncationMode::TrimTail,
+        },
+        PromptSection {
+            kind: PromptSectionKind::ToolChoicePriority,
+            title: Some("Tool choice priority".to_string()),
+            content: build_tool_choice_priority_prompt(),
+            role: None,
+            cache_scope: CacheScope::Static,
+            tier: BudgetTier::Critical,
+            required: true,
+            estimated_tokens: 0,
+            truncation_mode: TruncationMode::TrimTail,
+        },
+        PromptSection {
+            kind: PromptSectionKind::RequestedToolPreferenceTemplate,
+            title: Some("Requested tool preference policy".to_string()),
+            content: build_requested_tool_preference_template_prompt(),
+            role: None,
+            cache_scope: CacheScope::Static,
+            tier: BudgetTier::Critical,
+            required: true,
+            estimated_tokens: 0,
+            truncation_mode: TruncationMode::TrimTail,
+        },
+        PromptSection {
+            kind: PromptSectionKind::FailureRecoveryPolicy,
+            title: Some("Failure recovery policy".to_string()),
+            content: build_failure_recovery_policy_prompt(),
+            role: None,
+            cache_scope: CacheScope::Static,
+            tier: BudgetTier::Critical,
+            required: true,
+            estimated_tokens: 0,
+            truncation_mode: TruncationMode::TrimTail,
+        },
+        PromptSection {
+            kind: PromptSectionKind::CompactToolRouting,
+            title: Some("Compact tool routing".to_string()),
+            content: build_compact_tool_routing_prompt(),
+            role: None,
+            cache_scope: CacheScope::Static,
+            tier: BudgetTier::Critical,
+            required: true,
+            estimated_tokens: 0,
+            truncation_mode: TruncationMode::TrimTail,
+        },
+        PromptSection {
+            kind: PromptSectionKind::TaskProtocolLibrary,
+            title: Some("Task protocol library".to_string()),
+            content: build_task_protocol_library_prompt(),
+            role: None,
+            cache_scope: CacheScope::Static,
+            tier: BudgetTier::Important,
+            required: true,
+            estimated_tokens: 0,
+            truncation_mode: TruncationMode::TrimTail,
+        },
+        PromptSection {
+            kind: PromptSectionKind::CommunicationPolicy,
+            title: Some("Communication policy".to_string()),
+            content: build_communication_policy_prompt(),
+            role: None,
+            cache_scope: CacheScope::Static,
+            tier: BudgetTier::Supplemental,
+            required: false,
+            estimated_tokens: 0,
+            truncation_mode: TruncationMode::TrimTail,
+        },
+    ];
+    budget::enrich_sections(&mut sections);
+    sections
 }
 
 fn build_recent_task_continuity_prompt(builder: &PromptBuilder<'_>) -> Option<String> {
@@ -237,153 +345,73 @@ pub(crate) async fn assemble(builder: &PromptBuilder<'_>) -> TalosResult<PromptA
         TalosError::ValidationError("PromptBuilder requires user input".to_string())
     })?;
 
-    let mut static_sections = vec![
-        PromptSection {
-            kind: PromptSectionKind::IdentityMission,
-            title: Some("Identity and mission".to_string()),
-            content: build_identity_mission_prompt(builder),
-            role: None,
-            cache_scope: CacheScope::Static,
-            tier: BudgetTier::Critical,
-            required: true,
-            estimated_tokens: 0,
-            truncation_mode: TruncationMode::TrimTail,
-        },
-        PromptSection {
-            kind: PromptSectionKind::EvidenceToolingPolicy,
-            title: Some("Evidence and tooling policy".to_string()),
-            content: build_evidence_tooling_policy_prompt(),
-            role: None,
-            cache_scope: CacheScope::Static,
-            tier: BudgetTier::Critical,
-            required: true,
-            estimated_tokens: 0,
-            truncation_mode: TruncationMode::TrimTail,
-        },
-        PromptSection {
-            kind: PromptSectionKind::ToolChoicePriority,
-            title: Some("Tool choice priority".to_string()),
-            content: build_tool_choice_priority_prompt(),
-            role: None,
-            cache_scope: CacheScope::Static,
-            tier: BudgetTier::Critical,
-            required: true,
-            estimated_tokens: 0,
-            truncation_mode: TruncationMode::TrimTail,
-        },
-    ];
-    if let Some(requested_tool_preference) = build_requested_tool_preference_prompt(builder) {
-        static_sections.push(PromptSection {
-            kind: PromptSectionKind::RequestedToolPreference,
-            title: Some("Requested tool preference".to_string()),
-            content: requested_tool_preference,
-            role: None,
-            cache_scope: CacheScope::Static,
-            tier: BudgetTier::Critical,
-            required: true,
-            estimated_tokens: 0,
-            truncation_mode: TruncationMode::TrimTail,
-        });
-    }
-    static_sections.extend([
-        PromptSection {
-            kind: PromptSectionKind::FailureRecoveryPolicy,
-            title: Some("Failure recovery policy".to_string()),
-            content: build_failure_recovery_policy_prompt(),
-            role: None,
-            cache_scope: CacheScope::Static,
-            tier: BudgetTier::Critical,
-            required: true,
-            estimated_tokens: 0,
-            truncation_mode: TruncationMode::TrimTail,
-        },
-        PromptSection {
-            kind: PromptSectionKind::CompactToolRouting,
-            title: Some("Compact tool routing".to_string()),
-            content: build_compact_tool_routing_prompt(),
-            role: None,
-            cache_scope: CacheScope::Static,
-            tier: BudgetTier::Critical,
-            required: true,
-            estimated_tokens: 0,
-            truncation_mode: TruncationMode::TrimTail,
-        },
-        PromptSection {
-            kind: PromptSectionKind::TaskProtocolLibrary,
-            title: Some("Task protocol library".to_string()),
-            content: build_task_protocol_library_prompt(),
-            role: None,
-            cache_scope: CacheScope::Static,
-            tier: BudgetTier::Important,
-            required: true,
-            estimated_tokens: 0,
-            truncation_mode: TruncationMode::TrimTail,
-        },
-        PromptSection {
-            kind: PromptSectionKind::CommunicationPolicy,
-            title: Some("Communication policy".to_string()),
-            content: build_communication_policy_prompt(),
-            role: None,
-            cache_scope: CacheScope::Static,
-            tier: BudgetTier::Supplemental,
-            required: false,
-            estimated_tokens: 0,
-            truncation_mode: TruncationMode::TrimTail,
-        },
-    ]);
-    if let Some(planning_instruction) = builder.planning_instruction.as_deref() {
-        if !planning_instruction.trim().is_empty() {
-            static_sections.push(PromptSection {
-                kind: PromptSectionKind::PlanningInstruction,
-                title: Some("Planning instruction".to_string()),
-                content: format!("Planning instruction:\n{}", planning_instruction.trim()),
-                role: None,
-                cache_scope: CacheScope::Static,
-                tier: BudgetTier::Critical,
-                required: true,
-                estimated_tokens: 0,
-                truncation_mode: TruncationMode::TrimTail,
-            });
-        }
-    }
-    budget::enrich_sections(&mut static_sections);
+    let static_prefix_sections = build_static_prefix_sections(builder);
     let mut dropped_sections = Vec::new();
-    let mut truncated_sections = Vec::new();
-    let static_budget = builder.config.budget.max_static_tokens.max(1);
-    budget::truncate_sections_to_budget(
-        &mut static_sections,
-        static_budget,
-        true,
-        &mut dropped_sections,
-        &mut truncated_sections,
-    );
+    let truncated_sections = Vec::new();
 
-    let (mut dynamic_sections, bootstrap_diagnostics) = load_dynamic_sections(builder).await?;
-    budget::enrich_sections(&mut dynamic_sections);
-    let dynamic_budget = builder.config.budget.max_dynamic_tokens.max(1);
-    budget::truncate_sections_to_budget(
-        &mut dynamic_sections,
-        dynamic_budget,
-        false,
-        &mut dropped_sections,
-        &mut truncated_sections,
+    let (mut dynamic_suffix_sections, bootstrap_diagnostics) =
+        load_dynamic_sections(builder).await?;
+    budget::enrich_sections(&mut dynamic_suffix_sections);
+    let static_prefix_tokens = budget::estimate_sections_tokens(&static_prefix_sections);
+    let mut window_usage = resolve_window_usage(
+        builder,
+        static_prefix_tokens,
+        budget::estimate_sections_tokens(&dynamic_suffix_sections),
     );
+    if window_usage.window_resolved && !window_usage.within_effective_budget {
+        let dynamic_budget = window_usage
+            .effective_prompt_budget
+            .saturating_sub(static_prefix_tokens);
+        budget::trim_dynamic_suffix_to_budget(
+            &mut dynamic_suffix_sections,
+            dynamic_budget,
+            &mut dropped_sections,
+        );
+        window_usage = resolve_window_usage(
+            builder,
+            static_prefix_tokens,
+            budget::estimate_sections_tokens(&dynamic_suffix_sections),
+        );
+    }
 
     let diagnostics = build_diagnostics(
         builder.mode,
-        &static_sections,
-        &dynamic_sections,
+        &static_prefix_sections,
+        &dynamic_suffix_sections,
         bootstrap_diagnostics,
         dropped_sections,
         truncated_sections,
+        window_usage,
     );
 
     Ok(PromptAssembly {
-        system_sections: static_sections,
-        context_sections: dynamic_sections,
+        static_prefix_sections,
+        dynamic_suffix_sections,
         user_input,
         diagnostics,
     })
+}
+
+fn resolve_window_usage(
+    builder: &PromptBuilder<'_>,
+    static_prefix_tokens: usize,
+    dynamic_suffix_tokens: usize,
+) -> PromptWindowUsage {
+    PromptWindowUsage::resolve(
+        &builder.config.prompt,
+        builder
+            .model_info
+            .as_ref()
+            .map(|model| model.context_window as usize)
+            .unwrap_or_default(),
+        builder
+            .model_info
+            .as_ref()
+            .map(|model| model.max_tokens as usize)
+            .unwrap_or_default(),
+        static_prefix_tokens,
+        dynamic_suffix_tokens,
+    )
 }
 
 fn format_bootstrap_heading(file: &WorkspaceBootstrapFile) -> String {
@@ -479,10 +507,9 @@ pub(crate) async fn load_dynamic_sections(
     let include_summary = builder.config.load_policy.include_session_summary;
     let include_recent = builder.config.load_policy.include_recent_messages;
     let include_retrieved_memories = builder.config.load_policy.include_retrieved_memories;
-    let summary_recent_count = builder.config.memory.session_summary_recent_count;
-    let summary_max_chars = builder.config.memory.session_summary_max_chars;
+    let summary_recent_count = builder.config.prompt.session_summary_recent_count;
+    let summary_max_chars = builder.config.prompt.session_summary_max_chars;
     let context_target_messages = builder.config.load_policy.session_recent_limit;
-    let memory_enable_summary = builder.config.memory.session_summary_enabled;
     let retrieved_memory_max_items = builder.config.load_policy.retrieved_memory_max_items;
     let retrieved_memory_max_chars = builder.config.load_policy.retrieved_memory_max_chars;
     let mut bootstrap_files = if builder.memory_store.is_some() {
@@ -492,6 +519,50 @@ pub(crate) async fn load_dynamic_sections(
     };
     bootstrap_files.extend(builder.load_project_bootstrap_files().await?);
     let mut bootstrap_diagnostics = Vec::new();
+
+    sections.push(PromptSection {
+        kind: PromptSectionKind::RuntimeSessionContext,
+        title: Some("Runtime session context".to_string()),
+        content: build_runtime_session_context_prompt(builder),
+        role: None,
+        cache_scope: CacheScope::None,
+        tier: BudgetTier::Important,
+        required: false,
+        estimated_tokens: 0,
+        truncation_mode: TruncationMode::TrimTail,
+    });
+
+    if let Some(requested_tool_preference_hint) =
+        build_requested_tool_preference_hint_prompt(builder)
+    {
+        sections.push(PromptSection {
+            kind: PromptSectionKind::RequestedToolPreferenceHint,
+            title: Some("Requested tool preference hint".to_string()),
+            content: requested_tool_preference_hint,
+            role: None,
+            cache_scope: CacheScope::None,
+            tier: BudgetTier::Important,
+            required: false,
+            estimated_tokens: 0,
+            truncation_mode: TruncationMode::DropWhole,
+        });
+    }
+
+    if let Some(planning_instruction) = builder.planning_instruction.as_deref() {
+        if !planning_instruction.trim().is_empty() {
+            sections.push(PromptSection {
+                kind: PromptSectionKind::PlanningInstruction,
+                title: Some("Planning instruction".to_string()),
+                content: format!("Planning instruction:\n{}", planning_instruction.trim()),
+                role: None,
+                cache_scope: CacheScope::None,
+                tier: BudgetTier::Critical,
+                required: true,
+                estimated_tokens: 0,
+                truncation_mode: TruncationMode::TrimTail,
+            });
+        }
+    }
 
     if let Some(continuity_prompt) = build_recent_task_continuity_prompt(builder) {
         sections.push(PromptSection {
@@ -507,13 +578,13 @@ pub(crate) async fn load_dynamic_sections(
         });
     }
 
-    if let Some(tooling_prompt) = build_tooling_prompt(builder) {
+    if let Some(tooling_prompt) = build_expanded_tool_catalog_prompt(builder) {
         sections.push(PromptSection {
-            kind: PromptSectionKind::Tooling,
+            kind: PromptSectionKind::ExpandedToolCatalog,
             title: Some("Expanded tool catalog".to_string()),
             content: tooling_prompt,
             role: None,
-            cache_scope: CacheScope::Static,
+            cache_scope: CacheScope::None,
             tier: BudgetTier::Important,
             required: false,
             estimated_tokens: 0,
@@ -538,7 +609,7 @@ pub(crate) async fn load_dynamic_sections(
                     } else {
                         0
                     },
-                    include_summary: include_summary && memory_enable_summary,
+                    include_summary,
                     summary_recent_count,
                     summary_max_chars,
                 },
@@ -622,6 +693,7 @@ pub(crate) fn build_diagnostics(
     bootstrap_diagnostics: Vec<crate::BootstrapFileDiagnostic>,
     dropped_sections: Vec<PromptSectionKind>,
     truncated_sections: Vec<PromptSectionKind>,
+    window_usage: PromptWindowUsage,
 ) -> PromptDiagnostics {
     diagnostics::build_prompt_diagnostics(
         mode,
@@ -630,5 +702,6 @@ pub(crate) fn build_diagnostics(
         bootstrap_diagnostics,
         dropped_sections,
         truncated_sections,
+        window_usage,
     )
 }

@@ -62,6 +62,16 @@ fn normalized_tool_call_id(round: u32, index: usize, id: Option<String>) -> Stri
         .unwrap_or_else(|| format!("tool-{}-{}", round, index))
 }
 
+fn talos_usage_from_provider_usage(usage: &talos_llm_provider::Usage) -> TalosUsage {
+    TalosUsage {
+        input_tokens: usage.prompt_tokens,
+        output_tokens: usage.completion_tokens,
+        total_tokens: usage.total_tokens,
+        cache_creation_input_tokens: usage.cache_creation_input_tokens,
+        cache_read_input_tokens: usage.cache_read_input_tokens,
+    }
+}
+
 pub(crate) async fn stream_round(
     llm_provider: Arc<dyn LlmProvider>,
     request: ChatRequest,
@@ -197,11 +207,7 @@ pub(crate) async fn stream_round(
             } => {
                 finish_reason = final_reason;
                 if let Some(final_usage) = final_usage {
-                    usage = TalosUsage {
-                        input_tokens: final_usage.prompt_tokens,
-                        output_tokens: final_usage.completion_tokens,
-                        total_tokens: final_usage.total_tokens,
-                    };
+                    usage = talos_usage_from_provider_usage(&final_usage);
                 }
                 break;
             }
@@ -247,11 +253,7 @@ async fn chat_round(
         streamed_tool_outputs: Vec::new(),
         finish_reason: response.finish_reason,
         saw_output_delta: false,
-        usage: TalosUsage {
-            input_tokens: response.usage.prompt_tokens,
-            output_tokens: response.usage.completion_tokens,
-            total_tokens: response.usage.total_tokens,
-        },
+        usage: talos_usage_from_provider_usage(&response.usage),
     })
 }
 
@@ -317,18 +319,7 @@ pub async fn execute_general_turn_step(
 
 pub fn apply_general_turn_step(state: &mut GeneralTurnLoopState, step: &GeneralTurnStepResult) {
     state.saw_output_delta = state.saw_output_delta || step.saw_output_delta;
-    state.usage.input_tokens = state
-        .usage
-        .input_tokens
-        .saturating_add(step.usage.input_tokens);
-    state.usage.output_tokens = state
-        .usage
-        .output_tokens
-        .saturating_add(step.usage.output_tokens);
-    state.usage.total_tokens = state
-        .usage
-        .total_tokens
-        .saturating_add(step.usage.total_tokens);
+    state.usage.accumulate(&step.usage);
     state.output_items.extend(step.output_items.clone());
     state.reasoning_log.extend(step.reasoning.clone());
     if !step.tool_calls.is_empty() {

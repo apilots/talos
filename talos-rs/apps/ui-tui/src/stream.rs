@@ -4,7 +4,7 @@ use talos_client::{
     TalosContentItem, TalosEvent, TalosEventPayload, TalosInputItem, TalosMessageRequest,
 };
 use talos_error::{TalosError, TalosResult};
-use talos_types::talos::{TalosEventType, TalosToolProgressKind};
+use talos_types::talos::{TalosEventType, TalosToolProgressKind, TalosUsage};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
 use tracing::error;
@@ -150,6 +150,35 @@ impl TuiApp {
         }
     }
 
+    fn append_usage_lines(lines: &mut Vec<String>, label: &str, usage: &TalosUsage) {
+        lines.push(format!("{label}.usage.input: {}", usage.input_tokens));
+        lines.push(format!("{label}.usage.output: {}", usage.output_tokens));
+        lines.push(format!("{label}.usage.total: {}", usage.total_tokens));
+        lines.push(format!(
+            "{label}.usage.cache_create: {}",
+            usage
+                .cache_creation_input_tokens
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_string())
+        ));
+        lines.push(format!(
+            "{label}.usage.cache_read: {}",
+            usage
+                .cache_read_input_tokens
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_string())
+        ));
+    }
+
+    fn apply_cleared_session_snapshot(&mut self, session: &talos_client::TalosSession) {
+        self.apply_session_snapshot(session);
+        self.input_buffer.clear();
+        self.cursor_index = 0;
+        self.pasted_blocks.clear();
+        self.selected_pasted_block = None;
+        self.reset_chat_surface();
+    }
+
     pub(crate) fn poll_command_updates(&mut self) {
         let mut update: Option<RemoteCommandUpdate> = None;
         let mut should_clear = false;
@@ -241,14 +270,12 @@ impl TuiApp {
                         format!("in_flight: {}", self.in_flight),
                         format!("events: {}", self.trace_event_count),
                     ];
+                    Self::append_usage_lines(&mut lines, "local", &self.session_usage);
                     if let Some(info) = session_info {
                         self.apply_session_snapshot(&info);
                         lines.push(format!("server.model: {}", info.config.llm.model));
                         lines.push(format!("server.messages: {}", info.state.message_count));
-                        lines.push(format!(
-                            "server.usage.total: {}",
-                            info.state.usage.total_tokens
-                        ));
+                        Self::append_usage_lines(&mut lines, "server", &info.state.usage);
                     }
                     self.push_block(ChatRole::System, lines.join("\n"));
                     self.push_right_event("status loaded".to_string());
@@ -256,6 +283,41 @@ impl TuiApp {
                 Err(err) => {
                     self.push_block(ChatRole::System, format!("Failed to fetch status: {}", err));
                     self.push_right_event("status load failed".to_string());
+                }
+            },
+            RemoteCommandUpdate::SessionCompacted(result) => match result {
+                Ok(info) => {
+                    self.apply_session_snapshot(&info);
+                    self.push_block(
+                        ChatRole::System,
+                        "Session compaction completed for the current session.".to_string(),
+                    );
+                    self.push_right_event("session compacted".to_string());
+                }
+                Err(err) => {
+                    self.push_block(
+                        ChatRole::System,
+                        format!("Failed to compact session: {}", err),
+                    );
+                    self.push_right_event("session compact failed".to_string());
+                }
+            },
+            RemoteCommandUpdate::SessionCleared(result) => match result {
+                Ok(info) => {
+                    self.apply_cleared_session_snapshot(&info);
+                    self.push_block(
+                        ChatRole::System,
+                        "Session context cleared. History and token counters were reset."
+                            .to_string(),
+                    );
+                    self.push_right_event("session cleared".to_string());
+                }
+                Err(err) => {
+                    self.push_block(
+                        ChatRole::System,
+                        format!("Failed to clear session: {}", err),
+                    );
+                    self.push_right_event("session clear failed".to_string());
                 }
             },
             RemoteCommandUpdate::ModelSwitched { requested, result } => match result {
@@ -786,18 +848,7 @@ impl TuiApp {
                 );
             }
             (TalosEventType::MessageCompleted, TalosEventPayload::MessageCompleted(payload)) => {
-                self.session_usage.input_tokens = self
-                    .session_usage
-                    .input_tokens
-                    .saturating_add(payload.usage.input_tokens);
-                self.session_usage.output_tokens = self
-                    .session_usage
-                    .output_tokens
-                    .saturating_add(payload.usage.output_tokens);
-                self.session_usage.total_tokens = self
-                    .session_usage
-                    .total_tokens
-                    .saturating_add(payload.usage.total_tokens);
+                self.session_usage.accumulate(&payload.usage);
                 self.finish_active_stream("stream completed", false, false);
             }
             (TalosEventType::MessageError, TalosEventPayload::MessageError(payload)) => {

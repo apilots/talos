@@ -470,3 +470,22 @@ pub(crate) async fn session_size_bytes(store: &MemoryStore, session_id: &str) ->
 
     Ok(total)
 }
+
+pub(crate) async fn reset_session(store: &MemoryStore, session_id: &str) -> TalosResult<()> {
+    let session_dir = path_policy::session_dir(store, session_id);
+    match fs::remove_dir_all(&session_dir).await {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => {
+            return Err(TalosError::StorageError(format!(
+                "remove session memory dir: {}",
+                err
+            )));
+        }
+    }
+
+    store.hot_cache.write().await.remove(session_id);
+    store.transcript_cache.write().await.remove(session_id);
+    store.seq_cache.write().await.remove(session_id);
+    Ok(())
+}

@@ -40,6 +40,8 @@ pub trait SessionStore: Send + Sync {
         patch: &SessionPatch,
     ) -> TalosResult<SessionPatchAck>;
 
+    async fn reset_session_record(&self, session_id: &str) -> TalosResult<SessionPatchAck>;
+
     async fn update_session_title(&self, session_id: &str, title: &str) -> TalosResult<()>;
 
     async fn record_session_progress(
@@ -535,6 +537,52 @@ impl SessionStore for DatabaseSessionStore {
         Ok(())
     }
 
+    async fn reset_session_record(&self, session_id: &str) -> TalosResult<SessionPatchAck> {
+        let now = chrono::Utc::now().timestamp_millis();
+        let Some(mut record) = self.get_session_record(session_id).await? else {
+            return Ok(SessionPatchAck { success: false });
+        };
+
+        record.title = DEFAULT_SESSION_TITLE.to_string();
+        record.last_activity = now.try_into().unwrap_or_default();
+        record.message_count = 0;
+        record.usage = TalosUsage::default();
+
+        let row = self.fetch_session_row(session_id).await?;
+        let conf_json = Self::build_conf_json(Self::parse_conf_json(
+            row.and_then(|stored| stored.get_string("conf_json")),
+        ))?;
+        let context_json = Self::build_context_json(&record.context)?;
+        let update_row = Row::new(
+            vec![
+                "last_activity".to_string(),
+                "title".to_string(),
+                "context_json".to_string(),
+                "model".to_string(),
+                "message_count".to_string(),
+                "usage_json".to_string(),
+                "conf_json".to_string(),
+            ],
+            vec![
+                Value::Number(now.into()),
+                Value::String(record.title.clone()),
+                Value::String(context_json),
+                Value::String(record.model.clone()),
+                Value::Number(0.into()),
+                Value::String(Self::build_usage_json(&record.usage)?),
+                Value::String(conf_json),
+            ],
+        );
+        let affected = self
+            .storage
+            .update("sessions", &update_row, "session_key = ?", &[session_id])
+            .await?;
+
+        Ok(SessionPatchAck {
+            success: affected > 0,
+        })
+    }
+
     async fn record_session_progress(
         &self,
         session_id: &str,
@@ -552,12 +600,7 @@ impl SessionStore for DatabaseSessionStore {
 
         record.last_activity = now.try_into().unwrap_or_default();
         record.message_count = record.message_count.saturating_add(message_delta);
-        record.usage.input_tokens = record.usage.input_tokens.saturating_add(usage.input_tokens);
-        record.usage.output_tokens = record
-            .usage
-            .output_tokens
-            .saturating_add(usage.output_tokens);
-        record.usage.total_tokens = record.usage.total_tokens.saturating_add(usage.total_tokens);
+        record.usage.accumulate(usage);
         if let Some(model) = model {
             record.model = model.to_string();
         }
@@ -700,6 +743,10 @@ impl SessionStore for MockSessionStore {
         Ok(SessionPatchAck { success: true })
     }
 
+    async fn reset_session_record(&self, _session_id: &str) -> TalosResult<SessionPatchAck> {
+        Ok(SessionPatchAck { success: true })
+    }
+
     async fn update_session_title(&self, _session_id: &str, _title: &str) -> TalosResult<()> {
         Ok(())
     }
@@ -813,5 +860,61 @@ mod scope_tests {
             .expect("load session should succeed")
             .expect("session should exist");
         assert_eq!(loaded.title, DEFAULT_SESSION_TITLE);
+    }
+
+    #[tokio::test]
+    async fn test_reset_session_record_clears_title_message_count_and_usage() {
+        let storage = Arc::new(SqliteStorage::new("sqlite::memory:").await.unwrap());
+        let store = DatabaseSessionStore::new(storage).await.unwrap();
+
+        let session = store
+            .create_session(
+                &sample_context(),
+                "agent-a",
+                "qwen-max",
+                Some("gpt-5.3"),
+                None,
+            )
+            .await
+            .expect("create session should succeed");
+        store
+            .update_session_title(&session.id, "Custom Title")
+            .await
+            .expect("title update should succeed");
+        store
+            .record_session_progress(
+                &session.id,
+                4,
+                &TalosUsage {
+                    input_tokens: 11,
+                    output_tokens: 7,
+                    total_tokens: 18,
+                    cache_creation_input_tokens: Some(3),
+                    cache_read_input_tokens: Some(5),
+                },
+                Some("gpt-5.4"),
+            )
+            .await
+            .expect("progress update should succeed");
+
+        let ack = store
+            .reset_session_record(&session.id)
+            .await
+            .expect("reset should succeed");
+        assert!(ack.success);
+
+        let loaded = store
+            .get_session_record(&session.id)
+            .await
+            .expect("load session should succeed")
+            .expect("session should exist");
+        assert_eq!(loaded.title, DEFAULT_SESSION_TITLE);
+        assert_eq!(loaded.message_count, 0);
+        assert_eq!(loaded.usage, TalosUsage::default());
+        assert_eq!(loaded.model, "gpt-5.4");
+        assert_eq!(
+            loaded.conf,
+            SessionConfigOverridePolicy::single_model_conf("gpt-5.3")
+        );
     }
 }

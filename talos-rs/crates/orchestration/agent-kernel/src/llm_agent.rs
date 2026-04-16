@@ -417,8 +417,8 @@ mod tests {
                     prompt_tokens: 11,
                     completion_tokens: 7,
                     total_tokens: 18,
-                    cache_creation_input_tokens: None,
-                    cache_read_input_tokens: None,
+                    cache_creation_input_tokens: Some(5),
+                    cache_read_input_tokens: Some(9),
                 },
                 finish_reason: Some("stop".to_string()),
                 tool_calls: None,
@@ -445,8 +445,8 @@ mod tests {
                             prompt_tokens: 11,
                             completion_tokens: 7,
                             total_tokens: 18,
-                            cache_creation_input_tokens: None,
-                            cache_read_input_tokens: None,
+                            cache_creation_input_tokens: Some(5),
+                            cache_read_input_tokens: Some(9),
                         }),
                     }))
                     .await;
@@ -727,6 +727,8 @@ mod tests {
             result.task_results[0].usage.total_tokens,
             result.usage.total_tokens
         );
+        assert_eq!(result.usage.cache_creation_input_tokens, Some(5));
+        assert_eq!(result.usage.cache_read_input_tokens, Some(9));
     }
 
     #[tokio::test]
@@ -738,10 +740,19 @@ mod tests {
 
         assert_eq!(result.task_results.len(), 1);
         assert_eq!(result.task_results[0].warnings, result.warnings);
-        assert!(!ctx
+        let diagnostics = ctx
             .state_bags
             .request_state
-            .contains_key("last_prompt_diagnostics"));
+            .get("last_prompt_diagnostics")
+            .expect("last prompt diagnostics should be staged");
+        assert_eq!(
+            diagnostics["window_usage"]["cache_creation_input_tokens"].as_u64(),
+            Some(5)
+        );
+        assert_eq!(
+            diagnostics["window_usage"]["cache_read_input_tokens"].as_u64(),
+            Some(9)
+        );
     }
 
     #[tokio::test]

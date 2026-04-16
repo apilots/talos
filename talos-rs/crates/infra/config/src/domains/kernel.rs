@@ -7,6 +7,7 @@ use crate::{
 
 /// Agent kernel runtime configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AgentKernelConfig {
     /// Maximum loop iterations in a single turn
     #[serde(default = "default_kernel_max_iters")]
@@ -72,10 +73,6 @@ pub struct AgentKernelConfig {
     #[serde(default)]
     pub memory: AgentKernelMemoryConfig,
 
-    /// Kernel agent binding defaults
-    #[serde(default)]
-    pub binding: AgentKernelBindingConfig,
-
     /// Tools runtime defaults
     #[serde(default)]
     pub tools: ToolsRuntimeConfig,
@@ -137,26 +134,6 @@ fn default_kernel_execution_loop_iters() -> u32 {
     3
 }
 
-/// Binding defaults under agent.kernel
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentKernelBindingConfig {
-    /// Default kernel agent kind
-    #[serde(default = "default_kernel_binding_agent_kind")]
-    pub default_agent_kind: String,
-}
-
-fn default_kernel_binding_agent_kind() -> String {
-    "llm".to_string()
-}
-
-impl Default for AgentKernelBindingConfig {
-    fn default() -> Self {
-        Self {
-            default_agent_kind: default_kernel_binding_agent_kind(),
-        }
-    }
-}
-
 impl Default for AgentKernelConfig {
     fn default() -> Self {
         Self {
@@ -176,7 +153,6 @@ impl Default for AgentKernelConfig {
             execution_loop_iters: default_kernel_execution_loop_iters(),
             prompt: AgentKernelPromptConfig::default(),
             memory: AgentKernelMemoryConfig::default(),
-            binding: AgentKernelBindingConfig::default(),
             tools: ToolsRuntimeConfig::default(),
             mcp: AgentKernelMcpConfig::default(),
             plan_react: PlanReActPolicy::default(),

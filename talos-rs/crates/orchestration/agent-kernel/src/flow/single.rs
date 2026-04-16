@@ -5,7 +5,7 @@ use crate::{
         should_force_finalization_for_empty_response, should_force_finalization_for_step,
         should_inject_read_only_nudge, stage_session_state_update,
         stop_reason_for_forced_finalization, ForcedFinalizationCause, ToolLoopGuardState,
-        PROMPT_WARNING_STATE_KEY, SESSION_CONTINUITY_STATE_KEY,
+        LAST_PROMPT_DIAGNOSTICS_STATE_KEY, PROMPT_WARNING_STATE_KEY, SESSION_CONTINUITY_STATE_KEY,
     },
     StreamingToolExecutionConfig, ToolExecutionContext,
 };
@@ -230,6 +230,7 @@ impl BaseLlmFlow for SingleFlow {
             &self.agent_name,
             &self.agent_description,
             input,
+            self.llm_provider.clone(),
             self.tool_definition_provider.clone(),
             self.memory_store.clone(),
             &self.kernel_config,
@@ -797,6 +798,14 @@ impl BaseLlmFlow for SingleFlow {
         };
 
         let executed = finalize_general_turn_artifacts(state, final_text.clone(), stop_reason);
+        let mut prompt_diagnostics = prepared.prompt_diagnostics.clone();
+        prompt_diagnostics.window_usage.cache_read_input_tokens =
+            executed.usage.cache_read_input_tokens;
+        prompt_diagnostics.window_usage.cache_creation_input_tokens =
+            executed.usage.cache_creation_input_tokens;
+        if let Ok(value) = serde_json::to_value(&prompt_diagnostics) {
+            ctx.set_request_state(LAST_PROMPT_DIAGNOSTICS_STATE_KEY, value);
+        }
         if let Some(session_continuity) = build_session_continuity(&executed) {
             if let Ok(value) = serde_json::to_value(session_continuity) {
                 stage_session_state_update(

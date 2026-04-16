@@ -19,14 +19,12 @@ load_env() {
 }
 
 prepare_talos_home() {
-  local test_home="${HOME}/.talos"
+  local test_home="${TALOS_HOME:-${HOME}/.talos}"
   local config_src="${ROOT_DIR}/conf/talos.yaml"
   local config_dst="${test_home}/conf/talos.yaml"
 
   mkdir -p "${test_home}/conf" "${test_home}/logs" "${test_home}/data"
-  if [[ ! -f "${config_dst}" ]]; then
-    cp "${config_src}" "${config_dst}"
-  fi
+  cp "${config_src}" "${config_dst}"
 }
 
 require_command() {

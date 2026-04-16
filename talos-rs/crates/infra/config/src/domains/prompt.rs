@@ -10,6 +10,7 @@ pub enum BootstrapPromptWarningMode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AgentKernelBootstrapPromptConfig {
     /// Enable workspace bootstrap prompt injection.
     #[serde(default = "default_true")]
@@ -80,16 +81,50 @@ impl Default for AgentKernelBootstrapPromptConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ReservedOutputPolicy {
+    UseModelDefault,
+    Fixed { tokens: usize },
+    Ratio { numerator: u32, denominator: u32 },
+}
+
+impl Default for ReservedOutputPolicy {
+    fn default() -> Self {
+        Self::UseModelDefault
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PromptWindowPolicy {
+    #[serde(default)]
+    pub reserved_output_tokens: ReservedOutputPolicy,
+
+    #[serde(default = "default_prompt_compaction_buffer_tokens")]
+    pub compaction_buffer_tokens: usize,
+}
+
+fn default_prompt_compaction_buffer_tokens() -> usize {
+    4_096
+}
+
+impl Default for PromptWindowPolicy {
+    fn default() -> Self {
+        Self {
+            reserved_output_tokens: ReservedOutputPolicy::default(),
+            compaction_buffer_tokens: default_prompt_compaction_buffer_tokens(),
+        }
+    }
+}
+
 /// Prompt defaults under agent.kernel
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AgentKernelPromptConfig {
-    /// Static prompt token budget
-    #[serde(default = "default_prompt_max_static_tokens")]
-    pub max_static_tokens: usize,
-
-    /// Dynamic prompt token budget
-    #[serde(default = "default_prompt_max_dynamic_tokens")]
-    pub max_dynamic_tokens: usize,
+    /// Prompt context window governance policy.
+    #[serde(default)]
+    pub window: PromptWindowPolicy,
 
     /// Include session summary in prompt context
     #[serde(default = "default_true")]
@@ -99,9 +134,21 @@ pub struct AgentKernelPromptConfig {
     #[serde(default = "default_true")]
     pub include_recent_messages: bool,
 
+    /// Target recent message count when building session prompt context.
+    #[serde(default = "default_prompt_session_recent_messages_limit")]
+    pub session_recent_messages_limit: usize,
+
     /// Include retrieved memories in prompt context
     #[serde(default = "default_true")]
     pub include_retrieved_memories: bool,
+
+    /// Number of latest summaries to inject.
+    #[serde(default = "default_prompt_session_summary_recent_count")]
+    pub session_summary_recent_count: usize,
+
+    /// Maximum characters retained per summary item.
+    #[serde(default = "default_prompt_session_summary_max_chars")]
+    pub session_summary_max_chars: usize,
 
     /// Maximum retrieved memory items injected into prompt
     #[serde(default = "default_prompt_retrieved_memory_max_items")]
@@ -116,27 +163,33 @@ pub struct AgentKernelPromptConfig {
     pub bootstrap: AgentKernelBootstrapPromptConfig,
 }
 
-fn default_prompt_max_static_tokens() -> usize {
-    2000
-}
-
-fn default_prompt_max_dynamic_tokens() -> usize {
-    3200
-}
-
 impl Default for AgentKernelPromptConfig {
     fn default() -> Self {
         Self {
-            max_static_tokens: default_prompt_max_static_tokens(),
-            max_dynamic_tokens: default_prompt_max_dynamic_tokens(),
+            window: PromptWindowPolicy::default(),
             include_session_summary: true,
             include_recent_messages: true,
+            session_recent_messages_limit: default_prompt_session_recent_messages_limit(),
             include_retrieved_memories: true,
+            session_summary_recent_count: default_prompt_session_summary_recent_count(),
+            session_summary_max_chars: default_prompt_session_summary_max_chars(),
             retrieved_memory_max_items: default_prompt_retrieved_memory_max_items(),
             retrieved_memory_max_chars: default_prompt_retrieved_memory_max_chars(),
             bootstrap: AgentKernelBootstrapPromptConfig::default(),
         }
     }
+}
+
+fn default_prompt_session_recent_messages_limit() -> usize {
+    24
+}
+
+fn default_prompt_session_summary_recent_count() -> usize {
+    2
+}
+
+fn default_prompt_session_summary_max_chars() -> usize {
+    1200
 }
 
 fn default_prompt_retrieved_memory_max_items() -> usize {

@@ -328,6 +328,33 @@ pub struct TalosUsage {
     pub input_tokens: u32,
     pub output_tokens: u32,
     pub total_tokens: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_creation_input_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read_input_tokens: Option<u32>,
+}
+
+impl TalosUsage {
+    pub fn accumulate(&mut self, other: &Self) {
+        self.input_tokens = self.input_tokens.saturating_add(other.input_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(other.output_tokens);
+        self.total_tokens = self.total_tokens.saturating_add(other.total_tokens);
+        self.cache_creation_input_tokens = sum_optional_tokens(
+            self.cache_creation_input_tokens,
+            other.cache_creation_input_tokens,
+        );
+        self.cache_read_input_tokens =
+            sum_optional_tokens(self.cache_read_input_tokens, other.cache_read_input_tokens);
+    }
+}
+
+fn sum_optional_tokens(left: Option<u32>, right: Option<u32>) -> Option<u32> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.saturating_add(right)),
+        (Some(left), None) => Some(left),
+        (None, Some(right)) => Some(right),
+        (None, None) => None,
+    }
 }
 
 /// Talos response shape returned by session interaction APIs.

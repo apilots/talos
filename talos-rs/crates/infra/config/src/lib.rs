@@ -38,7 +38,7 @@ pub type TalosTimezone = chrono_tz::Tz;
 pub use domains::agent::{
     AgentConfig, ExecutionMode, PlanReActPolicy, PlannerMode, PlannerSelection,
 };
-pub use domains::kernel::{AgentKernelBindingConfig, AgentKernelConfig};
+pub use domains::kernel::AgentKernelConfig;
 pub use domains::memory::AgentKernelMemoryConfig;
 pub use domains::network::{
     ChannelConfig, ChannelsConfig, DmPolicy, DmScope, GatewayConfig, GroupPolicy, LlmConfig,
@@ -48,6 +48,7 @@ pub use domains::network::{
 };
 pub use domains::prompt::{
     AgentKernelBootstrapPromptConfig, AgentKernelPromptConfig, BootstrapPromptWarningMode,
+    PromptWindowPolicy, ReservedOutputPolicy,
 };
 pub use domains::storage::{DatabaseType, StorageBackendConfig};
 pub use domains::tools::{
@@ -61,6 +62,7 @@ pub use paths::{
 
 /// 主配置结构
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Global timezone used for user-visible time rendering.
     #[serde(default = "default_timezone")]

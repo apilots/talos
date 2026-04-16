@@ -105,6 +105,8 @@ async fn test_execute_general_turn_loop_forces_summary_when_budget_is_exhausted(
             total_estimated_tokens: 0,
             static_estimated_tokens: 0,
             dynamic_estimated_tokens: 0,
+            window_usage: talos_prompt::PromptWindowUsage::default(),
+            session_history_compaction: None,
         },
         warnings: Vec::new(),
         prompt_warning_state: None,

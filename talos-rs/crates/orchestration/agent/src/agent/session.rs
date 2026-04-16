@@ -1,7 +1,7 @@
 use super::{ActiveTurnHandle, AgentImpl};
 use chrono::Utc;
 use std::time::Duration;
-use talos_error::TalosResult;
+use talos_error::{TalosError, TalosResult};
 use talos_memory::Memory;
 use talos_memory::{
     SessionTranscriptActions, SessionTranscriptApprovalResponsePayload, SessionTranscriptAuthor,
@@ -9,10 +9,20 @@ use talos_memory::{
     SessionTranscriptEventKind, SessionTranscriptHeader, SessionTranscriptPayload,
     SessionTranscriptRecord,
 };
-use talos_types::TalosSession;
+use talos_types::{talos::TalosUsage, TalosSession};
 use uuid::Uuid;
 
 impl AgentImpl {
+    fn ensure_session_is_idle(&self, session_id: &str, action: &str) -> TalosResult<()> {
+        if self.active_turns.contains_key(session_id) {
+            return Err(TalosError::ValidationError(format!(
+                "cannot {} session `{}` while a turn is active",
+                action, session_id
+            )));
+        }
+        Ok(())
+    }
+
     pub(crate) fn register_active_turn(&self, session_id: &str, handle: ActiveTurnHandle) {
         if let Some(previous) = self.active_turns.insert(session_id.to_string(), handle) {
             previous.execution_task.abort();
@@ -162,6 +172,47 @@ impl AgentImpl {
             partial: false,
         };
         self.memory_store.append_transcript_record(&record).await
+    }
+
+    pub(crate) async fn compact_session_impl(
+        &self,
+        session: TalosSession,
+    ) -> TalosResult<TalosUsage> {
+        let session_id = session.context.session_id.clone();
+        self.ensure_session_is_idle(&session_id, "compact")?;
+        let selected_model = if session.config.llm.model.trim().is_empty() {
+            self.model.clone()
+        } else {
+            session.config.llm.model.clone()
+        };
+        let report = talos_agent_kernel::flush_session_memory_with_report(
+            &session_id,
+            &selected_model,
+            self.llm_provider.clone(),
+            self.memory_store.as_ref(),
+            &self.kernel_config,
+            talos_agent_kernel::MemoryFlushPolicy::for_compaction(
+                self.kernel_config.memory.workspace_memory_flush_enabled
+                    && self
+                        .kernel_config
+                        .memory
+                        .workspace_memory_flush_on_compaction,
+            ),
+        )
+        .await?;
+        Ok(TalosUsage {
+            input_tokens: report.input_tokens,
+            output_tokens: report.output_tokens,
+            total_tokens: report.total_tokens,
+            cache_creation_input_tokens: report.cache_creation_input_tokens,
+            cache_read_input_tokens: report.cache_read_input_tokens,
+        })
+    }
+
+    pub(crate) async fn clear_session_impl(&self, session: TalosSession) -> TalosResult<()> {
+        let session_id = session.context.session_id.clone();
+        self.ensure_session_is_idle(&session_id, "clear")?;
+        self.memory_store.reset_session(&session_id).await
     }
 
     pub(crate) async fn close_session_impl(&self, session: TalosSession) -> TalosResult<()> {

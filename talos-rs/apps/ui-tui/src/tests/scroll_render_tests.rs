@@ -24,6 +24,7 @@ fn test_input_status_line_uses_dynamic_token_left_percent() {
         input_tokens: 964,
         output_tokens: 16,
         total_tokens: 980,
+        ..TalosUsage::default()
     };
 
     let text = line_plain_text(&app.input_status_line(120));
@@ -51,10 +52,14 @@ async fn test_message_completed_updates_session_usage() {
             input_tokens: 964,
             output_tokens: 16,
             total_tokens: 980,
+            cache_creation_input_tokens: Some(7),
+            cache_read_input_tokens: Some(13),
         },
     ));
 
     assert_eq!(app.session_usage.total_tokens, 980);
+    assert_eq!(app.session_usage.cache_creation_input_tokens, Some(7));
+    assert_eq!(app.session_usage.cache_read_input_tokens, Some(13));
     assert_eq!(app.token_left_percent(), Some(97));
 }
 

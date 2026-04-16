@@ -229,6 +229,32 @@ impl TalosClient {
         ))
     }
 
+    pub async fn compact_session(&self, session_id: &str) -> TalosResult<TalosSession> {
+        let url = format!(
+            "{}/v1/sessions/{}/compact",
+            self.config.gateway_url, session_id
+        );
+        let response = self
+            .authorized(self.http_client.post(&url))
+            .send()
+            .await
+            .map_err(|e| Self::request_error("POST", &url, e))?;
+        Self::decode_json(response, "POST", &url).await
+    }
+
+    pub async fn clear_session(&self, session_id: &str) -> TalosResult<TalosSession> {
+        let url = format!(
+            "{}/v1/sessions/{}/clear",
+            self.config.gateway_url, session_id
+        );
+        let response = self
+            .authorized(self.http_client.post(&url))
+            .send()
+            .await
+            .map_err(|e| Self::request_error("POST", &url, e))?;
+        Self::decode_json(response, "POST", &url).await
+    }
+
     pub async fn get_session_turns(
         &self,
         session_id: &str,

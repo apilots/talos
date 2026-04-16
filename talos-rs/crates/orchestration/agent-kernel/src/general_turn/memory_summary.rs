@@ -1,5 +1,6 @@
 use super::*;
 use serde::{Deserialize, Serialize};
+use talos_llm_provider::Usage;
 
 const MEMORY_PERSISTENCE_DECISION_PROMPT: &str = r#"Decide whether this sanitized session summary should be persisted.
 Return ONLY valid JSON, no markdown fences, no explanation.
@@ -29,6 +30,31 @@ enum MemoryPersistenceKind {
 struct MemoryPersistenceDecision {
     decision: MemoryPersistenceKind,
     rationale: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MemoryFlushUsageReport {
+    pub request_count: u32,
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+    pub total_tokens: u32,
+    pub cache_creation_input_tokens: Option<u32>,
+    pub cache_read_input_tokens: Option<u32>,
+}
+
+impl MemoryFlushUsageReport {
+    fn record_usage(&mut self, usage: &Usage) {
+        self.request_count = self.request_count.saturating_add(1);
+        self.input_tokens = self.input_tokens.saturating_add(usage.prompt_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(usage.completion_tokens);
+        self.total_tokens = self.total_tokens.saturating_add(usage.total_tokens);
+        self.cache_creation_input_tokens = sum_optional_tokens(
+            self.cache_creation_input_tokens,
+            usage.cache_creation_input_tokens,
+        );
+        self.cache_read_input_tokens =
+            sum_optional_tokens(self.cache_read_input_tokens, usage.cache_read_input_tokens);
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -252,7 +278,7 @@ async fn decide_memory_persistence(
     selected_model: &str,
     llm_provider: Arc<dyn LlmProvider>,
     sanitized_input: &str,
-) -> TalosResult<MemoryPersistenceDecision> {
+) -> TalosResult<(MemoryPersistenceDecision, Usage)> {
     let response = llm_provider
         .chat(
             ChatRequest::builder()
@@ -265,28 +291,30 @@ async fn decide_memory_persistence(
         )
         .await?;
 
-    serde_json::from_str(strip_json_fences(&response.content)).map_err(|err| {
+    let decision = serde_json::from_str(strip_json_fences(&response.content)).map_err(|err| {
         talos_error::TalosError::ToolError(format!(
             "parse memory persistence decision json: {}",
             err
         ))
-    })
+    })?;
+    Ok((decision, response.usage))
 }
 
-pub async fn flush_session_memory(
+pub async fn flush_session_memory_with_report(
     session_id: &str,
     selected_model: &str,
     llm_provider: Arc<dyn LlmProvider>,
     memory_store: &MemoryStore,
     kernel_config: &AgentKernelConfig,
     policy: MemoryFlushPolicy,
-) -> TalosResult<()> {
+) -> TalosResult<MemoryFlushUsageReport> {
+    let mut usage_report = MemoryFlushUsageReport::default();
     if policy.has_persistence_target() {
         if policy.enforce_threshold {
             let threshold = kernel_config.memory.compaction_threshold_bytes as u64;
             if threshold == 0 {
                 tracing::debug!(session_id = %session_id, "skip memory flush because threshold is zero");
-                return Ok(());
+                return Ok(usage_report);
             }
             let session_bytes = memory_store.session_size_bytes(session_id).await?;
             if session_bytes < threshold {
@@ -296,7 +324,7 @@ pub async fn flush_session_memory(
                     threshold,
                     "skip memory flush because session size is below threshold"
                 );
-                return Ok(());
+                return Ok(usage_report);
             }
         }
     } else {
@@ -306,7 +334,7 @@ pub async fn flush_session_memory(
             flush_workspace_memory = policy.flush_workspace_memory,
             "skip memory flush because all persistence targets are disabled"
         );
-        return Ok(());
+        return Ok(usage_report);
     }
 
     let context = memory_store
@@ -322,7 +350,7 @@ pub async fn flush_session_memory(
         .await?;
     if context.recent_messages.is_empty() {
         tracing::debug!(session_id = %session_id, "skip memory flush because session prompt context is empty");
-        return Ok(());
+        return Ok(usage_report);
     }
     let transcript = context
         .recent_messages
@@ -342,7 +370,7 @@ pub async fn flush_session_memory(
         .join("\n");
     if transcript.trim().is_empty() {
         tracing::debug!(session_id = %session_id, "skip memory flush because transcript is empty");
-        return Ok(());
+        return Ok(usage_report);
     }
 
     let selected_model = selected_model.to_string();
@@ -355,18 +383,19 @@ pub async fn flush_session_memory(
         ])
         .build();
     let response = llm_provider_for_summary.chat(request).await?;
+    usage_report.record_usage(&response.usage);
     let summary: SessionMemorySummary = serde_json::from_str(strip_json_fences(&response.content))
         .map_err(|err| {
             talos_error::TalosError::ToolError(format!("parse memory summary json: {}", err))
         })?;
     if summary.title.trim().is_empty() {
         tracing::debug!(session_id = %session_id, "skip memory flush because summary title is empty");
-        return Ok(());
+        return Ok(usage_report);
     }
     let workspace_body = render_workspace_summary_body(&summary);
     let session_summary_content = render_session_summary_content(&summary);
     if session_summary_content.is_empty() {
-        return Ok(());
+        return Ok(usage_report);
     }
     if !policy.persist_session_summary && policy.flush_workspace_memory {
         if !workspace_body.is_empty() {
@@ -379,15 +408,16 @@ pub async fn flush_session_memory(
                 })
                 .await?;
         }
-        return Ok(());
+        return Ok(usage_report);
     }
     let sanitized_input = build_sanitized_memory_decision_input(&context, &summary);
     let Some(judge_input) = render_sanitized_memory_decision_input(&sanitized_input) else {
         tracing::debug!(session_id = %session_id, "skip memory flush because sanitized judge input is empty");
-        return Ok(());
+        return Ok(usage_report);
     };
-    let persistence =
+    let (persistence, persistence_usage) =
         decide_memory_persistence(&selected_model, llm_provider.clone(), &judge_input).await?;
+    usage_report.record_usage(&persistence_usage);
     tracing::debug!(
         session_id = %session_id,
         decision = ?persistence.decision,
@@ -395,7 +425,7 @@ pub async fn flush_session_memory(
         "memory persistence decision"
     );
     if persistence.decision == MemoryPersistenceKind::Skip {
-        return Ok(());
+        return Ok(usage_report);
     }
     let latest_seq = memory_store.latest_seq(session_id).await?;
     let source_turn_count = context
@@ -440,6 +470,26 @@ pub async fn flush_session_memory(
             .await?;
     }
 
+    Ok(usage_report)
+}
+
+pub async fn flush_session_memory(
+    session_id: &str,
+    selected_model: &str,
+    llm_provider: Arc<dyn LlmProvider>,
+    memory_store: &MemoryStore,
+    kernel_config: &AgentKernelConfig,
+    policy: MemoryFlushPolicy,
+) -> TalosResult<()> {
+    let _ = flush_session_memory_with_report(
+        session_id,
+        selected_model,
+        llm_provider,
+        memory_store,
+        kernel_config,
+        policy,
+    )
+    .await?;
     Ok(())
 }
 
@@ -450,7 +500,7 @@ pub(crate) async fn compact_workspace_context_if_needed(
     memory_store: &MemoryStore,
     kernel_config: &AgentKernelConfig,
 ) -> TalosResult<()> {
-    flush_session_memory(
+    let _ = flush_session_memory_with_report(
         session_id,
         selected_model,
         llm_provider,
@@ -461,5 +511,15 @@ pub(crate) async fn compact_workspace_context_if_needed(
                 && kernel_config.memory.workspace_memory_flush_on_compaction,
         ),
     )
-    .await
+    .await?;
+    Ok(())
+}
+
+fn sum_optional_tokens(left: Option<u32>, right: Option<u32>) -> Option<u32> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.saturating_add(right)),
+        (Some(left), None) => Some(left),
+        (None, Some(right)) => Some(right),
+        (None, None) => None,
+    }
 }

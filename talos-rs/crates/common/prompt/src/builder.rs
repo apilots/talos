@@ -3,7 +3,7 @@ use talos_error::TalosResult;
 use talos_llm_provider::ChatMessage;
 use talos_memory::{MemoryStore, RetrievedMemoryItem};
 use talos_tools::ToolDefinitionProvider;
-use talos_types::talos::TalosSessionEnvironment;
+use talos_types::{talos::TalosSessionEnvironment, ModelInfo};
 use tokio::fs;
 
 use crate::types::*;
@@ -25,6 +25,7 @@ pub struct PromptBuilder<'a> {
     pub(crate) session_environment: Option<TalosSessionEnvironment>,
     pub(crate) project_root: Option<PathBuf>,
     pub(crate) session_continuity: Option<SessionContinuity>,
+    pub(crate) model_info: Option<ModelInfo>,
     pub(crate) config: PromptBuildConfig,
 }
 
@@ -51,6 +52,7 @@ impl<'a> PromptBuilder<'a> {
             session_environment: None,
             project_root: None,
             session_continuity: None,
+            model_info: None,
             config: PromptBuildConfig::default(),
         }
     }
@@ -122,9 +124,8 @@ impl<'a> PromptBuilder<'a> {
         self
     }
 
-    pub fn budget(mut self, max_static_tokens: usize, max_dynamic_tokens: usize) -> Self {
-        self.config.budget.max_static_tokens = max_static_tokens.max(1);
-        self.config.budget.max_dynamic_tokens = max_dynamic_tokens.max(1);
+    pub fn model_info(mut self, model_info: ModelInfo) -> Self {
+        self.model_info = Some(model_info);
         self
     }
 

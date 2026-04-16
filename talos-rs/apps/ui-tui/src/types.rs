@@ -53,6 +53,18 @@ impl CommandSuggestion {
                 description: "Show connection status".to_string(),
             },
             CommandSuggestion {
+                name: "compact".to_string(),
+                insert_text: "/compact".to_string(),
+                display_text: "/compact".to_string(),
+                description: "Compact current session history".to_string(),
+            },
+            CommandSuggestion {
+                name: "clear".to_string(),
+                insert_text: "/clear".to_string(),
+                display_text: "/clear".to_string(),
+                description: "Clear current session context".to_string(),
+            },
+            CommandSuggestion {
                 name: "project".to_string(),
                 insert_text: "/project".to_string(),
                 display_text: "/project [path|clear]".to_string(),
@@ -280,6 +292,8 @@ pub(crate) struct PendingApprovalState {
 pub(crate) enum RemoteCommandUpdate {
     ModelsLoaded(TalosResult<Vec<ModelInfo>>),
     StatusLoaded(TalosResult<Option<TalosSession>>),
+    SessionCompacted(TalosResult<TalosSession>),
+    SessionCleared(TalosResult<TalosSession>),
     ModelSwitched {
         requested: String,
         result: TalosResult<TalosSession>,

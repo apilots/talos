@@ -39,7 +39,8 @@ pub(crate) fn load_config_from_path(path: Option<&str>) -> TalosResult<Config> {
         .build()
         .map_err(|e| TalosError::ConfigError(e.to_string()))?;
 
-    // Strictly require explicit config keys instead of relying on fallback defaults.
+    // Require explicit top-level operational keys while allowing optional prompt knobs
+    // to fall back to typed defaults when omitted from config files.
     let raw_value: Value = config
         .try_deserialize()
         .map_err(|e| TalosError::ConfigError(e.to_string()))?;
@@ -152,13 +153,20 @@ agent:
     execution_mode: single
     execution_children: 2
     execution_loop_iters: 3
-    prompt:
-      max_static_tokens: 2000
-      max_dynamic_tokens: 3200
-      include_session_summary: true
-      include_recent_messages: true
-    binding:
-      default_agent_kind: llm
+    memory:
+      hot_recent_messages: 64
+      compaction_threshold_bytes: 262144
+      root_memory_filename: MEMORY.md
+      memory_dirname: memory
+      workspace_memory_flush_enabled: true
+      workspace_memory_flush_on_compaction: true
+      flush_file_pattern: YYYY-MM-DD.md
+      tool_search_enabled: true
+      tool_get_enabled: true
+      search_max_results: 6
+      search_include_root_memory: true
+      search_include_daily_memory: true
+      search_include_sessions: false
 
 # Gateway 配置
 gateway:
@@ -259,6 +267,7 @@ logging:
 storage:
   database_type: sqlite
   max_connections: 5
+
 "#
     .to_string()
 }

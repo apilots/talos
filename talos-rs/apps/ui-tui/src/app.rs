@@ -116,7 +116,7 @@ impl TuiApp {
         );
         app.push_block(
             ChatRole::System,
-            "Type a message or use /help /model /project /history /sessions /status /quit"
+            "Type a message or use /help /model /project /history /sessions /status /compact /clear /quit"
                 .to_string(),
         );
         app.push_right_event("tui initialized".to_string());
@@ -283,6 +283,42 @@ impl TuiApp {
                 );
             }
         }
+        self.rebuild_chat_render_state_if_rect();
+    }
+
+    pub(crate) fn reset_chat_surface(&mut self) {
+        self.chat_blocks.clear();
+        self.rendered_chat_lines.clear();
+        self.chat_history.clear();
+        self.tool_events.clear();
+        self.right_panel_events.clear();
+        self.rendered_round_footer_buttons.clear();
+        self.chat_selection = None;
+        self.pending_approval = None;
+        self.active_message = None;
+        self.active_message_raw = None;
+        self.active_user_idx = None;
+        self.received_output_delta = false;
+        self.chat_scroll = 0;
+        self.chat_manual_scroll = false;
+        self.sent_messages_history.clear();
+        self.message_history_index = None;
+        self.transcript = Default::default();
+        self.push_block(
+            ChatRole::System,
+            build_welcome_card(
+                APP_VERSION,
+                &self.current_model,
+                self.current_project_root.as_deref(),
+                &self.startup_directory,
+                self.connection_mode,
+            ),
+        );
+        self.push_block(
+            ChatRole::System,
+            "Type a message or use /help /model /project /history /sessions /status /compact /clear /quit"
+                .to_string(),
+        );
         self.rebuild_chat_render_state_if_rect();
     }
 

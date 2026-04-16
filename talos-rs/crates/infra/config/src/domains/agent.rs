@@ -6,6 +6,7 @@ use crate::AgentKernelConfig;
 
 /// Agent configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AgentConfig {
     /// Agent name
     #[serde(default = "default_agent_name")]

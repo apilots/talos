@@ -484,7 +484,13 @@ impl LlmProvider for SummaryProvider {
             content: response,
             reasoning: Vec::new(),
             model: "summary-model".to_string(),
-            usage: Usage::default(),
+            usage: Usage {
+                prompt_tokens: 13,
+                completion_tokens: 7,
+                total_tokens: 20,
+                cache_creation_input_tokens: Some(3),
+                cache_read_input_tokens: Some(11),
+            },
             finish_reason: Some("stop".to_string()),
             tool_calls: None,
         })

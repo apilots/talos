@@ -1,9 +1,11 @@
 use super::*;
 use crate::{EventAuthor, ExecutionBranch, SessionEvent, SessionEventKind, SessionEventPayload};
 use serde::de::DeserializeOwned;
+use talos_prompt::PromptSectionKind;
 
 pub(crate) const SESSION_CONTINUITY_STATE_KEY: &str = "session_continuity";
 pub(crate) const PROMPT_WARNING_STATE_KEY: &str = "prompt_warning_state";
+pub(crate) const LAST_PROMPT_DIAGNOSTICS_STATE_KEY: &str = "last_prompt_diagnostics";
 
 fn split_prompt_prefix_messages(messages: &[ChatMessage], input: &str) -> Vec<ChatMessage> {
     let Some(last_message) = messages.last() else {
@@ -13,6 +15,176 @@ fn split_prompt_prefix_messages(messages: &[ChatMessage], input: &str) -> Vec<Ch
         return messages[..messages.len().saturating_sub(1)].to_vec();
     }
     messages.to_vec()
+}
+
+fn build_prompt_load_policy(kernel_config: &AgentKernelConfig) -> PromptLoadPolicy {
+    PromptLoadPolicy {
+        include_session_summary: kernel_config.prompt.include_session_summary,
+        include_recent_messages: kernel_config.prompt.include_recent_messages,
+        include_retrieved_memories: kernel_config.prompt.include_retrieved_memories,
+        session_recent_limit: kernel_config.prompt.session_recent_messages_limit,
+        retrieved_memory_max_items: kernel_config.prompt.retrieved_memory_max_items,
+        retrieved_memory_max_chars: kernel_config.prompt.retrieved_memory_max_chars,
+        unified_recent_limit: 10,
+    }
+}
+
+fn build_compacted_prompt_load_policy(kernel_config: &AgentKernelConfig) -> PromptLoadPolicy {
+    PromptLoadPolicy {
+        include_session_summary: true,
+        include_recent_messages: true,
+        include_retrieved_memories: kernel_config.prompt.include_retrieved_memories,
+        session_recent_limit: kernel_config.prompt.session_summary_recent_count.max(1),
+        retrieved_memory_max_items: kernel_config.prompt.retrieved_memory_max_items,
+        retrieved_memory_max_chars: kernel_config.prompt.retrieved_memory_max_chars,
+        unified_recent_limit: 10,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_prompt_builder<'a>(
+    agent_name: &str,
+    agent_description: &str,
+    input: &str,
+    tool_definition_provider: &'a dyn ToolDefinitionProvider,
+    memory_store: &'a MemoryStore,
+    kernel_config: &AgentKernelConfig,
+    session_id: &'a str,
+    phase: PromptPhase,
+    planning_instruction: Option<String>,
+    selected_model_info: talos_types::ModelInfo,
+    session_environment: Option<talos_types::talos::TalosSessionEnvironment>,
+    project_root: Option<std::path::PathBuf>,
+    session_continuity: Option<SessionContinuity>,
+    load_policy: PromptLoadPolicy,
+) -> TalosResult<PromptBuilder<'a>> {
+    Ok(PromptBuilder::new()
+        .agent(agent_name.to_string(), agent_description.to_string())
+        .phase(phase)
+        .planner_mode(kernel_config.planner_mode.as_str())?
+        .planning_instruction(planning_instruction)
+        .config(PromptBuildConfig {
+            load_policy,
+            prompt: kernel_config.prompt.clone(),
+            memory: kernel_config.memory.clone(),
+        })
+        .tools(tool_definition_provider)
+        .memory_store(session_id, memory_store)
+        .model_info(selected_model_info)
+        .session_environment(session_environment)
+        .project_root(project_root)
+        .session_continuity(session_continuity)
+        .user_input(input.to_string()))
+}
+
+fn count_section_kind(sections: &[talos_prompt::PromptSection], kind: PromptSectionKind) -> usize {
+    sections
+        .iter()
+        .filter(|section| section.kind == kind)
+        .count()
+}
+
+fn history_sections_were_dropped(prompt_assembly: &talos_prompt::PromptAssembly) -> bool {
+    prompt_assembly
+        .diagnostics
+        .dropped_sections
+        .iter()
+        .any(|kind| {
+            matches!(
+                kind,
+                PromptSectionKind::RecentMessages | PromptSectionKind::SessionSummary
+            )
+        })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn compact_session_history_if_needed(
+    prompt_assembly: &talos_prompt::PromptAssembly,
+    agent_name: &str,
+    agent_description: &str,
+    input: &str,
+    llm_provider: Arc<dyn LlmProvider>,
+    tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
+    memory_store: Arc<MemoryStore>,
+    kernel_config: &AgentKernelConfig,
+    session_id: &str,
+    selected_model: &str,
+    selected_model_info: talos_types::ModelInfo,
+    phase: PromptPhase,
+    planning_instruction: Option<String>,
+    session_environment: Option<talos_types::talos::TalosSessionEnvironment>,
+    project_root: Option<std::path::PathBuf>,
+    session_continuity: Option<SessionContinuity>,
+) -> TalosResult<Option<(talos_prompt::PromptAssembly, SessionHistoryCompaction)>> {
+    let window_usage = &prompt_assembly.diagnostics.window_usage;
+    let history_reduction_needed = history_sections_were_dropped(prompt_assembly);
+    if !window_usage.window_resolved
+        || (window_usage.within_effective_budget && !history_reduction_needed)
+    {
+        return Ok(None);
+    }
+
+    let pre_recent_messages = count_section_kind(
+        &prompt_assembly.dynamic_suffix_sections,
+        PromptSectionKind::RecentMessages,
+    );
+    let flush_workspace_memory = kernel_config.memory.workspace_memory_flush_enabled
+        && kernel_config.memory.workspace_memory_flush_on_compaction;
+    let compaction_usage = flush_session_memory_with_report(
+        session_id,
+        selected_model,
+        llm_provider,
+        memory_store.as_ref(),
+        kernel_config,
+        MemoryFlushPolicy::new(false, true, flush_workspace_memory),
+    )
+    .await?;
+
+    let compacted_builder = build_prompt_builder(
+        agent_name,
+        agent_description,
+        input,
+        tool_definition_provider.as_ref(),
+        memory_store.as_ref(),
+        kernel_config,
+        session_id,
+        phase,
+        planning_instruction,
+        selected_model_info,
+        session_environment,
+        project_root,
+        session_continuity,
+        build_compacted_prompt_load_policy(kernel_config),
+    )?;
+    let compacted_assembly = compacted_builder.assemble().await?;
+    let summary_sections_after = count_section_kind(
+        &compacted_assembly.dynamic_suffix_sections,
+        PromptSectionKind::SessionSummary,
+    );
+    if summary_sections_after == 0 {
+        return Ok(None);
+    }
+
+    let recent_messages_after = count_section_kind(
+        &compacted_assembly.dynamic_suffix_sections,
+        PromptSectionKind::RecentMessages,
+    );
+    Ok(Some((
+        compacted_assembly.clone(),
+        SessionHistoryCompaction {
+            pre_compaction_total_tokens: prompt_assembly.diagnostics.total_estimated_tokens,
+            post_compaction_total_tokens: compacted_assembly.diagnostics.total_estimated_tokens,
+            recent_messages_before: pre_recent_messages,
+            recent_messages_after,
+            summary_sections_after,
+            compaction_request_count: compaction_usage.request_count,
+            compaction_input_tokens: compaction_usage.input_tokens,
+            compaction_output_tokens: compaction_usage.output_tokens,
+            compaction_total_tokens: compaction_usage.total_tokens,
+            compaction_cache_creation_input_tokens: compaction_usage.cache_creation_input_tokens,
+            compaction_cache_read_input_tokens: compaction_usage.cache_read_input_tokens,
+        },
+    )))
 }
 
 async fn emit_prompt_warning_events(ctx: &mut InvocationContext, warnings: &[KernelWarning]) {
@@ -37,10 +209,7 @@ async fn emit_prompt_warning_events(ctx: &mut InvocationContext, warnings: &[Ker
     }
 }
 
-fn load_session_state_value<T: DeserializeOwned>(
-    ctx: &InvocationContext,
-    key: &str,
-) -> Option<T> {
+fn load_session_state_value<T: DeserializeOwned>(ctx: &InvocationContext, key: &str) -> Option<T> {
     ctx.session
         .state
         .get(crate::StateNamespace::Session, key)
@@ -52,9 +221,10 @@ fn prompt_warning_key(warning: &KernelWarning) -> Option<String> {
         KernelWarning::PromptBootstrapFileMissing(payload) => {
             Some(format!("missing:{:?}:{}", payload.file_kind, payload.path))
         }
-        KernelWarning::PromptBootstrapFileTruncated(payload) => {
-            Some(format!("truncated:{:?}:{}", payload.file_kind, payload.path))
-        }
+        KernelWarning::PromptBootstrapFileTruncated(payload) => Some(format!(
+            "truncated:{:?}:{}",
+            payload.file_kind, payload.path
+        )),
         KernelWarning::PromptBootstrapFileDropped(payload) => {
             Some(format!("dropped:{:?}:{}", payload.file_kind, payload.path))
         }
@@ -84,10 +254,7 @@ fn filter_prompt_warnings(
         }
     }
 
-    (
-        filtered,
-        changed.then_some(warning_state),
-    )
+    (filtered, changed.then_some(warning_state))
 }
 
 pub(crate) fn stage_session_state_update(
@@ -149,7 +316,11 @@ pub(crate) fn build_session_continuity(
         }
 
         if call.name == "grep_files" {
-            if let Some(pattern) = call.arguments.get("pattern").and_then(|value| value.as_str()) {
+            if let Some(pattern) = call
+                .arguments
+                .get("pattern")
+                .and_then(|value| value.as_str())
+            {
                 grep_patterns.push(pattern.to_string());
             }
         }
@@ -157,7 +328,8 @@ pub(crate) fn build_session_continuity(
 
     let mut recent_unhelpful_patterns = Vec::new();
     if !recent_failed_tools.is_empty() {
-        recent_unhelpful_patterns.push("avoid retrying the same failing path or command".to_string());
+        recent_unhelpful_patterns
+            .push("avoid retrying the same failing path or command".to_string());
     }
     if grep_patterns.len() > 1 {
         let unique_patterns = grep_patterns
@@ -211,6 +383,7 @@ pub async fn prepare_general_turn(
     agent_name: &str,
     agent_description: &str,
     input: &str,
+    llm_provider: Arc<dyn LlmProvider>,
     tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
     memory_store: Arc<MemoryStore>,
     kernel_config: &AgentKernelConfig,
@@ -228,38 +401,61 @@ pub async fn prepare_general_turn(
         crate::TurnPhase::Execution => PromptPhase::Execution,
     };
 
-    let prompt_builder = PromptBuilder::new()
-        .agent(agent_name.to_string(), agent_description.to_string())
-        .phase(phase)
-        .planner_mode(kernel_config.planner_mode.as_str())?
-        .planning_instruction(ctx.planning_instruction.clone())
-        .config(PromptBuildConfig {
-            budget: PromptBudget {
-                max_static_tokens: kernel_config.prompt.max_static_tokens,
-                max_dynamic_tokens: kernel_config.prompt.max_dynamic_tokens,
-            },
-            load_policy: PromptLoadPolicy {
-                include_session_summary: kernel_config.prompt.include_session_summary,
-                include_recent_messages: kernel_config.prompt.include_recent_messages,
-                include_retrieved_memories: kernel_config.prompt.include_retrieved_memories,
-                session_recent_limit: kernel_config.memory.session_recent_messages_limit,
-                retrieved_memory_max_items: kernel_config.prompt.retrieved_memory_max_items,
-                retrieved_memory_max_chars: kernel_config.prompt.retrieved_memory_max_chars,
-                unified_recent_limit: 10,
-            },
-            prompt: kernel_config.prompt.clone(),
-            memory: kernel_config.memory.clone(),
-        })
-        .tools(tool_definition_provider.as_ref())
-        .memory_store(&session_id, memory_store.as_ref())
-        .session_environment(ctx.session_environment.clone())
-        .project_root(ctx.project_root.clone())
-        .session_continuity(session_continuity)
-        .user_input(input.to_string());
-    let prompt_assembly = prompt_builder.assemble().await?;
+    let prompt_builder = build_prompt_builder(
+        agent_name,
+        agent_description,
+        input,
+        tool_definition_provider.as_ref(),
+        memory_store.as_ref(),
+        kernel_config,
+        &session_id,
+        phase,
+        ctx.planning_instruction.clone(),
+        ctx.selected_model_info.clone(),
+        ctx.session_environment.clone(),
+        ctx.project_root.clone(),
+        session_continuity.clone(),
+        build_prompt_load_policy(kernel_config),
+    )?;
+    let mut prompt_assembly = prompt_builder.assemble().await?;
+    if let Some((compacted_assembly, compaction)) = compact_session_history_if_needed(
+        &prompt_assembly,
+        agent_name,
+        agent_description,
+        input,
+        llm_provider,
+        tool_definition_provider.clone(),
+        memory_store.clone(),
+        kernel_config,
+        &session_id,
+        &selected_model,
+        ctx.selected_model_info.clone(),
+        phase,
+        ctx.planning_instruction.clone(),
+        ctx.session_environment.clone(),
+        ctx.project_root.clone(),
+        session_continuity,
+    )
+    .await?
+    {
+        tracing::debug!(
+            session_id = %session_id,
+            agent_id = %agent_id,
+            pre_tokens = compaction.pre_compaction_total_tokens,
+            post_tokens = compaction.post_compaction_total_tokens,
+            recent_messages_before = compaction.recent_messages_before,
+            recent_messages_after = compaction.recent_messages_after,
+            summary_sections_after = compaction.summary_sections_after,
+            "session history compaction rebuilt prompt"
+        );
+        prompt_assembly = compacted_assembly;
+        prompt_assembly.diagnostics.session_history_compaction = Some(compaction);
+    }
     let prompt_diagnostics = prompt_assembly.diagnostics.clone();
-    let (warnings, prompt_warning_state) =
-        filter_prompt_warnings(ctx, derive_prompt_warnings(&prompt_diagnostics, kernel_config));
+    let (warnings, prompt_warning_state) = filter_prompt_warnings(
+        ctx,
+        derive_prompt_warnings(&prompt_diagnostics, kernel_config),
+    );
     tracing::debug!(
         session_id = %session_id,
         agent_id = %agent_id,
@@ -267,9 +463,19 @@ pub async fn prepare_general_turn(
         included_sections = ?prompt_diagnostics.included_sections,
         dropped_sections = ?prompt_diagnostics.dropped_sections,
         truncated_sections = ?prompt_diagnostics.truncated_sections,
+        context_window_tokens = prompt_diagnostics.window_usage.context_window,
+        reserved_output_tokens = prompt_diagnostics.window_usage.reserved_output_tokens,
+        compaction_buffer_tokens = prompt_diagnostics.window_usage.compaction_buffer_tokens,
+        effective_prompt_budget_tokens = prompt_diagnostics.window_usage.effective_prompt_budget,
+        static_prefix_tokens = prompt_diagnostics.window_usage.static_prefix_tokens,
+        dynamic_suffix_tokens = prompt_diagnostics.window_usage.dynamic_suffix_tokens,
+        cache_read_input_tokens = prompt_diagnostics.window_usage.cache_read_input_tokens,
+        cache_creation_input_tokens = prompt_diagnostics.window_usage.cache_creation_input_tokens,
+        within_effective_budget = prompt_diagnostics.window_usage.within_effective_budget,
         static_estimated_tokens = prompt_diagnostics.static_estimated_tokens,
         dynamic_estimated_tokens = prompt_diagnostics.dynamic_estimated_tokens,
         total_estimated_tokens = prompt_diagnostics.total_estimated_tokens,
+        session_history_compaction = ?prompt_diagnostics.session_history_compaction,
         bootstrap_files = ?prompt_diagnostics.bootstrap_files,
         "prompt diagnostics"
     );
@@ -525,12 +731,13 @@ pub async fn run_general_turn(
         agent_name,
         agent_description,
         input,
+        llm_provider.clone(),
         tool_definition_provider,
         memory_store.clone(),
         kernel_config,
     )
     .await?;
-    let prompt_diagnostics = prepared.prompt_diagnostics.clone();
+    let mut prompt_diagnostics = prepared.prompt_diagnostics.clone();
     let warnings = prepared.warnings.clone();
     if let Some(prompt_warning_state) = prepared.prompt_warning_state.as_ref() {
         if let Ok(value) = serde_json::to_value(prompt_warning_state) {
@@ -553,6 +760,26 @@ pub async fn run_general_turn(
         kernel_config,
     )
     .await?;
+    prompt_diagnostics.window_usage.cache_read_input_tokens =
+        executed.usage.cache_read_input_tokens;
+    prompt_diagnostics.window_usage.cache_creation_input_tokens =
+        executed.usage.cache_creation_input_tokens;
+    if let Ok(value) = serde_json::to_value(&prompt_diagnostics) {
+        ctx.set_request_state(LAST_PROMPT_DIAGNOSTICS_STATE_KEY, value);
+    }
+    tracing::debug!(
+        session_id = %prepared.session_id,
+        agent_id = %prepared.agent_id,
+        prompt_context_window_tokens = prompt_diagnostics.window_usage.context_window,
+        prompt_effective_budget_tokens = prompt_diagnostics.window_usage.effective_prompt_budget,
+        prompt_static_prefix_tokens = prompt_diagnostics.window_usage.static_prefix_tokens,
+        prompt_dynamic_suffix_tokens = prompt_diagnostics.window_usage.dynamic_suffix_tokens,
+        prompt_total_tokens = prompt_diagnostics.window_usage.total_tokens,
+        cache_read_input_tokens = prompt_diagnostics.window_usage.cache_read_input_tokens,
+        cache_creation_input_tokens = prompt_diagnostics.window_usage.cache_creation_input_tokens,
+        session_history_compaction = ?prompt_diagnostics.session_history_compaction,
+        "prompt governance metrics"
+    );
     persist_general_turn_artifacts(
         &prepared,
         input,

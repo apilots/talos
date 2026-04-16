@@ -33,6 +33,8 @@ struct RecordingApprovalAgent {
     approvals: Arc<Mutex<Vec<(String, String, String, bool, Option<String>)>>>,
     resumed_inputs: Arc<Mutex<Vec<Vec<TalosInputItem>>>>,
     cancelled_sessions: Arc<Mutex<Vec<String>>>,
+    compacted_sessions: Arc<Mutex<Vec<String>>>,
+    cleared_sessions: Arc<Mutex<Vec<String>>>,
 }
 
 impl RecordingApprovalAgent {
@@ -41,6 +43,8 @@ impl RecordingApprovalAgent {
             approvals: Arc::new(Mutex::new(Vec::new())),
             resumed_inputs: Arc::new(Mutex::new(Vec::new())),
             cancelled_sessions: Arc::new(Mutex::new(Vec::new())),
+            compacted_sessions: Arc::new(Mutex::new(Vec::new())),
+            cleared_sessions: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }
@@ -120,6 +124,28 @@ impl AgentOrchestrator for RecordingApprovalAgent {
     }
 
     async fn close_session(&self, _session: TalosSession) -> TalosResult<()> {
+        Ok(())
+    }
+
+    async fn compact_session(&self, session: TalosSession) -> TalosResult<TalosUsage> {
+        self.compacted_sessions
+            .lock()
+            .unwrap()
+            .push(session.context.session_id);
+        Ok(TalosUsage {
+            input_tokens: 5,
+            output_tokens: 3,
+            total_tokens: 8,
+            cache_creation_input_tokens: Some(2),
+            cache_read_input_tokens: Some(4),
+        })
+    }
+
+    async fn clear_session(&self, session: TalosSession) -> TalosResult<()> {
+        self.cleared_sessions
+            .lock()
+            .unwrap()
+            .push(session.context.session_id);
         Ok(())
     }
 
@@ -243,6 +269,17 @@ impl talos_session_store::SessionStore for TitleTestSessionStore {
         Ok(SessionPatchAck { success: true })
     }
 
+    async fn reset_session_record(&self, session_id: &str) -> TalosResult<SessionPatchAck> {
+        let mut sessions = self.sessions.lock().unwrap();
+        let Some(record) = sessions.get_mut(session_id) else {
+            return Ok(SessionPatchAck { success: false });
+        };
+        record.title = DEFAULT_SESSION_TITLE.to_string();
+        record.message_count = 0;
+        record.usage = TalosUsage::default();
+        Ok(SessionPatchAck { success: true })
+    }
+
     async fn update_session_title(&self, session_id: &str, title: &str) -> TalosResult<()> {
         let mut sessions = self.sessions.lock().unwrap();
         let Some(session) = sessions.get_mut(session_id) else {
@@ -308,6 +345,14 @@ impl AgentOrchestrator for TrackingFlushAgent {
     }
 
     async fn close_session(&self, _session: TalosSession) -> TalosResult<()> {
+        Ok(())
+    }
+
+    async fn compact_session(&self, _session: TalosSession) -> TalosResult<TalosUsage> {
+        Ok(TalosUsage::default())
+    }
+
+    async fn clear_session(&self, _session: TalosSession) -> TalosResult<()> {
         Ok(())
     }
 
@@ -490,6 +535,108 @@ async fn test_submit_tool_approval_routes_to_session_agent() {
     let resumed_inputs = resumed_inputs.lock().unwrap();
     assert_eq!(resumed_inputs.len(), 1);
     assert!(resumed_inputs[0].is_empty());
+}
+
+#[tokio::test]
+async fn test_compact_session_routes_to_session_agent_and_records_usage() {
+    let mock_router = Arc::new(MockRouter::new());
+    let session_record = SessionRecord {
+        id: "session-compact".to_string(),
+        title: DEFAULT_SESSION_TITLE.to_string(),
+        context: TalosContext {
+            source_type: TalosSourceType::Im,
+            provider: TalosProvider::Telegram,
+            user_id: "user-1".to_string(),
+            message_id: "message-1".to_string(),
+            trace_id: "trace-1".to_string(),
+            channel_id: Some("test-channel".to_string()),
+            thread_id: None,
+            project_root: None,
+            environment: None,
+        },
+        model: "test-model".to_string(),
+        created_at: 0,
+        last_activity: 0,
+        message_count: 2,
+        usage: TalosUsage::default(),
+        conf: HashMap::new(),
+    };
+    let session_store = Arc::new(TitleTestSessionStore::new(session_record));
+    let coordinator =
+        CoordinatorImpl::new(mock_router, session_store.clone(), TalosConfig::default());
+    let agent = Arc::new(RecordingApprovalAgent::new());
+    let compacted_sessions = agent.compacted_sessions.clone();
+    coordinator
+        .register_agent("test_agent", agent)
+        .await
+        .expect("agent registration should succeed");
+
+    let session = coordinator
+        .compact_session("session-compact")
+        .await
+        .expect("compact session should succeed");
+
+    assert_eq!(
+        compacted_sessions.lock().unwrap().as_slice(),
+        &["session-compact".to_string()]
+    );
+    assert_eq!(session.state.message_count, 2);
+    assert_eq!(session.state.usage.total_tokens, 8);
+    assert_eq!(session.state.usage.cache_creation_input_tokens, Some(2));
+    assert_eq!(session.state.usage.cache_read_input_tokens, Some(4));
+}
+
+#[tokio::test]
+async fn test_clear_session_routes_to_session_agent_and_resets_session_state() {
+    let mock_router = Arc::new(MockRouter::new());
+    let session_record = SessionRecord {
+        id: "session-clear".to_string(),
+        title: "Old Title".to_string(),
+        context: TalosContext {
+            source_type: TalosSourceType::Im,
+            provider: TalosProvider::Telegram,
+            user_id: "user-1".to_string(),
+            message_id: "message-1".to_string(),
+            trace_id: "trace-1".to_string(),
+            channel_id: Some("test-channel".to_string()),
+            thread_id: None,
+            project_root: None,
+            environment: None,
+        },
+        model: "test-model".to_string(),
+        created_at: 0,
+        last_activity: 0,
+        message_count: 6,
+        usage: TalosUsage {
+            input_tokens: 9,
+            output_tokens: 3,
+            total_tokens: 12,
+            cache_creation_input_tokens: Some(1),
+            cache_read_input_tokens: Some(2),
+        },
+        conf: HashMap::new(),
+    };
+    let session_store = Arc::new(TitleTestSessionStore::new(session_record));
+    let coordinator = CoordinatorImpl::new(mock_router, session_store, TalosConfig::default());
+    let agent = Arc::new(RecordingApprovalAgent::new());
+    let cleared_sessions = agent.cleared_sessions.clone();
+    coordinator
+        .register_agent("test_agent", agent)
+        .await
+        .expect("agent registration should succeed");
+
+    let session = coordinator
+        .clear_session("session-clear")
+        .await
+        .expect("clear session should succeed");
+
+    assert_eq!(
+        cleared_sessions.lock().unwrap().as_slice(),
+        &["session-clear".to_string()]
+    );
+    assert_eq!(session.title, DEFAULT_SESSION_TITLE);
+    assert_eq!(session.state.message_count, 0);
+    assert_eq!(session.state.usage, TalosUsage::default());
 }
 
 #[tokio::test]

@@ -206,6 +206,17 @@ impl AgentOrchestrator for MockAgent {
         Ok(())
     }
 
+    async fn compact_session(
+        &self,
+        _session: talos_types::TalosSession,
+    ) -> TalosResult<TalosUsage> {
+        Ok(TalosUsage::default())
+    }
+
+    async fn clear_session(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
+        Ok(())
+    }
+
     async fn drain_memory_flushes(&self, _timeout: Duration) -> TalosResult<()> {
         Ok(())
     }

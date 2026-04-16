@@ -38,11 +38,20 @@ fn test_kernel_defaults() {
     assert_eq!(config.agent.kernel.execution_mode, ExecutionMode::Single);
     assert_eq!(config.agent.kernel.execution_children, 2);
     assert_eq!(config.agent.kernel.execution_loop_iters, 3);
-    assert_eq!(config.agent.kernel.prompt.max_static_tokens, 2000);
-    assert_eq!(config.agent.kernel.prompt.max_dynamic_tokens, 3200);
+    assert_eq!(
+        config.agent.kernel.prompt.window.compaction_buffer_tokens,
+        4_096
+    );
+    assert_eq!(
+        config.agent.kernel.prompt.window.reserved_output_tokens,
+        ReservedOutputPolicy::UseModelDefault
+    );
     assert!(config.agent.kernel.prompt.include_session_summary);
     assert!(config.agent.kernel.prompt.include_recent_messages);
     assert!(config.agent.kernel.prompt.include_retrieved_memories);
+    assert_eq!(config.agent.kernel.prompt.session_recent_messages_limit, 24);
+    assert_eq!(config.agent.kernel.prompt.session_summary_recent_count, 2);
+    assert_eq!(config.agent.kernel.prompt.session_summary_max_chars, 1200);
     assert!(config.agent.kernel.prompt.bootstrap.enabled);
     assert!(
         config
@@ -69,17 +78,55 @@ fn test_kernel_defaults() {
             .to_string()
     );
     assert_eq!(config.agent.kernel.memory.hot_recent_messages, 64);
-    assert_eq!(config.agent.kernel.memory.session_recent_messages_limit, 24);
-    assert!(config.agent.kernel.memory.session_summary_enabled);
-    assert_eq!(config.agent.kernel.memory.session_summary_recent_count, 2);
-    assert_eq!(config.agent.kernel.memory.session_summary_max_chars, 1200);
     assert_eq!(
         config.agent.kernel.memory.compaction_threshold_bytes,
         256 * 1024
     );
     assert_eq!(config.agent.kernel.memory.root_memory_filename, "MEMORY.md");
     assert!(config.agent.kernel.memory.workspace_memory_flush_enabled);
-    assert_eq!(config.agent.kernel.binding.default_agent_kind, "llm");
+    assert_eq!(config.logging.level, "info");
+    assert_eq!(config.storage.database_type, DatabaseType::Sqlite);
+}
+
+#[test]
+fn test_prompt_config_rejects_unknown_legacy_fields() {
+    let yaml = r#"
+agent:
+  name: talos
+  model: qwen-plus
+  kernel:
+    prompt:
+      bootstrap:
+        include_tools: true
+    memory:
+      workspace_dir: /tmp/custom
+gateway:
+  host: 127.0.0.1
+  port: 18789
+  token: token
+  auth: false
+  jwt_secret: jwt
+logging:
+  level: info
+  format: text
+  stdout: true
+storage:
+  database_type: sqlite
+  connection_string: /tmp/custom.db
+  max_connections: 5
+llm:
+  provider: ollama
+  model: qwen-plus
+  anthropic: { enabled: false }
+  openai: { enabled: false }
+  bailian: { enabled: false }
+  ollama:
+    enabled: true
+    base_url: http://localhost:11434
+"#;
+
+    let err = serde_yaml::from_str::<Config>(yaml).expect_err("legacy prompt field must fail");
+    assert!(err.to_string().contains("include_tools"));
 }
 
 #[test]
@@ -189,6 +236,99 @@ fn test_load_from_path_fails_when_required_keys_missing() {
 }
 
 #[test]
+fn test_load_from_path_uses_prompt_defaults_when_prompt_block_is_missing() {
+    let yaml = r#"
+agent:
+  name: talos
+  model: qwen-plus
+gateway:
+  host: 127.0.0.1
+  port: 18789
+  token: token
+  auth: false
+  jwt_secret: jwt
+logging:
+  level: info
+  format: text
+  stdout: true
+storage:
+  database_type: sqlite
+  max_connections: 5
+llm:
+  provider: ollama
+  model: qwen-plus
+  anthropic: { enabled: false }
+  openai: { enabled: false }
+  bailian: { enabled: false }
+  ollama:
+    enabled: true
+    base_url: http://localhost:11434
+"#;
+    let temp_file = std::env::temp_dir().join(format!(
+        "talos-config-prompt-defaults-{}.yaml",
+        std::process::id()
+    ));
+    std::fs::write(&temp_file, yaml).expect("failed to write temp config");
+    let config = Config::load_from_path(Some(
+        temp_file
+            .to_str()
+            .expect("temp path should be valid unicode"),
+    ))
+    .expect("config without prompt block should load");
+    let _ = std::fs::remove_file(&temp_file);
+
+    assert!(config.agent.kernel.prompt.include_session_summary);
+    assert!(config.agent.kernel.prompt.include_recent_messages);
+    assert_eq!(config.agent.kernel.prompt.session_recent_messages_limit, 24);
+    assert_eq!(config.agent.kernel.prompt.session_summary_recent_count, 2);
+    assert_eq!(config.agent.kernel.prompt.session_summary_max_chars, 1200);
+}
+
+#[test]
+fn test_load_from_path_uses_optional_block_defaults_when_omitted() {
+    let yaml = r#"
+agent:
+  name: talos
+  model: qwen-plus
+gateway:
+  host: 127.0.0.1
+  port: 18789
+  token: token
+  auth: false
+llm:
+  provider: ollama
+  model: qwen-plus
+  ollama:
+    enabled: true
+    base_url: http://localhost:11434
+"#;
+    let temp_file = std::env::temp_dir().join(format!(
+        "talos-config-optional-defaults-{}.yaml",
+        std::process::id()
+    ));
+    std::fs::write(&temp_file, yaml).expect("failed to write temp config");
+    let config = Config::load_from_path(Some(
+        temp_file
+            .to_str()
+            .expect("temp path should be valid unicode"),
+    ))
+    .expect("config without optional blocks should load");
+    let _ = std::fs::remove_file(&temp_file);
+
+    assert_eq!(config.agent.kernel.max_iters, 1);
+    assert_eq!(config.agent.kernel.max_task_per_turn, 3);
+    assert_eq!(
+        config.agent.kernel.planner_selection,
+        PlannerSelection::Static
+    );
+    assert_eq!(config.logging.level, "info");
+    assert_eq!(config.logging.format, "text");
+    assert!(config.logging.stdout);
+    assert_eq!(config.storage.database_type, DatabaseType::Sqlite);
+    assert_eq!(config.storage.max_connections, 5);
+}
+
+#[test]
 fn test_load_from_path_fails_when_file_missing() {
     let missing_file = std::env::temp_dir().join(format!(
         "talos-config-not-found-{}.yaml",
@@ -215,28 +355,15 @@ agent:
   name: talos
   model: qwen-plus
   kernel:
-    max_iters: 1
-    max_task_per_turn: 3
-    tool_parallelism: 1
-    max_llm_calls: 8
-    max_tool_rounds: 8
-    tool_result_max_bytes: 65536
-    context_compaction_max_bytes: 262144
-    default_workspace_id: default
-    planner_mode: built_in
-    planner_selection: static
-    execution_mode: single
-    execution_children: 2
-    execution_loop_iters: 3
     prompt:
-      max_static_tokens: 2000
-      max_dynamic_tokens: 3200
+      window:
+        reserved_output_tokens:
+          kind: use_model_default
+        compaction_buffer_tokens: 4096
       include_session_summary: true
       include_recent_messages: true
     memory:
       workspace_dir: /tmp/custom
-    binding:
-      default_agent_kind: llm
 gateway:
   host: 127.0.0.1
   port: 18789
@@ -273,4 +400,30 @@ base_url: http://localhost:11434
     ));
     let _ = std::fs::remove_file(&temp_file);
     assert!(result.is_err());
+}
+
+#[test]
+fn test_kernel_config_rejects_legacy_binding_field() {
+    let yaml = r#"
+agent:
+  name: talos
+  model: qwen-plus
+  kernel:
+    binding:
+      default_agent_kind: llm
+gateway:
+  host: 127.0.0.1
+  port: 18789
+  token: token
+  auth: false
+llm:
+  provider: ollama
+  model: qwen-plus
+  ollama:
+    enabled: true
+    base_url: http://localhost:11434
+"#;
+
+    let err = serde_yaml::from_str::<Config>(yaml).expect_err("legacy binding field must fail");
+    assert!(err.to_string().contains("binding"));
 }

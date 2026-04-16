@@ -323,6 +323,50 @@ impl SessionService for CoordinatorImpl {
         self.sessions.patch_session(session_id, patch).await
     }
 
+    async fn compact_session(&self, session_id: &str) -> TalosResult<TalosSession> {
+        let session = self
+            .sessions
+            .get_session(session_id)
+            .await?
+            .ok_or_else(|| {
+                talos_error::TalosError::ResourceNotFound(format!("session {}", session_id))
+            })?;
+        let (_target_agent, agent) = self.resolve_session_agent(&session).await?;
+        let usage = agent.compact_session(session.clone()).await?;
+        self.sessions
+            .record_session_usage(
+                &session.context.session_id,
+                &session.config.llm.model,
+                &usage,
+            )
+            .await?;
+        self.sessions.get_session(session_id).await?.ok_or_else(|| {
+            talos_error::TalosError::ResourceNotFound(format!("session {}", session_id))
+        })
+    }
+
+    async fn clear_session(&self, session_id: &str) -> TalosResult<TalosSession> {
+        let session = self
+            .sessions
+            .get_session(session_id)
+            .await?
+            .ok_or_else(|| {
+                talos_error::TalosError::ResourceNotFound(format!("session {}", session_id))
+            })?;
+        let (_target_agent, agent) = self.resolve_session_agent(&session).await?;
+        agent.clear_session(session.clone()).await?;
+        let ack = self.sessions.reset_session(session_id).await?;
+        if !ack.success {
+            return Err(talos_error::TalosError::ResourceNotFound(format!(
+                "session {}",
+                session_id
+            )));
+        }
+        self.sessions.get_session(session_id).await?.ok_or_else(|| {
+            talos_error::TalosError::ResourceNotFound(format!("session {}", session_id))
+        })
+    }
+
     async fn close_session(&self, session_id: &str) -> TalosResult<()> {
         let Some(session) = self.sessions.load_session_for_close(session_id).await? else {
             return Err(talos_error::TalosError::ResourceNotFound(format!(

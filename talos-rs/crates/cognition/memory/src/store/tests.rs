@@ -182,6 +182,76 @@ async fn test_summary_records() {
 }
 
 #[tokio::test]
+async fn test_reset_session_clears_turns_summaries_and_sequence_cache() {
+    let (_guard, store) = new_temp_store();
+    let session_id = "reset-session";
+    let timestamp = Utc::now();
+
+    store
+        .append_turn(&TalosTurn {
+            turn_id: "turn-1".to_string(),
+            session_id: session_id.to_string(),
+            seq: store
+                .next_turn_seq(session_id)
+                .await
+                .expect("seq should load"),
+            timestamp,
+            items: vec![TalosOutputItem::UserInput {
+                text: "hello".to_string(),
+            }],
+            usage: TalosUsage::default(),
+            stop_reason: StopReason::EndTurn,
+        })
+        .await
+        .expect("append turn should succeed");
+    store
+        .save_summary(&SummaryRecord {
+            version: 2,
+            header: RecordHeader {
+                id: "summary-1".to_string(),
+                session_id: session_id.to_string(),
+                turn_id: None,
+                timestamp,
+            },
+            covers_until_seq: 1,
+            source_turn_count: 1,
+            content: "facts".to_string(),
+        })
+        .await
+        .expect("save summary should succeed");
+
+    store
+        .reset_session(session_id)
+        .await
+        .expect("reset session should succeed");
+
+    assert!(store
+        .load_session_turns(session_id)
+        .await
+        .expect("turns should load")
+        .is_empty());
+    assert!(store
+        .load_summaries(session_id, 4)
+        .await
+        .expect("summaries should load")
+        .is_empty());
+    assert_eq!(
+        store
+            .latest_seq(session_id)
+            .await
+            .expect("latest seq should load"),
+        0
+    );
+    assert_eq!(
+        store
+            .next_turn_seq(session_id)
+            .await
+            .expect("next seq should load"),
+        1
+    );
+}
+
+#[tokio::test]
 async fn test_transcript_records_roundtrip_from_jsonl_artifacts() {
     let (_guard, store) = new_temp_store();
     let timestamp = Utc::now();

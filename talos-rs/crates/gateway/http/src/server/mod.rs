@@ -22,7 +22,8 @@ use self::messages::{
 };
 use self::misc::{health_handler, list_models_handler, shutdown_signal};
 use self::sessions::{
-    cancel_active_turn_handler, close_session_handler, create_session_handler, get_session_handler,
+    cancel_active_turn_handler, clear_session_handler, close_session_handler,
+    compact_session_handler, create_session_handler, get_session_handler,
     get_session_turns_handler, list_sessions_handler, patch_session_handler,
 };
 use self::state::HttpApiState;
@@ -137,6 +138,14 @@ impl HttpServer {
             .route(
                 "/v1/sessions/:session_id/cancel",
                 post(cancel_active_turn_handler),
+            )
+            .route(
+                "/v1/sessions/:session_id/compact",
+                post(compact_session_handler),
+            )
+            .route(
+                "/v1/sessions/:session_id/clear",
+                post(clear_session_handler),
             )
             .route(
                 "/v1/sessions/:session_id/messages",

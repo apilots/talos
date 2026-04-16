@@ -8,20 +8,22 @@ source "${ROOT_DIR}/tests/integration/scripts/common.sh"
 load_env
 require_command curl
 require_command python3
+require_command mktemp
+
+TEST_TALOS_HOME="$(mktemp -d "${TMPDIR:-/tmp}/talos-close-flush-home.XXXXXX")"
+cleanup() {
+  stop_server
+  rm -rf "${TEST_TALOS_HOME}"
+}
+export TALOS_HOME="${TEST_TALOS_HOME}"
 
 start_server
-trap stop_server EXIT
+trap cleanup EXIT
 
-WORKSPACE_DIR="${HOME}/.talos/workspace-talos"
+WORKSPACE_DIR="${TALOS_HOME}/workspace-talos"
 ROOT_MEMORY_FILE="${WORKSPACE_DIR}/MEMORY.md"
 DAY_FILE="${WORKSPACE_DIR}/memory/$(date '+%Y-%m-%d').md"
 mkdir -p "${WORKSPACE_DIR}"
-
-if [[ ! -f "${ROOT_MEMORY_FILE}" ]]; then
-  echo "CASE root_memory_bootstrap FAIL missing=${ROOT_MEMORY_FILE}"
-  exit 1
-fi
-echo "CASE root_memory_bootstrap PASS path=${ROOT_MEMORY_FILE}"
 
 pre_size=0
 if [[ -f "${DAY_FILE}" ]]; then
@@ -76,6 +78,12 @@ if [[ "${message_session_id}" != "${session_id}" ]]; then
   exit 1
 fi
 echo "CASE send_message_for_close_flush PASS session_id=${message_session_id}"
+
+if [[ ! -f "${ROOT_MEMORY_FILE}" ]]; then
+  echo "CASE root_memory_bootstrap FAIL missing=${ROOT_MEMORY_FILE}"
+  exit 1
+fi
+echo "CASE root_memory_bootstrap PASS path=${ROOT_MEMORY_FILE}"
 
 close_json="$(curl -sS -X DELETE "${GATEWAY_URL}/v1/sessions/${session_id}" \
   -H "Authorization: Bearer ${AUTH_TOKEN}")"

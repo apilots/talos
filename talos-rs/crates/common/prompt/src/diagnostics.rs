@@ -1,5 +1,6 @@
 use crate::{
-    BootstrapFileDiagnostic, PromptDiagnostics, PromptMode, PromptSection, PromptSectionKind,
+    budget, BootstrapFileDiagnostic, PromptDiagnostics, PromptMode, PromptSection,
+    PromptSectionKind, PromptWindowUsage,
 };
 
 pub(crate) fn build_prompt_diagnostics(
@@ -9,15 +10,10 @@ pub(crate) fn build_prompt_diagnostics(
     bootstrap_files: Vec<BootstrapFileDiagnostic>,
     dropped_sections: Vec<PromptSectionKind>,
     truncated_sections: Vec<PromptSectionKind>,
+    window_usage: PromptWindowUsage,
 ) -> PromptDiagnostics {
-    let static_estimated_tokens = static_sections
-        .iter()
-        .map(|section| section.estimated_tokens + 4)
-        .sum();
-    let dynamic_estimated_tokens = dynamic_sections
-        .iter()
-        .map(|section| section.estimated_tokens + 4)
-        .sum();
+    let static_estimated_tokens = budget::estimate_sections_tokens(static_sections);
+    let dynamic_estimated_tokens = budget::estimate_sections_tokens(dynamic_sections);
 
     PromptDiagnostics {
         mode,
@@ -32,5 +28,7 @@ pub(crate) fn build_prompt_diagnostics(
         total_estimated_tokens: static_estimated_tokens + dynamic_estimated_tokens,
         static_estimated_tokens,
         dynamic_estimated_tokens,
+        window_usage,
+        session_history_compaction: None,
     }
 }

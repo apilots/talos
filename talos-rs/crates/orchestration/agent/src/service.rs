@@ -216,6 +216,8 @@ pub trait AgentOrchestrator: Send + Sync {
         &self,
         request: OrchestratorRequest,
     ) -> TalosResult<mpsc::Receiver<OrchestratorEvent>>;
+    async fn compact_session(&self, session: TalosSession) -> TalosResult<TalosUsage>;
+    async fn clear_session(&self, session: TalosSession) -> TalosResult<()>;
     async fn close_session(&self, session: TalosSession) -> TalosResult<()>;
     async fn drain_memory_flushes(&self, timeout: Duration) -> TalosResult<()>;
     fn pending_memory_flushes(&self) -> usize;

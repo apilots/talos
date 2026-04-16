@@ -279,6 +279,10 @@ pub trait SessionService: Send + Sync {
         patch: SessionPatch,
     ) -> crate::TalosResult<SessionPatchAck>;
 
+    async fn compact_session(&self, session_id: &str) -> crate::TalosResult<TalosSession>;
+
+    async fn clear_session(&self, session_id: &str) -> crate::TalosResult<TalosSession>;
+
     async fn close_session(&self, session_id: &str) -> crate::TalosResult<()>;
 
     async fn cancel_active_turn(&self, session_id: &str) -> crate::TalosResult<()>;

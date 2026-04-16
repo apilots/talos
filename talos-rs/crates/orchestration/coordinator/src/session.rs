@@ -243,6 +243,16 @@ impl SessionManager {
         Ok(())
     }
 
+    pub(super) async fn record_session_usage(
+        &self,
+        session_id: &str,
+        assistant_model: &str,
+        usage: &TalosUsage,
+    ) -> TalosResult<()> {
+        self.record_turn_completion(session_id, assistant_model, 0, usage)
+            .await
+    }
+
     pub(super) async fn record_stream_completion(
         &self,
         session_id: &str,
@@ -270,21 +280,7 @@ impl SessionManager {
             let now = talos_types::now();
             session.state.last_activity = now;
             session.state.message_count = session.state.message_count.saturating_add(message_delta);
-            session.state.usage.input_tokens = session
-                .state
-                .usage
-                .input_tokens
-                .saturating_add(usage.input_tokens);
-            session.state.usage.output_tokens = session
-                .state
-                .usage
-                .output_tokens
-                .saturating_add(usage.output_tokens);
-            session.state.usage.total_tokens = session
-                .state
-                .usage
-                .total_tokens
-                .saturating_add(usage.total_tokens);
+            session.state.usage.accumulate(usage);
             session.config.agent.model = assistant_model.to_string();
             session.config.llm.model = assistant_model.to_string();
         }
@@ -362,6 +358,14 @@ impl SessionManager {
             .session_store
             .patch_session_record(session_id, &patch)
             .await?;
+        if ack.success {
+            self.invalidate_cached_session(session_id).await;
+        }
+        Ok(ack)
+    }
+
+    pub(super) async fn reset_session(&self, session_id: &str) -> TalosResult<SessionPatchAck> {
+        let ack = self.session_store.reset_session_record(session_id).await?;
         if ack.success {
             self.invalidate_cached_session(session_id).await;
         }

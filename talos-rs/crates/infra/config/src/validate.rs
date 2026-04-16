@@ -7,40 +7,12 @@ use crate::{Config, DatabaseType};
 const REQUIRED_CONFIG_PATHS: &[&str] = &[
     "agent.name",
     "agent.model",
-    "agent.kernel.max_iters",
-    "agent.kernel.max_task_per_turn",
-    "agent.kernel.tool_parallelism",
-    "agent.kernel.max_llm_calls",
-    "agent.kernel.max_tool_rounds",
-    "agent.kernel.tool_result_max_bytes",
-    "agent.kernel.context_compaction_max_bytes",
-    "agent.kernel.default_workspace_id",
-    "agent.kernel.planner_mode",
-    "agent.kernel.planner_selection",
-    "agent.kernel.execution_mode",
-    "agent.kernel.execution_children",
-    "agent.kernel.execution_loop_iters",
-    "agent.kernel.prompt.max_static_tokens",
-    "agent.kernel.prompt.max_dynamic_tokens",
-    "agent.kernel.prompt.include_session_summary",
-    "agent.kernel.prompt.include_recent_messages",
-    "agent.kernel.binding.default_agent_kind",
     "gateway.host",
     "gateway.port",
     "gateway.token",
     "gateway.auth",
-    "gateway.jwt_secret",
-    "logging.level",
-    "logging.format",
-    "logging.stdout",
-    "storage.database_type",
-    "storage.max_connections",
     "llm.provider",
     "llm.model",
-    "llm.anthropic.enabled",
-    "llm.openai.enabled",
-    "llm.bailian.enabled",
-    "llm.ollama.enabled",
 ];
 
 const FORBIDDEN_CONFIG_PATHS: &[&str] = &[
@@ -175,16 +147,6 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             "agent.kernel.execution_loop_iters must be > 0".to_string(),
         ));
     }
-    if config.agent.kernel.prompt.max_static_tokens == 0 {
-        return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.prompt.max_static_tokens must be > 0".to_string(),
-        ));
-    }
-    if config.agent.kernel.prompt.max_dynamic_tokens == 0 {
-        return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.prompt.max_dynamic_tokens must be > 0".to_string(),
-        ));
-    }
     if config.agent.kernel.memory.workspace_dir.trim().is_empty()
         || is_unresolved_placeholder(&config.agent.kernel.memory.workspace_dir)
     {
@@ -197,19 +159,19 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             "agent.kernel.memory.hot_recent_messages must be > 0".to_string(),
         ));
     }
-    if config.agent.kernel.memory.session_recent_messages_limit == 0 {
+    if config.agent.kernel.prompt.session_recent_messages_limit == 0 {
         return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.memory.session_recent_messages_limit must be > 0".to_string(),
+            "agent.kernel.prompt.session_recent_messages_limit must be > 0".to_string(),
         ));
     }
-    if config.agent.kernel.memory.session_summary_recent_count == 0 {
+    if config.agent.kernel.prompt.session_summary_recent_count == 0 {
         return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.memory.session_summary_recent_count must be > 0".to_string(),
+            "agent.kernel.prompt.session_summary_recent_count must be > 0".to_string(),
         ));
     }
-    if config.agent.kernel.memory.session_summary_max_chars == 0 {
+    if config.agent.kernel.prompt.session_summary_max_chars == 0 {
         return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.memory.session_summary_max_chars must be > 0".to_string(),
+            "agent.kernel.prompt.session_summary_max_chars must be > 0".to_string(),
         ));
     }
     if config.agent.kernel.memory.compaction_threshold_bytes == 0 {
@@ -239,21 +201,33 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             "agent.kernel.prompt.bootstrap.max_chars_total must be >= agent.kernel.prompt.bootstrap.max_chars_per_file".to_string(),
         ));
     }
-    if config
-        .agent
-        .kernel
-        .binding
-        .default_agent_kind
-        .trim()
-        .is_empty()
-        || is_unresolved_placeholder(&config.agent.kernel.binding.default_agent_kind)
-    {
+    if config.agent.kernel.prompt.window.compaction_buffer_tokens == 0 {
         return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.binding.default_agent_kind is empty or unresolved placeholder"
-                .to_string(),
+            "agent.kernel.prompt.window.compaction_buffer_tokens must be > 0".to_string(),
         ));
     }
-
+    match &config.agent.kernel.prompt.window.reserved_output_tokens {
+        crate::ReservedOutputPolicy::UseModelDefault => {}
+        crate::ReservedOutputPolicy::Fixed { tokens } => {
+            if *tokens == 0 {
+                return Err(TalosError::InvalidConfiguration(
+                    "agent.kernel.prompt.window.reserved_output_tokens.fixed.tokens must be > 0"
+                        .to_string(),
+                ));
+            }
+        }
+        crate::ReservedOutputPolicy::Ratio {
+            numerator,
+            denominator,
+        } => {
+            if *numerator == 0 || *denominator == 0 {
+                return Err(TalosError::InvalidConfiguration(
+                    "agent.kernel.prompt.window.reserved_output_tokens.ratio must be > 0"
+                        .to_string(),
+                ));
+            }
+        }
+    }
     if config.gateway.host.trim().is_empty() || is_unresolved_placeholder(&config.gateway.host) {
         return Err(TalosError::InvalidConfiguration(
             "gateway.host is empty or unresolved placeholder".to_string(),

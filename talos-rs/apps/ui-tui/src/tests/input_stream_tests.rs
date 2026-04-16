@@ -387,6 +387,121 @@ async fn test_project_command_reports_embedded_project_root_without_switching() 
 }
 
 #[tokio::test]
+async fn test_compact_command_triggers_remote_compaction() {
+    let client = Arc::new(MockGatewayClient::new());
+    let state = client.state.clone();
+    let gateway_client: Arc<dyn GatewayClient> = client;
+    let mut app = TuiApp::new_with_gateway_client(gateway_client, TalosConnectionMode::Remote);
+    app.initialize_remote().await;
+    app.input_buffer = "/compact".to_string();
+    app.cursor_index = app.input_buffer.chars().count();
+
+    let should_quit = app.submit_input().await.unwrap();
+    for _ in 0..10 {
+        app.on_tick().await;
+        tokio::task::yield_now().await;
+        if app.pending_command_update.is_none() {
+            break;
+        }
+    }
+
+    assert!(!should_quit);
+    assert_eq!(state.lock().unwrap().compact_calls, 1);
+    assert!(app
+        .chat_blocks
+        .iter()
+        .any(|block| block.content.contains("Session compaction completed")));
+}
+
+#[tokio::test]
+async fn test_clear_command_resets_local_chat_and_session_usage() {
+    let client = Arc::new(MockGatewayClient::new());
+    let state = client.state.clone();
+    let gateway_client: Arc<dyn GatewayClient> = client;
+    let mut app = TuiApp::new_with_gateway_client(gateway_client, TalosConnectionMode::Remote);
+    app.initialize_remote().await;
+    app.session_usage = TalosUsage {
+        input_tokens: 20,
+        output_tokens: 10,
+        total_tokens: 30,
+        cache_creation_input_tokens: Some(4),
+        cache_read_input_tokens: Some(6),
+    };
+    app.push_block(ChatRole::Assistant, "old answer".to_string());
+    app.input_buffer = "/clear".to_string();
+    app.cursor_index = app.input_buffer.chars().count();
+
+    let should_quit = app.submit_input().await.unwrap();
+    for _ in 0..10 {
+        app.on_tick().await;
+        tokio::task::yield_now().await;
+        if app.pending_command_update.is_none() {
+            break;
+        }
+    }
+
+    assert!(!should_quit);
+    assert_eq!(state.lock().unwrap().clear_calls, 1);
+    assert_eq!(app.session_usage, TalosUsage::default());
+    assert!(!app
+        .chat_blocks
+        .iter()
+        .any(|block| block.content == "old answer"));
+    assert!(app
+        .chat_blocks
+        .iter()
+        .any(|block| block.content.contains("Session context cleared")));
+}
+
+#[tokio::test]
+async fn test_status_command_displays_cache_usage_metrics() {
+    let client = Arc::new(MockGatewayClient::new());
+    client.state.lock().unwrap().session_usage = TalosUsage {
+        input_tokens: 120,
+        output_tokens: 45,
+        total_tokens: 165,
+        cache_creation_input_tokens: Some(9),
+        cache_read_input_tokens: Some(21),
+    };
+    let gateway_client: Arc<dyn GatewayClient> = client;
+    let mut app = TuiApp::new_with_gateway_client(gateway_client, TalosConnectionMode::Remote);
+    app.initialize_remote().await;
+    app.session_usage = TalosUsage {
+        input_tokens: 12,
+        output_tokens: 5,
+        total_tokens: 17,
+        cache_creation_input_tokens: Some(2),
+        cache_read_input_tokens: Some(3),
+    };
+    app.input_buffer = "/status".to_string();
+    app.cursor_index = app.input_buffer.chars().count();
+
+    let should_quit = app.submit_input().await.unwrap();
+    for _ in 0..10 {
+        app.on_tick().await;
+        tokio::task::yield_now().await;
+        if app.pending_command_update.is_none() {
+            break;
+        }
+    }
+
+    assert!(!should_quit);
+    let status_text = app
+        .chat_blocks
+        .iter()
+        .filter(|block| block.role == ChatRole::System)
+        .map(|block| block.content.as_str())
+        .find(|content| content.contains("local.usage.input: 12"))
+        .unwrap_or_default()
+        .to_string();
+    assert!(status_text.contains("local.usage.cache_create: 2"));
+    assert!(status_text.contains("local.usage.cache_read: 3"));
+    assert!(status_text.contains("server.usage.input: 120"));
+    assert!(status_text.contains("server.usage.cache_create: 9"));
+    assert!(status_text.contains("server.usage.cache_read: 21"));
+}
+
+#[tokio::test]
 async fn test_send_message_stream_updates_assistant_block() {
     let mut app = create_remote_app();
     app.initialize_remote().await;

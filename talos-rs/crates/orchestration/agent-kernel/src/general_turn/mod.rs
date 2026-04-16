@@ -23,8 +23,9 @@ use talos_memory::{
     TalosMessageRole, TalosTurn, ToolCallRecord,
 };
 use talos_prompt::{
-    render_prompt_assembly, ContinuityAnswerMode, PromptBudget, PromptBuildConfig, PromptBuilder,
+    render_prompt_assembly, ContinuityAnswerMode, PromptBuildConfig, PromptBuilder,
     PromptDiagnostics, PromptLoadPolicy, PromptPhase, PromptWarningState, SessionContinuity,
+    SessionHistoryCompaction,
 };
 use talos_tools::{
     ToolDefinitionProvider, ToolDispatchOutcome, ToolExecutorPort, ToolOutputPayload, ToolPending,
@@ -68,18 +69,22 @@ pub(crate) use finalize::to_api_stop_reason;
 pub use finalize::{emit_general_turn_finalization_stream, finalize_general_turn_artifacts};
 pub(crate) use guard::{
     build_read_only_nudge_message, is_read_only_tool_round, run_forced_finalization_step,
-    should_inject_read_only_nudge,
     should_force_finalization_for_empty_response, should_force_finalization_for_step,
-    stop_reason_for_forced_finalization,
+    should_inject_read_only_nudge, stop_reason_for_forced_finalization,
 };
 pub(crate) use memory_summary::compact_workspace_context_if_needed;
-pub use memory_summary::{flush_session_memory, MemoryFlushPolicy};
+pub use memory_summary::{
+    flush_session_memory, flush_session_memory_with_report, MemoryFlushPolicy,
+    MemoryFlushUsageReport,
+};
+pub(crate) use prepare::{build_session_continuity, stage_session_state_update};
 pub use prepare::{
     execute_general_turn_loop, persist_general_turn_artifacts, prepare_general_turn,
     run_general_turn,
 };
-pub(crate) use prepare::{build_session_continuity, stage_session_state_update};
-pub(crate) use prepare::{PROMPT_WARNING_STATE_KEY, SESSION_CONTINUITY_STATE_KEY};
+pub(crate) use prepare::{
+    LAST_PROMPT_DIAGNOSTICS_STATE_KEY, PROMPT_WARNING_STATE_KEY, SESSION_CONTINUITY_STATE_KEY,
+};
 pub(crate) use step_execute::emit_stream_event;
 #[cfg(test)]
 pub(crate) use step_execute::stream_round;

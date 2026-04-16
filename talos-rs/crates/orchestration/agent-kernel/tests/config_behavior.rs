@@ -100,26 +100,13 @@ fn test_boundary_validation() {
         !config.default_workspace_id.trim().is_empty(),
         "default_workspace_id must be non-empty"
     );
-
-    assert!(
-        config.prompt.max_static_tokens > 0,
-        "prompt.max_static_tokens must be > 0"
-    );
-    assert!(
-        config.prompt.max_dynamic_tokens > 0,
-        "prompt.max_dynamic_tokens must be > 0"
-    );
-    assert_eq!(
-        config.prompt.max_static_tokens, 2000,
-        "prompt.max_static_tokens should default to 2000"
-    );
-    assert_eq!(
-        config.prompt.max_dynamic_tokens, 3200,
-        "prompt.max_dynamic_tokens should default to 3200"
-    );
     assert!(
         config.prompt.bootstrap.enabled,
         "prompt.bootstrap.enabled should default to true"
+    );
+    assert_eq!(
+        config.prompt.window.compaction_buffer_tokens, 4_096,
+        "prompt.window.compaction_buffer_tokens should default to 4096"
     );
     assert!(
         config.prompt.bootstrap.auto_create_missing_files,
@@ -143,21 +130,12 @@ fn test_boundary_validation() {
         "memory.hot_recent_messages must be > 0"
     );
     assert!(
-        config.memory.session_recent_messages_limit > 0,
-        "memory.session_recent_messages_limit must be > 0"
+        config.prompt.session_recent_messages_limit > 0,
+        "prompt.session_recent_messages_limit must be > 0"
     );
     assert_eq!(
         config.memory.root_memory_filename, "MEMORY.md",
         "memory.root_memory_filename should be fixed to MEMORY.md"
-    );
-
-    assert!(
-        !config.binding.default_agent_kind.trim().is_empty(),
-        "binding.default_agent_kind must be non-empty"
-    );
-    assert_eq!(
-        config.binding.default_agent_kind, "llm",
-        "binding.default_agent_kind should default to 'llm'"
     );
 }
 
@@ -168,9 +146,10 @@ fn test_nested_config_defaults() {
 
     assert!(config.prompt.include_session_summary);
     assert!(config.prompt.include_recent_messages);
+    assert!(config.prompt.include_retrieved_memories);
+    assert!(config.prompt.session_recent_messages_limit > 0);
     assert!(config.prompt.bootstrap.include_memory);
 
-    assert!(config.memory.session_summary_enabled);
     assert!(config.memory.workspace_memory_flush_enabled);
 }
 

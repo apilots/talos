@@ -41,9 +41,10 @@ pub use general_turn::{
     apply_general_turn_step, apply_general_turn_tool_batch, build_general_turn_step_request,
     emit_general_turn_finalization_stream, execute_general_turn_loop, execute_general_turn_step,
     execute_general_turn_tool_batch, finalize_general_turn_artifacts, flush_session_memory,
-    persist_general_turn_artifacts, prepare_general_turn, run_general_turn, ExecutedTurnArtifacts,
-    GeneralTurnLoopState, GeneralTurnResult, GeneralTurnStepDisposition, GeneralTurnStepRequest,
-    GeneralTurnStepResult, GeneralTurnToolBatch, MemoryFlushPolicy, ModelFinishReason,
+    flush_session_memory_with_report, persist_general_turn_artifacts, prepare_general_turn,
+    run_general_turn, ExecutedTurnArtifacts, GeneralTurnLoopState, GeneralTurnResult,
+    GeneralTurnStepDisposition, GeneralTurnStepRequest, GeneralTurnStepResult,
+    GeneralTurnToolBatch, MemoryFlushPolicy, MemoryFlushUsageReport, ModelFinishReason,
     PlanReActLoopState, PreparedGeneralTurn, StreamingToolExecutionConfig,
 };
 pub use llm_agent::LlmKernelAgent;

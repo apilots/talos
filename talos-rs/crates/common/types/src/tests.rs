@@ -115,7 +115,7 @@ fn test_talos_session_from_record_applies_conf_override() {
 fn test_session_override_policy_rejects_unknown_keys() {
     let mut conf = HashMap::new();
     conf.insert(
-        "agent.kernel.prompt.max_dynamic_tokens".to_string(),
+        "agent.kernel.prompt.unknown_field".to_string(),
         serde_json::Value::Number(1.into()),
     );
 

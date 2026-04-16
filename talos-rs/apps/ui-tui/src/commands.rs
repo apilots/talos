@@ -68,7 +68,7 @@ impl TuiApp {
             "help" => {
                 self.push_block(
                     ChatRole::System,
-                    "Commands: /help /model /models /project /history /sessions /status /quit\nKeys: ↑/↓/PgUp/PgDn scroll, Ctrl+O expand tool, Ctrl+B toggle panel, Ctrl+Y copy, Ctrl+U clear input"
+                    "Commands: /help /model /models /project /history /sessions /status /compact /clear /quit\nKeys: ↑/↓/PgUp/PgDn scroll, Ctrl+O expand tool, Ctrl+B toggle panel, Ctrl+Y copy, Ctrl+U clear input"
                         .to_string(),
                 );
                 Ok(false)
@@ -126,6 +126,14 @@ impl TuiApp {
             }
             "status" => {
                 self.status_command()?;
+                Ok(false)
+            }
+            "compact" => {
+                self.compact_session_command()?;
+                Ok(false)
+            }
+            "clear" => {
+                self.clear_session_command()?;
                 Ok(false)
             }
             "project" => {
@@ -416,6 +424,52 @@ impl TuiApp {
                 Ok(None)
             };
             RemoteCommandUpdate::StatusLoaded(result)
+        })
+    }
+
+    fn active_session_id_for_control_command(&mut self, command: &str) -> Option<String> {
+        if self.in_flight {
+            self.show_status_hint(
+                format!("Finish the active turn before running /{}.", command),
+                Duration::from_secs(2),
+            );
+            return None;
+        }
+
+        if self.session_id.is_none() {
+            self.show_status_hint(
+                format!("No active session available for /{}.", command),
+                Duration::from_secs(2),
+            );
+        }
+        self.session_id.clone()
+    }
+
+    pub(crate) fn compact_session_command(&mut self) -> TalosResult<()> {
+        let Some(client) = self.gateway_client.clone() else {
+            return Err(TalosError::ClientError(
+                "missing gateway client in remote mode".to_string(),
+            ));
+        };
+        let Some(session_id) = self.active_session_id_for_control_command("compact") else {
+            return Ok(());
+        };
+        self.spawn_remote_command_task("session compact started", async move {
+            RemoteCommandUpdate::SessionCompacted(client.compact_session(&session_id).await)
+        })
+    }
+
+    pub(crate) fn clear_session_command(&mut self) -> TalosResult<()> {
+        let Some(client) = self.gateway_client.clone() else {
+            return Err(TalosError::ClientError(
+                "missing gateway client in remote mode".to_string(),
+            ));
+        };
+        let Some(session_id) = self.active_session_id_for_control_command("clear") else {
+            return Ok(());
+        };
+        self.spawn_remote_command_task("session clear started", async move {
+            RemoteCommandUpdate::SessionCleared(client.clear_session(&session_id).await)
         })
     }
 

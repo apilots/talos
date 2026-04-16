@@ -268,6 +268,22 @@ impl SessionService for MockSessionService {
         Ok(talos_types::SessionPatchAck { success: true })
     }
 
+    async fn compact_session(&self, session_id: &str) -> TalosResult<talos_types::TalosSession> {
+        self.get_session(session_id)
+            .await?
+            .ok_or_else(|| talos_error::TalosError::ResourceNotFound(session_id.to_string()))
+    }
+
+    async fn clear_session(&self, session_id: &str) -> TalosResult<talos_types::TalosSession> {
+        let mut session = self
+            .get_session(session_id)
+            .await?
+            .ok_or_else(|| talos_error::TalosError::ResourceNotFound(session_id.to_string()))?;
+        session.state.message_count = 0;
+        session.state.usage = talos_types::talos::TalosUsage::default();
+        Ok(session)
+    }
+
     async fn close_session(&self, _session_id: &str) -> TalosResult<()> {
         Ok(())
     }
@@ -502,6 +518,53 @@ async fn test_close_session_handler_returns_success() {
     .expect("close session should succeed");
 
     assert_eq!(response.0["success"], serde_json::Value::Bool(true));
+}
+
+#[tokio::test]
+async fn test_compact_session_handler_returns_session_payload() {
+    let state = Arc::new(HttpApiState::new(
+        Arc::new(MockGateway),
+        Arc::new(MockSessionService),
+        "test-secret".to_string(),
+        None,
+        false,
+        vec![test_model_info()],
+    ));
+
+    let response = compact_session_handler(
+        State(state),
+        axum::extract::Extension(test_auth()),
+        Path("mock-session".to_string()),
+    )
+    .await
+    .expect("compact session should succeed");
+
+    assert_eq!(response.0["context"]["session_id"], "mock-session");
+    assert_eq!(response.0["state"]["message_count"], 1);
+}
+
+#[tokio::test]
+async fn test_clear_session_handler_returns_reset_session_payload() {
+    let state = Arc::new(HttpApiState::new(
+        Arc::new(MockGateway),
+        Arc::new(MockSessionService),
+        "test-secret".to_string(),
+        None,
+        false,
+        vec![test_model_info()],
+    ));
+
+    let response = clear_session_handler(
+        State(state),
+        axum::extract::Extension(test_auth()),
+        Path("mock-session".to_string()),
+    )
+    .await
+    .expect("clear session should succeed");
+
+    assert_eq!(response.0["context"]["session_id"], "mock-session");
+    assert_eq!(response.0["state"]["message_count"], 0);
+    assert_eq!(response.0["state"]["usage"]["total_tokens"], 0);
 }
 
 #[test]

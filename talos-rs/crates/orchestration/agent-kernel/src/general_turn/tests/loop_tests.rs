@@ -1,5 +1,5 @@
 use super::*;
-use talos_prompt::PromptMode;
+use talos_prompt::{PromptMode, PromptSectionKind, PromptWindowUsage};
 
 #[test]
 fn test_build_general_turn_step_request_respects_parallel_flag() {
@@ -21,6 +21,8 @@ fn test_build_general_turn_step_request_respects_parallel_flag() {
             total_estimated_tokens: 0,
             static_estimated_tokens: 0,
             dynamic_estimated_tokens: 0,
+            window_usage: PromptWindowUsage::default(),
+            session_history_compaction: None,
         },
         warnings: Vec::new(),
         prompt_warning_state: None,
@@ -40,11 +42,16 @@ async fn test_run_general_turn_emits_prompt_warning_event() {
     let provider = Arc::new(NoopLlmProvider);
     let tool_registry = Arc::new(ToolRegistry::new());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+    std::fs::write(
+        workspace_dir.join("SOUL.md"),
+        "# SOUL\n\n- Keep the run grounded in repo evidence.\n",
+    )
+    .expect("soul file should exist");
     let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
     seed_recent_user_message(memory_store.as_ref()).await;
     let mut config = AgentKernelConfig::default();
-    config.prompt.bootstrap.enabled = false;
-    config.prompt.max_dynamic_tokens = 1;
+    config.prompt.bootstrap.auto_create_missing_files = false;
     config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
     let mut ctx = build_ctx_with_stream(None);
 
@@ -75,11 +82,16 @@ async fn test_run_general_turn_streams_prompt_warning_event() {
     let provider = Arc::new(NoopLlmProvider);
     let tool_registry = Arc::new(ToolRegistry::new());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+    std::fs::write(
+        workspace_dir.join("SOUL.md"),
+        "# SOUL\n\n- Keep the run grounded in repo evidence.\n",
+    )
+    .expect("soul file should exist");
     let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
     seed_recent_user_message(memory_store.as_ref()).await;
     let mut config = AgentKernelConfig::default();
-    config.prompt.bootstrap.enabled = false;
-    config.prompt.max_dynamic_tokens = 1;
+    config.prompt.bootstrap.auto_create_missing_files = false;
     config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
     let (tx, mut rx) = mpsc::channel(16);
     let mut ctx = build_ctx_with_stream(Some(tx));
@@ -108,6 +120,110 @@ async fn test_run_general_turn_streams_prompt_warning_event() {
         }
     }
     assert!(saw_prompt_warning, "stream should include prompt.warning");
+}
+
+#[tokio::test]
+async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_budget() {
+    let provider = Arc::new(SummaryProvider {
+        responses: std::sync::Mutex::new(std::collections::VecDeque::from(vec![
+            "{\"title\":\"Prompt Compact\",\"facts\":[\"history condensed\"],\"open_tasks\":[\"continue the current turn\"]}".to_string(),
+            "{\"decision\":\"session_only\",\"rationale\":\"near-term continuity only\"}"
+                .to_string(),
+        ])),
+    });
+    let tool_registry = Arc::new(ToolRegistry::new());
+    register_core_local_tools(tool_registry.as_ref());
+    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    for idx in 0..24 {
+        let timestamp = Utc::now();
+        memory_store
+            .append_turn(&TalosTurn {
+                turn_id: format!("turn-{idx}"),
+                session_id: "s1".to_string(),
+                seq: memory_store
+                    .next_turn_seq("s1")
+                    .await
+                    .expect("seq should load"),
+                timestamp,
+                items: vec![
+                    TalosOutputItem::UserInput {
+                        text: format!(
+                            "historical user message {} requesting additional repository evidence and continuity details",
+                            idx
+                        ),
+                    },
+                    TalosOutputItem::OutputText {
+                        text: format!(
+                            "historical assistant message {} with enough content to stress the prompt window and preserve a larger review trail across repeated follow-up turns",
+                            idx
+                        ),
+                    },
+                ],
+                usage: TalosUsage::default(),
+                stop_reason: TalosApiStopReason::EndTurn,
+            })
+            .await
+            .expect("append should succeed");
+    }
+
+    let mut config = AgentKernelConfig::default();
+    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.prompt.bootstrap.enabled = false;
+    config.prompt.window.compaction_buffer_tokens = 32;
+    config.prompt.session_recent_messages_limit = 24;
+
+    let mut ctx = build_ctx_with_stream(None);
+    ctx.selected_model_info.context_window = 2_400;
+    ctx.selected_model_info.max_tokens = 128;
+
+    let prepared = prepare_general_turn(
+        &mut ctx,
+        "talos",
+        "assistant",
+        "continue",
+        provider,
+        tool_registry,
+        memory_store.clone(),
+        &config,
+    )
+    .await
+    .expect("prompt prepare should succeed");
+
+    assert!(prepared
+        .prompt_diagnostics
+        .dropped_sections
+        .contains(&PromptSectionKind::ExpandedToolCatalog));
+    let compaction = prepared
+        .prompt_diagnostics
+        .session_history_compaction
+        .as_ref()
+        .expect("session history compaction should be recorded");
+    assert!(compaction.summary_sections_after > 0);
+    assert_eq!(compaction.compaction_request_count, 2);
+    assert_eq!(compaction.compaction_input_tokens, 26);
+    assert_eq!(compaction.compaction_output_tokens, 14);
+    assert_eq!(compaction.compaction_total_tokens, 40);
+    assert_eq!(compaction.compaction_cache_creation_input_tokens, Some(6));
+    assert_eq!(compaction.compaction_cache_read_input_tokens, Some(22));
+    assert!(
+        compaction.post_compaction_total_tokens <= compaction.pre_compaction_total_tokens,
+        "compaction should not increase prompt token usage"
+    );
+    assert!(prepared
+        .prompt_diagnostics
+        .included_sections
+        .contains(&PromptSectionKind::SessionSummary));
+
+    let summaries = memory_store
+        .load_summaries("s1", 4)
+        .await
+        .expect("summary load should succeed");
+    assert!(
+        !summaries.is_empty(),
+        "compaction should persist a session summary"
+    );
 }
 
 #[tokio::test]

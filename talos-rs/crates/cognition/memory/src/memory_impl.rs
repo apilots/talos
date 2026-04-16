@@ -62,6 +62,10 @@ impl Memory for MemoryStore {
         session_store::session_size_bytes(self, session_id).await
     }
 
+    async fn reset_session(&self, session_id: &str) -> TalosResult<()> {
+        session_store::reset_session(self, session_id).await
+    }
+
     async fn search_memory(
         &self,
         query: &MemorySearchQuery,

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
-use talos_config::{AgentKernelMemoryConfig, AgentKernelPromptConfig};
+use talos_config::{AgentKernelMemoryConfig, AgentKernelPromptConfig, ReservedOutputPolicy};
 use talos_error::{TalosError, TalosResult};
 use talos_memory::TalosMessageRole;
 
@@ -142,7 +142,6 @@ impl WorkspaceBootstrapFileKind {
     pub(crate) fn should_auto_create(self) -> bool {
         matches!(self, Self::Soul | Self::User | Self::Memory)
     }
-
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -163,13 +162,15 @@ pub enum BootstrapFileScope {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PromptSectionKind {
-    IdentityMission,
+    IdentityCore,
+    RuntimeSessionContext,
     EvidenceToolingPolicy,
     ToolChoicePriority,
-    RequestedToolPreference,
+    RequestedToolPreferenceTemplate,
+    RequestedToolPreferenceHint,
     FailureRecoveryPolicy,
     CompactToolRouting,
-    Tooling,
+    ExpandedToolCatalog,
     TaskProtocolLibrary,
     CommunicationPolicy,
     PlanningInstruction,
@@ -238,30 +239,17 @@ pub struct PromptDiagnostics {
     pub total_estimated_tokens: usize,
     pub static_estimated_tokens: usize,
     pub dynamic_estimated_tokens: usize,
+    pub window_usage: PromptWindowUsage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_history_compaction: Option<SessionHistoryCompaction>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptAssembly {
-    pub system_sections: Vec<PromptSection>,
-    pub context_sections: Vec<PromptSection>,
+    pub static_prefix_sections: Vec<PromptSection>,
+    pub dynamic_suffix_sections: Vec<PromptSection>,
     pub user_input: String,
     pub diagnostics: PromptDiagnostics,
-}
-
-/// Prompt budget controls.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PromptBudget {
-    pub max_static_tokens: usize,
-    pub max_dynamic_tokens: usize,
-}
-
-impl Default for PromptBudget {
-    fn default() -> Self {
-        Self {
-            max_static_tokens: 2000,
-            max_dynamic_tokens: 3200,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -293,6 +281,123 @@ pub struct PromptWarningState {
     pub seen_warning_keys: BTreeSet<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct PromptWindowUsage {
+    pub window_resolved: bool,
+    pub context_window: usize,
+    pub reserved_output_tokens: usize,
+    pub compaction_buffer_tokens: usize,
+    pub effective_prompt_budget: usize,
+    pub static_prefix_tokens: usize,
+    pub dynamic_suffix_tokens: usize,
+    pub total_tokens: usize,
+    pub within_effective_budget: bool,
+    pub cache_read_input_tokens: Option<u32>,
+    pub cache_creation_input_tokens: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionHistoryCompaction {
+    pub pre_compaction_total_tokens: usize,
+    pub post_compaction_total_tokens: usize,
+    pub recent_messages_before: usize,
+    pub recent_messages_after: usize,
+    pub summary_sections_after: usize,
+    pub compaction_request_count: u32,
+    pub compaction_input_tokens: u32,
+    pub compaction_output_tokens: u32,
+    pub compaction_total_tokens: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compaction_cache_creation_input_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compaction_cache_read_input_tokens: Option<u32>,
+}
+
+impl PromptWindowUsage {
+    pub fn resolve(
+        prompt_config: &AgentKernelPromptConfig,
+        context_window: usize,
+        model_max_output_tokens: usize,
+        static_prefix_tokens: usize,
+        dynamic_suffix_tokens: usize,
+    ) -> Self {
+        let reserved_output_tokens = resolve_reserved_output_tokens(
+            &prompt_config.window.reserved_output_tokens,
+            context_window,
+            model_max_output_tokens,
+        );
+        let compaction_buffer_tokens = resolve_compaction_buffer_tokens(
+            prompt_config.window.compaction_buffer_tokens,
+            context_window,
+        );
+        let total_tokens = static_prefix_tokens + dynamic_suffix_tokens;
+        let effective_prompt_budget = context_window
+            .saturating_sub(reserved_output_tokens)
+            .saturating_sub(compaction_buffer_tokens);
+        let window_resolved = context_window > 0;
+
+        Self {
+            window_resolved,
+            context_window,
+            reserved_output_tokens,
+            compaction_buffer_tokens,
+            effective_prompt_budget,
+            static_prefix_tokens,
+            dynamic_suffix_tokens,
+            total_tokens,
+            within_effective_budget: !window_resolved || total_tokens <= effective_prompt_budget,
+            cache_read_input_tokens: None,
+            cache_creation_input_tokens: None,
+        }
+    }
+}
+
+fn resolve_compaction_buffer_tokens(
+    configured_buffer_tokens: usize,
+    context_window: usize,
+) -> usize {
+    if context_window == 0 {
+        return configured_buffer_tokens;
+    }
+
+    configured_buffer_tokens.min(context_window / 4)
+}
+
+fn resolve_reserved_output_tokens(
+    policy: &ReservedOutputPolicy,
+    context_window: usize,
+    model_max_output_tokens: usize,
+) -> usize {
+    match policy {
+        ReservedOutputPolicy::UseModelDefault => {
+            if model_max_output_tokens > 0 {
+                model_max_output_tokens
+            } else {
+                derive_reserved_output_tokens(context_window)
+            }
+        }
+        ReservedOutputPolicy::Fixed { tokens } => *tokens,
+        ReservedOutputPolicy::Ratio {
+            numerator,
+            denominator,
+        } => {
+            if *denominator == 0 {
+                0
+            } else {
+                context_window.saturating_mul(*numerator as usize) / (*denominator as usize)
+            }
+        }
+    }
+}
+
+fn derive_reserved_output_tokens(context_window: usize) -> usize {
+    if context_window == 0 {
+        return 0;
+    }
+
+    (context_window / 8).clamp(1_024, 8_192)
+}
+
 /// Prompt context loading policy.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptLoadPolicy {
@@ -311,7 +416,7 @@ impl Default for PromptLoadPolicy {
             include_session_summary: true,
             include_recent_messages: true,
             include_retrieved_memories: true,
-            session_recent_limit: 16,
+            session_recent_limit: 24,
             retrieved_memory_max_items: 4,
             retrieved_memory_max_chars: 2000,
             unified_recent_limit: 10,
@@ -322,7 +427,6 @@ impl Default for PromptLoadPolicy {
 /// Prompt build configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PromptBuildConfig {
-    pub budget: PromptBudget,
     pub load_policy: PromptLoadPolicy,
     pub prompt: AgentKernelPromptConfig,
     pub memory: AgentKernelMemoryConfig,

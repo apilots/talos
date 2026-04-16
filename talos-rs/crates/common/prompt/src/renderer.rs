@@ -20,9 +20,10 @@ fn cache_control_from_scope(scope: CacheScope) -> Option<CacheControl> {
 }
 
 pub(crate) fn render_assembly(assembly: &PromptAssembly) -> Vec<ChatMessage> {
-    let mut messages =
-        Vec::with_capacity(assembly.system_sections.len() + assembly.context_sections.len() + 1);
-    messages.extend(assembly.system_sections.iter().map(|section| {
+    let mut messages = Vec::with_capacity(
+        assembly.static_prefix_sections.len() + assembly.dynamic_suffix_sections.len() + 1,
+    );
+    messages.extend(assembly.static_prefix_sections.iter().map(|section| {
         let mut message = match &section.role {
             Some(role) => talos_message_to_chat_message(role.clone(), section.content.clone()),
             None => ChatMessage::system(section.content.clone()),
@@ -30,7 +31,7 @@ pub(crate) fn render_assembly(assembly: &PromptAssembly) -> Vec<ChatMessage> {
         message.cache_control = cache_control_from_scope(section.cache_scope);
         message
     }));
-    messages.extend(assembly.context_sections.iter().map(|section| {
+    messages.extend(assembly.dynamic_suffix_sections.iter().map(|section| {
         let mut message = match &section.role {
             Some(role) => talos_message_to_chat_message(role.clone(), section.content.clone()),
             None => ChatMessage::system(section.content.clone()),

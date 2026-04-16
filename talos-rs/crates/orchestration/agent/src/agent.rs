@@ -110,11 +110,6 @@ impl AgentImpl {
         Ok(())
     }
 
-    pub fn set_prompt_budget(&mut self, max_static_tokens: usize, max_dynamic_tokens: usize) {
-        self.kernel_config.prompt.max_static_tokens = max_static_tokens.max(1);
-        self.kernel_config.prompt.max_dynamic_tokens = max_dynamic_tokens.max(1);
-    }
-
     /// Update kernel configuration with a new config object.
     pub fn update_kernel_config(&mut self, config: AgentKernelConfig) {
         self.kernel_config = Self::normalized_kernel_config(config);
@@ -398,6 +393,14 @@ impl AgentOrchestrator for AgentImpl {
 
     async fn close_session(&self, session: talos_types::TalosSession) -> TalosResult<()> {
         self.close_session_impl(session).await
+    }
+
+    async fn compact_session(&self, session: talos_types::TalosSession) -> TalosResult<TalosUsage> {
+        self.compact_session_impl(session).await
+    }
+
+    async fn clear_session(&self, session: talos_types::TalosSession) -> TalosResult<()> {
+        self.clear_session_impl(session).await
     }
 
     async fn drain_memory_flushes(&self, timeout: Duration) -> TalosResult<()> {

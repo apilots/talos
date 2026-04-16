@@ -10,9 +10,7 @@ use talos_types::talos::TalosUsage;
 use tokio::task::JoinSet;
 
 fn merge_usage(mut acc: TalosUsage, usage: &TalosUsage) -> TalosUsage {
-    acc.input_tokens = acc.input_tokens.saturating_add(usage.input_tokens);
-    acc.output_tokens = acc.output_tokens.saturating_add(usage.output_tokens);
-    acc.total_tokens = acc.total_tokens.saturating_add(usage.total_tokens);
+    acc.accumulate(usage);
     acc
 }
 

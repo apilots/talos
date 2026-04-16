@@ -291,12 +291,6 @@ fn test_planner_mode_comes_from_kernel_config() {
     );
 }
 
-#[test]
-fn test_kernel_binding_default_is_llm() {
-    let agent = build_test_agent();
-    assert_eq!(agent.kernel_config.binding.default_agent_kind, "llm");
-}
-
 #[tokio::test]
 async fn test_submit_dynamic_tool_result_rejects_replay() {
     let (_temp_dir, agent) = build_temp_agent();

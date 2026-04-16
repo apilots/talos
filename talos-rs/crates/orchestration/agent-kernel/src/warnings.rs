@@ -44,13 +44,11 @@ pub struct PromptBootstrapFileDroppedWarning {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PromptDynamicSectionDroppedWarning {
     pub sections: Vec<PromptSectionKind>,
-    pub dynamic_budget_tokens: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PromptDynamicSectionTruncatedWarning {
     pub sections: Vec<PromptSectionKind>,
-    pub dynamic_budget_tokens: usize,
 }
 
 pub(crate) fn derive_prompt_warnings(
@@ -135,7 +133,6 @@ pub(crate) fn derive_prompt_warnings(
         warnings.push(KernelWarning::PromptDynamicSectionDropped(
             PromptDynamicSectionDroppedWarning {
                 sections: diagnostics.dropped_sections.clone(),
-                dynamic_budget_tokens: kernel_config.prompt.max_dynamic_tokens,
             },
         ));
     }
@@ -144,7 +141,6 @@ pub(crate) fn derive_prompt_warnings(
         warnings.push(KernelWarning::PromptDynamicSectionTruncated(
             PromptDynamicSectionTruncatedWarning {
                 sections: diagnostics.truncated_sections.clone(),
-                dynamic_budget_tokens: kernel_config.prompt.max_dynamic_tokens,
             },
         ));
     }
@@ -161,13 +157,15 @@ mod tests {
     fn base_diagnostics() -> PromptDiagnostics {
         PromptDiagnostics {
             mode: PromptMode::Full,
-            included_sections: vec![PromptSectionKind::IdentityMission],
+            included_sections: vec![PromptSectionKind::IdentityCore],
             dropped_sections: Vec::new(),
             truncated_sections: Vec::new(),
             bootstrap_files: Vec::new(),
             total_estimated_tokens: 10,
             static_estimated_tokens: 4,
             dynamic_estimated_tokens: 6,
+            window_usage: talos_prompt::PromptWindowUsage::default(),
+            session_history_compaction: None,
         }
     }
 
