@@ -110,8 +110,8 @@ fn test_boundary_validation() {
         "prompt.max_dynamic_tokens must be > 0"
     );
     assert_eq!(
-        config.prompt.max_static_tokens, 1200,
-        "prompt.max_static_tokens should default to 1200"
+        config.prompt.max_static_tokens, 2000,
+        "prompt.max_static_tokens should default to 2000"
     );
     assert_eq!(
         config.prompt.max_dynamic_tokens, 3200,

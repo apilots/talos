@@ -1,4 +1,39 @@
 use super::*;
+use talos_prompt::PromptMode;
+
+#[test]
+fn test_build_general_turn_step_request_respects_parallel_flag() {
+    let prepared = PreparedGeneralTurn {
+        session_id: "s1".to_string(),
+        invocation_id: "i1".to_string(),
+        agent_id: "a1".to_string(),
+        project_root: None,
+        selected_model: "model".to_string(),
+        prompt_prefix_messages: Vec::new(),
+        messages: Vec::new(),
+        tool_definitions: Vec::new(),
+        prompt_diagnostics: PromptDiagnostics {
+            mode: PromptMode::Full,
+            included_sections: Vec::new(),
+            dropped_sections: Vec::new(),
+            truncated_sections: Vec::new(),
+            bootstrap_files: Vec::new(),
+            total_estimated_tokens: 0,
+            static_estimated_tokens: 0,
+            dynamic_estimated_tokens: 0,
+        },
+        warnings: Vec::new(),
+        prompt_warning_state: None,
+        stream_tx: None,
+    };
+    let state = GeneralTurnLoopState::new(&prepared);
+
+    let sequential_request = build_general_turn_step_request(&prepared, &state, false);
+    assert!(!sequential_request.parallel_tool_calls);
+
+    let parallel_request = build_general_turn_step_request(&prepared, &state, true);
+    assert!(parallel_request.parallel_tool_calls);
+}
 
 #[tokio::test]
 async fn test_run_general_turn_emits_prompt_warning_event() {
@@ -189,4 +224,48 @@ async fn test_run_general_turn_forces_summary_when_final_response_is_empty_after
         "forced summary should replace placeholder fallback"
     );
     assert!(provider.round.load(Ordering::SeqCst) >= 3);
+}
+
+#[tokio::test]
+async fn test_run_general_turn_uses_salvage_call_when_forced_summary_is_still_empty() {
+    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+    std::fs::write(workspace_dir.join("Cargo.toml"), "[workspace]\n")
+        .expect("fixture should exist");
+
+    let provider = Arc::new(SalvageAfterEmptyFinalProvider {
+        dir_path: workspace_dir.to_string_lossy().to_string(),
+        ..Default::default()
+    });
+    let tool_registry = Arc::new(ToolRegistry::new());
+    register_core_local_tools(tool_registry.as_ref());
+    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    let mut config = AgentKernelConfig::default();
+    config.prompt.bootstrap.enabled = false;
+    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    let mut ctx = build_ctx_with_stream(None);
+
+    let result = run_general_turn(
+        &mut ctx,
+        "talos",
+        "assistant",
+        "Analyze the project architecture from code.",
+        provider.clone(),
+        tool_registry.clone(),
+        tool_registry,
+        memory_store,
+        &config,
+    )
+    .await
+    .expect("general turn should succeed");
+
+    assert_eq!(
+        result.output_text,
+        "Salvaged final answer from verified tool results."
+    );
+    assert!(
+        !result.output_text.contains("Tool execution completed."),
+        "salvage call should replace placeholder fallback"
+    );
+    assert!(provider.round.load(Ordering::SeqCst) >= 4);
 }

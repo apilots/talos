@@ -14,7 +14,7 @@ impl Tool for GrepFilesTool {
     }
 
     fn description(&self) -> &str {
-        "Search files with ripgrep to locate symbols, entrypoints, exports, module boundaries, routes, or call sites before reading files. This is the default search tool for repository exploration and source analysis. Prefer grep_files over shell grep or rg whenever the goal is to find code locations. After grep_files narrows the candidate files, use read_file on the most relevant paths instead of repeatedly searching with the same pattern. When you already have enough matches to choose the next file, stop searching and move to read_file."
+        "Search file contents with ripgrep to locate symbols, entrypoints, exports, module boundaries, routes, or call sites before reading files.\n\nUsage:\n- Use grep_files for content search tasks instead of shell grep or rg.\n- Use grep_files first when you need to narrow candidate files for code analysis.\n- After grep_files identifies the best file, switch to read_file on that file.\n- When the path question is about directory shape rather than content search, use list_dir instead.\n- Do not keep repeating near-identical searches once you already have enough matches to choose the next file."
     }
 
     fn parameters_schema(&self) -> Option<Value> {

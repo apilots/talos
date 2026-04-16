@@ -422,6 +422,7 @@ fn test_build_flow_step_model_request_preserves_state_messages() {
             dynamic_estimated_tokens: 0,
         },
         warnings: Vec::new(),
+        prompt_warning_state: None,
         stream_tx: None,
     };
     let mut state = GeneralTurnLoopState::new(&prepared);
@@ -469,6 +470,7 @@ fn test_build_flow_step_model_request_preserves_native_thinking() {
             dynamic_estimated_tokens: 0,
         },
         warnings: Vec::new(),
+        prompt_warning_state: None,
         stream_tx: None,
     };
     let state = GeneralTurnLoopState::new(&prepared);

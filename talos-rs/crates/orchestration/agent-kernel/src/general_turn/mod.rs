@@ -23,8 +23,8 @@ use talos_memory::{
     TalosMessageRole, TalosTurn, ToolCallRecord,
 };
 use talos_prompt::{
-    render_prompt_assembly, PromptBudget, PromptBuildConfig, PromptBuilder, PromptDiagnostics,
-    PromptLoadPolicy, PromptPhase,
+    render_prompt_assembly, ContinuityAnswerMode, PromptBudget, PromptBuildConfig, PromptBuilder,
+    PromptDiagnostics, PromptLoadPolicy, PromptPhase, PromptWarningState, SessionContinuity,
 };
 use talos_tools::{
     ToolDefinitionProvider, ToolDispatchOutcome, ToolExecutorPort, ToolOutputPayload, ToolPending,
@@ -67,7 +67,8 @@ mod types;
 pub(crate) use finalize::to_api_stop_reason;
 pub use finalize::{emit_general_turn_finalization_stream, finalize_general_turn_artifacts};
 pub(crate) use guard::{
-    is_read_only_tool_round, run_forced_finalization_step,
+    build_read_only_nudge_message, is_read_only_tool_round, run_forced_finalization_step,
+    should_inject_read_only_nudge,
     should_force_finalization_for_empty_response, should_force_finalization_for_step,
     stop_reason_for_forced_finalization,
 };
@@ -77,6 +78,8 @@ pub use prepare::{
     execute_general_turn_loop, persist_general_turn_artifacts, prepare_general_turn,
     run_general_turn,
 };
+pub(crate) use prepare::{build_session_continuity, stage_session_state_update};
+pub(crate) use prepare::{PROMPT_WARNING_STATE_KEY, SESSION_CONTINUITY_STATE_KEY};
 pub(crate) use step_execute::emit_stream_event;
 #[cfg(test)]
 pub(crate) use step_execute::stream_round;

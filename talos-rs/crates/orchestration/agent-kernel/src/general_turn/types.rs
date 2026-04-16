@@ -25,6 +25,7 @@ pub struct PreparedGeneralTurn {
     pub tool_definitions: Vec<ToolDefinition>,
     pub prompt_diagnostics: PromptDiagnostics,
     pub warnings: Vec<KernelWarning>,
+    pub prompt_warning_state: Option<PromptWarningState>,
     pub stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
 }
 

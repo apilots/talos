@@ -25,7 +25,7 @@ agent:
     execution_children: 2
     execution_loop_iters: 3
     prompt:
-      max_static_tokens: 1200
+      max_static_tokens: 2000
       max_dynamic_tokens: 3200
       include_session_summary: true
       include_recent_messages: true

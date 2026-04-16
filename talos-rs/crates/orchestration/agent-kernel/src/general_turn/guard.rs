@@ -2,6 +2,9 @@ use super::*;
 use serde_json::{Map, Value};
 
 const FORCED_FINALIZATION_INSTRUCTION: &str = "Tool investigation must stop now. Do not call any more tools. Based only on the verified observations and tool results already present in the conversation, provide the best final answer for the user. If the evidence is incomplete, say so briefly and summarize what is known.";
+const SALVAGE_FINALIZATION_INSTRUCTION: &str = "Your previous attempt did not produce a usable final answer. Do not call any tools. Using only the verified observations, tool results, and explicit failures already in the conversation, produce a concise final answer. If the tools failed or evidence is incomplete, explain that clearly and give the best next step.";
+const FALLBACK_SALVAGE_RESPONSE: &str = "I could not produce a full final answer after tool execution. Based on the available tool results, at least one required step failed or returned insufficient evidence. Review the tool errors and continue with a narrower follow-up step.";
+const LOW_GAIN_READ_ONLY_NUDGE: &str = "You are repeating a similar read-only investigation. Unless the next step materially narrows scope, stop searching and either read the most relevant file or answer with the verified evidence already collected.";
 
 pub(crate) fn is_read_only_tool_name(tool_name: &str) -> bool {
     matches!(
@@ -48,8 +51,16 @@ pub(crate) fn should_force_finalization_for_step(
         guard.consecutive_equivalent_read_only_rounds = 0;
     }
 
-    (guard.consecutive_equivalent_read_only_rounds >= 1)
+    (guard.consecutive_equivalent_read_only_rounds >= 2)
         .then_some(ForcedFinalizationCause::RepeatedReadOnlyInvestigation)
+}
+
+pub(crate) fn should_inject_read_only_nudge(guard: &ToolLoopGuardState) -> bool {
+    guard.consecutive_equivalent_read_only_rounds == 1
+}
+
+pub(crate) fn build_read_only_nudge_message() -> ChatMessage {
+    ChatMessage::system(LOW_GAIN_READ_ONLY_NUDGE)
 }
 
 pub(crate) fn stop_reason_for_forced_finalization(_cause: ForcedFinalizationCause) -> StopReason {
@@ -92,7 +103,41 @@ pub(crate) async fn run_forced_finalization_step(
         FORCED_FINALIZATION_INSTRUCTION, cause_note
     )));
 
-    execute_general_turn_step(
+    let step = execute_general_turn_step(
+        GeneralTurnStepRequest {
+            round: 0,
+            model: model.clone(),
+            messages: messages.clone(),
+            tool_definitions: Vec::new(),
+            parallel_tool_calls: false,
+            native_thinking: native_thinking.clone(),
+            stream_tx: None,
+            streaming_tool_execution: None,
+        },
+        llm_provider.clone(),
+    )
+    .await?;
+
+    if !step.text.trim().is_empty() {
+        return Ok(step);
+    }
+
+    run_salvage_finalization_step(messages, step, model, llm_provider, native_thinking).await
+}
+
+async fn run_salvage_finalization_step(
+    mut messages: Vec<ChatMessage>,
+    prior_step: GeneralTurnStepResult,
+    model: String,
+    llm_provider: Arc<dyn LlmProvider>,
+    native_thinking: Option<NativeThinkingConfig>,
+) -> TalosResult<GeneralTurnStepResult> {
+    messages.push(ChatMessage::system(SALVAGE_FINALIZATION_INSTRUCTION));
+    if !prior_step.text.trim().is_empty() {
+        messages.push(ChatMessage::assistant(prior_step.text.clone()));
+    }
+
+    let mut salvage_step = execute_general_turn_step(
         GeneralTurnStepRequest {
             round: 0,
             model,
@@ -105,7 +150,14 @@ pub(crate) async fn run_forced_finalization_step(
         },
         llm_provider,
     )
-    .await
+    .await?;
+
+    if salvage_step.text.trim().is_empty() {
+        salvage_step.text = FALLBACK_SALVAGE_RESPONSE.to_string();
+        salvage_step.disposition = GeneralTurnStepDisposition::FinalResponse;
+    }
+
+    Ok(salvage_step)
 }
 
 fn fingerprint_read_only_round(step: &GeneralTurnStepResult) -> ReadOnlyRoundFingerprint {
@@ -115,14 +167,38 @@ fn fingerprint_read_only_round(step: &GeneralTurnStepResult) -> ReadOnlyRoundFin
             .iter()
             .map(|call| ToolCallFingerprint {
                 tool_name: call.name.clone(),
-                canonical_arguments: canonical_json_string(&call.arguments),
+                canonical_arguments: canonical_read_only_arguments(&call.name, &call.arguments),
             })
             .collect(),
     }
 }
 
+fn canonical_read_only_arguments(tool_name: &str, value: &Value) -> String {
+    canonical_json_string(&canonicalize_read_only_arguments(tool_name, value))
+}
+
 fn canonical_json_string(value: &Value) -> String {
     canonicalize_value(value).to_string()
+}
+
+fn canonicalize_read_only_arguments(tool_name: &str, value: &Value) -> Value {
+    let mut normalized = canonicalize_value(value);
+    let Value::Object(map) = &mut normalized else {
+        return normalized;
+    };
+
+    match tool_name {
+        "grep_files" => {
+            map.remove("limit");
+        }
+        "list_dir" => {
+            map.remove("limit");
+            map.remove("offset");
+        }
+        _ => {}
+    }
+
+    Value::Object(map.clone())
 }
 
 fn canonicalize_value(value: &Value) -> Value {

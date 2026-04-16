@@ -57,8 +57,8 @@ impl LlmProvider for RepeatedReadOnlyFlowProvider {
         }
 
         assert!(
-            round < 2,
-            "flow should force finalization before a third tool-enabled round"
+            round < 3,
+            "flow should inject a nudge on the second equivalent round and force finalization before a fourth tool-enabled round"
         );
         Ok(ChatResponse {
             content: "I should inspect the same directory again.".to_string(),
@@ -150,7 +150,7 @@ async fn test_single_flow_forces_final_summary_after_repeated_read_only_round() 
         "Final summary after repeated investigation."
     );
     assert_eq!(result.summary.stop_reason, StopReason::ToolRoundLimit);
-    assert_eq!(provider.round.load(Ordering::SeqCst), 3);
+    assert_eq!(provider.round.load(Ordering::SeqCst), 4);
     assert!(provider.forced_finalization_seen.load(Ordering::SeqCst));
     assert_ne!(result.summary.output_text, "[tool-call rounds exceeded]");
 }

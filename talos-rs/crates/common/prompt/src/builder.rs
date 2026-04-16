@@ -24,6 +24,7 @@ pub struct PromptBuilder<'a> {
     pub(crate) retrieved_memories: Vec<RetrievedMemoryItem>,
     pub(crate) session_environment: Option<TalosSessionEnvironment>,
     pub(crate) project_root: Option<PathBuf>,
+    pub(crate) session_continuity: Option<SessionContinuity>,
     pub(crate) config: PromptBuildConfig,
 }
 
@@ -49,6 +50,7 @@ impl<'a> PromptBuilder<'a> {
             retrieved_memories: Vec::new(),
             session_environment: None,
             project_root: None,
+            session_continuity: None,
             config: PromptBuildConfig::default(),
         }
     }
@@ -115,6 +117,11 @@ impl<'a> PromptBuilder<'a> {
         self
     }
 
+    pub fn session_continuity(mut self, session_continuity: Option<SessionContinuity>) -> Self {
+        self.session_continuity = session_continuity;
+        self
+    }
+
     pub fn budget(mut self, max_static_tokens: usize, max_dynamic_tokens: usize) -> Self {
         self.config.budget.max_static_tokens = max_static_tokens.max(1);
         self.config.budget.max_dynamic_tokens = max_dynamic_tokens.max(1);
@@ -164,6 +171,7 @@ impl<'a> PromptBuilder<'a> {
     async fn read_bootstrap_file(
         path: &Path,
         kind: WorkspaceBootstrapFileKind,
+        scope: BootstrapFileScope,
     ) -> TalosResult<WorkspaceBootstrapFile> {
         let content = match fs::read_to_string(path).await {
             Ok(content) => Some(content),
@@ -178,6 +186,7 @@ impl<'a> PromptBuilder<'a> {
         };
         Ok(WorkspaceBootstrapFile {
             kind,
+            scope,
             path: path.to_path_buf(),
             content,
         })
@@ -207,7 +216,9 @@ impl<'a> PromptBuilder<'a> {
             if self.config.prompt.bootstrap.auto_create_missing_files && kind.should_auto_create() {
                 bootstrap::ensure_bootstrap_file(&path, kind.default_template()).await?;
             }
-            files.push(Self::read_bootstrap_file(&path, *kind).await?);
+            files.push(
+                Self::read_bootstrap_file(&path, *kind, BootstrapFileScope::Workspace).await?,
+            );
         }
         Ok(files)
     }
@@ -221,14 +232,31 @@ impl<'a> PromptBuilder<'a> {
         let Some(project_root) = self.project_root.as_ref() else {
             return Ok(Vec::new());
         };
+        let workspace_dir = bootstrap::expand_workspace_dir(&self.config.memory.workspace_dir);
 
         let mut files = Vec::new();
         for kind in WorkspaceBootstrapFileKind::project_files() {
             if !kind.should_load_in_mode(self.mode, &self.config.prompt) {
                 continue;
             }
-            let path = project_root.join(kind.file_name());
-            files.push(Self::read_bootstrap_file(&path, *kind).await?);
+            let project_path = project_root.join(kind.file_name());
+            let project_file =
+                Self::read_bootstrap_file(&project_path, *kind, BootstrapFileScope::ProjectRoot)
+                    .await?;
+            if project_file.content.is_some() {
+                files.push(project_file);
+                continue;
+            }
+
+            let workspace_path = workspace_dir.join(kind.file_name());
+            let workspace_file =
+                Self::read_bootstrap_file(&workspace_path, *kind, BootstrapFileScope::Workspace)
+                    .await?;
+            if workspace_file.content.is_some() {
+                files.push(workspace_file);
+            } else {
+                files.push(project_file);
+            }
         }
         Ok(files)
     }

@@ -1,4 +1,9 @@
 use super::*;
+use crate::{EventAuthor, ExecutionBranch, SessionEvent, SessionEventKind, SessionEventPayload};
+use serde::de::DeserializeOwned;
+
+pub(crate) const SESSION_CONTINUITY_STATE_KEY: &str = "session_continuity";
+pub(crate) const PROMPT_WARNING_STATE_KEY: &str = "prompt_warning_state";
 
 fn split_prompt_prefix_messages(messages: &[ChatMessage], input: &str) -> Vec<ChatMessage> {
     let Some(last_message) = messages.last() else {
@@ -32,6 +37,175 @@ async fn emit_prompt_warning_events(ctx: &mut InvocationContext, warnings: &[Ker
     }
 }
 
+fn load_session_state_value<T: DeserializeOwned>(
+    ctx: &InvocationContext,
+    key: &str,
+) -> Option<T> {
+    ctx.session
+        .state
+        .get(crate::StateNamespace::Session, key)
+        .and_then(|value| serde_json::from_value(value.clone()).ok())
+}
+
+fn prompt_warning_key(warning: &KernelWarning) -> Option<String> {
+    match warning {
+        KernelWarning::PromptBootstrapFileMissing(payload) => {
+            Some(format!("missing:{:?}:{}", payload.file_kind, payload.path))
+        }
+        KernelWarning::PromptBootstrapFileTruncated(payload) => {
+            Some(format!("truncated:{:?}:{}", payload.file_kind, payload.path))
+        }
+        KernelWarning::PromptBootstrapFileDropped(payload) => {
+            Some(format!("dropped:{:?}:{}", payload.file_kind, payload.path))
+        }
+        KernelWarning::PromptDynamicSectionDropped(_)
+        | KernelWarning::PromptDynamicSectionTruncated(_) => None,
+    }
+}
+
+fn filter_prompt_warnings(
+    ctx: &InvocationContext,
+    warnings: Vec<KernelWarning>,
+) -> (Vec<KernelWarning>, Option<PromptWarningState>) {
+    let mut warning_state =
+        load_session_state_value::<PromptWarningState>(ctx, PROMPT_WARNING_STATE_KEY)
+            .unwrap_or_default();
+    let mut changed = false;
+    let mut filtered = Vec::new();
+
+    for warning in warnings {
+        if let Some(key) = prompt_warning_key(&warning) {
+            if warning_state.seen_warning_keys.insert(key) {
+                changed = true;
+                filtered.push(warning);
+            }
+        } else {
+            filtered.push(warning);
+        }
+    }
+
+    (
+        filtered,
+        changed.then_some(warning_state),
+    )
+}
+
+pub(crate) fn stage_session_state_update(
+    ctx: &mut InvocationContext,
+    session_id: &str,
+    invocation_id: &str,
+    branch: ExecutionBranch,
+    key: &str,
+    value: serde_json::Value,
+) {
+    let mut event = SessionEvent::new(
+        session_id.to_string(),
+        invocation_id.to_string(),
+        branch,
+        EventAuthor::System,
+        SessionEventKind::Planning,
+        SessionEventPayload::StateOnly,
+    );
+    event.actions.state_delta.push(crate::StateDelta {
+        namespace: crate::StateNamespace::Session,
+        key: key.to_string(),
+        value,
+    });
+    crate::flow::stage_session_event(ctx, event);
+}
+
+pub(crate) fn build_session_continuity(
+    executed: &ExecutedTurnArtifacts,
+) -> Option<SessionContinuity> {
+    let failed_call_ids = executed
+        .tool_result_log
+        .iter()
+        .filter(|log| log.is_error)
+        .map(|log| log.call_id.clone())
+        .collect::<std::collections::HashSet<_>>();
+
+    let mut recent_verified_paths = Vec::new();
+    let mut recent_successful_tools = Vec::new();
+    let mut recent_failed_tools = Vec::new();
+    let mut grep_patterns = Vec::new();
+
+    for call in &executed.tool_call_log {
+        let tool_name = call.name.clone();
+        if failed_call_ids.contains(&call.call_id) {
+            if !recent_failed_tools.contains(&tool_name) {
+                recent_failed_tools.push(tool_name);
+            }
+        } else if !recent_successful_tools.contains(&tool_name) {
+            recent_successful_tools.push(tool_name.clone());
+        }
+
+        for key in ["file_path", "dir_path", "path"] {
+            if let Some(path) = call.arguments.get(key).and_then(|value| value.as_str()) {
+                if !recent_verified_paths.contains(&path.to_string()) {
+                    recent_verified_paths.push(path.to_string());
+                }
+                break;
+            }
+        }
+
+        if call.name == "grep_files" {
+            if let Some(pattern) = call.arguments.get("pattern").and_then(|value| value.as_str()) {
+                grep_patterns.push(pattern.to_string());
+            }
+        }
+    }
+
+    let mut recent_unhelpful_patterns = Vec::new();
+    if !recent_failed_tools.is_empty() {
+        recent_unhelpful_patterns.push("avoid retrying the same failing path or command".to_string());
+    }
+    if grep_patterns.len() > 1 {
+        let unique_patterns = grep_patterns
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len();
+        if unique_patterns < grep_patterns.len() {
+            recent_unhelpful_patterns.push(
+                "avoid repeating grep on the same pattern without narrowing scope".to_string(),
+            );
+        }
+    }
+    if executed.tool_call_log.len() > 1
+        && recent_verified_paths.len() < executed.tool_call_log.len().min(3)
+    {
+        recent_unhelpful_patterns
+            .push("avoid re-reading the same path when no new evidence is needed".to_string());
+    }
+
+    let recent_answer_mode = if recent_successful_tools
+        .iter()
+        .any(|tool| matches!(tool.as_str(), "grep_files" | "read_file" | "list_dir"))
+    {
+        Some(ContinuityAnswerMode::CodeFirst)
+    } else if executed.tool_call_log.is_empty() {
+        Some(ContinuityAnswerMode::DirectAnswer)
+    } else {
+        Some(ContinuityAnswerMode::Mixed)
+    };
+
+    if recent_verified_paths.is_empty()
+        && recent_successful_tools.is_empty()
+        && recent_failed_tools.is_empty()
+        && recent_unhelpful_patterns.is_empty()
+        && recent_answer_mode.is_none()
+    {
+        None
+    } else {
+        Some(SessionContinuity {
+            recent_verified_paths: recent_verified_paths.into_iter().take(4).collect(),
+            recent_successful_tools: recent_successful_tools.into_iter().take(4).collect(),
+            recent_failed_tools: recent_failed_tools.into_iter().take(4).collect(),
+            recent_unhelpful_patterns: recent_unhelpful_patterns.into_iter().take(3).collect(),
+            recent_answer_mode,
+        })
+    }
+}
+
 pub async fn prepare_general_turn(
     ctx: &mut InvocationContext,
     agent_name: &str,
@@ -46,6 +220,8 @@ pub async fn prepare_general_turn(
     let agent_id = ctx.agent_id.clone();
     let selected_model = ctx.selected_model_id().to_string();
     let stream_tx = ctx.stream_tx.clone();
+    let session_continuity =
+        load_session_state_value::<SessionContinuity>(ctx, SESSION_CONTINUITY_STATE_KEY);
 
     let phase = match ctx.phase {
         crate::TurnPhase::Planning => PromptPhase::Planning,
@@ -78,10 +254,12 @@ pub async fn prepare_general_turn(
         .memory_store(&session_id, memory_store.as_ref())
         .session_environment(ctx.session_environment.clone())
         .project_root(ctx.project_root.clone())
+        .session_continuity(session_continuity)
         .user_input(input.to_string());
     let prompt_assembly = prompt_builder.assemble().await?;
     let prompt_diagnostics = prompt_assembly.diagnostics.clone();
-    let warnings = derive_prompt_warnings(&prompt_diagnostics, kernel_config);
+    let (warnings, prompt_warning_state) =
+        filter_prompt_warnings(ctx, derive_prompt_warnings(&prompt_diagnostics, kernel_config));
     tracing::debug!(
         session_id = %session_id,
         agent_id = %agent_id,
@@ -119,6 +297,7 @@ pub async fn prepare_general_turn(
         tool_definitions: tool_definition_provider.get_tool_definitions(),
         prompt_diagnostics,
         warnings,
+        prompt_warning_state,
         stream_tx,
     })
 }
@@ -140,7 +319,11 @@ pub async fn execute_general_turn_loop(
     let mut tool_loop_guard = ToolLoopGuardState::default();
 
     let (final_text, stop_reason) = loop {
-        let mut step_request = build_general_turn_step_request(&prepared, &state);
+        let mut step_request = build_general_turn_step_request(
+            &prepared,
+            &state,
+            execution_settings.tool_execution_mode == crate::ToolExecutionMode::Parallel,
+        );
         if prepared.stream_tx.is_some() {
             step_request.streaming_tool_execution = Some(StreamingToolExecutionConfig {
                 execution_mode: execution_settings.tool_execution_mode,
@@ -223,6 +406,9 @@ pub async fn execute_general_turn_loop(
             .await?
         };
         apply_general_turn_tool_batch(&mut state, &tool_batch, kernel_config.as_ref());
+        if should_inject_read_only_nudge(&tool_loop_guard) {
+            state.messages.push(build_read_only_nudge_message());
+        }
 
         if !tool_batch.pending_confirmations.is_empty()
             || !tool_batch.pending_dynamic_requests.is_empty()
@@ -346,6 +532,18 @@ pub async fn run_general_turn(
     .await?;
     let prompt_diagnostics = prepared.prompt_diagnostics.clone();
     let warnings = prepared.warnings.clone();
+    if let Some(prompt_warning_state) = prepared.prompt_warning_state.as_ref() {
+        if let Ok(value) = serde_json::to_value(prompt_warning_state) {
+            stage_session_state_update(
+                ctx,
+                &prepared.session_id,
+                &prepared.invocation_id,
+                ExecutionBranch::ModelThinking,
+                PROMPT_WARNING_STATE_KEY,
+                value,
+            );
+        }
+    }
     let executed = execute_general_turn_loop(
         prepared.clone(),
         agent_name,
@@ -364,6 +562,18 @@ pub async fn run_general_turn(
         kernel_config,
     )
     .await;
+    if let Some(session_continuity) = build_session_continuity(&executed) {
+        if let Ok(value) = serde_json::to_value(session_continuity) {
+            stage_session_state_update(
+                ctx,
+                &prepared.session_id,
+                &prepared.invocation_id,
+                ExecutionBranch::ModelThinking,
+                SESSION_CONTINUITY_STATE_KEY,
+                value,
+            );
+        }
+    }
 
     Ok(GeneralTurnResult {
         output_text: executed.output_text,

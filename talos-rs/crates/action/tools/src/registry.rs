@@ -70,6 +70,17 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
+    fn tool_priority(name: &str) -> usize {
+        match name {
+            "grep_files" => 0,
+            "read_file" => 1,
+            "list_dir" => 2,
+            "exec_command" => 3,
+            "write_stdin" => 4,
+            _ => 100,
+        }
+    }
+
     fn resolve_max_output_bytes(context: &ToolContext) -> usize {
         context
             .kernel_config()
@@ -305,12 +316,23 @@ impl ToolRegistry {
     }
 
     pub fn tool_catalog(&self) -> ToolCatalog {
-        ToolCatalog::new(
-            self.specs
-                .iter()
-                .map(|entry| entry.value().clone())
-                .collect(),
-        )
+        let mut specs = self
+            .specs
+            .iter()
+            .map(|entry| entry.value().clone())
+            .collect::<Vec<_>>();
+        specs.sort_by(|left, right| {
+            let left_key = (
+                Self::tool_priority(left.definition.name.as_str()),
+                left.definition.name.as_str(),
+            );
+            let right_key = (
+                Self::tool_priority(right.definition.name.as_str()),
+                right.definition.name.as_str(),
+            );
+            left_key.cmp(&right_key)
+        });
+        ToolCatalog::new(specs)
     }
 
     pub fn build_function_invocation(
@@ -697,6 +719,24 @@ mod tests {
         let defs = registry.get_tool_definitions();
         assert_eq!(defs.len(), 1);
         assert_eq!(defs[0].name, "echo_test");
+    }
+
+    #[test]
+    fn test_get_tool_definitions_uses_stable_priority_order() {
+        use crate::{ExecCommandTool, GrepFilesTool, ListDirTool, ReadFileTool};
+
+        let registry = ToolRegistry::new();
+        registry.register(Arc::new(ListDirTool));
+        registry.register(Arc::new(ExecCommandTool));
+        registry.register(Arc::new(ReadFileTool));
+        registry.register(Arc::new(GrepFilesTool));
+
+        let defs = registry.get_tool_definitions();
+        let names = defs.iter().map(|def| def.name.as_str()).collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            vec!["grep_files", "read_file", "list_dir", "exec_command"]
+        );
     }
 
     #[test]

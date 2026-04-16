@@ -5,7 +5,7 @@ use chrono::Utc;
 use serde_json::Value;
 use talos_llm_provider::Role;
 use talos_memory::{Memory, MemoryStore, TalosTurn};
-use talos_tools::{Tool, ToolContext, ToolOutput, ToolRegistry};
+use talos_tools::{GrepFilesTool, Tool, ToolContext, ToolOutput, ToolRegistry};
 use talos_types::talos::{StopReason, TalosOutputItem, TalosUsage};
 use uuid::Uuid;
 
@@ -389,6 +389,44 @@ async fn test_prompt_builder_minimal_mode_filters_bootstrap_files() {
 }
 
 #[tokio::test]
+async fn test_prompt_builder_falls_back_to_workspace_agents_when_project_agents_missing() {
+    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    let project_root = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    let memory = MemoryStore::new(workspace_dir.clone());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace dir should exist");
+    std::fs::create_dir_all(&project_root).expect("project root should exist");
+    std::fs::write(
+        workspace_dir.join("AGENTS.md"),
+        "# AGENTS\n\n- Workspace fallback rule.\n",
+    )
+    .expect("workspace agents file should write");
+
+    let mut config = PromptBuildConfig::default();
+    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.load_policy.include_session_summary = false;
+    config.load_policy.include_recent_messages = false;
+
+    let assembly = PromptBuilder::new()
+        .memory_store("s1", &memory)
+        .project_root(Some(project_root))
+        .config(config)
+        .user_input("bootstrap")
+        .assemble()
+        .await
+        .expect("prompt assembly should succeed");
+
+    let project_context = assembly
+        .context_sections
+        .iter()
+        .find(|section| section.kind == PromptSectionKind::ProjectContext)
+        .expect("project context should exist");
+    assert!(project_context
+        .content
+        .contains("## AGENTS.md (workspace)"));
+    assert!(project_context.content.contains("Workspace fallback rule"));
+}
+
+#[tokio::test]
 async fn test_prompt_builder_full_mode_includes_bootstrap_extensions() {
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     let project_root = std::env::temp_dir().join(Uuid::new_v4().to_string());
@@ -447,6 +485,32 @@ async fn test_prompt_builder_full_mode_includes_bootstrap_extensions() {
 }
 
 #[tokio::test]
+async fn test_prompt_builder_includes_recent_task_continuity_section() {
+    let assembly = PromptBuilder::new()
+        .session_continuity(Some(SessionContinuity {
+            recent_verified_paths: vec!["/tmp/project/Cargo.toml".to_string()],
+            recent_successful_tools: vec!["grep_files".to_string(), "read_file".to_string()],
+            recent_failed_tools: vec!["exec_command".to_string()],
+            recent_unhelpful_patterns: vec![
+                "avoid retrying the same failing path or command".to_string(),
+            ],
+            recent_answer_mode: Some(ContinuityAnswerMode::CodeFirst),
+        }))
+        .user_input("hello")
+        .assemble()
+        .await
+        .expect("prompt assembly should succeed");
+
+    let continuity = assembly
+        .context_sections
+        .iter()
+        .find(|section| section.kind == PromptSectionKind::RecentTaskContinuity)
+        .expect("continuity section should exist");
+    assert!(continuity.content.contains("recent_successful_tools"));
+    assert!(continuity.content.contains("code_first"));
+}
+
+#[tokio::test]
 async fn test_prompt_builder_none_mode_skips_bootstrap_context() {
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     let memory = MemoryStore::new(workspace_dir.clone());
@@ -496,20 +560,77 @@ async fn test_prompt_assembly_splits_system_and_tooling_sections() {
     assert!(assembly
         .system_sections
         .iter()
+        .any(|section| section.kind == PromptSectionKind::ToolChoicePriority));
+    assert!(assembly
+        .system_sections
+        .iter()
+        .any(|section| section.kind == PromptSectionKind::FailureRecoveryPolicy));
+    assert!(assembly
+        .system_sections
+        .iter()
+        .any(|section| section.kind == PromptSectionKind::CompactToolRouting));
+    assert!(assembly
+        .system_sections
+        .iter()
         .any(|section| section.kind == PromptSectionKind::TaskProtocolLibrary));
     assert!(assembly
         .system_sections
         .iter()
         .any(|section| section.kind == PromptSectionKind::CommunicationPolicy));
-    let tooling = assembly
+    let tool_choice = assembly
         .system_sections
+        .iter()
+        .find(|section| section.kind == PromptSectionKind::ToolChoicePriority)
+        .expect("tool choice priority should exist");
+    assert!(tool_choice.content.contains("honor that tool"));
+    assert!(tool_choice.content.contains("prefer grep_files first"));
+    let compact_tool_routing = assembly
+        .system_sections
+        .iter()
+        .find(|section| section.kind == PromptSectionKind::CompactToolRouting)
+        .expect("compact tool routing should exist");
+    assert!(compact_tool_routing
+        .content
+        .contains("instead of shell grep or rg"));
+    assert!(compact_tool_routing
+        .content
+        .contains("instead of cat, head, or tail"));
+    let tooling = assembly
+        .context_sections
         .iter()
         .find(|section| section.kind == PromptSectionKind::Tooling)
         .expect("tooling section should exist");
     assert!(tooling.content.contains("Available tools:"));
     assert!(tooling.content.contains("echo"));
     assert_eq!(tooling.cache_scope, CacheScope::Static);
-    assert!(assembly.context_sections.is_empty());
+    assert!(!assembly.context_sections.is_empty());
+}
+
+#[tokio::test]
+async fn test_prompt_builder_adds_requested_tool_preference_for_explicit_grep_request() {
+    let registry = ToolRegistry::new();
+    registry.register(Arc::new(GrepFilesTool));
+
+    let assembly = PromptBuilder::new()
+        .agent("talos", "assistant")
+        .tools(&registry)
+        .user_input("Analyze the repository architecture and use grep_files first.")
+        .assemble()
+        .await
+        .expect("prompt assembly should succeed");
+
+    let requested_tool_preference = assembly
+        .system_sections
+        .iter()
+        .find(|section| section.kind == PromptSectionKind::RequestedToolPreference)
+        .expect("requested tool preference section should exist");
+    assert!(requested_tool_preference.content.contains("grep_files"));
+    assert!(requested_tool_preference
+        .content
+        .contains("start with grep_files rather than list_dir"));
+    assert!(requested_tool_preference
+        .content
+        .contains("switch to the next best dedicated tool"));
 }
 
 #[tokio::test]
@@ -574,8 +695,11 @@ async fn test_rendered_cache_breakpoints_cover_tooling_and_workspace_sections() 
     let rendered = render_prompt_assembly(&assembly);
     let tooling_index = assembly
         .system_sections
-        .iter()
-        .position(|section| section.kind == PromptSectionKind::Tooling)
+        .len()
+        + assembly
+            .context_sections
+            .iter()
+            .position(|section| section.kind == PromptSectionKind::Tooling)
         .expect("tooling section should exist");
     assert!(rendered[tooling_index].cache_control.is_some());
     assert!(assembly

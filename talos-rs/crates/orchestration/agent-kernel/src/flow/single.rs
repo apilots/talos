@@ -1,9 +1,11 @@
 use super::*;
 use crate::{
     general_turn::{
-        run_forced_finalization_step, should_force_finalization_for_empty_response,
-        should_force_finalization_for_step, stop_reason_for_forced_finalization,
-        ForcedFinalizationCause, ToolLoopGuardState,
+        build_read_only_nudge_message, build_session_continuity, run_forced_finalization_step,
+        should_force_finalization_for_empty_response, should_force_finalization_for_step,
+        should_inject_read_only_nudge, stage_session_state_update,
+        stop_reason_for_forced_finalization, ForcedFinalizationCause, ToolLoopGuardState,
+        PROMPT_WARNING_STATE_KEY, SESSION_CONTINUITY_STATE_KEY,
     },
     StreamingToolExecutionConfig, ToolExecutionContext,
 };
@@ -234,6 +236,18 @@ impl BaseLlmFlow for SingleFlow {
         )
         .await?;
         let warnings = prepared.warnings.clone();
+        if let Some(prompt_warning_state) = prepared.prompt_warning_state.as_ref() {
+            if let Ok(value) = serde_json::to_value(prompt_warning_state) {
+                stage_session_state_update(
+                    ctx,
+                    &prepared.session_id,
+                    &prepared.invocation_id,
+                    request.branch,
+                    PROMPT_WARNING_STATE_KEY,
+                    value,
+                );
+            }
+        }
         stage_session_event(
             ctx,
             SessionEvent::new(
@@ -270,7 +284,11 @@ impl BaseLlmFlow for SingleFlow {
                 emit_framework_thinking(prepared.stream_tx.as_ref(), stage, state.round, text)
                     .await;
             }
-            let mut step_request = build_general_turn_step_request(&prepared, &state);
+            let mut step_request = build_general_turn_step_request(
+                &prepared,
+                &state,
+                self.settings.tool_execution_mode == crate::ToolExecutionMode::Parallel,
+            );
             if prepared.stream_tx.is_some() {
                 step_request.streaming_tool_execution = Some(StreamingToolExecutionConfig {
                     execution_mode: self.settings.tool_execution_mode,
@@ -699,6 +717,9 @@ impl BaseLlmFlow for SingleFlow {
                 );
             }
             apply_general_turn_tool_batch(&mut state, &tool_batch, &self.kernel_config);
+            if should_inject_read_only_nudge(&tool_loop_guard) {
+                state.messages.push(build_read_only_nudge_message());
+            }
             last_tool_batch = Some(tool_batch.clone());
             if !tool_batch.pending_confirmations.is_empty()
                 || !tool_batch.pending_dynamic_requests.is_empty()
@@ -776,6 +797,18 @@ impl BaseLlmFlow for SingleFlow {
         };
 
         let executed = finalize_general_turn_artifacts(state, final_text.clone(), stop_reason);
+        if let Some(session_continuity) = build_session_continuity(&executed) {
+            if let Ok(value) = serde_json::to_value(session_continuity) {
+                stage_session_state_update(
+                    ctx,
+                    &prepared.session_id,
+                    &prepared.invocation_id,
+                    request.branch,
+                    SESSION_CONTINUITY_STATE_KEY,
+                    value,
+                );
+            }
+        }
         emit_general_turn_finalization_stream(&prepared, &executed).await;
         let mut final_response = LlmResponseEnvelope {
             output_text: executed.output_text.clone(),

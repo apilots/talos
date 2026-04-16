@@ -38,7 +38,7 @@ fn test_kernel_defaults() {
     assert_eq!(config.agent.kernel.execution_mode, ExecutionMode::Single);
     assert_eq!(config.agent.kernel.execution_children, 2);
     assert_eq!(config.agent.kernel.execution_loop_iters, 3);
-    assert_eq!(config.agent.kernel.prompt.max_static_tokens, 1200);
+    assert_eq!(config.agent.kernel.prompt.max_static_tokens, 2000);
     assert_eq!(config.agent.kernel.prompt.max_dynamic_tokens, 3200);
     assert!(config.agent.kernel.prompt.include_session_summary);
     assert!(config.agent.kernel.prompt.include_recent_messages);
@@ -229,7 +229,7 @@ agent:
     execution_children: 2
     execution_loop_iters: 3
     prompt:
-      max_static_tokens: 1200
+      max_static_tokens: 2000
       max_dynamic_tokens: 3200
       include_session_summary: true
       include_recent_messages: true

@@ -107,6 +107,7 @@ async fn test_execute_general_turn_loop_forces_summary_when_budget_is_exhausted(
             dynamic_estimated_tokens: 0,
         },
         warnings: Vec::new(),
+        prompt_warning_state: None,
         stream_tx: None,
     };
     let mut config = AgentKernelConfig::default();

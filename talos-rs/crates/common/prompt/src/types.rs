@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use talos_config::{AgentKernelMemoryConfig, AgentKernelPromptConfig};
 use talos_error::{TalosError, TalosResult};
@@ -142,16 +143,21 @@ impl WorkspaceBootstrapFileKind {
         matches!(self, Self::Soul | Self::User | Self::Memory)
     }
 
-    pub(crate) fn is_project_file(self) -> bool {
-        matches!(self, Self::Agents)
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceBootstrapFile {
     pub kind: WorkspaceBootstrapFileKind,
+    pub scope: BootstrapFileScope,
     pub path: PathBuf,
     pub content: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BootstrapFileScope {
+    Workspace,
+    ProjectRoot,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -159,11 +165,16 @@ pub struct WorkspaceBootstrapFile {
 pub enum PromptSectionKind {
     IdentityMission,
     EvidenceToolingPolicy,
+    ToolChoicePriority,
+    RequestedToolPreference,
+    FailureRecoveryPolicy,
+    CompactToolRouting,
     Tooling,
     TaskProtocolLibrary,
     CommunicationPolicy,
     PlanningInstruction,
     ProjectContext,
+    RecentTaskContinuity,
     SessionSummary,
     RecentMessages,
     RetrievedMemories,
@@ -247,10 +258,39 @@ pub struct PromptBudget {
 impl Default for PromptBudget {
     fn default() -> Self {
         Self {
-            max_static_tokens: 1200,
+            max_static_tokens: 2000,
             max_dynamic_tokens: 3200,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContinuityAnswerMode {
+    CodeFirst,
+    DocumentationFirst,
+    DirectAnswer,
+    Mixed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct SessionContinuity {
+    #[serde(default)]
+    pub recent_verified_paths: Vec<String>,
+    #[serde(default)]
+    pub recent_successful_tools: Vec<String>,
+    #[serde(default)]
+    pub recent_failed_tools: Vec<String>,
+    #[serde(default)]
+    pub recent_unhelpful_patterns: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recent_answer_mode: Option<ContinuityAnswerMode>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct PromptWarningState {
+    #[serde(default)]
+    pub seen_warning_keys: BTreeSet<String>,
 }
 
 /// Prompt context loading policy.

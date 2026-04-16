@@ -117,7 +117,7 @@ pub struct AgentKernelPromptConfig {
 }
 
 fn default_prompt_max_static_tokens() -> usize {
-    1200
+    2000
 }
 
 fn default_prompt_max_dynamic_tokens() -> usize {

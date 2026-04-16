@@ -14,7 +14,7 @@ impl Tool for ListDirTool {
     }
 
     fn description(&self) -> &str {
-        "List a local directory with bounded depth to map repository or subsystem structure before reading files. Prefer this over shell ls or find when exploring an unfamiliar project area. Use list_dir to confirm top-level layout, then switch to grep_files or read_file once the search scope is clear. If you are unsure whether a path is a file or directory, call list_dir before read_file."
+        "List a local directory with bounded depth to map repository or subsystem structure.\n\nUsage:\n- Use list_dir instead of shell ls or find for directory inspection.\n- Use list_dir when you need directory shape, top-level layout, or to confirm whether a path is a directory.\n- For code structure, symbol, export, route, or entrypoint analysis, prefer grep_files before list_dir unless the missing fact is directory shape.\n- After list_dir clarifies the path, switch to grep_files for content search or read_file for a specific file.\n- Do not use list_dir as a substitute for grep_files when the task is to locate symbols or code references.\n- Do not keep using list_dir after the relevant files are already known."
     }
 
     fn parameters_schema(&self) -> Option<Value> {

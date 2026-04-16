@@ -22,7 +22,9 @@ pub use context::PromptContext;
 pub use manager::PromptManager;
 pub use template::PromptTemplate;
 pub use types::{
-    BootstrapFileDiagnostic, BudgetTier, CacheScope, PlannerMode, PromptAssembly, PromptBudget,
-    PromptBuildConfig, PromptDiagnostics, PromptLoadPolicy, PromptMode, PromptPhase, PromptSection,
-    PromptSectionKind, TruncationMode, WorkspaceBootstrapFile, WorkspaceBootstrapFileKind,
+    BootstrapFileDiagnostic, BootstrapFileScope, BudgetTier, CacheScope, ContinuityAnswerMode,
+    PlannerMode, PromptAssembly, PromptBudget, PromptBuildConfig, PromptDiagnostics,
+    PromptLoadPolicy, PromptMode, PromptPhase, PromptSection, PromptSectionKind,
+    PromptWarningState, SessionContinuity, TruncationMode, WorkspaceBootstrapFile,
+    WorkspaceBootstrapFileKind,
 };
