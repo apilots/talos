@@ -267,6 +267,8 @@ pub async fn start_server(
     let mut http_server = HttpServer::new(
         gateway,
         session_service,
+        config.clone(),
+        llm_provider.clone(),
         config.gateway.host.clone(),
         config.gateway.port,
         default_model,

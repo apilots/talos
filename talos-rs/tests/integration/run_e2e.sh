@@ -22,6 +22,7 @@ scenarios=(
   "06_cli_stream_thinking_and_tools.sh"
   "07_session_close_flushes_memory.sh"
   "08_embedded_tui_quit_flushes_memory.sh"
+  "09_memory_and_workspace_docs_api.sh"
 )
 
 pass_count=0

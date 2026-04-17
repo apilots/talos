@@ -92,9 +92,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .run(OrchestratorRequest {
             session: TalosSession {
                 title: "Untitled Session".to_string(),
+                project_id: None,
+                current_directory: None,
                 context: SessionContext {
                     session_id: "demo-session".to_string(),
                     workspace_id: Some("default".to_string()),
+                    project_id: None,
+                    current_directory: None,
+                    project_root: None,
                     source_type: TalosSourceType::System,
                     provider: TalosProvider::System,
                     user_id: "demo-user".to_string(),

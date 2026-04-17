@@ -7,10 +7,13 @@ use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{ChatMessage, ChatRequest, LlmProvider};
 use talos_session_store::SessionStore;
 use talos_types::gateway::GatewayRequest;
-use talos_types::talos::{TalosContext, TalosInputItem, TalosProvider, TalosUsage};
+use talos_types::talos::{
+    TalosConnectionMode, TalosContext, TalosInputItem, TalosProvider, TalosUsage,
+};
 use talos_types::{
-    SessionPatch, SessionPatchAck, SessionProjectRootPatch, SessionQuery, SessionRecord,
-    TalosConfig, TalosSession, DEFAULT_SESSION_TITLE,
+    OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, ProjectPatch, ProjectRecord,
+    SessionPatch, SessionPatchAck, SessionQuery, SessionRecord, TalosConfig, TalosSession,
+    DEFAULT_SESSION_TITLE,
 };
 use tokio::sync::RwLock;
 
@@ -167,14 +170,12 @@ impl SessionManager {
         record: &SessionRecord,
         workspace_id: Option<String>,
     ) -> TalosResult<TalosSession> {
-        TalosSession::restore(record, &self.base_config, workspace_id)
+        let mut session = TalosSession::restore(record, &self.base_config, workspace_id)?;
+        session.context.project_root = None;
+        Ok(session)
     }
 
-    fn resolve_initial_project_root(&self, context: &TalosContext) -> Option<PathBuf> {
-        if let Some(project_root) = context.project_root.clone() {
-            return Some(project_root);
-        }
-
+    fn workspace_root(&self) -> Option<PathBuf> {
         let workspace_dir = self.base_config.agent.kernel.memory.workspace_dir.trim();
         if workspace_dir.is_empty() {
             return None;
@@ -182,6 +183,83 @@ impl SessionManager {
 
         let candidate = resolve_runtime_path(workspace_dir);
         candidate.exists().then_some(candidate)
+    }
+
+    fn connection_mode_from_context(&self, context: &TalosContext) -> TalosConnectionMode {
+        context
+            .environment
+            .as_ref()
+            .map(|environment| environment.connection_mode)
+            .unwrap_or_default()
+    }
+
+    fn normalize_current_directory(
+        &self,
+        context: &TalosContext,
+        current_directory: Option<PathBuf>,
+    ) -> TalosResult<Option<PathBuf>> {
+        match self.connection_mode_from_context(context) {
+            TalosConnectionMode::Remote => Ok(None),
+            TalosConnectionMode::Embedded => {
+                let Some(path) = current_directory else {
+                    return Ok(None);
+                };
+                if !path.is_absolute() {
+                    return Err(TalosError::ValidationError(format!(
+                        "current directory must be an absolute path: {}",
+                        path.display()
+                    )));
+                }
+                if !path.exists() {
+                    return Err(TalosError::ValidationError(format!(
+                        "current directory does not exist: {}",
+                        path.display()
+                    )));
+                }
+                if !path.is_dir() {
+                    return Err(TalosError::ValidationError(format!(
+                        "current directory is not a directory: {}",
+                        path.display()
+                    )));
+                }
+                Ok(Some(path))
+            }
+        }
+    }
+
+    async fn resolve_effective_root(&self, session: &TalosSession) -> TalosResult<Option<PathBuf>> {
+        if let Some(project_id) = session.project_id.as_deref() {
+            let project = self
+                .session_store
+                .get_project(project_id)
+                .await?
+                .ok_or_else(|| {
+                    TalosError::ResourceNotFound(format!("project {}", project_id))
+                })?;
+            return Ok(Some(project.directory));
+        }
+
+        if matches!(
+            session.context.environment.as_ref().map(|env| env.connection_mode),
+            Some(TalosConnectionMode::Embedded)
+        ) {
+            if let Some(current_directory) = session.current_directory.clone() {
+                return Ok(Some(current_directory));
+            }
+        }
+
+        Ok(self.workspace_root())
+    }
+
+    async fn validate_project_id(&self, project_id: &str) -> TalosResult<()> {
+        let exists = self.session_store.get_project(project_id).await?.is_some();
+        if !exists {
+            return Err(TalosError::ValidationError(format!(
+                "project {} not found",
+                project_id
+            )));
+        }
+        Ok(())
     }
 
     async fn cache_session(&self, session: TalosSession) -> TalosSession {
@@ -224,7 +302,8 @@ impl SessionManager {
         let record = self.session_store.get_session_record(session_id).await?;
         let record = record
             .ok_or_else(|| TalosError::ResourceNotFound(format!("session {}", session_id)))?;
-        let session = self.build_session(&record, Some(workspace_id))?;
+        let mut session = self.build_session(&record, Some(workspace_id))?;
+        session.context.project_root = self.resolve_effective_root(&session).await?;
         Ok(self.cache_session(session).await)
     }
 
@@ -291,9 +370,15 @@ impl SessionManager {
         context: TalosContext,
         target_agent: &str,
         model: Option<String>,
+        project_id: Option<String>,
+        current_directory: Option<PathBuf>,
     ) -> TalosResult<TalosSession> {
+        if let Some(project_id) = project_id.as_deref() {
+            self.validate_project_id(project_id).await?;
+        }
         let mut context = context;
-        context.project_root = self.resolve_initial_project_root(&context);
+        context.project_root = None;
+        let current_directory = self.normalize_current_directory(&context, current_directory)?;
         let record = self
             .session_store
             .create_session(
@@ -302,9 +387,12 @@ impl SessionManager {
                 self.base_model(),
                 model.as_deref(),
                 self.resolve_dm_scope(&context.provider),
+                project_id,
+                current_directory,
             )
             .await?;
-        let session = self.build_session(&record, Some(self.default_workspace_id.clone()))?;
+        let mut session = self.build_session(&record, Some(self.default_workspace_id.clone()))?;
+        session.context.project_root = self.resolve_effective_root(&session).await?;
         Ok(self.cache_session(session).await)
     }
 
@@ -313,10 +401,14 @@ impl SessionManager {
         query: SessionQuery,
     ) -> TalosResult<Vec<TalosSession>> {
         let records = self.session_store.list_session_records(&query).await?;
-        records
-            .iter()
-            .map(|record| self.build_session(record, Some(self.default_workspace_id.clone())))
-            .collect()
+        let mut sessions = Vec::with_capacity(records.len());
+        for record in &records {
+            let mut session =
+                self.build_session(record, Some(self.default_workspace_id.clone()))?;
+            session.context.project_root = self.resolve_effective_root(&session).await?;
+            sessions.push(session);
+        }
+        Ok(sessions)
     }
 
     pub(super) async fn get_session(&self, session_id: &str) -> TalosResult<Option<TalosSession>> {
@@ -338,10 +430,11 @@ impl SessionManager {
         let Some(record) = self.session_store.get_session_record(session_id).await? else {
             return Ok(None);
         };
-        let session = self.build_session(
+        let mut session = self.build_session(
             &record,
             workspace_id.or_else(|| Some(self.default_workspace_id.clone())),
         )?;
+        session.context.project_root = self.resolve_effective_root(&session).await?;
         Ok(Some(self.cache_session(session).await))
     }
 
@@ -350,9 +443,14 @@ impl SessionManager {
         session_id: &str,
         patch: SessionPatch,
     ) -> TalosResult<SessionPatchAck> {
-        let patch = self.normalize_session_patch(patch);
-        if let Some(project_root_patch) = &patch.project_root {
-            self.validate_project_root_patch(project_root_patch)?;
+        let Some(record) = self.session_store.get_session_record(session_id).await? else {
+            return Ok(SessionPatchAck { success: false });
+        };
+        let patch = self
+            .normalize_session_patch(record.context.clone(), patch)
+            .await?;
+        if let Some(OptionalProjectIdPatch::Set { project_id }) = patch.project_id.as_ref() {
+            self.validate_project_id(project_id).await?;
         }
         let ack = self
             .session_store
@@ -372,35 +470,31 @@ impl SessionManager {
         Ok(ack)
     }
 
-    fn normalize_session_patch(&self, mut patch: SessionPatch) -> SessionPatch {
-        if matches!(patch.project_root, Some(SessionProjectRootPatch::Clear)) {
-            patch.project_root = self
-                .resolve_initial_project_root(&TalosContext::system("session-patch"))
-                .map(|path| SessionProjectRootPatch::Set { path });
+    pub(super) async fn delete_session(&self, session_id: &str) -> TalosResult<SessionPatchAck> {
+        let ack = self.session_store.delete_session_record(session_id).await?;
+        if ack.success {
+            self.invalidate_cached_session(session_id).await;
         }
-        patch
+        Ok(ack)
     }
 
-    fn validate_project_root_patch(&self, patch: &SessionProjectRootPatch) -> TalosResult<()> {
-        match patch {
-            SessionProjectRootPatch::Set { path } => {
-                let candidate = PathBuf::from(path);
-                if !candidate.exists() {
-                    return Err(TalosError::ValidationError(format!(
-                        "configured project root does not exist on the server: {}",
-                        candidate.display()
-                    )));
-                }
-                if !candidate.is_dir() {
-                    return Err(TalosError::ValidationError(format!(
-                        "configured project root is not a directory: {}",
-                        candidate.display()
-                    )));
-                }
-                Ok(())
-            }
-            SessionProjectRootPatch::Clear => Ok(()),
+    async fn normalize_session_patch(
+        &self,
+        context: TalosContext,
+        mut patch: SessionPatch,
+    ) -> TalosResult<SessionPatch> {
+        if let Some(OptionalCurrentDirectoryPatch::Set { path }) = patch.current_directory.as_ref() {
+            patch.current_directory = self
+                .normalize_current_directory(&context, Some(path.clone()))?
+                .map(|normalized| OptionalCurrentDirectoryPatch::Set { path: normalized });
         }
+        if matches!(
+            self.connection_mode_from_context(&context),
+            TalosConnectionMode::Remote
+        ) {
+            patch.current_directory = None;
+        }
+        Ok(patch)
     }
 
     async fn update_session_title(&self, session_id: &str, title: &str) -> TalosResult<()> {
@@ -447,6 +541,52 @@ impl SessionManager {
             .load_session(session_id, Some(self.default_workspace_id.clone()))
             .await?;
         Ok(session)
+    }
+
+    pub(super) async fn list_projects(&self) -> TalosResult<Vec<ProjectRecord>> {
+        self.session_store.list_projects().await
+    }
+
+    pub(super) async fn get_project(&self, project_id: &str) -> TalosResult<Option<ProjectRecord>> {
+        self.session_store.get_project(project_id).await
+    }
+
+    pub(super) async fn create_project(
+        &self,
+        name: String,
+        directory: PathBuf,
+    ) -> TalosResult<ProjectRecord> {
+        if !directory.is_absolute() {
+            return Err(TalosError::ValidationError(format!(
+                "project directory must be absolute: {}",
+                directory.display()
+            )));
+        }
+        if !directory.exists() {
+            return Err(TalosError::ValidationError(format!(
+                "project directory does not exist: {}",
+                directory.display()
+            )));
+        }
+        if !directory.is_dir() {
+            return Err(TalosError::ValidationError(format!(
+                "project directory is not a directory: {}",
+                directory.display()
+            )));
+        }
+        self.session_store.create_project(&name, &directory).await
+    }
+
+    pub(super) async fn patch_project(
+        &self,
+        project_id: &str,
+        patch: ProjectPatch,
+    ) -> TalosResult<Option<ProjectRecord>> {
+        self.session_store.patch_project(project_id, &patch).await
+    }
+
+    pub(super) async fn delete_project(&self, project_id: &str) -> TalosResult<()> {
+        self.session_store.delete_project(project_id).await
     }
 }
 

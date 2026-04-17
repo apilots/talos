@@ -1,5 +1,6 @@
 import type {
   ModelInfo,
+  ProjectRecord as ApiProjectRecord,
   SessionUpdate,
   TalosContext,
   TalosEvent,
@@ -10,12 +11,11 @@ import type {
 } from "@talos/sdk";
 
 import { getTalosClient } from "@/shared/api/client";
+import { isUnboundProject } from "@/shared/types/domain";
 import type { ProjectRecord } from "@/shared/types/ui";
-import { resolveProjectRootPath } from "@/shared/types/domain";
 
-function createContext(userId: string, project?: ProjectRecord): TalosContext {
+function createContext(userId: string): TalosContext {
   const randomPart = Math.random().toString(36).slice(2, 10);
-  const projectRoot = project ? resolveProjectRootPath(project.root) : undefined;
   return {
     source_type: "http",
     provider: "sdk",
@@ -23,12 +23,32 @@ function createContext(userId: string, project?: ProjectRecord): TalosContext {
     message_id: `msg_${randomPart}`,
     trace_id: `trace_${randomPart}`,
     channel_id: "web",
-    project_root: projectRoot,
   };
+}
+
+function mapProjectRecord(project: ApiProjectRecord): ProjectRecord {
+  return {
+    id: project.project_id,
+    name: project.name,
+    directory: project.directory,
+    createdAt: project.created_at,
+    updatedAt: project.updated_at,
+    origin: "server",
+  };
+}
+
+function deriveProjectName(directory: string) {
+  const normalized = directory.trim().replace(/\/+$/, "");
+  return normalized.split("/").filter(Boolean).at(-1) || "project";
 }
 
 export async function listModels() {
   return getTalosClient().models.list();
+}
+
+export async function listProjects() {
+  const projects = await getTalosClient().projects.list();
+  return projects.map(mapProjectRecord);
 }
 
 export async function listSessions() {
@@ -45,24 +65,30 @@ export async function getSessionTurns(sessionId: string) {
 
 export async function createSession(userId: string, model: string | undefined, project?: ProjectRecord) {
   return getTalosClient().sessions.create({
-    context: createContext(userId, project),
+    context: createContext(userId),
     model,
+    project_id: project && !isUnboundProject(project.id) ? project.id : undefined,
   });
 }
 
-export async function updateSessionProject(sessionId: string, project: ProjectRecord) {
-  const resolvedPath = resolveProjectRootPath(project.root);
-  const patch: SessionUpdate = resolvedPath
+export async function createProject(directory: string) {
+  const record = await getTalosClient().projects.create({
+    name: deriveProjectName(directory),
+    directory,
+  });
+  return mapProjectRecord(record);
+}
+
+export async function updateSessionProject(sessionId: string, project?: ProjectRecord) {
+  const patch: SessionUpdate = project && !isUnboundProject(project.id)
     ? {
-        conf: {},
-        project_root: {
+        project_id: {
           type: "set",
-          path: resolvedPath,
+          project_id: project.id,
         },
       }
     : {
-        conf: {},
-        project_root: {
+        project_id: {
           type: "clear",
         },
       };
@@ -72,7 +98,9 @@ export async function updateSessionProject(sessionId: string, project: ProjectRe
 export async function updateSessionModel(sessionId: string, model: string) {
   const patch: SessionUpdate = {
     conf: {
-      "agent.model": model,
+      agent: {
+        model,
+      },
     },
   };
   await getTalosClient().sessions.patch(sessionId, patch);
@@ -80,6 +108,10 @@ export async function updateSessionModel(sessionId: string, model: string) {
 
 export async function closeSession(sessionId: string) {
   await getTalosClient().sessions.close(sessionId);
+}
+
+export async function deleteSession(sessionId: string) {
+  await getTalosClient().sessions.delete(sessionId);
 }
 
 export async function cancelActiveTurn(sessionId: string) {
@@ -121,12 +153,10 @@ export async function submitToolApproval(
 }
 
 export function belongsToProject(session: TalosSession, project?: ProjectRecord) {
-  if (!project) {
-    return true;
+  if (!project || isUnboundProject(project.id)) {
+    return !session.project_id;
   }
-  const path = resolveProjectRootPath(project.root);
-  const sessionPath = session.context.project_root ?? __TALOS_DEFAULT_PROJECT_ROOT__;
-  return sessionPath === path;
+  return session.project_id === project.id;
 }
 
 export type ChatApiModel = ModelInfo;

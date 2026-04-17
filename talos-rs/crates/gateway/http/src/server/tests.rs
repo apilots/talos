@@ -7,6 +7,7 @@ use axum::Json;
 use serde_json::Value;
 use talos_auth::{AuthResult, TokenType};
 use talos_gateway::GatewayRequest;
+use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
 use talos_types::talos::{
     StopReason, TalosContext, TalosEvent, TalosEventPayload, TalosEventType, TalosInputItem,
     TalosMessageCompletedEvent, TalosMessageOutputDeltaEvent, TalosMessageRequest,
@@ -22,6 +23,7 @@ use crate::server::messages::{process_session_message, stream_session_message};
 
 struct MockGateway;
 struct MockSessionService;
+struct MockLlmProvider;
 
 fn test_model_info() -> ModelInfo {
     ModelInfo {
@@ -34,6 +36,91 @@ fn test_model_info() -> ModelInfo {
         input: vec![talos_types::ModelInputKind::Text],
         cost: talos_types::ModelCostConfig::default(),
         compat: talos_types::ModelCompatConfig::default(),
+    }
+}
+
+fn test_config() -> talos_types::TalosConfig {
+    talos_types::TalosConfig::default()
+}
+
+fn isolated_test_config() -> (talos_types::TalosConfig, std::path::PathBuf) {
+    let workspace_dir = std::env::temp_dir().join(format!("talos-http-test-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&workspace_dir).expect("workspace dir should exist");
+    let mut config = test_config();
+    config.agent.kernel.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    (config, workspace_dir)
+}
+
+fn test_state(auth_disabled: bool, static_token: Option<&str>) -> Arc<HttpApiState> {
+    Arc::new(HttpApiState::new(
+        Arc::new(MockGateway),
+        Arc::new(MockSessionService),
+        test_config(),
+        Arc::new(MockLlmProvider),
+        "test-secret".to_string(),
+        static_token.map(str::to_string),
+        auth_disabled,
+        vec![test_model_info()],
+    ))
+}
+
+fn test_state_with_config(
+    config: talos_types::TalosConfig,
+    auth_disabled: bool,
+    static_token: Option<&str>,
+) -> Arc<HttpApiState> {
+    Arc::new(HttpApiState::new(
+        Arc::new(MockGateway),
+        Arc::new(MockSessionService),
+        config,
+        Arc::new(MockLlmProvider),
+        "test-secret".to_string(),
+        static_token.map(str::to_string),
+        auth_disabled,
+        vec![test_model_info()],
+    ))
+}
+
+#[async_trait::async_trait]
+impl LlmProvider for MockLlmProvider {
+    fn name(&self) -> &str {
+        "mock"
+    }
+
+    fn default_model(&self) -> &str {
+        "mock-model"
+    }
+
+    async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
+        let content = if _request.messages.iter().any(|message| {
+            message
+                .content
+                .contains("Respond ONLY with a valid JSON array of file paths.")
+        }) {
+            "[\"memory/2026-04-04.md\"]".to_string()
+        } else if _request.messages.iter().any(|message| {
+            message
+                .content
+                .contains("Respond ONLY with a valid JSON array.")
+        }) {
+            "[{\"path\":\"memory/2026-04-04.md\",\"from\":1,\"to\":5}]".to_string()
+        } else {
+            String::new()
+        };
+        Ok(ChatResponse {
+            content,
+            reasoning: Vec::new(),
+            model: "mock-model".to_string(),
+            usage: Usage::default(),
+            finish_reason: None,
+            tool_calls: None,
+        })
+    }
+
+    async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        drop(tx);
+        Ok(ChatStream { rx })
     }
 }
 
@@ -189,6 +276,8 @@ impl SessionService for MockSessionService {
         &self,
         context: TalosContext,
         model: Option<String>,
+        project_id: Option<String>,
+        current_directory: Option<std::path::PathBuf>,
     ) -> TalosResult<talos_types::TalosSession> {
         Ok(talos_types::TalosSession {
             title: "Untitled Session".to_string(),
@@ -202,9 +291,13 @@ impl SessionService for MockSessionService {
                 trace_id: context.trace_id,
                 channel_id: context.channel_id,
                 thread_id: context.thread_id,
+                project_id: project_id.clone(),
+                current_directory: current_directory.clone(),
                 project_root: context.project_root,
                 environment: context.environment,
             },
+            project_id,
+            current_directory,
             config: {
                 let mut config = talos_types::TalosConfig::default();
                 let resolved = model.unwrap_or_else(|| "qwen-plus".to_string());
@@ -242,9 +335,13 @@ impl SessionService for MockSessionService {
                 trace_id: "trace-1".to_string(),
                 channel_id: Some("test-channel".to_string()),
                 thread_id: None,
+                project_id: None,
+                current_directory: None,
                 project_root: None,
                 environment: None,
             },
+            project_id: None,
+            current_directory: None,
             config: {
                 let mut config = talos_types::TalosConfig::default();
                 config.agent.model = "qwen-plus".to_string();
@@ -288,6 +385,13 @@ impl SessionService for MockSessionService {
         Ok(())
     }
 
+    async fn delete_session(
+        &self,
+        _session_id: &str,
+    ) -> TalosResult<talos_types::SessionPatchAck> {
+        Ok(talos_types::SessionPatchAck { success: true })
+    }
+
     async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
         Ok(())
     }
@@ -320,6 +424,43 @@ impl SessionService for MockSessionService {
     ) -> TalosResult<Vec<talos_types::talos::TalosMessageResponse>> {
         Ok(vec![])
     }
+
+    async fn list_projects(&self) -> TalosResult<Vec<talos_types::ProjectRecord>> {
+        Ok(Vec::new())
+    }
+
+    async fn get_project(
+        &self,
+        _project_id: &str,
+    ) -> TalosResult<Option<talos_types::ProjectRecord>> {
+        Ok(None)
+    }
+
+    async fn create_project(
+        &self,
+        name: String,
+        directory: std::path::PathBuf,
+    ) -> TalosResult<talos_types::ProjectRecord> {
+        Ok(talos_types::ProjectRecord {
+            project_id: "project-mock".to_string(),
+            name,
+            directory,
+            created_at: 0,
+            updated_at: 0,
+        })
+    }
+
+    async fn patch_project(
+        &self,
+        _project_id: &str,
+        _patch: talos_types::ProjectPatch,
+    ) -> TalosResult<Option<talos_types::ProjectRecord>> {
+        Ok(None)
+    }
+
+    async fn delete_project(&self, _project_id: &str) -> TalosResult<()> {
+        Ok(())
+    }
 }
 
 fn test_auth() -> AuthResult {
@@ -344,7 +485,6 @@ fn test_context() -> TalosContext {
         "trace-1",
     )
     .with_channel_id("test-channel")
-    .with_project_root("/server/project")
 }
 
 #[tokio::test]
@@ -364,14 +504,7 @@ async fn test_health() {
 
 #[tokio::test]
 async fn test_models() {
-    let state = Arc::new(HttpApiState::new(
-        Arc::new(MockGateway),
-        Arc::new(MockSessionService),
-        "test-secret".to_string(),
-        None,
-        false,
-        vec![test_model_info()],
-    ));
+    let state = test_state(false, None);
     let app = Router::new()
         .route("/v1/models", get(list_models_handler))
         .with_state(state);
@@ -398,14 +531,7 @@ async fn test_models() {
 
 #[tokio::test]
 async fn test_create_session_handler_returns_session_payload() {
-    let state = Arc::new(HttpApiState::new(
-        Arc::new(MockGateway),
-        Arc::new(MockSessionService),
-        "test-secret".to_string(),
-        None,
-        false,
-        vec![test_model_info()],
-    ));
+    let state = test_state(false, None);
 
     let response = create_session_handler(
         State(state),
@@ -422,20 +548,14 @@ async fn test_create_session_handler_returns_session_payload() {
     .expect("create session should succeed");
 
     assert_eq!(response.0["context"]["session_id"], "mock-session");
-    assert_eq!(response.0["context"]["project_root"], "/server/project");
+    assert!(response.0["project_id"].is_null());
+    assert!(response.0["current_directory"].is_null());
     assert_eq!(response.0["config"]["llm"]["model"], "qwen-plus");
 }
 
 #[tokio::test]
 async fn test_list_sessions_handler_returns_data_array() {
-    let state = Arc::new(HttpApiState::new(
-        Arc::new(MockGateway),
-        Arc::new(MockSessionService),
-        "test-secret".to_string(),
-        None,
-        false,
-        vec![test_model_info()],
-    ));
+    let state = test_state(false, None);
 
     let response = list_sessions_handler(
         State(state),
@@ -450,14 +570,7 @@ async fn test_list_sessions_handler_returns_data_array() {
 
 #[tokio::test]
 async fn test_get_session_handler_returns_not_found_for_unknown_session() {
-    let state = Arc::new(HttpApiState::new(
-        Arc::new(MockGateway),
-        Arc::new(MockSessionService),
-        "test-secret".to_string(),
-        None,
-        false,
-        vec![test_model_info()],
-    ));
+    let state = test_state(false, None);
 
     let err = get_session_handler(
         State(state),
@@ -472,14 +585,7 @@ async fn test_get_session_handler_returns_not_found_for_unknown_session() {
 
 #[tokio::test]
 async fn test_patch_session_handler_returns_success_ack() {
-    let state = Arc::new(HttpApiState::new(
-        Arc::new(MockGateway),
-        Arc::new(MockSessionService),
-        "test-secret".to_string(),
-        None,
-        false,
-        vec![test_model_info()],
-    ));
+    let state = test_state(false, None);
 
     let response = patch_session_handler(
         State(state),
@@ -500,14 +606,7 @@ async fn test_patch_session_handler_returns_success_ack() {
 
 #[tokio::test]
 async fn test_close_session_handler_returns_success() {
-    let state = Arc::new(HttpApiState::new(
-        Arc::new(MockGateway),
-        Arc::new(MockSessionService),
-        "test-secret".to_string(),
-        None,
-        false,
-        vec![test_model_info()],
-    ));
+    let state = test_state(false, None);
 
     let response = close_session_handler(
         State(state),
@@ -521,15 +620,23 @@ async fn test_close_session_handler_returns_success() {
 }
 
 #[tokio::test]
+async fn test_delete_session_handler_returns_success() {
+    let state = test_state(false, None);
+
+    let response = delete_session_handler(
+        State(state),
+        axum::extract::Extension(test_auth()),
+        Path("mock-session".to_string()),
+    )
+    .await
+    .expect("delete session should succeed");
+
+    assert_eq!(response.0["success"], serde_json::Value::Bool(true));
+}
+
+#[tokio::test]
 async fn test_compact_session_handler_returns_session_payload() {
-    let state = Arc::new(HttpApiState::new(
-        Arc::new(MockGateway),
-        Arc::new(MockSessionService),
-        "test-secret".to_string(),
-        None,
-        false,
-        vec![test_model_info()],
-    ));
+    let state = test_state(false, None);
 
     let response = compact_session_handler(
         State(state),
@@ -545,14 +652,7 @@ async fn test_compact_session_handler_returns_session_payload() {
 
 #[tokio::test]
 async fn test_clear_session_handler_returns_reset_session_payload() {
-    let state = Arc::new(HttpApiState::new(
-        Arc::new(MockGateway),
-        Arc::new(MockSessionService),
-        "test-secret".to_string(),
-        None,
-        false,
-        vec![test_model_info()],
-    ));
+    let state = test_state(false, None);
 
     let response = clear_session_handler(
         State(state),
@@ -567,11 +667,103 @@ async fn test_clear_session_handler_returns_reset_session_payload() {
     assert_eq!(response.0["state"]["usage"]["total_tokens"], 0);
 }
 
+#[tokio::test]
+async fn test_get_workspace_doc_handler_returns_exists_false_for_missing_file() {
+    let (config, workspace_dir) = isolated_test_config();
+    let state = test_state_with_config(config, false, None);
+
+    let response = get_workspace_doc_handler(
+        State(state),
+        axum::extract::Extension(test_auth()),
+        Path("soul".to_string()),
+    )
+    .await
+    .expect("get workspace doc should succeed");
+
+    assert_eq!(response.0["kind"], "soul");
+    assert_eq!(response.0["exists"], serde_json::Value::Bool(false));
+    assert_eq!(response.0["content"], "");
+    let _ = std::fs::remove_dir_all(workspace_dir);
+}
+
+#[tokio::test]
+async fn test_put_and_get_memory_file_handlers_roundtrip() {
+    let (config, workspace_dir) = isolated_test_config();
+    let state = test_state_with_config(config, false, None);
+
+    let put_response = put_memory_file_handler(
+        State(state.clone()),
+        axum::extract::Extension(test_auth()),
+        Path("2026-04-04".to_string()),
+        Json(talos_types::DocUpdateRequest {
+            content: "## [10:00] Example\nsession: session-1\n\n**Facts:**\n- stable fact\n".to_string(),
+            base_version: talos_types::ExpectedFileVersion::MustNotExist,
+        }),
+    )
+    .await
+    .expect("put memory file should succeed");
+
+    assert_eq!(put_response.0["date"], "2026-04-04");
+
+    let get_response = get_memory_file_handler(
+        State(state.clone()),
+        axum::extract::Extension(test_auth()),
+        Path("2026-04-04".to_string()),
+    )
+    .await
+    .expect("get memory file should succeed");
+
+    assert!(get_response.0["content"].as_str().unwrap().contains("stable fact"));
+
+    let list_response = list_memory_files_handler(
+        State(state),
+        axum::extract::Extension(test_auth()),
+        Query(serde_json::from_value(serde_json::json!({ "limit": 10 })).unwrap()),
+    )
+    .await
+    .expect("list memory files should succeed");
+
+    assert_eq!(list_response.0["data"][0]["date"], "2026-04-04");
+    let _ = std::fs::remove_dir_all(workspace_dir);
+}
+
+#[tokio::test]
+async fn test_search_memory_files_handler_returns_matching_data() {
+    let (config, workspace_dir) = isolated_test_config();
+    let memory_dir = workspace_dir.join("memory");
+    std::fs::create_dir_all(&memory_dir).expect("memory dir should exist");
+    std::fs::write(
+        memory_dir.join("2026-04-04.md"),
+        "## [10:00] Example\nsession: session-1\n\n**Facts:**\n- stable fact\n",
+    )
+    .expect("memory file should write");
+    let state = test_state_with_config(config, false, None);
+
+    let response = search_memory_files_handler(
+        State(state),
+        axum::extract::Extension(test_auth()),
+        Query(serde_json::from_value(serde_json::json!({
+            "q": "stable",
+            "limit": 5,
+            "date_from": "2026-04-01",
+            "date_to": "2026-04-30"
+        }))
+        .unwrap()),
+    )
+    .await
+    .expect("search memory should succeed");
+
+    assert_eq!(response.0["data"][0]["path"], "memory/2026-04-04.md");
+    let _ = std::fs::remove_dir_all(workspace_dir);
+}
+
 #[test]
 fn test_http_server_listen_addr_uses_configured_host() {
     let server = HttpServer::new(
         Arc::new(MockGateway),
         Arc::new(MockSessionService),
+        test_config(),
+        Arc::new(MockLlmProvider),
         "127.0.0.1",
         8080,
         "qwen-plus",
@@ -583,14 +775,7 @@ fn test_http_server_listen_addr_uses_configured_host() {
 
 #[tokio::test]
 async fn test_models_require_bearer_when_auth_enabled() {
-    let state = Arc::new(HttpApiState::new(
-        Arc::new(MockGateway),
-        Arc::new(MockSessionService),
-        "test-secret".to_string(),
-        None,
-        false,
-        vec![test_model_info()],
-    ));
+    let state = test_state(false, None);
     let app = Router::new()
         .route("/v1/models", get(list_models_handler))
         .with_state(state.clone())
@@ -610,14 +795,7 @@ async fn test_models_require_bearer_when_auth_enabled() {
 
 #[tokio::test]
 async fn test_models_allow_no_token_when_auth_disabled() {
-    let state = Arc::new(HttpApiState::new(
-        Arc::new(MockGateway),
-        Arc::new(MockSessionService),
-        "test-secret".to_string(),
-        None,
-        true,
-        vec![test_model_info()],
-    ));
+    let state = test_state(true, None);
     let app = Router::new()
         .route("/v1/models", get(list_models_handler))
         .with_state(state.clone())
@@ -642,6 +820,8 @@ async fn test_lifecycle_gate_rejects_new_requests_when_quiescing() {
     let state = Arc::new(HttpApiState::new_with_lifecycle(
         Arc::new(MockGateway),
         Arc::new(MockSessionService),
+        test_config(),
+        Arc::new(MockLlmProvider),
         "test-secret".to_string(),
         None,
         true,
@@ -676,6 +856,8 @@ async fn test_lifecycle_gate_allows_health_when_quiescing() {
     let state = Arc::new(HttpApiState::new_with_lifecycle(
         Arc::new(MockGateway),
         Arc::new(MockSessionService),
+        test_config(),
+        Arc::new(MockLlmProvider),
         "test-secret".to_string(),
         None,
         true,
@@ -705,14 +887,7 @@ async fn test_lifecycle_gate_allows_health_when_quiescing() {
 
 #[tokio::test]
 async fn test_process_session_message() {
-    let state = Arc::new(HttpApiState::new(
-        Arc::new(MockGateway),
-        Arc::new(MockSessionService),
-        "test-secret".to_string(),
-        Some("test-token".to_string()),
-        false,
-        vec![test_model_info()],
-    ));
+    let state = test_state(false, Some("test-token"));
 
     let request = TalosMessageRequest {
         input: vec![TalosInputItem::Text {
@@ -743,14 +918,7 @@ async fn test_process_session_message() {
 
 #[tokio::test]
 async fn test_stream_session_message_uses_gateway_stream_path() {
-    let state = Arc::new(HttpApiState::new(
-        Arc::new(MockGateway),
-        Arc::new(MockSessionService),
-        "test-secret".to_string(),
-        Some("test-token".to_string()),
-        false,
-        vec![test_model_info()],
-    ));
+    let state = test_state(false, Some("test-token"));
 
     let request = TalosMessageRequest {
         input: vec![TalosInputItem::Text {
@@ -776,14 +944,7 @@ async fn test_stream_session_message_uses_gateway_stream_path() {
 
 #[tokio::test]
 async fn test_cancel_active_turn_handler_returns_success() {
-    let state = Arc::new(HttpApiState::new(
-        Arc::new(MockGateway),
-        Arc::new(MockSessionService),
-        "test-secret".to_string(),
-        Some("test-token".to_string()),
-        false,
-        vec![test_model_info()],
-    ));
+    let state = test_state(false, Some("test-token"));
 
     let result = cancel_active_turn_handler(
         State(state),
@@ -798,14 +959,7 @@ async fn test_cancel_active_turn_handler_returns_success() {
 
 #[tokio::test]
 async fn test_submit_tool_approval_handler_returns_no_content() {
-    let state = Arc::new(HttpApiState::new(
-        Arc::new(MockGateway),
-        Arc::new(MockSessionService),
-        "test-secret".to_string(),
-        None,
-        false,
-        vec![test_model_info()],
-    ));
+    let state = test_state(false, None);
     let app = Router::new()
         .route(
             "/v1/sessions/:session_id/tool-approvals",

@@ -1,13 +1,15 @@
 use async_trait::async_trait;
 use serde_json::Value;
+use std::path::PathBuf;
 use std::sync::Arc;
 use talos_error::TalosResult;
 use talos_storage::{Row, Storage};
 use talos_types::talos::TalosUsage;
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType};
 use talos_types::{
-    SessionConfigOverridePolicy, SessionPatch, SessionPatchAck, SessionProjectRootPatch,
-    SessionQuery, SessionRecord, DEFAULT_SESSION_TITLE,
+    OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, ProjectPatch, ProjectRecord,
+    SessionConf, SessionConfigOverridePolicy, SessionPatch, SessionPatchAck, SessionQuery,
+    SessionRecord, DEFAULT_SESSION_TITLE,
 };
 
 #[async_trait]
@@ -19,6 +21,8 @@ pub trait SessionStore: Send + Sync {
         default_model: &str,
         requested_model: Option<&str>,
         dm_scope: Option<String>,
+        project_id: Option<String>,
+        current_directory: Option<PathBuf>,
     ) -> TalosResult<SessionRecord>;
 
     async fn resolve_or_create_session(
@@ -28,6 +32,8 @@ pub trait SessionStore: Send + Sync {
         default_model: &str,
         requested_model: Option<&str>,
         dm_scope: Option<String>,
+        project_id: Option<String>,
+        current_directory: Option<PathBuf>,
     ) -> TalosResult<SessionRecord>;
 
     async fn get_session_record(&self, session_id: &str) -> TalosResult<Option<SessionRecord>>;
@@ -42,6 +48,8 @@ pub trait SessionStore: Send + Sync {
 
     async fn reset_session_record(&self, session_id: &str) -> TalosResult<SessionPatchAck>;
 
+    async fn delete_session_record(&self, session_id: &str) -> TalosResult<SessionPatchAck>;
+
     async fn update_session_title(&self, session_id: &str, title: &str) -> TalosResult<()>;
 
     async fn record_session_progress(
@@ -51,6 +59,20 @@ pub trait SessionStore: Send + Sync {
         usage: &TalosUsage,
         model: Option<&str>,
     ) -> TalosResult<()>;
+
+    async fn list_projects(&self) -> TalosResult<Vec<ProjectRecord>>;
+
+    async fn get_project(&self, project_id: &str) -> TalosResult<Option<ProjectRecord>>;
+
+    async fn create_project(&self, name: &str, directory: &PathBuf) -> TalosResult<ProjectRecord>;
+
+    async fn patch_project(
+        &self,
+        project_id: &str,
+        patch: &ProjectPatch,
+    ) -> TalosResult<Option<ProjectRecord>>;
+
+    async fn delete_project(&self, project_id: &str) -> TalosResult<()>;
 }
 
 pub struct DatabaseSessionStore {
@@ -101,7 +123,7 @@ impl DatabaseSessionStore {
     }
 
     async fn fetch_session_row(&self, session_key: &str) -> TalosResult<Option<Row>> {
-        let sql = "SELECT session_key, title, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, usage_json, conf_json FROM sessions WHERE session_key = ?";
+        let sql = "SELECT session_key, title, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, usage_json, conf_json, project_id, current_directory FROM sessions WHERE session_key = ?";
         let rows = self.storage.query(sql, &[session_key]).await?;
         Ok(rows.into_iter().next())
     }
@@ -155,21 +177,32 @@ impl DatabaseSessionStore {
                 .unwrap_or_default(),
             message_count,
             usage,
-            conf: Self::parse_conf_json(row.get_string("conf_json"))
-                .into_iter()
-                .collect::<std::collections::HashMap<_, _>>(),
+            conf: Self::parse_conf_json(row.get_string("conf_json")),
+            project_id: Self::normalized_optional_string(row.get_string("project_id")),
+            current_directory: Self::normalized_optional_string(row.get_string("current_directory"))
+                .map(PathBuf::from),
         }
     }
 
-    fn parse_conf_json(conf_json: Option<String>) -> serde_json::Map<String, Value> {
+    fn parse_conf_json(conf_json: Option<String>) -> SessionConf {
         conf_json
-            .and_then(|v| serde_json::from_str::<Value>(&v).ok())
-            .and_then(|v| v.as_object().cloned())
+            .and_then(|v| serde_json::from_str::<SessionConf>(&v).ok())
             .unwrap_or_default()
     }
 
-    fn build_conf_json(conf: serde_json::Map<String, Value>) -> TalosResult<String> {
-        serde_json::to_string(&Value::Object(conf))
+    fn normalized_optional_string(value: Option<String>) -> Option<String> {
+        value.and_then(|raw| {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+    }
+
+    fn build_conf_json(conf: &SessionConf) -> TalosResult<String> {
+        serde_json::to_string(conf)
             .map_err(|e| talos_error::TalosError::SerializationError(e.to_string()))
     }
 
@@ -182,6 +215,29 @@ impl DatabaseSessionStore {
         serde_json::to_string(usage)
             .map_err(|e| talos_error::TalosError::SerializationError(e.to_string()))
     }
+
+    fn parse_project_record(row: &Row) -> ProjectRecord {
+        ProjectRecord {
+            project_id: row.get_string("project_id").unwrap_or_default(),
+            name: row.get_string("name").unwrap_or_default(),
+            directory: row
+                .get_string("directory")
+                .map(PathBuf::from)
+                .unwrap_or_default(),
+            created_at: row.get_i64("created_at").unwrap_or_default(),
+            updated_at: row.get_i64("updated_at").unwrap_or_default(),
+        }
+    }
+
+    async fn count_sessions_bound_to_project(&self, project_id: &str) -> TalosResult<i64> {
+        let sql = "SELECT COUNT(*) AS count FROM sessions WHERE project_id = ?";
+        let rows = self.storage.query(sql, &[project_id]).await?;
+        Ok(rows
+            .into_iter()
+            .next()
+            .and_then(|row| row.get_i64("count"))
+            .unwrap_or_default())
+    }
 }
 
 #[async_trait]
@@ -193,16 +249,16 @@ impl SessionStore for DatabaseSessionStore {
         default_model: &str,
         requested_model: Option<&str>,
         _dm_scope: Option<String>,
+        project_id: Option<String>,
+        current_directory: Option<PathBuf>,
     ) -> TalosResult<SessionRecord> {
         let session_id = Self::new_session_id();
         let now = chrono::Utc::now().timestamp_millis();
         let model = requested_model.unwrap_or(default_model).to_string();
-        let conf: serde_json::Map<String, Value> = if requested_model.is_some() {
+        let conf = if requested_model.is_some() {
             SessionConfigOverridePolicy::single_model_conf(&model)
-                .into_iter()
-                .collect()
         } else {
-            serde_json::Map::new()
+            SessionConf::default()
         };
 
         let record = SessionRecord {
@@ -214,15 +270,14 @@ impl SessionStore for DatabaseSessionStore {
             last_activity: now.try_into().unwrap_or_default(),
             message_count: 0,
             usage: TalosUsage::default(),
-            conf: conf
-                .clone()
-                .into_iter()
-                .collect::<std::collections::HashMap<_, _>>(),
+            conf: conf.clone(),
+            project_id: project_id.clone(),
+            current_directory: current_directory.clone(),
         };
 
         let context_json = Self::build_context_json(context)?;
         let usage_json = Self::build_usage_json(&record.usage)?;
-        let conf_json = Self::build_conf_json(conf)?;
+        let conf_json = Self::build_conf_json(&conf)?;
 
         let row = Row::new(
             vec![
@@ -242,6 +297,8 @@ impl SessionStore for DatabaseSessionStore {
                 "message_count".to_string(),
                 "usage_json".to_string(),
                 "conf_json".to_string(),
+                "project_id".to_string(),
+                "current_directory".to_string(),
             ],
             vec![
                 Value::String(session_id),
@@ -268,6 +325,10 @@ impl SessionStore for DatabaseSessionStore {
                 Value::Number(0.into()),
                 Value::String(usage_json),
                 Value::String(conf_json),
+                project_id.map(Value::String).unwrap_or(Value::Null),
+                current_directory
+                    .map(|path| Value::String(path.display().to_string()))
+                    .unwrap_or(Value::Null),
             ],
         );
         self.storage.insert("sessions", &row).await?;
@@ -282,6 +343,8 @@ impl SessionStore for DatabaseSessionStore {
         default_model: &str,
         requested_model: Option<&str>,
         dm_scope: Option<String>,
+        project_id: Option<String>,
+        current_directory: Option<PathBuf>,
     ) -> TalosResult<SessionRecord> {
         let dm_scope = Self::resolve_dm_scope(dm_scope.as_deref());
         let session_key = Self::stable_session_key(context, agent_id, &dm_scope);
@@ -292,18 +355,13 @@ impl SessionStore for DatabaseSessionStore {
             let mut conf = Self::parse_conf_json(existing.get_string("conf_json"));
             if let Some(model) = requested_model {
                 record.model = model.to_string();
-                conf = SessionConfigOverridePolicy::single_model_conf(model)
-                    .into_iter()
-                    .collect();
+                conf = SessionConfigOverridePolicy::single_model_conf(model);
             }
-            record.conf = conf
-                .clone()
-                .into_iter()
-                .collect::<std::collections::HashMap<_, _>>();
+            record.conf = conf.clone();
             record.last_activity = now.try_into().unwrap_or_default();
 
             let context_json = Self::build_context_json(&record.context)?;
-            let conf_json = Self::build_conf_json(conf)?;
+            let conf_json = Self::build_conf_json(&conf)?;
 
             let update_row = Row::new(
                 vec![
@@ -314,6 +372,8 @@ impl SessionStore for DatabaseSessionStore {
                     "message_count".to_string(),
                     "usage_json".to_string(),
                     "conf_json".to_string(),
+                    "project_id".to_string(),
+                    "current_directory".to_string(),
                 ],
                 vec![
                     Value::Number(now.into()),
@@ -323,6 +383,12 @@ impl SessionStore for DatabaseSessionStore {
                     Value::Number(serde_json::Number::from(record.message_count)),
                     Value::String(Self::build_usage_json(&record.usage)?),
                     Value::String(conf_json),
+                    record.project_id.clone().map(Value::String).unwrap_or(Value::Null),
+                    record
+                        .current_directory
+                        .clone()
+                        .map(|path| Value::String(path.display().to_string()))
+                        .unwrap_or(Value::Null),
                 ],
             );
             self.storage
@@ -338,12 +404,10 @@ impl SessionStore for DatabaseSessionStore {
         }
 
         let model = requested_model.unwrap_or(default_model).to_string();
-        let conf: serde_json::Map<String, Value> = if requested_model.is_some() {
+        let conf = if requested_model.is_some() {
             SessionConfigOverridePolicy::single_model_conf(&model)
-                .into_iter()
-                .collect()
         } else {
-            serde_json::Map::new()
+            SessionConf::default()
         };
         let record = SessionRecord {
             id: session_key.clone(),
@@ -354,15 +418,14 @@ impl SessionStore for DatabaseSessionStore {
             last_activity: now.try_into().unwrap_or_default(),
             message_count: 0,
             usage: TalosUsage::default(),
-            conf: conf
-                .clone()
-                .into_iter()
-                .collect::<std::collections::HashMap<_, _>>(),
+            conf: conf.clone(),
+            project_id: project_id.clone(),
+            current_directory: current_directory.clone(),
         };
 
         let context_json = Self::build_context_json(context)?;
         let usage_json = Self::build_usage_json(&record.usage)?;
-        let conf_json = Self::build_conf_json(conf)?;
+        let conf_json = Self::build_conf_json(&conf)?;
 
         let row = Row::new(
             vec![
@@ -382,6 +445,8 @@ impl SessionStore for DatabaseSessionStore {
                 "message_count".to_string(),
                 "usage_json".to_string(),
                 "conf_json".to_string(),
+                "project_id".to_string(),
+                "current_directory".to_string(),
             ],
             vec![
                 Value::String(session_key),
@@ -408,6 +473,10 @@ impl SessionStore for DatabaseSessionStore {
                 Value::Number(0.into()),
                 Value::String(usage_json),
                 Value::String(conf_json),
+                project_id.map(Value::String).unwrap_or(Value::Null),
+                current_directory
+                    .map(|path| Value::String(path.display().to_string()))
+                    .unwrap_or(Value::Null),
             ],
         );
         self.storage.insert("sessions", &row).await?;
@@ -420,7 +489,7 @@ impl SessionStore for DatabaseSessionStore {
     }
 
     async fn list_session_records(&self, query: &SessionQuery) -> TalosResult<Vec<SessionRecord>> {
-        let sql = "SELECT session_key, title, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, usage_json, conf_json FROM sessions ORDER BY last_activity DESC";
+        let sql = "SELECT session_key, title, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, usage_json, conf_json, project_id, current_directory FROM sessions ORDER BY last_activity DESC";
         let rows = self.storage.query(sql, &[]).await?;
         let mut records = Vec::new();
         for row in rows {
@@ -456,26 +525,37 @@ impl SessionStore for DatabaseSessionStore {
         session_id: &str,
         patch: &SessionPatch,
     ) -> TalosResult<SessionPatchAck> {
-        SessionConfigOverridePolicy::validate_conf(&patch.conf)?;
+        if let Some(conf) = patch.conf.as_ref() {
+            SessionConfigOverridePolicy::validate_conf(conf)?;
+        }
         let Some(row) = self.fetch_session_row(session_id).await? else {
             return Ok(SessionPatchAck { success: false });
         };
         let mut record = Self::parse_session_record(&row);
         let mut conf = Self::parse_conf_json(row.get_string("conf_json"));
 
-        if let Some(model) = SessionConfigOverridePolicy::extract_agent_model(&patch.conf)? {
+        let patch_conf = patch.conf.as_ref().cloned().unwrap_or_default();
+        if let Some(model) = SessionConfigOverridePolicy::extract_agent_model(&patch_conf)? {
             record.model = model.clone();
-            conf = SessionConfigOverridePolicy::single_model_conf(&model)
-                .into_iter()
-                .collect();
+            conf = SessionConfigOverridePolicy::single_model_conf(&model);
         }
-        if let Some(project_root_patch) = &patch.project_root {
-            match project_root_patch {
-                SessionProjectRootPatch::Set { path } => {
-                    record.context.project_root = Some(path.clone());
+        if let Some(project_id_patch) = &patch.project_id {
+            match project_id_patch {
+                OptionalProjectIdPatch::Set { project_id } => {
+                    record.project_id = Some(project_id.clone());
                 }
-                SessionProjectRootPatch::Clear => {
-                    record.context.project_root = None;
+                OptionalProjectIdPatch::Clear => {
+                    record.project_id = None;
+                }
+            }
+        }
+        if let Some(current_directory_patch) = &patch.current_directory {
+            match current_directory_patch {
+                OptionalCurrentDirectoryPatch::Set { path } => {
+                    record.current_directory = Some(path.clone());
+                }
+                OptionalCurrentDirectoryPatch::Clear => {
+                    record.current_directory = None;
                 }
             }
         }
@@ -484,7 +564,7 @@ impl SessionStore for DatabaseSessionStore {
             .try_into()
             .unwrap_or_default();
         let context_json = Self::build_context_json(&record.context)?;
-        let conf_json = Self::build_conf_json(conf)?;
+        let conf_json = Self::build_conf_json(&conf)?;
 
         let update_row = Row::new(
             vec![
@@ -495,6 +575,8 @@ impl SessionStore for DatabaseSessionStore {
                 "message_count".to_string(),
                 "usage_json".to_string(),
                 "conf_json".to_string(),
+                "project_id".to_string(),
+                "current_directory".to_string(),
             ],
             vec![
                 Value::Number(serde_json::Number::from(record.last_activity)),
@@ -504,6 +586,12 @@ impl SessionStore for DatabaseSessionStore {
                 Value::Number(serde_json::Number::from(record.message_count)),
                 Value::String(Self::build_usage_json(&record.usage)?),
                 Value::String(conf_json),
+                record.project_id.clone().map(Value::String).unwrap_or(Value::Null),
+                record
+                    .current_directory
+                    .clone()
+                    .map(|path| Value::String(path.display().to_string()))
+                    .unwrap_or(Value::Null),
             ],
         );
         self.storage
@@ -549,9 +637,8 @@ impl SessionStore for DatabaseSessionStore {
         record.usage = TalosUsage::default();
 
         let row = self.fetch_session_row(session_id).await?;
-        let conf_json = Self::build_conf_json(Self::parse_conf_json(
-            row.and_then(|stored| stored.get_string("conf_json")),
-        ))?;
+        let conf = Self::parse_conf_json(row.and_then(|stored| stored.get_string("conf_json")));
+        let conf_json = Self::build_conf_json(&conf)?;
         let context_json = Self::build_context_json(&record.context)?;
         let update_row = Row::new(
             vec![
@@ -562,6 +649,8 @@ impl SessionStore for DatabaseSessionStore {
                 "message_count".to_string(),
                 "usage_json".to_string(),
                 "conf_json".to_string(),
+                "project_id".to_string(),
+                "current_directory".to_string(),
             ],
             vec![
                 Value::Number(now.into()),
@@ -571,6 +660,12 @@ impl SessionStore for DatabaseSessionStore {
                 Value::Number(0.into()),
                 Value::String(Self::build_usage_json(&record.usage)?),
                 Value::String(conf_json),
+                record.project_id.clone().map(Value::String).unwrap_or(Value::Null),
+                record
+                    .current_directory
+                    .clone()
+                    .map(|path| Value::String(path.display().to_string()))
+                    .unwrap_or(Value::Null),
             ],
         );
         let affected = self
@@ -578,6 +673,16 @@ impl SessionStore for DatabaseSessionStore {
             .update("sessions", &update_row, "session_key = ?", &[session_id])
             .await?;
 
+        Ok(SessionPatchAck {
+            success: affected > 0,
+        })
+    }
+
+    async fn delete_session_record(&self, session_id: &str) -> TalosResult<SessionPatchAck> {
+        let affected = self
+            .storage
+            .delete("sessions", "session_key = ?", &[session_id])
+            .await?;
         Ok(SessionPatchAck {
             success: affected > 0,
         })
@@ -606,9 +711,8 @@ impl SessionStore for DatabaseSessionStore {
         }
 
         let row = self.fetch_session_row(session_id).await?;
-        let conf_json = Self::build_conf_json(Self::parse_conf_json(
-            row.and_then(|stored| stored.get_string("conf_json")),
-        ))?;
+        let conf = Self::parse_conf_json(row.and_then(|stored| stored.get_string("conf_json")));
+        let conf_json = Self::build_conf_json(&conf)?;
         let context_json = Self::build_context_json(&record.context)?;
 
         let update_row = Row::new(
@@ -620,6 +724,8 @@ impl SessionStore for DatabaseSessionStore {
                 "message_count".to_string(),
                 "usage_json".to_string(),
                 "conf_json".to_string(),
+                "project_id".to_string(),
+                "current_directory".to_string(),
             ],
             vec![
                 Value::Number(now.into()),
@@ -629,12 +735,99 @@ impl SessionStore for DatabaseSessionStore {
                 Value::Number(serde_json::Number::from(record.message_count)),
                 Value::String(Self::build_usage_json(&record.usage)?),
                 Value::String(conf_json),
+                record.project_id.clone().map(Value::String).unwrap_or(Value::Null),
+                record
+                    .current_directory
+                    .clone()
+                    .map(|path| Value::String(path.display().to_string()))
+                    .unwrap_or(Value::Null),
             ],
         );
         self.storage
             .update("sessions", &update_row, "session_key = ?", &[session_id])
             .await?;
 
+        Ok(())
+    }
+
+    async fn list_projects(&self) -> TalosResult<Vec<ProjectRecord>> {
+        let sql = "SELECT project_id, name, directory, created_at, updated_at FROM projects ORDER BY created_at DESC";
+        let rows = self.storage.query(sql, &[]).await?;
+        Ok(rows.iter().map(Self::parse_project_record).collect())
+    }
+
+    async fn get_project(&self, project_id: &str) -> TalosResult<Option<ProjectRecord>> {
+        let sql =
+            "SELECT project_id, name, directory, created_at, updated_at FROM projects WHERE project_id = ?";
+        let rows = self.storage.query(sql, &[project_id]).await?;
+        Ok(rows.into_iter().next().map(|row| Self::parse_project_record(&row)))
+    }
+
+    async fn create_project(&self, name: &str, directory: &PathBuf) -> TalosResult<ProjectRecord> {
+        let now = chrono::Utc::now().timestamp_millis();
+        let record = ProjectRecord {
+            project_id: uuid::Uuid::now_v7().to_string(),
+            name: name.to_string(),
+            directory: directory.clone(),
+            created_at: now,
+            updated_at: now,
+        };
+        let row = Row::new(
+            vec![
+                "project_id".to_string(),
+                "name".to_string(),
+                "directory".to_string(),
+                "created_at".to_string(),
+                "updated_at".to_string(),
+            ],
+            vec![
+                Value::String(record.project_id.clone()),
+                Value::String(record.name.clone()),
+                Value::String(record.directory.display().to_string()),
+                Value::Number(now.into()),
+                Value::Number(now.into()),
+            ],
+        );
+        self.storage.insert("projects", &row).await?;
+        Ok(record)
+    }
+
+    async fn patch_project(
+        &self,
+        project_id: &str,
+        patch: &ProjectPatch,
+    ) -> TalosResult<Option<ProjectRecord>> {
+        let Some(mut record) = self.get_project(project_id).await? else {
+            return Ok(None);
+        };
+        if let Some(name) = patch.name.as_ref() {
+            record.name = name.clone();
+        }
+        record.updated_at = chrono::Utc::now().timestamp_millis();
+        let row = Row::new(
+            vec!["name".to_string(), "updated_at".to_string()],
+            vec![
+                Value::String(record.name.clone()),
+                Value::Number(record.updated_at.into()),
+            ],
+        );
+        self.storage
+            .update("projects", &row, "project_id = ?", &[project_id])
+            .await?;
+        Ok(Some(record))
+    }
+
+    async fn delete_project(&self, project_id: &str) -> TalosResult<()> {
+        let bound_count = self.count_sessions_bound_to_project(project_id).await?;
+        if bound_count > 0 {
+            return Err(talos_error::TalosError::ValidationError(format!(
+                "project {} still has bound sessions",
+                project_id
+            )));
+        }
+        self.storage
+            .execute("DELETE FROM projects WHERE project_id = ?", &[project_id])
+            .await?;
         Ok(())
     }
 }
@@ -657,6 +850,8 @@ impl SessionStore for MockSessionStore {
         default_model: &str,
         requested_model: Option<&str>,
         _dm_scope: Option<String>,
+        project_id: Option<String>,
+        current_directory: Option<PathBuf>,
     ) -> TalosResult<SessionRecord> {
         Ok(SessionRecord {
             id: DatabaseSessionStore::new_session_id(),
@@ -668,12 +863,10 @@ impl SessionStore for MockSessionStore {
             message_count: 0,
             usage: TalosUsage::default(),
             conf: requested_model
-                .map(|model| {
-                    let mut conf = std::collections::HashMap::new();
-                    conf.insert("agent.model".to_string(), Value::String(model.to_string()));
-                    conf
-                })
+                .map(SessionConfigOverridePolicy::single_model_conf)
                 .unwrap_or_default(),
+            project_id,
+            current_directory,
         })
     }
 
@@ -684,6 +877,8 @@ impl SessionStore for MockSessionStore {
         default_model: &str,
         requested_model: Option<&str>,
         dm_scope: Option<String>,
+        project_id: Option<String>,
+        current_directory: Option<PathBuf>,
     ) -> TalosResult<SessionRecord> {
         let dm_scope = DatabaseSessionStore::resolve_dm_scope(dm_scope.as_deref());
         Ok(SessionRecord {
@@ -696,12 +891,10 @@ impl SessionStore for MockSessionStore {
             message_count: 0,
             usage: TalosUsage::default(),
             conf: requested_model
-                .map(|model| {
-                    let mut conf = std::collections::HashMap::new();
-                    conf.insert("agent.model".to_string(), Value::String(model.to_string()));
-                    conf
-                })
+                .map(SessionConfigOverridePolicy::single_model_conf)
                 .unwrap_or_default(),
+            project_id,
+            current_directory,
         })
     }
 
@@ -725,7 +918,9 @@ impl SessionStore for MockSessionStore {
             last_activity: 0,
             message_count: 0,
             usage: TalosUsage::default(),
-            conf: std::collections::HashMap::new(),
+            conf: SessionConf::default(),
+            project_id: None,
+            current_directory: None,
         }))
     }
 
@@ -747,6 +942,10 @@ impl SessionStore for MockSessionStore {
         Ok(SessionPatchAck { success: true })
     }
 
+    async fn delete_session_record(&self, _session_id: &str) -> TalosResult<SessionPatchAck> {
+        Ok(SessionPatchAck { success: true })
+    }
+
     async fn update_session_title(&self, _session_id: &str, _title: &str) -> TalosResult<()> {
         Ok(())
     }
@@ -760,11 +959,46 @@ impl SessionStore for MockSessionStore {
     ) -> TalosResult<()> {
         Ok(())
     }
+
+    async fn list_projects(&self) -> TalosResult<Vec<ProjectRecord>> {
+        Ok(Vec::new())
+    }
+
+    async fn get_project(&self, _project_id: &str) -> TalosResult<Option<ProjectRecord>> {
+        Ok(None)
+    }
+
+    async fn create_project(
+        &self,
+        name: &str,
+        directory: &PathBuf,
+    ) -> TalosResult<ProjectRecord> {
+        Ok(ProjectRecord {
+            project_id: "project-mock".to_string(),
+            name: name.to_string(),
+            directory: directory.clone(),
+            created_at: 0,
+            updated_at: 0,
+        })
+    }
+
+    async fn patch_project(
+        &self,
+        _project_id: &str,
+        _patch: &ProjectPatch,
+    ) -> TalosResult<Option<ProjectRecord>> {
+        Ok(None)
+    }
+
+    async fn delete_project(&self, _project_id: &str) -> TalosResult<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod scope_tests {
     use super::*;
+    use std::path::Path;
     use std::sync::Arc;
     use talos_storage::SqliteStorage;
 
@@ -826,6 +1060,23 @@ mod scope_tests {
         assert_ne!(id1, id2);
     }
 
+    #[test]
+    fn test_normalized_optional_string_treats_blank_as_none() {
+        assert_eq!(DatabaseSessionStore::normalized_optional_string(None), None);
+        assert_eq!(
+            DatabaseSessionStore::normalized_optional_string(Some(String::new())),
+            None
+        );
+        assert_eq!(
+            DatabaseSessionStore::normalized_optional_string(Some("   ".to_string())),
+            None
+        );
+        assert_eq!(
+            DatabaseSessionStore::normalized_optional_string(Some(" project-1 ".to_string())),
+            Some("project-1".to_string())
+        );
+    }
+
     #[tokio::test]
     async fn test_record_session_progress_returns_not_found_for_missing_session() {
         let storage = Arc::new(SqliteStorage::new("sqlite::memory:").await.unwrap());
@@ -848,7 +1099,7 @@ mod scope_tests {
         let store = DatabaseSessionStore::new(storage).await.unwrap();
 
         let session = store
-            .create_session(&sample_context(), "agent-a", "qwen-max", None, None)
+            .create_session(&sample_context(), "agent-a", "qwen-max", None, None, None, None)
             .await
             .expect("create session should succeed");
 
@@ -873,6 +1124,8 @@ mod scope_tests {
                 "agent-a",
                 "qwen-max",
                 Some("gpt-5.3"),
+                None,
+                None,
                 None,
             )
             .await
@@ -915,6 +1168,79 @@ mod scope_tests {
         assert_eq!(
             loaded.conf,
             SessionConfigOverridePolicy::single_model_conf("gpt-5.3")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_delete_session_record_removes_session() {
+        let storage = Arc::new(SqliteStorage::new("sqlite::memory:").await.unwrap());
+        let store = DatabaseSessionStore::new(storage).await.unwrap();
+
+        let session = store
+            .create_session(&sample_context(), "agent-a", "qwen-max", None, None, None, None)
+            .await
+            .expect("create session should succeed");
+
+        let ack = store
+            .delete_session_record(&session.id)
+            .await
+            .expect("delete should succeed");
+        assert!(ack.success);
+
+        let loaded = store
+            .get_session_record(&session.id)
+            .await
+            .expect("load session should succeed");
+        assert!(loaded.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_or_create_session_preserves_existing_project_binding_fields() {
+        let storage = Arc::new(SqliteStorage::new("sqlite::memory:").await.unwrap());
+        let store = DatabaseSessionStore::new(storage).await.unwrap();
+
+        let initial = store
+            .resolve_or_create_session(
+                &sample_context(),
+                "agent-a",
+                "qwen-max",
+                None,
+                Some("per_channel_peer_topic".to_string()),
+                Some("project-1".to_string()),
+                Some(PathBuf::from("/repo/one")),
+            )
+            .await
+            .expect("initial resolve_or_create should succeed");
+
+        let resolved = store
+            .resolve_or_create_session(
+                &sample_context(),
+                "agent-a",
+                "qwen-max",
+                None,
+                Some("per_channel_peer_topic".to_string()),
+                Some("project-2".to_string()),
+                Some(PathBuf::from("/repo/two")),
+            )
+            .await
+            .expect("second resolve_or_create should succeed");
+
+        assert_eq!(resolved.id, initial.id);
+        assert_eq!(resolved.project_id.as_deref(), Some("project-1"));
+        assert_eq!(
+            resolved.current_directory.as_deref(),
+            Some(Path::new("/repo/one"))
+        );
+
+        let persisted = store
+            .get_session_record(&initial.id)
+            .await
+            .expect("load session should succeed")
+            .expect("session should exist");
+        assert_eq!(persisted.project_id.as_deref(), Some("project-1"));
+        assert_eq!(
+            persisted.current_directory.as_deref(),
+            Some(Path::new("/repo/one"))
         );
     }
 }

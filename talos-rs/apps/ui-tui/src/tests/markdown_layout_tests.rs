@@ -270,9 +270,13 @@ async fn test_history_enter_switches_session() {
             trace_id: "t".to_string(),
             channel_id: None,
             thread_id: None,
+            project_id: None,
+            current_directory: None,
             project_root: None,
             environment: None,
         },
+        project_id: None,
+        current_directory: None,
         config,
         state: talos_types::SessionState {
             created_at: 0,

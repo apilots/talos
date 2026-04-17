@@ -6,12 +6,13 @@ import {
   ChatComposer,
   useChatSession,
   useModelsQuery,
+  useProjectsQuery,
   useSessionQuery,
   useUpdateSessionModelMutation,
   useUpdateSessionProjectMutation,
 } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
-import { getSessionModel, resolveProjectRootPath } from "@/shared/types/domain";
+import { getSessionModel, UNBOUND_PROJECT_ID } from "@/shared/types/domain";
 import { MessageList } from "@/widgets/message-list/MessageList";
 import { Panel } from "@/shared/ui/Panel";
 import { Button } from "@/shared/ui/Button";
@@ -35,6 +36,7 @@ export function ChatSessionPage() {
 
   const { data: session } = useSessionQuery(sessionId);
   const { data: models } = useModelsQuery();
+  useProjectsQuery();
   const {
     blocks,
     draft,
@@ -76,12 +78,7 @@ export function ChatSessionPage() {
     if (!session) {
       return activeProjectId;
     }
-    const matchedProject = projects.find((project) => {
-      const path = resolveProjectRootPath(project.root);
-      const sessionPath = session.context.project_root ?? __TALOS_DEFAULT_PROJECT_ROOT__;
-      return path === sessionPath;
-    });
-    return matchedProject?.id ?? activeProjectId;
+    return session.project_id ?? UNBOUND_PROJECT_ID;
   }, [activeProjectId, projects, session]);
   useEffect(() => {
     const initialPrompt = locationState?.initialPrompt?.trim();
@@ -150,9 +147,9 @@ export function ChatSessionPage() {
   }
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-[920px] flex-col overflow-hidden px-7 py-5">
+    <div className="flex h-full w-full flex-col overflow-hidden">
       <div
-        className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-2"
+        className="min-h-0 flex-1 overflow-y-auto"
         onScroll={(event) => {
           const viewport = event.currentTarget;
           const distanceToBottom =
@@ -161,7 +158,7 @@ export function ChatSessionPage() {
         }}
         ref={messageViewportRef}
       >
-        <div className="space-y-4 pb-2" ref={messageContentRef}>
+        <div className="mx-auto w-full max-w-[920px] space-y-4 px-7 pb-2 pt-5" ref={messageContentRef}>
           <MessageList
             actions={
               <>
@@ -229,6 +226,7 @@ export function ChatSessionPage() {
         </div>
       </div>
       <div className="mt-4 shrink-0">
+        <div className="mx-auto w-full max-w-[920px] px-7 pb-5">
           <ChatComposer
             activeProjectId={selectedProjectId}
             approvalMode={approvalMode}
@@ -244,7 +242,7 @@ export function ChatSessionPage() {
             onProjectChange={(projectId) => {
               setActiveProjectId(projectId);
               const project = projects.find((entry) => entry.id === projectId);
-              if (project) {
+              if (project || projectId === UNBOUND_PROJECT_ID) {
                 updateProject.mutate(project);
               }
             }}
@@ -263,6 +261,7 @@ export function ChatSessionPage() {
             selectedModel={currentModel}
             compact
           />
+        </div>
       </div>
     </div>
   );

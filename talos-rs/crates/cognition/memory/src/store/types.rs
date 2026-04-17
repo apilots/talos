@@ -348,5 +348,7 @@ pub struct MemoryIndexFile {
     pub path: String,
     pub date: String,
     #[serde(default)]
+    pub source_content_hash: String,
+    #[serde(default)]
     pub sections: Vec<MemoryIndexSection>,
 }

@@ -65,12 +65,6 @@ impl CommandSuggestion {
                 description: "Clear current session context".to_string(),
             },
             CommandSuggestion {
-                name: "project".to_string(),
-                insert_text: "/project".to_string(),
-                display_text: "/project [path|clear]".to_string(),
-                description: "Show or update the active server project root".to_string(),
-            },
-            CommandSuggestion {
                 name: "quit".to_string(),
                 insert_text: "/quit".to_string(),
                 display_text: "/quit".to_string(),
@@ -300,10 +294,6 @@ pub(crate) enum RemoteCommandUpdate {
     },
     HistoryLoaded(TalosResult<Vec<TalosSession>>),
     ModelPickerSwitched {
-        requested: String,
-        result: TalosResult<TalosSession>,
-    },
-    ProjectRootSwitched {
         requested: String,
         result: TalosResult<TalosSession>,
     },

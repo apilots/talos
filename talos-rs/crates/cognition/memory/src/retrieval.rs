@@ -117,6 +117,15 @@ fn extract_summary_preview(section_lines: &[&str]) -> String {
     truncate_preview(&parts.join(" "), INDEX_PREVIEW_LIMIT)
 }
 
+fn source_content_hash(content: &str) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in content.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
 fn build_index_file_from_content(
     workspace_dir: &Path,
     md_path: &Path,
@@ -159,6 +168,7 @@ fn build_index_file_from_content(
     MemoryIndexFile {
         path,
         date,
+        source_content_hash: source_content_hash(content),
         sections,
     }
 }
@@ -222,7 +232,18 @@ async fn load_index_files(store: &MemoryStore) -> TalosResult<Vec<MemoryIndexFil
             .map_err(|e| TalosError::StorageError(format!("read memory index file: {}", e)))?;
         let parsed = serde_json::from_str::<MemoryIndexFile>(&content)
             .map_err(|e| TalosError::StorageError(format!("parse memory index file: {}", e)))?;
-        indexes.push(parsed);
+        let source = fs::read_to_string(&file)
+            .await
+            .map_err(|e| TalosError::StorageError(format!("read memory source file: {}", e)))?;
+        if parsed.source_content_hash == source_content_hash(&source) {
+            indexes.push(parsed);
+            continue;
+        }
+
+        let Some(date) = file.file_stem().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        indexes.push(rebuild_file_index(store, date).await?);
     }
     indexes.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(indexes)

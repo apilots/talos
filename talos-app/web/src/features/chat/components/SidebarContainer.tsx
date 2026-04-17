@@ -2,8 +2,8 @@ import { useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import {
-  useCloseSessionMutation,
   useCreateSessionMutation,
+  useDeleteSessionMutation,
   useModelsQuery,
   useSessionsQuery,
 } from "../hooks/useChatQueries";
@@ -17,7 +17,7 @@ export function SidebarContainer() {
   const { data: models } = useModelsQuery();
   const sessionsQuery = useSessionsQuery();
   const createSession = useCreateSessionMutation();
-  const closeSession = useCloseSessionMutation();
+  const deleteSession = useDeleteSessionMutation();
   const threadFilter = useAppStore((state) => state.threadFilter);
   const setThreadFilter = useAppStore((state) => state.setThreadFilter);
   const aliases = useAppStore((state) => state.sessionAliases);
@@ -42,8 +42,8 @@ export function SidebarContainer() {
     <Sidebar
       currentPath={location.pathname}
       isHomePage={location.pathname === "/"}
-      onCloseThread={async (sessionId) => {
-        await closeSession.mutateAsync(sessionId);
+      onDeleteThread={async (sessionId) => {
+        await deleteSession.mutateAsync(sessionId);
         if (location.pathname === `/sessions/${sessionId}`) {
           navigate("/");
         }

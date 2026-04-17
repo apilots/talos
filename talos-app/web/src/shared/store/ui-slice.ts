@@ -28,24 +28,11 @@ export function normalizeProjects(projects?: ProjectRecord[]) {
   const normalized = new Map<string, ProjectRecord>();
 
   for (const project of defaultProjects) {
-    normalized.set(getProjectRecordKey(project.root), project);
+    normalized.set(getProjectRecordKey(project), project);
   }
 
   for (const project of projects ?? []) {
-    const isLegacyDefaultWorkspace =
-      project.origin === "default" &&
-      getProjectRecordKey(project.root) !== getProjectRecordKey(defaultProjects[0].root);
-    const isLegacyManagedWorkspace =
-      project.root.type === "managed_workspace" &&
-      (project.root.name === "talos" || project.root.name.startsWith("server-default"));
-    const isLegacyWorkspacePath =
-      project.root.type === "server_visible_path" &&
-      project.root.path === "/srv/talos/workspace";
-    if (isLegacyDefaultWorkspace || isLegacyManagedWorkspace || isLegacyWorkspacePath) {
-      continue;
-    }
-
-    const key = getProjectRecordKey(project.root);
+    const key = getProjectRecordKey(project);
     const current = normalized.get(key);
     if (!current) {
       normalized.set(key, project);
@@ -53,15 +40,24 @@ export function normalizeProjects(projects?: ProjectRecord[]) {
     }
 
     normalized.set(key, {
+      ...current,
       ...project,
-      name: current.origin === "default" ? current.name : project.name,
-      origin: current.origin ?? project.origin,
+      name: project.name || current.name,
+      origin: current.origin === "default" ? current.origin : (project.origin ?? current.origin),
       sessionCount: project.sessionCount ?? current.sessionCount,
-      lastUsedAt: Math.max(project.lastUsedAt, current.lastUsedAt),
+      updatedAt: Math.max(project.updatedAt, current.updatedAt),
     });
   }
 
-  return [...normalized.values()].sort((left, right) => right.lastUsedAt - left.lastUsedAt);
+  return [...normalized.values()].sort((left, right) => {
+    if (left.origin === "default") {
+      return -1;
+    }
+    if (right.origin === "default") {
+      return 1;
+    }
+    return right.updatedAt - left.updatedAt;
+  });
 }
 
 export function mergeById<T extends { id: string }>(defaults: T[], persisted?: T[]) {

@@ -30,7 +30,6 @@ export interface TalosContext {
   trace_id: string;
   channel_id?: string | null;
   thread_id?: string | null;
-  project_root?: string | null;
   environment?: TalosSessionEnvironment | null;
 }
 
@@ -298,7 +297,9 @@ export interface SessionRecord {
   last_activity: number;
   message_count: number;
   usage: TalosUsage;
-  conf: Record<string, unknown>;
+  conf: SessionConf;
+  project_id?: string | null;
+  current_directory?: string | null;
 }
 
 export interface TalosSession {
@@ -313,9 +314,12 @@ export interface TalosSession {
     trace_id: string;
     channel_id?: string | null;
     thread_id?: string | null;
-    project_root?: string | null;
+    project_id?: string | null;
+    current_directory?: string | null;
     environment?: TalosSessionEnvironment | null;
   };
+  project_id?: string | null;
+  current_directory?: string | null;
   config: {
     agent?: { model?: string } & Record<string, unknown>;
     llm?: { model?: string } & Record<string, unknown>;
@@ -334,13 +338,94 @@ export interface SessionQuery {
   provider?: string;
 }
 
-export type SessionProjectRootPatch =
+export interface SessionAgentConf {
+  model?: string | null;
+}
+
+export interface SessionConf {
+  agent?: SessionAgentConf | null;
+}
+
+export type OptionalProjectIdPatch =
+  | { type: "set"; project_id: string }
+  | { type: "clear" };
+
+export type OptionalCurrentDirectoryPatch =
   | { type: "set"; path: string }
   | { type: "clear" };
 
 export interface SessionUpdate {
-  conf: Record<string, unknown>;
-  project_root?: SessionProjectRootPatch | null;
+  conf?: SessionConf | null;
+  project_id?: OptionalProjectIdPatch | null;
+  current_directory?: OptionalCurrentDirectoryPatch | null;
+}
+
+export interface ProjectRecord {
+  project_id: string;
+  name: string;
+  directory: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface ProjectPatch {
+  name?: string | null;
+}
+
+export type ExpectedFileVersion =
+  | { mode: "must_not_exist" }
+  | { mode: "match"; version_token: string };
+
+export interface DocUpdateRequest {
+  content: string;
+  base_version: ExpectedFileVersion;
+}
+
+export interface MemoryFileSummary {
+  date: string;
+  path: string;
+  section_count: number;
+  updated_at?: number | null;
+  version_token: string;
+}
+
+export interface MemoryFileDetail extends MemoryFileSummary {
+  content: string;
+}
+
+export interface MemoryFileListParams {
+  limit?: number;
+  before_date?: string;
+  date_from?: string;
+  date_to?: string;
+}
+
+export interface MemorySearchParams {
+  q: string;
+  limit?: number;
+  date_from?: string;
+  date_to?: string;
+}
+
+export interface MemorySearchResult {
+  path: string;
+  snippet: string;
+  start_line: number;
+  end_line: number;
+}
+
+export type WorkspaceDocKind = "soul" | "identity" | "user" | "heartbeat" | "memory";
+
+export interface WorkspaceDocSummary {
+  kind: WorkspaceDocKind;
+  path: string;
+  exists: boolean;
+  updated_at?: number | null;
+  version_token?: string | null;
+}
+
+export interface WorkspaceDocDetail extends WorkspaceDocSummary {
+  content: string;
 }
 
 export interface ToolApprovalRequest {

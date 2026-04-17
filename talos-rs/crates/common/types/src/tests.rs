@@ -1,6 +1,4 @@
 use super::*;
-use std::collections::HashMap;
-
 #[test]
 fn test_agent_id() {
     let id = AgentId::new("test");
@@ -57,7 +55,9 @@ fn test_session_context_and_state_from_record() {
         last_activity: 200,
         message_count: 3,
         usage: talos::TalosUsage::default(),
-        conf: HashMap::new(),
+        conf: SessionConf::default(),
+        project_id: Some("project-1".to_string()),
+        current_directory: Some(std::path::PathBuf::from("/repo")),
     };
 
     let context = SessionContext::from_record(&record, Some("workspace-1".to_string()));
@@ -66,9 +66,10 @@ fn test_session_context_and_state_from_record() {
     assert_eq!(context.session_id, "session-1");
     assert_eq!(context.workspace_id.as_deref(), Some("workspace-1"));
     assert_eq!(
-        context.project_root.as_deref(),
+        context.current_directory.as_deref(),
         Some(std::path::Path::new("/repo"))
     );
+    assert_eq!(context.project_id.as_deref(), Some("project-1"));
     assert_eq!(context.provider, talos::TalosProvider::Telegram);
     assert_eq!(state.created_at, 100);
     assert_eq!(state.last_activity, 200);
@@ -97,12 +98,11 @@ fn test_talos_session_from_record_applies_conf_override() {
         last_activity: 200,
         message_count: 3,
         usage: talos::TalosUsage::default(),
-        conf: HashMap::new(),
+        conf: SessionConf::default(),
+        project_id: None,
+        current_directory: None,
     };
-    record.conf.insert(
-        "agent.model".to_string(),
-        serde_json::Value::String("qwen-plus".to_string()),
-    );
+    record.conf = SessionConfigOverridePolicy::single_model_conf("qwen-plus");
 
     let session = TalosSession::from_record(&record, &TalosConfig::default(), None)
         .expect("talos session restore should succeed");
@@ -113,15 +113,13 @@ fn test_talos_session_from_record_applies_conf_override() {
 
 #[test]
 fn test_session_override_policy_rejects_unknown_keys() {
-    let mut conf = HashMap::new();
-    conf.insert(
-        "agent.kernel.prompt.unknown_field".to_string(),
-        serde_json::Value::Number(1.into()),
-    );
-
-    let error = SessionConfigOverridePolicy::validate_conf(&conf)
-        .expect_err("unknown conf key should be rejected");
-    assert!(error.to_string().contains("unsupported session config key"));
+    let conf = SessionConf {
+        agent: Some(SessionAgentConf {
+            model: Some("gpt-4o".to_string()),
+        }),
+    };
+    SessionConfigOverridePolicy::validate_conf(&conf)
+        .expect("known strong typed conf should be accepted");
 }
 
 #[test]
@@ -134,10 +132,13 @@ fn test_session_override_policy_builds_model_conf() {
 }
 
 #[test]
-fn test_session_patch_roundtrip_with_project_root() {
+fn test_session_patch_roundtrip_with_project_binding_fields() {
     let patch = SessionPatch {
-        conf: HashMap::new(),
-        project_root: Some(SessionProjectRootPatch::Set {
+        conf: None,
+        project_id: Some(OptionalProjectIdPatch::Set {
+            project_id: "project-1".to_string(),
+        }),
+        current_directory: Some(OptionalCurrentDirectoryPatch::Set {
             path: std::path::PathBuf::from("/repo"),
         }),
     };
@@ -146,9 +147,89 @@ fn test_session_patch_roundtrip_with_project_root() {
     let decoded: SessionPatch = serde_json::from_str(&encoded).unwrap();
 
     assert_eq!(
-        decoded.project_root,
-        Some(SessionProjectRootPatch::Set {
+        decoded.project_id,
+        Some(OptionalProjectIdPatch::Set {
+            project_id: "project-1".to_string(),
+        })
+    );
+    assert_eq!(
+        decoded.current_directory,
+        Some(OptionalCurrentDirectoryPatch::Set {
             path: std::path::PathBuf::from("/repo"),
         })
     );
+}
+
+#[test]
+fn test_doc_update_request_roundtrip() {
+    let request = DocUpdateRequest {
+        content: "hello".to_string(),
+        base_version: ExpectedFileVersion::Match {
+            version_token: "token-1".to_string(),
+        },
+    };
+
+    let encoded = serde_json::to_string(&request).unwrap();
+    let decoded: DocUpdateRequest = serde_json::from_str(&encoded).unwrap();
+
+    assert_eq!(decoded, request);
+}
+
+#[test]
+fn test_memory_file_summary_roundtrip() {
+    let summary = MemoryFileSummary {
+        date: "2026-04-17".to_string(),
+        path: "memory/2026-04-17.md".to_string(),
+        section_count: 3,
+        updated_at: Some(123),
+        version_token: "token-1".to_string(),
+    };
+
+    let encoded = serde_json::to_string(&summary).unwrap();
+    let decoded: MemoryFileSummary = serde_json::from_str(&encoded).unwrap();
+
+    assert_eq!(decoded, summary);
+}
+
+#[test]
+fn test_workspace_doc_kind_file_name() {
+    assert_eq!(WorkspaceDocKind::Soul.file_name(), "SOUL.md");
+    assert_eq!(WorkspaceDocKind::Identity.file_name(), "IDENTITY.md");
+    assert_eq!(WorkspaceDocKind::User.file_name(), "USER.md");
+    assert_eq!(WorkspaceDocKind::Heartbeat.file_name(), "HEARTBEAT.md");
+    assert_eq!(WorkspaceDocKind::Memory.file_name(), "MEMORY.md");
+}
+
+#[test]
+fn test_workspace_doc_detail_roundtrip() {
+    let detail = WorkspaceDocDetail {
+        kind: WorkspaceDocKind::Memory,
+        path: "MEMORY.md".to_string(),
+        exists: true,
+        content: "content".to_string(),
+        updated_at: Some(123),
+        version_token: Some("token-1".to_string()),
+    };
+
+    let encoded = serde_json::to_string(&detail).unwrap();
+    let decoded: WorkspaceDocDetail = serde_json::from_str(&encoded).unwrap();
+
+    assert_eq!(decoded, detail);
+}
+
+#[test]
+fn test_memory_file_detail_roundtrip() {
+    let detail = MemoryFileDetail {
+        date: "2026-04-17".to_string(),
+        path: "memory/2026-04-17.md".to_string(),
+        section_count: 4,
+        content: "content".to_string(),
+        updated_at: Some(123),
+        version_token: "token-1".to_string(),
+    };
+
+    let encoded = serde_json::to_string(&detail).unwrap();
+    let decoded: MemoryFileDetail = serde_json::from_str(&encoded).unwrap();
+
+    assert_eq!(decoded, detail);
 }

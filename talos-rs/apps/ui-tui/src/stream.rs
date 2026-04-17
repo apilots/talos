@@ -244,9 +244,9 @@ impl TuiApp {
             },
             RemoteCommandUpdate::StatusLoaded(result) => match result {
                 Ok(session_info) => {
-                    let project_root = session_info
+                    let working_directory = session_info
                         .as_ref()
-                        .and_then(|session| session.context.project_root.as_ref())
+                        .and_then(|session| session.current_directory.as_ref())
                         .cloned()
                         .or_else(|| self.current_project_root.clone());
                     let mut lines = vec![
@@ -254,10 +254,10 @@ impl TuiApp {
                         format!("model: {}", self.current_model),
                         format!("client_directory: {}", self.startup_directory.display()),
                         format!(
-                            "project_root: {}",
-                            project_root
+                            "working_directory: {}",
+                            working_directory
                                 .map(|path| path.display().to_string())
-                                .unwrap_or_else(|| "(unset)".to_string())
+                                .unwrap_or_else(|| "(server-managed)".to_string())
                         ),
                         format!("connection_mode: {}", self.connection_mode),
                         format!(
@@ -370,35 +370,6 @@ impl TuiApp {
                     self.show_model_picker = false;
                     self.push_block(ChatRole::System, format!("Failed to switch model: {}", err));
                     self.push_right_event("model picker switch failed".to_string());
-                }
-            },
-            RemoteCommandUpdate::ProjectRootSwitched { requested, result } => match result {
-                Ok(info) => {
-                    self.apply_session_snapshot(&info);
-                    let resolved = info
-                        .context
-                        .project_root
-                        .as_ref()
-                        .map(|path| path.display().to_string())
-                        .unwrap_or_else(|| "(unset)".to_string());
-                    let message = if requested == "clear" {
-                        if info.context.project_root.is_some() {
-                            format!("Project root reset to `{}`.", resolved)
-                        } else {
-                            "Project root cleared.".to_string()
-                        }
-                    } else {
-                        format!("Project root switched to `{}`.", resolved)
-                    };
-                    self.push_block(ChatRole::System, message);
-                    self.push_right_event(format!("project root updated: {}", resolved));
-                }
-                Err(err) => {
-                    self.push_block(
-                        ChatRole::System,
-                        format!("Failed to update project root: {}", err),
-                    );
-                    self.push_right_event("project root update failed".to_string());
                 }
             },
             RemoteCommandUpdate::SessionTurnsLoaded { session, result } => match result {

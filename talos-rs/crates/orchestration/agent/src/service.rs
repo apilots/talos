@@ -221,6 +221,8 @@ pub trait AgentOrchestrator: Send + Sync {
     async fn close_session(&self, session: TalosSession) -> TalosResult<()>;
     async fn drain_memory_flushes(&self, timeout: Duration) -> TalosResult<()>;
     fn pending_memory_flushes(&self) -> usize;
+    async fn has_pending_memory_flush(&self, session_id: &str) -> bool;
+    fn has_active_turn(&self, session_id: &str) -> bool;
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()>;
     async fn submit_tool_approval(
         &self,

@@ -13,7 +13,7 @@ export function OverviewCard({
   detail: string;
 }) {
   return (
-    <Panel className="rounded-[1.2rem] border-border/80 bg-card/82 p-4">
+    <Panel className="rounded-[var(--radius-panel)] border-border/80 bg-card/82 p-4">
       <div className="text-[10px] uppercase tracking-[0.18em] text-muted">{title}</div>
       <div className="mt-2 text-[1.65rem] font-display tracking-[-0.04em] text-ink">{value}</div>
       <p className="mt-1.5 text-sm leading-6 text-muted">{detail}</p>
@@ -32,7 +32,7 @@ export function SectionHeader({
 }) {
   return (
     <div className="flex items-start gap-4">
-      <div className="flex size-11 items-center justify-center rounded-3xl border border-border bg-background/55 text-brand">
+      <div className="flex size-11 items-center justify-center rounded-[var(--radius-control)] border border-border bg-background/55 text-brand">
         {icon}
       </div>
       <div className="flex-1">
@@ -73,7 +73,7 @@ export function ToggleRow({
 
   return (
     <button
-      className="rounded-[1.25rem] border border-border/80 bg-background/45 p-4 text-left transition hover:border-brand/25"
+      className="rounded-[var(--radius-panel)] border border-border/80 bg-background/45 p-4 text-left transition hover:border-brand/25"
       onClick={onToggle}
       type="button"
     >

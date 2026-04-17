@@ -164,6 +164,8 @@ agent:
       tool_search_enabled: true
       tool_get_enabled: true
       search_max_results: 6
+      file_list_default_limit: 20
+      file_list_max_limit: 90
       search_include_root_memory: true
       search_include_daily_memory: true
       search_include_sessions: false

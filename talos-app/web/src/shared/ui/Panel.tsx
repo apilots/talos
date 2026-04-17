@@ -8,7 +8,12 @@ interface PanelProps {
 
 export function Panel({ children, className }: PropsWithChildren<PanelProps>) {
   return (
-    <div className={cn("rounded-[1.5rem] border border-border bg-card shadow-panel", className)}>
+    <div
+      className={cn(
+        "rounded-[var(--radius-panel)] border border-border/80 bg-card/90 shadow-panel backdrop-blur-[14px]",
+        className,
+      )}
+    >
       {children}
     </div>
   );

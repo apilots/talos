@@ -50,6 +50,14 @@ pub struct AgentKernelMemoryConfig {
     #[serde(default = "default_kernel_memory_search_max_results")]
     pub search_max_results: usize,
 
+    /// Default page size for memory file listing.
+    #[serde(default = "default_kernel_memory_file_list_default_limit")]
+    pub file_list_default_limit: usize,
+
+    /// Max page size for memory file listing.
+    #[serde(default = "default_kernel_memory_file_list_max_limit")]
+    pub file_list_max_limit: usize,
+
     /// Include root memory in workspace memory search.
     #[serde(default = "default_true")]
     pub search_include_root_memory: bool,
@@ -94,6 +102,14 @@ fn default_kernel_memory_search_max_results() -> usize {
     6
 }
 
+fn default_kernel_memory_file_list_default_limit() -> usize {
+    20
+}
+
+fn default_kernel_memory_file_list_max_limit() -> usize {
+    90
+}
+
 impl Default for AgentKernelMemoryConfig {
     fn default() -> Self {
         Self {
@@ -108,6 +124,8 @@ impl Default for AgentKernelMemoryConfig {
             tool_search_enabled: true,
             tool_get_enabled: true,
             search_max_results: default_kernel_memory_search_max_results(),
+            file_list_default_limit: default_kernel_memory_file_list_default_limit(),
+            file_list_max_limit: default_kernel_memory_file_list_max_limit(),
             search_include_root_memory: true,
             search_include_daily_memory: true,
             search_include_sessions: false,

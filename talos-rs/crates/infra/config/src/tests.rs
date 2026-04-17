@@ -83,6 +83,8 @@ fn test_kernel_defaults() {
         256 * 1024
     );
     assert_eq!(config.agent.kernel.memory.root_memory_filename, "MEMORY.md");
+    assert_eq!(config.agent.kernel.memory.file_list_default_limit, 20);
+    assert_eq!(config.agent.kernel.memory.file_list_max_limit, 90);
     assert!(config.agent.kernel.memory.workspace_memory_flush_enabled);
     assert_eq!(config.logging.level, "info");
     assert_eq!(config.storage.database_type, DatabaseType::Sqlite);

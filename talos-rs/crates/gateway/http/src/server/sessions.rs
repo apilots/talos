@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -10,7 +9,9 @@ use serde_json::{json, Value};
 
 use talos_auth::AuthResult;
 use talos_types::talos::TalosContext;
-use talos_types::{SessionPatch, SessionProjectRootPatch, SessionQuery};
+use talos_types::{
+    OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, SessionConf, SessionPatch, SessionQuery,
+};
 
 use super::errors::ApiError;
 use super::misc::{validate_auth_context, validate_model_supported};
@@ -20,21 +21,20 @@ use super::state::HttpApiState;
 pub(super) struct CreateSessionRequest {
     context: TalosContext,
     model: Option<String>,
+    #[serde(default)]
+    project_id: Option<String>,
+    #[serde(default)]
+    current_directory: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
 pub(super) struct PatchSessionRequest {
     #[serde(default)]
-    conf: HashMap<String, Value>,
+    conf: Option<SessionConf>,
     #[serde(default)]
-    project_root: Option<ProjectRootPatchRequest>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub(super) enum ProjectRootPatchRequest {
-    Set { path: PathBuf },
-    Clear,
+    project_id: Option<OptionalProjectIdPatch>,
+    #[serde(default)]
+    current_directory: Option<OptionalCurrentDirectoryPatch>,
 }
 
 pub(super) async fn create_session_handler(
@@ -47,13 +47,25 @@ pub(super) async fn create_session_handler(
         &request.context,
         super::DEFAULT_SCOPE_SESSIONS_WRITE,
     )?;
+    if request.context.project_root.is_some() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "context.project_root is not supported",
+        ));
+    }
     if let Some(model) = request.model.as_deref() {
         validate_model_supported(&state, &model)?;
     }
 
     let session = state
         .session_service
-        .create_session(request.context, request.model)
+        .create_session(
+            request.context,
+            request.model,
+            request.project_id,
+            request.current_directory,
+        )
         .await
         .map_err(|e| {
             ApiError::new(
@@ -141,10 +153,8 @@ pub(super) async fn patch_session_handler(
 ) -> Result<Json<Value>, ApiError> {
     let patch = SessionPatch {
         conf: request.conf,
-        project_root: request.project_root.map(|value| match value {
-            ProjectRootPatchRequest::Set { path } => SessionProjectRootPatch::Set { path },
-            ProjectRootPatchRequest::Clear => SessionProjectRootPatch::Clear,
-        }),
+        project_id: request.project_id,
+        current_directory: request.current_directory,
     };
     if let Some(model) = patch
         .agent_model()
@@ -197,6 +207,33 @@ pub(super) async fn close_session_handler(
             ),
         })?;
     Ok(Json(json!({ "success": true })))
+}
+
+pub(super) async fn delete_session_handler(
+    State(state): State<Arc<HttpApiState>>,
+    _auth: axum::extract::Extension<AuthResult>,
+    Path(session_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let ack = state
+        .session_service
+        .delete_session(&session_id)
+        .await
+        .map_err(|err| match err {
+            talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
+                StatusCode::NOT_FOUND,
+                "invalid_request",
+                "session not found",
+            ),
+            talos_error::TalosError::ValidationError(message) => {
+                ApiError::new(StatusCode::CONFLICT, "invalid_request", message)
+            }
+            other => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                other.to_string(),
+            ),
+        })?;
+    Ok(Json(json!({ "success": ack.success })))
 }
 
 pub(super) async fn compact_session_handler(

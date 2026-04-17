@@ -36,9 +36,9 @@ dist/
 *reports
 test-results/
 .tmp-ui-review
-.talos
+.talos/
 output/
-.playwright-mcp
+.playwright-mcp/
 
 # sisyphus
 .sisyphus

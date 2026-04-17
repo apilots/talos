@@ -225,6 +225,14 @@ impl AgentOrchestrator for MockAgent {
         0
     }
 
+    async fn has_pending_memory_flush(&self, _session_id: &str) -> bool {
+        false
+    }
+
+    fn has_active_turn(&self, _session_id: &str) -> bool {
+        false
+    }
+
     async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
         Ok(())
     }

@@ -1,128 +1,190 @@
-import { useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { useAppStore } from "@/shared/store/app-store";
-import type { MemoryRecord } from "@/shared/types/ui";
+import { getTalosClient } from "@/shared/api/client";
+import { useConnectionKey } from "@/features/chat";
+import type {
+  ExpectedFileVersion,
+  MemoryFileDetail,
+} from "@talos/sdk";
 
-export type MemorySectionId = "aboutYou" | "workPreferences" | "projectContext" | "other";
-
-export function classifyMemory(item: MemoryRecord): MemorySectionId {
-  const normalized = `${item.title} ${item.detail} ${item.tags.join(" ")}`.toLowerCase();
-  if (normalized.includes("you") || normalized.includes("profile") || normalized.includes("engineer")) {
-    return "aboutYou";
-  }
-  if (normalized.includes("project") || normalized.includes("workspace") || normalized.includes("talos")) {
-    return "projectContext";
-  }
-  if (normalized.includes("prefer") || normalized.includes("review") || normalized.includes("style")) {
-    return "workPreferences";
-  }
-  return "other";
+function isNotFoundError(error: unknown) {
+  return error instanceof Error && error.message.includes("status 404");
 }
 
-export function formatMemoryDate(updatedAt: number) {
+function buildMissingDetail(date: string): MemoryFileDetail {
+  return {
+    date,
+    path: `memory/${date}.md`,
+    section_count: 0,
+    content: "",
+    updated_at: null,
+    version_token: "",
+  };
+}
+
+export function getTodayDateString() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function memoryDateFromPath(path: string) {
+  const fileName = path.split("/").at(-1) ?? "";
+  return fileName.replace(/\.md$/, "");
+}
+
+export function formatMemoryDate(updatedAt?: number | null) {
+  if (!updatedAt) {
+    return "Not saved yet";
+  }
   const locale = typeof navigator !== "undefined" ? navigator.language : "en";
   return new Intl.DateTimeFormat(locale, {
     month: "short",
     day: "2-digit",
     year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
   }).format(updatedAt);
 }
 
 export function useMemoryPage() {
-  const { t } = useTranslation("memory");
-  const items = useAppStore((state) => state.memoryItems);
-  const upsertMemory = useAppStore((state) => state.upsertMemory);
-  const removeMemory = useAppStore((state) => state.removeMemory);
+  const connectionKey = useConnectionKey();
+  const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [draftTitle, setDraftTitle] = useState("");
-  const [draftDetail, setDraftDetail] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [selectedDate, setSelectedDate] = useState<string>(getTodayDateString());
+  const [editorContent, setEditorContent] = useState("");
 
-  const filteredItems = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    if (!normalized) {
-      return items;
+  const normalizedQuery = query.trim();
+  const normalizedDebouncedQuery = debouncedQuery.trim();
+  const listQuery = useQuery({
+    queryKey: ["talos", connectionKey, "memory-files"],
+    queryFn: () => getTalosClient().memory.list({ limit: 90 }),
+    refetchOnWindowFocus: false,
+  });
+
+  const searchQuery = useQuery({
+    queryKey: ["talos", connectionKey, "memory-search", normalizedDebouncedQuery],
+    queryFn: async ({ signal }) => {
+      return await Promise.race([
+        getTalosClient().memory.search(
+          { q: normalizedDebouncedQuery, limit: 20 },
+          { signal },
+        ),
+        new Promise<never>((_, reject) => {
+          window.setTimeout(() => {
+            reject(new Error("Memory search timed out. Try a narrower query."));
+          }, 8000);
+        }),
+      ]);
+    },
+    enabled: normalizedDebouncedQuery.length > 0,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+
+  const detailQuery = useQuery({
+    queryKey: ["talos", connectionKey, "memory-file", selectedDate],
+    queryFn: async () => {
+      try {
+        return await getTalosClient().memory.get(selectedDate);
+      } catch (error) {
+        if (isNotFoundError(error)) {
+          return buildMissingDetail(selectedDate);
+        }
+        throw error;
+      }
+    },
+    enabled: Boolean(selectedDate),
+    refetchOnWindowFocus: false,
+  });
+
+  useEffect(() => {
+    if (!selectedDate && listQuery.data?.[0]?.date) {
+      setSelectedDate(listQuery.data[0].date);
     }
-    return items.filter((item) =>
-      [item.title, item.detail, item.tags.join(" ")].some((value) =>
-        value.toLowerCase().includes(normalized),
+  }, [listQuery.data, selectedDate]);
+
+  useEffect(() => {
+    if (!normalizedQuery) {
+      setDebouncedQuery("");
+      return;
+    }
+
+    const handle = window.setTimeout(() => {
+      setDebouncedQuery(normalizedQuery);
+    }, 450);
+
+    return () => {
+      window.clearTimeout(handle);
+    };
+  }, [normalizedQuery]);
+
+  useEffect(() => {
+    setEditorContent(detailQuery.data?.content ?? "");
+  }, [detailQuery.data?.date, detailQuery.data?.version_token, detailQuery.data?.content]);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const detail = detailQuery.data ?? buildMissingDetail(selectedDate);
+      const baseVersion: ExpectedFileVersion = detail.version_token
+        ? { mode: "match", version_token: detail.version_token }
+        : { mode: "must_not_exist" };
+      return getTalosClient().memory.put(selectedDate, {
+        content: editorContent,
+        base_version: baseVersion,
+      });
+    },
+    onSuccess: async (detail) => {
+      queryClient.setQueryData(["talos", connectionKey, "memory-file", detail.date], detail);
+      await queryClient.invalidateQueries({ queryKey: ["talos", connectionKey, "memory-files"] });
+      await queryClient.invalidateQueries({ queryKey: ["talos", connectionKey, "memory-search"] });
+    },
+  });
+
+  const files = listQuery.data ?? [];
+  const searchResults = searchQuery.data ?? [];
+  const selectedDetail = detailQuery.data ?? buildMissingDetail(selectedDate);
+  const isDirty = editorContent !== selectedDetail.content;
+  const isSearchPending = normalizedQuery.length > 0 && normalizedDebouncedQuery !== normalizedQuery;
+
+  const searchResultDates = useMemo(
+    () =>
+      Array.from(
+        new Map(
+          searchResults.map((result) => [memoryDateFromPath(result.path), memoryDateFromPath(result.path)]),
+        ).values(),
       ),
-    );
-  }, [items, query]);
-
-  const sections = useMemo(() => {
-    const grouped = new Map<MemorySectionId, MemoryRecord[]>();
-    for (const key of ["aboutYou", "workPreferences", "projectContext", "other"] as MemorySectionId[]) {
-      grouped.set(key, []);
-    }
-    filteredItems.forEach((item) => {
-      grouped.get(classifyMemory(item))?.push(item);
-    });
-    return grouped;
-  }, [filteredItems]);
-
-  const hasQuery = query.trim().length > 0;
-  const visibleSections = useMemo(
-    () => Array.from(sections.entries()).filter(([, records]) => hasQuery || records.length > 0),
-    [hasQuery, sections],
+    [searchResults],
   );
 
-  function beginEdit(item: MemoryRecord) {
-    setEditingId(item.id);
-    setDraftTitle(item.title);
-    setDraftDetail(item.detail);
+  function selectDate(date: string) {
+    setSelectedDate(date);
   }
 
-  function commitEdit(item: MemoryRecord) {
-    upsertMemory({
-      ...item,
-      title: draftTitle.trim() || item.title,
-      detail: draftDetail.trim() || item.detail,
-      updatedAt: Date.now(),
-    });
-    setEditingId(null);
-  }
-
-  function cancelEdit() {
-    setEditingId(null);
-  }
-
-  function addMemory() {
-    const id = `memory-${Date.now()}`;
-    upsertMemory({
-      id,
-      title: t("newMemoryTitle"),
-      detail: t("newMemoryDetail"),
-      tags: ["other"],
-      updatedAt: Date.now(),
-    });
-    setEditingId(id);
-    setDraftTitle(t("newMemoryTitle"));
-    setDraftDetail(t("newMemoryDetail"));
-  }
-
-  function clearMemories() {
-    items.forEach((item) => removeMemory(item.id));
-    setEditingId(null);
+  function openToday() {
+    setSelectedDate(getTodayDateString());
   }
 
   return {
-    items,
     query,
     setQuery,
-    filteredItems,
-    visibleSections,
-    editingId,
-    draftTitle,
-    draftDetail,
-    setDraftTitle,
-    setDraftDetail,
-    beginEdit,
-    commitEdit,
-    cancelEdit,
-    addMemory,
-    clearMemories,
-    removeMemory,
+    files,
+    searchResults,
+    searchResultDates,
+    selectedDate,
+    selectedDetail,
+    editorContent,
+    setEditorContent,
+    selectDate,
+    openToday,
+    saveCurrent: () => saveMutation.mutateAsync(),
+    isDirty,
+    isLoadingList: listQuery.isLoading,
+    isLoadingDetail: detailQuery.isLoading,
+    isSearching: searchQuery.isFetching,
+    isSearchPending,
+    isSaving: saveMutation.isPending,
+    searchError: searchQuery.error instanceof Error ? searchQuery.error.message : null,
+    saveError: saveMutation.error instanceof Error ? saveMutation.error.message : null,
   };
 }

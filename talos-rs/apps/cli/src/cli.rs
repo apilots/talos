@@ -262,6 +262,8 @@ async fn execute_chat_command(
             let params = SessionCreateParams {
                 context: Some(default_chat_context(user.as_deref().unwrap_or("cli-user"))),
                 model: model.clone(),
+                project_id: None,
+                current_directory: None,
             };
             let session = client.create_session(&params).await?;
             let request = build_message_request(&message, model, stream);
@@ -310,6 +312,8 @@ async fn execute_session_command(
             let params = SessionCreateParams {
                 context: None,
                 model,
+                project_id: None,
+                current_directory: None,
             };
             let session = client.create_session(&params).await?;
             println!(

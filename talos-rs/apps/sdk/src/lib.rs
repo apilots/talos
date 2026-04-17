@@ -6,8 +6,8 @@ use futures_util::StreamExt;
 use reqwest::{Client, RequestBuilder, Response};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::Path;
+use std::path::PathBuf;
 use tokio::sync::mpsc;
 
 use talos_error::{TalosError, TalosResult};
@@ -20,7 +20,12 @@ pub use talos_types::talos::{
     TalosMessageToolCallPendingApprovalEvent, TalosMessageToolCallStartedEvent, TalosOutputItem,
     TalosProvider, TalosSourceType, TalosThinkingSource, TalosThinkingStage,
 };
-pub use talos_types::{ModelInfo, SessionProjectRootPatch, TalosSession};
+pub use talos_types::{
+    DocUpdateRequest, ExpectedFileVersion, MemoryFileDetail, MemoryFileSummary, ModelInfo,
+    OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, ProjectPatch, ProjectRecord,
+    SessionAgentConf, SessionConf, TalosSession, WorkspaceDocDetail, WorkspaceDocKind,
+    WorkspaceDocSummary,
+};
 
 #[derive(Clone, Debug)]
 pub struct ClientConfig {
@@ -43,18 +48,23 @@ impl Default for ClientConfig {
 pub struct SessionCreateParams {
     pub context: Option<TalosContext>,
     pub model: Option<String>,
+    pub project_id: Option<String>,
+    pub current_directory: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionUpdate {
-    pub conf: HashMap<String, serde_json::Value>,
-    pub project_root: Option<SessionProjectRootPatch>,
+    pub conf: Option<SessionConf>,
+    pub project_id: Option<OptionalProjectIdPatch>,
+    pub current_directory: Option<OptionalCurrentDirectoryPatch>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CreateSessionRequest {
     context: TalosContext,
     model: Option<String>,
+    project_id: Option<String>,
+    current_directory: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,6 +78,26 @@ struct ListSessionsResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct ListProjectsResponse {
+    data: Vec<ProjectRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ListMemoryFilesResponse {
+    data: Vec<MemoryFileSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ListWorkspaceDocsResponse {
+    data: Vec<WorkspaceDocSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SearchMemoryFilesResponse {
+    data: Vec<MemorySearchResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ListSessionTurnsResponse {
     data: Vec<TalosMessageResponse>,
 }
@@ -75,6 +105,36 @@ struct ListSessionTurnsResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SessionPatchResponse {
     success: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MemoryFileListParams {
+    pub limit: Option<usize>,
+    pub before_date: Option<String>,
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemorySearchParams {
+    pub q: String,
+    pub limit: Option<usize>,
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemorySearchResult {
+    pub path: String,
+    pub snippet: String,
+    pub start_line: usize,
+    pub end_line: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CreateProjectRequest {
+    name: String,
+    directory: PathBuf,
 }
 
 pub struct TalosClient {
@@ -126,6 +186,8 @@ impl TalosClient {
                 .clone()
                 .unwrap_or_else(|| default_context("anonymous")),
             model: params.model.clone(),
+            project_id: params.project_id.clone(),
+            current_directory: params.current_directory.clone(),
         };
 
         let url = format!("{}/v1/sessions", self.config.gateway_url);
@@ -158,6 +220,82 @@ impl TalosClient {
         Ok(payload.data)
     }
 
+    pub async fn list_projects(&self) -> TalosResult<Vec<ProjectRecord>> {
+        let url = format!("{}/v1/projects", self.config.gateway_url);
+        let response = self
+            .authorized(self.http_client.get(&url))
+            .send()
+            .await
+            .map_err(|e| Self::request_error("GET", &url, e))?;
+        let payload: ListProjectsResponse = Self::decode_json(response, "GET", &url).await?;
+        Ok(payload.data)
+    }
+
+    pub async fn get_project(&self, project_id: &str) -> TalosResult<ProjectRecord> {
+        let url = format!("{}/v1/projects/{}", self.config.gateway_url, project_id);
+        let response = self
+            .authorized(self.http_client.get(&url))
+            .send()
+            .await
+            .map_err(|e| Self::request_error("GET", &url, e))?;
+        Self::decode_json(response, "GET", &url).await
+    }
+
+    pub async fn create_project(&self, name: &str, directory: &Path) -> TalosResult<ProjectRecord> {
+        let url = format!("{}/v1/projects", self.config.gateway_url);
+        let request = CreateProjectRequest {
+            name: name.to_string(),
+            directory: directory.to_path_buf(),
+        };
+        let response = self
+            .authorized(self.http_client.post(&url).json(&request))
+            .send()
+            .await
+            .map_err(|e| Self::request_error("POST", &url, e))?;
+        Self::decode_json(response, "POST", &url).await
+    }
+
+    pub async fn patch_project(
+        &self,
+        project_id: &str,
+        patch: &ProjectPatch,
+    ) -> TalosResult<ProjectRecord> {
+        let url = format!("{}/v1/projects/{}", self.config.gateway_url, project_id);
+        let response = self
+            .authorized(self.http_client.patch(&url).json(patch))
+            .send()
+            .await
+            .map_err(|e| Self::request_error("PATCH", &url, e))?;
+        Self::decode_json(response, "PATCH", &url).await
+    }
+
+    pub async fn update_project_name(
+        &self,
+        project_id: &str,
+        name: &str,
+    ) -> TalosResult<ProjectRecord> {
+        self.patch_project(
+            project_id,
+            &ProjectPatch {
+                name: Some(name.to_string()),
+            },
+        )
+        .await
+    }
+
+    pub async fn delete_project(&self, project_id: &str) -> TalosResult<()> {
+        let url = format!("{}/v1/projects/{}", self.config.gateway_url, project_id);
+        let response = self
+            .authorized(self.http_client.delete(&url))
+            .send()
+            .await
+            .map_err(|e| Self::request_error("DELETE", &url, e))?;
+        if response.status().is_success() {
+            return Ok(());
+        }
+        Err(Self::http_error(response, "DELETE", &url).await)
+    }
+
     pub async fn update_session(
         &self,
         session_id: &str,
@@ -179,41 +317,86 @@ impl TalosClient {
     }
 
     pub async fn update_session_model(&self, session_id: &str, model: &str) -> TalosResult<()> {
-        let mut conf = HashMap::new();
-        conf.insert(
-            "agent.model".to_string(),
-            serde_json::Value::String(model.to_string()),
-        );
         let update = SessionUpdate {
-            conf,
-            project_root: None,
+            conf: Some(SessionConf {
+                agent: Some(SessionAgentConf {
+                    model: Some(model.to_string()),
+                }),
+            }),
+            project_id: None,
+            current_directory: None,
         };
         self.update_session(session_id, &update).await
     }
 
-    pub async fn update_session_project_root(
+    pub async fn update_session_project(
+        &self,
+        session_id: &str,
+        project_id: &str,
+    ) -> TalosResult<()> {
+        let update = SessionUpdate {
+            conf: None,
+            project_id: Some(OptionalProjectIdPatch::Set {
+                project_id: project_id.to_string(),
+            }),
+            current_directory: None,
+        };
+        self.update_session(session_id, &update).await
+    }
+
+    pub async fn clear_session_project(&self, session_id: &str) -> TalosResult<()> {
+        let update = SessionUpdate {
+            conf: None,
+            project_id: Some(OptionalProjectIdPatch::Clear),
+            current_directory: None,
+        };
+        self.update_session(session_id, &update).await
+    }
+
+    pub async fn update_session_current_directory(
         &self,
         session_id: &str,
         path: &Path,
     ) -> TalosResult<()> {
         let update = SessionUpdate {
-            conf: HashMap::new(),
-            project_root: Some(SessionProjectRootPatch::Set {
+            conf: None,
+            project_id: None,
+            current_directory: Some(OptionalCurrentDirectoryPatch::Set {
                 path: path.to_path_buf(),
             }),
         };
         self.update_session(session_id, &update).await
     }
 
-    pub async fn clear_session_project_root(&self, session_id: &str) -> TalosResult<()> {
+    pub async fn clear_session_current_directory(&self, session_id: &str) -> TalosResult<()> {
         let update = SessionUpdate {
-            conf: HashMap::new(),
-            project_root: Some(SessionProjectRootPatch::Clear),
+            conf: None,
+            project_id: None,
+            current_directory: Some(OptionalCurrentDirectoryPatch::Clear),
         };
         self.update_session(session_id, &update).await
     }
 
     pub async fn close_session(&self, session_id: &str) -> TalosResult<()> {
+        let url = format!(
+            "{}/v1/sessions/{}/close",
+            self.config.gateway_url, session_id
+        );
+        let response = self
+            .authorized(self.http_client.post(&url))
+            .send()
+            .await
+            .map_err(|e| Self::request_error("POST", &url, e))?;
+        let payload: SessionPatchResponse = Self::decode_json(response, "POST", &url).await?;
+        if payload.success {
+            return Ok(());
+        }
+        Err(TalosError::ClientError(
+            "session close did not succeed".to_string(),
+        ))
+    }
+
+    pub async fn delete_session(&self, session_id: &str) -> TalosResult<()> {
         let url = format!("{}/v1/sessions/{}", self.config.gateway_url, session_id);
         let response = self
             .authorized(self.http_client.delete(&url))
@@ -225,7 +408,7 @@ impl TalosClient {
             return Ok(());
         }
         Err(TalosError::ClientError(
-            "session close did not succeed".to_string(),
+            "session delete did not succeed".to_string(),
         ))
     }
 
@@ -270,6 +453,101 @@ impl TalosClient {
             .map_err(|e| Self::request_error("GET", &url, e))?;
         let payload: ListSessionTurnsResponse = Self::decode_json(response, "GET", &url).await?;
         Ok(payload.data)
+    }
+
+    pub async fn list_memory_files(
+        &self,
+        params: &MemoryFileListParams,
+    ) -> TalosResult<Vec<MemoryFileSummary>> {
+        let url = format!("{}/v1/memory/files", self.config.gateway_url);
+        let response = self
+            .authorized(self.http_client.get(&url).query(params))
+            .send()
+            .await
+            .map_err(|e| Self::request_error("GET", &url, e))?;
+        let payload: ListMemoryFilesResponse = Self::decode_json(response, "GET", &url).await?;
+        Ok(payload.data)
+    }
+
+    pub async fn get_memory_file(&self, date: &str) -> TalosResult<MemoryFileDetail> {
+        let url = format!("{}/v1/memory/files/{}", self.config.gateway_url, date);
+        let response = self
+            .authorized(self.http_client.get(&url))
+            .send()
+            .await
+            .map_err(|e| Self::request_error("GET", &url, e))?;
+        Self::decode_json(response, "GET", &url).await
+    }
+
+    pub async fn put_memory_file(
+        &self,
+        date: &str,
+        request: &DocUpdateRequest,
+    ) -> TalosResult<MemoryFileDetail> {
+        let url = format!("{}/v1/memory/files/{}", self.config.gateway_url, date);
+        let response = self
+            .authorized(self.http_client.put(&url).json(request))
+            .send()
+            .await
+            .map_err(|e| Self::request_error("PUT", &url, e))?;
+        Self::decode_json(response, "PUT", &url).await
+    }
+
+    pub async fn search_memory(
+        &self,
+        params: &MemorySearchParams,
+    ) -> TalosResult<Vec<MemorySearchResult>> {
+        let url = format!("{}/v1/memory/search", self.config.gateway_url);
+        let response = self
+            .authorized(self.http_client.get(&url).query(params))
+            .send()
+            .await
+            .map_err(|e| Self::request_error("GET", &url, e))?;
+        let payload: SearchMemoryFilesResponse = Self::decode_json(response, "GET", &url).await?;
+        Ok(payload.data)
+    }
+
+    pub async fn list_workspace_docs(&self) -> TalosResult<Vec<WorkspaceDocSummary>> {
+        let url = format!("{}/v1/workspace/docs", self.config.gateway_url);
+        let response = self
+            .authorized(self.http_client.get(&url))
+            .send()
+            .await
+            .map_err(|e| Self::request_error("GET", &url, e))?;
+        let payload: ListWorkspaceDocsResponse = Self::decode_json(response, "GET", &url).await?;
+        Ok(payload.data)
+    }
+
+    pub async fn get_workspace_doc(&self, kind: WorkspaceDocKind) -> TalosResult<WorkspaceDocDetail> {
+        let url = format!(
+            "{}/v1/workspace/docs/{}",
+            self.config.gateway_url,
+            workspace_doc_kind_path(kind)
+        );
+        let response = self
+            .authorized(self.http_client.get(&url))
+            .send()
+            .await
+            .map_err(|e| Self::request_error("GET", &url, e))?;
+        Self::decode_json(response, "GET", &url).await
+    }
+
+    pub async fn put_workspace_doc(
+        &self,
+        kind: WorkspaceDocKind,
+        request: &DocUpdateRequest,
+    ) -> TalosResult<WorkspaceDocDetail> {
+        let url = format!(
+            "{}/v1/workspace/docs/{}",
+            self.config.gateway_url,
+            workspace_doc_kind_path(kind)
+        );
+        let response = self
+            .authorized(self.http_client.put(&url).json(request))
+            .send()
+            .await
+            .map_err(|e| Self::request_error("PUT", &url, e))?;
+        Self::decode_json(response, "PUT", &url).await
     }
 
     pub async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()> {
@@ -442,6 +720,16 @@ fn default_context(user_id: &str) -> TalosContext {
     TalosContext::sdk(user_id).with_channel_id("default")
 }
 
+fn workspace_doc_kind_path(kind: WorkspaceDocKind) -> &'static str {
+    match kind {
+        WorkspaceDocKind::Soul => "soul",
+        WorkspaceDocKind::Identity => "identity",
+        WorkspaceDocKind::User => "user",
+        WorkspaceDocKind::Heartbeat => "heartbeat",
+        WorkspaceDocKind::Memory => "memory",
+    }
+}
+
 fn is_local_gateway_url(gateway_url: &str) -> bool {
     let Ok(url) = reqwest::Url::parse(gateway_url) else {
         return false;
@@ -490,6 +778,43 @@ mod tests {
     }
 
     #[test]
+    fn test_workspace_doc_kind_path() {
+        assert_eq!(workspace_doc_kind_path(WorkspaceDocKind::Soul), "soul");
+        assert_eq!(workspace_doc_kind_path(WorkspaceDocKind::Memory), "memory");
+    }
+
+    #[test]
+    fn test_memory_file_list_params_query_serialization() {
+        let params = MemoryFileListParams {
+            limit: Some(10),
+            before_date: Some("2026-04-05".to_string()),
+            date_from: Some("2026-04-01".to_string()),
+            date_to: Some("2026-04-30".to_string()),
+        };
+        let url = reqwest::Client::new()
+            .get("http://localhost:8080/v1/memory/files")
+            .query(&params)
+            .build()
+            .expect("request should build")
+            .url()
+            .to_string();
+        assert!(url.contains("limit=10"));
+        assert!(url.contains("before_date=2026-04-05"));
+        assert!(url.contains("date_from=2026-04-01"));
+        assert!(url.contains("date_to=2026-04-30"));
+    }
+
+    #[test]
+    fn test_doc_update_request_shape_uses_expected_file_version() {
+        let request = DocUpdateRequest {
+            content: "body".to_string(),
+            base_version: ExpectedFileVersion::MustNotExist,
+        };
+        let value = serde_json::to_value(&request).expect("request should serialize");
+        assert_eq!(value["base_version"]["mode"], "must_not_exist");
+    }
+
+    #[test]
     fn test_talos_session_roundtrip_shape() {
         let mut config = talos_types::TalosConfig::default();
         config.agent.model = "gpt-4o-mini".to_string();
@@ -507,8 +832,13 @@ mod tests {
                 trace_id: "t1".to_string(),
                 channel_id: Some("default".to_string()),
                 thread_id: None,
+                project_id: None,
+                current_directory: None,
+                project_root: None,
                 environment: None,
             },
+            project_id: None,
+            current_directory: None,
             config,
             state: talos_types::SessionState {
                 created_at: 1,

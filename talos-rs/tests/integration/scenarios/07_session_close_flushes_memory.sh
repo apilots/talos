@@ -85,7 +85,7 @@ if [[ ! -f "${ROOT_MEMORY_FILE}" ]]; then
 fi
 echo "CASE root_memory_bootstrap PASS path=${ROOT_MEMORY_FILE}"
 
-close_json="$(curl -sS -X DELETE "${GATEWAY_URL}/v1/sessions/${session_id}" \
+close_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/close" \
   -H "Authorization: Bearer ${AUTH_TOKEN}")"
 log_case_json "close_session_for_memory_flush" "{\"session_id\":\"${session_id}\"}" "${close_json}"
 close_success="$(json_get "${close_json}" "success")"

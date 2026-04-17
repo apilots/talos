@@ -89,9 +89,13 @@ fn build_temp_agent() -> (TempDir, AgentImpl) {
 fn build_test_session(session_id: &str, workspace_id: &str) -> TalosSession {
     TalosSession {
         title: "Untitled Session".to_string(),
+        project_id: None,
+        current_directory: None,
         context: SessionContext {
             session_id: session_id.to_string(),
             workspace_id: Some(workspace_id.to_string()),
+            project_id: None,
+            current_directory: None,
             project_root: None,
             source_type: TalosSourceType::Cli,
             provider: TalosProvider::Cli,

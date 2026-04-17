@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use std::path::Path;
 use talos_client::{
     ModelInfo, SessionCreateParams, TalosClient, TalosEvent, TalosMessageRequest,
     TalosMessageResponse, TalosSession,
@@ -20,12 +19,6 @@ pub trait GatewayClient: Send + Sync {
         session_id: &str,
         model: &str,
     ) -> TalosResult<TalosSession>;
-    async fn update_session_project_root(
-        &self,
-        session_id: &str,
-        path: &Path,
-    ) -> TalosResult<TalosSession>;
-    async fn clear_session_project_root(&self, session_id: &str) -> TalosResult<TalosSession>;
     async fn compact_session(&self, session_id: &str) -> TalosResult<TalosSession>;
     async fn clear_session(&self, session_id: &str) -> TalosResult<TalosSession>;
     async fn send_message_stream(
@@ -76,20 +69,6 @@ impl GatewayClient for TalosClient {
         model: &str,
     ) -> TalosResult<TalosSession> {
         TalosClient::update_session_model(self, session_id, model).await?;
-        TalosClient::get_session(self, session_id).await
-    }
-
-    async fn update_session_project_root(
-        &self,
-        session_id: &str,
-        path: &Path,
-    ) -> TalosResult<TalosSession> {
-        TalosClient::update_session_project_root(self, session_id, path).await?;
-        TalosClient::get_session(self, session_id).await
-    }
-
-    async fn clear_session_project_root(&self, session_id: &str) -> TalosResult<TalosSession> {
-        TalosClient::clear_session_project_root(self, session_id).await?;
         TalosClient::get_session(self, session_id).await
     }
 

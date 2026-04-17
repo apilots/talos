@@ -1,197 +1,209 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Save, Search } from "lucide-react";
 
-import { formatMemoryDate, useMemoryPage, type MemorySectionId } from "@/features/memory";
 import { Button } from "@/shared/ui/Button";
 import { Input, Textarea } from "@/shared/ui/Input";
 import { Panel } from "@/shared/ui/Panel";
+import { formatMemoryDate, useMemoryPage } from "@/features/memory";
 
 export function MemoryPage() {
   const { t } = useTranslation(["memory", "common"]);
   const {
-    items,
     query,
     setQuery,
-    filteredItems,
-    visibleSections,
-    editingId,
-    draftTitle,
-    draftDetail,
-    setDraftTitle,
-    setDraftDetail,
-    beginEdit,
-    commitEdit,
-    cancelEdit,
-    addMemory,
-    clearMemories,
-    removeMemory,
+    files,
+    searchResults,
+    searchResultDates,
+    selectedDate,
+    selectedDetail,
+    editorContent,
+    setEditorContent,
+    selectDate,
+    saveCurrent,
+    isDirty,
+    isLoadingList,
+    isLoadingDetail,
+    isSearching,
+    isSearchPending,
+    isSaving,
+    searchError,
+    saveError,
   } = useMemoryPage();
 
-  const totalCount = items.length;
-  const sectionLabels = useMemo<Record<MemorySectionId, string>>(
-    () => ({
-      aboutYou: t("memory:sections.aboutYou"),
-      workPreferences: t("memory:sections.workPreferences"),
-      projectContext: t("memory:sections.projectContext"),
-      other: t("memory:sections.other"),
-    }),
-    [t],
+  const showingSearch = query.trim().length > 0;
+  const listDates = useMemo(
+    () => (showingSearch ? searchResultDates : files.map((item) => item.date)),
+    [files, searchResultDates, showingSearch],
   );
 
+  const searchBusy = isSearchPending || isSearching;
+
   return (
-    <div className="mx-auto flex h-full w-full max-w-[1080px] flex-col gap-5 overflow-y-auto px-8 py-7">
-      <Panel className="rounded-[1.45rem] border-border/80 bg-card/88 p-5 backdrop-blur">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="flex h-full w-full flex-col overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-[1180px] flex-col px-8 py-8">
+      <Panel className="mb-6 rounded-[var(--radius-panel)] border-border/75 bg-card/88 p-4">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
           <div>
-            <div className="text-xs uppercase tracking-[0.22em] text-muted">{t("memory:pageLabel")}</div>
-            <h1 className="mt-2 font-display text-[28px] tracking-[-0.05em] text-ink">
-              {t("memory:title")}
-            </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-muted">
-              {t("memory:detail")}
-            </p>
-          </div>
-          <Button onClick={addMemory} variant="secondary">
-            <Plus size={16} />
-            {t("memory:addMemory")}
-          </Button>
-        </div>
-      </Panel>
-
-      <div className="grid gap-5 xl:grid-cols-[250px_minmax(0,1fr)]">
-        <div className="space-y-5">
-          <Panel className="rounded-[1.25rem] border-border/65 bg-card/70 p-4 shadow-[0_10px_30px_-24px_rgba(15,23,42,0.34)]">
-            <div className="text-[11px] uppercase tracking-[0.22em] text-muted/80">{t("memory:overview")}</div>
-            <div className="mt-3 flex items-end gap-2.5">
-              <div className="text-[2.1rem] font-display leading-none tracking-[-0.06em] text-ink">{totalCount}</div>
-              <div className="pb-0.5 text-[11px] uppercase tracking-[0.14em] text-muted/80">{t("memory:activeNotes")}</div>
-            </div>
-            <div className="mt-4 flex flex-wrap gap-1.5">
-              {visibleSections.map(([section, records]) => (
-                <div
-                  className="rounded-full border border-border/60 bg-background/78 px-2.5 py-1 text-[11px] leading-5"
-                  key={section}
-                >
-                  <span className="text-muted/90">{sectionLabels[section]}</span>
-                  <span className="ml-1.5 font-medium text-ink">{records.length}</span>
-                </div>
-              ))}
-            </div>
-          </Panel>
-
-          <Panel className="rounded-[1.25rem] border-border/65 bg-card/70 p-4 shadow-[0_10px_30px_-24px_rgba(15,23,42,0.34)]">
-            <label className="mb-3 block text-[11px] uppercase tracking-[0.22em] text-muted/80">{t("common:search")}</label>
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted/80" size={14} />
+            <label className="block text-[11px] uppercase tracking-[0.22em] text-muted/80">
+              {t("common:search")}
+            </label>
+            <div className="relative mt-3">
+              <Search
+                className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted/80"
+                size={14}
+              />
               <Input
-                className="h-11 rounded-[1rem] border-border/60 bg-background/82 pl-10"
+                className="h-12 rounded-[var(--radius-control)] border-border/65 bg-background/82 pl-10"
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={t("memory:searchPlaceholder")}
                 value={query}
               />
             </div>
-            <button
-              className="mt-3 inline-flex w-full items-center justify-center rounded-[1rem] border border-transparent px-3 py-2 text-sm text-muted transition hover:border-danger/12 hover:bg-danger/6 hover:text-danger"
-              onClick={clearMemories}
-              type="button"
-            >
-              {t("memory:clearAll")}
-            </button>
+            <div className="mt-3 text-xs text-muted">
+              {showingSearch
+                ? searchBusy
+                  ? t("memory:searching")
+                  : t("memory:searchResultsCount", { count: searchResults.length })
+                : t("memory:fileCount", { count: files.length })}
+            </div>
+          </div>
+
+        </div>
+      </Panel>
+
+      <div className="grid gap-6 xl:grid-cols-[348px_minmax(0,1fr)]">
+        <div className="space-y-4">
+          <Panel className="rounded-[var(--radius-panel)] border-border/70 bg-card/78 p-2.5">
+            <div className="mb-2 flex items-center justify-between px-2 pt-2 text-[11px] uppercase tracking-[0.22em] text-muted/80">
+              {showingSearch ? t("memory:matchingFiles") : t("memory:recentFiles")}
+              <span className="rounded-[var(--radius-control)] border border-border/65 bg-background/65 px-2 py-0.5 text-[10px] tracking-[0.16em]">
+                {listDates.length}
+              </span>
+            </div>
+            <div className="space-y-1">
+              {isLoadingList ? (
+                <div className="px-3 py-4 text-sm text-muted">{t("common:loading")}</div>
+              ) : listDates.length === 0 ? (
+                <div className="px-3 py-4 text-sm text-muted">{t("memory:noMemoryDetail")}</div>
+              ) : (
+                listDates.map((date) => (
+                  <button
+                    className={[
+                      "w-full rounded-[var(--radius-control)] border px-3.5 py-3 text-left transition",
+                      selectedDate === date
+                        ? "border-border/80 bg-background/88 text-ink shadow-[0_10px_24px_rgba(95,84,64,0.045)]"
+                        : "border-transparent text-muted hover:border-border/60 hover:bg-background/55",
+                    ].join(" ")}
+                    key={date}
+                    onClick={() => selectDate(date)}
+                    type="button"
+                  >
+                    <div className="font-medium">{date}</div>
+                    <div className="mt-1 text-xs text-muted">{`memory/${date}.md`}</div>
+                  </button>
+                ))
+              )}
+            </div>
           </Panel>
+
         </div>
 
-        <div className="space-y-5">
-          {visibleSections.map(([section, records]) => (
-            <section key={section}>
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-medium uppercase tracking-[0.18em] text-muted">{sectionLabels[section]}</h2>
-                <span className="text-xs text-muted">{records.length}</span>
-              </div>
-              {records.length === 0 ? (
-                <Panel className="rounded-[1.4rem] border-border/80 bg-card/70 p-8 text-center">
-                  <div className="text-sm text-muted">{t("memory:nothingMatched")}</div>
-                </Panel>
-              ) : (
-                <div className="space-y-3">
-                  {records.map((item) => {
-                    const isEditing = editingId === item.id;
-                    return (
-                      <Panel className="rounded-[1.3rem] border-border/80 bg-card/82 p-4" key={item.id}>
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="min-w-0 flex-1">
-                            {isEditing ? (
-                              <div className="space-y-3">
-                                <Input
-                                  onChange={(event) => setDraftTitle(event.target.value)}
-                                  value={draftTitle}
-                                />
-                                <Textarea
-                                  className="min-h-24"
-                                  onChange={(event) => setDraftDetail(event.target.value)}
-                                  value={draftDetail}
-                                />
-                                <div className="flex items-center gap-2">
-                                  <Button onClick={() => commitEdit(item)} type="button">
-                                    {t("common:save")}
-                                  </Button>
-                                  <Button onClick={cancelEdit} type="button" variant="ghost">
-                                    {t("common:cancel")}
-                                  </Button>
-                                </div>
-                              </div>
-                            ) : (
-                              <>
-                                <div className="text-base font-medium text-ink">{item.title}</div>
-                                <p className="mt-2 text-sm leading-6 text-muted">{item.detail}</p>
-                              </>
-                            )}
-                            <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-muted">
-                              {item.tags.map((tag) => (
-                                <span
-                                  className="rounded-full border border-border/70 bg-background/55 px-2.5 py-1"
-                                  key={`${item.id}-${tag}`}
-                                >
-                                  {tag}
-                                </span>
-                              ))}
-                              <span className="ml-auto">{t("memory:recordedOn", { date: formatMemoryDate(item.updatedAt) })}</span>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <button
-                              className="rounded-xl p-2 text-muted transition hover:bg-surface hover:text-ink"
-                              onClick={() => beginEdit(item)}
-                              type="button"
-                            >
-                              <Pencil size={15} />
-                            </button>
-                            <button
-                              className="rounded-xl p-2 text-muted transition hover:bg-danger/10 hover:text-danger"
-                              onClick={() => removeMemory(item.id)}
-                              type="button"
-                            >
-                              <Trash2 size={15} />
-                            </button>
-                          </div>
-                        </div>
-                      </Panel>
-                    );
-                  })}
+        <Panel className="rounded-[var(--radius-panel)] border-border/75 bg-card/90 p-5">
+          {showingSearch ? (
+            <div>
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <div className="text-xs uppercase tracking-[0.22em] text-muted">{t("common:search")}</div>
+                  <h2 className="mt-2 font-display text-[24px] tracking-[-0.045em] text-ink">
+                    {searchBusy ? t("memory:searching") : t("memory:matchingSnippets")}
+                  </h2>
+                  <p className="mt-2 text-sm text-muted">
+                    {searchBusy
+                      ? t("memory:detail")
+                      : t("memory:searchResultsCount", { count: searchResults.length })}
+                  </p>
                 </div>
-              )}
-            </section>
-          ))}
+                <div className="rounded-[var(--radius-control)] border border-border/70 bg-background/60 px-3 py-2 text-xs text-muted">
+                  {query.trim()}
+                </div>
+              </div>
 
-          {filteredItems.length === 0 ? (
-            <Panel className="rounded-[1.4rem] border-border/80 bg-card/80 p-12 text-center">
-              <div className="text-4xl">🗂</div>
-              <h2 className="mt-4 font-display text-2xl tracking-[-0.04em] text-ink">{t("memory:noMemoryTitle")}</h2>
-              <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-muted">
-                {t("memory:noMemoryDetail")}
-              </p>
-            </Panel>
-          ) : null}
+              <div className="mt-5 space-y-3">
+                {searchError ? (
+                  <div className="rounded-[var(--radius-control)] border border-danger/20 bg-danger/5 px-3.5 py-3 text-sm text-danger">
+                    {searchError}
+                  </div>
+                ) : null}
+                {searchResults.length === 0 && !searchBusy ? (
+                  <div className="rounded-[var(--radius-control)] border border-dashed border-border/65 bg-background/38 px-3.5 py-4 text-sm text-muted">
+                    {t("memory:nothingMatched")}
+                  </div>
+                ) : (
+                  searchResults.map((result) => (
+                    <button
+                      className="w-full rounded-[var(--radius-control)] border border-border/65 bg-background/50 px-4 py-4 text-left transition hover:border-brand/30 hover:bg-background/74"
+                      key={`${result.path}:${result.start_line}:${result.end_line}`}
+                      onClick={() => selectDate(result.path.split("/").at(-1)?.replace(/\.md$/, "") ?? selectedDate)}
+                      type="button"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="text-xs uppercase tracking-[0.18em] text-muted">
+                            {result.path.split("/").at(-1)?.replace(/\.md$/, "")}
+                          </div>
+                          <div className="mt-1 text-xs text-muted">{result.path}</div>
+                        </div>
+                        <div className="rounded-[var(--radius-control)] border border-border/65 bg-background/68 px-2.5 py-1 text-[11px] text-muted">
+                          {t("memory:lineRange", { start: result.start_line, end: result.end_line })}
+                        </div>
+                      </div>
+                      <div className="mt-3 text-sm leading-6 text-ink">{result.snippet}</div>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <div className="text-xs uppercase tracking-[0.22em] text-muted">{selectedDate}</div>
+                  <h2 className="mt-2 font-display text-[24px] tracking-[-0.045em] text-ink">
+                    {selectedDetail.version_token ? t("memory:editorTitle") : t("memory:newFileTitle")}
+                  </h2>
+                  <p className="mt-2 text-sm text-muted">
+                    {selectedDetail.version_token
+                      ? t("memory:lastUpdated", { date: formatMemoryDate(selectedDetail.updated_at) })
+                      : t("memory:newFileDetail")}
+                  </p>
+                </div>
+                <Button disabled={!isDirty || isSaving || isLoadingDetail} onClick={() => void saveCurrent()}>
+                  <Save size={16} />
+                  {isSaving ? t("memory:saving") : t("common:save")}
+                </Button>
+              </div>
+
+              <div className="mt-4 rounded-[var(--radius-control)] border border-border/70 bg-background/52 px-3 py-2 text-xs text-muted">
+                {selectedDetail.path}
+              </div>
+
+              <Textarea
+                className="mt-4 min-h-[440px] rounded-[var(--radius-panel)] border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.32),rgba(255,255,255,0.16))] font-mono text-sm leading-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]"
+                onChange={(event) => setEditorContent(event.target.value)}
+                value={editorContent}
+              />
+
+              {saveError ? (
+                <div className="mt-3 rounded-[var(--radius-control)] border border-danger/20 bg-danger/5 px-3 py-2 text-sm text-danger">
+                  {saveError}
+                </div>
+              ) : null}
+            </div>
+          )}
+        </Panel>
+      </div>
         </div>
       </div>
     </div>

@@ -4,10 +4,10 @@ import { applyStreamEvent } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
 import {
   createDefaultProjects,
-  describeProjectRoot,
+  describeProjectDirectory,
   getEffectiveSessionStatus,
   mapTurnsToBlocks,
-  resolveProjectRootPath,
+  UNBOUND_PROJECT_ID,
 } from "@/shared/types/domain";
 
 describe("chat stream integration helpers", () => {
@@ -125,11 +125,11 @@ describe("chat stream integration helpers", () => {
     expect(state.streams["sess-1"]?.connectionState).toBe("detached");
   });
 
-  it("uses the configured default workspace path for web sessions", () => {
+  it("keeps an explicit unbound project option for web sessions", () => {
     const projects = createDefaultProjects();
-    const defaultWorkspace = projects[0];
+    const defaultProject = projects[0];
 
-    expect(resolveProjectRootPath(defaultWorkspace.root)).toBe(__TALOS_DEFAULT_PROJECT_ROOT__);
-    expect(describeProjectRoot(defaultWorkspace.root)).toBe(__TALOS_DEFAULT_PROJECT_ROOT__);
+    expect(defaultProject?.id).toBe(UNBOUND_PROJECT_ID);
+    expect(describeProjectDirectory(defaultProject?.directory)).toBe("No project");
   });
 });

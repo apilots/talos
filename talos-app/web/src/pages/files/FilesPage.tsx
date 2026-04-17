@@ -36,65 +36,51 @@ export function FilesPage() {
   );
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-[1120px] flex-col gap-5 overflow-y-auto px-8 py-7">
-      <Panel className="rounded-[1.45rem] border-border/80 bg-card/88 p-5 backdrop-blur">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div className="text-xs uppercase tracking-[0.22em] text-muted">{t("files:pageLabel")}</div>
-            <h1 className="mt-2 font-display text-[28px] tracking-[-0.05em] text-ink">
-              {t("files:title")}
-            </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-muted">
-              {t("files:detail")}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              className="rounded-2xl border border-border bg-card/80 p-2.5 text-muted transition hover:border-brand/40 hover:text-ink"
-              onClick={() => setView("list")}
-              type="button"
-            >
-              <List size={16} />
-            </button>
-            <button
-              className="rounded-2xl border border-border bg-card/80 p-2.5 text-muted transition hover:border-brand/40 hover:text-ink"
-              onClick={() => setView("grid")}
-              type="button"
-            >
-              <Grid2x2 size={16} />
-            </button>
-            <Button onClick={addFile} variant="secondary">
-              <Plus size={16} />
-              {t("files:upload")}
-            </Button>
-          </div>
-        </div>
-      </Panel>
-
+    <div className="flex h-full w-full flex-col overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 px-8 py-7">
       <Panel className="rounded-[1.35rem] border-border/80 bg-card/82 p-4.5">
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <Input
             className="max-w-md"
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t("files:searchPlaceholder")}
             value={query}
           />
-          <div className="flex flex-wrap items-center gap-2">
-            {(Object.keys(categoryLabels) as FileCategory[]).map((itemCategory) => (
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <div className="flex items-center gap-2">
               <button
-                className={[
-                  "rounded-full border px-3 py-1.5 text-xs transition",
-                  category === itemCategory
-                    ? "border-brand/40 bg-brand/10 text-brand"
-                    : "border-border bg-background/55 text-muted hover:text-ink",
-                ].join(" ")}
-                key={itemCategory}
-                onClick={() => setCategory(itemCategory)}
+                className="rounded-2xl border border-border bg-card/80 p-2.5 text-muted transition hover:border-brand/40 hover:text-ink"
+                onClick={() => setView("list")}
                 type="button"
               >
-                {categoryLabels[itemCategory]} ({categorized[itemCategory]})
+                <List size={16} />
               </button>
-            ))}
+              <button
+                className="rounded-2xl border border-border bg-card/80 p-2.5 text-muted transition hover:border-brand/40 hover:text-ink"
+                onClick={() => setView("grid")}
+                type="button"
+              >
+                <Grid2x2 size={16} />
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {(Object.keys(categoryLabels) as FileCategory[]).map((itemCategory) => (
+                <button
+                  className={[
+                    "rounded-full border px-3 py-1.5 text-xs transition",
+                    category === itemCategory
+                      ? "border-brand/40 bg-brand/10 text-brand"
+                      : "border-border bg-background/55 text-muted hover:text-ink",
+                  ].join(" ")}
+                  key={itemCategory}
+                  onClick={() => setCategory(itemCategory)}
+                  type="button"
+                >
+                  {categoryLabels[itemCategory]} ({categorized[itemCategory]})
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </Panel>
@@ -178,8 +164,19 @@ export function FilesPage() {
       )}
 
       <Panel className="rounded-[1.4rem] border-border/80 border-dashed bg-card/60 p-8 text-center">
-        <div className="text-sm text-muted">{t("files:dragHint")}</div>
+        <div className="mx-auto flex size-14 items-center justify-center rounded-3xl border border-border bg-background/55 text-brand">
+          <Upload size={22} />
+        </div>
+        <div className="mt-4 text-sm text-muted">{t("files:dragHint")}</div>
+        <div className="mt-5 flex items-center justify-center">
+          <Button onClick={addFile} variant="secondary">
+            <Plus size={16} />
+            {t("files:upload")}
+          </Button>
+        </div>
       </Panel>
+        </div>
+      </div>
     </div>
   );
 }

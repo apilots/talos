@@ -228,7 +228,7 @@ pub(crate) fn copy_to_system_clipboard(text: &str) -> Result<(), String> {
 pub(crate) fn build_welcome_card(
     version: &str,
     model: &str,
-    project_root: Option<&Path>,
+    working_directory: Option<&Path>,
     directory: &Path,
     connection_mode: TalosConnectionMode,
 ) -> String {
@@ -248,9 +248,9 @@ pub(crate) fn build_welcome_card(
         card_line(&format!("{}{}", " ".repeat(indent), content))
     }
 
-    let project_root_line = project_root
-        .map(|path| format!("project_root: {}", compact_directory_path(path)))
-        .unwrap_or_else(|| "project_root: (unset)".to_string());
+    let working_directory_line = working_directory
+        .map(|path| format!("working_directory: {}", compact_directory_path(path)))
+        .unwrap_or_else(|| "working_directory: (server-managed)".to_string());
     let directory_line = format!("client_directory: {}", compact_directory_path(directory));
     let connection_line = format!("connection: {}", connection_mode);
     [
@@ -263,7 +263,7 @@ pub(crate) fn build_welcome_card(
             &format!("model:     {:<12} /model to change", model),
             INFO_BLOCK_INDENT,
         ),
-        indented_card_line(&project_root_line, INFO_BLOCK_INDENT),
+        indented_card_line(&working_directory_line, INFO_BLOCK_INDENT),
         indented_card_line(&directory_line, INFO_BLOCK_INDENT),
         indented_card_line(&connection_line, INFO_BLOCK_INDENT),
         "╰──────────────────────────────────────────────────╯".to_string(),
@@ -301,7 +301,7 @@ mod tests {
             "│                                                  │"
         );
         assert!(lines[5].starts_with("│  model:"));
-        assert!(lines[6].starts_with("│  project_root:"));
+        assert!(lines[6].starts_with("│  working_directory:"));
         assert!(lines[7].starts_with("│  client_directory:"));
         assert!(lines[8].starts_with("│  connection:"));
     }

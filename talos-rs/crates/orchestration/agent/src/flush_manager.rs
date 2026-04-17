@@ -131,6 +131,10 @@ impl MemoryFlushManager {
     pub fn pending_count(&self) -> usize {
         self.pending_count.load(Ordering::SeqCst)
     }
+
+    pub async fn contains_session(&self, session_id: &str) -> bool {
+        self.tasks.lock().await.contains_key(session_id)
+    }
 }
 
 #[cfg(test)]

@@ -39,7 +39,7 @@ interface SidebarProps {
   onCycleThreadFilter: () => void;
   onCreateThread: () => Promise<void> | void;
   onSelectThread: (sessionId: string) => void;
-  onCloseThread: (sessionId: string) => Promise<void> | void;
+  onDeleteThread: (sessionId: string) => Promise<void> | void;
 }
 
 export function Sidebar({
@@ -51,7 +51,7 @@ export function Sidebar({
   onCycleThreadFilter,
   onCreateThread,
   onSelectThread,
-  onCloseThread,
+  onDeleteThread,
 }: SidebarProps) {
   const { t } = useTranslation(["sidebar", "common"]);
   const filterLabel =
@@ -62,14 +62,17 @@ export function Sidebar({
         : threadFilter.replaceAll("_", " ");
 
   return (
-    <aside className="sticky top-0 flex h-screen w-full shrink-0 flex-col border-r border-border bg-sidebar px-3 py-3">
-      <Link className="mb-4 block rounded-[1.25rem] border border-border/80 bg-card/80 px-3 py-3" to="/">
+    <aside className="sticky top-0 flex h-screen w-full shrink-0 flex-col border-r border-border/80 bg-sidebar/95 px-4 py-4 backdrop-blur-[18px]">
+      <Link
+        className="mb-5 block rounded-[var(--radius-panel)] border border-border/75 bg-card/86 px-4 py-4 shadow-[0_12px_28px_rgba(95,84,64,0.04)]"
+        to="/"
+      >
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="font-display text-[21px] font-semibold tracking-[-0.04em] text-ink">Talos</div>
             <div className="mt-1 text-[10px] uppercase tracking-[0.22em] text-muted">{t("sidebar:webConsole")}</div>
           </div>
-          <div className="flex size-9 items-center justify-center rounded-2xl border border-brand/30 bg-brand/10 text-brand">
+          <div className="flex size-10 items-center justify-center rounded-[var(--radius-control)] border border-brand/25 bg-brand/10 text-brand">
             ⬡
           </div>
         </div>
@@ -89,7 +92,7 @@ export function Sidebar({
         </div>
         <div className="flex items-center gap-2">
           <button
-            className="rounded-2xl border border-border bg-card p-2.5 text-muted transition hover:border-brand/40 hover:text-ink"
+            className="rounded-[var(--radius-control)] border border-border/80 bg-card/88 p-2.5 text-muted transition hover:border-brand/40 hover:text-ink"
             onClick={onCycleThreadFilter}
             type="button"
           >
@@ -97,7 +100,7 @@ export function Sidebar({
           </button>
           {!isHomePage ? (
             <button
-              className="rounded-2xl border border-border bg-card p-2.5 text-muted transition hover:border-brand/40 hover:text-ink"
+              className="rounded-[var(--radius-control)] border border-border/80 bg-card/88 p-2.5 text-muted transition hover:border-brand/40 hover:text-ink"
               onClick={() => void onCreateThread()}
               type="button"
             >
@@ -107,13 +110,14 @@ export function Sidebar({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1.5">
         {threads.map((thread) => {
           return (
             <div
               className={cn(
-                "group cursor-pointer rounded-[1.05rem] border border-transparent bg-transparent px-3 py-2 transition hover:border-border hover:bg-card/90",
-                currentPath === `/sessions/${thread.id}` && "border-border bg-card/95 shadow-panel",
+                "group cursor-pointer rounded-[var(--radius-control)] border border-transparent bg-transparent px-3.5 py-3 transition hover:border-border/80 hover:bg-card/88",
+                currentPath === `/sessions/${thread.id}` &&
+                  "border-border/85 bg-card/94 shadow-[0_10px_24px_rgba(95,84,64,0.045)]",
               )}
               onClick={() => onSelectThread(thread.id)}
               key={`${thread.id}-${thread.createdAt}`}
@@ -127,7 +131,7 @@ export function Sidebar({
               }}
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="line-clamp-2 text-[12.5px] font-medium leading-5 text-ink">{thread.label}</span>
+                <span className="line-clamp-2 text-[13px] font-medium leading-5 text-ink">{thread.label}</span>
                 <Badge tone={statusTone(thread.status)}>{thread.status.replaceAll("_", " ")}</Badge>
               </div>
               <div className="mt-1.5 flex items-center justify-between gap-3 text-[10px] text-muted">
@@ -136,15 +140,15 @@ export function Sidebar({
               </div>
               <div className="mt-1.5 flex items-center justify-end text-xs opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">
                 <button
-                  className="inline-flex items-center gap-1 rounded-xl px-2 py-1 text-muted transition hover:bg-danger/10 hover:text-danger"
+                  className="inline-flex items-center gap-1 rounded-[var(--radius-control)] px-2 py-1 text-muted transition hover:bg-danger/10 hover:text-danger"
                   onClick={async (event) => {
                     event.stopPropagation();
-                    await onCloseThread(thread.id);
+                    await onDeleteThread(thread.id);
                   }}
                   type="button"
                 >
                   <Trash2 size={14} />
-                  {t("common:close")}
+                  {t("common:delete")}
                 </button>
               </div>
             </div>
@@ -152,7 +156,7 @@ export function Sidebar({
         })}
       </div>
 
-      <nav className="mt-5 space-y-1 border-t border-border pt-5">
+      <nav className="mt-5 space-y-1 border-t border-border/80 pt-5">
         <NavItem icon={<MemoryStick size={16} />} label={t("sidebar:memory")} to="/memory" />
         <NavItem icon={<HardDriveUpload size={16} />} label={t("sidebar:files")} to="/files" />
         <NavItem icon={<Settings2 size={16} />} label={t("sidebar:settings")} to="/settings" />
@@ -175,8 +179,8 @@ function NavItem({
     <NavLink
       className={({ isActive }) =>
         cn(
-          "flex items-center gap-3 rounded-md px-3 py-2.5 text-sm text-muted transition hover:bg-card hover:text-ink",
-          isActive && "bg-card text-ink",
+          "flex items-center gap-3 rounded-[var(--radius-control)] px-3 py-2.5 text-sm text-muted transition hover:bg-card/88 hover:text-ink",
+          isActive && "bg-card/92 text-ink shadow-[inset_0_0_0_1px_rgba(224,218,209,0.5)]",
         )
       }
       to={to}

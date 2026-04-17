@@ -4,6 +4,7 @@ export interface HttpRequestOptions {
   method?: HttpMethod;
   body?: string;
   headers?: Record<string, string>;
+  signal?: AbortSignal;
 }
 
 export interface StreamRequestOptions extends HttpRequestOptions {

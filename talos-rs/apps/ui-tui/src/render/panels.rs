@@ -40,11 +40,11 @@ impl TuiApp {
                 .unwrap_or_else(|| "none".to_string())
         )));
         lines.push(Line::from(format!(
-            "project: {}",
+            "directory: {}",
             self.current_project_root
                 .as_ref()
                 .map(|path| path.display().to_string())
-                .unwrap_or_else(|| "(unset)".to_string())
+                .unwrap_or_else(|| "(server-managed)".to_string())
         )));
         lines.push(Line::from(format!(
             "queue: {}/{}",
@@ -136,7 +136,7 @@ impl TuiApp {
                 .fg(Color::White),
         )));
         lines.push(Line::from(
-            "/help /model /project /history /sessions /status /quit",
+            "/help /model /history /sessions /status /quit",
         ));
         lines.push(Line::from("↑/↓ scroll  Ctrl+O expand tool"));
         lines.push(Line::from("Ctrl+B panel  Ctrl+Y copy"));

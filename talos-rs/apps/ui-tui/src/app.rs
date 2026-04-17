@@ -116,7 +116,7 @@ impl TuiApp {
         );
         app.push_block(
             ChatRole::System,
-            "Type a message or use /help /model /project /history /sessions /status /compact /clear /quit"
+            "Type a message or use /help /model /history /sessions /status /compact /clear /quit"
                 .to_string(),
         );
         app.push_right_event("tui initialized".to_string());
@@ -147,9 +147,6 @@ impl TuiApp {
             TalosContext::cli(env::var("USER").unwrap_or_else(|_| "local-user".to_string()))
                 .with_channel_id("terminal")
                 .with_environment(self.session_environment());
-        if matches!(self.connection_mode, TalosConnectionMode::Embedded) {
-            return context.with_project_root(self.startup_directory.clone());
-        }
         context
     }
 
@@ -268,7 +265,11 @@ impl TuiApp {
         self.session_id = Some(session.context.session_id.clone());
         self.current_model = session.config.llm.model.clone();
         self.session_usage = session.state.usage.clone();
-        self.current_project_root = session.context.project_root.clone().or_else(|| {
+        self.current_project_root = session
+            .current_directory
+            .clone()
+            .or_else(|| session.context.environment.as_ref().map(|env| env.directory.clone()))
+            .or_else(|| {
             matches!(self.connection_mode, TalosConnectionMode::Embedded)
                 .then(|| self.startup_directory.clone())
         });
@@ -316,7 +317,7 @@ impl TuiApp {
         );
         self.push_block(
             ChatRole::System,
-            "Type a message or use /help /model /project /history /sessions /status /compact /clear /quit"
+            "Type a message or use /help /model /history /sessions /status /compact /clear /quit"
                 .to_string(),
         );
         self.rebuild_chat_render_state_if_rect();
@@ -354,14 +355,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn embedded_session_context_uses_startup_directory_as_project_root() {
+    fn embedded_session_context_uses_environment_directory_only() {
         let app = TuiApp::build(None, TalosConnectionMode::Embedded);
         let context = app.build_session_context();
 
-        assert_eq!(
-            context.project_root.as_deref(),
-            Some(app.startup_directory.as_path())
-        );
+        assert_eq!(context.project_root, None);
         assert_eq!(
             context
                 .environment
@@ -372,7 +370,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_session_context_keeps_client_directory_but_not_project_root() {
+    fn remote_session_context_keeps_environment_directory_without_project_root() {
         let app = TuiApp::build(None, TalosConnectionMode::Remote);
         let context = app.build_session_context();
 

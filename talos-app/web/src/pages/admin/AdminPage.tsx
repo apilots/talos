@@ -15,8 +15,6 @@ import {
   useAdminPage,
   type AdminSection,
 } from "@/features/admin";
-import { Badge } from "@/shared/ui/Badge";
-import { Panel } from "@/shared/ui/Panel";
 
 export function AdminPage() {
   const { t } = useTranslation(["admin"]);
@@ -44,23 +42,9 @@ export function AdminPage() {
     system: Cpu,
   };
   return (
-    <div className="mx-auto flex h-full w-full max-w-[1240px] flex-col gap-5 overflow-y-auto px-8 py-7">
-      <Panel className="rounded-[1.5rem] border-border/80 bg-card/88 p-6 backdrop-blur">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div className="text-xs uppercase tracking-[0.22em] text-muted">{t("admin:pageLabel")}</div>
-            <h1 className="mt-2 font-display text-[30px] tracking-[-0.05em] text-ink">{t("admin:title")}</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-muted">{t("admin:detail")}</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="text-xs text-muted">
-              {t("admin:todayLabel")} · 2026-04-16
-            </div>
-            <Badge tone="warning">{t("admin:preview")}</Badge>
-          </div>
-        </div>
-      </Panel>
-
+    <div className="flex h-full w-full flex-col overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-[1240px] flex-col gap-5 px-8 py-7">
       <div className="grid gap-5 xl:grid-cols-[220px_minmax(0,1fr)]">
         <AdminNavigation
           activeSection={activeSection}
@@ -85,6 +69,8 @@ export function AdminPage() {
           {activeSection === "audit" ? <AdminAuditSection /> : null}
           {activeSection === "models" ? <AdminModelsSection models={models} /> : null}
           {activeSection === "system" ? <AdminSystemSection connection={connection} /> : null}
+        </div>
+      </div>
         </div>
       </div>
     </div>

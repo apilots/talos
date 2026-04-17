@@ -179,6 +179,23 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             "agent.kernel.memory.compaction_threshold_bytes must be > 0".to_string(),
         ));
     }
+    if config.agent.kernel.memory.file_list_default_limit == 0 {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.memory.file_list_default_limit must be > 0".to_string(),
+        ));
+    }
+    if config.agent.kernel.memory.file_list_max_limit == 0 {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.memory.file_list_max_limit must be > 0".to_string(),
+        ));
+    }
+    if config.agent.kernel.memory.file_list_default_limit
+        >= config.agent.kernel.memory.file_list_max_limit
+    {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.memory.file_list_default_limit must be < agent.kernel.memory.file_list_max_limit".to_string(),
+        ));
+    }
     if config.agent.kernel.memory.root_memory_filename.trim() != "MEMORY.md" {
         return Err(TalosError::InvalidConfiguration(
             "agent.kernel.memory.root_memory_filename must be MEMORY.md".to_string(),

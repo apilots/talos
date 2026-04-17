@@ -19,10 +19,12 @@ export { SidebarContainer } from "./components/SidebarContainer";
 export { useChatSession } from "./hooks/useChatSession";
 export {
   chatKeys,
-  useCloseSessionMutation,
+  useCreateProjectMutation,
   useConnectionKey,
   useCreateSessionMutation,
+  useDeleteSessionMutation,
   useModelsQuery,
+  useProjectsQuery,
   useSessionActions,
   useSessionQuery,
   useSessionsQuery,

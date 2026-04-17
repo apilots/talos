@@ -1,9 +1,9 @@
 use super::*;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use talos_agent::{OrchestratorEvent, OrchestratorExecution, OrchestratorRequest};
+use talos_error::{TalosError, TalosResult};
 use talos_memory::{Memory, MemoryStore, TalosTurn};
 use talos_session_store::SessionStore;
 use talos_types::talos::{
@@ -11,8 +11,9 @@ use talos_types::talos::{
     TalosOutputItem, TalosProvider, TalosSessionEnvironment, TalosSourceType, TalosUsage,
 };
 use talos_types::{
-    SessionPatch, SessionPatchAck, SessionProjectRootPatch, SessionQuery, SessionRecord,
-    TalosConfig, TalosSession, DEFAULT_SESSION_TITLE,
+    OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, ProjectPatch, ProjectRecord,
+    SessionConf, SessionPatch, SessionPatchAck, SessionQuery, SessionRecord, TalosConfig,
+    TalosSession, DEFAULT_SESSION_TITLE,
 };
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -61,6 +62,22 @@ struct TrackingFlushAgent {
 impl TrackingFlushAgent {
     fn new(pending: usize, drained: Arc<AtomicUsize>) -> Self {
         Self { pending, drained }
+    }
+}
+
+struct GuardedSessionAgent {
+    active_turn: bool,
+    pending_flush: bool,
+    cleared_sessions: Arc<Mutex<Vec<String>>>,
+}
+
+impl GuardedSessionAgent {
+    fn new(active_turn: bool, pending_flush: bool) -> Self {
+        Self {
+            active_turn,
+            pending_flush,
+            cleared_sessions: Arc::new(Mutex::new(Vec::new())),
+        }
     }
 }
 
@@ -157,6 +174,14 @@ impl AgentOrchestrator for RecordingApprovalAgent {
         0
     }
 
+    async fn has_pending_memory_flush(&self, _session_id: &str) -> bool {
+        false
+    }
+
+    fn has_active_turn(&self, _session_id: &str) -> bool {
+        false
+    }
+
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()> {
         self.cancelled_sessions
             .lock()
@@ -204,6 +229,8 @@ impl talos_session_store::SessionStore for TitleTestSessionStore {
         default_model: &str,
         requested_model: Option<&str>,
         _dm_scope: Option<String>,
+        project_id: Option<String>,
+        current_directory: Option<std::path::PathBuf>,
     ) -> TalosResult<SessionRecord> {
         let record = SessionRecord {
             id: "created-session".to_string(),
@@ -214,7 +241,9 @@ impl talos_session_store::SessionStore for TitleTestSessionStore {
             last_activity: 0,
             message_count: 0,
             usage: TalosUsage::default(),
-            conf: HashMap::new(),
+            conf: SessionConf::default(),
+            project_id,
+            current_directory,
         };
         self.sessions
             .lock()
@@ -230,8 +259,18 @@ impl talos_session_store::SessionStore for TitleTestSessionStore {
         default_model: &str,
         requested_model: Option<&str>,
         dm_scope: Option<String>,
+        project_id: Option<String>,
+        current_directory: Option<std::path::PathBuf>,
     ) -> TalosResult<SessionRecord> {
-        self.create_session(context, agent_id, default_model, requested_model, dm_scope)
+        self.create_session(
+            context,
+            agent_id,
+            default_model,
+            requested_model,
+            dm_scope,
+            project_id,
+            current_directory,
+        )
             .await
     }
 
@@ -256,13 +295,23 @@ impl talos_session_store::SessionStore for TitleTestSessionStore {
         if let Some(model) = requested_model {
             record.model = model;
         }
-        if let Some(project_root_patch) = &patch.project_root {
-            match project_root_patch {
-                SessionProjectRootPatch::Set { path } => {
-                    record.context.project_root = Some(path.clone());
+        if let Some(project_id_patch) = &patch.project_id {
+            match project_id_patch {
+                OptionalProjectIdPatch::Set { project_id } => {
+                    record.project_id = Some(project_id.clone());
                 }
-                SessionProjectRootPatch::Clear => {
-                    record.context.project_root = None;
+                OptionalProjectIdPatch::Clear => {
+                    record.project_id = None;
+                }
+            }
+        }
+        if let Some(current_directory_patch) = &patch.current_directory {
+            match current_directory_patch {
+                OptionalCurrentDirectoryPatch::Set { path } => {
+                    record.current_directory = Some(path.clone());
+                }
+                OptionalCurrentDirectoryPatch::Clear => {
+                    record.current_directory = None;
                 }
             }
         }
@@ -278,6 +327,11 @@ impl talos_session_store::SessionStore for TitleTestSessionStore {
         record.message_count = 0;
         record.usage = TalosUsage::default();
         Ok(SessionPatchAck { success: true })
+    }
+
+    async fn delete_session_record(&self, session_id: &str) -> TalosResult<SessionPatchAck> {
+        let removed = self.sessions.lock().unwrap().remove(session_id).is_some();
+        Ok(SessionPatchAck { success: removed })
     }
 
     async fn update_session_title(&self, session_id: &str, title: &str) -> TalosResult<()> {
@@ -314,6 +368,40 @@ impl talos_session_store::SessionStore for TitleTestSessionStore {
         if let Some(model) = model {
             session.model = model.to_string();
         }
+        Ok(())
+    }
+
+    async fn list_projects(&self) -> TalosResult<Vec<ProjectRecord>> {
+        Ok(Vec::new())
+    }
+
+    async fn get_project(&self, _project_id: &str) -> TalosResult<Option<ProjectRecord>> {
+        Ok(None)
+    }
+
+    async fn create_project(
+        &self,
+        name: &str,
+        directory: &std::path::PathBuf,
+    ) -> TalosResult<ProjectRecord> {
+        Ok(ProjectRecord {
+            project_id: "project-test".to_string(),
+            name: name.to_string(),
+            directory: directory.clone(),
+            created_at: 0,
+            updated_at: 0,
+        })
+    }
+
+    async fn patch_project(
+        &self,
+        _project_id: &str,
+        _patch: &ProjectPatch,
+    ) -> TalosResult<Option<ProjectRecord>> {
+        Ok(None)
+    }
+
+    async fn delete_project(&self, _project_id: &str) -> TalosResult<()> {
         Ok(())
     }
 }
@@ -363,6 +451,99 @@ impl AgentOrchestrator for TrackingFlushAgent {
 
     fn pending_memory_flushes(&self) -> usize {
         self.pending
+    }
+
+    async fn has_pending_memory_flush(&self, _session_id: &str) -> bool {
+        self.pending > 0
+    }
+
+    fn has_active_turn(&self, _session_id: &str) -> bool {
+        false
+    }
+
+    async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
+        Ok(())
+    }
+
+    async fn submit_tool_approval(
+        &self,
+        _session_id: &str,
+        _call_id: &str,
+        _tool_name: &str,
+        _approved: bool,
+        _reason: Option<String>,
+    ) -> TalosResult<()> {
+        Ok(())
+    }
+
+    async fn submit_dynamic_tool_result(
+        &self,
+        _session_id: &str,
+        _call_id: &str,
+        _tool_name: &str,
+        _output: String,
+        _success: bool,
+    ) -> TalosResult<()> {
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl AgentOrchestrator for GuardedSessionAgent {
+    fn id(&self) -> &str {
+        "guarded-session"
+    }
+
+    async fn run(&self, request: OrchestratorRequest) -> TalosResult<OrchestratorExecution> {
+        Ok(OrchestratorExecution {
+            output_text: String::new(),
+            output_items: Vec::new(),
+            reasoning: Vec::new(),
+            stop_reason: StopReason::EndTurn,
+            usage: TalosUsage::default(),
+            task_count: 0,
+            session_id: request.session.context.session_id,
+        })
+    }
+
+    async fn run_stream(
+        &self,
+        _request: OrchestratorRequest,
+    ) -> TalosResult<mpsc::Receiver<OrchestratorEvent>> {
+        let (_tx, rx) = mpsc::channel(1);
+        Ok(rx)
+    }
+
+    async fn close_session(&self, _session: TalosSession) -> TalosResult<()> {
+        Ok(())
+    }
+
+    async fn compact_session(&self, _session: TalosSession) -> TalosResult<TalosUsage> {
+        Ok(TalosUsage::default())
+    }
+
+    async fn clear_session(&self, session: TalosSession) -> TalosResult<()> {
+        self.cleared_sessions
+            .lock()
+            .unwrap()
+            .push(session.context.session_id);
+        Ok(())
+    }
+
+    async fn drain_memory_flushes(&self, _timeout: Duration) -> TalosResult<()> {
+        Ok(())
+    }
+
+    fn pending_memory_flushes(&self) -> usize {
+        usize::from(self.pending_flush)
+    }
+
+    async fn has_pending_memory_flush(&self, _session_id: &str) -> bool {
+        self.pending_flush
+    }
+
+    fn has_active_turn(&self, _session_id: &str) -> bool {
+        self.active_turn
     }
 
     async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
@@ -559,7 +740,9 @@ async fn test_compact_session_routes_to_session_agent_and_records_usage() {
         last_activity: 0,
         message_count: 2,
         usage: TalosUsage::default(),
-        conf: HashMap::new(),
+        conf: SessionConf::default(),
+        project_id: None,
+        current_directory: None,
     };
     let session_store = Arc::new(TitleTestSessionStore::new(session_record));
     let coordinator =
@@ -614,7 +797,9 @@ async fn test_clear_session_routes_to_session_agent_and_resets_session_state() {
             cache_creation_input_tokens: Some(1),
             cache_read_input_tokens: Some(2),
         },
-        conf: HashMap::new(),
+        conf: SessionConf::default(),
+        project_id: None,
+        current_directory: None,
     };
     let session_store = Arc::new(TitleTestSessionStore::new(session_record));
     let coordinator = CoordinatorImpl::new(mock_router, session_store, TalosConfig::default());
@@ -640,6 +825,145 @@ async fn test_clear_session_routes_to_session_agent_and_resets_session_state() {
 }
 
 #[tokio::test]
+async fn test_delete_session_clears_agent_state_and_removes_record() {
+    let mock_router = Arc::new(MockRouter::new());
+    let session_record = SessionRecord {
+        id: "session-delete".to_string(),
+        title: "Delete Me".to_string(),
+        context: TalosContext {
+            source_type: TalosSourceType::Im,
+            provider: TalosProvider::Telegram,
+            user_id: "user-1".to_string(),
+            message_id: "message-1".to_string(),
+            trace_id: "trace-1".to_string(),
+            channel_id: Some("test-channel".to_string()),
+            thread_id: None,
+            project_root: None,
+            environment: None,
+        },
+        model: "test-model".to_string(),
+        created_at: 0,
+        last_activity: 0,
+        message_count: 3,
+        usage: TalosUsage::default(),
+        conf: SessionConf::default(),
+        project_id: None,
+        current_directory: None,
+    };
+    let session_store = Arc::new(TitleTestSessionStore::new(session_record));
+    let coordinator =
+        CoordinatorImpl::new(mock_router, session_store.clone(), TalosConfig::default());
+    let agent = Arc::new(RecordingApprovalAgent::new());
+    let cleared_sessions = agent.cleared_sessions.clone();
+    coordinator
+        .register_agent("test_agent", agent)
+        .await
+        .expect("agent registration should succeed");
+
+    let ack = coordinator
+        .delete_session("session-delete")
+        .await
+        .expect("delete session should succeed");
+
+    assert!(ack.success);
+    assert_eq!(
+        cleared_sessions.lock().unwrap().as_slice(),
+        &["session-delete".to_string()]
+    );
+    assert!(
+        coordinator
+            .get_session("session-delete")
+            .await
+            .expect("get session should succeed")
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn test_delete_session_rejects_active_turn() {
+    let mock_router = Arc::new(MockRouter::new());
+    let session_record = SessionRecord {
+        id: "session-busy".to_string(),
+        title: DEFAULT_SESSION_TITLE.to_string(),
+        context: TalosContext {
+            source_type: TalosSourceType::Im,
+            provider: TalosProvider::Telegram,
+            user_id: "user-1".to_string(),
+            message_id: "message-1".to_string(),
+            trace_id: "trace-1".to_string(),
+            channel_id: Some("test-channel".to_string()),
+            thread_id: None,
+            project_root: None,
+            environment: None,
+        },
+        model: "test-model".to_string(),
+        created_at: 0,
+        last_activity: 0,
+        message_count: 0,
+        usage: TalosUsage::default(),
+        conf: SessionConf::default(),
+        project_id: None,
+        current_directory: None,
+    };
+    let session_store = Arc::new(TitleTestSessionStore::new(session_record));
+    let coordinator =
+        CoordinatorImpl::new(mock_router, session_store, TalosConfig::default());
+    coordinator
+        .register_agent("test_agent", Arc::new(GuardedSessionAgent::new(true, false)))
+        .await
+        .expect("agent registration should succeed");
+
+    let err = coordinator
+        .delete_session("session-busy")
+        .await
+        .expect_err("delete should reject active session");
+    assert!(matches!(err, TalosError::ValidationError(_)));
+    assert!(err.to_string().contains("active"));
+}
+
+#[tokio::test]
+async fn test_delete_session_rejects_pending_memory_flush() {
+    let mock_router = Arc::new(MockRouter::new());
+    let session_record = SessionRecord {
+        id: "session-flushing".to_string(),
+        title: DEFAULT_SESSION_TITLE.to_string(),
+        context: TalosContext {
+            source_type: TalosSourceType::Im,
+            provider: TalosProvider::Telegram,
+            user_id: "user-1".to_string(),
+            message_id: "message-1".to_string(),
+            trace_id: "trace-1".to_string(),
+            channel_id: Some("test-channel".to_string()),
+            thread_id: None,
+            project_root: None,
+            environment: None,
+        },
+        model: "test-model".to_string(),
+        created_at: 0,
+        last_activity: 0,
+        message_count: 0,
+        usage: TalosUsage::default(),
+        conf: SessionConf::default(),
+        project_id: None,
+        current_directory: None,
+    };
+    let session_store = Arc::new(TitleTestSessionStore::new(session_record));
+    let coordinator =
+        CoordinatorImpl::new(mock_router, session_store, TalosConfig::default());
+    coordinator
+        .register_agent("test_agent", Arc::new(GuardedSessionAgent::new(false, true)))
+        .await
+        .expect("agent registration should succeed");
+
+    let err = coordinator
+        .delete_session("session-flushing")
+        .await
+        .expect_err("delete should reject pending memory flush");
+    assert!(matches!(err, TalosError::ValidationError(_)));
+    assert!(err.to_string().contains("pending"));
+}
+
+#[tokio::test]
 async fn test_first_turn_assigns_deterministic_session_title() {
     let mock_router = Arc::new(MockRouter::new());
     let session_record = SessionRecord {
@@ -661,7 +985,9 @@ async fn test_first_turn_assigns_deterministic_session_title() {
         last_activity: 0,
         message_count: 0,
         usage: TalosUsage::default(),
-        conf: HashMap::new(),
+        conf: SessionConf::default(),
+        project_id: None,
+        current_directory: None,
     };
     let session_store = Arc::new(TitleTestSessionStore::new(session_record));
     let coordinator =
@@ -724,7 +1050,9 @@ async fn test_cancel_active_turn_routes_to_session_agent_and_is_noop_safe() {
         last_activity: 0,
         message_count: 0,
         usage: TalosUsage::default(),
-        conf: HashMap::new(),
+        conf: SessionConf::default(),
+        project_id: None,
+        current_directory: None,
     };
     let session_store = Arc::new(TitleTestSessionStore::new(session_record));
     let coordinator = CoordinatorImpl::new(mock_router, session_store, TalosConfig::default());
@@ -863,6 +1191,8 @@ async fn test_remote_session_defaults_project_root_to_workspace_dir() {
             connection_mode: TalosConnectionMode::Remote,
         }),
         None,
+        None,
+        None,
     )
     .await
     .expect("session creation should succeed");
@@ -874,7 +1204,7 @@ async fn test_remote_session_defaults_project_root_to_workspace_dir() {
 }
 
 #[tokio::test]
-async fn test_clear_project_root_resets_remote_session_to_workspace_dir_default() {
+async fn test_remote_session_ignores_current_directory_patch_for_root_resolution() {
     let workspace_dir = std::env::temp_dir().join(format!("talos-coordinator-{}", Uuid::new_v4()));
     let custom_dir = std::env::temp_dir().join(format!("talos-project-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&workspace_dir).expect("workspace dir should be created");
@@ -894,13 +1224,18 @@ async fn test_clear_project_root_resets_remote_session_to_workspace_dir_default(
             "message-1",
             "trace-1",
         )
-        .with_project_root(custom_dir.clone()),
+        .with_environment(TalosSessionEnvironment {
+            directory: std::path::PathBuf::from("/client/path"),
+            connection_mode: TalosConnectionMode::Remote,
+        }),
         model: config.llm.model.clone(),
         created_at: 0,
         last_activity: 0,
         message_count: 0,
         usage: TalosUsage::default(),
-        conf: HashMap::new(),
+        conf: SessionConf::default(),
+        project_id: None,
+        current_directory: Some(custom_dir.clone()),
     }));
     let coordinator = CoordinatorImpl::new(mock_router, session_store, config);
 
@@ -908,8 +1243,11 @@ async fn test_clear_project_root_resets_remote_session_to_workspace_dir_default(
         &coordinator,
         "session-1",
         SessionPatch {
-            conf: HashMap::new(),
-            project_root: Some(SessionProjectRootPatch::Clear),
+            conf: None,
+            project_id: None,
+            current_directory: Some(OptionalCurrentDirectoryPatch::Set {
+                path: custom_dir.clone(),
+            }),
         },
     )
     .await

@@ -8,6 +8,9 @@ talos-gateway = { path = "../core" }
 talos-error = { path = "../../infra/error" }
 talos-types = { path = "../../common/types" }
 talos-auth = { path = "../../infra/auth" }
+talos-config = { workspace = true }
+talos-memory = { workspace = true }
+talos-llm-provider = { workspace = true }
 axum = { version = "0.7", features = ["macros"] }
 tokio = { version = "1.0", features = ["full"] }
 tokio-util = { workspace = true }

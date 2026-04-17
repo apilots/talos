@@ -22,6 +22,8 @@
   --page-brand-glow: rgba(242, 140, 40, 0.14);
   --page-info-glow: rgba(125, 211, 252, 0.12);
   --shadow-panel: 0 18px 48px rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(36, 49, 55, 0.9);
+  --radius-panel: 1.18rem;
+  --radius-control: 0.84rem;
   color: rgb(var(--color-ink));
   background: rgb(var(--color-background));
   font-family: "IBM Plex Sans", -apple-system, sans-serif;
@@ -73,6 +75,7 @@ body {
     rgb(var(--color-background));
   background-size: 24px 24px, 24px 24px, auto, auto, auto;
   color: rgb(var(--color-ink));
+  text-rendering: optimizeLegibility;
 }
 
 a {

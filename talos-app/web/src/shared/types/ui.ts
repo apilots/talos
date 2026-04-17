@@ -5,18 +5,13 @@ export type ApprovalMode = "needs_approval" | "skip";
 export type ThreadFilter = "all" | "running" | "waiting_approval" | "done" | "error";
 export type SessionUiStatus = "running" | "waiting_approval" | "done" | "error";
 
-export type ProjectRoot =
-  | { type: "managed_workspace"; name: string }
-  | { type: "server_visible_path"; path: string }
-  | { type: "desktop_local_path"; path: string };
-
 export interface ProjectRecord {
   id: string;
   name: string;
-  root: ProjectRoot;
+  directory?: string | null;
   createdAt: number;
-  lastUsedAt: number;
-  origin?: "default" | "inferred" | "manual";
+  updatedAt: number;
+  origin?: "default" | "server";
   sessionCount?: number;
 }
 
@@ -103,9 +98,4 @@ export interface StreamSessionState {
   blocks: ChatRenderBlock[];
   pendingApproval?: PendingApproval;
   error?: string;
-}
-
-export interface InferredProjectsResult {
-  projects: ProjectRecord[];
-  preferredProjectId: string;
 }

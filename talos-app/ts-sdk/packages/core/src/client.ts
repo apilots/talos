@@ -1,6 +1,14 @@
 import type { HttpAdapter, StreamAdapter } from "./adapters";
 import type {
+  DocUpdateRequest,
+  MemoryFileDetail,
+  MemoryFileListParams,
+  MemoryFileSummary,
+  MemorySearchParams,
+  MemorySearchResult,
   ModelInfo,
+  ProjectPatch,
+  ProjectRecord,
   SessionQuery,
   SessionUpdate,
   TalosContext,
@@ -9,6 +17,9 @@ import type {
   TalosMessageResponse,
   TalosSession,
   ToolApprovalRequest,
+  WorkspaceDocDetail,
+  WorkspaceDocKind,
+  WorkspaceDocSummary,
 } from "./types";
 
 interface ListResponse<T> {
@@ -17,6 +28,22 @@ interface ListResponse<T> {
 
 interface AckResponse {
   success: boolean;
+}
+
+interface CreateSessionRequest {
+  context: TalosContext;
+  model?: string | null;
+  project_id?: string | null;
+  current_directory?: string | null;
+}
+
+interface CreateProjectRequest {
+  name: string;
+  directory: string;
+}
+
+interface RequestControlOptions {
+  signal?: AbortSignal;
 }
 
 export class TalosClient {
@@ -58,7 +85,7 @@ export class TalosClient {
       );
       return response.data;
     },
-    create: (body: { context: TalosContext; model?: string | null }) =>
+    create: (body: CreateSessionRequest) =>
       this.http.request<TalosSession>(this.url("/v1/sessions"), {
         method: "POST",
         body: JSON.stringify(body),
@@ -75,11 +102,19 @@ export class TalosClient {
       }
     },
     close: async (sessionId: string): Promise<void> => {
+      const response = await this.http.request<AckResponse>(this.url(`/v1/sessions/${sessionId}/close`), {
+        method: "POST",
+      });
+      if (!response.success) {
+        throw new Error("Session close did not succeed.");
+      }
+    },
+    delete: async (sessionId: string): Promise<void> => {
       const response = await this.http.request<AckResponse>(this.url(`/v1/sessions/${sessionId}`), {
         method: "DELETE",
       });
       if (!response.success) {
-        throw new Error("Session close did not succeed.");
+        throw new Error("Session delete did not succeed.");
       }
     },
     cancel: async (sessionId: string): Promise<void> => {
@@ -105,6 +140,73 @@ export class TalosClient {
       );
       return response.data;
     },
+  };
+
+  projects = {
+    list: async (): Promise<ProjectRecord[]> => {
+      const response = await this.http.request<ListResponse<ProjectRecord>>(this.url("/v1/projects"));
+      return response.data;
+    },
+    get: (projectId: string) =>
+      this.http.request<ProjectRecord>(this.url(`/v1/projects/${projectId}`)),
+    create: (body: CreateProjectRequest) =>
+      this.http.request<ProjectRecord>(this.url("/v1/projects"), {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    patch: (projectId: string, patch: ProjectPatch) =>
+      this.http.request<ProjectRecord>(this.url(`/v1/projects/${projectId}`), {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      }),
+    delete: async (projectId: string): Promise<void> => {
+      await this.http.request<void>(this.url(`/v1/projects/${projectId}`), {
+        method: "DELETE",
+      });
+    },
+  };
+
+  memory = {
+    list: async (query?: MemoryFileListParams): Promise<MemoryFileSummary[]> => {
+      const response = await this.http.request<ListResponse<MemoryFileSummary>>(
+        this.urlWithQuery("/v1/memory/files", query),
+      );
+      return response.data;
+    },
+    get: (date: string) =>
+      this.http.request<MemoryFileDetail>(this.url(`/v1/memory/files/${date}`)),
+    put: (date: string, request: DocUpdateRequest) =>
+      this.http.request<MemoryFileDetail>(this.url(`/v1/memory/files/${date}`), {
+        method: "PUT",
+        body: JSON.stringify(request),
+      }),
+    search: async (
+      query: MemorySearchParams,
+      options?: RequestControlOptions,
+    ): Promise<MemorySearchResult[]> => {
+      const requestOptions = options?.signal ? { signal: options.signal } : undefined;
+      const url = this.urlWithQuery("/v1/memory/search", query);
+      const response = requestOptions
+        ? await this.http.request<ListResponse<MemorySearchResult>>(url, requestOptions)
+        : await this.http.request<ListResponse<MemorySearchResult>>(url);
+      return response.data;
+    },
+  };
+
+  workspaceDocs = {
+    list: async (): Promise<WorkspaceDocSummary[]> => {
+      const response = await this.http.request<ListResponse<WorkspaceDocSummary>>(
+        this.url("/v1/workspace/docs"),
+      );
+      return response.data;
+    },
+    get: (kind: WorkspaceDocKind) =>
+      this.http.request<WorkspaceDocDetail>(this.url(`/v1/workspace/docs/${kind}`)),
+    put: (kind: WorkspaceDocKind, request: DocUpdateRequest) =>
+      this.http.request<WorkspaceDocDetail>(this.url(`/v1/workspace/docs/${kind}`), {
+        method: "PUT",
+        body: JSON.stringify(request),
+      }),
   };
 
   messages = {

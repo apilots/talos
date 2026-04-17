@@ -4,9 +4,10 @@ import "@/shared/i18n/setup";
 import { i18n } from "@/shared/i18n/setup";
 import {
   createDefaultProjects,
+  describeProjectDirectory,
   getApprovalModeHint,
   getApprovalModeLabel,
-  getProjectDisplayName,
+  UNBOUND_PROJECT_ID,
 } from "@/shared/types/domain";
 
 describe("domain helpers", () => {
@@ -24,25 +25,19 @@ describe("domain helpers", () => {
     expect(getApprovalModeHint("skip")).toBe("安全工具可直接执行，无需逐次确认。");
   });
 
-  it("localizes the default workspace display name", async () => {
-    expect(getProjectDisplayName({ type: "server_visible_path", path: __TALOS_DEFAULT_PROJECT_ROOT__ })).toBe(
-      "Default workspace",
-    );
+  it("localizes the unbound project display name", async () => {
+    expect(describeProjectDirectory(undefined)).toBe("No project");
 
     await i18n.changeLanguage("zh-CN");
 
-    expect(getProjectDisplayName({ type: "server_visible_path", path: __TALOS_DEFAULT_PROJECT_ROOT__ })).toBe(
-      "默认工作区",
-    );
+    expect(describeProjectDirectory(undefined)).toBe("不绑定项目");
   });
 
-  it("creates a default project keyed to the workspace root", async () => {
+  it("creates an unbound project option by default", async () => {
     const projects = createDefaultProjects();
 
     expect(projects).toHaveLength(1);
-    expect(projects[0]?.root).toEqual({
-      type: "server_visible_path",
-      path: __TALOS_DEFAULT_PROJECT_ROOT__,
-    });
+    expect(projects[0]?.id).toBe(UNBOUND_PROJECT_ID);
+    expect(projects[0]?.directory).toBeNull();
   });
 });

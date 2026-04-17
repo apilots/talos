@@ -2,7 +2,6 @@ use crate::model::TalosConfig;
 use crate::talos;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Session record stored by the gateway.
@@ -18,7 +17,11 @@ pub struct SessionRecord {
     #[serde(default)]
     pub usage: talos::TalosUsage,
     #[serde(default)]
-    pub conf: HashMap<String, serde_json::Value>,
+    pub conf: SessionConf,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub current_directory: Option<PathBuf>,
 }
 
 pub const DEFAULT_SESSION_TITLE: &str = "Untitled Session";
@@ -48,6 +51,8 @@ impl SessionRecord {
             message_count: session.state.message_count,
             usage: session.state.usage.clone(),
             conf,
+            project_id: session.project_id.clone(),
+            current_directory: session.current_directory.clone(),
         }
     }
 
@@ -72,6 +77,10 @@ pub struct SessionContext {
     #[serde(default)]
     pub thread_id: Option<String>,
     #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub current_directory: Option<PathBuf>,
+    #[serde(skip_serializing, skip_deserializing)]
     pub project_root: Option<PathBuf>,
     #[serde(default)]
     pub environment: Option<talos::TalosSessionEnvironment>,
@@ -89,6 +98,8 @@ impl SessionContext {
             trace_id: record.context.trace_id.clone(),
             channel_id: record.context.channel_id.clone(),
             thread_id: record.context.thread_id.clone(),
+            project_id: record.project_id.clone(),
+            current_directory: record.current_directory.clone(),
             project_root: record.context.project_root.clone(),
             environment: record.context.environment.clone(),
         }
@@ -119,6 +130,10 @@ impl SessionState {
 pub struct TalosSession {
     pub title: String,
     pub context: SessionContext,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub current_directory: Option<PathBuf>,
     pub config: TalosConfig,
     pub state: SessionState,
 }
@@ -126,68 +141,34 @@ pub struct TalosSession {
 pub struct SessionConfigOverridePolicy;
 
 impl SessionConfigOverridePolicy {
-    pub const AGENT_MODEL_KEY: &'static str = "agent.model";
-
-    pub fn validate_conf(conf: &HashMap<String, serde_json::Value>) -> crate::TalosResult<()> {
-        for key in conf.keys() {
-            if key != Self::AGENT_MODEL_KEY {
-                return Err(crate::TalosError::ValidationError(format!(
-                    "unsupported session config key: {}",
-                    key
-                )));
-            }
-        }
-
-        if let Some(value) = conf.get(Self::AGENT_MODEL_KEY) {
-            if !value.is_string() {
-                return Err(crate::TalosError::ValidationError(
-                    "agent.model must be a string".to_string(),
-                ));
-            }
-        }
-
+    pub fn validate_conf(_conf: &SessionConf) -> crate::TalosResult<()> {
         Ok(())
     }
 
-    pub fn extract_agent_model(
-        conf: &HashMap<String, serde_json::Value>,
-    ) -> crate::TalosResult<Option<String>> {
+    pub fn extract_agent_model(conf: &SessionConf) -> crate::TalosResult<Option<String>> {
         Self::validate_conf(conf)?;
-        Ok(conf
-            .get(Self::AGENT_MODEL_KEY)
-            .and_then(|value| value.as_str())
-            .map(ToString::to_string))
+        Ok(conf.agent.as_ref().and_then(|agent| agent.model.clone()))
     }
 
-    pub fn build_conf_for_model(
-        base_model: &str,
-        effective_model: &str,
-    ) -> HashMap<String, serde_json::Value> {
+    pub fn build_conf_for_model(base_model: &str, effective_model: &str) -> SessionConf {
         if effective_model == base_model {
-            return HashMap::new();
+            return SessionConf::default();
         }
-
-        let mut conf = HashMap::new();
-        conf.insert(
-            Self::AGENT_MODEL_KEY.to_string(),
-            serde_json::Value::String(effective_model.to_string()),
-        );
-        conf
+        Self::single_model_conf(effective_model)
     }
 
-    pub fn single_model_conf(model: &str) -> HashMap<String, serde_json::Value> {
-        let mut conf = HashMap::new();
-        conf.insert(
-            Self::AGENT_MODEL_KEY.to_string(),
-            serde_json::Value::String(model.to_string()),
-        );
-        conf
+    pub fn single_model_conf(model: &str) -> SessionConf {
+        SessionConf {
+            agent: Some(SessionAgentConf {
+                model: Some(model.to_string()),
+            }),
+        }
     }
 
     pub fn apply_to_config(
         base_config: &TalosConfig,
         record_model: &str,
-        conf: &HashMap<String, serde_json::Value>,
+        conf: &SessionConf,
     ) -> crate::TalosResult<TalosConfig> {
         let mut config = base_config.clone();
         let model = Self::extract_agent_model(conf)?.unwrap_or_else(|| record_model.to_string());
@@ -209,6 +190,8 @@ impl TalosSession {
         Ok(Self {
             title: record.title.clone(),
             context: SessionContext::from_record(record, workspace_id),
+            project_id: record.project_id.clone(),
+            current_directory: record.current_directory.clone(),
             config,
             state: SessionState::from_record(record),
         })
@@ -238,22 +221,59 @@ pub struct SessionQuery {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SessionPatch {
     #[serde(default)]
-    pub conf: HashMap<String, serde_json::Value>,
+    pub conf: Option<SessionConf>,
     #[serde(default)]
-    pub project_root: Option<SessionProjectRootPatch>,
+    pub project_id: Option<OptionalProjectIdPatch>,
+    #[serde(default)]
+    pub current_directory: Option<OptionalCurrentDirectoryPatch>,
 }
 
 impl SessionPatch {
     pub fn agent_model(&self) -> crate::TalosResult<Option<String>> {
-        SessionConfigOverridePolicy::extract_agent_model(&self.conf)
+        let conf = self.conf.as_ref().cloned().unwrap_or_default();
+        SessionConfigOverridePolicy::extract_agent_model(&conf)
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum SessionProjectRootPatch {
+pub enum OptionalProjectIdPatch {
+    Set { project_id: String },
+    Clear,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum OptionalCurrentDirectoryPatch {
     Set { path: PathBuf },
     Clear,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionAgentConf {
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionConf {
+    #[serde(default)]
+    pub agent: Option<SessionAgentConf>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProjectRecord {
+    pub project_id: String,
+    pub name: String,
+    pub directory: PathBuf,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProjectPatch {
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -267,6 +287,8 @@ pub trait SessionService: Send + Sync {
         &self,
         context: talos::TalosContext,
         model: Option<String>,
+        project_id: Option<String>,
+        current_directory: Option<PathBuf>,
     ) -> crate::TalosResult<TalosSession>;
 
     async fn list_sessions(&self, query: SessionQuery) -> crate::TalosResult<Vec<TalosSession>>;
@@ -284,6 +306,8 @@ pub trait SessionService: Send + Sync {
     async fn clear_session(&self, session_id: &str) -> crate::TalosResult<TalosSession>;
 
     async fn close_session(&self, session_id: &str) -> crate::TalosResult<()>;
+
+    async fn delete_session(&self, session_id: &str) -> crate::TalosResult<SessionPatchAck>;
 
     async fn cancel_active_turn(&self, session_id: &str) -> crate::TalosResult<()>;
 
@@ -309,4 +333,22 @@ pub trait SessionService: Send + Sync {
         &self,
         session_id: &str,
     ) -> crate::TalosResult<Vec<talos::TalosMessageResponse>>;
+
+    async fn list_projects(&self) -> crate::TalosResult<Vec<ProjectRecord>>;
+
+    async fn get_project(&self, project_id: &str) -> crate::TalosResult<Option<ProjectRecord>>;
+
+    async fn create_project(
+        &self,
+        name: String,
+        directory: PathBuf,
+    ) -> crate::TalosResult<ProjectRecord>;
+
+    async fn patch_project(
+        &self,
+        project_id: &str,
+        patch: ProjectPatch,
+    ) -> crate::TalosResult<Option<ProjectRecord>>;
+
+    async fn delete_project(&self, project_id: &str) -> crate::TalosResult<()>;
 }

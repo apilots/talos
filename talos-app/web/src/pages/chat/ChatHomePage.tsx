@@ -3,25 +3,31 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { FolderPlus } from "lucide-react";
 
-import { ChatComposer, useCreateSessionMutation, useModelsQuery } from "@/features/chat";
+import {
+  ChatComposer,
+  useCreateProjectMutation,
+  useCreateSessionMutation,
+  useModelsQuery,
+  useProjectsQuery,
+} from "@/features/chat";
 import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
 import { useAppStore } from "@/shared/store/app-store";
 import {
-  describeProjectRoot,
+  describeProjectDirectory,
   getApprovalModeLabel,
-  getProjectRecordKey,
+  isUnboundProject,
 } from "@/shared/types/domain";
-import type { ProjectRecord, ProjectRoot } from "@/shared/types/ui";
 
 export function ChatHomePage() {
   const { t } = useTranslation(["chat", "common"]);
   const navigate = useNavigate();
   const { data: models } = useModelsQuery();
+  useProjectsQuery();
   const createSession = useCreateSessionMutation();
+  const createProject = useCreateProjectMutation();
   const projects = useAppStore((state) => state.projects);
   const activeProjectId = useAppStore((state) => state.activeProjectId);
-  const addProject = useAppStore((state) => state.addProject);
   const setActiveProjectId = useAppStore((state) => state.setActiveProjectId);
   const connection = useAppStore((state) => state.connection);
   const setConnection = useAppStore((state) => state.setConnection);
@@ -51,17 +57,14 @@ export function ChatHomePage() {
     });
   }
 
-  function handleCreateProject(root: ProjectRoot) {
-    const now = Date.now();
-    const project: ProjectRecord = {
-      id: `project-${now}`,
-      name: root.type === "managed_workspace" ? "Server workspace" : root.path.split("/").at(-1) || "project",
-      root,
-      createdAt: now,
-      lastUsedAt: now,
-    };
-    addProject(project);
+  async function handleCreateProject() {
+    const directory = customPath.trim();
+    if (!directory) {
+      return;
+    }
+    const project = await createProject.mutateAsync(directory);
     setActiveProjectId(project.id);
+    setCustomPath("");
   }
 
   return (
@@ -81,7 +84,7 @@ export function ChatHomePage() {
               {activeProject.name}
             </span>
             <span className="truncate rounded-full border border-border/70 bg-background/55 px-3 py-1">
-              {describeProjectRoot(activeProject.root)}
+              {describeProjectDirectory(activeProject.directory)}
             </span>
           </div>
         </div>
@@ -95,9 +98,9 @@ export function ChatHomePage() {
             >
               {projects.map((project) => (
                 <option key={project.id} value={project.id}>
-                  {getProjectRecordKey(project.root) === "workspace-default"
-                    ? t("common:defaultWorkspace")
-                    : `${project.name} · ${describeProjectRoot(project.root)}`}
+                  {isUnboundProject(project.id)
+                    ? t("common:noProject")
+                    : `${project.name} · ${describeProjectDirectory(project.directory)}`}
                 </option>
               ))}
             </select>
@@ -105,19 +108,15 @@ export function ChatHomePage() {
               onChange={(event) => setCustomPath(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
-                  const path = customPath.trim() || __TALOS_DEFAULT_PROJECT_ROOT__;
-                  handleCreateProject({ type: "server_visible_path", path });
-                  setCustomPath("");
+                  void handleCreateProject();
                 }
               }}
-              placeholder={__TALOS_DEFAULT_PROJECT_ROOT__}
+              placeholder="/path/to/project"
               value={customPath}
             />
             <Button
               onClick={() => {
-                const path = customPath.trim() || __TALOS_DEFAULT_PROJECT_ROOT__;
-                handleCreateProject({ type: "server_visible_path", path });
-                setCustomPath("");
+                void handleCreateProject();
               }}
               type="button"
               variant="secondary"

@@ -240,10 +240,15 @@ impl GatewayClient for MockGatewayClient {
             } else {
                 false
             };
-            if let Some(context) = &params.context {
+            if let Some(current_directory) = &params.current_directory {
+                state.current_project_root = Some(current_directory.clone());
+            } else if params.project_id.is_some() {
+                state.current_project_root = state.default_project_root.clone();
+            } else if let Some(context) = &params.context {
                 state.current_project_root = context
-                    .project_root
-                    .clone()
+                    .environment
+                    .as_ref()
+                    .map(|environment| environment.directory.clone())
                     .or_else(|| state.default_project_root.clone());
             } else if state.current_project_root.is_none() {
                 state.current_project_root = state.default_project_root.clone();
@@ -271,9 +276,13 @@ impl GatewayClient for MockGatewayClient {
                 trace_id: "trace-1".to_string(),
                 channel_id: Some("terminal".to_string()),
                 thread_id: None,
-                project_root: state.current_project_root.clone(),
+                project_id: None,
+                current_directory: state.current_project_root.clone(),
+                project_root: None,
                 environment: None,
             },
+            project_id: None,
+            current_directory: state.current_project_root.clone(),
             config: {
                 let mut config = talos_types::TalosConfig::default();
                 config.agent.model = state.current_model.clone();
@@ -303,9 +312,13 @@ impl GatewayClient for MockGatewayClient {
                 trace_id: "trace-1".to_string(),
                 channel_id: Some("terminal".to_string()),
                 thread_id: None,
-                project_root: state.current_project_root.clone(),
+                project_id: None,
+                current_directory: state.current_project_root.clone(),
+                project_root: None,
                 environment: None,
             },
+            project_id: None,
+            current_directory: state.current_project_root.clone(),
             config: {
                 let mut config = talos_types::TalosConfig::default();
                 config.agent.model = state.current_model.clone();
@@ -358,79 +371,13 @@ impl GatewayClient for MockGatewayClient {
                 trace_id: "trace-1".to_string(),
                 channel_id: Some("terminal".to_string()),
                 thread_id: None,
-                project_root: state.current_project_root.clone(),
+                project_id: None,
+                current_directory: state.current_project_root.clone(),
+                project_root: None,
                 environment: None,
             },
-            config: {
-                let mut config = talos_types::TalosConfig::default();
-                config.agent.model = state.current_model.clone();
-                config.llm.model = state.current_model.clone();
-                config
-            },
-            state: talos_types::SessionState {
-                created_at: 1,
-                last_activity: 2,
-                message_count: 3,
-                usage: state.session_usage.clone(),
-            },
-        })
-    }
-
-    async fn update_session_project_root(
-        &self,
-        _session_id: &str,
-        path: &std::path::Path,
-    ) -> TalosResult<TalosSession> {
-        let mut state = self.state.lock().unwrap();
-        state.current_project_root = Some(path.to_path_buf());
-        Ok(TalosSession {
-            title: "Untitled Session".to_string(),
-            context: talos_types::SessionContext {
-                session_id: state.session_id.clone(),
-                workspace_id: None,
-                source_type: talos_types::talos::TalosSourceType::Http,
-                provider: talos_types::talos::TalosProvider::Sdk,
-                user_id: "test-user".to_string(),
-                message_id: "message-1".to_string(),
-                trace_id: "trace-1".to_string(),
-                channel_id: Some("terminal".to_string()),
-                thread_id: None,
-                project_root: state.current_project_root.clone(),
-                environment: None,
-            },
-            config: {
-                let mut config = talos_types::TalosConfig::default();
-                config.agent.model = state.current_model.clone();
-                config.llm.model = state.current_model.clone();
-                config
-            },
-            state: talos_types::SessionState {
-                created_at: 1,
-                last_activity: 2,
-                message_count: 3,
-                usage: state.session_usage.clone(),
-            },
-        })
-    }
-
-    async fn clear_session_project_root(&self, _session_id: &str) -> TalosResult<TalosSession> {
-        let mut state = self.state.lock().unwrap();
-        state.current_project_root = state.default_project_root.clone();
-        Ok(TalosSession {
-            title: "Untitled Session".to_string(),
-            context: talos_types::SessionContext {
-                session_id: state.session_id.clone(),
-                workspace_id: None,
-                source_type: talos_types::talos::TalosSourceType::Http,
-                provider: talos_types::talos::TalosProvider::Sdk,
-                user_id: "test-user".to_string(),
-                message_id: "message-1".to_string(),
-                trace_id: "trace-1".to_string(),
-                channel_id: Some("terminal".to_string()),
-                thread_id: None,
-                project_root: state.current_project_root.clone(),
-                environment: None,
-            },
+            project_id: None,
+            current_directory: state.current_project_root.clone(),
             config: {
                 let mut config = talos_types::TalosConfig::default();
                 config.agent.model = state.current_model.clone();
@@ -462,9 +409,13 @@ impl GatewayClient for MockGatewayClient {
                 trace_id: "trace-1".to_string(),
                 channel_id: Some("terminal".to_string()),
                 thread_id: None,
-                project_root: state.current_project_root.clone(),
+                project_id: None,
+                current_directory: state.current_project_root.clone(),
+                project_root: None,
                 environment: None,
             },
+            project_id: None,
+            current_directory: state.current_project_root.clone(),
             config: {
                 let mut config = talos_types::TalosConfig::default();
                 config.agent.model = state.current_model.clone();
@@ -496,9 +447,13 @@ impl GatewayClient for MockGatewayClient {
                 trace_id: "trace-1".to_string(),
                 channel_id: Some("terminal".to_string()),
                 thread_id: None,
-                project_root: state.current_project_root.clone(),
+                project_id: None,
+                current_directory: state.current_project_root.clone(),
+                project_root: None,
                 environment: None,
             },
+            project_id: None,
+            current_directory: state.current_project_root.clone(),
             config: {
                 let mut config = talos_types::TalosConfig::default();
                 config.agent.model = state.current_model.clone();

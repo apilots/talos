@@ -5,7 +5,7 @@ import { Button } from "@/shared/ui/Button";
 import { cn } from "@/shared/lib/cn";
 import { Panel } from "@/shared/ui/Panel";
 import { Textarea } from "@/shared/ui/Input";
-import { describeProjectRoot, getProjectRecordKey } from "@/shared/types/domain";
+import { describeProjectDirectory, isUnboundProject } from "@/shared/types/domain";
 import type { ApprovalMode, ProjectRecord, RuntimeMode } from "@/shared/types/ui";
 
 interface ChatComposerProps {
@@ -76,9 +76,9 @@ export function ChatComposer({
           >
             {projects.map((project) => (
               <option key={project.id} value={project.id}>
-                {getProjectRecordKey(project.root) === "workspace-default"
-                  ? t("common:defaultWorkspace")
-                  : `${project.name} · ${describeProjectRoot(project.root)}`}
+                {isUnboundProject(project.id)
+                  ? t("common:noProject")
+                  : `${project.name} · ${describeProjectDirectory(project.directory)}`}
               </option>
             ))}
           </select>

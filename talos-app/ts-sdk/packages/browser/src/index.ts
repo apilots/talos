@@ -21,6 +21,7 @@ class BrowserHttpAdapter implements HttpAdapter {
     const token = this.getToken?.();
     const response = await fetch(url, {
       method: options?.method ?? "GET",
+      signal: options?.signal,
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),

@@ -267,9 +267,14 @@ fn build_request(input: &str) -> OrchestratorRequest {
     OrchestratorRequest {
         session: TalosSession {
             title: "Untitled Session".to_string(),
+            project_id: None,
+            current_directory: None,
             context: SessionContext {
                 session_id: "integration-session".to_string(),
                 workspace_id: Some("default".to_string()),
+                project_id: None,
+                current_directory: None,
+                project_root: None,
                 source_type: TalosSourceType::System,
                 provider: TalosProvider::System,
                 user_id: "integration-user".to_string(),

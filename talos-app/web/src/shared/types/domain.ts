@@ -4,13 +4,13 @@ import type {
   ApprovalMode,
   ChatRenderBlock,
   FileRecord,
-  InferredProjectsResult,
   MemoryRecord,
   ProjectRecord,
-  ProjectRoot,
   SessionUiStatus,
   StreamSessionState,
 } from "./ui";
+
+export const UNBOUND_PROJECT_ID = "__unbound_project__";
 
 export function getEffectiveSessionStatus(
   transientStatus?: SessionUiStatus,
@@ -37,79 +37,35 @@ export function getEffectiveSessionStatus(
   return "done";
 }
 
-function normalizeWorkspacePath(path?: string | null) {
-  if (!path) {
-    return __TALOS_DEFAULT_PROJECT_ROOT__;
-  }
-
-  if (
-    path === "~/.talos/workspace-talos" &&
-    __TALOS_DEFAULT_PROJECT_ROOT__.endsWith("/.talos/workspace-talos")
-  ) {
-    return __TALOS_DEFAULT_PROJECT_ROOT__;
-  }
-
-  return path;
-}
-
-export function resolveProjectRootPath(root: ProjectRoot): string | undefined {
-  switch (root.type) {
-    case "managed_workspace":
-      return __TALOS_DEFAULT_PROJECT_ROOT__;
-    case "server_visible_path":
-      return root.path;
-    case "desktop_local_path":
-      return root.path;
-  }
-}
-
-export function describeProjectRoot(root: ProjectRoot) {
-  return normalizeWorkspacePath(resolveProjectRootPath(root));
+export function normalizeProjectDirectory(directory?: string | null) {
+  return directory?.trim() || null;
 }
 
 export function createDefaultProjects(): ProjectRecord[] {
   const now = Date.now();
   return [
     {
-      id: "workspace-default",
-      name: i18n.t("common:defaultWorkspace"),
-      root: { type: "server_visible_path", path: __TALOS_DEFAULT_PROJECT_ROOT__ },
+      id: UNBOUND_PROJECT_ID,
+      name: i18n.t("common:noProject"),
+      directory: null,
       createdAt: now,
-      lastUsedAt: now,
+      updatedAt: now,
       origin: "default",
       sessionCount: 0,
     },
   ];
 }
 
-function slugifyProjectPath(path: string) {
-  return path
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 64);
+export function describeProjectDirectory(directory?: string | null) {
+  return normalizeProjectDirectory(directory) ?? i18n.t("common:noProject");
 }
 
-export function getProjectRecordKey(root: ProjectRoot) {
-  const resolvedPath = resolveProjectRootPath(root);
-  if (resolvedPath === __TALOS_DEFAULT_PROJECT_ROOT__) {
-    return "workspace-default";
-  }
-
-  if (root.type === "managed_workspace") {
-    return "workspace-default";
-  }
-
-  return `workspace-path-${slugifyProjectPath(root.path)}`;
+export function getProjectRecordKey(project: ProjectRecord) {
+  return project.id;
 }
 
-export function getProjectDisplayName(root: ProjectRoot) {
-  const resolvedPath = normalizeWorkspacePath(resolveProjectRootPath(root));
-  if (resolvedPath === __TALOS_DEFAULT_PROJECT_ROOT__) {
-    return i18n.t("common:defaultWorkspace");
-  }
-
-  return resolvedPath.split("/").filter(Boolean).at(-1) || resolvedPath;
+export function isUnboundProject(projectId?: string | null) {
+  return !projectId || projectId === UNBOUND_PROJECT_ID;
 }
 
 export function getApprovalModeLabel(mode: ApprovalMode) {
@@ -120,57 +76,6 @@ export function getApprovalModeHint(mode: ApprovalMode) {
   return mode === "skip"
     ? i18n.t("settings:fields.skipHint")
     : i18n.t("settings:fields.needsApprovalHint");
-}
-
-export function inferProjectsFromSessions(sessions: TalosSession[]): InferredProjectsResult {
-  const defaultProjects = createDefaultProjects();
-  const inferred = new Map<string, ProjectRecord>();
-
-  for (const session of sessions) {
-    const root: ProjectRoot = {
-      type: "server_visible_path",
-      path: normalizeWorkspacePath(session.context.project_root),
-    };
-    const key = getProjectRecordKey(root);
-    const existing = inferred.get(key);
-    if (existing) {
-      existing.sessionCount = (existing.sessionCount ?? 0) + 1;
-      existing.lastUsedAt = Math.max(existing.lastUsedAt, session.state.last_activity);
-      continue;
-    }
-    inferred.set(key, {
-      id: key,
-      name: getProjectDisplayName(root),
-      root,
-      createdAt: session.state.created_at,
-      lastUsedAt: session.state.last_activity,
-      origin: "inferred",
-      sessionCount: 1,
-    });
-  }
-
-  for (const project of defaultProjects) {
-    const key = getProjectRecordKey(project.root);
-    const existing = inferred.get(key);
-    if (existing) {
-      existing.name = project.name;
-      existing.origin = "default";
-    } else {
-      inferred.set(key, project);
-    }
-  }
-
-  const projects = [...inferred.values()].sort((left, right) => {
-    const countDiff = (right.sessionCount ?? 0) - (left.sessionCount ?? 0);
-    if (countDiff !== 0) {
-      return countDiff;
-    }
-    return right.lastUsedAt - left.lastUsedAt;
-  });
-  return {
-    projects,
-    preferredProjectId: projects[0]?.id ?? defaultProjects[0].id,
-  };
 }
 
 export function createDefaultMemory(): MemoryRecord[] {
@@ -336,8 +241,4 @@ export function getSessionModel(session: TalosSession) {
     session.config?.agent?.model ??
     "unknown"
   );
-}
-
-export function getSessionProjectLabel(session: TalosSession) {
-  return normalizeWorkspacePath(session.context.project_root);
 }

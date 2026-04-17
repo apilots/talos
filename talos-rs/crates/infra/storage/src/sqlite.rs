@@ -257,6 +257,16 @@ impl Storage for SqliteStorage {
                 )
                 .await?;
             }
+            if !existing.contains("project_id") {
+                info!("Adding project_id column to sessions schema");
+                self.execute("ALTER TABLE sessions ADD COLUMN project_id TEXT", &[])
+                    .await?;
+            }
+            if !existing.contains("current_directory") {
+                info!("Adding current_directory column to sessions schema");
+                self.execute("ALTER TABLE sessions ADD COLUMN current_directory TEXT", &[])
+                    .await?;
+            }
         }
 
         // Sessions table
@@ -278,7 +288,9 @@ impl Storage for SqliteStorage {
                 model TEXT,
                 message_count INTEGER NOT NULL DEFAULT 0,
                 usage_json TEXT,
-                conf_json TEXT
+                conf_json TEXT,
+                project_id TEXT,
+                current_directory TEXT
             )
         "#;
 
@@ -302,6 +314,20 @@ impl Storage for SqliteStorage {
 
         self.execute(create_bindings, &[]).await?;
         debug!("Bindings table created/verified");
+
+        let create_projects = r#"
+            CREATE TABLE IF NOT EXISTS projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id TEXT UNIQUE NOT NULL,
+                name TEXT NOT NULL,
+                directory TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+        "#;
+
+        self.execute(create_projects, &[]).await?;
+        debug!("Projects table created/verified");
 
         info!("Database schema initialization complete");
         Ok(())

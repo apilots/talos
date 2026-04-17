@@ -41,6 +41,14 @@ impl AgentImpl {
         self.memory_flush_manager.pending_count()
     }
 
+    pub(crate) async fn has_pending_memory_flush(&self, session_id: &str) -> bool {
+        self.memory_flush_manager.contains_session(session_id).await
+    }
+
+    pub(crate) fn has_active_turn(&self, session_id: &str) -> bool {
+        self.active_turns.contains_key(session_id)
+    }
+
     pub(crate) async fn validate_dynamic_tool_submission(
         &self,
         session_id: &str,

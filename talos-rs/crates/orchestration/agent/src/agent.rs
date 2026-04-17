@@ -411,6 +411,14 @@ impl AgentOrchestrator for AgentImpl {
         self.pending_memory_flush_count()
     }
 
+    async fn has_pending_memory_flush(&self, session_id: &str) -> bool {
+        AgentImpl::has_pending_memory_flush(self, session_id).await
+    }
+
+    fn has_active_turn(&self, session_id: &str) -> bool {
+        AgentImpl::has_active_turn(self, session_id)
+    }
+
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()> {
         let Some((_, handle)) = self.active_turns.remove(session_id) else {
             return Ok(());

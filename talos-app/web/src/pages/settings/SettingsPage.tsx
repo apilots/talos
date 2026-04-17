@@ -9,7 +9,6 @@ import {
   SettingsServerSection,
   useSettingsPage,
 } from "@/features/settings";
-import { Badge } from "@/shared/ui/Badge";
 import { Panel } from "@/shared/ui/Panel";
 
 export function SettingsPage() {
@@ -50,26 +49,15 @@ export function SettingsPage() {
   );
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-[1120px] flex-col gap-5 overflow-y-auto px-8 py-7">
-      <Panel className="rounded-[1.45rem] border-border/80 bg-card/88 p-5 backdrop-blur">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div className="text-xs uppercase tracking-[0.22em] text-muted">{t("settings:pageLabel")}</div>
-            <h1 className="mt-2 font-display text-[28px] tracking-[-0.05em] text-ink">{t("settings:title")}</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-muted">{t("settings:detail")}</p>
-          </div>
-          <Badge tone={models.isSuccess ? "success" : "warning"}>
-            {models.isSuccess ? t("common:connectedShort") : t("common:awaitingServer")}
-          </Badge>
-        </div>
-      </Panel>
-
-      <Panel className="rounded-[1.3rem] border-border/80 bg-card/82 p-2">
+    <div className="flex h-full w-full flex-col overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-6 px-8 py-8">
+      <Panel className="rounded-[var(--radius-panel)] border-border/75 bg-card/86 p-2">
         <div className="flex flex-wrap gap-2">
           {tabs.map((tab) => (
             <button
               className={[
-                "rounded-2xl px-4 py-2.5 text-sm transition",
+                "rounded-[var(--radius-control)] px-4 py-2.5 text-sm transition",
                 activeTab === tab.id
                   ? "bg-background/70 text-ink shadow-panel"
                   : "text-muted hover:bg-background/45 hover:text-ink",
@@ -119,6 +107,8 @@ export function SettingsPage() {
           terminalApproval={terminalApproval}
         />
       ) : null}
+        </div>
+      </div>
     </div>
   );
 }

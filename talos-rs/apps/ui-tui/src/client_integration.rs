@@ -108,6 +108,8 @@ impl TuiAppState {
                 .create_session(&SessionCreateParams {
                     context: None,
                     model: Some(model_guard.clone()),
+                    project_id: None,
+                    current_directory: None,
                 })
                 .await?;
             let mut active_sess = self.active_session.write().await;

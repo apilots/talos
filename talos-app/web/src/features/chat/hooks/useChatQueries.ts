@@ -4,18 +4,20 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   cancelActiveTurn,
   clearSession,
-  closeSession,
   compactSession,
+  createProject,
   createSession,
+  deleteSession,
   getSession,
   getSessionTurns,
   listModels,
+  listProjects,
   listSessions,
   updateSessionModel,
   updateSessionProject,
 } from "../api";
 import { useAppStore } from "@/shared/store/app-store";
-import { getEffectiveSessionStatus, inferProjectsFromSessions } from "@/shared/types/domain";
+import { getEffectiveSessionStatus } from "@/shared/types/domain";
 
 export const chatKeys = {
   all: ["talos"] as const,
@@ -45,19 +47,10 @@ export function useModelsQuery() {
 export function useSessionsQuery() {
   const connectionKey = useConnectionKey();
   const threadFilter = useAppStore((state) => state.threadFilter);
-  const mergeProjects = useAppStore((state) => state.mergeProjects);
   const query = useQuery({
     queryKey: chatKeys.sessions(connectionKey),
     queryFn: listSessions,
   });
-
-  useEffect(() => {
-    if (!query.data || query.data.length === 0) {
-      return;
-    }
-    const inferred = inferProjectsFromSessions(query.data);
-    mergeProjects(inferred.projects, inferred.preferredProjectId);
-  }, [mergeProjects, query.data]);
 
   const data = (query.data ?? [])
     .sort((left, right) => right.state.last_activity - left.state.last_activity)
@@ -77,6 +70,24 @@ export function useSessionsQuery() {
     ...query,
     data,
   };
+}
+
+export function useProjectsQuery() {
+  const connectionKey = useConnectionKey();
+  const mergeProjects = useAppStore((state) => state.mergeProjects);
+  const query = useQuery({
+    queryKey: [...chatKeys.all, connectionKey, "projects"] as const,
+    queryFn: listProjects,
+  });
+
+  useEffect(() => {
+    if (!query.data) {
+      return;
+    }
+    mergeProjects(query.data);
+  }, [mergeProjects, query.data]);
+
+  return query;
 }
 
 export function useSessionQuery(sessionId: string) {
@@ -129,6 +140,19 @@ export function useUpdateSessionProjectMutation(sessionId: string) {
   });
 }
 
+export function useCreateProjectMutation() {
+  const connectionKey = useConnectionKey();
+  const queryClient = useQueryClient();
+  const mergeProjects = useAppStore((state) => state.mergeProjects);
+  return useMutation({
+    mutationFn: createProject,
+    onSuccess: async (project) => {
+      mergeProjects([project], project.id);
+      await queryClient.invalidateQueries({ queryKey: [...chatKeys.all, connectionKey, "projects"] });
+    },
+  });
+}
+
 export function useUpdateSessionModelMutation(sessionId: string) {
   const connectionKey = useConnectionKey();
   const queryClient = useQueryClient();
@@ -141,11 +165,11 @@ export function useUpdateSessionModelMutation(sessionId: string) {
   });
 }
 
-export function useCloseSessionMutation() {
+export function useDeleteSessionMutation() {
   const connectionKey = useConnectionKey();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: closeSession,
+    mutationFn: deleteSession,
     onSuccess: async (_, sessionId) => {
       await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
       queryClient.removeQueries({ queryKey: chatKeys.session(connectionKey, sessionId) });

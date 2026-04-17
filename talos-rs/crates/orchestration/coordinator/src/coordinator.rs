@@ -19,8 +19,8 @@ use talos_session_store::SessionStore;
 use talos_types::gateway::{GatewayRequest, GatewayResponse};
 use talos_types::talos::{TalosContext, TalosEvent, TalosUsage};
 use talos_types::{
-    RequestHandler, SessionPatch, SessionPatchAck, SessionQuery, SessionService, TalosConfig,
-    TalosSession,
+    ProjectPatch, ProjectRecord, RequestHandler, SessionPatch, SessionPatchAck, SessionQuery,
+    SessionService, TalosConfig, TalosSession,
 };
 use tokio::sync::{mpsc, RwLock};
 use tracing::{info, warn};
@@ -292,6 +292,8 @@ impl SessionService for CoordinatorImpl {
         &self,
         context: TalosContext,
         model: Option<String>,
+        project_id: Option<String>,
+        current_directory: std::option::Option<std::path::PathBuf>,
     ) -> TalosResult<TalosSession> {
         let channel = Self::route_channel(&context);
         let target_agent = self
@@ -302,7 +304,7 @@ impl SessionService for CoordinatorImpl {
 
         let record = self
             .sessions
-            .create_session(context, &target_agent, model)
+            .create_session(context, &target_agent, model, project_id, current_directory)
             .await?;
         Ok(record)
     }
@@ -378,6 +380,38 @@ impl SessionService for CoordinatorImpl {
         self.sessions.invalidate_cached_session(session_id).await;
         agent.close_session(session).await?;
         Ok(())
+    }
+
+    async fn delete_session(&self, session_id: &str) -> TalosResult<SessionPatchAck> {
+        let session = self
+            .sessions
+            .get_session(session_id)
+            .await?
+            .ok_or_else(|| {
+                talos_error::TalosError::ResourceNotFound(format!("session {}", session_id))
+            })?;
+        let (_target_agent, agent) = self.resolve_session_agent(&session).await?;
+        if agent.has_active_turn(session_id) {
+            return Err(talos_error::TalosError::ValidationError(format!(
+                "cannot delete session `{}` while a turn is active",
+                session_id
+            )));
+        }
+        if agent.has_pending_memory_flush(session_id).await {
+            return Err(talos_error::TalosError::ValidationError(format!(
+                "cannot delete session `{}` while memory flush is pending",
+                session_id
+            )));
+        }
+        agent.clear_session(session).await?;
+        let ack = self.sessions.delete_session(session_id).await?;
+        if !ack.success {
+            return Err(talos_error::TalosError::ResourceNotFound(format!(
+                "session {}",
+                session_id
+            )));
+        }
+        Ok(ack)
     }
 
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()> {
@@ -484,5 +518,33 @@ impl SessionService for CoordinatorImpl {
             .collect();
 
         Ok(responses)
+    }
+
+    async fn list_projects(&self) -> TalosResult<Vec<ProjectRecord>> {
+        self.sessions.list_projects().await
+    }
+
+    async fn get_project(&self, project_id: &str) -> TalosResult<Option<ProjectRecord>> {
+        self.sessions.get_project(project_id).await
+    }
+
+    async fn create_project(
+        &self,
+        name: String,
+        directory: std::path::PathBuf,
+    ) -> TalosResult<ProjectRecord> {
+        self.sessions.create_project(name, directory).await
+    }
+
+    async fn patch_project(
+        &self,
+        project_id: &str,
+        patch: ProjectPatch,
+    ) -> TalosResult<Option<ProjectRecord>> {
+        self.sessions.patch_project(project_id, patch).await
+    }
+
+    async fn delete_project(&self, project_id: &str) -> TalosResult<()> {
+        self.sessions.delete_project(project_id).await
     }
 }
