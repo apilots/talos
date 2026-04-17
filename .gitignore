@@ -38,6 +38,7 @@ test-results/
 .tmp-ui-review
 .talos
 output/
+.playwright-mcp
 
 # sisyphus
 .sisyphus
