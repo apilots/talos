@@ -1,0 +1,254 @@
+import { useMemo, useState } from "react";
+import { FileCode2, FileImage, FileSpreadsheet, FileText, Grid2x2, List, Plus, Trash2, Upload } from "lucide-react";
+
+import { useAppStore } from "@/shared/store/app-store";
+import type { FileRecord } from "@/shared/types/domain";
+import { Button } from "@/shared/ui/Button";
+import { Input } from "@/shared/ui/Input";
+import { Panel } from "@/shared/ui/Panel";
+
+type FileView = "grid" | "list";
+type FileCategory = "all" | "document" | "code" | "image" | "data";
+
+function getFileExtension(path: string) {
+  return path.split(".").at(-1)?.toLowerCase() ?? "";
+}
+
+function classifyFile(item: FileRecord): FileCategory {
+  const ext = getFileExtension(item.path);
+  if (["rs", "ts", "tsx", "py", "js", "jsx", "yaml", "yml"].includes(ext)) {
+    return "code";
+  }
+  if (["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext)) {
+    return "image";
+  }
+  if (["csv", "json"].includes(ext)) {
+    return "data";
+  }
+  return "document";
+}
+
+function formatFileMeta(updatedAt: number) {
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "2-digit",
+  }).format(updatedAt);
+}
+
+function iconForFile(category: FileCategory) {
+  switch (category) {
+    case "code":
+      return <FileCode2 size={18} />;
+    case "image":
+      return <FileImage size={18} />;
+    case "data":
+      return <FileSpreadsheet size={18} />;
+    default:
+      return <FileText size={18} />;
+  }
+}
+
+const categoryLabels: Record<FileCategory, string> = {
+  all: "All",
+  document: "Documents",
+  code: "Code",
+  image: "Images",
+  data: "Data",
+};
+
+export function FilesPage() {
+  const items = useAppStore((state) => state.fileItems);
+  const upsertFile = useAppStore((state) => state.upsertFile);
+  const removeFile = useAppStore((state) => state.removeFile);
+  const [query, setQuery] = useState("");
+  const [view, setView] = useState<FileView>("grid");
+  const [category, setCategory] = useState<FileCategory>("all");
+
+  const categorized = useMemo(() => {
+    const counts: Record<FileCategory, number> = {
+      all: items.length,
+      document: 0,
+      code: 0,
+      image: 0,
+      data: 0,
+    };
+    items.forEach((item) => {
+      counts[classifyFile(item)] += 1;
+    });
+    return counts;
+  }, [items]);
+
+  const filteredItems = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return items.filter((item) => {
+      const matchQuery =
+        !normalized ||
+        [item.label, item.path, item.summary].some((value) => value.toLowerCase().includes(normalized));
+      const matchCategory = category === "all" || classifyFile(item) === category;
+      return matchQuery && matchCategory;
+    });
+  }, [category, items, query]);
+
+  function addFile() {
+    const id = `file-${Date.now()}`;
+    upsertFile({
+      id,
+      label: `reference-${items.length + 1}.md`,
+      path: `notes/reference-${items.length + 1}.md`,
+      summary: "Placeholder record for the Web UI until the upload API is wired.",
+      updatedAt: Date.now(),
+    });
+  }
+
+  return (
+    <div className="mx-auto flex h-full w-full max-w-[1120px] flex-col gap-5 overflow-y-auto px-8 py-7">
+      <Panel className="rounded-[1.45rem] border-border/80 bg-card/88 p-5 backdrop-blur">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="text-xs uppercase tracking-[0.22em] text-muted">Files</div>
+            <h1 className="mt-2 font-display text-[28px] tracking-[-0.05em] text-ink">
+              Reference uploaded material in chat with @
+            </h1>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-muted">
+              Keep working documents, code snippets, and notes close at hand so the composer can reference
+              them instantly.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              className="rounded-2xl border border-border bg-card/80 p-2.5 text-muted transition hover:border-brand/40 hover:text-ink"
+              onClick={() => setView("list")}
+              type="button"
+            >
+              <List size={16} />
+            </button>
+            <button
+              className="rounded-2xl border border-border bg-card/80 p-2.5 text-muted transition hover:border-brand/40 hover:text-ink"
+              onClick={() => setView("grid")}
+              type="button"
+            >
+              <Grid2x2 size={16} />
+            </button>
+            <Button onClick={addFile} variant="secondary">
+              <Plus size={16} />
+              Upload
+            </Button>
+          </div>
+        </div>
+      </Panel>
+
+      <Panel className="rounded-[1.35rem] border-border/80 bg-card/82 p-4.5">
+        <div className="flex flex-wrap items-center gap-3">
+          <Input
+            className="max-w-md"
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search files..."
+            value={query}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            {(Object.keys(categoryLabels) as FileCategory[]).map((itemCategory) => (
+              <button
+                className={[
+                  "rounded-full border px-3 py-1.5 text-xs transition",
+                  category === itemCategory
+                    ? "border-brand/40 bg-brand/10 text-brand"
+                    : "border-border bg-background/55 text-muted hover:text-ink",
+                ].join(" ")}
+                key={itemCategory}
+                onClick={() => setCategory(itemCategory)}
+                type="button"
+              >
+                {categoryLabels[itemCategory]} ({categorized[itemCategory]})
+              </button>
+            ))}
+          </div>
+        </div>
+      </Panel>
+
+      {filteredItems.length === 0 ? (
+        <Panel className="rounded-[1.45rem] border-border/80 bg-card/78 p-14 text-center">
+          <div className="mx-auto flex size-14 items-center justify-center rounded-3xl border border-border bg-background/55 text-brand">
+            <Upload size={22} />
+          </div>
+          <h2 className="mt-5 font-display text-2xl tracking-[-0.04em] text-ink">No files yet</h2>
+          <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-muted">
+            Drop source files, PDFs, or notes here. Once uploaded, mention them directly in chat with
+            the <span className="text-ink">@</span> trigger.
+          </p>
+        </Panel>
+      ) : view === "grid" ? (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {filteredItems.map((item) => {
+            const fileCategory = classifyFile(item);
+            return (
+              <Panel className="rounded-[1.3rem] border-border/80 bg-card/82 p-4" key={item.id}>
+                <div className="flex h-full flex-col gap-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex size-11 items-center justify-center rounded-2xl border border-border bg-background/50 text-brand">
+                      {iconForFile(fileCategory)}
+                    </div>
+                    <button
+                      className="rounded-xl p-2 text-muted transition hover:bg-danger/10 hover:text-danger"
+                      onClick={() => removeFile(item.id)}
+                      type="button"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="text-base font-medium text-ink">{item.label}</div>
+                    <div className="font-mono text-xs text-muted">{item.path}</div>
+                    <p className="line-clamp-3 text-sm leading-6 text-muted">{item.summary}</p>
+                  </div>
+                  <div className="mt-auto flex items-center justify-between text-xs text-muted">
+                    <span>{categoryLabels[fileCategory]}</span>
+                    <span>{formatFileMeta(item.updatedAt)}</span>
+                  </div>
+                </div>
+              </Panel>
+            );
+          })}
+        </div>
+      ) : (
+        <Panel className="overflow-hidden rounded-[1.4rem] border-border/80 bg-card/82">
+          <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1.4fr)_140px_120px] gap-4 border-b border-border/80 px-5 py-3 text-[11px] uppercase tracking-[0.18em] text-muted">
+            <div>Name</div>
+            <div>Path</div>
+            <div>Type</div>
+            <div className="text-right">Actions</div>
+          </div>
+          {filteredItems.map((item) => {
+            const fileCategory = classifyFile(item);
+            return (
+              <div
+                className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1.4fr)_140px_120px] gap-4 border-b border-border/60 px-5 py-4 last:border-b-0"
+                key={item.id}
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium text-ink">{item.label}</div>
+                  <div className="mt-1 truncate text-xs text-muted">{item.summary}</div>
+                </div>
+                <div className="truncate font-mono text-xs text-muted">{item.path}</div>
+                <div className="text-sm text-muted">{categoryLabels[fileCategory]}</div>
+                <div className="flex items-center justify-end gap-2">
+                  <span className="text-xs text-muted">@ ready</span>
+                  <button
+                    className="rounded-xl p-2 text-muted transition hover:bg-danger/10 hover:text-danger"
+                    onClick={() => removeFile(item.id)}
+                    type="button"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </Panel>
+      )}
+
+      <Panel className="rounded-[1.4rem] border-border/80 border-dashed bg-card/60 p-8 text-center">
+        <div className="text-sm text-muted">Drag files here, or use the upload button to add a new reference.</div>
+      </Panel>
+    </div>
+  );
+}

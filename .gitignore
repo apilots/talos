@@ -25,14 +25,24 @@ Cargo.lock
 # Claude
 claude*
 AGENTS.md
+.claude
 
 # DB
 *.db
+node_modules/
+dist/
 
 # ci
 *reports
+test-results/
+.tmp-ui-review
+.talos
+output/
 
 # sisyphus
 .sisyphus
 docs
 IMPLEMENTATION_PLAN.md
+
+# node
+node_modules/

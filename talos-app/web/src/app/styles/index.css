@@ -1,0 +1,254 @@
+@import url("https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-background: 11 17 19;
+  --color-sidebar: 15 23 26;
+  --color-card: 21 31 35;
+  --color-border: 36 49 55;
+  --color-surface: 27 39 44;
+  --color-ink: 244 247 246;
+  --color-muted: 144 160 166;
+  --color-brand: 242 140 40;
+  --color-brand-dim: 43 33 24;
+  --color-warning: 224 161 59;
+  --color-danger: 227 93 93;
+  --color-success: 94 234 212;
+  --color-info: 125 211 252;
+  --page-grid: rgba(255, 255, 255, 0.015);
+  --page-brand-glow: rgba(242, 140, 40, 0.14);
+  --page-info-glow: rgba(125, 211, 252, 0.12);
+  --shadow-panel: 0 18px 48px rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(36, 49, 55, 0.9);
+  color: rgb(var(--color-ink));
+  background: rgb(var(--color-background));
+  font-family: "IBM Plex Sans", -apple-system, sans-serif;
+}
+
+:root[data-theme="light"] {
+  --color-background: 250 248 244;
+  --color-sidebar: 245 243 238;
+  --color-card: 255 253 249;
+  --color-border: 224 218 209;
+  --color-surface: 248 245 239;
+  --color-ink: 34 39 45;
+  --color-muted: 102 111 121;
+  --color-brand: 194 109 39;
+  --color-brand-dim: 248 238 223;
+  --color-warning: 171 126 56;
+  --color-danger: 179 79 79;
+  --color-success: 44 127 109;
+  --color-info: 63 118 168;
+  --page-grid: rgba(34, 39, 45, 0.014);
+  --page-brand-glow: rgba(194, 109, 39, 0.035);
+  --page-info-glow: rgba(63, 118, 168, 0.022);
+  --shadow-panel:
+    0 16px 34px rgba(104, 94, 78, 0.055),
+    0 1px 0 rgba(255, 255, 255, 0.94),
+    0 0 0 1px rgba(224, 218, 209, 0.78);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    linear-gradient(var(--page-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--page-grid) 1px, transparent 1px),
+    radial-gradient(circle at top left, var(--page-brand-glow), transparent 26%),
+    radial-gradient(circle at bottom right, var(--page-info-glow), transparent 22%),
+    rgb(var(--color-background));
+  background-size: 24px 24px, 24px 24px, auto, auto, auto;
+  color: rgb(var(--color-ink));
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+::selection {
+  background: rgb(var(--color-brand) / 0.3);
+  color: rgb(var(--color-ink));
+}
+
+@layer components {
+  .markdown-body {
+    --tw-prose-body: rgb(var(--color-ink) / 0.92);
+    --tw-prose-headings: rgb(var(--color-ink));
+    --tw-prose-lead: rgb(var(--color-muted));
+    --tw-prose-links: rgb(var(--color-brand));
+    --tw-prose-bold: rgb(var(--color-ink));
+    --tw-prose-counters: rgb(var(--color-muted));
+    --tw-prose-bullets: rgb(var(--color-muted) / 0.72);
+    --tw-prose-hr: rgb(var(--color-border));
+    --tw-prose-quotes: rgb(var(--color-ink));
+    --tw-prose-quote-borders: rgb(var(--color-brand) / 0.22);
+    --tw-prose-captions: rgb(var(--color-muted));
+    --tw-prose-code: rgb(var(--color-ink));
+    --tw-prose-pre-code: rgb(var(--color-ink));
+    --tw-prose-pre-bg: rgb(var(--color-surface) / 0.96);
+    --tw-prose-th-borders: rgb(var(--color-border));
+    --tw-prose-td-borders: rgb(var(--color-border) / 0.82);
+    font-size: 0.97rem;
+    line-height: 1.88;
+    letter-spacing: 0.004em;
+    text-wrap: pretty;
+    overflow-wrap: anywhere;
+  }
+
+  .markdown-body > :first-child {
+    margin-top: 0;
+  }
+
+  .markdown-body > :last-child {
+    margin-bottom: 0;
+  }
+
+  .markdown-body :where(h1, h2, h3, h4) {
+    @apply font-display tracking-[-0.04em];
+  }
+
+  .markdown-body :where(h2, h3, h4) {
+    margin-top: 1.9em;
+    margin-bottom: 0.72em;
+  }
+
+  .markdown-body :where(h1) {
+    @apply text-[1.64rem] leading-[1.14];
+  }
+
+  .markdown-body :where(h2) {
+    @apply text-[1.28rem] leading-[1.2];
+  }
+
+  .markdown-body :where(h3) {
+    @apply text-[1.04rem] leading-[1.3];
+  }
+
+  .markdown-body :where(p, li) {
+    text-wrap: pretty;
+  }
+
+  .markdown-body :where(p) {
+    margin-top: 0.85em;
+    margin-bottom: 0.85em;
+  }
+
+  .markdown-body :where(ul, ol) {
+    @apply pl-5;
+    margin-top: 1.05em;
+    margin-bottom: 1.05em;
+    list-style-position: outside;
+  }
+
+  .markdown-body :where(li > p) {
+    @apply my-0.5;
+  }
+
+  .markdown-body :where(li) {
+    @apply pl-1.5;
+  }
+
+  .markdown-body :where(li)::marker {
+    color: rgb(var(--color-brand) / 0.52);
+  }
+
+  .markdown-body :where(pre) {
+    @apply overflow-x-auto rounded-[1.05rem] border border-border px-4 py-3 shadow-none;
+  }
+
+  .markdown-body :where([data-rehype-pretty-code-figure]) {
+    @apply my-5 overflow-hidden rounded-[1.05rem] border border-border bg-surface/90;
+  }
+
+  .markdown-body :where([data-rehype-pretty-code-title]) {
+    @apply border-b border-border bg-background/55 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted;
+  }
+
+  .markdown-body :where([data-rehype-pretty-code-figure] pre) {
+    @apply m-0 border-0 bg-transparent px-4 py-3.5;
+  }
+
+  .markdown-body :where([data-rehype-pretty-code-figure] code) {
+    @apply block font-mono text-[13px] leading-6;
+  }
+
+  .markdown-body :where([data-highlighted-line]) {
+    @apply -mx-4 border-l-2 border-brand/35 bg-brand/5 px-4;
+  }
+
+  .markdown-body :where([data-highlighted-chars]) {
+    @apply rounded-md bg-brand/10 px-1 py-0.5;
+  }
+
+  .markdown-body :where(pre code) {
+    @apply bg-transparent p-0 text-[13px] text-ink;
+  }
+
+  .markdown-body :where(code):not(:where(pre code)) {
+    @apply rounded-[0.45rem] px-1 py-px font-mono text-[0.88em] font-medium text-ink;
+    border: 1px solid rgb(var(--color-border) / 0.72);
+    background: rgb(var(--color-surface) / 0.72);
+    display: inline;
+    white-space: normal;
+    word-break: normal;
+    overflow-wrap: anywhere;
+    vertical-align: baseline;
+  }
+
+  .markdown-body :where(blockquote) {
+    @apply border-l-2 pl-4 not-italic text-muted;
+    border-left-color: rgb(var(--color-brand) / 0.18);
+  }
+
+  .markdown-body :where(strong) {
+    font-weight: 600;
+  }
+
+  .markdown-body :where(table) {
+    @apply min-w-full overflow-hidden rounded-[0.9rem] border border-border;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  .markdown-body :where(thead) {
+    @apply bg-surface;
+  }
+
+  .markdown-body :where(th, td) {
+    @apply px-3 py-2 text-left align-top;
+  }
+
+  .markdown-body :where(tr:not(:last-child) td) {
+    border-bottom: 1px solid rgb(var(--color-border) / 0.82);
+  }
+
+  .markdown-body :where(hr) {
+    @apply my-6;
+  }
+}

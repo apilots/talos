@@ -1,0 +1,16 @@
+{
+  "name": "talos-app",
+  "private": true,
+  "packageManager": "pnpm@9.14.4",
+  "devDependencies": {
+    "@eslint/js": "^9.25.0",
+    "typescript-eslint": "^8.31.1"
+  },
+  "scripts": {
+    "dev": "pnpm --filter talos-web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test"
+  }
+}
