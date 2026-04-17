@@ -226,6 +226,7 @@ impl DatabaseSessionStore {
                 .unwrap_or_default(),
             created_at: row.get_i64("created_at").unwrap_or_default(),
             updated_at: row.get_i64("updated_at").unwrap_or_default(),
+            session_count: row.get_i64("session_count").unwrap_or_default(),
         }
     }
 
@@ -489,25 +490,32 @@ impl SessionStore for DatabaseSessionStore {
     }
 
     async fn list_session_records(&self, query: &SessionQuery) -> TalosResult<Vec<SessionRecord>> {
-        let sql = "SELECT session_key, title, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, usage_json, conf_json, project_id, current_directory FROM sessions ORDER BY last_activity DESC";
-        let rows = self.storage.query(sql, &[]).await?;
+        let mut sql = "SELECT session_key, title, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, usage_json, conf_json, project_id, current_directory FROM sessions".to_string();
+        let mut clauses = Vec::new();
+        let mut params = Vec::new();
+        if let Some(user_id) = query.user_id.as_deref() {
+            clauses.push("user_id = ?");
+            params.push(user_id.to_string());
+        }
+        if let Some(channel_id) = query.channel_id.as_deref() {
+            clauses.push("channel = ?");
+            params.push(channel_id.to_string());
+        }
+        if let Some(project_id) = query.project_id.as_deref() {
+            clauses.push("project_id = ?");
+            params.push(project_id.to_string());
+        }
+        if !clauses.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&clauses.join(" AND "));
+        }
+        sql.push_str(" ORDER BY last_activity DESC");
+
+        let params_ref = params.iter().map(String::as_str).collect::<Vec<_>>();
+        let rows = self.storage.query(&sql, &params_ref).await?;
         let mut records = Vec::new();
         for row in rows {
             let record = Self::parse_session_record(&row);
-            if query
-                .user_id
-                .as_ref()
-                .is_some_and(|v| &record.context.user_id != v)
-            {
-                continue;
-            }
-            if query
-                .channel_id
-                .as_ref()
-                .is_some_and(|v| record.context.channel_id.as_ref() != Some(v))
-            {
-                continue;
-            }
             if query
                 .provider
                 .as_ref()
@@ -751,14 +759,14 @@ impl SessionStore for DatabaseSessionStore {
     }
 
     async fn list_projects(&self) -> TalosResult<Vec<ProjectRecord>> {
-        let sql = "SELECT project_id, name, directory, created_at, updated_at FROM projects ORDER BY created_at DESC";
+        let sql = "SELECT p.project_id, p.name, p.directory, p.created_at, p.updated_at, COUNT(s.session_key) AS session_count FROM projects p LEFT JOIN sessions s ON s.project_id = p.project_id GROUP BY p.project_id, p.name, p.directory, p.created_at, p.updated_at ORDER BY p.created_at DESC";
         let rows = self.storage.query(sql, &[]).await?;
         Ok(rows.iter().map(Self::parse_project_record).collect())
     }
 
     async fn get_project(&self, project_id: &str) -> TalosResult<Option<ProjectRecord>> {
         let sql =
-            "SELECT project_id, name, directory, created_at, updated_at FROM projects WHERE project_id = ?";
+            "SELECT p.project_id, p.name, p.directory, p.created_at, p.updated_at, COUNT(s.session_key) AS session_count FROM projects p LEFT JOIN sessions s ON s.project_id = p.project_id WHERE p.project_id = ? GROUP BY p.project_id, p.name, p.directory, p.created_at, p.updated_at";
         let rows = self.storage.query(sql, &[project_id]).await?;
         Ok(rows.into_iter().next().map(|row| Self::parse_project_record(&row)))
     }
@@ -771,6 +779,7 @@ impl SessionStore for DatabaseSessionStore {
             directory: directory.clone(),
             created_at: now,
             updated_at: now,
+            session_count: 0,
         };
         let row = Row::new(
             vec![
@@ -979,6 +988,7 @@ impl SessionStore for MockSessionStore {
             directory: directory.clone(),
             created_at: 0,
             updated_at: 0,
+            session_count: 0,
         })
     }
 
@@ -1242,5 +1252,86 @@ mod scope_tests {
             persisted.current_directory.as_deref(),
             Some(Path::new("/repo/one"))
         );
+    }
+
+    #[tokio::test]
+    async fn test_list_session_records_filters_by_project_id() {
+        let storage = Arc::new(SqliteStorage::new("sqlite::memory:").await.unwrap());
+        let store = DatabaseSessionStore::new(storage).await.unwrap();
+
+        let first = store
+            .create_session(
+                &sample_context(),
+                "agent-a",
+                "qwen-max",
+                None,
+                None,
+                Some("project-1".to_string()),
+                None,
+            )
+            .await
+            .expect("create first session should succeed");
+        let second = store
+            .create_session(
+                &sample_context(),
+                "agent-a",
+                "qwen-max",
+                None,
+                None,
+                Some("project-2".to_string()),
+                None,
+            )
+            .await
+            .expect("create second session should succeed");
+
+        let records = store
+            .list_session_records(&SessionQuery {
+                user_id: None,
+                channel_id: None,
+                provider: None,
+                project_id: Some("project-1".to_string()),
+            })
+            .await
+            .expect("list sessions should succeed");
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].id, first.id);
+        assert_ne!(records[0].id, second.id);
+    }
+
+    #[tokio::test]
+    async fn test_list_projects_returns_session_count() {
+        let storage = Arc::new(SqliteStorage::new("sqlite::memory:").await.unwrap());
+        let store = DatabaseSessionStore::new(storage).await.unwrap();
+
+        let project = store
+            .create_project("repo", &PathBuf::from("/repo"))
+            .await
+            .expect("create project should succeed");
+
+        store
+            .create_session(
+                &sample_context(),
+                "agent-a",
+                "qwen-max",
+                None,
+                None,
+                Some(project.project_id.clone()),
+                None,
+            )
+            .await
+            .expect("create bound session should succeed");
+
+        let projects = store.list_projects().await.expect("list projects should succeed");
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].project_id, project.project_id);
+        assert_eq!(projects[0].session_count, 1);
+
+        let loaded = store
+            .get_project(&project.project_id)
+            .await
+            .expect("get project should succeed")
+            .expect("project should exist");
+        assert_eq!(loaded.session_count, 1);
     }
 }

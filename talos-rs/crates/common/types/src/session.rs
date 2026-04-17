@@ -216,6 +216,7 @@ pub struct SessionQuery {
     pub user_id: Option<String>,
     pub channel_id: Option<String>,
     pub provider: Option<String>,
+    pub project_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -268,6 +269,7 @@ pub struct ProjectRecord {
     pub directory: PathBuf,
     pub created_at: i64,
     pub updated_at: i64,
+    pub session_count: i64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

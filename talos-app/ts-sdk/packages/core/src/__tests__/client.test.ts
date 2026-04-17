@@ -68,6 +68,7 @@ describe("TalosClient", () => {
       directory: "/repo",
       created_at: 1,
       updated_at: 1,
+      session_count: 0,
     });
     const http: HttpAdapter = { request };
     const streamAdapter: StreamAdapter = {
@@ -81,6 +82,19 @@ describe("TalosClient", () => {
       method: "POST",
       body: JSON.stringify({ name: "repo", directory: "/repo" }),
     });
+  });
+
+  it("serializes session query parameters on the sessions list url", async () => {
+    const request = vi.fn().mockResolvedValue({ data: [] });
+    const http: HttpAdapter = { request };
+    const streamAdapter: StreamAdapter = {
+      stream: vi.fn().mockResolvedValue(undefined),
+    };
+    const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
+
+    await client.sessions.list({ project_id: "project-1" });
+
+    expect(request).toHaveBeenCalledWith("http://localhost:8080/v1/sessions?project_id=project-1");
   });
 
   it("serializes memory search query parameters on the request url", async () => {

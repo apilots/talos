@@ -161,6 +161,41 @@ fn test_session_patch_roundtrip_with_project_binding_fields() {
 }
 
 #[test]
+fn test_session_query_roundtrip_with_project_id() {
+    let query = SessionQuery {
+        user_id: Some("user-1".to_string()),
+        channel_id: Some("channel-1".to_string()),
+        provider: Some("http".to_string()),
+        project_id: Some("project-1".to_string()),
+    };
+
+    let encoded = serde_json::to_string(&query).unwrap();
+    let decoded: SessionQuery = serde_json::from_str(&encoded).unwrap();
+
+    assert_eq!(decoded.user_id.as_deref(), Some("user-1"));
+    assert_eq!(decoded.channel_id.as_deref(), Some("channel-1"));
+    assert_eq!(decoded.provider.as_deref(), Some("http"));
+    assert_eq!(decoded.project_id.as_deref(), Some("project-1"));
+}
+
+#[test]
+fn test_project_record_roundtrip_with_session_count() {
+    let record = ProjectRecord {
+        project_id: "project-1".to_string(),
+        name: "repo".to_string(),
+        directory: std::path::PathBuf::from("/repo"),
+        created_at: 1,
+        updated_at: 2,
+        session_count: 3,
+    };
+
+    let encoded = serde_json::to_string(&record).unwrap();
+    let decoded: ProjectRecord = serde_json::from_str(&encoded).unwrap();
+
+    assert_eq!(decoded, record);
+}
+
+#[test]
 fn test_doc_update_request_roundtrip() {
     let request = DocUpdateRequest {
         content: "hello".to_string(),

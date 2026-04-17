@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { HardDriveUpload, MemoryStick, Plus, Settings2, Shield, SlidersHorizontal, Trash2 } from "lucide-react";
+import { FolderOpen, HardDriveUpload, MemoryStick, Plus, Settings2, Shield, SlidersHorizontal, Trash2 } from "lucide-react";
 import { Link, NavLink } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -81,6 +81,10 @@ export function Sidebar({
           <span>{t("common:connected")}</span>
         </div>
       </Link>
+
+      <div className="mb-5 border-b border-border/80 pb-4">
+        <NavItem icon={<FolderOpen size={16} />} label={t("sidebar:projects")} to="/projects" />
+      </div>
 
       <div className="mb-3 flex items-end justify-between gap-3">
         <div>

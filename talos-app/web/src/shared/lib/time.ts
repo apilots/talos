@@ -27,5 +27,16 @@ export function formatRelativeTime(timestamp?: number | null) {
     return `${diffHours}h ago`;
   }
   const diffDays = Math.round(diffHours / 24);
-  return `${diffDays}d ago`;
+  if (diffDays < 30) {
+    return `${diffDays}d ago`;
+  }
+  const diffMonths = Math.round(diffDays / 30);
+  if (diffMonths < 12) {
+    return `${diffMonths}mo ago`;
+  }
+  const diffYears = Math.round(diffMonths / 12);
+  if (diffYears <= 1) {
+    return "1y ago";
+  }
+  return `${diffYears}y ago`;
 }

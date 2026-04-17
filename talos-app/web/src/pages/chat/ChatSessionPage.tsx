@@ -14,6 +14,7 @@ import {
 import { useAppStore } from "@/shared/store/app-store";
 import { getSessionModel, UNBOUND_PROJECT_ID } from "@/shared/types/domain";
 import { MessageList } from "@/widgets/message-list/MessageList";
+import { ChatContextBar } from "@/widgets/chat-context-bar/ChatContextBar";
 import { Panel } from "@/shared/ui/Panel";
 import { Button } from "@/shared/ui/Button";
 
@@ -80,6 +81,12 @@ export function ChatSessionPage() {
     }
     return session.project_id ?? UNBOUND_PROJECT_ID;
   }, [activeProjectId, projects, session]);
+  const boundProject = useMemo(() => {
+    if (!session?.project_id) {
+      return undefined;
+    }
+    return projects.find((entry) => entry.id === session.project_id);
+  }, [projects, session?.project_id]);
   useEffect(() => {
     const initialPrompt = locationState?.initialPrompt?.trim();
     if (!session || !initialPrompt || initialPromptHandledRef.current) {
@@ -148,6 +155,18 @@ export function ChatSessionPage() {
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
+      <ChatContextBar
+        loading={!session}
+        onProjectClick={
+          boundProject
+            ? () => {
+                navigate(`/projects/${boundProject.id}`);
+              }
+            : undefined
+        }
+        projectName={boundProject?.name}
+        sessionTitle={session?.title}
+      />
       <div
         className="min-h-0 flex-1 overflow-y-auto"
         onScroll={(event) => {

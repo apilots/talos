@@ -23,7 +23,7 @@ pub use talos_types::talos::{
 pub use talos_types::{
     DocUpdateRequest, ExpectedFileVersion, MemoryFileDetail, MemoryFileSummary, ModelInfo,
     OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, ProjectPatch, ProjectRecord,
-    SessionAgentConf, SessionConf, TalosSession, WorkspaceDocDetail, WorkspaceDocKind,
+    SessionAgentConf, SessionConf, SessionQuery, TalosSession, WorkspaceDocDetail, WorkspaceDocKind,
     WorkspaceDocSummary,
 };
 
@@ -210,9 +210,23 @@ impl TalosClient {
     }
 
     pub async fn list_sessions(&self) -> TalosResult<Vec<TalosSession>> {
+        self.list_sessions_with_query(&SessionQuery::default()).await
+    }
+
+    pub async fn list_sessions_by_project(&self, project_id: &str) -> TalosResult<Vec<TalosSession>> {
+        self.list_sessions_with_query(&SessionQuery {
+            user_id: None,
+            channel_id: None,
+            provider: None,
+            project_id: Some(project_id.to_string()),
+        })
+        .await
+    }
+
+    pub async fn list_sessions_with_query(&self, query: &SessionQuery) -> TalosResult<Vec<TalosSession>> {
         let url = format!("{}/v1/sessions", self.config.gateway_url);
         let response = self
-            .authorized(self.http_client.get(&url))
+            .authorized(self.http_client.get(&url).query(query))
             .send()
             .await
             .map_err(|e| Self::request_error("GET", &url, e))?;

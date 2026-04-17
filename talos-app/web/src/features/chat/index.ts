@@ -7,6 +7,7 @@ export {
   getSession,
   getSessionTurns,
   listModels,
+  listSessionsByProject,
   listSessions,
   sendMessage,
   sendMessageStream,

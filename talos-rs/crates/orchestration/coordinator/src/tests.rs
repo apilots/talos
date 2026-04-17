@@ -390,6 +390,7 @@ impl talos_session_store::SessionStore for TitleTestSessionStore {
             directory: directory.clone(),
             created_at: 0,
             updated_at: 0,
+            session_count: 0,
         })
     }
 

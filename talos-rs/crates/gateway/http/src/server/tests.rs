@@ -447,6 +447,7 @@ impl SessionService for MockSessionService {
             directory,
             created_at: 0,
             updated_at: 0,
+            session_count: 0,
         })
     }
 

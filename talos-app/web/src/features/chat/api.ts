@@ -34,12 +34,18 @@ function mapProjectRecord(project: ApiProjectRecord): ProjectRecord {
     createdAt: project.created_at,
     updatedAt: project.updated_at,
     origin: "server",
+    sessionCount: project.session_count,
   };
 }
 
 function deriveProjectName(directory: string) {
   const normalized = directory.trim().replace(/\/+$/, "");
   return normalized.split("/").filter(Boolean).at(-1) || "project";
+}
+
+interface CreateProjectInput {
+  name?: string;
+  directory: string;
 }
 
 export async function listModels() {
@@ -53,6 +59,10 @@ export async function listProjects() {
 
 export async function listSessions() {
   return getTalosClient().sessions.list();
+}
+
+export async function listSessionsByProject(projectId: string) {
+  return getTalosClient().sessions.list({ project_id: projectId });
 }
 
 export async function getSession(sessionId: string) {
@@ -71,9 +81,11 @@ export async function createSession(userId: string, model: string | undefined, p
   });
 }
 
-export async function createProject(directory: string) {
+export async function createProject(input: string | CreateProjectInput) {
+  const directory = typeof input === "string" ? input : input.directory;
+  const name = typeof input === "string" ? deriveProjectName(directory) : input.name?.trim() || deriveProjectName(directory);
   const record = await getTalosClient().projects.create({
-    name: deriveProjectName(directory),
+    name,
     directory,
   });
   return mapProjectRecord(record);

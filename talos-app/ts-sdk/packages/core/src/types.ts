@@ -336,6 +336,7 @@ export interface SessionQuery {
   user_id?: string;
   channel_id?: string;
   provider?: string;
+  project_id?: string;
 }
 
 export interface SessionAgentConf {
@@ -366,6 +367,7 @@ export interface ProjectRecord {
   directory: string;
   created_at: number;
   updated_at: number;
+  session_count: number;
 }
 
 export interface ProjectPatch {
