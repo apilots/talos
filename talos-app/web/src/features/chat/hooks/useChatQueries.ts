@@ -13,7 +13,7 @@ import {
   listSessions,
   updateSessionModel,
   updateSessionProject,
-} from "@/features/chat/api";
+} from "../api";
 import { useAppStore } from "@/shared/store/app-store";
 import { getEffectiveSessionStatus, inferProjectsFromSessions } from "@/shared/types/domain";
 

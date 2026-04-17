@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 
-import { sendMessageStream } from "@/features/chat/api";
-import { applyStreamEvent } from "@/features/chat/store";
+import { sendMessageStream } from "../api";
+import { applyStreamEvent } from "../stream-events";
 
 export function useSessionMessageStream(sessionId: string) {
   const abortRef = useRef<AbortController | null>(null);
@@ -17,6 +17,7 @@ export function useSessionMessageStream(sessionId: string) {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
+
       try {
         await sendMessageStream(
           sessionId,

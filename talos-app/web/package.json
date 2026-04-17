@@ -9,21 +9,22 @@
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint src --ext .ts,.tsx",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check": "pnpm lint && pnpm test && pnpm build"
   },
   "dependencies": {
     "@talos/sdk": "workspace:*",
     "@tanstack/react-query": "^5.76.1",
     "clsx": "^2.1.1",
+    "i18next": "^26.0.5",
     "lucide-react": "^0.511.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-i18next": "^17.0.3",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.5.3",
     "rehype-highlight": "^7.0.2",
-    "rehype-pretty-code": "^0.14.3",
     "remark-gfm": "^4.0.1",
-    "shiki": "^4.0.2",
     "tailwind-merge": "^3.3.0",
     "zustand": "^5.0.4"
   },

@@ -1,20 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { FolderPlus } from "lucide-react";
 
-import { useCreateSessionMutation, useModelsQuery } from "@/features/chat/hooks/useChatQueries";
-import { ChatComposer } from "@/features/chat/components/ChatComposer";
+import { ChatComposer, useCreateSessionMutation, useModelsQuery } from "@/features/chat";
 import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
 import { useAppStore } from "@/shared/store/app-store";
 import {
   describeProjectRoot,
   getApprovalModeLabel,
-  type ProjectRecord,
-  type ProjectRoot,
+  getProjectRecordKey,
 } from "@/shared/types/domain";
+import type { ProjectRecord, ProjectRoot } from "@/shared/types/ui";
 
 export function ChatHomePage() {
+  const { t } = useTranslation(["chat", "common"]);
   const navigate = useNavigate();
   const { data: models } = useModelsQuery();
   const createSession = useCreateSessionMutation();
@@ -71,9 +72,9 @@ export function ChatHomePage() {
       </div>
       <div className="relative mx-auto my-auto w-full max-w-[820px]">
         <div className="mb-4 text-center">
-          <div className="text-[11px] uppercase tracking-[0.22em] text-brand/80">New thread</div>
+          <div className="text-[11px] uppercase tracking-[0.22em] text-brand/80">{t("chat:newThread")}</div>
           <h1 className="mt-3 font-display text-[29px] font-semibold tracking-[-0.05em] text-ink">
-            Start with one clear prompt
+            {t("chat:startPromptTitle")}
           </h1>
           <div className="mt-3 flex items-center justify-center gap-2 text-xs text-muted">
             <span className="rounded-full border border-border/70 bg-card/80 px-3 py-1 text-ink">
@@ -94,8 +95,8 @@ export function ChatHomePage() {
             >
               {projects.map((project) => (
                 <option key={project.id} value={project.id}>
-                  {project.name === "Default workspace"
-                    ? project.name
+                  {getProjectRecordKey(project.root) === "workspace-default"
+                    ? t("common:defaultWorkspace")
                     : `${project.name} · ${describeProjectRoot(project.root)}`}
                 </option>
               ))}
@@ -122,7 +123,7 @@ export function ChatHomePage() {
               variant="secondary"
             >
               <FolderPlus size={16} />
-              Add path
+              {t("chat:addPath")}
             </Button>
           </div>
         </div>
@@ -151,7 +152,7 @@ export function ChatHomePage() {
             showProjectSelector={false}
           />
           <div className="pl-2 text-[10px] text-muted">
-            First session uses {getApprovalModeLabel(connection.defaultApprovalMode)}.
+            {t("chat:firstSessionUses", { mode: getApprovalModeLabel(connection.defaultApprovalMode) })}
           </div>
         </div>
       </div>

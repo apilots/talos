@@ -1,108 +1,278 @@
-import type { TalosEvent, TalosEventPayload } from "@talos/sdk";
+import type { ApprovalMode, PendingApproval, SessionUiStatus, StreamSessionState } from "@/shared/types/ui";
 
-import { useAppStore } from "@/shared/store/app-store";
-import { outputContentToText } from "@/shared/types/domain";
-
-function resolvePayloadType(payload: TalosEvent["payload"]): TalosEventPayload["type"] {
-  return payload.type;
+export interface ChatSlice {
+  sessionAliases: Record<string, string>;
+  sessionApprovalModes: Record<string, ApprovalMode>;
+  transientStatuses: Record<string, SessionUiStatus>;
+  streams: Record<string, StreamSessionState>;
+  renameSessionLocal: (sessionId: string, title: string) => void;
+  deleteSessionAlias: (sessionId: string) => void;
+  setSessionApprovalMode: (sessionId: string, mode: ApprovalMode) => void;
+  setSessionStatus: (sessionId: string, status: SessionUiStatus | undefined) => void;
+  resetStream: (sessionId: string) => void;
+  appendStreamText: (
+    sessionId: string,
+    kind: "assistant" | "thinking" | "system",
+    chunk: string,
+  ) => void;
+  appendStreamUserInput: (sessionId: string, text: string) => void;
+  upsertStreamTool: (
+    sessionId: string,
+    callId: string,
+    payload: Partial<StreamSessionState["blocks"][number]> & {
+      toolName?: string;
+      arguments?: unknown;
+      status?: SessionUiStatus | "queued";
+      prompt?: string;
+    },
+  ) => void;
+  appendToolProgress: (
+    sessionId: string,
+    callId: string,
+    message: string,
+    kind: "status" | "stdout" | "stderr",
+  ) => void;
+  completeStreamTool: (
+    sessionId: string,
+    callId: string,
+    output: string,
+    status: "done" | "error",
+    timingMs?: number | null,
+  ) => void;
+  setPendingApproval: (sessionId: string, approval?: PendingApproval) => void;
+  setStreamError: (sessionId: string, error?: string) => void;
+  setStreamMeta: (
+    sessionId: string,
+    meta: Partial<
+      Pick<
+        StreamSessionState,
+        "isStreaming" | "activeMessageId" | "lastSequence" | "connectionState" | "expectedMessageCount"
+      >
+    >,
+  ) => void;
 }
 
-export function applyStreamEvent(sessionId: string, event: TalosEvent) {
-  const state = useAppStore.getState();
-  const stream = state.streams[sessionId];
+export type ChatSliceSetter = (updater: (state: ChatSlice) => Partial<ChatSlice>) => void;
 
-  if (stream?.lastSequence !== undefined && event.sequence < stream.lastSequence) {
-    return;
-  }
+function ensureStreamState(state: Pick<ChatSlice, "streams">, sessionId: string): StreamSessionState {
+  return (
+    state.streams[sessionId] ?? {
+      isStreaming: false,
+      connectionState: "idle",
+      blocks: [],
+    }
+  );
+}
 
-  state.setStreamMeta(sessionId, {
-    lastSequence: event.sequence,
-    activeMessageId: event.message_id,
-    isStreaming: true,
-    connectionState: "streaming",
-  });
-
-  const payloadType = resolvePayloadType(event.payload);
-  switch (payloadType) {
-    case "message_started":
-      state.setSessionStatus(sessionId, "running");
-      return;
-    case "message_reasoning_delta":
-      state.appendStreamText(sessionId, "thinking", String(event.payload.delta ?? ""));
-      return;
-    case "message_execution_summary":
-      state.appendStreamText(sessionId, "system", String(event.payload.text ?? ""));
-      return;
-    case "message_output_delta":
-      state.appendStreamText(sessionId, "assistant", String(event.payload.delta ?? ""));
-      return;
-    case "message_tool_call_started":
-      state.upsertStreamTool(sessionId, String(event.payload.call_id), {
-        toolName: String(event.payload.name),
-        arguments: event.payload.arguments,
-        status: "queued",
-      });
-      return;
-    case "message_tool_call_queued":
-      state.upsertStreamTool(sessionId, String(event.payload.call_id), {
-        toolName: String(event.payload.tool_name),
-        status: "queued",
-      });
-      return;
-    case "message_tool_call_executing":
-      state.upsertStreamTool(sessionId, String(event.payload.call_id), {
-        toolName: String(event.payload.tool_name),
-        status: "running",
-      });
-      state.setSessionStatus(sessionId, "running");
-      return;
-    case "message_tool_call_progress_delta":
-      state.appendToolProgress(
-        sessionId,
-        String(event.payload.call_id),
-        String(event.payload.message),
-        event.payload.progress_kind as "status" | "stdout" | "stderr",
-      );
-      return;
-    case "message_tool_call_pending_approval":
-      state.upsertStreamTool(sessionId, String(event.payload.call_id), {
-        toolName: String(event.payload.tool_name),
-        arguments: event.payload.arguments,
-        prompt: String(event.payload.prompt),
-        status: "waiting_approval",
-      });
-      state.setPendingApproval(sessionId, {
-        callId: String(event.payload.call_id),
-        toolName: String(event.payload.tool_name),
-        prompt: String(event.payload.prompt),
-        arguments: event.payload.arguments,
-      });
-      state.setSessionStatus(sessionId, "waiting_approval");
-      return;
-    case "message_tool_call_completed":
-      state.completeStreamTool(
-        sessionId,
-        String(event.payload.call_id),
-        outputContentToText((event.payload.content ?? []) as never[]),
-        event.payload.is_error ? "error" : "done",
-        Number(event.payload.timing_ms ?? 0),
-      );
-      return;
-    case "message_completed":
-      state.setPendingApproval(sessionId, undefined);
-      state.setSessionStatus(sessionId, undefined);
-      state.setStreamMeta(sessionId, {
-        isStreaming: false,
-        connectionState: "idle",
-        expectedMessageCount: undefined,
-      });
-      return;
-    case "message_error":
-      state.setPendingApproval(sessionId, undefined);
-      state.setSessionStatus(sessionId, "error");
-      state.setStreamError(sessionId, String(event.payload.error ?? "Unknown stream error."));
-      return;
-    case "message_tool_call_args_delta":
-      return;
-  }
+export function createChatSlice(set: ChatSliceSetter): ChatSlice {
+  return {
+    sessionAliases: {},
+    sessionApprovalModes: {},
+    transientStatuses: {},
+    streams: {},
+    renameSessionLocal: (sessionId, title) =>
+      set((state) => ({
+        sessionAliases: {
+          ...state.sessionAliases,
+          [sessionId]: title,
+        },
+      })),
+    deleteSessionAlias: (sessionId) =>
+      set((state) => {
+        const aliases = { ...state.sessionAliases };
+        delete aliases[sessionId];
+        return { sessionAliases: aliases };
+      }),
+    setSessionApprovalMode: (sessionId, mode) =>
+      set((state) => ({
+        sessionApprovalModes: {
+          ...state.sessionApprovalModes,
+          [sessionId]: mode,
+        },
+      })),
+    setSessionStatus: (sessionId, status) =>
+      set((state) => {
+        const next = { ...state.transientStatuses };
+        if (!status) {
+          delete next[sessionId];
+        } else {
+          next[sessionId] = status;
+        }
+        return { transientStatuses: next };
+      }),
+    resetStream: (sessionId) =>
+      set((state) => ({
+        streams: {
+          ...state.streams,
+          [sessionId]: { isStreaming: false, connectionState: "idle", blocks: [] },
+        },
+      })),
+    appendStreamText: (sessionId, kind, chunk) =>
+      set((state) => {
+        const stream = ensureStreamState(state, sessionId);
+        const blocks = [...stream.blocks];
+        const lastBlock = blocks.at(-1);
+        if (
+          lastBlock &&
+          (lastBlock.kind === "assistant" ||
+            lastBlock.kind === "thinking" ||
+            lastBlock.kind === "system") &&
+          lastBlock.kind === kind
+        ) {
+          lastBlock.text += chunk;
+        } else {
+          blocks.push({
+            id: `${kind}-${Date.now()}-${blocks.length}`,
+            kind,
+            text: chunk,
+            live: true,
+          });
+        }
+        return {
+          streams: {
+            ...state.streams,
+            [sessionId]: { ...stream, isStreaming: true, blocks },
+          },
+        };
+      }),
+    appendStreamUserInput: (sessionId, text) =>
+      set((state) => {
+        const stream = ensureStreamState(state, sessionId);
+        const blocks = [
+          ...stream.blocks,
+          {
+            id: `user-${Date.now()}-${stream.blocks.length}`,
+            kind: "user" as const,
+            text,
+            live: true,
+          },
+        ];
+        return {
+          streams: {
+            ...state.streams,
+            [sessionId]: { ...stream, isStreaming: true, blocks },
+          },
+        };
+      }),
+    upsertStreamTool: (sessionId, callId, payload) =>
+      set((state) => {
+        const stream = ensureStreamState(state, sessionId);
+        const blocks = [...stream.blocks];
+        const index = blocks.findIndex(
+          (block) => block.kind === "tool" && block.callId === callId,
+        );
+        if (index >= 0) {
+          const current = blocks[index];
+          if (current.kind === "tool") {
+            blocks[index] = {
+              ...current,
+              toolName: payload.toolName ?? current.toolName,
+              arguments: payload.arguments ?? current.arguments,
+              status: (payload.status as typeof current.status | undefined) ?? current.status,
+              prompt: payload.prompt ?? current.prompt,
+              live: true,
+            };
+          }
+        } else {
+          blocks.push({
+            id: `tool-${callId}`,
+            kind: "tool",
+            callId,
+            toolName: payload.toolName ?? "tool",
+            arguments: payload.arguments ?? null,
+            status:
+              (payload.status as
+                | "queued"
+                | "running"
+                | "waiting_approval"
+                | "done"
+                | "error"
+                | undefined) ?? "queued",
+            progress: [],
+            prompt: payload.prompt,
+            live: true,
+          });
+        }
+        return {
+          streams: {
+            ...state.streams,
+            [sessionId]: { ...stream, isStreaming: true, blocks },
+          },
+        };
+      }),
+    appendToolProgress: (sessionId, callId, message, kind) =>
+      set((state) => {
+        const stream = ensureStreamState(state, sessionId);
+        const blocks = stream.blocks.map((block) => {
+          if (block.kind !== "tool" || block.callId !== callId) {
+            return block;
+          }
+          return {
+            ...block,
+            progress: [...block.progress, { kind, message }],
+            live: true,
+          };
+        });
+        return {
+          streams: {
+            ...state.streams,
+            [sessionId]: { ...stream, blocks },
+          },
+        };
+      }),
+    completeStreamTool: (sessionId, callId, output, status, timingMs) =>
+      set((state) => {
+        const stream = ensureStreamState(state, sessionId);
+        const blocks = stream.blocks.map((block) => {
+          if (block.kind !== "tool" || block.callId !== callId) {
+            return block;
+          }
+          return {
+            ...block,
+            output,
+            status,
+            timingMs,
+            live: true,
+          };
+        });
+        return {
+          streams: {
+            ...state.streams,
+            [sessionId]: { ...stream, blocks },
+          },
+        };
+      }),
+    setPendingApproval: (sessionId, pendingApproval) =>
+      set((state) => {
+        const stream = ensureStreamState(state, sessionId);
+        return {
+          streams: {
+            ...state.streams,
+            [sessionId]: { ...stream, pendingApproval },
+          },
+        };
+      }),
+    setStreamError: (sessionId, error) =>
+      set((state) => {
+        const stream = ensureStreamState(state, sessionId);
+        return {
+          streams: {
+            ...state.streams,
+            [sessionId]: error
+              ? { ...stream, error, isStreaming: false, connectionState: "idle" }
+              : { ...stream, error: undefined },
+          },
+        };
+      }),
+    setStreamMeta: (sessionId, meta) =>
+      set((state) => {
+        const stream = ensureStreamState(state, sessionId);
+        return {
+          streams: {
+            ...state.streams,
+            [sessionId]: { ...stream, ...meta },
+          },
+        };
+      }),
+  };
 }

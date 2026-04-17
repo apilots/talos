@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { applyStreamEvent } from "@/features/chat/store";
+import { applyStreamEvent } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
 import {
   createDefaultProjects,

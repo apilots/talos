@@ -1,39 +1,11 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { FileCode2, FileImage, FileSpreadsheet, FileText, Grid2x2, List, Plus, Trash2, Upload } from "lucide-react";
 
-import { useAppStore } from "@/shared/store/app-store";
-import type { FileRecord } from "@/shared/types/domain";
+import { classifyFile, formatFileMeta, useFilesPage, type FileCategory } from "@/features/files";
 import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
 import { Panel } from "@/shared/ui/Panel";
-
-type FileView = "grid" | "list";
-type FileCategory = "all" | "document" | "code" | "image" | "data";
-
-function getFileExtension(path: string) {
-  return path.split(".").at(-1)?.toLowerCase() ?? "";
-}
-
-function classifyFile(item: FileRecord): FileCategory {
-  const ext = getFileExtension(item.path);
-  if (["rs", "ts", "tsx", "py", "js", "jsx", "yaml", "yml"].includes(ext)) {
-    return "code";
-  }
-  if (["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(ext)) {
-    return "image";
-  }
-  if (["csv", "json"].includes(ext)) {
-    return "data";
-  }
-  return "document";
-}
-
-function formatFileMeta(updatedAt: number) {
-  return new Intl.DateTimeFormat("en", {
-    month: "short",
-    day: "2-digit",
-  }).format(updatedAt);
-}
 
 function iconForFile(category: FileCategory) {
   switch (category) {
@@ -48,70 +20,32 @@ function iconForFile(category: FileCategory) {
   }
 }
 
-const categoryLabels: Record<FileCategory, string> = {
-  all: "All",
-  document: "Documents",
-  code: "Code",
-  image: "Images",
-  data: "Data",
-};
-
 export function FilesPage() {
-  const items = useAppStore((state) => state.fileItems);
-  const upsertFile = useAppStore((state) => state.upsertFile);
-  const removeFile = useAppStore((state) => state.removeFile);
-  const [query, setQuery] = useState("");
-  const [view, setView] = useState<FileView>("grid");
-  const [category, setCategory] = useState<FileCategory>("all");
-
-  const categorized = useMemo(() => {
-    const counts: Record<FileCategory, number> = {
-      all: items.length,
-      document: 0,
-      code: 0,
-      image: 0,
-      data: 0,
-    };
-    items.forEach((item) => {
-      counts[classifyFile(item)] += 1;
-    });
-    return counts;
-  }, [items]);
-
-  const filteredItems = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    return items.filter((item) => {
-      const matchQuery =
-        !normalized ||
-        [item.label, item.path, item.summary].some((value) => value.toLowerCase().includes(normalized));
-      const matchCategory = category === "all" || classifyFile(item) === category;
-      return matchQuery && matchCategory;
-    });
-  }, [category, items, query]);
-
-  function addFile() {
-    const id = `file-${Date.now()}`;
-    upsertFile({
-      id,
-      label: `reference-${items.length + 1}.md`,
-      path: `notes/reference-${items.length + 1}.md`,
-      summary: "Placeholder record for the Web UI until the upload API is wired.",
-      updatedAt: Date.now(),
-    });
-  }
+  const { t } = useTranslation(["files", "common"]);
+  const { query, setQuery, view, setView, category, setCategory, categorized, filteredItems, addFile, removeFile } =
+    useFilesPage();
+  const categoryLabels = useMemo<Record<FileCategory, string>>(
+    () => ({
+      all: t("files:categories.all"),
+      document: t("files:categories.document"),
+      code: t("files:categories.code"),
+      image: t("files:categories.image"),
+      data: t("files:categories.data"),
+    }),
+    [t],
+  );
 
   return (
     <div className="mx-auto flex h-full w-full max-w-[1120px] flex-col gap-5 overflow-y-auto px-8 py-7">
       <Panel className="rounded-[1.45rem] border-border/80 bg-card/88 p-5 backdrop-blur">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <div className="text-xs uppercase tracking-[0.22em] text-muted">Files</div>
+            <div className="text-xs uppercase tracking-[0.22em] text-muted">{t("files:pageLabel")}</div>
             <h1 className="mt-2 font-display text-[28px] tracking-[-0.05em] text-ink">
-              Reference uploaded material in chat with @
+              {t("files:title")}
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-muted">
-              Keep working documents, code snippets, and notes close at hand so the composer can reference
-              them instantly.
+              {t("files:detail")}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -131,7 +65,7 @@ export function FilesPage() {
             </button>
             <Button onClick={addFile} variant="secondary">
               <Plus size={16} />
-              Upload
+              {t("files:upload")}
             </Button>
           </div>
         </div>
@@ -142,7 +76,7 @@ export function FilesPage() {
           <Input
             className="max-w-md"
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search files..."
+            placeholder={t("files:searchPlaceholder")}
             value={query}
           />
           <div className="flex flex-wrap items-center gap-2">
@@ -170,11 +104,8 @@ export function FilesPage() {
           <div className="mx-auto flex size-14 items-center justify-center rounded-3xl border border-border bg-background/55 text-brand">
             <Upload size={22} />
           </div>
-          <h2 className="mt-5 font-display text-2xl tracking-[-0.04em] text-ink">No files yet</h2>
-          <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-muted">
-            Drop source files, PDFs, or notes here. Once uploaded, mention them directly in chat with
-            the <span className="text-ink">@</span> trigger.
-          </p>
+          <h2 className="mt-5 font-display text-2xl tracking-[-0.04em] text-ink">{t("files:noFilesTitle")}</h2>
+          <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-muted">{t("files:noFilesDetail")}</p>
         </Panel>
       ) : view === "grid" ? (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -212,10 +143,10 @@ export function FilesPage() {
       ) : (
         <Panel className="overflow-hidden rounded-[1.4rem] border-border/80 bg-card/82">
           <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1.4fr)_140px_120px] gap-4 border-b border-border/80 px-5 py-3 text-[11px] uppercase tracking-[0.18em] text-muted">
-            <div>Name</div>
-            <div>Path</div>
-            <div>Type</div>
-            <div className="text-right">Actions</div>
+            <div>{t("files:table.name")}</div>
+            <div>{t("files:table.path")}</div>
+            <div>{t("files:table.type")}</div>
+            <div className="text-right">{t("files:table.actions")}</div>
           </div>
           {filteredItems.map((item) => {
             const fileCategory = classifyFile(item);
@@ -231,7 +162,7 @@ export function FilesPage() {
                 <div className="truncate font-mono text-xs text-muted">{item.path}</div>
                 <div className="text-sm text-muted">{categoryLabels[fileCategory]}</div>
                 <div className="flex items-center justify-end gap-2">
-                  <span className="text-xs text-muted">@ ready</span>
+                  <span className="text-xs text-muted">{t("files:ready")}</span>
                   <button
                     className="rounded-xl p-2 text-muted transition hover:bg-danger/10 hover:text-danger"
                     onClick={() => removeFile(item.id)}
@@ -247,7 +178,7 @@ export function FilesPage() {
       )}
 
       <Panel className="rounded-[1.4rem] border-border/80 border-dashed bg-card/60 p-8 text-center">
-        <div className="text-sm text-muted">Drag files here, or use the upload button to add a new reference.</div>
+        <div className="text-sm text-muted">{t("files:dragHint")}</div>
       </Panel>
     </div>
   );

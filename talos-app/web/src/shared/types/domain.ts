@@ -1,115 +1,16 @@
+import { i18n } from "@/shared/i18n/setup";
+import type { TalosContentItem, TalosMessageResponse, TalosOutputItem, TalosSession } from "./protocol";
 import type {
-  TalosContentItem,
-  TalosMessageResponse,
-  TalosOutputItem,
-  TalosSession,
-  TalosToolProgressKind,
-} from "@talos/sdk";
-
-export type RuntimeMode = "cloud" | "local";
-export type ApprovalMode = "needs_approval" | "skip";
-export type ThreadFilter = "all" | "running" | "waiting_approval" | "done" | "error";
-export type SessionUiStatus = "running" | "waiting_approval" | "done" | "error";
-
-export type ProjectRoot =
-  | { type: "managed_workspace"; name: string }
-  | { type: "server_visible_path"; path: string }
-  | { type: "desktop_local_path"; path: string };
-
-export interface ProjectRecord {
-  id: string;
-  name: string;
-  root: ProjectRoot;
-  createdAt: number;
-  lastUsedAt: number;
-  origin?: "default" | "inferred" | "manual";
-  sessionCount?: number;
-}
-
-export interface MemoryRecord {
-  id: string;
-  title: string;
-  detail: string;
-  tags: string[];
-  updatedAt: number;
-}
-
-export interface FileRecord {
-  id: string;
-  label: string;
-  path: string;
-  summary: string;
-  updatedAt: number;
-}
-
-export interface AdminMetric {
-  id: string;
-  label: string;
-  value: string;
-  trend: string;
-}
-
-export type ChatToolStatus =
-  | "queued"
-  | "running"
-  | "waiting_approval"
-  | "done"
-  | "error";
-
-export type StreamConnectionState =
-  | "idle"
-  | "awaiting"
-  | "streaming"
-  | "detached"
-  | "reconnecting"
-  | "cancelling";
-
-export type ChatRenderBlock =
-  | {
-      id: string;
-      kind: "user" | "assistant" | "thinking" | "system";
-      text: string;
-      live?: boolean;
-    }
-  | {
-      id: string;
-      kind: "status";
-      variant: "thinking" | "reconnecting" | "cancelling";
-      title: string;
-      detail: string;
-      live?: boolean;
-    }
-  | {
-      id: string;
-      kind: "tool";
-      callId: string;
-      toolName: string;
-      arguments: unknown;
-      status: ChatToolStatus;
-      output?: string;
-      progress: Array<{ kind: TalosToolProgressKind; message: string }>;
-      prompt?: string;
-      timingMs?: number | null;
-      live?: boolean;
-    };
-
-export interface PendingApproval {
-  callId: string;
-  toolName: string;
-  prompt: string;
-  arguments: unknown;
-}
-
-export interface StreamSessionState {
-  isStreaming: boolean;
-  connectionState?: StreamConnectionState;
-  lastSequence?: number;
-  activeMessageId?: string;
-  expectedMessageCount?: number;
-  blocks: ChatRenderBlock[];
-  pendingApproval?: PendingApproval;
-  error?: string;
-}
+  ApprovalMode,
+  ChatRenderBlock,
+  FileRecord,
+  InferredProjectsResult,
+  MemoryRecord,
+  ProjectRecord,
+  ProjectRoot,
+  SessionUiStatus,
+  StreamSessionState,
+} from "./ui";
 
 export function getEffectiveSessionStatus(
   transientStatus?: SessionUiStatus,
@@ -134,11 +35,6 @@ export function getEffectiveSessionStatus(
   }
 
   return "done";
-}
-
-export interface InferredProjectsResult {
-  projects: ProjectRecord[];
-  preferredProjectId: string;
 }
 
 function normalizeWorkspacePath(path?: string | null) {
@@ -176,7 +72,7 @@ export function createDefaultProjects(): ProjectRecord[] {
   return [
     {
       id: "workspace-default",
-      name: "Default workspace",
+      name: i18n.t("common:defaultWorkspace"),
       root: { type: "server_visible_path", path: __TALOS_DEFAULT_PROJECT_ROOT__ },
       createdAt: now,
       lastUsedAt: now,
@@ -210,20 +106,20 @@ export function getProjectRecordKey(root: ProjectRoot) {
 export function getProjectDisplayName(root: ProjectRoot) {
   const resolvedPath = normalizeWorkspacePath(resolveProjectRootPath(root));
   if (resolvedPath === __TALOS_DEFAULT_PROJECT_ROOT__) {
-    return "Default workspace";
+    return i18n.t("common:defaultWorkspace");
   }
 
   return resolvedPath.split("/").filter(Boolean).at(-1) || resolvedPath;
 }
 
 export function getApprovalModeLabel(mode: ApprovalMode) {
-  return mode === "skip" ? "Full Access" : "Default permissions";
+  return mode === "skip" ? i18n.t("chat:fullAccess") : i18n.t("chat:defaultPermissions");
 }
 
 export function getApprovalModeHint(mode: ApprovalMode) {
   return mode === "skip"
-    ? "Allow safe tools without per-call confirmation."
-    : "Require approval before sensitive tool execution.";
+    ? i18n.t("settings:fields.skipHint")
+    : i18n.t("settings:fields.needsApprovalHint");
 }
 
 export function inferProjectsFromSessions(sessions: TalosSession[]): InferredProjectsResult {

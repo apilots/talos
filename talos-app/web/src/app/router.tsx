@@ -1,7 +1,8 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import { createBrowserRouter } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 
-import { AppLayout } from "@/widgets/app-layout/AppLayout";
+import { AppLayout } from "@/app/layouts/AppLayout";
 
 const ChatHomePage = lazy(() =>
   import("@/pages/chat/ChatHomePage").then((module) => ({ default: module.ChatHomePage })),
@@ -23,7 +24,12 @@ const AdminPage = lazy(() =>
 );
 
 function withSuspense(element: ReactNode) {
-  return <Suspense fallback={<div className="p-8 text-sm text-muted">Loading…</div>}>{element}</Suspense>;
+  function LoadingFallback() {
+    const { t } = useTranslation("common");
+    return <div className="p-8 text-sm text-muted">{t("loading")}</div>;
+  }
+
+  return <Suspense fallback={<LoadingFallback />}>{element}</Suspense>;
 }
 
 export const router = createBrowserRouter([

@@ -182,32 +182,48 @@ select {
     @apply overflow-x-auto rounded-[1.05rem] border border-border px-4 py-3 shadow-none;
   }
 
-  .markdown-body :where([data-rehype-pretty-code-figure]) {
-    @apply my-5 overflow-hidden rounded-[1.05rem] border border-border bg-surface/90;
-  }
-
-  .markdown-body :where([data-rehype-pretty-code-title]) {
-    @apply border-b border-border bg-background/55 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted;
-  }
-
-  .markdown-body :where([data-rehype-pretty-code-figure] pre) {
-    @apply m-0 border-0 bg-transparent px-4 py-3.5;
-  }
-
-  .markdown-body :where([data-rehype-pretty-code-figure] code) {
-    @apply block font-mono text-[13px] leading-6;
-  }
-
-  .markdown-body :where([data-highlighted-line]) {
-    @apply -mx-4 border-l-2 border-brand/35 bg-brand/5 px-4;
-  }
-
-  .markdown-body :where([data-highlighted-chars]) {
-    @apply rounded-md bg-brand/10 px-1 py-0.5;
-  }
-
   .markdown-body :where(pre code) {
     @apply bg-transparent p-0 text-[13px] text-ink;
+  }
+
+  .markdown-body :where(pre code.hljs) {
+    display: block;
+    color: rgb(var(--color-ink) / 0.94);
+    background: transparent;
+  }
+
+  .markdown-body :where(.hljs-comment),
+  .markdown-body :where(.hljs-quote) {
+    color: rgb(var(--color-muted));
+  }
+
+  .markdown-body :where(.hljs-keyword),
+  .markdown-body :where(.hljs-selector-tag),
+  .markdown-body :where(.hljs-subst) {
+    color: rgb(var(--color-brand));
+  }
+
+  .markdown-body :where(.hljs-string),
+  .markdown-body :where(.hljs-title),
+  .markdown-body :where(.hljs-section),
+  .markdown-body :where(.hljs-attribute),
+  .markdown-body :where(.hljs-literal),
+  .markdown-body :where(.hljs-template-tag),
+  .markdown-body :where(.hljs-template-variable),
+  .markdown-body :where(.hljs-name),
+  .markdown-body :where(.hljs-selector-class),
+  .markdown-body :where(.hljs-selector-id),
+  .markdown-body :where(.hljs-type) {
+    color: rgb(var(--color-info));
+  }
+
+  .markdown-body :where(.hljs-number),
+  .markdown-body :where(.hljs-symbol),
+  .markdown-body :where(.hljs-bullet),
+  .markdown-body :where(.hljs-variable),
+  .markdown-body :where(.hljs-meta),
+  .markdown-body :where(.hljs-link) {
+    color: rgb(var(--color-warning));
   }
 
   .markdown-body :where(code):not(:where(pre code)) {

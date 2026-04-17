@@ -1,14 +1,15 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
-import { useChatSession } from "@/features/chat/hooks/useChatSession";
 import {
+  ChatComposer,
+  useChatSession,
   useModelsQuery,
   useSessionQuery,
   useUpdateSessionModelMutation,
   useUpdateSessionProjectMutation,
-} from "@/features/chat/hooks/useChatQueries";
-import { ChatComposer } from "@/features/chat/components/ChatComposer";
+} from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
 import { getSessionModel, resolveProjectRootPath } from "@/shared/types/domain";
 import { MessageList } from "@/widgets/message-list/MessageList";
@@ -20,6 +21,7 @@ interface SessionLocationState {
 }
 
 export function ChatSessionPage() {
+  const { t } = useTranslation(["chat"]);
   const params = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -163,34 +165,26 @@ export function ChatSessionPage() {
           <MessageList
             actions={
               <>
-                <Button onClick={() => navigate("/files")} variant="secondary">
-                  Open Files
-                </Button>
-                <Button onClick={() => navigate("/memory")} variant="secondary">
-                  Open Memory
-                </Button>
-                <Button onClick={() => navigate("/settings")} variant="secondary">
-                  Open Settings
-                </Button>
+                <Button onClick={() => navigate("/files")} variant="secondary">{t("chat:openFiles")}</Button>
+                <Button onClick={() => navigate("/memory")} variant="secondary">{t("chat:openMemory")}</Button>
+                <Button onClick={() => navigate("/settings")} variant="secondary">{t("chat:openSettings")}</Button>
               </>
             }
             blocks={blocks}
-            emptyDetail="Ask Talos to inspect code, run tools, or summarize context. The Web UI follows the same shared API path as the TUI."
-            emptyTitle="This thread is ready."
+            emptyDetail={t("chat:emptyReadyDetail")}
+            emptyTitle={t("chat:emptyReadyTitle")}
           />
           {pendingApproval ? (
             <Panel className="rounded-[1.5rem] border-warning/30 bg-warning/5 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <div className="text-xs uppercase tracking-[0.16em] text-warning">Approval required</div>
+                  <div className="text-xs uppercase tracking-[0.16em] text-warning">{t("chat:approvalRequired")}</div>
                   <div className="mt-2 text-base font-medium">{pendingApproval.toolName}</div>
                   <p className="mt-2 text-sm text-muted">{pendingApproval.prompt}</p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <Button onClick={() => void submitApproval(false)} variant="danger">
-                    Reject
-                  </Button>
-                  <Button onClick={() => void submitApproval(true)}>Approve</Button>
+                  <Button onClick={() => void submitApproval(false)} variant="danger">{t("common:reject")}</Button>
+                  <Button onClick={() => void submitApproval(true)}>{t("common:approve")}</Button>
                 </div>
               </div>
             </Panel>
@@ -205,17 +199,17 @@ export function ChatSessionPage() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <div className="text-xs uppercase tracking-[0.16em] text-brand">
-                    {streamConnectionState === "reconnecting" ? "Reconnecting" : "Connection lost"}
+                    {streamConnectionState === "reconnecting" ? t("chat:reconnecting") : t("chat:connectionLost")}
                   </div>
                   <div className="mt-2 text-base font-medium text-ink">
                     {streamConnectionState === "reconnecting"
-                      ? "Refreshing session history…"
-                      : "Live response was interrupted"}
+                      ? t("chat:refreshingSessionHistory")
+                      : t("chat:liveResponseInterrupted")}
                   </div>
                   <p className="mt-2 max-w-2xl text-sm text-muted">
                     {streamConnectionState === "reconnecting"
-                      ? "Checking whether the server has already finished the current reply."
-                      : "The server may still be generating a reply. Retry to refresh the latest turn or stop the active response."}
+                      ? t("chat:refreshingDetail")
+                      : t("chat:interruptedDetail")}
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -224,11 +218,9 @@ export function ChatSessionPage() {
                     onClick={() => void retryStream()}
                     variant="secondary"
                   >
-                    Retry now
+                    {t("common:retryNow")}
                   </Button>
-                  <Button disabled={isCancelling} onClick={() => void stopResponse()} variant="danger">
-                    Stop response
-                  </Button>
+                  <Button disabled={isCancelling} onClick={() => void stopResponse()} variant="danger">{t("common:stopResponse")}</Button>
                 </div>
               </div>
             </Panel>

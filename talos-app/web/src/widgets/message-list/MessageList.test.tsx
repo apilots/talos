@@ -3,6 +3,7 @@
 import { render, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import "@/shared/i18n/setup";
 import { MessageList } from "@/widgets/message-list/MessageList";
 
 describe("MessageList", () => {

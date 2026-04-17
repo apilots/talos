@@ -1,16 +1,12 @@
 import { LoaderCircle, Paperclip, Send, Square } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { Button } from "@/shared/ui/Button";
 import { cn } from "@/shared/lib/cn";
 import { Panel } from "@/shared/ui/Panel";
 import { Textarea } from "@/shared/ui/Input";
-import {
-  describeProjectRoot,
-  getApprovalModeLabel,
-  type ApprovalMode,
-  type ProjectRecord,
-  type RuntimeMode,
-} from "@/shared/types/domain";
+import { describeProjectRoot, getProjectRecordKey } from "@/shared/types/domain";
+import type { ApprovalMode, ProjectRecord, RuntimeMode } from "@/shared/types/ui";
 
 interface ChatComposerProps {
   draft: string;
@@ -55,6 +51,7 @@ export function ChatComposer({
   showProjectSelector = true,
   compact = false,
 }: ChatComposerProps) {
+  const { t } = useTranslation(["chat", "common"]);
   const isBusy = Boolean(isStreaming || isCancelling);
 
   return (
@@ -79,8 +76,8 @@ export function ChatComposer({
           >
             {projects.map((project) => (
               <option key={project.id} value={project.id}>
-                {project.name === "Default workspace"
-                  ? project.name
+                {getProjectRecordKey(project.root) === "workspace-default"
+                  ? t("common:defaultWorkspace")
                   : `${project.name} · ${describeProjectRoot(project.root)}`}
               </option>
             ))}
@@ -100,16 +97,16 @@ export function ChatComposer({
             void onSend();
           }
         }}
-        placeholder="Ask Talos to analyze, change, or inspect your workspace."
+        placeholder={t("chat:askTalos")}
         value={draft}
       />
       <div className={cn("mt-2 flex flex-col border-t border-border/70 pt-2", compact ? "gap-1.5" : "gap-2")}>
         <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted">
           <span className="inline-flex items-center gap-2 rounded-full border border-border/80 bg-background/50 px-2.5 py-1.5">
             <Paperclip size={14} />
-            Attachments
+            {t("chat:attachments")}
           </span>
-          <span className="rounded-full border border-border/80 bg-background/50 px-2.5 py-1.5">@ Mention files</span>
+          <span className="rounded-full border border-border/80 bg-background/50 px-2.5 py-1.5">{t("chat:mentionFiles")}</span>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -119,9 +116,9 @@ export function ChatComposer({
               onChange={(event) => onRuntimeModeChange(event.target.value as RuntimeMode)}
               value={runtimeMode}
             >
-              <option value="cloud">Cloud</option>
+              <option value="cloud">{t("common:cloud")}</option>
               <option disabled value="local">
-                Local
+                {t("common:localDesktopOnly")}
               </option>
             </select>
             <select
@@ -130,8 +127,8 @@ export function ChatComposer({
               onChange={(event) => onApprovalModeChange(event.target.value as ApprovalMode)}
               value={approvalMode}
             >
-              <option value="needs_approval">{getApprovalModeLabel("needs_approval")}</option>
-              <option value="skip">{getApprovalModeLabel("skip")}</option>
+              <option value="needs_approval">{t("chat:defaultPermissions")}</option>
+              <option value="skip">{t("chat:fullAccess")}</option>
             </select>
           </div>
           <div className="ml-auto flex items-center gap-3">
@@ -154,7 +151,7 @@ export function ChatComposer({
               ) : (
                 <Send size={15} />
               )}
-              {isCancelling ? "Stopping..." : isBusy ? "Stop" : "Send"}
+              {isCancelling ? t("chat:stopping") : isBusy ? t("chat:stop") : t("chat:send")}
             </Button>
           </div>
         </div>

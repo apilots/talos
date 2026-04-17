@@ -10,7 +10,7 @@ import type {
 } from "@talos/sdk";
 
 import { getTalosClient } from "@/shared/api/client";
-import type { ProjectRecord } from "@/shared/types/domain";
+import type { ProjectRecord } from "@/shared/types/ui";
 import { resolveProjectRootPath } from "@/shared/types/domain";
 
 function createContext(userId: string, project?: ProjectRecord): TalosContext {

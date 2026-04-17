@@ -1,0 +1,71 @@
+import { useMemo } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+
+import {
+  useCloseSessionMutation,
+  useCreateSessionMutation,
+  useModelsQuery,
+  useSessionsQuery,
+} from "../hooks/useChatQueries";
+import { useAppStore } from "@/shared/store/app-store";
+import { getEffectiveSessionStatus } from "@/shared/types/domain";
+import { Sidebar, type SidebarThreadItem } from "@/widgets/sidebar/Sidebar";
+
+export function SidebarContainer() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { data: models } = useModelsQuery();
+  const sessionsQuery = useSessionsQuery();
+  const createSession = useCreateSessionMutation();
+  const closeSession = useCloseSessionMutation();
+  const threadFilter = useAppStore((state) => state.threadFilter);
+  const setThreadFilter = useAppStore((state) => state.setThreadFilter);
+  const aliases = useAppStore((state) => state.sessionAliases);
+  const statuses = useAppStore((state) => state.transientStatuses);
+  const streams = useAppStore((state) => state.streams);
+
+  const threads = useMemo<SidebarThreadItem[]>(() => {
+    return (sessionsQuery.data ?? []).slice(0, 120).map((session) => {
+      const sessionId = session.context.session_id;
+      return {
+        id: sessionId,
+        label: aliases[sessionId] ?? session.title,
+        status: getEffectiveSessionStatus(statuses[sessionId], streams[sessionId]),
+        model: session.config.llm?.model ?? session.config.agent?.model ?? "unknown",
+        lastActivityAt: session.state.last_activity,
+        createdAt: session.state.created_at,
+      };
+    });
+  }, [aliases, sessionsQuery.data, statuses, streams]);
+
+  return (
+    <Sidebar
+      currentPath={location.pathname}
+      isHomePage={location.pathname === "/"}
+      onCloseThread={async (sessionId) => {
+        await closeSession.mutateAsync(sessionId);
+        if (location.pathname === `/sessions/${sessionId}`) {
+          navigate("/");
+        }
+      }}
+      onCreateThread={async () => {
+        const model = models?.[0]?.id;
+        const session = await createSession.mutateAsync(model);
+        navigate(`/sessions/${session.context.session_id}`);
+      }}
+      onCycleThreadFilter={() =>
+        setThreadFilter(
+          threadFilter === "all"
+            ? "running"
+            : threadFilter === "running"
+              ? "waiting_approval"
+              : "all",
+        )
+      }
+      onSelectThread={(sessionId) => navigate(`/sessions/${sessionId}`)}
+      threadCount={sessionsQuery.data?.length ?? 0}
+      threadFilter={threadFilter}
+      threads={threads}
+    />
+  );
+}

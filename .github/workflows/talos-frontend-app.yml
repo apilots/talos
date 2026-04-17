@@ -1,0 +1,46 @@
+name: talos-frontend-app
+
+concurrency:
+  group: talos-frontend-app-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - "talos-app/**"
+      - ".github/workflows/talos-frontend-app.yml"
+  push:
+    paths:
+      - "talos-app/**"
+      - ".github/workflows/talos-frontend-app.yml"
+
+jobs:
+  frontend-app-quality:
+    name: frontend-app-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: talos-app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: talos-app/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Frontend app checks
+        run: pnpm ci:frontend-app
