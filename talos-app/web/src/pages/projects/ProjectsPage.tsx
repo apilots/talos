@@ -4,8 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
 import { useCreateProjectMutation } from "@/features/chat";
-import { ProjectRow } from "@/features/projects/components/ProjectRow";
-import { useProjectsPageState, type ProjectSort } from "@/features/projects/hooks/useProjectsPageState";
+import { ProjectRow, useProjectsPageState, type ProjectSort } from "@/features/projects";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";

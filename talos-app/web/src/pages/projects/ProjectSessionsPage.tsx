@@ -2,8 +2,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
 import { FolderSearch } from "lucide-react";
 
-import { ProjectSessionRow } from "@/features/projects/components/ProjectSessionRow";
-import { useProjectSessionsPageState } from "@/features/projects/hooks/useProjectSessionsPageState";
+import { ProjectSessionRow, useProjectSessionsPageState } from "@/features/projects";
 import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
 import { Panel } from "@/shared/ui/Panel";
