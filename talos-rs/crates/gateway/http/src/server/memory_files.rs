@@ -125,7 +125,10 @@ async fn load_memory_section_count(
     version_token: &str,
 ) -> Result<usize, ApiError> {
     let index_path = memory_index_path(state, date)?;
-    let Some(index_content) = read_optional(&index_path).await.map_err(map_internal_error)? else {
+    let Some(index_content) = read_optional(&index_path)
+        .await
+        .map_err(map_internal_error)?
+    else {
         return Ok(0);
     };
     let parsed = serde_json::from_str::<MemoryIndexFile>(&index_content).map_err(|err| {
@@ -158,7 +161,10 @@ fn map_write_error(err: TalosError) -> ApiError {
     }
 }
 
-async fn restore_previous_memory_file(path: &std::path::Path, previous_content: Option<&str>) -> TalosResult<()> {
+async fn restore_previous_memory_file(
+    path: &std::path::Path,
+    previous_content: Option<&str>,
+) -> TalosResult<()> {
     match previous_content {
         Some(content) => write_atomic(path, content).await,
         None => match fs::remove_file(path).await {
@@ -219,9 +225,21 @@ pub(super) async fn list_memory_files_handler(
         .limit
         .unwrap_or(file_list_config.file_list_default_limit)
         .min(file_list_config.file_list_max_limit.max(1));
-    let before_date = query.before_date.as_deref().map(parse_memory_date).transpose()?;
-    let date_from = query.date_from.as_deref().map(parse_memory_date).transpose()?;
-    let date_to = query.date_to.as_deref().map(parse_memory_date).transpose()?;
+    let before_date = query
+        .before_date
+        .as_deref()
+        .map(parse_memory_date)
+        .transpose()?;
+    let date_from = query
+        .date_from
+        .as_deref()
+        .map(parse_memory_date)
+        .transpose()?;
+    let date_to = query
+        .date_to
+        .as_deref()
+        .map(parse_memory_date)
+        .transpose()?;
 
     let dir = memory_dir(state.as_ref());
     let mut entries = match tokio::fs::read_dir(&dir).await {
@@ -229,7 +247,11 @@ pub(super) async fn list_memory_files_handler(
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             return Ok(Json(json!({ "data": Vec::<MemoryFileSummary>::new() })));
         }
-        Err(err) => return Err(map_internal_error(TalosError::StorageError(err.to_string()))),
+        Err(err) => {
+            return Err(map_internal_error(TalosError::StorageError(
+                err.to_string(),
+            )))
+        }
     };
 
     let mut files = Vec::new();
@@ -301,8 +323,13 @@ pub(super) async fn put_memory_file_handler(
             let store = MemoryStore::from_config(&state.base_config.agent.kernel);
             async move { store.rebuild_memory_indexes().await }
         };
-        write_memory_file_transaction(&path, &request.content, existing.as_deref(), &rebuild_indexes)
-            .await?;
+        write_memory_file_transaction(
+            &path,
+            &request.content,
+            existing.as_deref(),
+            &rebuild_indexes,
+        )
+        .await?;
         Ok(())
     })
     .await
@@ -335,12 +362,30 @@ pub(super) async fn search_memory_files_handler(
     let limit = query
         .limit
         .unwrap_or(state.base_config.agent.kernel.memory.search_max_results)
-        .min(state.base_config.agent.kernel.memory.search_max_results.max(1));
-    let date_from = query.date_from.as_deref().map(parse_memory_date).transpose()?;
-    let date_to = query.date_to.as_deref().map(parse_memory_date).transpose()?;
+        .min(
+            state
+                .base_config
+                .agent
+                .kernel
+                .memory
+                .search_max_results
+                .max(1),
+        );
+    let date_from = query
+        .date_from
+        .as_deref()
+        .map(parse_memory_date)
+        .transpose()?;
+    let date_to = query
+        .date_to
+        .as_deref()
+        .map(parse_memory_date)
+        .transpose()?;
 
-    let store =
-        MemoryStore::from_config_with_llm(&state.base_config.agent.kernel, state.llm_provider.clone());
+    let store = MemoryStore::from_config_with_llm(
+        &state.base_config.agent.kernel,
+        state.llm_provider.clone(),
+    );
     let mut results = store
         .search_memory(&MemorySearchQuery {
             query: query.q,
@@ -400,7 +445,9 @@ mod tests {
         let path = temp_dir.join("memory").join("2026-04-04.md");
 
         let result = write_memory_file_transaction(&path, "new content", None, &|| async {
-            Err(TalosError::StorageError("forced rebuild failure".to_string()))
+            Err(TalosError::StorageError(
+                "forced rebuild failure".to_string(),
+            ))
         })
         .await;
 
@@ -418,10 +465,13 @@ mod tests {
             .await
             .expect("seed file should write");
 
-        let result = write_memory_file_transaction(&path, "new content", Some("old content"), &|| async {
-            Err(TalosError::StorageError("forced rebuild failure".to_string()))
-        })
-        .await;
+        let result =
+            write_memory_file_transaction(&path, "new content", Some("old content"), &|| async {
+                Err(TalosError::StorageError(
+                    "forced rebuild failure".to_string(),
+                ))
+            })
+            .await;
 
         assert!(result.is_err());
         let restored = fs::read_to_string(&path)

@@ -39,13 +39,13 @@ describe("chat stream integration helpers", () => {
           {
             type: "tool_call",
             call_id: "call-1",
-            name: "read_file",
+            name: "Read",
             arguments: { path: "README.md" },
           },
           {
             type: "tool_result",
             call_id: "call-1",
-            tool_name: "read_file",
+            tool_name: "Read",
             content: [{ type: "text", text: "done" }],
           },
         ],
@@ -72,7 +72,7 @@ describe("chat stream integration helpers", () => {
       payload: {
         type: "message_tool_call_pending_approval",
         call_id: "call-1",
-        tool_name: "exec_command",
+        tool_name: "Bash",
         prompt: "Approve command?",
         arguments: { cmd: "cargo test" },
         step_id: "step-1",
@@ -82,8 +82,43 @@ describe("chat stream integration helpers", () => {
     const stream = useAppStore.getState().streams["sess-1"];
     expect(stream.pendingApproval).toMatchObject({
       callId: "call-1",
-      toolName: "exec_command",
+      toolName: "Bash",
     });
+    expect(useAppStore.getState().transientStatuses["sess-1"]).toBe("waiting_approval");
+  });
+
+  it("keeps pending approval visible after message completion", () => {
+    applyStreamEvent("sess-1", {
+      event_type: "message_tool_call_pending_approval",
+      message_id: "msg-1",
+      session_id: "sess-1",
+      sequence: 3,
+      payload: {
+        type: "message_tool_call_pending_approval",
+        call_id: "call-1",
+        tool_name: "Agent",
+        prompt: "Approve agent task?",
+        arguments: { description: "Count rs files" },
+        step_id: "step-1",
+      },
+    });
+
+    applyStreamEvent("sess-1", {
+      event_type: "message_completed",
+      message_id: "msg-1",
+      session_id: "sess-1",
+      sequence: 4,
+      payload: {
+        type: "message_completed",
+      },
+    });
+
+    const stream = useAppStore.getState().streams["sess-1"];
+    expect(stream?.pendingApproval).toMatchObject({
+      callId: "call-1",
+      toolName: "Agent",
+    });
+    expect(stream?.connectionState).toBe("idle");
     expect(useAppStore.getState().transientStatuses["sess-1"]).toBe("waiting_approval");
   });
 

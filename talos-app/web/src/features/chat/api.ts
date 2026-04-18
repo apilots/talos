@@ -11,8 +11,9 @@ import type {
 } from "@talos/sdk";
 
 import { getTalosClient } from "@/shared/api/client";
-import { isUnboundProject } from "@/shared/types/domain";
+import { approvalModeToPolicy, isUnboundProject } from "@/shared/types/domain";
 import type { ProjectRecord } from "@/shared/types/ui";
+import type { ApprovalMode } from "@/shared/types/ui";
 
 function createContext(userId: string): TalosContext {
   const randomPart = Math.random().toString(36).slice(2, 10);
@@ -73,10 +74,20 @@ export async function getSessionTurns(sessionId: string) {
   return getTalosClient().sessions.turns(sessionId);
 }
 
-export async function createSession(userId: string, model: string | undefined, project?: ProjectRecord) {
+export async function createSession(
+  userId: string,
+  model: string | undefined,
+  project: ProjectRecord | undefined,
+  approvalMode: ApprovalMode,
+) {
   return getTalosClient().sessions.create({
     context: createContext(userId),
     model,
+    conf: {
+      tools: {
+        approval_policy: approvalModeToPolicy(approvalMode),
+      },
+    },
     project_id: project && !isUnboundProject(project.id) ? project.id : undefined,
   });
 }
@@ -112,6 +123,17 @@ export async function updateSessionModel(sessionId: string, model: string) {
     conf: {
       agent: {
         model,
+      },
+    },
+  };
+  await getTalosClient().sessions.patch(sessionId, patch);
+}
+
+export async function updateSessionApprovalMode(sessionId: string, approvalMode: ApprovalMode) {
+  const patch: SessionUpdate = {
+    conf: {
+      tools: {
+        approval_policy: approvalModeToPolicy(approvalMode),
       },
     },
   };

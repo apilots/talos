@@ -4,6 +4,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import {
   ChatComposer,
+  useUpdateSessionApprovalModeMutation,
   useChatSession,
   useModelsQuery,
   useProjectsQuery,
@@ -12,7 +13,7 @@ import {
   useUpdateSessionProjectMutation,
 } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
-import { getSessionModel, UNBOUND_PROJECT_ID } from "@/shared/types/domain";
+import { getSessionApprovalMode, getSessionModel, UNBOUND_PROJECT_ID } from "@/shared/types/domain";
 import { MessageList } from "@/widgets/message-list/MessageList";
 import { ChatContextBar } from "@/widgets/chat-context-bar/ChatContextBar";
 import { Panel } from "@/shared/ui/Panel";
@@ -55,13 +56,17 @@ export function ChatSessionPage() {
   } = useChatSession(sessionId, session?.state.message_count);
   const updateModel = useUpdateSessionModelMutation(sessionId);
   const updateProject = useUpdateSessionProjectMutation(sessionId);
+  const updateApprovalMode = useUpdateSessionApprovalModeMutation(sessionId);
   const connection = useAppStore((state) => state.connection);
   const setConnection = useAppStore((state) => state.setConnection);
   const projects = useAppStore((state) => state.projects);
   const activeProjectId = useAppStore((state) => state.activeProjectId);
   const setActiveProjectId = useAppStore((state) => state.setActiveProjectId);
   const approvalMode = useAppStore(
-    (state) => state.sessionApprovalModes[sessionId] ?? state.connection.defaultApprovalMode,
+    (state) =>
+      state.sessionApprovalModes[sessionId]
+      ?? getSessionApprovalMode(session)
+      ?? state.connection.defaultApprovalMode,
   );
   const setSessionApprovalMode = useAppStore((state) => state.setSessionApprovalMode);
   const currentModel = session ? getSessionModel(session) : models?.[0]?.id;
@@ -99,6 +104,13 @@ export function ChatSessionPage() {
       navigate(location.pathname, { replace: true, state: null });
     });
   }, [location.pathname, locationState?.initialPrompt, navigate, sendText, session]);
+
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+    setSessionApprovalMode(sessionId, getSessionApprovalMode(session));
+  }, [session, sessionId, setSessionApprovalMode]);
 
   useEffect(() => {
     stickToBottomRef.current = true;
@@ -254,7 +266,10 @@ export function ChatSessionPage() {
             isCancelling={isCancelling}
             isStreaming={isStreaming}
             models={(models ?? []).map((model) => ({ id: model.id, name: model.name }))}
-            onApprovalModeChange={(mode) => setSessionApprovalMode(sessionId, mode)}
+            onApprovalModeChange={(mode) => {
+              setSessionApprovalMode(sessionId, mode);
+              updateApprovalMode.mutate(mode);
+            }}
             onCancel={() => void stopResponse()}
             onDraftChange={setDraft}
             onModelChange={(model) => updateModel.mutate(model)}

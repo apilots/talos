@@ -281,6 +281,7 @@ impl GatewayClient for MockGatewayClient {
                 project_root: None,
                 environment: None,
             },
+            conf: talos_client::SessionConf::default(),
             project_id: None,
             current_directory: state.current_project_root.clone(),
             config: {
@@ -317,6 +318,7 @@ impl GatewayClient for MockGatewayClient {
                 project_root: None,
                 environment: None,
             },
+            conf: talos_client::SessionConf::default(),
             project_id: None,
             current_directory: state.current_project_root.clone(),
             config: {
@@ -376,6 +378,7 @@ impl GatewayClient for MockGatewayClient {
                 project_root: None,
                 environment: None,
             },
+            conf: talos_client::SessionConf::default(),
             project_id: None,
             current_directory: state.current_project_root.clone(),
             config: {
@@ -414,6 +417,7 @@ impl GatewayClient for MockGatewayClient {
                 project_root: None,
                 environment: None,
             },
+            conf: talos_client::SessionConf::default(),
             project_id: None,
             current_directory: state.current_project_root.clone(),
             config: {
@@ -452,6 +456,7 @@ impl GatewayClient for MockGatewayClient {
                 project_root: None,
                 environment: None,
             },
+            conf: talos_client::SessionConf::default(),
             project_id: None,
             current_directory: state.current_project_root.clone(),
             config: {

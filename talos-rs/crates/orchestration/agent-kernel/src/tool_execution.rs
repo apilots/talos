@@ -535,6 +535,7 @@ mod tests {
     use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use talos_tools::spec::ToolBehaviorFlags;
     use talos_tools::{Tool, ToolContext, ToolOutput, ToolRegistry};
     use tokio::time::{sleep, Duration};
 
@@ -552,6 +553,15 @@ mod tests {
 
         fn description(&self) -> &str {
             "Return the provided label after a configurable delay"
+        }
+
+        fn behavior_flags(&self) -> ToolBehaviorFlags {
+            ToolBehaviorFlags {
+                read_only: self.name != "Write",
+                destructive: self.name == "Write",
+                concurrency_safe: self.name != "Write",
+                requires_user_interaction: false,
+            }
         }
 
         fn parameters_schema(&self) -> Option<Value> {
@@ -593,7 +603,7 @@ mod tests {
         let concurrent = Arc::new(AtomicUsize::new(0));
         let max_concurrent = Arc::new(AtomicUsize::new(0));
         registry.register(Arc::new(ObservedDelayTool {
-            name: "read_file",
+            name: "Read",
             concurrent: concurrent.clone(),
             max_concurrent: max_concurrent.clone(),
         }));
@@ -612,7 +622,7 @@ mod tests {
         let calls = vec![
             ToolExecutionInput {
                 call_id: "call_1".to_string(),
-                tool_name: "read_file".to_string(),
+                tool_name: "Read".to_string(),
                 arguments: json!({
                     "label": "first",
                     "delay_ms": 50
@@ -620,7 +630,7 @@ mod tests {
             },
             ToolExecutionInput {
                 call_id: "call_2".to_string(),
-                tool_name: "read_file".to_string(),
+                tool_name: "Read".to_string(),
                 arguments: json!({
                     "label": "second",
                     "delay_ms": 1
@@ -636,8 +646,8 @@ mod tests {
         assert_eq!(outputs.len(), 2);
         assert_eq!(outputs[0].call_id, "call_1");
         assert_eq!(outputs[1].call_id, "call_2");
-        assert_eq!(outputs[0].tool_name, "read_file");
-        assert_eq!(outputs[1].tool_name, "read_file");
+        assert_eq!(outputs[0].tool_name, "Read");
+        assert_eq!(outputs[1].tool_name, "Read");
         assert!(max_concurrent.load(Ordering::SeqCst) >= 2);
     }
 
@@ -647,12 +657,12 @@ mod tests {
         let concurrent = Arc::new(AtomicUsize::new(0));
         let max_concurrent = Arc::new(AtomicUsize::new(0));
         registry.register(Arc::new(ObservedDelayTool {
-            name: "read_file",
+            name: "Read",
             concurrent: concurrent.clone(),
             max_concurrent: max_concurrent.clone(),
         }));
         registry.register(Arc::new(ObservedDelayTool {
-            name: "apply_patch",
+            name: "Write",
             concurrent,
             max_concurrent: max_concurrent.clone(),
         }));
@@ -672,7 +682,7 @@ mod tests {
         let calls = vec![
             ToolExecutionInput {
                 call_id: "call_1".to_string(),
-                tool_name: "read_file".to_string(),
+                tool_name: "Read".to_string(),
                 arguments: json!({
                     "label": "read",
                     "delay_ms": 50
@@ -680,7 +690,7 @@ mod tests {
             },
             ToolExecutionInput {
                 call_id: "call_2".to_string(),
-                tool_name: "apply_patch".to_string(),
+                tool_name: "Write".to_string(),
                 arguments: json!({
                     "label": "write",
                     "delay_ms": 50

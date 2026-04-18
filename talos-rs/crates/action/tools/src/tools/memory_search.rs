@@ -1,8 +1,9 @@
 use async_trait::async_trait;
 use serde_json::Value;
 use talos_error::{TalosError, TalosResult};
-use talos_memory::{Memory, MemoryGetResult, MemorySearchQuery, MemorySearchResponse};
+use talos_memory::{Memory, MemorySearchQuery, MemorySearchResponse};
 
+use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
 use crate::{Tool, ToolContext, ToolOutput};
 
 fn resolve_search_defaults(context: &ToolContext) -> usize {
@@ -18,11 +19,36 @@ pub struct MemorySearchTool;
 #[async_trait]
 impl Tool for MemorySearchTool {
     fn name(&self) -> &str {
+        "MemorySearch"
+    }
+
+    fn internal_name(&self) -> &str {
         "memory_search"
     }
 
+    fn aliases(&self) -> &'static [&'static str] {
+        &["memory_search"]
+    }
+
     fn description(&self) -> &str {
-        "Searches memory/*.md for prior work, decisions, dates, preferences, and todos. Use this before answering memory-dependent questions."
+        "Search memory/*.md for prior work, decisions, dates, preferences, and todos. Use this before answering memory-dependent questions."
+    }
+
+    fn behavior_flags(&self) -> ToolBehaviorFlags {
+        ToolBehaviorFlags {
+            read_only: true,
+            destructive: false,
+            concurrency_safe: true,
+            requires_user_interaction: false,
+        }
+    }
+
+    fn result_policy(&self) -> ToolResultPolicy {
+        ToolResultPolicy {
+            max_inline_bytes: 32 * 1024,
+            persist_large_output: false,
+            preview_lines: 40,
+        }
     }
 
     fn parameters_schema(&self) -> Option<Value> {
@@ -70,70 +96,6 @@ impl Tool for MemorySearchTool {
             TalosError::ToolError(format!("serialize memory_search result: {}", err))
         })?;
 
-        Ok(ToolOutput {
-            success: true,
-            output,
-            error: None,
-        })
-    }
-}
-
-pub struct MemoryGetTool;
-
-#[async_trait]
-impl Tool for MemoryGetTool {
-    fn name(&self) -> &str {
-        "memory_get"
-    }
-
-    fn description(&self) -> &str {
-        "Reads a precise snippet from memory/*.md after memory_search returns a path."
-    }
-
-    fn parameters_schema(&self) -> Option<Value> {
-        Some(serde_json::json!({
-            "type": "object",
-            "required": ["path"],
-            "properties": {
-                "path": {"type": "string"},
-                "from": {"type": "integer", "minimum": 1},
-                "lines": {"type": "integer", "minimum": 1}
-            }
-        }))
-    }
-
-    async fn execute(&self, input: Value, context: ToolContext) -> TalosResult<ToolOutput> {
-        let Some(memory) = context.memory_store() else {
-            return Err(TalosError::ToolError(
-                "memory_get requires an injected memory store in tool context".to_string(),
-            ));
-        };
-        let path = input
-            .get("path")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .trim()
-            .to_string();
-        if path.is_empty() {
-            return Ok(ToolOutput {
-                success: false,
-                output: String::new(),
-                error: Some("path is required".to_string()),
-            });
-        }
-        let from = input
-            .get("from")
-            .and_then(Value::as_u64)
-            .map(|value| value as usize);
-        let lines = input
-            .get("lines")
-            .and_then(Value::as_u64)
-            .map(|value| value as usize);
-
-        let result: MemoryGetResult = memory.get_memory(&path, from, lines).await?;
-        let output = serde_json::to_string(&result).map_err(|err| {
-            TalosError::ToolError(format!("serialize memory_get result: {}", err))
-        })?;
         Ok(ToolOutput {
             success: true,
             output,
@@ -380,25 +342,6 @@ mod tests {
         );
         let error = tool
             .execute(serde_json::json!({ "query": "friday" }), context)
-            .await
-            .expect_err("tool should fail when memory store is missing");
-        assert!(matches!(error, TalosError::ToolError(_)));
-    }
-
-    #[tokio::test]
-    async fn test_memory_get_errors_without_memory_store() {
-        let workspace_dir = temp_workspace_dir();
-        let tool = MemoryGetTool;
-        let context = ToolContext::new_with_kernel_config(
-            "session-1",
-            "user-1",
-            Some(test_kernel_config(&workspace_dir)),
-        );
-        let error = tool
-            .execute(
-                serde_json::json!({ "path": "memory/2026-03-25.md" }),
-                context,
-            )
             .await
             .expect_err("tool should fail when memory store is missing");
         assert!(matches!(error, TalosError::ToolError(_)));

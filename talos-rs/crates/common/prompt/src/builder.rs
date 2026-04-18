@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use talos_error::TalosResult;
 use talos_llm_provider::ChatMessage;
 use talos_memory::{MemoryStore, RetrievedMemoryItem};
-use talos_tools::ToolDefinitionProvider;
+use talos_tools::{ToolDefinitionProvider, ToolSelectionPhase, ToolSelectionRequest};
 use talos_types::{talos::TalosSessionEnvironment, ModelInfo};
 use tokio::fs;
 
@@ -148,25 +148,23 @@ impl<'a> PromptBuilder<'a> {
         assembler::assemble(&self).await
     }
 
-    pub(crate) fn render_tool_summary(tool_registry: &dyn ToolDefinitionProvider) -> String {
-        let mut definitions = tool_registry.get_tool_definitions();
-        if definitions.is_empty() {
-            return "none".to_string();
+    pub(crate) fn tool_selection_request(&self) -> ToolSelectionRequest {
+        let mut request = ToolSelectionRequest {
+            phase: match self.phase {
+                PromptPhase::Planning => ToolSelectionPhase::Planning,
+                PromptPhase::Execution => ToolSelectionPhase::Execution,
+            },
+            planner_mode: Some(self.planner_mode.as_str().to_string()),
+            permission_mode: talos_tools::PermissionMode::Default,
+            user_input: self.user_input.clone(),
+            session_id: self.session_id.map(str::to_string),
+        };
+
+        if matches!(self.phase, PromptPhase::Planning) {
+            request.permission_mode = talos_tools::PermissionMode::Plan;
         }
 
-        definitions.sort_by(|a, b| a.name.cmp(&b.name));
-        definitions
-            .into_iter()
-            .map(|tool| {
-                let desc = tool.description.trim();
-                if desc.is_empty() {
-                    format!("- {}", tool.name)
-                } else {
-                    format!("- {}: {}", tool.name, desc)
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
+        request
     }
 
     async fn read_bootstrap_file(

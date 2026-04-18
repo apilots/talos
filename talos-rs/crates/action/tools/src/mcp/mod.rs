@@ -6,6 +6,7 @@ pub use client::McpClient;
 pub use protocol::McpToolDefinition;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -20,12 +21,15 @@ use crate::output::ToolOutputPayload;
 use crate::spec::{
     default_governance_for_source, RegisteredToolSpec, ToolParallelism, ToolPayloadKind, ToolSource,
 };
+use crate::state::sha256_hex;
+use crate::ToolContext;
 
 /// Prefix used in tool names for MCP tools: `mcp__<server>__<tool>`.
 pub const MCP_TOOL_NAME_PREFIX: &str = "mcp__";
 const MCP_DELIMITER: &str = "__";
 const DEFAULT_RESOURCE_TTL: Duration = Duration::from_secs(60);
 const DEFAULT_RESOURCE_TEMPLATE_TTL: Duration = Duration::from_secs(120);
+const MCP_BLOB_DIR: &str = ".talos/mcp_blobs";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct McpServerConfig {
@@ -96,6 +100,38 @@ struct CachedEntry<T> {
     value: T,
     cached_at: Instant,
     ttl: Duration,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+struct McpReadResourceResponse {
+    server: String,
+    uri: String,
+    contents: Vec<McpReadResourceEntry>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum McpReadResourceEntry {
+    Text {
+        uri: String,
+        mime_type: Option<String>,
+        text: String,
+    },
+    Blob {
+        uri: String,
+        mime_type: Option<String>,
+        path: String,
+        sha256: String,
+        size_bytes: u64,
+        encoding: &'static str,
+    },
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct PersistedBlobArtifact {
+    path: PathBuf,
+    sha256: String,
+    size_bytes: u64,
 }
 
 impl<T> CachedEntry<T> {
@@ -300,43 +336,17 @@ impl McpConnectionManager {
         }
     }
 
-    pub async fn read_resource(&self, server: &str, uri: &str) -> TalosResult<ToolOutputPayload> {
+    pub async fn read_resource(
+        &self,
+        server: &str,
+        uri: &str,
+        context: &ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
         let client = self.clients.get(server).ok_or_else(|| {
             TalosError::ToolError(format!("MCP server `{}` not connected", server))
         })?;
         let result = client.read_resource(uri).await?;
-        let mut combined = Vec::new();
-        let mut mime_type = None;
-        for item in result.contents {
-            match item {
-                protocol::McpResourceContents::TextResourceContents {
-                    mime_type: item_mime,
-                    text,
-                    ..
-                } => {
-                    if mime_type.is_none() {
-                        mime_type = item_mime;
-                    }
-                    combined.push(text);
-                }
-                protocol::McpResourceContents::BlobResourceContents {
-                    mime_type: item_mime,
-                    blob,
-                    ..
-                } => {
-                    if mime_type.is_none() {
-                        mime_type = item_mime;
-                    }
-                    combined.push(blob);
-                }
-                protocol::McpResourceContents::Unknown => {}
-            }
-        }
-        Ok(ToolOutputPayload::Resource {
-            uri: uri.to_string(),
-            mime_type,
-            content: combined.join("\n"),
-        })
+        build_read_resource_payload(server, uri, result.contents, context).await
     }
 
     fn resource_tool_specs() -> Vec<RegisteredToolSpec> {
@@ -466,6 +476,206 @@ impl Default for McpConnectionManager {
     }
 }
 
+async fn build_read_resource_payload(
+    server: &str,
+    uri: &str,
+    contents: Vec<protocol::McpResourceContents>,
+    context: &ToolContext,
+) -> TalosResult<ToolOutputPayload> {
+    let mut entries = Vec::new();
+    for (index, item) in contents.into_iter().enumerate() {
+        match item {
+            protocol::McpResourceContents::TextResourceContents {
+                uri,
+                mime_type,
+                text,
+            } => entries.push(McpReadResourceEntry::Text {
+                uri,
+                mime_type,
+                text,
+            }),
+            protocol::McpResourceContents::BlobResourceContents {
+                uri,
+                mime_type,
+                blob,
+            } => {
+                let artifact = persist_blob_artifact(
+                    context,
+                    server,
+                    uri.as_str(),
+                    index,
+                    mime_type.as_deref(),
+                    &blob,
+                )
+                .await?;
+                entries.push(McpReadResourceEntry::Blob {
+                    uri,
+                    mime_type,
+                    path: artifact.path.display().to_string(),
+                    sha256: artifact.sha256,
+                    size_bytes: artifact.size_bytes,
+                    encoding: "binary",
+                });
+            }
+            protocol::McpResourceContents::Unknown => {}
+        }
+    }
+
+    let payload = McpReadResourceResponse {
+        server: server.to_string(),
+        uri: uri.to_string(),
+        contents: entries,
+    };
+    let structured_content = serde_json::to_value(&payload)
+        .map_err(|err| TalosError::ToolError(format!("serialize MCP resource payload: {err}")))?;
+    Ok(ToolOutputPayload::Function {
+        content: structured_content.to_string(),
+        success: true,
+        structured_content: Some(structured_content),
+    })
+}
+
+async fn persist_blob_artifact(
+    context: &ToolContext,
+    server: &str,
+    uri: &str,
+    index: usize,
+    mime_type: Option<&str>,
+    blob: &str,
+) -> TalosResult<PersistedBlobArtifact> {
+    let bytes = decode_base64_blob(blob)?;
+    let sha256 = sha256_hex(&bytes);
+    let directory = blob_storage_dir(context, server);
+    tokio::fs::create_dir_all(&directory)
+        .await
+        .map_err(|err| TalosError::ToolError(format!("create MCP blob directory: {err}")))?;
+    let file_name = format!(
+        "{}-{}-{}.{}",
+        sanitize_path_component(uri),
+        index,
+        &sha256[..12],
+        extension_for_mime_type(mime_type)
+    );
+    let path = directory.join(file_name);
+    tokio::fs::write(&path, &bytes)
+        .await
+        .map_err(|err| TalosError::ToolError(format!("persist MCP blob artifact: {err}")))?;
+    Ok(PersistedBlobArtifact {
+        path,
+        sha256,
+        size_bytes: bytes.len() as u64,
+    })
+}
+
+fn blob_storage_dir(context: &ToolContext, server: &str) -> PathBuf {
+    let root = context
+        .project_root()
+        .or_else(|| {
+            context
+                .kernel_config()
+                .map(|config| PathBuf::from(config.memory.workspace_dir.trim()))
+                .filter(|path| !path.as_os_str().is_empty())
+        })
+        .unwrap_or_else(|| std::env::temp_dir().join("talos"));
+    root.join(MCP_BLOB_DIR)
+        .join(sanitize_path_component(server))
+}
+
+fn extension_for_mime_type(mime_type: Option<&str>) -> &'static str {
+    match mime_type {
+        Some("application/json") => "json",
+        Some("text/plain") => "txt",
+        Some("text/html") => "html",
+        Some("image/png") => "png",
+        Some("image/jpeg") => "jpg",
+        Some("image/gif") => "gif",
+        Some("application/pdf") => "pdf",
+        _ => "bin",
+    }
+}
+
+fn sanitize_path_component(value: &str) -> String {
+    let sanitized: String = value
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '.' | '-' | '_' => ch,
+            _ => '_',
+        })
+        .collect();
+    let trimmed = sanitized.trim_matches('_');
+    if trimmed.is_empty() {
+        "resource".to_string()
+    } else {
+        trimmed.chars().take(80).collect()
+    }
+}
+
+fn decode_base64_blob(blob: &str) -> TalosResult<Vec<u8>> {
+    let normalized: Vec<u8> = blob
+        .bytes()
+        .filter(|byte| !byte.is_ascii_whitespace())
+        .collect();
+
+    if normalized.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    if normalized.len() % 4 != 0 {
+        return Err(TalosError::ToolError(
+            "invalid MCP blob encoding: base64 payload length must be a multiple of 4".to_string(),
+        ));
+    }
+
+    let mut bytes = Vec::with_capacity(normalized.len() / 4 * 3);
+    for chunk in normalized.chunks(4) {
+        let mut values = [0u8; 4];
+        let mut padding = 0usize;
+
+        for (index, byte) in chunk.iter().enumerate() {
+            if *byte == b'=' {
+                padding += 1;
+                values[index] = 0;
+                continue;
+            }
+
+            if padding > 0 {
+                return Err(TalosError::ToolError(
+                    "invalid MCP blob encoding: '=' padding must be trailing".to_string(),
+                ));
+            }
+
+            values[index] = decode_base64_byte(*byte)?;
+        }
+
+        let combined = ((values[0] as u32) << 18)
+            | ((values[1] as u32) << 12)
+            | ((values[2] as u32) << 6)
+            | (values[3] as u32);
+        bytes.push(((combined >> 16) & 0xff) as u8);
+        if padding < 2 {
+            bytes.push(((combined >> 8) & 0xff) as u8);
+        }
+        if padding == 0 {
+            bytes.push((combined & 0xff) as u8);
+        }
+    }
+    Ok(bytes)
+}
+
+fn decode_base64_byte(byte: u8) -> TalosResult<u8> {
+    match byte {
+        b'A'..=b'Z' => Ok(byte - b'A'),
+        b'a'..=b'z' => Ok(byte - b'a' + 26),
+        b'0'..=b'9' => Ok(byte - b'0' + 52),
+        b'+' => Ok(62),
+        b'/' => Ok(63),
+        _ => Err(TalosError::ToolError(format!(
+            "invalid MCP blob encoding: unsupported base64 byte `{}`",
+            byte as char
+        ))),
+    }
+}
+
 fn cache_key(server: Option<&str>, cursor: Option<&str>) -> String {
     match server {
         Some(server_name) => format!("server:{server_name}|cursor:{}", cursor.unwrap_or_default()),
@@ -476,6 +686,8 @@ fn cache_key(server: Option<&str>, cursor: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
+    use tokio::fs;
 
     #[test]
     fn test_mcp_tool_name_roundtrip() {
@@ -489,7 +701,7 @@ mod tests {
 
     #[test]
     fn test_split_mcp_tool_name_rejects_non_mcp() {
-        assert!(split_mcp_tool_name("exec_command").is_none());
+        assert!(split_mcp_tool_name("bash").is_none());
         assert!(split_mcp_tool_name("mcp__").is_none());
         assert!(split_mcp_tool_name("mcp__server__").is_none());
     }
@@ -524,5 +736,63 @@ mod tests {
             .iter()
             .any(|spec| spec.definition.name.starts_with("mcp__broken__")));
         assert!(error.to_string().contains("__talos_missing_mcp_binary__"));
+    }
+
+    #[test]
+    fn test_decode_base64_blob_rejects_invalid_padding() {
+        let error = decode_base64_blob("ab=c").expect_err("invalid base64 should fail");
+        assert!(error.to_string().contains("padding must be trailing"));
+    }
+
+    #[test]
+    fn test_decode_base64_blob_success() {
+        let bytes = decode_base64_blob("aGVsbG8=").expect("base64 should decode");
+        assert_eq!(bytes, b"hello");
+    }
+
+    #[tokio::test]
+    async fn test_build_read_resource_payload_persists_blob_artifact() {
+        let tempdir = tempdir().expect("tempdir should create");
+        let context = ToolContext::new("session-1", "user-1").with_project_root(tempdir.path());
+        let payload = build_read_resource_payload(
+            "github",
+            "artifact://demo",
+            vec![
+                protocol::McpResourceContents::TextResourceContents {
+                    uri: "artifact://demo".to_string(),
+                    mime_type: Some("text/plain".to_string()),
+                    text: "metadata".to_string(),
+                },
+                protocol::McpResourceContents::BlobResourceContents {
+                    uri: "artifact://demo/blob".to_string(),
+                    mime_type: Some("application/pdf".to_string()),
+                    blob: "aGVsbG8=".to_string(),
+                },
+            ],
+            &context,
+        )
+        .await
+        .expect("payload should build");
+
+        let ToolOutputPayload::Function {
+            content,
+            success,
+            structured_content,
+        } = payload
+        else {
+            panic!("expected function payload");
+        };
+
+        assert!(success);
+        assert!(!content.contains("aGVsbG8="));
+
+        let structured = structured_content.expect("structured content should exist");
+        let blob = structured["contents"]
+            .as_array()
+            .and_then(|items| items.get(1))
+            .expect("blob entry should exist");
+        let blob_path = blob["path"].as_str().expect("blob path should be a string");
+        let persisted = fs::read(blob_path).await.expect("blob file should exist");
+        assert_eq!(persisted, b"hello");
     }
 }

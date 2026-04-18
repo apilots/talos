@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use dashmap::DashMap;
 use serde_json::Value;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult};
@@ -20,15 +21,72 @@ use crate::output::{ToolDispatchOutcome, ToolOutputPayload};
 use crate::r#trait::Tool;
 use crate::router::ToolRouter;
 use crate::spec::{
-    default_governance_for_source, RegisteredToolSpec, ToolCatalog, ToolParallelism, ToolSource,
+    default_governance_for_source, RegisteredToolSpec, ToolCatalog, ToolSelection,
+    ToolSelectionRequest, ToolSource, ToolVisibility,
 };
+use crate::state::{get_session_tool_state, PermissionMode};
 use crate::ToolContext;
 
 const DEFAULT_TOOL_OUTPUT_MAX_BYTES: usize = 64 * 1024;
 const TOOL_OUTPUT_TRUNCATED_SUFFIX: &str = "\n...[truncated]";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolPromptEntry {
+    pub name: String,
+    pub description: String,
+}
+
 pub trait ToolDefinitionProvider: Send + Sync {
     fn get_tool_definitions(&self) -> Vec<ToolDefinition>;
+
+    fn get_tool_prompt_entries(&self) -> Vec<ToolPromptEntry> {
+        self.get_tool_definitions()
+            .into_iter()
+            .map(|definition| ToolPromptEntry {
+                name: definition.name,
+                description: definition.description,
+            })
+            .collect()
+    }
+
+    fn get_tool_selection(&self, _request: &ToolSelectionRequest) -> ToolSelection {
+        let definitions = self.get_tool_definitions();
+        ToolSelection::new(
+            definitions
+                .into_iter()
+                .map(|definition| {
+                    RegisteredToolSpec::local_function(
+                        definition,
+                        crate::spec::ToolParallelism::SerialOnly,
+                        false,
+                    )
+                })
+                .collect(),
+            Vec::new(),
+            Vec::new(),
+        )
+    }
+
+    fn get_tool_definitions_for_request(
+        &self,
+        request: &ToolSelectionRequest,
+    ) -> Vec<ToolDefinition> {
+        self.get_tool_selection(request).model_definitions()
+    }
+
+    fn get_tool_prompt_entries_for_request(
+        &self,
+        request: &ToolSelectionRequest,
+    ) -> Vec<ToolPromptEntry> {
+        self.get_tool_selection(request)
+            .visible_specs()
+            .into_iter()
+            .map(|spec| ToolPromptEntry {
+                name: spec.definition.name.clone(),
+                description: spec.definition.description.clone(),
+            })
+            .collect()
+    }
 }
 
 #[async_trait]
@@ -72,11 +130,12 @@ pub struct ToolRegistry {
 impl ToolRegistry {
     fn tool_priority(name: &str) -> usize {
         match name {
-            "grep_files" => 0,
-            "read_file" => 1,
-            "list_dir" => 2,
-            "exec_command" => 3,
-            "write_stdin" => 4,
+            "Grep" => 0,
+            "Read" => 1,
+            "Glob" => 2,
+            "Bash" => 3,
+            "TaskOutput" => 4,
+            "TaskStop" => 5,
             _ => 100,
         }
     }
@@ -198,14 +257,22 @@ impl ToolRegistry {
     }
 
     fn register_local_tool(&self, tool: Arc<dyn Tool>) {
-        let tool_name = tool.name().to_string();
-        let mutating = Self::default_mutation(tool_name.as_str());
-        let spec = RegisteredToolSpec::local_function(
+        let tool_name = tool.internal_name().to_string();
+        let mutating = tool.mutating();
+        let spec = RegisteredToolSpec::new(
             ToolDefinition::new(tool.name(), tool.description(), tool.parameters_schema()),
-            Self::default_parallelism(tool.name()),
+            tool.source(),
+            tool.payload_kind(),
+            tool.parallelism(),
             mutating,
+            Self::default_governance(tool.internal_name()),
         )
-        .with_governance(Self::default_governance(tool.name()));
+        .with_internal_name(tool.internal_name())
+        .with_aliases(tool.aliases().iter().copied())
+        .with_visibility(tool.visibility())
+        .with_behavior_flags(tool.behavior_flags())
+        .with_result_policy(tool.result_policy())
+        .with_user_facing_name(tool.user_facing_name());
         self.register_handler(
             tool_name,
             spec,
@@ -213,37 +280,141 @@ impl ToolRegistry {
         );
     }
 
-    fn default_parallelism(name: &str) -> ToolParallelism {
-        match name {
-            "read" | "read_file" | "list_dir" | "grep_files" | "memory_search" | "memory_get"
-            | "web_search" | "web_fetch" | "http_request" => ToolParallelism::ParallelSafe,
-            _ => ToolParallelism::SerialOnly,
-        }
-    }
-
-    fn default_mutation(name: &str) -> bool {
-        matches!(
-            name,
-            "write" | "edit" | "exec" | "exec_command" | "write_stdin" | "apply_patch"
-        )
-    }
-
     fn default_governance(name: &str) -> ToolGovernanceSpec {
         match name {
-            "exec_command" => ToolGovernanceSpec {
+            "bash" => ToolGovernanceSpec {
                 default_approval: ToolApprovalRequirement::Skip,
                 preferred_sandbox: ToolSandboxMode::UseDefault,
-                argument_override: ToolGovernanceArgumentOverride::ExecCommandPermissions,
+                argument_override: ToolGovernanceArgumentOverride::BashCommandPermissions,
                 retry_without_sandbox: true,
-            },
-            "apply_patch" => ToolGovernanceSpec {
-                default_approval: ToolApprovalRequirement::Skip,
-                preferred_sandbox: ToolSandboxMode::WorkspaceWrite,
-                argument_override: ToolGovernanceArgumentOverride::None,
-                retry_without_sandbox: false,
             },
             _ => default_governance_for_source(ToolSource::Local),
         }
+    }
+
+    fn activated_deferred_names(request: &ToolSelectionRequest) -> BTreeSet<String> {
+        request
+            .session_id
+            .as_deref()
+            .map(get_session_tool_state)
+            .map(|state| state.deferred_tools.list().into_iter().collect())
+            .unwrap_or_default()
+    }
+
+    fn input_contains_any(request: &ToolSelectionRequest, patterns: &[&str]) -> bool {
+        let Some(user_input) = request.user_input.as_ref() else {
+            return false;
+        };
+        let normalized = user_input.to_ascii_lowercase();
+        patterns.iter().any(|pattern| normalized.contains(pattern))
+    }
+
+    fn should_activate_default_visible_tool(
+        spec: &RegisteredToolSpec,
+        request: &ToolSelectionRequest,
+    ) -> bool {
+        let name = spec.definition.name.as_str();
+        if matches!(spec.visibility, ToolVisibility::AlwaysLoad) {
+            return true;
+        }
+        if Self::activated_deferred_names(request).contains(name) {
+            return true;
+        }
+
+        match name {
+            "Bash" | "Read" | "Grep" | "Glob" | "Edit" | "Write" | "TaskOutput" | "TaskStop" => {
+                true
+            }
+            "ToolSearch" => false,
+            "WebFetch" | "WebSearch" => Self::input_contains_any(
+                request,
+                &[
+                    "http", "www.", "url", "website", "web ", "search ", "latest", "news",
+                ],
+            ),
+            "MemorySearch" | "MemoryGet" => Self::input_contains_any(
+                request,
+                &[
+                    "memory",
+                    "remember",
+                    "recall",
+                    "history",
+                    "preference",
+                    "decision",
+                    "todo",
+                ],
+            ),
+            "Agent" => Self::input_contains_any(
+                request,
+                &[
+                    "agent",
+                    "subagent",
+                    "delegate",
+                    "parallel",
+                    "background research",
+                ],
+            ),
+            "TodoWrite" => {
+                matches!(request.permission_mode, PermissionMode::Plan)
+                    || Self::input_contains_any(
+                        request,
+                        &["todo", "plan", "checklist", "step", "tasks", "task list"],
+                    )
+            }
+            "EnterPlanMode" | "ExitPlanMode" | "AskUserQuestion" => {
+                matches!(request.permission_mode, PermissionMode::Plan)
+                    || Self::input_contains_any(
+                        request,
+                        &["plan", "clarify", "question", "ask", "need info"],
+                    )
+            }
+            _ => matches!(spec.visibility, ToolVisibility::DefaultVisible),
+        }
+    }
+
+    pub fn select_tools(&self, request: &ToolSelectionRequest) -> ToolSelection {
+        let specs = self.tool_catalog().specs().to_vec();
+        let activated_deferred = Self::activated_deferred_names(request);
+        let mut active = Vec::new();
+        let mut deferred = Vec::new();
+        let mut always_loaded = Vec::new();
+        let mut tool_search_spec = None;
+
+        for spec in specs {
+            if matches!(spec.visibility, ToolVisibility::Disabled) {
+                continue;
+            }
+            if spec.definition.name == "ToolSearch" {
+                tool_search_spec = Some(spec);
+                continue;
+            }
+            match spec.visibility {
+                ToolVisibility::AlwaysLoad => always_loaded.push(spec),
+                ToolVisibility::Deferred => {
+                    if activated_deferred.contains(&spec.definition.name) {
+                        active.push(spec);
+                    } else {
+                        deferred.push(spec);
+                    }
+                }
+                ToolVisibility::DefaultVisible => {
+                    if Self::should_activate_default_visible_tool(&spec, request) {
+                        active.push(spec);
+                    } else {
+                        deferred.push(spec);
+                    }
+                }
+                ToolVisibility::Disabled => {}
+            }
+        }
+
+        if let Some(tool_search) = tool_search_spec {
+            if !deferred.is_empty() {
+                active.push(tool_search);
+            }
+        }
+
+        ToolSelection::new(active, deferred, always_loaded)
     }
 
     /// Create a new registry with default policy.
@@ -289,7 +460,7 @@ impl ToolRegistry {
     pub fn register_mcp_server(&self, manager: Arc<McpConnectionManager>) {
         let handler = Arc::new(McpToolHandler::new(Arc::clone(&manager)));
         for spec in manager.all_tool_specs() {
-            let tool_name = spec.definition.name.clone();
+            let tool_name = spec.internal_name.clone();
             self.register_handler(
                 tool_name,
                 spec,
@@ -304,13 +475,13 @@ impl ToolRegistry {
         spec: RegisteredToolSpec,
         func: crate::handlers::dynamic::DynamicToolFn,
     ) {
-        let tool_name = spec.definition.name.clone();
+        let tool_name = spec.internal_name.clone();
         let handler = Arc::new(DynamicToolHandler::new(spec.source.clone(), func));
         self.register_handler(tool_name, spec, handler);
     }
 
     pub fn register_external_dynamic_tool(&self, spec: RegisteredToolSpec) {
-        let tool_name = spec.definition.name.clone();
+        let tool_name = spec.internal_name.clone();
         let handler = Arc::new(DynamicToolHandler::external(spec.source));
         self.register_handler(tool_name, spec, handler);
     }
@@ -332,6 +503,7 @@ impl ToolRegistry {
             );
             left_key.cmp(&right_key)
         });
+        specs.dedup_by(|left, right| left.definition.name == right.definition.name);
         ToolCatalog::new(specs)
     }
 
@@ -350,8 +522,13 @@ impl ToolRegistry {
         invocation: ToolInvocation,
         context: ToolContext,
     ) -> TalosResult<ToolDispatchOutcome> {
-        self.policy_checker
-            .check_tool_access(invocation.tool_name.as_str())?;
+        if let Some(spec) = self.tool_catalog().find(invocation.tool_name.as_str()) {
+            self.policy_checker
+                .check_tool_access(spec.definition.name.as_str())?;
+        } else {
+            self.policy_checker
+                .check_tool_access(invocation.tool_name.as_str())?;
+        }
         self.execute_invocation_unchecked_with_context(invocation, context)
             .await
     }
@@ -385,7 +562,11 @@ impl ToolRegistry {
         if let Some(pending) = orchestrator.resolve_pending(&invocation, &context, spec.as_ref())? {
             return Ok(pending);
         }
-        let Some(handler) = self.handlers.get(invocation.tool_name.as_str()) else {
+        let Some(handler) = spec.as_ref().and_then(|item| {
+            self.handlers
+                .get(item.internal_name.as_str())
+                .map(|entry| entry.value().clone())
+        }) else {
             return Err(TalosError::ToolError(format!(
                 "Tool '{}' not found",
                 invocation.tool_name
@@ -402,21 +583,29 @@ impl ToolRegistry {
 
     /// Get a list of available tool names.
     pub fn list_tool_names(&self) -> Vec<String> {
-        self.specs.iter().map(|entry| entry.key().clone()).collect()
+        self.tool_catalog()
+            .specs()
+            .iter()
+            .map(|spec| spec.definition.name.clone())
+            .collect()
     }
 
     /// Get a list of available tool names that are allowed by policy.
     pub fn list_allowed_tool_names(&self) -> Vec<String> {
-        self.specs
+        self.tool_catalog()
+            .specs()
             .iter()
-            .map(|entry| entry.key().clone())
+            .map(|spec| spec.definition.name.clone())
             .filter(|name| self.policy_checker.policy.is_allowed(name))
             .collect()
     }
 
     /// Check if a tool is available and allowed by policy.
     pub fn is_tool_available(&self, name: &str) -> bool {
-        self.specs.contains_key(name) && self.policy_checker.policy.is_allowed(name)
+        self.tool_catalog()
+            .find(name)
+            .map(|spec| self.policy_checker.policy.is_allowed(&spec.definition.name))
+            .unwrap_or(false)
     }
 
     /// Return all registered tools as model-friendly definitions.
@@ -431,7 +620,7 @@ impl ToolRegistry {
     pub fn tool_is_mutating(&self, name: &str) -> bool {
         self.tool_catalog()
             .find(name)
-            .map(|spec| spec.mutating)
+            .map(|spec| !spec.behavior_flags.read_only)
             .unwrap_or(true)
     }
 
@@ -443,6 +632,23 @@ impl ToolRegistry {
         kernel_config: Option<Arc<AgentKernelConfig>>,
     ) -> ToolContext {
         let ctx = ToolContext::new_with_kernel_config(session_id, user_id, kernel_config);
+        let ctx = ctx.with_catalog_snapshot(
+            self.tool_catalog()
+                .specs()
+                .iter()
+                .map(|spec| crate::CatalogToolEntry {
+                    public_name: spec.definition.name.clone(),
+                    description: spec.definition.description.clone(),
+                    deferred: matches!(spec.visibility, crate::spec::ToolVisibility::Deferred),
+                    available: !matches!(spec.visibility, crate::spec::ToolVisibility::Disabled),
+                    unavailable_reason: matches!(
+                        spec.visibility,
+                        crate::spec::ToolVisibility::Disabled
+                    )
+                    .then(|| "tool is currently unavailable in this environment".to_string()),
+                })
+                .collect(),
+        );
         if let Some(runtime) = self
             .collaboration_runtime
             .get("default")
@@ -472,6 +678,50 @@ impl ToolRegistry {
 impl ToolDefinitionProvider for ToolRegistry {
     fn get_tool_definitions(&self) -> Vec<ToolDefinition> {
         ToolRegistry::get_tool_definitions(self)
+    }
+
+    fn get_tool_prompt_entries(&self) -> Vec<ToolPromptEntry> {
+        self.tool_catalog()
+            .specs()
+            .iter()
+            .filter(|spec| spec.is_visible_to_model())
+            .map(|spec| {
+                let name = if spec.user_facing_name == spec.definition.name {
+                    spec.definition.name.clone()
+                } else {
+                    format!("{} ({})", spec.user_facing_name, spec.definition.name)
+                };
+                ToolPromptEntry {
+                    name,
+                    description: spec.definition.description.clone(),
+                }
+            })
+            .collect()
+    }
+
+    fn get_tool_selection(&self, request: &ToolSelectionRequest) -> ToolSelection {
+        ToolRegistry::select_tools(self, request)
+    }
+
+    fn get_tool_definitions_for_request(
+        &self,
+        request: &ToolSelectionRequest,
+    ) -> Vec<ToolDefinition> {
+        self.select_tools(request).model_definitions()
+    }
+
+    fn get_tool_prompt_entries_for_request(
+        &self,
+        request: &ToolSelectionRequest,
+    ) -> Vec<ToolPromptEntry> {
+        self.select_tools(request)
+            .visible_specs()
+            .into_iter()
+            .map(|spec| ToolPromptEntry {
+                name: spec.definition.name.clone(),
+                description: spec.definition.description.clone(),
+            })
+            .collect()
     }
 }
 
@@ -524,8 +774,8 @@ impl Default for ToolRegistry {
 mod tests {
     use super::*;
     use crate::trait_impl::EchoTestTool;
-    use crate::MemorySearchTool;
     use crate::ToolOutput;
+    use crate::{MemoryGetTool, MemorySearchTool, SkillTool, ToolSearchTool};
     use async_trait::async_trait;
     use talos_config::AgentKernelConfig;
     use talos_tools_policy::ToolPolicy;
@@ -699,7 +949,7 @@ mod tests {
         let invocation = registry
             .build_function_invocation(
                 "call-memory",
-                "memory_search",
+                "MemorySearch",
                 serde_json::json!({ "query": "target" }),
             )
             .unwrap();
@@ -707,7 +957,7 @@ mod tests {
         let error = registry
             .execute_invocation_with_context(invocation, context)
             .await
-            .expect_err("memory_search should fail without injected memory store");
+            .expect_err("MemorySearch should fail without injected memory store");
 
         assert!(matches!(error, talos_error::TalosError::ToolError(_)));
     }
@@ -723,20 +973,17 @@ mod tests {
 
     #[test]
     fn test_get_tool_definitions_uses_stable_priority_order() {
-        use crate::{ExecCommandTool, GrepFilesTool, ListDirTool, ReadFileTool};
+        use crate::{BashTool, GlobTool, GrepTool, ReadTool};
 
         let registry = ToolRegistry::new();
-        registry.register(Arc::new(ListDirTool));
-        registry.register(Arc::new(ExecCommandTool));
-        registry.register(Arc::new(ReadFileTool));
-        registry.register(Arc::new(GrepFilesTool));
+        registry.register(Arc::new(GlobTool));
+        registry.register(Arc::new(BashTool));
+        registry.register(Arc::new(ReadTool));
+        registry.register(Arc::new(GrepTool));
 
         let defs = registry.get_tool_definitions();
         let names = defs.iter().map(|def| def.name.as_str()).collect::<Vec<_>>();
-        assert_eq!(
-            names,
-            vec!["grep_files", "read_file", "list_dir", "exec_command"]
-        );
+        assert_eq!(names, vec!["Grep", "Read", "Glob", "Bash"]);
     }
 
     #[test]
@@ -744,8 +991,52 @@ mod tests {
         let registry = ToolRegistry::new();
         registry.register(Arc::new(MemorySearchTool));
 
-        assert!(registry.tool_supports_parallel("memory_search"));
+        assert!(registry.tool_supports_parallel("MemorySearch"));
         assert!(!registry.tool_supports_parallel("exec"));
+    }
+
+    #[test]
+    fn test_request_time_selection_activates_memory_tools_only_for_memory_requests() {
+        let registry = ToolRegistry::new();
+        registry.register(Arc::new(MemorySearchTool));
+        registry.register(Arc::new(MemoryGetTool));
+
+        let default_request = ToolSelectionRequest::default();
+        let default_names = registry
+            .get_tool_definitions_for_request(&default_request)
+            .into_iter()
+            .map(|definition| definition.name)
+            .collect::<Vec<_>>();
+        assert!(!default_names.contains(&"MemorySearch".to_string()));
+        assert!(!default_names.contains(&"MemoryGet".to_string()));
+
+        let memory_request = ToolSelectionRequest::default()
+            .with_session_id("session-selection")
+            .with_user_input("search memory for prior decisions");
+        let memory_names = registry
+            .get_tool_definitions_for_request(&memory_request)
+            .into_iter()
+            .map(|definition| definition.name)
+            .collect::<Vec<_>>();
+        assert!(memory_names.contains(&"MemorySearch".to_string()));
+        assert!(memory_names.contains(&"MemoryGet".to_string()));
+    }
+
+    #[test]
+    fn test_request_time_selection_includes_tool_search_for_deferred_tools() {
+        let registry = ToolRegistry::new();
+        registry.register(Arc::new(ToolSearchTool));
+        registry.register(Arc::new(SkillTool));
+
+        let request = ToolSelectionRequest::default().with_session_id("session-selection");
+        let names = registry
+            .get_tool_definitions_for_request(&request)
+            .into_iter()
+            .map(|definition| definition.name)
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"ToolSearch".to_string()));
+        assert!(!names.contains(&"Skill".to_string()));
     }
 
     #[test]

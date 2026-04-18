@@ -24,7 +24,7 @@ pub enum ToolApprovalRequirement {
 pub enum ToolGovernanceArgumentOverride {
     #[default]
     None,
-    ExecCommandPermissions,
+    BashCommandPermissions,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,6 +75,7 @@ pub enum GovernanceDecisionReason {
 #[serde(rename_all = "snake_case")]
 pub enum ToolApprovalPolicySnapshot {
     OnRequest,
+    Always,
     Never,
 }
 

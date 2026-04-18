@@ -68,8 +68,8 @@ impl LlmProvider for RepeatedReadOnlyFlowProvider {
             finish_reason: Some("tool_calls".to_string()),
             tool_calls: Some(vec![FunctionCall::new(
                 format!("call_{round}"),
-                "list_dir",
-                json!({ "path": self.workspace_dir }),
+                "Glob",
+                json!({ "path": self.workspace_dir, "pattern": "**/*", "limit": 50 }),
             )]),
         })
     }

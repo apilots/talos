@@ -111,19 +111,19 @@ impl LlmProvider for ExecLoopProvider {
         let round = self.round.fetch_add(1, Ordering::SeqCst);
         match round {
             0 => Ok(ChatResponse {
-                content: "Open a shell session first.".to_string(),
+                content: "Start a background bash task first.".to_string(),
                 reasoning: Vec::new(),
                 model: request.model,
                 usage: Usage::default(),
                 finish_reason: Some("tool_calls".to_string()),
                 tool_calls: Some(vec![FunctionCall::new(
-                    "call_exec",
-                    "exec_command",
+                    "call_bash",
+                    "Bash",
                     json!({
-                        "cmd": "printf 'ready\\n'; read line; printf 'done:%s\\n' \"$line\"",
-                        "shell": "/bin/sh",
-                        "login": false,
-                        "yield_time_ms": 50
+                        "command": "sleep 0.2; printf 'done:ok\\n'",
+                        "description": "Run a short background task for verification.",
+                        "run_in_background": true,
+                        "timeout": 50
                     }),
                 )]),
             }),
@@ -133,11 +133,11 @@ impl LlmProvider for ExecLoopProvider {
                     .iter()
                     .find(|msg| {
                         msg.role == talos_llm_provider::Role::Tool
-                            && msg.tool_call_id.as_deref() == Some("call_exec")
+                            && msg.tool_call_id.as_deref() == Some("call_bash")
                     })
-                    .expect("exec_command tool message should exist");
-                let payload: Value = serde_json::from_str(&tool_message.content)
-                    .expect("exec_command payload should parse");
+                    .expect("Bash tool message should exist");
+                let payload: Value =
+                    serde_json::from_str(&tool_message.content).expect("Bash payload should parse");
                 let session_id = payload
                     .get("session_id")
                     .and_then(Value::as_i64)
@@ -148,18 +148,18 @@ impl LlmProvider for ExecLoopProvider {
                 );
                 assert!(payload.get("output").and_then(Value::as_str).is_some());
                 Ok(ChatResponse {
-                    content: "Write stdin to finish.".to_string(),
+                    content: "Check the background task output.".to_string(),
                     reasoning: Vec::new(),
                     model: request.model,
                     usage: Usage::default(),
                     finish_reason: Some("tool_calls".to_string()),
                     tool_calls: Some(vec![FunctionCall::new(
-                        "call_write",
-                        "write_stdin",
+                        "call_output",
+                        "TaskOutput",
                         json!({
-                            "session_id": session_id,
-                            "chars": "ok\n",
-                            "yield_time_ms": 50
+                            "task_id": session_id,
+                            "offset": 250,
+                            "max_output_tokens": 2000
                         }),
                     )]),
                 })
@@ -170,18 +170,18 @@ impl LlmProvider for ExecLoopProvider {
                     .iter()
                     .find(|msg| {
                         msg.role == talos_llm_provider::Role::Tool
-                            && msg.tool_call_id.as_deref() == Some("call_write")
+                            && msg.tool_call_id.as_deref() == Some("call_output")
                     })
-                    .expect("write_stdin tool message should exist");
+                    .expect("TaskOutput tool message should exist");
                 let payload: Value = serde_json::from_str(&tool_message.content)
-                    .expect("write_stdin payload should parse");
+                    .expect("TaskOutput payload should parse");
                 let output = payload
                     .get("output")
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_string();
                 Ok(ChatResponse {
-                    content: format!("Final answer after stdin write: {}", output.trim()),
+                    content: format!("Final answer after task output: {}", output.trim()),
                     reasoning: Vec::new(),
                     model: request.model,
                     usage: Usage::default(),
@@ -222,14 +222,12 @@ impl LlmProvider for ApprovalLoopProvider {
                 usage: Usage::default(),
                 finish_reason: Some("tool_calls".to_string()),
                 tool_calls: Some(vec![FunctionCall::new(
-                    "call_exec",
-                    "exec_command",
+                    "call_bash",
+                    "Bash",
                     json!({
-                        "cmd": "echo hi",
-                        "shell": "/bin/sh",
-                        "login": false,
-                        "sandbox_permissions": "require_escalated",
-                        "justification": "Need unrestricted shell access."
+                        "command": "echo hi",
+                        "dangerously_disable_sandbox": true,
+                        "description": "Need unrestricted shell access."
                     }),
                 )]),
             }),
@@ -268,14 +266,14 @@ impl LlmProvider for StreamingToolCallIdProvider {
             tx.send(Ok(ToolStreamEvent::ToolCallStart {
                 index: 0,
                 id: Some(String::new()),
-                name: Some("memory_search".to_string()),
+                name: Some("MemorySearch".to_string()),
             }))
             .await
             .expect("tool start should send");
             tx.send(Ok(ToolStreamEvent::ToolCallEnd {
                 index: 0,
                 id: Some(String::new()),
-                name: Some("memory_search".to_string()),
+                name: Some("MemorySearch".to_string()),
                 arguments: json!({ "query": "talos项目" }),
             }))
             .await
@@ -322,7 +320,7 @@ impl LlmProvider for StreamingToolExecutionProvider {
             tx.send(Ok(ToolStreamEvent::ToolCallStart {
                 index: 0,
                 id: Some("call_read".to_string()),
-                name: Some("read_file".to_string()),
+                name: Some("read".to_string()),
             }))
             .await
             .expect("tool start should send");
@@ -335,7 +333,7 @@ impl LlmProvider for StreamingToolExecutionProvider {
             tx.send(Ok(ToolStreamEvent::ToolCallEnd {
                 index: 0,
                 id: Some("call_read".to_string()),
-                name: Some("read_file".to_string()),
+                name: Some("read".to_string()),
                 arguments: json!({ "path": path }),
             }))
             .await
@@ -375,10 +373,11 @@ impl LlmProvider for EmptyFinalAfterToolsProvider {
                 finish_reason: Some("tool_calls".to_string()),
                 tool_calls: Some(vec![FunctionCall::new(
                     "call_list",
-                    "list_dir",
+                    "Glob",
                     json!({
-                        "dir_path": self.dir_path,
-                        "depth": 1
+                        "path": self.dir_path,
+                        "pattern": "**/*",
+                        "limit": 50
                     }),
                 )]),
             }),
@@ -431,10 +430,11 @@ impl LlmProvider for SalvageAfterEmptyFinalProvider {
                 finish_reason: Some("tool_calls".to_string()),
                 tool_calls: Some(vec![FunctionCall::new(
                     "call_list",
-                    "list_dir",
+                    "Glob",
                     json!({
-                        "dir_path": self.dir_path,
-                        "depth": 1
+                        "path": self.dir_path,
+                        "pattern": "**/*",
+                        "limit": 50
                     }),
                 )]),
             }),

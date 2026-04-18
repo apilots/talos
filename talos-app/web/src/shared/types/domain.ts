@@ -64,6 +64,10 @@ export function getProjectRecordKey(project: ProjectRecord) {
   return project.id;
 }
 
+export function resolveProjectRecord(projects: ProjectRecord[], projectId?: string | null) {
+  return projects.find((project) => project.id === projectId) ?? projects[0];
+}
+
 export function isUnboundProject(projectId?: string | null) {
   return !projectId || projectId === UNBOUND_PROJECT_ID;
 }
@@ -76,6 +80,15 @@ export function getApprovalModeHint(mode: ApprovalMode) {
   return mode === "skip"
     ? i18n.t("settings:fields.skipHint")
     : i18n.t("settings:fields.needsApprovalHint");
+}
+
+export function approvalModeToPolicy(mode: ApprovalMode) {
+  return mode === "skip" ? "never" : "always";
+}
+
+export function getSessionApprovalMode(session?: TalosSession | null): ApprovalMode {
+  const policy = session?.conf?.tools?.approval_policy;
+  return policy === "always" ? "needs_approval" : "skip";
 }
 
 export function createDefaultMemory(): MemoryRecord[] {

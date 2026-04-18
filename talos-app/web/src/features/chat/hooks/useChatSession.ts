@@ -11,9 +11,18 @@ export function useChatSession(sessionId: string, serverMessageCount?: number) {
   const [draft, setDraft] = useState("");
   const turnsQuery = useSessionTurnsQuery(sessionId);
   const streamState = useAppStore((state) => state.streams[sessionId]);
-  const { pendingApproval, submitApproval } = useSessionApproval(sessionId);
-  const { hasActiveConnection, isCancelling, isStreaming, sendMutation, sendText, stopResponse, streamState: liveStreamState } =
+  const {
+    continueAfterApproval,
+    hasActiveConnection,
+    isCancelling,
+    isStreaming,
+    sendMutation,
+    sendText,
+    stopResponse,
+    streamState: liveStreamState,
+  } =
     useSessionStreaming(sessionId, serverMessageCount);
+  const { pendingApproval, submitApproval } = useSessionApproval(sessionId, continueAfterApproval);
   const { retryStream } = useSessionReconnect({
     hasActiveConnection,
     serverMessageCount,
@@ -37,7 +46,7 @@ export function useChatSession(sessionId: string, serverMessageCount?: number) {
         return Promise.resolve();
       }
       setDraft("");
-      return sendMutation.mutateAsync(text);
+      return sendMutation.mutateAsync({ text, appendUserInput: true });
     },
     retryStream,
     stopResponse,

@@ -1,212 +1,97 @@
 use async_trait::async_trait;
-use serde::Deserialize;
 use serde_json::Value;
-use std::fs;
 use talos_error::TalosResult;
 
-use crate::{decode_tool_input, Tool, ToolContext, ToolOutput};
+use crate::runtimes::fs_edit::{run, EditFileRequest};
+use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
+use crate::{Tool, ToolContext, ToolOutput};
 
-/// Tool for editing file content (find and replace)
+/// Tool for editing file content with exact replacement semantics.
 pub struct EditTool;
-
-#[derive(Debug, Deserialize)]
-struct EditToolInput {
-    path: String,
-    find: String,
-    replace: String,
-}
 
 #[async_trait]
 impl Tool for EditTool {
     fn name(&self) -> &str {
+        "Edit"
+    }
+
+    fn internal_name(&self) -> &str {
         "edit"
     }
 
+    fn aliases(&self) -> &'static [&'static str] {
+        &["edit"]
+    }
+
     fn description(&self) -> &str {
-        "Edit a file by finding and replacing text. All occurrences of the find string will be replaced.\n\nUsage:\n- path must be an absolute path to an existing file\n- find must match the target text exactly, including whitespace and indentation\n- If the find string appears multiple times, all occurrences will be replaced; use a longer, unique context string to target a specific location\n- To verify current content before editing, use read_file first\n\nIMPORTANT: Always read the file with read_file before editing. Do not edit a file you have not read in the current session."
+        "Perform exact string replacements in files.\n\nUsage:\n- You must use Read at least once before editing the file.\n- old_string must match the target text exactly, including whitespace and indentation.\n- The edit fails if old_string is not unique unless replace_all=true.\n- Prefer editing existing files instead of rewriting them wholesale."
     }
 
     fn parameters_schema(&self) -> Option<Value> {
         Some(serde_json::json!({
             "type": "object",
-            "required": ["path", "find", "replace"],
+            "required": ["path", "old_string", "new_string"],
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Absolute path to the file to edit."
+                    "description": "Absolute path or workspace-relative path to the file to edit."
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "Legacy alias for path."
+                },
+                "old_string": {
+                    "type": "string",
+                    "description": "Exact text to replace."
+                },
+                "new_string": {
+                    "type": "string",
+                    "description": "Replacement text."
                 },
                 "find": {
                     "type": "string",
-                    "description": "Exact text to find in the file. Use a sufficiently unique context string to avoid changing multiple locations unintentionally."
+                    "description": "Legacy alias for old_string."
                 },
                 "replace": {
                     "type": "string",
-                    "description": "Replacement text that will be written wherever the find string matches."
+                    "description": "Legacy alias for new_string."
+                },
+                "replace_all": {
+                    "type": "boolean",
+                    "description": "Replace all occurrences instead of requiring a single exact match."
                 }
             }
         }))
     }
 
-    async fn execute(&self, input: Value, _context: ToolContext) -> TalosResult<ToolOutput> {
-        let input: EditToolInput = match decode_tool_input(input, self.name()) {
-            Ok(input) => input,
-            Err(err) => {
-                let error = if err.to_string().contains("missing field `path`") {
-                    "Input must contain 'path' field".to_string()
-                } else if err.to_string().contains("missing field `find`") {
-                    "Input must contain 'find' field".to_string()
-                } else if err.to_string().contains("missing field `replace`") {
-                    "Input must contain 'replace' field".to_string()
-                } else {
-                    err.to_string()
-                };
-                return Ok(ToolOutput {
-                    success: false,
-                    output: String::new(),
-                    error: Some(error),
-                });
-            }
-        };
-
-        // Read the original content
-        let original_content = match fs::read_to_string(&input.path) {
-            Ok(content) => content,
-            Err(err) => {
-                return Ok(ToolOutput {
-                    success: false,
-                    output: "".to_string(),
-                    error: Some(format!("Failed to read file '{}': {}", input.path, err)),
-                });
-            }
-        };
-
-        // Perform the replacement
-        let new_content = original_content.replace(&input.find, &input.replace);
-
-        // If no replacements were made, mention this in the output
-        let replacements = original_content.matches(&input.find).count();
-
-        if new_content == original_content {
-            return Ok(ToolOutput {
-                success: true,
-                output: format!("No occurrences of '{}' found in {}", input.find, input.path),
-                error: None,
-            });
-        }
-
-        // Write the new content back to the file
-        match fs::write(&input.path, &new_content) {
-            Ok(_) => Ok(ToolOutput {
-                success: true,
-                output: format!(
-                    "Replaced {} occurrence(s) of '{}' with '{}' in {}",
-                    replacements, input.find, input.replace, input.path
-                ),
-                error: None,
-            }),
-            Err(err) => Ok(ToolOutput {
-                success: false,
-                output: "".to_string(),
-                error: Some(format!("Failed to write to file '{}': {}", input.path, err)),
-            }),
+    fn behavior_flags(&self) -> ToolBehaviorFlags {
+        ToolBehaviorFlags {
+            read_only: false,
+            destructive: true,
+            concurrency_safe: false,
+            requires_user_interaction: false,
         }
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use std::io::Write;
-    use tempfile::NamedTempFile;
-
-    #[tokio::test]
-    async fn test_edit_tool_success() {
-        // Create a temporary file with initial content
-        let mut temp_file = NamedTempFile::new().unwrap();
-        let initial_content = "Hello world, this is a test.";
-        temp_file.write_all(initial_content.as_bytes()).unwrap();
-        let path = temp_file.path().to_str().unwrap().to_string();
-
-        let tool = EditTool;
-        let input = serde_json::json!({
-            "path": path,
-            "find": "world",
-            "replace": "Rust"
-        });
-        let result = tool.execute(input, ToolContext::default()).await.unwrap();
-
-        assert!(result.success);
-        assert!(result.output.contains("Replaced 1 occurrence"));
-
-        // Verify the content was changed
-        let new_content = fs::read_to_string(&path).unwrap();
-        assert!(new_content.contains("Hello Rust"));
+    fn result_policy(&self) -> ToolResultPolicy {
+        ToolResultPolicy {
+            max_inline_bytes: 32 * 1024,
+            persist_large_output: false,
+            preview_lines: 80,
+        }
     }
 
-    #[tokio::test]
-    async fn test_edit_tool_multiple_occurrences() {
-        // Create a temporary file with initial content
-        let mut temp_file = NamedTempFile::new().unwrap();
-        let initial_content = "Hello world, world is great, world!";
-        temp_file.write_all(initial_content.as_bytes()).unwrap();
-        let path = temp_file.path().to_str().unwrap().to_string();
-
-        let tool = EditTool;
-        let input = serde_json::json!({
-            "path": path,
-            "find": "world",
-            "replace": "Rust"
-        });
-        let result = tool.execute(input, ToolContext::default()).await.unwrap();
-
-        assert!(result.success);
-        assert!(result.output.contains("Replaced 3 occurrence"));
-
-        // Verify the content was changed
-        let new_content = fs::read_to_string(&path).unwrap();
-        assert_eq!(new_content, "Hello Rust, Rust is great, Rust!");
-    }
-
-    #[tokio::test]
-    async fn test_edit_tool_no_matches() {
-        // Create a temporary file with initial content
-        let mut temp_file = NamedTempFile::new().unwrap();
-        let initial_content = "Hello world, this is a test.";
-        temp_file.write_all(initial_content.as_bytes()).unwrap();
-        let path = temp_file.path().to_str().unwrap().to_string();
-
-        let tool = EditTool;
-        let input = serde_json::json!({
-            "path": path,
-            "find": "python",
-            "replace": "Rust"
-        });
-        let result = tool.execute(input, ToolContext::default()).await.unwrap();
-
-        assert!(result.success);
-        assert!(result.output.contains("No occurrences"));
-
-        // Verify the content was unchanged
-        let new_content = fs::read_to_string(&path).unwrap();
-        assert_eq!(new_content, initial_content);
-    }
-
-    #[tokio::test]
-    async fn test_edit_tool_missing_fields() {
-        let tool = EditTool;
-        let input = serde_json::json!({
-            "path": "/tmp/test.txt",
-            "find": "test"
-        });
-        let result = tool.execute(input, ToolContext::default()).await.unwrap();
-
-        assert!(!result.success);
-        assert!(result.error.is_some());
-        assert!(result
-            .error
-            .as_ref()
-            .unwrap()
-            .contains("Input must contain 'replace' field"));
+    async fn execute(&self, input: Value, context: ToolContext) -> TalosResult<ToolOutput> {
+        let request: EditFileRequest = serde_json::from_value(input).map_err(|err| {
+            talos_error::TalosError::ToolError(format!("invalid edit arguments: {}", err))
+        })?;
+        let result = run(&request, &context).await?;
+        Ok(ToolOutput {
+            success: true,
+            output: serde_json::to_string(&result).map_err(|err| {
+                talos_error::TalosError::ToolError(format!("serialize edit response: {}", err))
+            })?,
+            error: None,
+        })
     }
 }

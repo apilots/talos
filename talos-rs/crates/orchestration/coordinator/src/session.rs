@@ -12,8 +12,8 @@ use talos_types::talos::{
 };
 use talos_types::{
     OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, ProjectPatch, ProjectRecord,
-    SessionPatch, SessionPatchAck, SessionQuery, SessionRecord, TalosConfig, TalosSession,
-    DEFAULT_SESSION_TITLE,
+    SessionConf, SessionPatch, SessionPatchAck, SessionQuery, SessionRecord, TalosConfig,
+    TalosSession, DEFAULT_SESSION_TITLE,
 };
 use tokio::sync::RwLock;
 
@@ -233,14 +233,16 @@ impl SessionManager {
                 .session_store
                 .get_project(project_id)
                 .await?
-                .ok_or_else(|| {
-                    TalosError::ResourceNotFound(format!("project {}", project_id))
-                })?;
+                .ok_or_else(|| TalosError::ResourceNotFound(format!("project {}", project_id)))?;
             return Ok(Some(project.directory));
         }
 
         if matches!(
-            session.context.environment.as_ref().map(|env| env.connection_mode),
+            session
+                .context
+                .environment
+                .as_ref()
+                .map(|env| env.connection_mode),
             Some(TalosConnectionMode::Embedded)
         ) {
             if let Some(current_directory) = session.current_directory.clone() {
@@ -370,6 +372,7 @@ impl SessionManager {
         context: TalosContext,
         target_agent: &str,
         model: Option<String>,
+        conf: Option<SessionConf>,
         project_id: Option<String>,
         current_directory: Option<PathBuf>,
     ) -> TalosResult<TalosSession> {
@@ -386,6 +389,7 @@ impl SessionManager {
                 target_agent,
                 self.base_model(),
                 model.as_deref(),
+                conf,
                 self.resolve_dm_scope(&context.provider),
                 project_id,
                 current_directory,
@@ -483,7 +487,8 @@ impl SessionManager {
         context: TalosContext,
         mut patch: SessionPatch,
     ) -> TalosResult<SessionPatch> {
-        if let Some(OptionalCurrentDirectoryPatch::Set { path }) = patch.current_directory.as_ref() {
+        if let Some(OptionalCurrentDirectoryPatch::Set { path }) = patch.current_directory.as_ref()
+        {
             patch.current_directory = self
                 .normalize_current_directory(&context, Some(path.clone()))?
                 .map(|normalized| OptionalCurrentDirectoryPatch::Set { path: normalized });

@@ -3,23 +3,63 @@ use chrono::{Local, Utc};
 use serde_json::json;
 use std::future::pending;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use talos_agent_kernel::StopReason as KernelStopReason;
 use talos_agent_kernel::{KernelBuilder, RunRequest, RunResponse, Runner};
 use talos_config::AgentKernelConfig;
+use talos_error::TalosResult;
 use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, Role, Usage,
 };
 use talos_memory::{Memory, TalosTurn};
-use talos_tools::{ReadFileTool, ToolRegistry, WebSearchTool};
+use talos_tools::{ReadTool, Tool, ToolContext, ToolOutput, ToolRegistry, WebSearchTool};
 use talos_tools_policy::ToolPolicy;
 use talos_types::talos::{
     StopReason as TalosStopReason, TalosInputItem, TalosOutputItem, TalosProvider, TalosSourceType,
     TalosUsage,
 };
-use talos_types::{SessionContext, SessionState, TalosSession};
+use talos_types::{SessionConf, SessionContext, SessionState, TalosSession};
 use tempfile::TempDir;
 use tokio::sync::Notify;
+
+struct StaticSearchTool;
+
+#[async_trait::async_trait]
+impl Tool for StaticSearchTool {
+    fn name(&self) -> &str {
+        "StaticSearch"
+    }
+
+    fn description(&self) -> &str {
+        "Return deterministic search results for tests."
+    }
+
+    fn parameters_schema(&self) -> Option<serde_json::Value> {
+        Some(json!({
+            "type": "object",
+            "required": ["query"],
+            "properties": {
+                "query": { "type": "string" }
+            }
+        }))
+    }
+
+    async fn execute(
+        &self,
+        input: serde_json::Value,
+        _context: ToolContext,
+    ) -> TalosResult<ToolOutput> {
+        let query = input
+            .get("query")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        Ok(ToolOutput {
+            success: true,
+            output: format!("Static search results for '{query}'"),
+            error: None,
+        })
+    }
+}
 
 fn build_test_agent() -> AgentImpl {
     AgentImpl::new(
@@ -36,6 +76,38 @@ fn build_test_agent() -> AgentImpl {
 struct SequencedRunner {
     started: Arc<Notify>,
     calls: AtomicUsize,
+}
+
+struct CapturingRunner {
+    seen_kernel_config: Arc<Mutex<Option<AgentKernelConfig>>>,
+}
+
+#[async_trait::async_trait]
+impl Runner for CapturingRunner {
+    async fn run_turn(
+        &self,
+        _agent: Arc<dyn talos_agent_kernel::Agent>,
+        request: RunRequest,
+    ) -> talos_error::TalosResult<RunResponse> {
+        *self
+            .seen_kernel_config
+            .lock()
+            .expect("capture lock poisoned") = request.kernel_config;
+        Ok(RunResponse {
+            output_text: "captured".to_string(),
+            output_items: vec![TalosOutputItem::OutputText {
+                text: "captured".to_string(),
+            }],
+            stop_reason: KernelStopReason::EndTurn,
+            usage: TalosUsage::default(),
+            warnings: Vec::new(),
+            model: "mock-model".to_string(),
+            task_results: Vec::new(),
+            transfer_to: None,
+            iterations: 1,
+            events: Vec::new(),
+        })
+    }
 }
 
 #[async_trait::async_trait]
@@ -89,6 +161,7 @@ fn build_temp_agent() -> (TempDir, AgentImpl) {
 fn build_test_session(session_id: &str, workspace_id: &str) -> TalosSession {
     TalosSession {
         title: "Untitled Session".to_string(),
+        conf: SessionConf::default(),
         project_id: None,
         current_directory: None,
         context: SessionContext {
@@ -119,9 +192,9 @@ fn build_test_session(session_id: &str, workspace_id: &str) -> TalosSession {
 #[tokio::test]
 async fn test_process_tool_calls() {
     let mock_provider = MockLlmProvider {};
-    let policy = ToolPolicy::allow_list(vec!["web_search"]);
+    let policy = ToolPolicy::allow_list(vec!["StaticSearch"]);
     let registry = Arc::new(ToolRegistry::new_with_policy(policy));
-    registry.register(Arc::new(WebSearchTool));
+    registry.register(Arc::new(StaticSearchTool));
     let agent = AgentImpl::new(
         "test_agent".to_string(),
         "Test Agent".to_string(),
@@ -134,7 +207,7 @@ async fn test_process_tool_calls() {
 
     let tool_call = FunctionCall {
         id: "call_123".to_string(),
-        name: "web_search".to_string(),
+        name: "StaticSearch".to_string(),
         arguments: json!({"query": "test"}),
     };
 
@@ -160,14 +233,14 @@ async fn test_generate_system_prompt() {
     );
 
     agent.add_tool(Arc::new(WebSearchTool));
-    agent.add_tool(Arc::new(ReadFileTool));
+    agent.add_tool(Arc::new(ReadTool));
 
     let prompt = agent.generate_system_prompt();
 
     assert!(prompt.contains("Test Agent"));
     assert!(prompt.contains("An agent for testing"));
-    assert!(prompt.contains("web_search"));
-    assert!(prompt.contains("read_file"));
+    assert!(prompt.contains("WebSearch"));
+    assert!(prompt.contains("Read"));
 }
 
 #[tokio::test]
@@ -188,15 +261,15 @@ async fn test_add_tool() {
     agent.add_tool(Arc::new(WebSearchTool));
 
     let tools = agent.tool_registry.list_tool_names();
-    assert!(tools.contains(&"web_search".to_string()));
+    assert!(tools.contains(&"WebSearch".to_string()));
 }
 
 #[tokio::test]
 async fn test_execute_tool() {
     let mock_provider = MockLlmProvider {};
-    let policy = ToolPolicy::allow_list(vec!["web_search"]);
+    let policy = ToolPolicy::allow_list(vec!["StaticSearch"]);
     let registry = Arc::new(ToolRegistry::new_with_policy(policy));
-    registry.register(Arc::new(WebSearchTool));
+    registry.register(Arc::new(StaticSearchTool));
     let agent = AgentImpl::new(
         "test_agent".to_string(),
         "Test Agent".to_string(),
@@ -208,12 +281,51 @@ async fn test_execute_tool() {
     );
 
     let result = agent
-        .execute_tool("web_search", json!({"query": "test"}))
+        .execute_tool("StaticSearch", json!({"query": "test"}))
         .await;
 
     assert!(result.is_ok());
     let response = result.unwrap();
-    assert!(response.output_text.contains("Search results for 'test'"));
+    assert!(response
+        .output_text
+        .contains("Static search results for 'test'"));
+}
+
+#[tokio::test]
+async fn test_run_uses_session_kernel_config_override() {
+    let mut agent = build_test_agent();
+    let captured = Arc::new(Mutex::new(None));
+    agent.kernel_runtime = Arc::new(
+        KernelBuilder::new()
+            .with_runner(Arc::new(CapturingRunner {
+                seen_kernel_config: captured.clone(),
+            }))
+            .build(),
+    );
+
+    let mut session = build_test_session("session-kernel-override", "workspace-1");
+    session.config.agent.kernel.tools.approval_policy = talos_config::ToolApprovalPolicy::Never;
+
+    let result = agent
+        .run(OrchestratorRequest {
+            session,
+            input: vec![TalosInputItem::Text {
+                text: "hello".to_string(),
+            }],
+        })
+        .await
+        .expect("run should succeed");
+
+    assert_eq!(result.stop_reason, TalosStopReason::EndTurn);
+    let seen = captured
+        .lock()
+        .expect("capture lock poisoned")
+        .clone()
+        .expect("runner should receive kernel config");
+    assert_eq!(
+        seen.tools.approval_policy,
+        talos_config::ToolApprovalPolicy::Never
+    );
 }
 
 #[tokio::test]
@@ -276,11 +388,11 @@ async fn test_close_session_flushes_workspace_memory() {
 }
 
 #[test]
-fn test_derive_exec_command() {
-    assert_eq!(AgentImpl::derive_exec_command("run echo ok"), "echo ok");
-    assert_eq!(AgentImpl::derive_exec_command("execute ls"), "ls");
-    assert_eq!(AgentImpl::derive_exec_command("exec pwd"), "pwd");
-    assert_eq!(AgentImpl::derive_exec_command("echo plain"), "echo plain");
+fn test_derive_bash_command() {
+    assert_eq!(AgentImpl::derive_bash_command("run echo ok"), "echo ok");
+    assert_eq!(AgentImpl::derive_bash_command("execute ls"), "ls");
+    assert_eq!(AgentImpl::derive_bash_command("exec pwd"), "pwd");
+    assert_eq!(AgentImpl::derive_bash_command("echo plain"), "echo plain");
 }
 
 #[test]

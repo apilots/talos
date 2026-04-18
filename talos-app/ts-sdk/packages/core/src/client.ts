@@ -9,6 +9,7 @@ import type {
   ModelInfo,
   ProjectPatch,
   ProjectRecord,
+  SessionConf,
   SessionQuery,
   SessionUpdate,
   TalosContext,
@@ -33,6 +34,7 @@ interface AckResponse {
 interface CreateSessionRequest {
   context: TalosContext;
   model?: string | null;
+  conf?: SessionConf | null;
   project_id?: string | null;
   current_directory?: string | null;
 }

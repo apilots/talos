@@ -2,6 +2,7 @@ use super::*;
 use crate::{EventAuthor, ExecutionBranch, SessionEvent, SessionEventKind, SessionEventPayload};
 use serde::de::DeserializeOwned;
 use talos_prompt::PromptSectionKind;
+use talos_tools::{PermissionMode, ToolSelectionPhase, ToolSelectionRequest};
 
 pub(crate) const SESSION_CONTINUITY_STATE_KEY: &str = "session_continuity";
 pub(crate) const PROMPT_WARNING_STATE_KEY: &str = "prompt_warning_state";
@@ -26,6 +27,28 @@ fn build_prompt_load_policy(kernel_config: &AgentKernelConfig) -> PromptLoadPoli
         retrieved_memory_max_items: kernel_config.prompt.retrieved_memory_max_items,
         retrieved_memory_max_chars: kernel_config.prompt.retrieved_memory_max_chars,
         unified_recent_limit: 10,
+    }
+}
+
+fn build_tool_selection_request(
+    session_id: &str,
+    input: &str,
+    phase: PromptPhase,
+    kernel_config: &AgentKernelConfig,
+) -> ToolSelectionRequest {
+    ToolSelectionRequest {
+        phase: match phase {
+            PromptPhase::Planning => ToolSelectionPhase::Planning,
+            PromptPhase::Execution => ToolSelectionPhase::Execution,
+        },
+        planner_mode: Some(kernel_config.planner_mode.as_str().to_string()),
+        permission_mode: if matches!(phase, PromptPhase::Planning) {
+            PermissionMode::Plan
+        } else {
+            PermissionMode::Default
+        },
+        user_input: Some(input.to_string()),
+        session_id: Some(session_id.to_string()),
     }
 }
 
@@ -315,7 +338,7 @@ pub(crate) fn build_session_continuity(
             }
         }
 
-        if call.name == "grep_files" {
+        if matches!(call.name.as_str(), "Grep" | "grep") {
             if let Some(pattern) = call
                 .arguments
                 .get("pattern")
@@ -351,7 +374,7 @@ pub(crate) fn build_session_continuity(
 
     let recent_answer_mode = if recent_successful_tools
         .iter()
-        .any(|tool| matches!(tool.as_str(), "grep_files" | "read_file" | "list_dir"))
+        .any(|tool| matches!(tool.as_str(), "Grep" | "Read" | "Glob"))
     {
         Some(ContinuityAnswerMode::CodeFirst)
     } else if executed.tool_call_log.is_empty() {
@@ -490,7 +513,7 @@ pub async fn prepare_general_turn(
     emit_prompt_warning_events(ctx, &warnings).await;
 
     Ok(PreparedGeneralTurn {
-        session_id,
+        session_id: session_id.clone(),
         invocation_id,
         agent_id,
         project_root: ctx.project_root.clone(),
@@ -500,7 +523,9 @@ pub async fn prepare_general_turn(
             input,
         ),
         messages: render_prompt_assembly(&prompt_assembly),
-        tool_definitions: tool_definition_provider.get_tool_definitions(),
+        tool_definitions: tool_definition_provider.get_tool_definitions_for_request(
+            &build_tool_selection_request(&session_id, input, phase, kernel_config),
+        ),
         prompt_diagnostics,
         warnings,
         prompt_warning_state,
@@ -534,7 +559,7 @@ pub async fn execute_general_turn_loop(
             step_request.streaming_tool_execution = Some(StreamingToolExecutionConfig {
                 execution_mode: execution_settings.tool_execution_mode,
                 execution_context: ToolExecutionContext {
-                    session_id: format!("agent-{}", prepared.agent_id),
+                    session_id: prepared.session_id.clone(),
                     user_id: agent_name.to_string(),
                     project_root: prepared.project_root.clone(),
                     kernel_config: kernel_config.clone(),

@@ -88,12 +88,7 @@ pub(super) async fn patch_project_handler(
 
     let Some(project) = state
         .session_service
-        .patch_project(
-            &project_id,
-            ProjectPatch {
-                name: request.name,
-            },
-        )
+        .patch_project(&project_id, ProjectPatch { name: request.name })
         .await
         .map_err(map_project_error)?
     else {

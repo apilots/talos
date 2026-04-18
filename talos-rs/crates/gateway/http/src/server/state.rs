@@ -4,8 +4,8 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
 use talos_auth::JwtAuth;
-use talos_llm_provider::LlmProvider;
 use talos_gateway::Gateway;
+use talos_llm_provider::LlmProvider;
 use talos_types::talos::TalosMessageResponse;
 use talos_types::{ModelInfo, SessionService, TalosConfig};
 
@@ -20,7 +20,8 @@ impl FileLockRegistry {
     pub(super) async fn lock_for(&self, key: impl Into<String>) -> Arc<Mutex<()>> {
         let key = key.into();
         let mut locks = self.locks.lock().await;
-        locks.entry(key)
+        locks
+            .entry(key)
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone()
     }

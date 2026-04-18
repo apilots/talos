@@ -2,8 +2,8 @@ mod auth;
 mod errors;
 mod file_support;
 mod lifecycle;
-mod messages;
 mod memory_files;
+mod messages;
 mod misc;
 mod projects;
 mod sessions;
@@ -21,12 +21,12 @@ use tracing::{error, info};
 
 use self::auth::{auth_middleware, lifecycle_gate_middleware};
 pub use self::lifecycle::{ServerLifecycle, ServerLifecycleState};
-use self::messages::{
-    session_message_handler, submit_dynamic_tool_result_handler, submit_tool_approval_handler,
-};
 use self::memory_files::{
     get_memory_file_handler, list_memory_files_handler, put_memory_file_handler,
     search_memory_files_handler,
+};
+use self::messages::{
+    session_message_handler, submit_dynamic_tool_result_handler, submit_tool_approval_handler,
 };
 use self::misc::{health_handler, list_models_handler, shutdown_signal};
 use self::projects::{

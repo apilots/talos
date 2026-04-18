@@ -22,6 +22,8 @@ pub(super) struct CreateSessionRequest {
     context: TalosContext,
     model: Option<String>,
     #[serde(default)]
+    conf: Option<SessionConf>,
+    #[serde(default)]
     project_id: Option<String>,
     #[serde(default)]
     current_directory: Option<PathBuf>,
@@ -63,6 +65,7 @@ pub(super) async fn create_session_handler(
         .create_session(
             request.context,
             request.model,
+            request.conf,
             request.project_id,
             request.current_directory,
         )

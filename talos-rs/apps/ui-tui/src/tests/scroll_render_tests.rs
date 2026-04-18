@@ -185,7 +185,7 @@ fn test_round_text_for_block_includes_user_assistant_and_tool_blocks() {
     let mut app = create_embedded_app();
     let mut tool_block = ChatBlock::new_tool_call(
         "call-1".to_string(),
-        "read_file".to_string(),
+        "read".to_string(),
         json!({"file_path":"/tmp/demo.py"}),
         1,
         0,
@@ -209,7 +209,7 @@ fn test_round_text_for_block_includes_user_assistant_and_tool_blocks() {
 
     assert!(text.contains("## User\n\nAnalyze /tmp/demo"));
     assert!(text.contains("## Assistant\n\nPlanning to inspect the file."));
-    assert!(text.contains("### Tool `read_file`"));
+    assert!(text.contains("### Tool `Read`"));
     assert!(text.contains("\"file_path\": \"/tmp/demo.py\""));
     assert!(text.contains("```json"));
     assert!(text.contains("Output:\n```text\nL1: print('hi')\n```"));

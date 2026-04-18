@@ -3,8 +3,8 @@
 use std::sync::Arc;
 use talos_agent::MockAgent;
 use talos_tools::{
-    ExecCommandTool, HttpRequestTool, ReadFileTool, ToolContext, ToolDispatchOutcome, ToolRegistry,
-    WebFetchTool, WebSearchTool, WriteTool,
+    BashTool, ReadTool, ToolContext, ToolDispatchOutcome, ToolRegistry, WebFetchTool,
+    WebSearchTool, WriteTool,
 };
 use talos_tools_policy::ToolPolicy;
 
@@ -31,16 +31,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   - Better integration between agent and tool registry");
 
     // Demonstrate the tool registry with security policies
-    let policy = ToolPolicy::allow_list(vec!["web_search", "web_fetch", "read_file", "write"]);
+    let policy = ToolPolicy::allow_list(vec!["WebSearch", "WebFetch", "Read", "Write"]);
     let registry = Arc::new(ToolRegistry::new_with_policy(policy));
 
     // Register tools
-    registry.register(Arc::new(ReadFileTool));
+    registry.register(Arc::new(ReadTool));
     registry.register(Arc::new(WriteTool));
-    registry.register(Arc::new(ExecCommandTool));
+    registry.register(Arc::new(BashTool));
     registry.register(Arc::new(WebSearchTool));
     registry.register(Arc::new(WebFetchTool));
-    registry.register(Arc::new(HttpRequestTool));
 
     println!("4. Tool registry created with policy:");
     println!("   Available tools: {:?}", registry.list_tool_names());
@@ -50,7 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n5. Testing tool execution:");
     let web_search_invocation = registry.build_function_invocation(
         "call-web-search",
-        "web_search",
+        "WebSearch",
         serde_json::json!({"query": "test"}),
     )?;
     match registry
@@ -71,18 +70,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Test security policy
-    println!("\n6. Testing security policy (exec_command should be blocked):");
+    println!("\n6. Testing security policy (Bash should be blocked):");
     let exec_invocation = registry.build_function_invocation(
-        "call-exec-command",
-        "exec_command",
-        serde_json::json!({"cmd": "ls"}),
+        "call-bash",
+        "Bash",
+        serde_json::json!({"command": "ls"}),
     )?;
     match registry
         .execute_invocation_with_context(exec_invocation, ToolContext::default())
         .await
     {
-        Ok(_) => println!("   exec_command tool executed (unexpected)"),
-        Err(e) => println!("   exec_command tool blocked by policy: {} (expected)", e),
+        Ok(_) => println!("   Bash tool executed (unexpected)"),
+        Err(e) => println!("   Bash tool blocked by policy: {} (expected)", e),
     }
 
     println!("\n=== Agent Tool Integration Demo Completed ===");

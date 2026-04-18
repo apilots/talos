@@ -70,14 +70,13 @@ fn build_evidence_tooling_policy_prompt() -> String {
 - Treat README files, architecture documents, and design notes as secondary evidence unless the user explicitly asks for documentation analysis.
 - If the user asks for code-based analysis, first inspect code structure and only use documents as supplemental context.
 - Prefer dedicated tools over shell commands for repository exploration.
-- To search file contents or code symbols, use grep_files instead of shell grep or rg.
-- To read files, use read_file instead of cat, head, tail, or ad hoc shell readers.
-- To inspect directories, use list_dir instead of ls or find.
-- Use grep_files to locate symbols, entrypoints, exports, routes, and module boundaries before reading files.
-- Use read_file only after the target file has been named by the user or narrowed by grep_files or list_dir.
-- When a path might be a directory, verify it with list_dir before calling read_file.
-- Use list_dir to map unfamiliar directories or confirm high-level structure.
-- Reserve exec_command for tests, builds, scripts, git, and shell-required operations. Do not use exec_command as a substitute for grep_files, read_file, or list_dir when dedicated tools can answer directly.
+- To search file contents or code symbols, use Grep instead of shell grep or rg.
+- To read files, use Read instead of cat, head, tail, or ad hoc shell readers.
+- To inspect directory or path shape, use Glob instead of shell ls or find.
+- Use Grep to locate symbols, entrypoints, exports, routes, and module boundaries before reading files.
+- Use Read only after the target file has been named by the user or narrowed by Grep or Glob.
+- When a path might be a directory or you need to map a subtree, use Glob before calling Read.
+- Reserve Bash for tests, builds, scripts, git, and shell-required operations. Do not use Bash as a substitute for Grep, Read, or Glob when dedicated tools can answer directly.
 - Do not repeat an equivalent read-only tool call unless parameters materially narrow scope or verify changed state.
 - Do not re-read the same file with the same arguments. If the earlier read was insufficient, change offset or limit and briefly explain why you need the second read.
 - If a tool already provides enough evidence to answer, stop exploring and synthesize the answer."#
@@ -87,11 +86,11 @@ fn build_evidence_tooling_policy_prompt() -> String {
 fn build_tool_choice_priority_prompt() -> String {
     r#"Tool choice priority:
 - If the user explicitly names a tool and that tool can satisfy the next verification step, honor that tool before switching to adjacent tools.
-- For codebase analysis, prefer grep_files first, then read_file, then list_dir.
-- Use list_dir first only when the next step is to confirm whether a path is a directory or to map an unfamiliar top-level layout.
-- When analyzing architecture, ownership, exports, traits, routes, or entrypoints, start with grep_files unless the exact file is already known.
-- Use exec_command only when shell execution itself is required.
-- Do not replace grep_files, read_file, or list_dir with shell grep, cat, find, or ls.
+- For codebase analysis, prefer Grep first, then Read, then Glob.
+- Use Glob first only when the next step is to confirm path shape, expand a subtree, or map an unfamiliar top-level layout.
+- When analyzing architecture, ownership, exports, traits, routes, or entrypoints, start with Grep unless the exact file is already known.
+- Use Bash only when shell execution itself is required.
+- Do not replace Grep, Read, or Glob with shell grep, cat, find, or ls.
 - Once enough evidence exists, stop exploring and answer."#
         .to_string()
 }
@@ -116,12 +115,15 @@ fn build_requested_tool_preference_template_prompt() -> String {
 fn build_requested_tool_preference_hint_prompt(builder: &PromptBuilder<'_>) -> Option<String> {
     let user_input = builder.user_input.as_deref()?.to_ascii_lowercase();
     let tool_registry = builder.tool_registry?;
+    let selection_request = builder.tool_selection_request();
     let mut requested_tools = tool_registry
-        .get_tool_definitions()
+        .get_tool_definitions_for_request(&selection_request)
         .into_iter()
         .filter_map(|tool| {
             let name = tool.name;
-            user_input.contains(name.as_str()).then_some(name)
+            user_input
+                .contains(name.to_ascii_lowercase().as_str())
+                .then_some(name)
         })
         .collect::<Vec<_>>();
     requested_tools.sort();
@@ -132,17 +134,17 @@ fn build_requested_tool_preference_hint_prompt(builder: &PromptBuilder<'_>) -> O
     }
 
     Some(format!(
-        "Requested tool preference hint:\n- The user explicitly asked for these tools: {}.\n- Example: if the requested tool is grep_files for code investigation, start with grep_files rather than list_dir when grep_files can narrow the first files to inspect.",
+        "Requested tool preference hint:\n- The user explicitly asked for these tools: {}.\n- Example: if the requested tool is Grep for code investigation, start with Grep rather than Glob when it can narrow the first files to inspect.",
         requested_tools.join(", "),
     ))
 }
 
 fn build_compact_tool_routing_prompt() -> String {
     r#"Compact tool routing:
-- grep_files: search file contents, symbols, exports, routes, and entrypoints; use this instead of shell grep or rg
-- read_file: read a specific file after narrowing; use this instead of cat, head, or tail
-- list_dir: inspect directory shape or confirm a path is a directory; use this instead of ls or find
-- exec_command: run tests, scripts, builds, git, or other shell-only tasks when dedicated tools do not fit"#
+- Grep: search file contents, symbols, exports, routes, and entrypoints; use this instead of shell grep or rg
+- Read: read a specific file after narrowing; use this instead of cat, head, or tail
+- Glob: inspect path shape, expand a subtree, or confirm matching files; use this instead of ls or find
+- Bash: run tests, scripts, builds, git, or other shell-only tasks when dedicated tools do not fit"#
         .to_string()
 }
 
@@ -150,11 +152,11 @@ fn build_task_protocol_library_prompt() -> String {
     r#"Task protocol library:
 - Codebase analysis protocol:
   1. Start from code anchors such as workspace members, crate roots, exports, traits, entrypoints, and key module declarations.
-  2. Prefer grep_files before read_file when you still need to narrow candidate files.
-  3. If the user explicitly asks to use grep_files, make grep_files the first exploratory tool call unless the file path is already exact.
-  4. After two to four structural grep_files calls, switch to read_file on Cargo.toml, crate root files, or the most relevant modules before opening more broad searches.
+  2. Prefer Grep before Read when you still need to narrow candidate files.
+  3. If the user explicitly asks to use Grep, make Grep the first exploratory tool call unless the file path is already exact.
+  4. After two to four structural Grep calls, switch to Read on Cargo.toml, crate root files, or the most relevant modules before opening broader searches.
   5. Read Cargo.toml, crate root files, and a small set of key modules before describing architecture.
-  6. Use list_dir before grep_files only when directory shape itself is the missing fact.
+  6. Use Glob before Grep only when path shape itself is the missing fact.
   7. Avoid repeated reads of the same file unless you need a different offset or limit to confirm a specific detail.
   8. Treat architecture documents as target design or background unless code confirms they are current.
   9. Cite concrete code evidence in the answer instead of giving a documentation-only summary.
@@ -162,7 +164,7 @@ fn build_task_protocol_library_prompt() -> String {
   11. Mark any extrapolation as inference instead of verified fact.
 - Bug investigation protocol:
   1. Reproduce or localize the failure signal first.
-  2. Narrow likely ownership with grep_files, then inspect the smallest relevant files.
+  2. Narrow likely ownership with Grep, then inspect the smallest relevant files.
   3. Do not propose a fix until the failure path is evidenced.
 - Change planning protocol:
   1. Inspect the current implementation before suggesting edits.
@@ -190,12 +192,44 @@ pub(crate) fn build_expanded_tool_catalog_prompt(builder: &PromptBuilder<'_>) ->
     let Some(tool_registry) = builder.tool_registry else {
         return None;
     };
-    if tool_registry.get_tool_definitions().is_empty() {
+    let selection_request = builder.tool_selection_request();
+    let selection = tool_registry.get_tool_selection(&selection_request);
+    if selection.model_definitions().is_empty() {
         return None;
     }
 
-    let tool_summary = PromptBuilder::render_tool_summary(tool_registry);
-    Some(format!("Available tools:\n{}", tool_summary))
+    let active_summary = selection
+        .visible_specs()
+        .into_iter()
+        .map(|spec| {
+            format!(
+                "- {}: {}",
+                spec.definition.name,
+                spec.definition.description.trim()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if selection.deferred_specs().is_empty() {
+        Some(format!("Available tools:\n{}", active_summary))
+    } else {
+        let deferred_summary = selection
+            .deferred_specs()
+            .iter()
+            .map(|spec| {
+                format!(
+                    "- {}: {}",
+                    spec.definition.name,
+                    spec.definition.description.trim()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        Some(format!(
+            "Available tools:\n{}\n\nSearchable deferred tools (discover with ToolSearch before using them in a later turn):\n{}",
+            active_summary, deferred_summary
+        ))
+    }
 }
 
 fn build_static_prefix_sections(builder: &PromptBuilder<'_>) -> Vec<PromptSection> {

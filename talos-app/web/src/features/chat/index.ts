@@ -12,6 +12,7 @@ export {
   sendMessage,
   sendMessageStream,
   submitToolApproval,
+  updateSessionApprovalMode,
   updateSessionModel,
   updateSessionProject,
 } from "./api";
@@ -30,6 +31,7 @@ export {
   useSessionQuery,
   useSessionsQuery,
   useSessionTurnsQuery,
+  useUpdateSessionApprovalModeMutation,
   useUpdateSessionModelMutation,
   useUpdateSessionProjectMutation,
 } from "./hooks/useChatQueries";

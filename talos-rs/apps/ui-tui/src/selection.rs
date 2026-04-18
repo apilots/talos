@@ -2,7 +2,8 @@ use std::time::Duration;
 
 use crate::types::{ChatBlock, ChatRole, SelectionPoint};
 use crate::utils::{
-    copy_to_system_clipboard, line_display_width, slice_text_by_display_columns, text_display_width,
+    copy_to_system_clipboard, display_tool_name, line_display_width, slice_text_by_display_columns,
+    text_display_width,
 };
 use crate::TuiApp;
 
@@ -32,7 +33,7 @@ impl TuiApp {
         match block.role {
             ChatRole::Tool => {
                 let tool_name = block.tool_name.as_deref().unwrap_or("unknown");
-                let mut lines = vec![format!("### Tool `{}`", tool_name)];
+                let mut lines = vec![format!("### Tool `{}`", display_tool_name(tool_name))];
                 if let Some(input) = &block.tool_input {
                     lines.push(String::new());
                     lines.push("Input:".to_string());

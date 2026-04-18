@@ -68,7 +68,7 @@ fn test_tool_call_block_completed_on_event() {
             talos_client::TalosMessageToolCallStartedEvent {
                 request_id: "req1".to_string(),
                 call_id: "call-2".to_string(),
-                name: "read_file".to_string(),
+                name: "read".to_string(),
                 arguments: serde_json::json!({"path": "/tmp/x"}),
                 item_index: 0,
                 iteration: 1,
@@ -88,7 +88,7 @@ fn test_tool_call_block_completed_on_event() {
             talos_client::TalosMessageToolCallCompletedEvent {
                 request_id: "req1".to_string(),
                 call_id: "call-2".to_string(),
-                tool: "read_file".to_string(),
+                tool: "read".to_string(),
                 content: vec![talos_client::TalosContentItem::Text {
                     text: "file contents".to_string(),
                 }],
@@ -123,7 +123,7 @@ fn test_tool_completed_event_with_different_message_id_is_ignored() {
     app.last_stream_sequence = Some(10);
     app.push_tool_call_block(
         "call-stale".to_string(),
-        "memory_search".to_string(),
+        "MemorySearch".to_string(),
         serde_json::json!({"query": "talos 进展"}),
         1,
         0,
@@ -139,7 +139,7 @@ fn test_tool_completed_event_with_different_message_id_is_ignored() {
             talos_client::TalosMessageToolCallCompletedEvent {
                 request_id: "req1".to_string(),
                 call_id: "call-stale".to_string(),
-                tool: "memory_search".to_string(),
+                tool: "MemorySearch".to_string(),
                 content: vec![talos_client::TalosContentItem::Json {
                     value: serde_json::json!({"results": []}),
                 }],
@@ -176,7 +176,7 @@ fn test_tool_completed_event_with_older_sequence_is_ignored() {
     app.last_stream_sequence = Some(20);
     app.push_tool_call_block(
         "call-older".to_string(),
-        "exec_command".to_string(),
+        "bash".to_string(),
         serde_json::json!({"cmd": "pwd"}),
         1,
         0,
@@ -192,7 +192,7 @@ fn test_tool_completed_event_with_older_sequence_is_ignored() {
             talos_client::TalosMessageToolCallCompletedEvent {
                 request_id: "req1".to_string(),
                 call_id: "call-older".to_string(),
-                tool: "exec_command".to_string(),
+                tool: "bash".to_string(),
                 content: vec![talos_client::TalosContentItem::Json {
                     value: serde_json::json!({
                         "session_id": null,
@@ -240,7 +240,7 @@ fn test_tool_panel_events_are_upserted_per_call_id() {
             talos_client::TalosMessageToolCallStartedEvent {
                 request_id: "req1".to_string(),
                 call_id: "call-tools".to_string(),
-                name: "exec_command".to_string(),
+                name: "bash".to_string(),
                 arguments: serde_json::json!({"cmd": "pwd"}),
                 item_index: 0,
                 iteration: 1,
@@ -259,7 +259,7 @@ fn test_tool_panel_events_are_upserted_per_call_id() {
                 request_id: "req1".to_string(),
                 stream_key: talos_types::talos::TalosToolStreamKey { round: 0, index: 0 },
                 call_id: "call-tools".to_string(),
-                tool_name: "exec_command".to_string(),
+                tool_name: "bash".to_string(),
                 item_index: 0,
                 iteration: 1,
                 step_id: "step-1".to_string(),
@@ -276,7 +276,7 @@ fn test_tool_panel_events_are_upserted_per_call_id() {
                 request_id: "req1".to_string(),
                 stream_key: talos_types::talos::TalosToolStreamKey { round: 0, index: 0 },
                 call_id: "call-tools".to_string(),
-                tool_name: "exec_command".to_string(),
+                tool_name: "bash".to_string(),
                 item_index: 0,
                 iteration: 1,
                 step_id: "step-1".to_string(),
@@ -292,7 +292,7 @@ fn test_tool_panel_events_are_upserted_per_call_id() {
             talos_client::TalosMessageToolCallCompletedEvent {
                 request_id: "req1".to_string(),
                 call_id: "call-tools".to_string(),
-                tool: "exec_command".to_string(),
+                tool: "bash".to_string(),
                 content: vec![TalosContentItem::Text {
                     text: "/tmp".to_string(),
                 }],
@@ -307,7 +307,7 @@ fn test_tool_panel_events_are_upserted_per_call_id() {
 
     assert_eq!(app.tool_events.len(), 1);
     assert_eq!(app.tool_events[0].call_id, "call-tools");
-    assert_eq!(app.tool_events[0].summary, "done: exec_command");
+    assert_eq!(app.tool_events[0].summary, "done: Bash");
 
     let tool_block = app
         .chat_blocks
@@ -334,7 +334,7 @@ fn test_tool_progress_event_appends_to_existing_tool_block() {
             talos_client::TalosMessageToolCallStartedEvent {
                 request_id: "req1".to_string(),
                 call_id: "call-progress".to_string(),
-                name: "exec_command".to_string(),
+                name: "bash".to_string(),
                 arguments: serde_json::json!({"cmd": "pwd"}),
                 item_index: 0,
                 iteration: 1,
@@ -353,7 +353,7 @@ fn test_tool_progress_event_appends_to_existing_tool_block() {
                 request_id: "req1".to_string(),
                 stream_key: talos_types::talos::TalosToolStreamKey { round: 0, index: 0 },
                 call_id: "call-progress".to_string(),
-                tool_name: "exec_command".to_string(),
+                tool_name: "bash".to_string(),
                 message: "running pwd".to_string(),
                 progress_kind: talos_types::talos::TalosToolProgressKind::Status,
                 item_index: 0,
@@ -368,7 +368,7 @@ fn test_tool_progress_event_appends_to_existing_tool_block() {
         .iter()
         .find(|block| block.tool_call_id.as_deref() == Some("call-progress"))
         .expect("tool block should exist");
-    assert_eq!(tool_block.tool_name.as_deref(), Some("exec_command"));
+    assert_eq!(tool_block.tool_name.as_deref(), Some("bash"));
     assert!(tool_block
         .tool_progress
         .iter()
@@ -396,7 +396,7 @@ fn test_tool_progress_events_append_to_same_tool_block() {
             talos_client::TalosMessageToolCallStartedEvent {
                 request_id: "req1".to_string(),
                 call_id: "call-progress-append".to_string(),
-                name: "exec_command".to_string(),
+                name: "bash".to_string(),
                 arguments: serde_json::json!({"cmd": "pwd"}),
                 item_index: 0,
                 iteration: 1,
@@ -417,7 +417,7 @@ fn test_tool_progress_events_append_to_same_tool_block() {
                     request_id: "req1".to_string(),
                     stream_key: talos_types::talos::TalosToolStreamKey { round: 0, index: 0 },
                     call_id: "call-progress-append".to_string(),
-                    tool_name: "exec_command".to_string(),
+                    tool_name: "bash".to_string(),
                     message: message.to_string(),
                     progress_kind: talos_types::talos::TalosToolProgressKind::Stdout,
                     item_index: 0,
@@ -465,7 +465,7 @@ fn test_pending_approval_updates_existing_tool_block() {
             talos_client::TalosMessageToolCallStartedEvent {
                 request_id: "req1".to_string(),
                 call_id: "call-approval".to_string(),
-                name: "exec_command".to_string(),
+                name: "bash".to_string(),
                 arguments: serde_json::json!({"cmd": "git push"}),
                 item_index: 0,
                 iteration: 1,
@@ -484,7 +484,7 @@ fn test_pending_approval_updates_existing_tool_block() {
             talos_types::talos::TalosMessageToolCallPendingApprovalEvent {
                 request_id: "req1".to_string(),
                 call_id: "call-approval".to_string(),
-                tool_name: "exec_command".to_string(),
+                tool_name: "bash".to_string(),
                 prompt: "Need approval".to_string(),
                 arguments: serde_json::json!({"cmd": "git push"}),
                 step_id: "step-1".to_string(),
@@ -536,8 +536,8 @@ fn test_assistant_output_remains_interleaved_with_tool_blocks() {
             talos_client::TalosMessageToolCallStartedEvent {
                 request_id: "req1".to_string(),
                 call_id: "call-interleave".to_string(),
-                name: "list_dir".to_string(),
-                arguments: serde_json::json!({"dir_path": "/tmp/demo"}),
+                name: "Glob".to_string(),
+                arguments: serde_json::json!({"path": "/tmp/demo", "pattern": "**/*"}),
                 item_index: 0,
                 iteration: 1,
                 step_id: "step-1".to_string(),
@@ -578,7 +578,7 @@ fn test_assistant_output_remains_interleaved_with_tool_blocks() {
     assert!(matches!(visible_blocks[0].0, ChatRole::Assistant));
     assert_eq!(visible_blocks[0].1, "I will inspect the repo first.");
     assert!(matches!(visible_blocks[1].0, ChatRole::Tool));
-    assert_eq!(visible_blocks[1].2.as_deref(), Some("list_dir"));
+    assert_eq!(visible_blocks[1].2.as_deref(), Some("Glob"));
     assert!(matches!(visible_blocks[2].0, ChatRole::Assistant));
     assert_eq!(visible_blocks[2].1, "Next I will summarize what I found.");
 }
@@ -643,7 +643,7 @@ fn test_tool_blocks_are_ordered_by_iteration_and_item_index() {
             talos_client::TalosMessageToolCallStartedEvent {
                 request_id: "req-test".to_string(),
                 call_id: "call-second".to_string(),
-                name: "read_file".to_string(),
+                name: "read".to_string(),
                 arguments: serde_json::json!({"file_path":"/tmp/b.txt"}),
                 item_index: 1,
                 iteration: 1,
@@ -661,7 +661,7 @@ fn test_tool_blocks_are_ordered_by_iteration_and_item_index() {
             talos_client::TalosMessageToolCallStartedEvent {
                 request_id: "req-test".to_string(),
                 call_id: "call-first".to_string(),
-                name: "grep_files".to_string(),
+                name: "grep".to_string(),
                 arguments: serde_json::json!({"pattern":"main","path":"/tmp"}),
                 item_index: 0,
                 iteration: 1,
@@ -689,7 +689,7 @@ fn test_tool_block_folded_shows_details_and_output_preview() {
             r#"{"session_id":null,"status":"exited","output":"line1\nline2\nline3\nline4","exit_code":0,"truncated":false}"#
                 .to_string(),
         );
-    block.tool_name = Some("exec_command".to_string());
+    block.tool_name = Some("bash".to_string());
     block.tool_input = Some(serde_json::json!({
         "cmd": "git diff HEAD~1",
         "workdir": "/tmp/work"
@@ -704,9 +704,7 @@ fn test_tool_block_folded_shows_details_and_output_preview() {
         .map(|line| line_plain_text(&line.display))
         .collect::<Vec<_>>();
 
-    assert!(texts
-        .iter()
-        .any(|line| line == "● exec_command(git diff HEAD~1)"));
+    assert!(texts.iter().any(|line| line == "● Bash(git diff HEAD~1)"));
     assert!(texts.iter().any(|line| line == "  Done (exit:0 · 1.2s)"));
     assert!(texts.iter().any(|line| line == "  dir:  /tmp/work"));
     assert!(texts.iter().any(|line| line == "  stdout: line1"));
@@ -717,7 +715,7 @@ fn test_tool_block_folded_shows_details_and_output_preview() {
 fn test_tool_block_expanded_shows_details_without_output() {
     let app = create_embedded_app();
     let mut block = ChatBlock::new(ChatRole::Tool, String::new());
-    block.tool_name = Some("read_file".to_string());
+    block.tool_name = Some("read".to_string());
     block.tool_input = Some(serde_json::json!({
         "path": "/tmp/example.txt"
     }));
@@ -736,12 +734,13 @@ fn test_tool_block_expanded_shows_details_without_output() {
 }
 
 #[test]
-fn test_list_dir_tool_header_uses_path_summary() {
+fn test_glob_tool_header_uses_path_summary() {
     let app = create_embedded_app();
     let mut block = ChatBlock::new(ChatRole::Tool, String::new());
-    block.tool_name = Some("list_dir".to_string());
+    block.tool_name = Some("Glob".to_string());
     block.tool_input = Some(serde_json::json!({
-        "dir_path": "/tmp/project"
+        "path": "/tmp/project",
+        "pattern": "**/*"
     }));
     block.tool_status = Some(ToolCallStatus::Queued);
 
@@ -751,14 +750,16 @@ fn test_list_dir_tool_header_uses_path_summary() {
         .map(|line| line_plain_text(&line.display))
         .collect::<Vec<_>>();
 
-    assert!(texts.iter().any(|line| line == "◌ list_dir(/tmp/project)"));
+    assert!(texts
+        .iter()
+        .any(|line| line == "◌ Glob(\"**/*\", path=/tmp/project)"));
 }
 
 #[test]
-fn test_grep_files_tool_header_uses_pattern_and_path_summary() {
+fn test_grep_tool_header_uses_pattern_and_path_summary() {
     let app = create_embedded_app();
     let mut block = ChatBlock::new(ChatRole::Tool, String::new());
-    block.tool_name = Some("grep_files".to_string());
+    block.tool_name = Some("grep".to_string());
     block.tool_input = Some(serde_json::json!({
         "pattern": "AgentKernel",
         "path": "crates/orchestration",
@@ -773,24 +774,24 @@ fn test_grep_files_tool_header_uses_pattern_and_path_summary() {
         .collect::<Vec<_>>();
 
     assert!(texts.iter().any(|line| {
-        line == "⏳ grep_files(\"AgentKernel\", path=crates/orchestration, include=*.rs)"
+        line == "⏳ Grep(\"AgentKernel\", path=crates/orchestration, include=*.rs)"
     }));
 }
 
 #[test]
-fn test_read_file_folded_truncates_json_preview() {
+fn test_read_folded_truncates_json_preview() {
     let app = create_embedded_app();
     let mut block = ChatBlock::new(
             ChatRole::Tool,
             serde_json::json!({
                 "ok": true,
-                "tool": "read_file",
+                "tool": "read",
                 "result": "L1: This is a very long preview line that should be truncated in folded mode because it exceeds the preview limit by a wide margin and keeps going.",
                 "truncated": false
             })
             .to_string(),
         );
-    block.tool_name = Some("read_file".to_string());
+    block.tool_name = Some("read".to_string());
     block.tool_input = Some(serde_json::json!({
         "path": "/tmp/example.txt"
     }));
@@ -816,19 +817,19 @@ fn test_read_file_folded_truncates_json_preview() {
 }
 
 #[test]
-fn test_read_file_expanded_pretty_prints_json_output() {
+fn test_read_expanded_pretty_prints_json_output() {
     let app = create_embedded_app();
     let mut block = ChatBlock::new(
         ChatRole::Tool,
         serde_json::json!({
             "ok": true,
-            "tool": "read_file",
+            "tool": "read",
             "result": "L1: alpha\nL2: beta",
             "truncated": false
         })
         .to_string(),
     );
-    block.tool_name = Some("read_file".to_string());
+    block.tool_name = Some("read".to_string());
     block.tool_input = Some(serde_json::json!({
         "path": "/tmp/example.txt"
     }));
@@ -844,7 +845,7 @@ fn test_read_file_expanded_pretty_prints_json_output() {
     assert!(texts.iter().any(|line| line == "  ─────────────────"));
     assert!(texts
         .iter()
-        .any(|line| line.trim() == "\"tool\": \"read_file\","));
+        .any(|line| line.trim() == "\"tool\": \"read\","));
     assert!(texts
         .iter()
         .any(|line| line.trim() == "\"truncated\": false"));
@@ -858,7 +859,7 @@ fn test_memory_search_folded_shows_query_and_hits() {
             r#"{"results":[{"path":"spec/tui-improvement.md","snippet":"TUI layout summary","citation":"spec/tui-improvement.md#L1","score":0.91,"start_line":1,"end_line":1},{"path":"spec/tui-claude-code-style.md","snippet":"Claude style summary","citation":"spec/tui-claude-code-style.md#L1","score":0.87,"start_line":1,"end_line":1}]}"#
                 .to_string(),
         );
-    block.tool_name = Some("memory_search".to_string());
+    block.tool_name = Some("MemorySearch".to_string());
     block.tool_input = Some(serde_json::json!({
         "query": "talos 项目结构"
     }));
@@ -873,7 +874,7 @@ fn test_memory_search_folded_shows_query_and_hits() {
 
     assert!(texts
         .iter()
-        .any(|line| line == "● memory_search(talos 项目结构)"));
+        .any(|line| line == "● MemorySearch(talos 项目结构)"));
     assert!(texts.iter().any(|line| line == "  Done (2 hits · 0.8s)"));
     assert!(texts
         .iter()
@@ -887,7 +888,7 @@ fn test_memory_search_folded_shows_query_and_hits() {
 fn test_running_tool_folded_shows_latest_progress_only() {
     let app = create_embedded_app();
     let mut block = ChatBlock::new(ChatRole::Tool, String::new());
-    block.tool_name = Some("exec_command".to_string());
+    block.tool_name = Some("bash".to_string());
     block.tool_input = Some(serde_json::json!({
         "cmd": "cargo test -p talos-ui-tui --lib",
         "workdir": "/tmp/work"
@@ -906,7 +907,7 @@ fn test_running_tool_folded_shows_latest_progress_only() {
 
     assert!(texts
         .iter()
-        .any(|line| line == "⏳ exec_command(cargo test -p talos-ui-tui --lib)"));
+        .any(|line| line == "⏳ Bash(cargo test -p talos-ui-tui --lib)"));
     assert!(texts.iter().any(|line| line == "  Running…"));
     assert!(texts.iter().any(|line| line == "  dir:  /tmp/work"));
     assert!(texts
@@ -916,21 +917,16 @@ fn test_running_tool_folded_shows_latest_progress_only() {
 }
 
 #[test]
-fn test_list_dir_folded_shows_entry_preview() {
+fn test_glob_folded_shows_path_preview() {
     let app = create_embedded_app();
     let mut block = ChatBlock::new(
         ChatRole::Tool,
-        serde_json::json!({
-            "ok": true,
-            "tool": "list_dir",
-            "result": "Absolute path: /tmp/project\nsrc/\nCargo.toml\nREADME.md",
-            "truncated": false
-        })
-        .to_string(),
+        serde_json::json!(["src/lib.rs", "Cargo.toml", "README.md"]).to_string(),
     );
-    block.tool_name = Some("list_dir".to_string());
+    block.tool_name = Some("Glob".to_string());
     block.tool_input = Some(serde_json::json!({
-        "dir_path": "/tmp/project"
+        "path": "/tmp/project",
+        "pattern": "**/*"
     }));
     block.tool_status = Some(ToolCallStatus::Completed { exit_ok: true });
 
@@ -940,13 +936,15 @@ fn test_list_dir_folded_shows_entry_preview() {
         .map(|line| line_plain_text(&line.display))
         .collect::<Vec<_>>();
 
-    assert!(texts.iter().any(|line| line == "● list_dir(/tmp/project)"));
-    assert!(texts.iter().any(|line| line == "  Done (3 entries)"));
-    assert!(texts.iter().any(|line| line == "  entry: src/"));
+    assert!(texts
+        .iter()
+        .any(|line| line == "● Glob(\"**/*\", path=/tmp/project)"));
+    assert!(texts.iter().any(|line| line == "  Done (3 paths)"));
+    assert!(texts.iter().any(|line| line == "  path: src/lib.rs"));
 }
 
 #[test]
-fn test_grep_files_folded_shows_match_preview() {
+fn test_grep_folded_shows_match_preview() {
     let app = create_embedded_app();
     let mut block = ChatBlock::new(
         ChatRole::Tool,
@@ -956,7 +954,7 @@ fn test_grep_files_folded_shows_match_preview() {
         })
         .to_string(),
     );
-    block.tool_name = Some("grep_files".to_string());
+    block.tool_name = Some("grep".to_string());
     block.tool_input = Some(serde_json::json!({
         "pattern": "AgentKernel",
         "path": "crates/orchestration",
@@ -970,9 +968,9 @@ fn test_grep_files_folded_shows_match_preview() {
         .map(|line| line_plain_text(&line.display))
         .collect::<Vec<_>>();
 
-    assert!(texts.iter().any(
-        |line| line == "● grep_files(\"AgentKernel\", path=crates/orchestration, include=*.rs)"
-    ));
+    assert!(texts
+        .iter()
+        .any(|line| line == "● Grep(\"AgentKernel\", path=crates/orchestration, include=*.rs)"));
     assert!(texts.iter().any(|line| line == "  Done (2 matches)"));
     assert!(texts
         .iter()
@@ -987,7 +985,7 @@ fn test_complete_tool_call_recovers_after_block_index_shift() {
     let assistant_idx = app.push_block(ChatRole::Assistant, String::new());
     let tool_idx = app.push_tool_call_block(
         "call-shift".to_string(),
-        "exec_command".to_string(),
+        "bash".to_string(),
         serde_json::json!({"command": "pwd"}),
         1,
         0,
@@ -1034,12 +1032,12 @@ fn test_replay_full_mixed_turn_matches_streaming_order() {
         },
         TalosOutputItem::ToolCall {
             call_id: "call-history".to_string(),
-            name: "read_file".to_string(),
+            name: "read".to_string(),
             arguments: serde_json::json!({"path":"/tmp/demo.txt"}),
         },
         TalosOutputItem::ToolResult {
             call_id: "call-history".to_string(),
-            tool_name: "read_file".to_string(),
+            tool_name: "read".to_string(),
             content: vec![TalosContentItem::Text {
                 text: "demo contents".to_string(),
             }],
@@ -1064,7 +1062,7 @@ fn test_replay_full_mixed_turn_matches_streaming_order() {
     );
     stream_app.push_tool_call_block(
         "call-history".to_string(),
-        "read_file".to_string(),
+        "read".to_string(),
         serde_json::json!({"path":"/tmp/demo.txt"}),
         0,
         2,

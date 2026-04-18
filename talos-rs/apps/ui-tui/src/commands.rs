@@ -440,6 +440,7 @@ impl TuiApp {
                     .create_session(&SessionCreateParams {
                         context: Some(context),
                         model: Some(requested.clone()),
+                        conf: None,
                         project_id: None,
                         current_directory: None,
                     })
@@ -578,6 +579,7 @@ impl TuiApp {
                         .create_session(&SessionCreateParams {
                             context: Some(context),
                             model: Some(requested.clone()),
+                            conf: None,
                             project_id: None,
                             current_directory: None,
                         })
@@ -680,6 +682,7 @@ impl TuiApp {
         let params = SessionCreateParams {
             context: Some(context),
             model,
+            conf: None,
             project_id: None,
             current_directory: None,
         };
@@ -716,6 +719,7 @@ impl TuiApp {
                 .create_session(&SessionCreateParams {
                     context: Some(context),
                     model,
+                    conf: None,
                     project_id: None,
                     current_directory: None,
                 })

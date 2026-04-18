@@ -3,7 +3,10 @@ import { useMutation } from "@tanstack/react-query";
 import { submitToolApproval } from "../api";
 import { useAppStore } from "@/shared/store/app-store";
 
-export function useSessionApproval(sessionId: string) {
+export function useSessionApproval(
+  sessionId: string,
+  continueAfterApproval: (text: string) => Promise<unknown>,
+) {
   const pendingApproval = useAppStore((state) => state.streams[sessionId]?.pendingApproval);
 
   const approvalMutation = useMutation({
@@ -18,6 +21,10 @@ export function useSessionApproval(sessionId: string) {
       });
       useAppStore.getState().setPendingApproval(sessionId, undefined);
       useAppStore.getState().setSessionStatus(sessionId, "running");
+      const continuation = approved
+        ? ""
+        : `[Tool \`${pendingApproval.toolName}\` was rejected by user.]`;
+      await continueAfterApproval(continuation);
     },
   });
 

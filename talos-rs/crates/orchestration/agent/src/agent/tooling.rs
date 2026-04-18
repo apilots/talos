@@ -99,7 +99,7 @@ impl AgentImpl {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn derive_exec_command(goal: &str) -> String {
+    pub(crate) fn derive_bash_command(goal: &str) -> String {
         let trimmed = goal.trim();
         let normalized = trimmed.to_ascii_lowercase();
         for prefix in ["run ", "execute ", "exec "] {

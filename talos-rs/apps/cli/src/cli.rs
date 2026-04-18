@@ -262,8 +262,9 @@ async fn execute_chat_command(
             let params = SessionCreateParams {
                 context: Some(default_chat_context(user.as_deref().unwrap_or("cli-user"))),
                 model: model.clone(),
+                conf: None,
                 project_id: None,
-                current_directory: None,
+                current_directory: current_cli_directory(),
             };
             let session = client.create_session(&params).await?;
             let request = build_message_request(&message, model, stream);
@@ -312,8 +313,9 @@ async fn execute_session_command(
             let params = SessionCreateParams {
                 context: None,
                 model,
+                conf: None,
                 project_id: None,
-                current_directory: None,
+                current_directory: current_cli_directory(),
             };
             let session = client.create_session(&params).await?;
             println!(
@@ -395,7 +397,13 @@ async fn execute_session_command(
                 .submit_tool_approval(&session_id, &call_id, &tool_name, approved, reason)
                 .await?;
             let verdict = if approved { "approved" } else { "rejected" };
-            println!("Tool call {} {}: {}", tool_name, verdict, call_id);
+            println!(
+                "Tool call {} ({}) {}: {}",
+                display_tool_name(&tool_name),
+                tool_name,
+                verdict,
+                call_id
+            );
         }
     }
     Ok(())
@@ -537,8 +545,11 @@ async fn send_and_render_message(
                 TalosEventPayload::MessageToolCallStarted(payload),
             ) => {
                 eprintln!(
-                    "TOOL_CALL_STARTED name={} call_id={} step={}",
-                    payload.name, payload.call_id, payload.step_id
+                    "TOOL_CALL_STARTED name={} internal={} call_id={} step={}",
+                    display_tool_name(&payload.name),
+                    payload.name,
+                    payload.call_id,
+                    payload.step_id
                 );
             }
             (
@@ -546,7 +557,12 @@ async fn send_and_render_message(
                 TalosEventPayload::MessageToolCallArgsDelta(payload),
             ) => {
                 eprintln!(
-                    "TOOL_CALL_ARGS_DELTA tool={} call_id={} step={} delta={}",
+                    "TOOL_CALL_ARGS_DELTA tool={} internal={} call_id={} step={} delta={}",
+                    payload
+                        .tool_name
+                        .as_deref()
+                        .map(display_tool_name)
+                        .unwrap_or("unknown"),
                     payload.tool_name.as_deref().unwrap_or("unknown"),
                     payload.call_id.as_deref().unwrap_or("pending"),
                     payload.step_id,
@@ -558,8 +574,11 @@ async fn send_and_render_message(
                 TalosEventPayload::MessageToolCallQueued(payload),
             ) => {
                 eprintln!(
-                    "TOOL_CALL_QUEUED tool={} call_id={} step={}",
-                    payload.tool_name, payload.call_id, payload.step_id
+                    "TOOL_CALL_QUEUED tool={} internal={} call_id={} step={}",
+                    display_tool_name(&payload.tool_name),
+                    payload.tool_name,
+                    payload.call_id,
+                    payload.step_id
                 );
             }
             (
@@ -567,8 +586,11 @@ async fn send_and_render_message(
                 TalosEventPayload::MessageToolCallExecuting(payload),
             ) => {
                 eprintln!(
-                    "TOOL_CALL_EXECUTING tool={} call_id={} step={}",
-                    payload.tool_name, payload.call_id, payload.step_id
+                    "TOOL_CALL_EXECUTING tool={} internal={} call_id={} step={}",
+                    display_tool_name(&payload.tool_name),
+                    payload.tool_name,
+                    payload.call_id,
+                    payload.step_id
                 );
             }
             (
@@ -576,7 +598,8 @@ async fn send_and_render_message(
                 TalosEventPayload::MessageToolCallProgressDelta(payload),
             ) => {
                 eprintln!(
-                    "TOOL_CALL_PROGRESS tool={} call_id={} kind={:?} step={} message={}",
+                    "TOOL_CALL_PROGRESS tool={} internal={} call_id={} kind={:?} step={} message={}",
+                    display_tool_name(&payload.tool_name),
                     payload.tool_name,
                     payload.call_id,
                     payload.progress_kind,
@@ -589,8 +612,11 @@ async fn send_and_render_message(
                 TalosEventPayload::MessageToolCallCompleted(payload),
             ) => {
                 eprintln!(
-                    "TOOL_CALL_COMPLETED call_id={} tool={} is_error={}",
-                    payload.call_id, payload.tool, payload.is_error
+                    "TOOL_CALL_COMPLETED call_id={} tool={} internal={} is_error={}",
+                    payload.call_id,
+                    display_tool_name(&payload.tool),
+                    payload.tool,
+                    payload.is_error
                 );
             }
             (TalosEventType::MessageError, TalosEventPayload::MessageError(payload)) => {
@@ -626,8 +652,23 @@ fn extract_output_text(response: &TalosMessageResponse) -> String {
     texts.join("\n")
 }
 
+fn display_tool_name(tool_name: &str) -> &str {
+    match tool_name {
+        "bash" | "Bash" => "Bash",
+        "read" | "Read" => "Read",
+        "grep" | "Grep" => "Grep",
+        "write" | "write_file" | "Write" => "Write",
+        "edit" | "Edit" => "Edit",
+        _ => tool_name,
+    }
+}
+
 fn default_chat_context(user_id: &str) -> TalosContext {
     TalosContext::cli(user_id).with_channel_id("cli")
+}
+
+fn current_cli_directory() -> Option<std::path::PathBuf> {
+    std::env::current_dir().ok()
 }
 
 fn format_thinking_source(source: TalosThinkingSource) -> &'static str {
@@ -675,7 +716,7 @@ mod tests {
             "--call-id",
             "call-1",
             "--tool-name",
-            "exec_command",
+            "bash",
             "--approved",
             "false",
             "--reason",
@@ -696,7 +737,7 @@ mod tests {
 
         assert_eq!(session_id, "sess-1");
         assert_eq!(call_id, "call-1");
-        assert_eq!(tool_name, "exec_command");
+        assert_eq!(tool_name, "bash");
         assert!(!approved);
         assert_eq!(reason.as_deref(), Some("deny"));
     }

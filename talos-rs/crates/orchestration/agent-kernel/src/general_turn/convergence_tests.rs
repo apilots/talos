@@ -64,8 +64,8 @@ impl LlmProvider for BudgetFinalizationProvider {
             finish_reason: Some("tool_calls".to_string()),
             tool_calls: Some(vec![FunctionCall::new(
                 "call_0",
-                "list_dir",
-                json!({ "path": self.workspace_dir }),
+                "Glob",
+                json!({ "path": self.workspace_dir, "pattern": "**/*", "limit": 50 }),
             )]),
         })
     }

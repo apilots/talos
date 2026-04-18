@@ -166,7 +166,7 @@ if [[ -z "${tool_session_id}" ]]; then
 fi
 echo "CASE messages_tool_exec_create_session PASS session_id=${tool_session_id}"
 
-tool_input="You must call tool 'exec_command' exactly once with cmd ls, then return the raw stdout inside <tool_output></tool_output>."
+tool_input="You must call tool 'Bash' exactly once with command ls, then return the raw stdout inside <tool_output></tool_output>."
 tool_payload="$(build_payload "${tool_input}")"
 tool_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${tool_session_id}/messages" \
   -H "Content-Type: application/json" \
@@ -190,7 +190,7 @@ fi
 tool_call_name="$(python3 -c 'import json,sys; d=json.load(sys.stdin); calls=[i for i in d.get("output", []) if i.get("type")=="tool_call"]; print(calls[0].get("name","") if calls else "")' <<< "${tool_json}")"
 tool_result_tool="$(python3 -c 'import json,sys; d=json.load(sys.stdin); results=[i for i in d.get("output", []) if i.get("type")=="tool_result"]; print(results[0].get("tool_name","") if results else "")' <<< "${tool_json}")"
 execution_summary_count="$(python3 -c 'import json,sys; d=json.load(sys.stdin); print(sum(1 for i in d.get("output", []) if i.get("type")=="execution_summary"))' <<< "${tool_json}")"
-if [[ "${tool_call_name}" != "exec_command" || "${tool_result_tool}" != "exec_command" ]]; then
+if [[ "${tool_call_name}" != "Bash" || "${tool_result_tool}" != "Bash" ]]; then
   echo "CASE messages_tool_exec FAIL unexpected_tool call=${tool_call_name} result=${tool_result_tool}"
   exit 1
 fi
@@ -225,7 +225,7 @@ payload = {
     "input": [
         {
             "type": "text",
-            "text": "You must call exec_command tool with cmd ls, then summarize in one short sentence.",
+            "text": "You must call Bash tool with command ls, then summarize in one short sentence.",
         }
     ],
     "stream": True,
@@ -313,7 +313,7 @@ payload = {
     "input": [
         {
             "type": "text",
-            "text": "You must call memory_search exactly once with query talos项目, then answer in one short sentence.",
+            "text": "You must call MemorySearch exactly once with query talos项目, then answer in one short sentence.",
         }
     ],
     "stream": True,
@@ -331,8 +331,8 @@ log_case_json "messages_memory_search_stream" "${memory_stream_payload}" "$(cat 
 memory_stream_tool_started_count="$(grep -c '^event: message.tool_call.started' "${memory_stream_log}" || true)"
 memory_stream_tool_completed_count="$(grep -c '^event: message.tool_call.completed' "${memory_stream_log}" || true)"
 memory_stream_completed_count="$(grep -c '^event: message.completed' "${memory_stream_log}" || true)"
-memory_stream_tool_started_name_count="$(grep -c '"name":"memory_search"' "${memory_stream_log}" || true)"
-memory_stream_tool_completed_name_count="$(grep -c '"tool":"memory_search"' "${memory_stream_log}" || true)"
+memory_stream_tool_started_name_count="$(grep -c '"name":"MemorySearch"' "${memory_stream_log}" || true)"
+memory_stream_tool_completed_name_count="$(grep -c '"tool":"MemorySearch"' "${memory_stream_log}" || true)"
 memory_stream_results_count="$(grep -c '"results"' "${memory_stream_log}" || true)"
 if [[ "${memory_stream_tool_started_count}" -lt 1 || "${memory_stream_tool_completed_count}" -lt 1 || "${memory_stream_completed_count}" -lt 1 ]]; then
   echo "CASE messages_memory_search_stream FAIL tool_started=${memory_stream_tool_started_count} tool_completed=${memory_stream_tool_completed_count} completed=${memory_stream_completed_count}"

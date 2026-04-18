@@ -14,16 +14,16 @@ use tokio::sync::{Mutex, Notify};
 use crate::runtimes::{resolve_base_dir, resolve_path, truncate_prefix};
 use crate::ToolContext;
 
-const DEFAULT_EXEC_YIELD_TIME_MS: u64 = 10_000;
-const DEFAULT_WRITE_STDIN_YIELD_TIME_MS: u64 = 250;
+const DEFAULT_BASH_YIELD_TIME_MS: u64 = 10_000;
+const DEFAULT_TASK_OUTPUT_YIELD_TIME_MS: u64 = 250;
 const DEFAULT_MAX_OUTPUT_BYTES: usize = 16 * 1024;
 
-fn default_exec_yield_time_ms() -> u64 {
-    DEFAULT_EXEC_YIELD_TIME_MS
+fn default_bash_yield_time_ms() -> u64 {
+    DEFAULT_BASH_YIELD_TIME_MS
 }
 
-fn default_write_stdin_yield_time_ms() -> u64 {
-    DEFAULT_WRITE_STDIN_YIELD_TIME_MS
+fn default_task_output_yield_time_ms() -> u64 {
+    DEFAULT_TASK_OUTPUT_YIELD_TIME_MS
 }
 
 fn default_login() -> bool {
@@ -43,7 +43,7 @@ pub enum SandboxPermissions {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExecCommandRequest {
+pub struct BashCommandRequest {
     pub cmd: String,
     #[serde(default)]
     pub workdir: Option<String>,
@@ -53,7 +53,7 @@ pub struct ExecCommandRequest {
     pub login: bool,
     #[serde(default = "default_tty")]
     pub tty: bool,
-    #[serde(default = "default_exec_yield_time_ms")]
+    #[serde(default = "default_bash_yield_time_ms")]
     pub yield_time_ms: u64,
     #[serde(default)]
     pub max_output_tokens: Option<usize>,
@@ -66,11 +66,11 @@ pub struct ExecCommandRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WriteStdinRequest {
+pub struct TaskOutputRequest {
     pub session_id: i64,
     #[serde(default)]
     pub chars: String,
-    #[serde(default = "default_write_stdin_yield_time_ms")]
+    #[serde(default = "default_task_output_yield_time_ms")]
     pub yield_time_ms: u64,
     #[serde(default)]
     pub max_output_tokens: Option<usize>,
@@ -78,45 +78,45 @@ pub struct WriteStdinRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ExecStatus {
+pub enum TaskStatus {
     Running,
     Exited,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExecResponse {
+pub struct TaskSessionResponse {
     pub session_id: Option<i64>,
-    pub status: ExecStatus,
+    pub status: TaskStatus,
     pub output: String,
     pub exit_code: Option<i32>,
     pub truncated: bool,
 }
 
-struct ExecSession {
+struct BashSession {
     session_id: i64,
     owner_session_id: String,
     max_output_bytes: usize,
     stdin: Mutex<Option<ChildStdin>>,
-    state: Mutex<ExecSessionState>,
+    state: Mutex<BashSessionState>,
     notify: Notify,
 }
 
 #[derive(Default)]
-struct ExecSessionState {
+struct BashSessionState {
     output: String,
     delivered_bytes: usize,
     exit_code: Option<i32>,
 }
 
-struct ExecSessionManager {
+struct BashSessionManager {
     next_id: AtomicI64,
-    sessions: DashMap<i64, Arc<ExecSession>>,
+    sessions: DashMap<i64, Arc<BashSession>>,
 }
 
-impl ExecSessionManager {
-    fn global() -> &'static ExecSessionManager {
-        static INSTANCE: OnceLock<ExecSessionManager> = OnceLock::new();
-        INSTANCE.get_or_init(|| ExecSessionManager {
+impl BashSessionManager {
+    fn global() -> &'static BashSessionManager {
+        static INSTANCE: OnceLock<BashSessionManager> = OnceLock::new();
+        INSTANCE.get_or_init(|| BashSessionManager {
             next_id: AtomicI64::new(1),
             sessions: DashMap::new(),
         })
@@ -124,9 +124,9 @@ impl ExecSessionManager {
 
     async fn open_session(
         &self,
-        request: &ExecCommandRequest,
+        request: &BashCommandRequest,
         context: &ToolContext,
-    ) -> TalosResult<ExecResponse> {
+    ) -> TalosResult<TaskSessionResponse> {
         if request.cmd.trim().is_empty() {
             return Err(TalosError::ToolError("cmd cannot be empty".to_string()));
         }
@@ -148,7 +148,7 @@ impl ExecSessionManager {
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
 
-        let session = Arc::new(ExecSession {
+        let session = Arc::new(BashSession {
             session_id,
             owner_session_id: context.session_id().to_string(),
             max_output_bytes: context
@@ -157,7 +157,7 @@ impl ExecSessionManager {
                 .unwrap_or(DEFAULT_MAX_OUTPUT_BYTES)
                 .max(DEFAULT_MAX_OUTPUT_BYTES),
             stdin: Mutex::new(stdin),
-            state: Mutex::new(ExecSessionState::default()),
+            state: Mutex::new(BashSessionState::default()),
             notify: Notify::new(),
         });
         self.sessions.insert(session_id, session.clone());
@@ -174,11 +174,11 @@ impl ExecSessionManager {
             .await
     }
 
-    async fn write_stdin(
+    async fn read_task_output(
         &self,
-        request: &WriteStdinRequest,
+        request: &TaskOutputRequest,
         context: &ToolContext,
-    ) -> TalosResult<ExecResponse> {
+    ) -> TalosResult<TaskSessionResponse> {
         let session = self
             .sessions
             .get(&request.session_id)
@@ -226,7 +226,7 @@ impl ExecSessionManager {
         session_id: i64,
         yield_time_ms: u64,
         max_output_tokens: Option<usize>,
-    ) -> TalosResult<ExecResponse> {
+    ) -> TalosResult<TaskSessionResponse> {
         let session = self
             .sessions
             .get(&session_id)
@@ -249,20 +249,20 @@ impl ExecSessionManager {
         state.delivered_bytes += consumed_bytes;
 
         let status = if state.exit_code.is_some() {
-            ExecStatus::Exited
+            TaskStatus::Exited
         } else {
-            ExecStatus::Running
+            TaskStatus::Running
         };
         let exit_code = state.exit_code;
         let keep_session =
-            status == ExecStatus::Running || state.delivered_bytes < state.output.len();
+            status == TaskStatus::Running || state.delivered_bytes < state.output.len();
         drop(state);
 
         if !keep_session {
             self.sessions.remove(&session_id);
         }
 
-        Ok(ExecResponse {
+        Ok(TaskSessionResponse {
             session_id: if keep_session {
                 Some(session.session_id)
             } else {
@@ -274,33 +274,65 @@ impl ExecSessionManager {
             truncated,
         })
     }
+
+    async fn stop_session(&self, session_id: i64, context: &ToolContext) -> TalosResult<()> {
+        let session = self
+            .sessions
+            .get(&session_id)
+            .map(|entry| entry.value().clone())
+            .ok_or_else(|| TalosError::ToolError(format!("session {} not found", session_id)))?;
+        if session.owner_session_id != context.session_id() {
+            return Err(TalosError::ToolError(format!(
+                "session {} does not belong to Talos session {}",
+                session_id,
+                context.session_id()
+            )));
+        }
+
+        let mut stdin_guard = session.stdin.lock().await;
+        stdin_guard.take();
+        let mut state = session.state.lock().await;
+        if state.exit_code.is_none() {
+            state.exit_code = Some(130);
+        }
+        drop(state);
+        self.sessions.remove(&session_id);
+        session.notify.notify_waiters();
+        Ok(())
+    }
 }
 
-pub async fn exec_command(
-    request: &ExecCommandRequest,
+pub async fn run_bash_command(
+    request: &BashCommandRequest,
     context: &ToolContext,
-) -> TalosResult<ExecResponse> {
-    ExecSessionManager::global()
+) -> TalosResult<TaskSessionResponse> {
+    BashSessionManager::global()
         .open_session(request, context)
         .await
 }
 
-pub async fn write_stdin(request: &WriteStdinRequest) -> TalosResult<ExecResponse> {
-    ExecSessionManager::global()
-        .write_stdin(request, &ToolContext::default())
+pub async fn read_task_output(request: &TaskOutputRequest) -> TalosResult<TaskSessionResponse> {
+    BashSessionManager::global()
+        .read_task_output(request, &ToolContext::default())
         .await
 }
 
-pub async fn write_stdin_with_context(
-    request: &WriteStdinRequest,
+pub async fn read_task_output_with_context(
+    request: &TaskOutputRequest,
     context: &ToolContext,
-) -> TalosResult<ExecResponse> {
-    ExecSessionManager::global()
-        .write_stdin(request, context)
+) -> TalosResult<TaskSessionResponse> {
+    BashSessionManager::global()
+        .read_task_output(request, context)
         .await
 }
 
-fn build_command(request: &ExecCommandRequest, workdir: &PathBuf) -> TalosResult<Command> {
+pub async fn stop_task_with_context(session_id: i64, context: &ToolContext) -> TalosResult<()> {
+    BashSessionManager::global()
+        .stop_session(session_id, context)
+        .await
+}
+
+fn build_command(request: &BashCommandRequest, workdir: &PathBuf) -> TalosResult<Command> {
     let shell = request
         .shell
         .clone()
@@ -329,7 +361,7 @@ fn build_command(request: &ExecCommandRequest, workdir: &PathBuf) -> TalosResult
     Ok(command)
 }
 
-fn spawn_reader<R>(reader: R, session: Arc<ExecSession>)
+fn spawn_reader<R>(reader: R, session: Arc<BashSession>)
 where
     R: AsyncRead + Unpin + Send + 'static,
 {
@@ -355,7 +387,7 @@ where
     });
 }
 
-fn spawn_waiter(mut child: Child, session: Arc<ExecSession>) {
+fn spawn_waiter(mut child: Child, session: Arc<BashSession>) {
     tokio::spawn(async move {
         let exit_code = child.wait().await.ok().and_then(|status| status.code());
         {
@@ -373,11 +405,11 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_exec_runtime_supports_sessionized_stdin() {
+    async fn test_bash_runtime_supports_sessionized_task_output() {
         let context = crate::ToolContext::default()
             .with_project_root(std::env::current_dir().expect("cwd should exist"));
-        let exec = exec_command(
-            &ExecCommandRequest {
+        let exec = run_bash_command(
+            &BashCommandRequest {
                 cmd: "printf 'ready\\n'; read line; printf 'done:%s\\n' \"$line\"".to_string(),
                 workdir: None,
                 shell: Some("sh".to_string()),
@@ -392,14 +424,14 @@ mod tests {
             &context,
         )
         .await
-        .expect("exec should succeed");
+        .expect("bash command should succeed");
 
-        assert_eq!(exec.status, ExecStatus::Running);
+        assert_eq!(exec.status, TaskStatus::Running);
         assert!(exec.output.contains("ready"));
 
         let session_id = exec.session_id.expect("session id should be present");
-        let output = write_stdin_with_context(
-            &WriteStdinRequest {
+        let output = read_task_output_with_context(
+            &TaskOutputRequest {
                 session_id,
                 chars: "ok\n".to_string(),
                 yield_time_ms: 50,
@@ -408,18 +440,18 @@ mod tests {
             &context,
         )
         .await
-        .expect("write_stdin should succeed");
+        .expect("task output read should succeed");
 
         assert!(output.output.contains("done:ok"));
-        assert_eq!(output.status, ExecStatus::Exited);
+        assert_eq!(output.status, TaskStatus::Exited);
     }
 
     #[tokio::test]
-    async fn test_exec_runtime_allows_escalated_command_when_called_directly() {
+    async fn test_bash_runtime_allows_escalated_command_when_called_directly() {
         let context = crate::ToolContext::default()
             .with_project_root(std::env::current_dir().expect("cwd should exist"));
-        let result = exec_command(
-            &ExecCommandRequest {
+        let result = run_bash_command(
+            &BashCommandRequest {
                 cmd: "echo hi".to_string(),
                 workdir: None,
                 shell: Some("sh".to_string()),
@@ -436,7 +468,7 @@ mod tests {
         .await
         .expect("direct runtime execution no longer applies approval policy");
 
-        assert!(result.output.contains("hi") || result.status == ExecStatus::Exited);
+        assert!(result.output.contains("hi") || result.status == TaskStatus::Exited);
     }
 
     #[tokio::test]
@@ -444,8 +476,8 @@ mod tests {
         let context = crate::ToolContext::default()
             .with_project_root(std::env::current_dir().expect("cwd should exist"))
             .with_pre_approved();
-        let result = exec_command(
-            &ExecCommandRequest {
+        let result = run_bash_command(
+            &BashCommandRequest {
                 cmd: "echo approved".to_string(),
                 workdir: None,
                 shell: Some("sh".to_string()),
@@ -462,17 +494,17 @@ mod tests {
         .await
         .expect("pre-approved context should bypass escalation check");
 
-        assert!(result.output.contains("approved") || result.status == ExecStatus::Exited);
+        assert!(result.output.contains("approved") || result.status == TaskStatus::Exited);
     }
 
     #[tokio::test]
-    async fn test_write_stdin_rejects_cross_session_access() {
+    async fn test_task_output_rejects_cross_session_access() {
         let owner_context = crate::ToolContext::new("session-owner", "user-1")
             .with_project_root(std::env::current_dir().expect("cwd should exist"));
         let foreign_context = crate::ToolContext::new("session-foreign", "user-2")
             .with_project_root(std::env::current_dir().expect("cwd should exist"));
-        let exec = exec_command(
-            &ExecCommandRequest {
+        let exec = run_bash_command(
+            &BashCommandRequest {
                 cmd: "printf 'ready\\n'; sleep 1".to_string(),
                 workdir: None,
                 shell: Some("sh".to_string()),
@@ -487,11 +519,11 @@ mod tests {
             &owner_context,
         )
         .await
-        .expect("exec should succeed");
+        .expect("bash command should succeed");
 
         let session_id = exec.session_id.expect("session id should be present");
-        let error = write_stdin_with_context(
-            &WriteStdinRequest {
+        let error = read_task_output_with_context(
+            &TaskOutputRequest {
                 session_id,
                 chars: "noop".to_string(),
                 yield_time_ms: 0,
@@ -500,7 +532,7 @@ mod tests {
             &foreign_context,
         )
         .await
-        .expect_err("cross-session write_stdin should be rejected");
+        .expect_err("cross-session task output read should be rejected");
 
         assert!(error
             .to_string()

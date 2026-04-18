@@ -4,7 +4,7 @@ use ratatui::{
 };
 
 use crate::types::{ChatBlock, CopyProjection, RenderedChatLine, ToolCallStatus, ToolRenderData};
-use crate::utils::{line_plain_text, wrap_line_visual};
+use crate::utils::{display_tool_name, line_plain_text, wrap_line_visual};
 use crate::TuiApp;
 use crate::TOOL_PREVIEW_CHAR_LIMIT;
 
@@ -15,6 +15,7 @@ impl TuiApp {
         content_width: usize,
     ) -> Vec<RenderedChatLine> {
         let tool_name = block.tool_name.as_deref().unwrap_or("unknown");
+        let display_tool_name = display_tool_name(tool_name);
         let mut lines = vec![];
 
         let arg_summary = if let Some(input) = &block.tool_input {
@@ -33,9 +34,9 @@ impl TuiApp {
         };
 
         let header_text = if arg_summary.is_empty() {
-            format!("{} {}", icon_str, tool_name)
+            format!("{} {}", icon_str, display_tool_name)
         } else {
-            format!("{} {}({})", icon_str, tool_name, arg_summary)
+            format!("{} {}({})", icon_str, display_tool_name, arg_summary)
         };
 
         let header_style = Style::default().fg(icon_color).add_modifier(Modifier::BOLD);
@@ -181,11 +182,11 @@ impl TuiApp {
 
     pub(crate) fn build_tool_render_data(block: &ChatBlock, tool_name: &str) -> ToolRenderData {
         match tool_name {
-            "memory_search" => Self::build_memory_search_render_data(block),
-            "exec_command" => Self::build_exec_command_render_data(block),
-            "read_file" | "write_file" => Self::build_read_file_render_data(block),
-            "list_dir" => Self::build_list_dir_render_data(block),
-            "grep_files" => Self::build_grep_files_render_data(block),
+            "MemorySearch" | "memory_search" => Self::build_memory_search_render_data(block),
+            "bash" | "Bash" => Self::build_bash_render_data(block),
+            "read" | "Read" | "write_file" | "Write" => Self::build_read_render_data(block),
+            "glob" | "Glob" => Self::build_glob_render_data(block),
+            "grep" | "Grep" => Self::build_grep_render_data(block),
             _ => Self::build_fallback_tool_render_data(block, tool_name),
         }
     }
@@ -308,7 +309,7 @@ impl TuiApp {
         }
     }
 
-    fn build_exec_command_render_data(block: &ChatBlock) -> ToolRenderData {
+    fn build_bash_render_data(block: &ChatBlock) -> ToolRenderData {
         let input = block.tool_input.as_ref();
         let dir = input.and_then(|value| {
             value
@@ -383,7 +384,7 @@ impl TuiApp {
         }
     }
 
-    fn build_read_file_render_data(block: &ChatBlock) -> ToolRenderData {
+    fn build_read_render_data(block: &ChatBlock) -> ToolRenderData {
         let path = block
             .tool_input
             .as_ref()
@@ -443,22 +444,15 @@ impl TuiApp {
         }
     }
 
-    fn build_list_dir_render_data(block: &ChatBlock) -> ToolRenderData {
+    fn build_glob_render_data(block: &ChatBlock) -> ToolRenderData {
         let parsed = Self::parse_tool_output_json(&block.content);
-        let content = parsed
+        let entries = parsed
             .as_ref()
-            .and_then(|value| value.get("result"))
-            .and_then(|value| value.as_str())
-            .unwrap_or_else(|| block.content.as_str());
-        let entries = content
-            .lines()
-            .filter(|line| {
-                let trimmed = line.trim();
-                !trimmed.is_empty()
-                    && !trimmed.starts_with("Absolute path:")
-                    && !trimmed.starts_with("More than ")
-            })
-            .map(|line| line.trim().to_string())
+            .and_then(|value| value.as_array())
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|value| value.as_str().map(str::to_string))
             .collect::<Vec<_>>();
         let timing = Self::timing_suffix(block.timing_ms);
         let summary = match block.tool_status {
@@ -466,19 +460,23 @@ impl TuiApp {
             Some(ToolCallStatus::Running) => "Running…".to_string(),
             Some(ToolCallStatus::PendingApproval) => "Approval needed".to_string(),
             Some(ToolCallStatus::Completed { exit_ok: true }) => {
-                format!("Done ({} entries{})", entries.len(), timing)
+                format!("Done ({} paths{})", entries.len(), timing)
             }
             Some(ToolCallStatus::Completed { exit_ok: false }) => {
-                format!("Error ({} entries{})", entries.len(), timing)
+                format!("Error ({} paths{})", entries.len(), timing)
             }
             None => "Unknown".to_string(),
         };
         let preview_lines = entries
             .iter()
             .take(2)
-            .map(|entry| format!("entry: {}", entry))
+            .map(|entry| format!("path: {}", entry))
             .collect::<Vec<_>>();
-        let output_lines = Self::tool_output_lines(content);
+        let output_lines = if entries.is_empty() {
+            Self::tool_output_lines(&block.content)
+        } else {
+            entries
+        };
 
         ToolRenderData {
             summary,
@@ -488,7 +486,7 @@ impl TuiApp {
         }
     }
 
-    fn build_grep_files_render_data(block: &ChatBlock) -> ToolRenderData {
+    fn build_grep_render_data(block: &ChatBlock) -> ToolRenderData {
         let parsed = Self::parse_tool_output_json(&block.content);
         let content = parsed
             .as_ref()
@@ -571,7 +569,7 @@ impl TuiApp {
     ) -> Vec<String> {
         let mut lines = Vec::new();
 
-        if tool_name == "exec_command" {
+        if tool_name == "bash" || tool_name == "Bash" {
             if let Some(dir_line) = detail_lines
                 .iter()
                 .find(|line| line.trim_start().starts_with("dir:"))
@@ -602,21 +600,15 @@ impl TuiApp {
 
     fn fallback_tool_detail_lines(tool_name: &str, input: &serde_json::Value) -> Vec<String> {
         match tool_name {
-            "web_search" => input
+            "web_search" | "WebSearch" => input
                 .get("query")
                 .and_then(|v| v.as_str())
                 .map(|query| vec![format!("  query: {}", query)])
                 .unwrap_or_default(),
-            "http_request" => input
+            "web_fetch" | "WebFetch" => input
                 .get("url")
                 .and_then(|v| v.as_str())
-                .map(|url| {
-                    let method = input
-                        .get("method")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("GET");
-                    vec![format!("  {} {}", method, url)]
-                })
+                .map(|url| vec![format!("  url: {}", url)])
                 .unwrap_or_default(),
             _ => input
                 .as_object()
@@ -646,30 +638,34 @@ impl TuiApp {
 
     pub(crate) fn tool_arg_summary(tool_name: &str, input: &serde_json::Value) -> String {
         let summary = match tool_name {
-            "exec_command" => input
+            "bash" | "Bash" => input
                 .get("cmd")
                 .or_else(|| input.get("command"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
                 .unwrap_or_default(),
-            "read_file" => input
+            "read" | "Read" => input
                 .get("file_path")
                 .or_else(|| input.get("path"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
                 .unwrap_or_default(),
-            "write_file" => input
+            "glob" | "Glob" => {
+                let mut parts = vec![];
+                if let Some(pattern) = input.get("pattern").and_then(|v| v.as_str()) {
+                    parts.push(format!("{:?}", pattern));
+                }
+                if let Some(path) = input.get("path").and_then(|v| v.as_str()) {
+                    parts.push(format!("path={}", path));
+                }
+                Self::join_tool_summary_parts(parts)
+            }
+            "write_file" | "Write" => input
                 .get("path")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
                 .unwrap_or_default(),
-            "list_dir" => input
-                .get("dir_path")
-                .or_else(|| input.get("path"))
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_default(),
-            "grep_files" => {
+            "grep" | "Grep" => {
                 let mut parts = vec![];
                 if let Some(pattern) = input.get("pattern").and_then(|v| v.as_str()) {
                     parts.push(format!("{:?}", pattern));
@@ -682,17 +678,17 @@ impl TuiApp {
                 }
                 Self::join_tool_summary_parts(parts)
             }
-            "memory_search" => input
+            "MemorySearch" | "memory_search" => input
                 .get("query")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
                 .unwrap_or_default(),
-            "web_search" => input
+            "web_search" | "WebSearch" => input
                 .get("query")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
                 .unwrap_or_default(),
-            "http_request" => input
+            "web_fetch" | "WebFetch" => input
                 .get("url")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())

@@ -17,6 +17,7 @@ import {
   describeProjectDirectory,
   getApprovalModeLabel,
   isUnboundProject,
+  resolveProjectRecord,
 } from "@/shared/types/domain";
 
 export function ChatHomePage() {
@@ -36,7 +37,7 @@ export function ChatHomePage() {
   const [selectedModel, setSelectedModel] = useState<string | undefined>(models?.[0]?.id);
 
   const activeProject = useMemo(
-    () => projects.find((project) => project.id === activeProjectId) ?? projects[0],
+    () => resolveProjectRecord(projects, activeProjectId),
     [activeProjectId, projects],
   );
 
@@ -46,8 +47,17 @@ export function ChatHomePage() {
     }
   }, [models, selectedModel]);
 
+  useEffect(() => {
+    if (activeProject && activeProject.id !== activeProjectId) {
+      setActiveProjectId(activeProject.id);
+    }
+  }, [activeProject, activeProjectId, setActiveProjectId]);
+
   async function handleCreateSession(initialPrompt?: string) {
-    const session = await createSession.mutateAsync(selectedModel ?? models?.[0]?.id);
+    const session = await createSession.mutateAsync({
+      model: selectedModel ?? models?.[0]?.id,
+      approvalMode: connection.defaultApprovalMode,
+    });
     navigate(`/sessions/${session.context.session_id}`, {
       state: initialPrompt?.trim()
         ? {
@@ -94,7 +104,7 @@ export function ChatHomePage() {
             <select
               className="w-full rounded-2xl border border-border bg-card/92 px-4 py-2.5 text-sm text-ink outline-none transition focus:border-brand/50"
               onChange={(event) => setActiveProjectId(event.target.value)}
-              value={activeProjectId}
+              value={activeProject?.id}
             >
               {projects.map((project) => (
                 <option key={project.id} value={project.id}>
@@ -129,7 +139,7 @@ export function ChatHomePage() {
 
         <div className="space-y-2">
           <ChatComposer
-            activeProjectId={activeProjectId}
+            activeProjectId={activeProject?.id ?? activeProjectId}
             approvalMode={connection.defaultApprovalMode}
             disabled={false}
             draft={draft}

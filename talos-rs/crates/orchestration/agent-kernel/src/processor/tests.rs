@@ -186,7 +186,7 @@ async fn test_tool_call_extraction_emits_tool_call_events() {
         output_text: String::new(),
         output_items: vec![TalosOutputItem::ToolCall {
             call_id: "call-1".to_string(),
-            name: "read_file".to_string(),
+            name: "read".to_string(),
             arguments: json!({"path": "README.md"}),
         }],
         branch: ExecutionBranch::ReactiveLoop,
@@ -210,7 +210,7 @@ async fn test_tool_context_processor_disables_tools_for_direct_answer() {
     let mut ctx = mock_ctx();
     let mut request = LlmRequestEnvelope {
         tool_definitions: vec![talos_llm_provider::ToolDefinition {
-            name: "read_file".to_string(),
+            name: "read".to_string(),
             description: "read file".to_string(),
             parameters: Some(json!({
                 "type": "object",
@@ -582,8 +582,8 @@ fn make_approval_event(
 async fn test_confirmation_processor_injects_replay_when_approved() {
     let mut ctx = mock_ctx();
     ctx.session.events = vec![
-        make_confirmation_event("call-1", "exec_command", -100),
-        make_approval_event("call-1", "exec_command", true, 0),
+        make_confirmation_event("call-1", "Bash", -100),
+        make_approval_event("call-1", "Bash", true, 0),
     ];
     let mut request = LlmRequestEnvelope {
         branch: ExecutionBranch::ReactiveLoop,
@@ -597,14 +597,14 @@ async fn test_confirmation_processor_injects_replay_when_approved() {
 
     assert_eq!(request.replay_tool_invocations.len(), 1);
     assert_eq!(request.replay_tool_invocations[0].call_id, "call-1");
-    assert_eq!(request.replay_tool_invocations[0].tool_name, "exec_command");
+    assert_eq!(request.replay_tool_invocations[0].tool_name, "Bash");
     assert!(request.prompt_prefix_messages.is_empty());
 }
 
 #[tokio::test]
 async fn test_confirmation_processor_still_blocks_when_no_response() {
     let mut ctx = mock_ctx();
-    ctx.session.events = vec![make_confirmation_event("call-2", "exec_command", -100)];
+    ctx.session.events = vec![make_confirmation_event("call-2", "Bash", -100)];
     let mut request = LlmRequestEnvelope {
         branch: ExecutionBranch::ReactiveLoop,
         ..LlmRequestEnvelope::default()
@@ -626,8 +626,8 @@ async fn test_confirmation_processor_still_blocks_when_no_response() {
 async fn test_confirmation_processor_handles_rejection() {
     let mut ctx = mock_ctx();
     ctx.session.events = vec![
-        make_confirmation_event("call-3", "exec_command", -100),
-        make_approval_event("call-3", "exec_command", false, 0),
+        make_confirmation_event("call-3", "Bash", -100),
+        make_approval_event("call-3", "Bash", false, 0),
     ];
     let mut request = LlmRequestEnvelope {
         branch: ExecutionBranch::ReactiveLoop,

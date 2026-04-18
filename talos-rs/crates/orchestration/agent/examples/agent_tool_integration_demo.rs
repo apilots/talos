@@ -52,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Validating Agent Tool Integration ===\n");
 
     // Create a tool registry with security policy
-    let policy = ToolPolicy::allow_list(vec!["web_search"]);
+    let policy = ToolPolicy::allow_list(vec!["WebSearch"]);
     let tool_registry = Arc::new(ToolRegistry::new_with_policy(policy));
 
     // Register a web search tool
@@ -85,7 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Test tool execution directly through the agent
     println!("\n3. Testing tool execution via agent.execute_tool():");
     match agent
-        .execute_tool("web_search", json!({"query": "Rust programming"}))
+        .execute_tool("WebSearch", json!({"query": "Rust programming"}))
         .await
     {
         Ok(result) => {
@@ -106,6 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .run(OrchestratorRequest {
             session: TalosSession {
                 title: "Untitled Session".to_string(),
+                conf: talos_types::SessionConf::default(),
                 project_id: None,
                 current_directory: None,
                 context: SessionContext {
@@ -152,7 +153,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!(
         "   Contains tool info: {}",
-        system_prompt.contains("web_search")
+        system_prompt.contains("WebSearch")
     );
 
     println!("\n=== Agent Tool Integration Validation Complete ===");

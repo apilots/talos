@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub use talos_config::{ModelCompatConfig, ModelCostConfig, ModelInputKind};
+pub use talos_config::{ModelCompatConfig, ModelCostConfig, ModelInputKind, ToolApprovalPolicy};
 
 pub type TalosConfig = talos_config::Config;
 

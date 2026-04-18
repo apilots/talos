@@ -20,6 +20,7 @@ pub trait SessionStore: Send + Sync {
         agent_id: &str,
         default_model: &str,
         requested_model: Option<&str>,
+        conf: Option<SessionConf>,
         dm_scope: Option<String>,
         project_id: Option<String>,
         current_directory: Option<PathBuf>,
@@ -179,8 +180,10 @@ impl DatabaseSessionStore {
             usage,
             conf: Self::parse_conf_json(row.get_string("conf_json")),
             project_id: Self::normalized_optional_string(row.get_string("project_id")),
-            current_directory: Self::normalized_optional_string(row.get_string("current_directory"))
-                .map(PathBuf::from),
+            current_directory: Self::normalized_optional_string(
+                row.get_string("current_directory"),
+            )
+            .map(PathBuf::from),
         }
     }
 
@@ -249,6 +252,7 @@ impl SessionStore for DatabaseSessionStore {
         agent_id: &str,
         default_model: &str,
         requested_model: Option<&str>,
+        conf: Option<SessionConf>,
         _dm_scope: Option<String>,
         project_id: Option<String>,
         current_directory: Option<PathBuf>,
@@ -256,10 +260,14 @@ impl SessionStore for DatabaseSessionStore {
         let session_id = Self::new_session_id();
         let now = chrono::Utc::now().timestamp_millis();
         let model = requested_model.unwrap_or(default_model).to_string();
-        let conf = if requested_model.is_some() {
+        let base_conf = if requested_model.is_some() {
             SessionConfigOverridePolicy::single_model_conf(&model)
         } else {
             SessionConf::default()
+        };
+        let effective_conf = match conf.as_ref() {
+            Some(patch_conf) => SessionConfigOverridePolicy::merge_conf(&base_conf, patch_conf),
+            None => base_conf,
         };
 
         let record = SessionRecord {
@@ -271,14 +279,14 @@ impl SessionStore for DatabaseSessionStore {
             last_activity: now.try_into().unwrap_or_default(),
             message_count: 0,
             usage: TalosUsage::default(),
-            conf: conf.clone(),
+            conf: effective_conf.clone(),
             project_id: project_id.clone(),
             current_directory: current_directory.clone(),
         };
 
         let context_json = Self::build_context_json(context)?;
         let usage_json = Self::build_usage_json(&record.usage)?;
-        let conf_json = Self::build_conf_json(&conf)?;
+        let conf_json = Self::build_conf_json(&effective_conf)?;
 
         let row = Row::new(
             vec![
@@ -356,7 +364,10 @@ impl SessionStore for DatabaseSessionStore {
             let mut conf = Self::parse_conf_json(existing.get_string("conf_json"));
             if let Some(model) = requested_model {
                 record.model = model.to_string();
-                conf = SessionConfigOverridePolicy::single_model_conf(model);
+                conf = SessionConfigOverridePolicy::merge_conf(
+                    &conf,
+                    &SessionConfigOverridePolicy::single_model_conf(model),
+                );
             }
             record.conf = conf.clone();
             record.last_activity = now.try_into().unwrap_or_default();
@@ -384,7 +395,11 @@ impl SessionStore for DatabaseSessionStore {
                     Value::Number(serde_json::Number::from(record.message_count)),
                     Value::String(Self::build_usage_json(&record.usage)?),
                     Value::String(conf_json),
-                    record.project_id.clone().map(Value::String).unwrap_or(Value::Null),
+                    record
+                        .project_id
+                        .clone()
+                        .map(Value::String)
+                        .unwrap_or(Value::Null),
                     record
                         .current_directory
                         .clone()
@@ -543,9 +558,9 @@ impl SessionStore for DatabaseSessionStore {
         let mut conf = Self::parse_conf_json(row.get_string("conf_json"));
 
         let patch_conf = patch.conf.as_ref().cloned().unwrap_or_default();
-        if let Some(model) = SessionConfigOverridePolicy::extract_agent_model(&patch_conf)? {
+        conf = SessionConfigOverridePolicy::merge_conf(&conf, &patch_conf);
+        if let Some(model) = SessionConfigOverridePolicy::extract_agent_model(&conf)? {
             record.model = model.clone();
-            conf = SessionConfigOverridePolicy::single_model_conf(&model);
         }
         if let Some(project_id_patch) = &patch.project_id {
             match project_id_patch {
@@ -594,7 +609,11 @@ impl SessionStore for DatabaseSessionStore {
                 Value::Number(serde_json::Number::from(record.message_count)),
                 Value::String(Self::build_usage_json(&record.usage)?),
                 Value::String(conf_json),
-                record.project_id.clone().map(Value::String).unwrap_or(Value::Null),
+                record
+                    .project_id
+                    .clone()
+                    .map(Value::String)
+                    .unwrap_or(Value::Null),
                 record
                     .current_directory
                     .clone()
@@ -668,7 +687,11 @@ impl SessionStore for DatabaseSessionStore {
                 Value::Number(0.into()),
                 Value::String(Self::build_usage_json(&record.usage)?),
                 Value::String(conf_json),
-                record.project_id.clone().map(Value::String).unwrap_or(Value::Null),
+                record
+                    .project_id
+                    .clone()
+                    .map(Value::String)
+                    .unwrap_or(Value::Null),
                 record
                     .current_directory
                     .clone()
@@ -743,7 +766,11 @@ impl SessionStore for DatabaseSessionStore {
                 Value::Number(serde_json::Number::from(record.message_count)),
                 Value::String(Self::build_usage_json(&record.usage)?),
                 Value::String(conf_json),
-                record.project_id.clone().map(Value::String).unwrap_or(Value::Null),
+                record
+                    .project_id
+                    .clone()
+                    .map(Value::String)
+                    .unwrap_or(Value::Null),
                 record
                     .current_directory
                     .clone()
@@ -768,7 +795,10 @@ impl SessionStore for DatabaseSessionStore {
         let sql =
             "SELECT p.project_id, p.name, p.directory, p.created_at, p.updated_at, COUNT(s.session_key) AS session_count FROM projects p LEFT JOIN sessions s ON s.project_id = p.project_id WHERE p.project_id = ? GROUP BY p.project_id, p.name, p.directory, p.created_at, p.updated_at";
         let rows = self.storage.query(sql, &[project_id]).await?;
-        Ok(rows.into_iter().next().map(|row| Self::parse_project_record(&row)))
+        Ok(rows
+            .into_iter()
+            .next()
+            .map(|row| Self::parse_project_record(&row)))
     }
 
     async fn create_project(&self, name: &str, directory: &PathBuf) -> TalosResult<ProjectRecord> {
@@ -858,10 +888,18 @@ impl SessionStore for MockSessionStore {
         _agent_id: &str,
         default_model: &str,
         requested_model: Option<&str>,
+        conf: Option<SessionConf>,
         _dm_scope: Option<String>,
         project_id: Option<String>,
         current_directory: Option<PathBuf>,
     ) -> TalosResult<SessionRecord> {
+        let base_conf = requested_model
+            .map(SessionConfigOverridePolicy::single_model_conf)
+            .unwrap_or_default();
+        let effective_conf = match conf.as_ref() {
+            Some(patch_conf) => SessionConfigOverridePolicy::merge_conf(&base_conf, patch_conf),
+            None => base_conf,
+        };
         Ok(SessionRecord {
             id: DatabaseSessionStore::new_session_id(),
             title: DEFAULT_SESSION_TITLE.to_string(),
@@ -871,9 +909,7 @@ impl SessionStore for MockSessionStore {
             last_activity: 0,
             message_count: 0,
             usage: TalosUsage::default(),
-            conf: requested_model
-                .map(SessionConfigOverridePolicy::single_model_conf)
-                .unwrap_or_default(),
+            conf: effective_conf,
             project_id,
             current_directory,
         })
@@ -977,11 +1013,7 @@ impl SessionStore for MockSessionStore {
         Ok(None)
     }
 
-    async fn create_project(
-        &self,
-        name: &str,
-        directory: &PathBuf,
-    ) -> TalosResult<ProjectRecord> {
+    async fn create_project(&self, name: &str, directory: &PathBuf) -> TalosResult<ProjectRecord> {
         Ok(ProjectRecord {
             project_id: "project-mock".to_string(),
             name: name.to_string(),
@@ -1109,7 +1141,16 @@ mod scope_tests {
         let store = DatabaseSessionStore::new(storage).await.unwrap();
 
         let session = store
-            .create_session(&sample_context(), "agent-a", "qwen-max", None, None, None, None)
+            .create_session(
+                &sample_context(),
+                "agent-a",
+                "qwen-max",
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
             .await
             .expect("create session should succeed");
 
@@ -1134,6 +1175,7 @@ mod scope_tests {
                 "agent-a",
                 "qwen-max",
                 Some("gpt-5.3"),
+                None,
                 None,
                 None,
                 None,
@@ -1187,7 +1229,16 @@ mod scope_tests {
         let store = DatabaseSessionStore::new(storage).await.unwrap();
 
         let session = store
-            .create_session(&sample_context(), "agent-a", "qwen-max", None, None, None, None)
+            .create_session(
+                &sample_context(),
+                "agent-a",
+                "qwen-max",
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
             .await
             .expect("create session should succeed");
 
@@ -1202,6 +1253,59 @@ mod scope_tests {
             .await
             .expect("load session should succeed");
         assert!(loaded.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_patch_session_record_merges_tool_approval_policy() {
+        let storage = Arc::new(SqliteStorage::new("sqlite::memory:").await.unwrap());
+        let store = DatabaseSessionStore::new(storage).await.unwrap();
+
+        let session = store
+            .create_session(
+                &sample_context(),
+                "agent-a",
+                "qwen-max",
+                Some("gpt-5.3"),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("create session should succeed");
+
+        let ack = store
+            .patch_session_record(
+                &session.id,
+                &SessionPatch {
+                    conf: Some(SessionConf {
+                        agent: None,
+                        tools: Some(talos_types::SessionToolsConf {
+                            approval_policy: Some(talos_types::ToolApprovalPolicy::Always),
+                        }),
+                    }),
+                    project_id: None,
+                    current_directory: None,
+                },
+            )
+            .await
+            .expect("patch session should succeed");
+        assert!(ack.success);
+
+        let loaded = store
+            .get_session_record(&session.id)
+            .await
+            .expect("load session should succeed")
+            .expect("session should exist");
+
+        assert_eq!(
+            SessionConfigOverridePolicy::extract_agent_model(&loaded.conf).unwrap(),
+            Some("gpt-5.3".to_string())
+        );
+        assert_eq!(
+            SessionConfigOverridePolicy::extract_tool_approval_policy(&loaded.conf).unwrap(),
+            Some(talos_types::ToolApprovalPolicy::Always)
+        );
     }
 
     #[tokio::test]
@@ -1266,6 +1370,7 @@ mod scope_tests {
                 "qwen-max",
                 None,
                 None,
+                None,
                 Some("project-1".to_string()),
                 None,
             )
@@ -1276,6 +1381,7 @@ mod scope_tests {
                 &sample_context(),
                 "agent-a",
                 "qwen-max",
+                None,
                 None,
                 None,
                 Some("project-2".to_string()),
@@ -1316,13 +1422,17 @@ mod scope_tests {
                 "qwen-max",
                 None,
                 None,
+                None,
                 Some(project.project_id.clone()),
                 None,
             )
             .await
             .expect("create bound session should succeed");
 
-        let projects = store.list_projects().await.expect("list projects should succeed");
+        let projects = store
+            .list_projects()
+            .await
+            .expect("list projects should succeed");
         assert_eq!(projects.len(), 1);
         assert_eq!(projects[0].project_id, project.project_id);
         assert_eq!(projects[0].session_count, 1);

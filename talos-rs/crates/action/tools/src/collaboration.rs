@@ -101,6 +101,7 @@ impl CollaborationRuntime {
                 None,
                 None,
                 None,
+                None,
             )
             .await?;
         let session_id = session.context.session_id.clone();

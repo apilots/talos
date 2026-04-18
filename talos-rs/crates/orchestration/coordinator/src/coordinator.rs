@@ -19,8 +19,8 @@ use talos_session_store::SessionStore;
 use talos_types::gateway::{GatewayRequest, GatewayResponse};
 use talos_types::talos::{TalosContext, TalosEvent, TalosUsage};
 use talos_types::{
-    ProjectPatch, ProjectRecord, RequestHandler, SessionPatch, SessionPatchAck, SessionQuery,
-    SessionService, TalosConfig, TalosSession,
+    ProjectPatch, ProjectRecord, RequestHandler, SessionConf, SessionPatch, SessionPatchAck,
+    SessionQuery, SessionService, TalosConfig, TalosSession,
 };
 use tokio::sync::{mpsc, RwLock};
 use tracing::{info, warn};
@@ -292,6 +292,7 @@ impl SessionService for CoordinatorImpl {
         &self,
         context: TalosContext,
         model: Option<String>,
+        conf: Option<SessionConf>,
         project_id: Option<String>,
         current_directory: std::option::Option<std::path::PathBuf>,
     ) -> TalosResult<TalosSession> {
@@ -304,7 +305,14 @@ impl SessionService for CoordinatorImpl {
 
         let record = self
             .sessions
-            .create_session(context, &target_agent, model, project_id, current_directory)
+            .create_session(
+                context,
+                &target_agent,
+                model,
+                conf,
+                project_id,
+                current_directory,
+            )
             .await?;
         Ok(record)
     }

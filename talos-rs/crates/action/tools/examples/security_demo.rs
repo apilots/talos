@@ -1,9 +1,7 @@
 //! Example demonstrating enhanced tool system with security policies
 
 use serde_json::json;
-use talos_tools::{
-    ExecCommandTool, ReadFileTool, ToolContext, ToolDispatchOutcome, ToolRegistry, WriteTool,
-};
+use talos_tools::{BashTool, ReadTool, ToolContext, ToolDispatchOutcome, ToolRegistry, WriteTool};
 use talos_tools_policy::ToolPolicy;
 
 async fn dispatch(
@@ -26,9 +24,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("1. Default Policy (Allow List) Example:");
     let registry = ToolRegistry::new();
 
-    registry.register(std::sync::Arc::new(ReadFileTool));
+    registry.register(std::sync::Arc::new(ReadTool));
     registry.register(std::sync::Arc::new(WriteTool));
-    registry.register(std::sync::Arc::new(ExecCommandTool));
+    registry.register(std::sync::Arc::new(BashTool));
 
     println!("   Registered tools: {:?}", registry.list_tool_names());
     println!("   Allowed tools: {:?}", registry.list_allowed_tool_names());
@@ -36,12 +34,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Example 2: Custom restrictive policy
     println!("2. Restrictive Policy Example:");
-    let restrictive_policy = ToolPolicy::allow_list(vec!["read_file"]);
+    let restrictive_policy = ToolPolicy::allow_list(vec!["Read"]);
     let restricted_registry = ToolRegistry::new_with_policy(restrictive_policy);
 
-    restricted_registry.register(std::sync::Arc::new(ReadFileTool));
+    restricted_registry.register(std::sync::Arc::new(ReadTool));
     restricted_registry.register(std::sync::Arc::new(WriteTool));
-    restricted_registry.register(std::sync::Arc::new(ExecCommandTool));
+    restricted_registry.register(std::sync::Arc::new(BashTool));
 
     println!(
         "   Registered tools: {:?}",
@@ -60,7 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let write_result = dispatch(
         &restricted_registry,
         "call-write",
-        "write",
+        "Write",
         json!({
             "path": "/tmp/test.txt",
             "content": "Hello, World!"
@@ -78,12 +76,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Example 4: Blacklist policy
     println!("4. Blacklist (Deny List) Policy Example:");
-    let deny_policy = ToolPolicy::deny_list(vec!["exec_command"]);
+    let deny_policy = ToolPolicy::deny_list(vec!["Bash"]);
     let deny_registry = ToolRegistry::new_with_policy(deny_policy);
 
-    deny_registry.register(std::sync::Arc::new(ReadFileTool));
+    deny_registry.register(std::sync::Arc::new(ReadTool));
     deny_registry.register(std::sync::Arc::new(WriteTool));
-    deny_registry.register(std::sync::Arc::new(ExecCommandTool));
+    deny_registry.register(std::sync::Arc::new(BashTool));
 
     println!("   Registered tools: {:?}", deny_registry.list_tool_names());
     println!(
@@ -93,13 +91,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let exec_result = dispatch(
         &deny_registry,
-        "call-exec-command",
-        "exec_command",
-        json!({"cmd": "echo hello"}),
+        "call-bash",
+        "Bash",
+        json!({"command": "echo hello"}),
     )
     .await;
     println!(
-        "   exec_command tool execution: {}",
+        "   Bash tool execution: {}",
         match exec_result {
             Ok(_) => "SUCCESS".to_string(),
             Err(e) => format!("FAILED: {} (as expected)", e),
@@ -109,7 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Example 5: Dynamic policy updates
     println!("5. Dynamic Policy Updates:");
-    let mutable_policy = ToolPolicy::allow_list(vec!["read_file"]);
+    let mutable_policy = ToolPolicy::allow_list(vec!["Read"]);
     let mut mutable_registry = ToolRegistry::new_with_policy(mutable_policy);
 
     println!(
@@ -117,7 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         mutable_registry.list_allowed_tool_names()
     );
 
-    let new_policy = ToolPolicy::allow_list(vec!["read_file", "write"]);
+    let new_policy = ToolPolicy::allow_list(vec!["Read", "Write"]);
     mutable_registry.update_policy(new_policy);
 
     println!(

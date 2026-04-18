@@ -13,7 +13,10 @@ use talos_config::{AgentKernelConfig, ExecutionMode, PlannerSelection};
 use talos_error::TalosResult;
 use talos_llm_provider::LlmProvider;
 use talos_memory::MemoryStore;
-use talos_tools::{ToolDefinitionProvider, ToolExecutorPort};
+use talos_tools::{
+    PermissionMode, ToolDefinitionProvider, ToolExecutorPort, ToolSelectionPhase,
+    ToolSelectionRequest,
+};
 use talos_types::talos::{TalosOutputItem, TalosUsage};
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -80,9 +83,16 @@ impl LlmKernelAgent {
         }
 
         if use_selector {
+            let selection_request = ToolSelectionRequest {
+                phase: ToolSelectionPhase::Execution,
+                planner_mode: Some(self.kernel_config.planner_mode.as_str().to_string()),
+                permission_mode: PermissionMode::Default,
+                user_input: Some(ctx.input.clone()),
+                session_id: Some(ctx.session_id.clone()),
+            };
             let tool_names = self
                 .tool_definition_provider
-                .get_tool_definitions()
+                .get_tool_definitions_for_request(&selection_request)
                 .into_iter()
                 .map(|t| t.name.clone())
                 .collect();
@@ -203,9 +213,16 @@ impl LlmKernelAgent {
         if let Some(response) = selection {
             let branch = Self::branch_for_profile(match response.planner_kind {
                 PlannerKind::BuiltIn => {
+                    let selection_request = ToolSelectionRequest {
+                        phase: ToolSelectionPhase::Execution,
+                        planner_mode: Some(self.kernel_config.planner_mode.as_str().to_string()),
+                        permission_mode: PermissionMode::Default,
+                        user_input: Some(ctx.input.clone()),
+                        session_id: Some(ctx.session_id.clone()),
+                    };
                     if self
                         .tool_definition_provider
-                        .get_tool_definitions()
+                        .get_tool_definitions_for_request(&selection_request)
                         .is_empty()
                     {
                         FlowProfile::DirectAnswer

@@ -10,16 +10,17 @@ pub(crate) fn is_read_only_tool_name(tool_name: &str) -> bool {
     matches!(
         tool_name,
         "read"
-            | "read_file"
-            | "list_dir"
-            | "grep_files"
-            | "memory_search"
-            | "memory_get"
-            | "web_search"
-            | "web_fetch"
-            | "http_request"
+            | "Read"
+            | "Glob"
+            | "Grep"
+            | "MemorySearch"
+            | "MemoryGet"
+            | "WebSearch"
+            | "WebFetch"
             | "list_mcp_resources"
             | "list_mcp_resource_templates"
+            | "web_search"
+            | "web_fetch"
     )
 }
 
@@ -188,10 +189,10 @@ fn canonicalize_read_only_arguments(tool_name: &str, value: &Value) -> Value {
     };
 
     match tool_name {
-        "grep_files" => {
+        "Grep" | "grep" => {
             map.remove("limit");
         }
-        "list_dir" => {
+        "Glob" | "glob" => {
             map.remove("limit");
             map.remove("offset");
         }

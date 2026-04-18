@@ -37,7 +37,7 @@ impl ToolHandler for McpToolHandler {
     async fn handle(
         &self,
         invocation: ToolInvocation,
-        _context: ToolDispatchContext,
+        context: ToolDispatchContext,
     ) -> TalosResult<ToolDispatchOutcome> {
         match invocation.payload {
             ToolCallPayload::Mcp {
@@ -89,7 +89,9 @@ impl ToolHandler for McpToolHandler {
                             ))
                         })?;
                     Ok(ToolDispatchOutcome::executed(
-                        self.manager.read_resource(&args.server, &args.uri).await?,
+                        self.manager
+                            .read_resource(&args.server, &args.uri, context.tool_context())
+                            .await?,
                     ))
                 }
                 other => Err(TalosError::ToolError(format!(

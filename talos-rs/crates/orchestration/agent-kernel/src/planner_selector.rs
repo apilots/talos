@@ -285,7 +285,7 @@ mod tests {
         let selector = PlannerSelector::new(Arc::new(MockLlmProvider { mode: "react" }));
         let resp = selector
             .select(
-                make_request("implement feature X", &["read_file", "exec_command"]),
+                make_request("implement feature X", &["Read", "Bash"]),
                 PlannerKind::BuiltIn,
             )
             .await;
@@ -360,7 +360,7 @@ mod tests {
                     timestamp: chrono::Utc::now(),
                 },
             ],
-            tool_names: vec!["read_file".to_string()],
+            tool_names: vec!["Read".to_string()],
             model: "mock".to_string(),
         };
 

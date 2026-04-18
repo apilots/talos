@@ -8,9 +8,7 @@ use serde_json::{json, Value};
 
 use talos_auth::AuthResult;
 use talos_error::TalosError;
-use talos_types::{
-    DocUpdateRequest, WorkspaceDocDetail, WorkspaceDocKind, WorkspaceDocSummary,
-};
+use talos_types::{DocUpdateRequest, WorkspaceDocDetail, WorkspaceDocKind, WorkspaceDocSummary};
 
 use super::errors::ApiError;
 use super::file_support::{
@@ -207,14 +205,18 @@ mod tests {
     #[async_trait::async_trait]
     impl Gateway for NoopGateway {
         async fn handle_request(&self, _request: GatewayRequest) -> TalosResult<GatewayResponse> {
-            Err(TalosError::ToolError("not used in workspace docs tests".to_string()))
+            Err(TalosError::ToolError(
+                "not used in workspace docs tests".to_string(),
+            ))
         }
 
         async fn handle_request_stream(
             &self,
             _request: GatewayRequest,
         ) -> TalosResult<tokio::sync::mpsc::Receiver<TalosEvent>> {
-            Err(TalosError::ToolError("not used in workspace docs tests".to_string()))
+            Err(TalosError::ToolError(
+                "not used in workspace docs tests".to_string(),
+            ))
         }
 
         async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
@@ -260,18 +262,25 @@ mod tests {
             &self,
             _context: TalosContext,
             _model: Option<String>,
+            _conf: Option<talos_types::SessionConf>,
             _project_id: Option<String>,
             _current_directory: Option<PathBuf>,
         ) -> TalosResult<TalosSession> {
-            Err(TalosError::ToolError("not used in workspace docs tests".to_string()))
+            Err(TalosError::ToolError(
+                "not used in workspace docs tests".to_string(),
+            ))
         }
 
         async fn list_sessions(&self, _query: SessionQuery) -> TalosResult<Vec<TalosSession>> {
-            Err(TalosError::ToolError("not used in workspace docs tests".to_string()))
+            Err(TalosError::ToolError(
+                "not used in workspace docs tests".to_string(),
+            ))
         }
 
         async fn get_session(&self, _session_id: &str) -> TalosResult<Option<TalosSession>> {
-            Err(TalosError::ToolError("not used in workspace docs tests".to_string()))
+            Err(TalosError::ToolError(
+                "not used in workspace docs tests".to_string(),
+            ))
         }
 
         async fn patch_session(
@@ -279,27 +288,39 @@ mod tests {
             _session_id: &str,
             _patch: SessionPatch,
         ) -> TalosResult<SessionPatchAck> {
-            Err(TalosError::ToolError("not used in workspace docs tests".to_string()))
+            Err(TalosError::ToolError(
+                "not used in workspace docs tests".to_string(),
+            ))
         }
 
         async fn compact_session(&self, _session_id: &str) -> TalosResult<TalosSession> {
-            Err(TalosError::ToolError("not used in workspace docs tests".to_string()))
+            Err(TalosError::ToolError(
+                "not used in workspace docs tests".to_string(),
+            ))
         }
 
         async fn clear_session(&self, _session_id: &str) -> TalosResult<TalosSession> {
-            Err(TalosError::ToolError("not used in workspace docs tests".to_string()))
+            Err(TalosError::ToolError(
+                "not used in workspace docs tests".to_string(),
+            ))
         }
 
         async fn close_session(&self, _session_id: &str) -> TalosResult<()> {
-            Err(TalosError::ToolError("not used in workspace docs tests".to_string()))
+            Err(TalosError::ToolError(
+                "not used in workspace docs tests".to_string(),
+            ))
         }
 
         async fn delete_session(&self, _session_id: &str) -> TalosResult<SessionPatchAck> {
-            Err(TalosError::ToolError("not used in workspace docs tests".to_string()))
+            Err(TalosError::ToolError(
+                "not used in workspace docs tests".to_string(),
+            ))
         }
 
         async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
-            Err(TalosError::ToolError("not used in workspace docs tests".to_string()))
+            Err(TalosError::ToolError(
+                "not used in workspace docs tests".to_string(),
+            ))
         }
 
         async fn submit_tool_approval(
@@ -310,7 +331,9 @@ mod tests {
             _approved: bool,
             _reason: Option<String>,
         ) -> TalosResult<()> {
-            Err(TalosError::ToolError("not used in workspace docs tests".to_string()))
+            Err(TalosError::ToolError(
+                "not used in workspace docs tests".to_string(),
+            ))
         }
 
         async fn submit_dynamic_tool_result(
@@ -321,22 +344,30 @@ mod tests {
             _output: String,
             _success: bool,
         ) -> TalosResult<()> {
-            Err(TalosError::ToolError("not used in workspace docs tests".to_string()))
+            Err(TalosError::ToolError(
+                "not used in workspace docs tests".to_string(),
+            ))
         }
 
         async fn get_session_turns(
             &self,
             _session_id: &str,
         ) -> TalosResult<Vec<TalosMessageResponse>> {
-            Err(TalosError::ToolError("not used in workspace docs tests".to_string()))
+            Err(TalosError::ToolError(
+                "not used in workspace docs tests".to_string(),
+            ))
         }
 
         async fn list_projects(&self) -> TalosResult<Vec<ProjectRecord>> {
-            Err(TalosError::ToolError("not used in workspace docs tests".to_string()))
+            Err(TalosError::ToolError(
+                "not used in workspace docs tests".to_string(),
+            ))
         }
 
         async fn get_project(&self, _project_id: &str) -> TalosResult<Option<ProjectRecord>> {
-            Err(TalosError::ToolError("not used in workspace docs tests".to_string()))
+            Err(TalosError::ToolError(
+                "not used in workspace docs tests".to_string(),
+            ))
         }
 
         async fn create_project(
@@ -344,7 +375,9 @@ mod tests {
             _name: String,
             _directory: PathBuf,
         ) -> TalosResult<ProjectRecord> {
-            Err(TalosError::ToolError("not used in workspace docs tests".to_string()))
+            Err(TalosError::ToolError(
+                "not used in workspace docs tests".to_string(),
+            ))
         }
 
         async fn patch_project(
@@ -352,11 +385,15 @@ mod tests {
             _project_id: &str,
             _patch: ProjectPatch,
         ) -> TalosResult<Option<ProjectRecord>> {
-            Err(TalosError::ToolError("not used in workspace docs tests".to_string()))
+            Err(TalosError::ToolError(
+                "not used in workspace docs tests".to_string(),
+            ))
         }
 
         async fn delete_project(&self, _project_id: &str) -> TalosResult<()> {
-            Err(TalosError::ToolError("not used in workspace docs tests".to_string()))
+            Err(TalosError::ToolError(
+                "not used in workspace docs tests".to_string(),
+            ))
         }
     }
 
@@ -418,7 +455,9 @@ mod tests {
             .await
             .expect("list workspace docs should succeed");
 
-        let docs = response.0["data"].as_array().expect("data should be an array");
+        let docs = response.0["data"]
+            .as_array()
+            .expect("data should be an array");
         assert_eq!(docs.len(), 5);
         assert_eq!(docs[0]["kind"], "soul");
         assert_eq!(docs[4]["kind"], "memory");

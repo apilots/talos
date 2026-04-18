@@ -2,8 +2,8 @@
 
 use serde_json::json;
 use talos_tools::{
-    ExecCommandTool, HttpRequestTool, ReadFileTool, ToolContext, ToolDispatchOutcome, ToolRegistry,
-    WebFetchTool, WebSearchTool, WriteTool,
+    BashTool, ReadTool, ToolContext, ToolDispatchOutcome, ToolRegistry, WebFetchTool,
+    WebSearchTool, WriteTool,
 };
 use talos_tools_policy::ToolPolicy;
 
@@ -23,24 +23,17 @@ async fn dispatch(
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Complete Enhanced Tool System Demo ===\n");
 
-    // 1. Setup a policy that allows most tools but restricts exec_command
+    // 1. Setup a policy that allows most tools but restricts Bash
     println!("1. Setting up security policy...");
-    let policy = ToolPolicy::allow_list(vec![
-        "read_file",
-        "write",
-        "web_search",
-        "web_fetch",
-        "http_request",
-    ]);
+    let policy = ToolPolicy::allow_list(vec!["Read", "Write", "WebSearch", "WebFetch"]);
     let registry = ToolRegistry::new_with_policy(policy);
 
     // Register all available tools
-    registry.register(std::sync::Arc::new(ReadFileTool));
+    registry.register(std::sync::Arc::new(ReadTool));
     registry.register(std::sync::Arc::new(WriteTool));
-    registry.register(std::sync::Arc::new(ExecCommandTool));
+    registry.register(std::sync::Arc::new(BashTool));
     registry.register(std::sync::Arc::new(WebSearchTool));
     registry.register(std::sync::Arc::new(WebFetchTool));
-    registry.register(std::sync::Arc::new(HttpRequestTool));
 
     println!("   Available tools: {:?}", registry.list_tool_names());
     println!("   Allowed tools: {:?}", registry.list_allowed_tool_names());
@@ -51,7 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let search_result = dispatch(
         &registry,
         "call-web-search",
-        "web_search",
+        "WebSearch",
         json!({"query": "Rust programming language"}),
     )
     .await;
@@ -77,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let fetch_result = dispatch(
         &registry,
         "call-web-fetch",
-        "web_fetch",
+        "WebFetch",
         json!({"url": "https://httpbin.org/html"}),
     )
     .await;
@@ -95,78 +88,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!();
 
-    // 4. Demonstrate HTTP Request Tool
-    println!("4. HTTP Request Tool:");
-    let http_result = dispatch(
-        &registry,
-        "call-http-request",
-        "http_request",
-        json!({
-            "url": "https://httpbin.org/get",
-            "method": "GET"
-        }),
-    )
-    .await;
-    match http_result {
-        Ok(ToolDispatchOutcome::Executed { payload }) => {
-            println!(
-                "   HTTP result: {}",
-                payload.content().lines().next().unwrap_or("No output")
-            );
-        }
-        Ok(ToolDispatchOutcome::Pending { tool_name, .. }) => {
-            println!(
-                "   HTTP request entered pending state unexpectedly: {}",
-                tool_name
-            );
-        }
-        Err(e) => println!("   HTTP request failed: {}", e),
-    }
-    println!();
-
-    // 5. Demonstrate Security Policy Enforcement
-    println!("5. Security Policy Enforcement:");
-    println!("   Attempting to execute 'exec_command' tool (should be blocked by policy)...");
+    // 4. Demonstrate Security Policy Enforcement
+    println!("4. Security Policy Enforcement:");
+    println!("   Attempting to execute 'Bash' tool (should be blocked by policy)...");
 
     let exec_result = dispatch(
         &registry,
-        "call-exec-command-blocked",
-        "exec_command",
-        json!({"cmd": "ls -la"}),
+        "call-bash-blocked",
+        "Bash",
+        json!({"command": "ls -la"}),
     )
     .await;
     match exec_result {
-        Ok(_) => println!("   exec_command tool executed successfully (unexpected!)"),
-        Err(e) => println!(
-            "   exec_command tool execution blocked: {} (as expected)",
-            e
-        ),
+        Ok(_) => println!("   Bash tool executed successfully (unexpected!)"),
+        Err(e) => println!("   Bash tool execution blocked: {} (as expected)", e),
     }
     println!();
 
-    // 6. Show how to update policy dynamically
-    println!("6. Dynamic Policy Update:");
+    // 5. Show how to update policy dynamically
+    println!("5. Dynamic Policy Update:");
     println!(
         "   Current allowed tools: {:?}",
         registry.list_allowed_tool_names()
     );
 
-    let new_policy = ToolPolicy::allow_list(vec![
-        "read_file",
-        "write",
-        "exec_command",
-        "web_search",
-        "web_fetch",
-        "http_request",
-    ]);
+    let new_policy = ToolPolicy::allow_list(vec!["Read", "Write", "Bash", "WebSearch", "WebFetch"]);
     let new_registry = ToolRegistry::new_with_policy(new_policy);
 
-    new_registry.register(std::sync::Arc::new(ReadFileTool));
+    new_registry.register(std::sync::Arc::new(ReadTool));
     new_registry.register(std::sync::Arc::new(WriteTool));
-    new_registry.register(std::sync::Arc::new(ExecCommandTool));
+    new_registry.register(std::sync::Arc::new(BashTool));
     new_registry.register(std::sync::Arc::new(WebSearchTool));
     new_registry.register(std::sync::Arc::new(WebFetchTool));
-    new_registry.register(std::sync::Arc::new(HttpRequestTool));
 
     println!(
         "   After policy update, allowed tools: {:?}",
@@ -174,41 +127,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!();
 
-    // 7. Now exec_command should work with the updated policy
-    println!("7. Verifying Updated Policy:");
+    // 6. Now Bash should work with the updated policy
+    println!("6. Verifying Updated Policy:");
     let exec_result_after_update = dispatch(
         &new_registry,
-        "call-exec-command-allowed",
-        "exec_command",
-        json!({"cmd": "echo 'Policy updated successfully'"}),
+        "call-bash-allowed",
+        "Bash",
+        json!({"command": "echo 'Policy updated successfully'"}),
     )
     .await;
     match exec_result_after_update {
         Ok(ToolDispatchOutcome::Executed { payload }) => {
-            println!(
-                "   exec_command tool now works: {}",
-                payload.content().trim()
-            )
+            println!("   Bash tool now works: {}", payload.content().trim())
         }
         Ok(ToolDispatchOutcome::Pending { tool_name, .. }) => {
-            println!(
-                "   exec_command unexpectedly entered pending state: {}",
-                tool_name
-            )
+            println!("   Bash unexpectedly entered pending state: {}", tool_name)
         }
-        Err(e) => println!("   exec_command tool still blocked: {}", e),
+        Err(e) => println!("   Bash tool still blocked: {}", e),
     }
     println!();
 
-    // 8. Demonstrate tool availability checking
-    println!("8. Tool Availability Checking:");
+    // 7. Demonstrate tool availability checking
+    println!("7. Tool Availability Checking:");
     println!(
-        "   Is 'web_search' available? {}",
-        new_registry.is_tool_available("web_search")
+        "   Is 'WebSearch' available? {}",
+        new_registry.is_tool_available("WebSearch")
     );
     println!(
-        "   Is 'exec_command' available? {}",
-        new_registry.is_tool_available("exec_command")
+        "   Is 'Bash' available? {}",
+        new_registry.is_tool_available("Bash")
     );
     println!(
         "   Is 'nonexistent' available? {}",

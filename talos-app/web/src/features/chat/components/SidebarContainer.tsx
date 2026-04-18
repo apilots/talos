@@ -20,6 +20,7 @@ export function SidebarContainer() {
   const deleteSession = useDeleteSessionMutation();
   const threadFilter = useAppStore((state) => state.threadFilter);
   const setThreadFilter = useAppStore((state) => state.setThreadFilter);
+  const defaultApprovalMode = useAppStore((state) => state.connection.defaultApprovalMode);
   const aliases = useAppStore((state) => state.sessionAliases);
   const statuses = useAppStore((state) => state.transientStatuses);
   const streams = useAppStore((state) => state.streams);
@@ -50,7 +51,10 @@ export function SidebarContainer() {
       }}
       onCreateThread={async () => {
         const model = models?.[0]?.id;
-        const session = await createSession.mutateAsync(model);
+        const session = await createSession.mutateAsync({
+          model,
+          approvalMode: defaultApprovalMode,
+        });
         navigate(`/sessions/${session.context.session_id}`);
       }}
       onCycleThreadFilter={() =>

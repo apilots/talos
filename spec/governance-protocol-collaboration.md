@@ -388,6 +388,10 @@ RegistryOrchestrator（Skill/Collaboration 默认 NeedsApproval）
 
 ### 3.3 Collaboration 执行原语映射
 
+这里描述的是 **内部 collaboration runtime primitive**，不是最终模型公开工具协议。
+
+对模型公开层应收敛为高层 `Agent` 工具；`spawn_agent / send_input / wait / close` 仅作为内部执行原语存在。
+
 原语需求：`spawn_agent / send_input / wait / close`
 
 ```text

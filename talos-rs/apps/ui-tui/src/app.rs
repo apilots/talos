@@ -268,11 +268,17 @@ impl TuiApp {
         self.current_project_root = session
             .current_directory
             .clone()
-            .or_else(|| session.context.environment.as_ref().map(|env| env.directory.clone()))
             .or_else(|| {
-            matches!(self.connection_mode, TalosConnectionMode::Embedded)
-                .then(|| self.startup_directory.clone())
-        });
+                session
+                    .context
+                    .environment
+                    .as_ref()
+                    .map(|env| env.directory.clone())
+            })
+            .or_else(|| {
+                matches!(self.connection_mode, TalosConnectionMode::Embedded)
+                    .then(|| self.startup_directory.clone())
+            });
         if let Some(welcome_block) = self.chat_blocks.first_mut() {
             if welcome_block.content.starts_with('╭') {
                 welcome_block.content = build_welcome_card(

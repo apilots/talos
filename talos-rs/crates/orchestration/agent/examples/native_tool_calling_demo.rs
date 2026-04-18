@@ -45,14 +45,14 @@ impl LlmProvider for NativeToolMockProvider {
         }
 
         Ok(ChatResponse {
-            content: "Let me call web_search first.".to_string(),
+            content: "Let me call WebSearch first.".to_string(),
             reasoning: Vec::new(),
             model: "mock-model".to_string(),
             usage: Usage::default(),
             finish_reason: Some("tool_calls".to_string()),
             tool_calls: Some(vec![FunctionCall::new(
                 "call_1",
-                "web_search",
+                "WebSearch",
                 json!({"query": "Rust async patterns"}),
             )]),
         })
@@ -74,7 +74,7 @@ impl LlmProvider for NativeToolMockProvider {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let provider = Arc::new(NativeToolMockProvider);
-    let policy = ToolPolicy::allow_list(vec!["web_search"]);
+    let policy = ToolPolicy::allow_list(vec!["WebSearch"]);
     let registry = Arc::new(ToolRegistry::new_with_policy(policy));
     registry.register(Arc::new(WebSearchTool));
 
@@ -92,6 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .run(OrchestratorRequest {
             session: TalosSession {
                 title: "Untitled Session".to_string(),
+                conf: talos_types::SessionConf::default(),
                 project_id: None,
                 current_directory: None,
                 context: SessionContext {

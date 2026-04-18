@@ -228,6 +228,7 @@ impl talos_session_store::SessionStore for TitleTestSessionStore {
         _agent_id: &str,
         default_model: &str,
         requested_model: Option<&str>,
+        conf: Option<SessionConf>,
         _dm_scope: Option<String>,
         project_id: Option<String>,
         current_directory: Option<std::path::PathBuf>,
@@ -241,7 +242,7 @@ impl talos_session_store::SessionStore for TitleTestSessionStore {
             last_activity: 0,
             message_count: 0,
             usage: TalosUsage::default(),
-            conf: SessionConf::default(),
+            conf: conf.unwrap_or_default(),
             project_id,
             current_directory,
         };
@@ -267,11 +268,12 @@ impl talos_session_store::SessionStore for TitleTestSessionStore {
             agent_id,
             default_model,
             requested_model,
+            None,
             dm_scope,
             project_id,
             current_directory,
         )
-            .await
+        .await
     }
 
     async fn get_session_record(&self, session_id: &str) -> TalosResult<Option<SessionRecord>> {
@@ -693,7 +695,7 @@ async fn test_submit_tool_approval_routes_to_session_agent() {
         .submit_tool_approval(
             "session-1",
             "call-1",
-            "exec_command",
+            "Bash",
             false,
             Some("deny".to_string()),
         )
@@ -707,7 +709,7 @@ async fn test_submit_tool_approval_routes_to_session_agent() {
         (
             "session-1".to_string(),
             "call-1".to_string(),
-            "exec_command".to_string(),
+            "Bash".to_string(),
             false,
             Some("deny".to_string()),
         )
@@ -871,13 +873,11 @@ async fn test_delete_session_clears_agent_state_and_removes_record() {
         cleared_sessions.lock().unwrap().as_slice(),
         &["session-delete".to_string()]
     );
-    assert!(
-        coordinator
-            .get_session("session-delete")
-            .await
-            .expect("get session should succeed")
-            .is_none()
-    );
+    assert!(coordinator
+        .get_session("session-delete")
+        .await
+        .expect("get session should succeed")
+        .is_none());
 }
 
 #[tokio::test]
@@ -907,10 +907,12 @@ async fn test_delete_session_rejects_active_turn() {
         current_directory: None,
     };
     let session_store = Arc::new(TitleTestSessionStore::new(session_record));
-    let coordinator =
-        CoordinatorImpl::new(mock_router, session_store, TalosConfig::default());
+    let coordinator = CoordinatorImpl::new(mock_router, session_store, TalosConfig::default());
     coordinator
-        .register_agent("test_agent", Arc::new(GuardedSessionAgent::new(true, false)))
+        .register_agent(
+            "test_agent",
+            Arc::new(GuardedSessionAgent::new(true, false)),
+        )
         .await
         .expect("agent registration should succeed");
 
@@ -949,10 +951,12 @@ async fn test_delete_session_rejects_pending_memory_flush() {
         current_directory: None,
     };
     let session_store = Arc::new(TitleTestSessionStore::new(session_record));
-    let coordinator =
-        CoordinatorImpl::new(mock_router, session_store, TalosConfig::default());
+    let coordinator = CoordinatorImpl::new(mock_router, session_store, TalosConfig::default());
     coordinator
-        .register_agent("test_agent", Arc::new(GuardedSessionAgent::new(false, true)))
+        .register_agent(
+            "test_agent",
+            Arc::new(GuardedSessionAgent::new(false, true)),
+        )
         .await
         .expect("agent registration should succeed");
 
@@ -1091,12 +1095,12 @@ async fn test_get_session_turns_returns_ordered_items() {
         },
         TalosOutputItem::ToolCall {
             call_id: "call-1".to_string(),
-            name: "read_file".to_string(),
+            name: "Read".to_string(),
             arguments: serde_json::json!({"path":"/tmp/demo.txt"}),
         },
         TalosOutputItem::ToolResult {
             call_id: "call-1".to_string(),
-            tool_name: "read_file".to_string(),
+            tool_name: "Read".to_string(),
             content: vec![TalosContentItem::Text {
                 text: "demo".to_string(),
             }],
@@ -1148,11 +1152,11 @@ async fn test_get_session_turns_returns_ordered_items() {
     ));
     assert!(matches!(
         turns[0].output.get(2),
-        Some(TalosOutputItem::ToolCall { name, .. }) if name == "read_file"
+        Some(TalosOutputItem::ToolCall { name, .. }) if name == "Read"
     ));
     assert!(matches!(
         turns[0].output.get(3),
-        Some(TalosOutputItem::ToolResult { tool_name, .. }) if tool_name == "read_file"
+        Some(TalosOutputItem::ToolResult { tool_name, .. }) if tool_name == "Read"
     ));
     assert!(matches!(
         turns[0].output.get(4),
@@ -1191,6 +1195,7 @@ async fn test_remote_session_defaults_project_root_to_workspace_dir() {
             directory: std::path::PathBuf::from("/client/path"),
             connection_mode: TalosConnectionMode::Remote,
         }),
+        None,
         None,
         None,
         None,
@@ -1278,13 +1283,13 @@ async fn test_get_session_turns_includes_tool_results() {
             {
                 "type": "tool_call",
                 "call_id": "call-tool",
-                "name": "exec_command",
-                "arguments": {"cmd": "pwd"}
+                "name": "Bash",
+                "arguments": {"command": "pwd"}
             },
             {
                 "type": "tool_result",
                 "call_id": "call-tool",
-                "tool_name": "exec_command",
+                "tool_name": "Bash",
                 "content": [
                     {
                         "type": "json",
@@ -1320,6 +1325,6 @@ async fn test_get_session_turns_includes_tool_results() {
 
     assert!(matches!(
         turns[0].output.get(1),
-        Some(TalosOutputItem::ToolResult { tool_name, .. }) if tool_name == "exec_command"
+        Some(TalosOutputItem::ToolResult { tool_name, .. }) if tool_name == "Bash"
     ));
 }

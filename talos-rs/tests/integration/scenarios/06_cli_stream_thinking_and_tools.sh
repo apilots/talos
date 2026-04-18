@@ -37,7 +37,7 @@ echo "CASE cli_stream_session_create PASS session_id=${session_id}"
 
 stream_stdout="${ROOT_DIR}/tests/integration/reports/cli_stream_stdout.log"
 stream_stderr="${ROOT_DIR}/tests/integration/reports/cli_stream_stderr.log"
-stream_input="You must call exec_command tool exactly once with cmd ls and return raw output inside <tool_output></tool_output>."
+stream_input="You must call Bash tool exactly once with command ls and return raw output inside <tool_output></tool_output>."
 
 "${cli}" --gateway-url "${GATEWAY_URL}" --auth-token "${AUTH_TOKEN}" \
   chat in "${session_id}" "${stream_input}" --stream \
@@ -64,7 +64,7 @@ if ! echo "${stderr_text}" | grep -Eq "THINKING\\[|SUMMARY\\["; then
   echo "CASE cli_chat_stream_tool_exec FAIL missing_thinking_or_summary_event stderr=${stderr_text}"
   exit 1
 fi
-if ! echo "${stderr_text}" | grep -q "TOOL_CALL_STARTED name=exec_command"; then
+if ! echo "${stderr_text}" | grep -q "TOOL_CALL_STARTED name=Bash internal=Bash"; then
   echo "CASE cli_chat_stream_tool_exec FAIL missing_tool_started stderr=${stderr_text}"
   exit 1
 fi
@@ -77,8 +77,8 @@ import os
 import re
 
 stderr = os.environ.get("STDERR_TEXT", "")
-started = re.search(r"TOOL_CALL_STARTED name=exec_command call_id=([^ ]*)", stderr)
-completed = re.search(r"TOOL_CALL_COMPLETED call_id=([^ ]+) tool=exec_command", stderr)
+started = re.search(r"TOOL_CALL_STARTED name=Bash internal=Bash call_id=([^ ]*)", stderr)
+completed = re.search(r"TOOL_CALL_COMPLETED call_id=([^ ]+) tool=Bash internal=Bash", stderr)
 print(f"{started.group(1) if started else ''}\t{completed.group(1) if completed else ''}")
 PY
 )"
@@ -107,7 +107,7 @@ if [[ -z "${memory_session_id}" ]]; then
 fi
 echo "CASE cli_stream_memory_session_create PASS session_id=${memory_session_id}"
 
-memory_stream_input="You must call memory_search tool exactly once with query talos项目 before any final answer. Do not answer from prior knowledge, prior messages, or workspace context. If no result is found, say so in one short sentence after the tool call."
+memory_stream_input="You must call MemorySearch exactly once with query talos项目 before any final answer. Do not answer from prior knowledge, prior messages, or workspace context. If no result is found, say so in one short sentence after the tool call."
 
 "${cli}" --gateway-url "${GATEWAY_URL}" --auth-token "${AUTH_TOKEN}" \
   chat in "${memory_session_id}" "${memory_stream_input}" --stream \
@@ -130,7 +130,7 @@ if [[ -z "${memory_stdout_text}" ]]; then
   echo "CASE cli_chat_stream_memory_search FAIL empty_stdout"
   exit 1
 fi
-if ! echo "${memory_stderr_text}" | grep -q "TOOL_CALL_STARTED name=memory_search"; then
+if ! echo "${memory_stderr_text}" | grep -q "TOOL_CALL_STARTED name=MemorySearch internal=MemorySearch"; then
   echo "CASE cli_chat_stream_memory_search FAIL missing_tool_started stderr=${memory_stderr_text}"
   exit 1
 fi
@@ -138,7 +138,7 @@ if ! echo "${memory_stderr_text}" | grep -q "TOOL_CALL_COMPLETED call_id="; then
   echo "CASE cli_chat_stream_memory_search FAIL missing_tool_completed stderr=${memory_stderr_text}"
   exit 1
 fi
-if ! echo "${memory_stderr_text}" | grep -q "tool=memory_search"; then
+if ! echo "${memory_stderr_text}" | grep -q "tool=MemorySearch internal=MemorySearch"; then
   echo "CASE cli_chat_stream_memory_search FAIL missing_memory_tool_name stderr=${memory_stderr_text}"
   exit 1
 fi
@@ -147,8 +147,8 @@ import os
 import re
 
 stderr = os.environ.get("STDERR_TEXT", "")
-started = re.search(r"TOOL_CALL_STARTED name=memory_search call_id=([^ ]*)", stderr)
-completed = re.search(r"TOOL_CALL_COMPLETED call_id=([^ ]+) tool=memory_search", stderr)
+started = re.search(r"TOOL_CALL_STARTED name=MemorySearch internal=MemorySearch call_id=([^ ]*)", stderr)
+completed = re.search(r"TOOL_CALL_COMPLETED call_id=([^ ]+) tool=MemorySearch internal=MemorySearch", stderr)
 print(f"{started.group(1) if started else ''}\t{completed.group(1) if completed else ''}")
 PY
 )"

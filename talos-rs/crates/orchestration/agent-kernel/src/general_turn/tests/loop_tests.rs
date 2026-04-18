@@ -227,7 +227,7 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
 }
 
 #[tokio::test]
-async fn test_run_general_turn_exec_command_then_write_stdin() {
+async fn test_run_general_turn_bash_then_task_output() {
     let provider = Arc::new(ExecLoopProvider::default());
     let tool_registry = Arc::new(ToolRegistry::new());
     register_core_local_tools(tool_registry.as_ref());
@@ -244,7 +244,7 @@ async fn test_run_general_turn_exec_command_then_write_stdin() {
         &mut ctx,
         "talos",
         "assistant",
-        "Use exec_command, then continue with write_stdin.",
+        "Use Bash, then continue with TaskOutput.",
         provider.clone(),
         tool_registry.clone(),
         tool_registry,
@@ -280,7 +280,7 @@ async fn test_run_general_turn_stops_on_pending_tool_confirmation() {
         &mut ctx,
         "talos",
         "assistant",
-        "Use exec_command with escalated permissions.",
+        "Use Bash with escalated permissions.",
         provider.clone(),
         tool_registry.clone(),
         tool_registry,

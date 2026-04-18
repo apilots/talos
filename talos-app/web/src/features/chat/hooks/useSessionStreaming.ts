@@ -54,9 +54,17 @@ export function useSessionStreaming(sessionId: string, serverMessageCount?: numb
   });
 
   const sendMutation = useMutation({
-    mutationFn: async (text: string) => {
+    mutationFn: async ({
+      text,
+      appendUserInput = true,
+    }: {
+      text: string;
+      appendUserInput?: boolean;
+    }) => {
       resetStream(sessionId);
-      appendStreamUserInput(sessionId, text);
+      if (appendUserInput && text.trim().length > 0) {
+        appendStreamUserInput(sessionId, text);
+      }
       useAppStore.getState().setStreamError(sessionId, undefined);
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: true,
@@ -69,6 +77,11 @@ export function useSessionStreaming(sessionId: string, serverMessageCount?: numb
     },
     onSuccess: async () => {
       await invalidateSessionQueries();
+      const currentStream = useAppStore.getState().streams[sessionId];
+      if (currentStream?.pendingApproval) {
+        setSessionStatus(sessionId, "waiting_approval");
+        return;
+      }
       resetStream(sessionId);
       setSessionStatus(sessionId, undefined);
     },
@@ -112,8 +125,10 @@ export function useSessionStreaming(sessionId: string, serverMessageCount?: numb
       if (!content) {
         return Promise.resolve();
       }
-      return sendMutation.mutateAsync(content);
+      return sendMutation.mutateAsync({ text: content, appendUserInput: true });
     },
+    continueAfterApproval: (text: string) =>
+      sendMutation.mutateAsync({ text, appendUserInput: false }),
     isStreaming: streamState?.isStreaming ?? false,
     isCancelling: stopMutation.isPending || streamState?.connectionState === "cancelling",
   };

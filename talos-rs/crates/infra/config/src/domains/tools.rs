@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolsRuntimeConfig {
     #[serde(default)]
     pub approval_policy: ToolApprovalPolicy,
@@ -21,15 +21,33 @@ pub struct ToolsRuntimeConfig {
     pub enable_mcp_tools: bool,
     #[serde(default)]
     pub enable_dynamic_tools: bool,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub enable_collaboration_tools: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+impl Default for ToolsRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            approval_policy: ToolApprovalPolicy::default(),
+            sandbox_policy: ToolSandboxPolicy::default(),
+            local_exec: LocalExecToolConfig::default(),
+            file: FileToolConfig::default(),
+            mcp_runtime: McpToolConfig::default(),
+            dynamic: DynamicToolConfig::default(),
+            enable_apply_patch: true,
+            enable_mcp_tools: true,
+            enable_dynamic_tools: false,
+            enable_collaboration_tools: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolApprovalPolicy {
     #[default]
     OnRequest,
+    Always,
     Never,
 }
 
@@ -205,4 +223,15 @@ fn default_tools_file_search_limit() -> usize {
 
 fn default_tools_file_list_limit() -> usize {
     200
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ToolsRuntimeConfig;
+
+    #[test]
+    fn collaboration_tools_are_enabled_by_default() {
+        let config = ToolsRuntimeConfig::default();
+        assert!(config.enable_collaboration_tools);
+    }
 }

@@ -16,6 +16,7 @@ describe("useProjectSessionsPageState helpers", () => {
           message_id: "message-1",
           trace_id: "trace-1",
         },
+        conf: {},
         config: {
           agent: { model: "qwen-plus" },
           llm: { model: "qwen-plus" },
@@ -38,6 +39,7 @@ describe("useProjectSessionsPageState helpers", () => {
           message_id: "message-2",
           trace_id: "trace-2",
         },
+        conf: {},
         config: {
           agent: { model: "gpt-5.4" },
           llm: { model: "gpt-5.4" },

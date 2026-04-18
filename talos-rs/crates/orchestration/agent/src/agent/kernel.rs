@@ -57,8 +57,11 @@ impl AgentImpl {
         self.kernel_config.clone()
     }
 
-    pub(crate) fn resolve_kernel_mode(&self) -> TalosResult<KernelExecutionMode> {
-        let mode = self.kernel_config.execution_mode;
+    pub(crate) fn resolve_kernel_mode_for(
+        &self,
+        kernel_config: &AgentKernelConfig,
+    ) -> TalosResult<KernelExecutionMode> {
+        let mode = kernel_config.execution_mode;
         Ok(match mode {
             ExecutionMode::Single => KernelExecutionMode::Single,
             ExecutionMode::Sequential => KernelExecutionMode::Sequential,
@@ -71,6 +74,7 @@ impl AgentImpl {
         &self,
         id: impl Into<String>,
         name: impl Into<String>,
+        kernel_config: AgentKernelConfig,
     ) -> Arc<dyn KernelAgent> {
         let planner_selector = Arc::new(PlannerSelector::new(self.llm_provider.clone()));
         Arc::new(LlmKernelAgent::new(
@@ -79,28 +83,34 @@ impl AgentImpl {
             self.description.clone(),
             self.llm_provider.clone(),
             self.memory_store.clone(),
-            self.kernel_config_snapshot(),
+            kernel_config,
             self.tool_registry.clone(),
             self.tool_registry.clone(),
             planner_selector,
         ))
     }
 
-    pub(crate) fn build_kernel_agent_for_request(&self) -> TalosResult<Arc<dyn KernelAgent>> {
-        let mode = self.resolve_kernel_mode()?;
-        let child_count = self.kernel_config.execution_children.clamp(1, 4);
-        let loop_iters = self.kernel_config.execution_loop_iters.clamp(1, 16);
+    pub(crate) fn build_kernel_agent_for_request(
+        &self,
+        kernel_config: &AgentKernelConfig,
+    ) -> TalosResult<Arc<dyn KernelAgent>> {
+        let mode = self.resolve_kernel_mode_for(kernel_config)?;
+        let child_count = kernel_config.execution_children.clamp(1, 4);
+        let loop_iters = kernel_config.execution_loop_iters.clamp(1, 16);
 
         Ok(match mode {
-            KernelExecutionMode::Single => {
-                self.build_llm_kernel_agent(self.id.clone(), self.name.clone())
-            }
+            KernelExecutionMode::Single => self.build_llm_kernel_agent(
+                self.id.clone(),
+                self.name.clone(),
+                kernel_config.clone(),
+            ),
             KernelExecutionMode::Sequential => {
                 let children = (0..child_count)
                     .map(|idx| {
                         self.build_llm_kernel_agent(
                             format!("{}-seq-{}", self.id, idx + 1),
                             format!("{} seq {}", self.name, idx + 1),
+                            kernel_config.clone(),
                         )
                     })
                     .collect::<Vec<_>>();
@@ -115,6 +125,7 @@ impl AgentImpl {
                         self.build_llm_kernel_agent(
                             format!("{}-par-{}", self.id, idx + 1),
                             format!("{} par {}", self.name, idx + 1),
+                            kernel_config.clone(),
                         )
                     })
                     .collect::<Vec<_>>();
@@ -128,6 +139,7 @@ impl AgentImpl {
                 self.build_llm_kernel_agent(
                     format!("{}-loop-body", self.id),
                     format!("{} loop body", self.name),
+                    kernel_config.clone(),
                 ),
                 loop_iters,
             )),

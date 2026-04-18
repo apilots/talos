@@ -713,11 +713,15 @@ impl TuiApp {
                 self.transcript.note_visible_activity();
                 self.push_right_event(format!(
                     "tool queued: {} ({})",
-                    payload.call_id, payload.tool_name
+                    payload.call_id,
+                    crate::utils::display_tool_name(&payload.tool_name)
                 ));
                 self.upsert_tool_event(
                     payload.call_id.clone(),
-                    format!("queued: {}", payload.tool_name),
+                    format!(
+                        "queued: {}",
+                        crate::utils::display_tool_name(&payload.tool_name)
+                    ),
                 );
                 self.transcript.record_stream_key(
                     payload.stream_key.round,
@@ -733,11 +737,15 @@ impl TuiApp {
                 self.transcript.note_visible_activity();
                 self.push_right_event(format!(
                     "tool executing: {} ({})",
-                    payload.call_id, payload.tool_name
+                    payload.call_id,
+                    crate::utils::display_tool_name(&payload.tool_name)
                 ));
                 self.upsert_tool_event(
                     payload.call_id.clone(),
-                    format!("running: {}", payload.tool_name),
+                    format!(
+                        "running: {}",
+                        crate::utils::display_tool_name(&payload.tool_name)
+                    ),
                 );
                 self.transcript.record_stream_key(
                     payload.stream_key.round,
@@ -762,9 +770,13 @@ impl TuiApp {
             ) => {
                 self.push_right_event(format!(
                     "tool completed: {} ({})",
-                    payload.call_id, payload.tool
+                    payload.call_id,
+                    crate::utils::display_tool_name(&payload.tool)
                 ));
-                self.upsert_tool_event(payload.call_id.clone(), format!("done: {}", payload.tool));
+                self.upsert_tool_event(
+                    payload.call_id.clone(),
+                    format!("done: {}", crate::utils::display_tool_name(&payload.tool)),
+                );
                 let output = payload
                     .content
                     .iter()
@@ -789,11 +801,15 @@ impl TuiApp {
                 self.transcript.note_visible_activity();
                 self.push_right_event(format!(
                     "approval needed: {} ({})",
-                    payload.tool_name, payload.call_id
+                    crate::utils::display_tool_name(&payload.tool_name),
+                    payload.call_id
                 ));
                 self.upsert_tool_event(
                     payload.call_id.clone(),
-                    format!("approval: {}", payload.tool_name),
+                    format!(
+                        "approval: {}",
+                        crate::utils::display_tool_name(&payload.tool_name)
+                    ),
                 );
                 self.pending_approval = Some(PendingApprovalState {
                     call_id: payload.call_id.clone(),

@@ -94,7 +94,7 @@ async fn test_tab_toggles_last_tool_block_without_pasted_behavior() {
     let mut app = create_embedded_app();
     let idx = app.push_block(
         ChatRole::Tool,
-        "Tool: read_file\nstatus: completed\nresult: ok".to_string(),
+        "Tool: read\nstatus: completed\nresult: ok".to_string(),
     );
     if let Some(block) = app.chat_blocks.get_mut(idx) {
         block.expanded = false;
@@ -700,7 +700,7 @@ async fn test_stale_tool_event_does_not_advance_sequence_or_block_valid_output()
 
     app.push_tool_call_block(
         "call-current".to_string(),
-        "exec_command".to_string(),
+        "bash".to_string(),
         serde_json::json!({"cmd": "pwd"}),
         1,
         0,
@@ -716,7 +716,7 @@ async fn test_stale_tool_event_does_not_advance_sequence_or_block_valid_output()
             talos_client::TalosMessageToolCallCompletedEvent {
                 request_id: "req1".to_string(),
                 call_id: "call-current".to_string(),
-                tool: "exec_command".to_string(),
+                tool: "bash".to_string(),
                 content: vec![TalosContentItem::Text {
                     text: "stale".to_string(),
                 }],
@@ -832,7 +832,7 @@ async fn test_tool_using_stream_keeps_assistant_output_interleaved() {
             talos_client::TalosMessageToolCallStartedEvent {
                 request_id: "req-test".to_string(),
                 call_id: "call-buffer".to_string(),
-                name: "read_file".to_string(),
+                name: "read".to_string(),
                 arguments: serde_json::json!({"path":"/tmp/example.txt"}),
                 item_index: 0,
                 iteration: 1,

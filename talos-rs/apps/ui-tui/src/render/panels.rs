@@ -135,9 +135,7 @@ impl TuiApp {
                 .add_modifier(Modifier::BOLD)
                 .fg(Color::White),
         )));
-        lines.push(Line::from(
-            "/help /model /history /sessions /status /quit",
-        ));
+        lines.push(Line::from("/help /model /history /sessions /status /quit"));
         lines.push(Line::from("↑/↓ scroll  Ctrl+O expand tool"));
         lines.push(Line::from("Ctrl+B panel  Ctrl+Y copy"));
         lines.push(Line::from("Click [ Copy Round ] to copy a turn"));

@@ -44,7 +44,8 @@ fn test_config() -> talos_types::TalosConfig {
 }
 
 fn isolated_test_config() -> (talos_types::TalosConfig, std::path::PathBuf) {
-    let workspace_dir = std::env::temp_dir().join(format!("talos-http-test-{}", uuid::Uuid::new_v4()));
+    let workspace_dir =
+        std::env::temp_dir().join(format!("talos-http-test-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&workspace_dir).expect("workspace dir should exist");
     let mut config = test_config();
     config.agent.kernel.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
@@ -192,7 +193,7 @@ impl Gateway for MockGateway {
                         request_id: "req_mock".to_string(),
                         stream_key: TalosToolStreamKey { round: 0, index: 0 },
                         call_id: "call-1".to_string(),
-                        tool_name: "exec_command".to_string(),
+                        tool_name: "Bash".to_string(),
                         item_index: 1,
                         iteration: 2,
                         step_id: "step-2".to_string(),
@@ -211,7 +212,7 @@ impl Gateway for MockGateway {
                         request_id: "req_mock".to_string(),
                         stream_key: TalosToolStreamKey { round: 0, index: 0 },
                         call_id: "call-1".to_string(),
-                        tool_name: "exec_command".to_string(),
+                        tool_name: "Bash".to_string(),
                         item_index: 2,
                         iteration: 3,
                         step_id: "step-3".to_string(),
@@ -230,7 +231,7 @@ impl Gateway for MockGateway {
                         request_id: "req_mock".to_string(),
                         stream_key: TalosToolStreamKey { round: 0, index: 0 },
                         call_id: "call-1".to_string(),
-                        tool_name: "exec_command".to_string(),
+                        tool_name: "Bash".to_string(),
                         message: "execution started".to_string(),
                         progress_kind: TalosToolProgressKind::Status,
                         item_index: 3,
@@ -276,6 +277,7 @@ impl SessionService for MockSessionService {
         &self,
         context: TalosContext,
         model: Option<String>,
+        conf: Option<talos_types::SessionConf>,
         project_id: Option<String>,
         current_directory: Option<std::path::PathBuf>,
     ) -> TalosResult<talos_types::TalosSession> {
@@ -296,6 +298,7 @@ impl SessionService for MockSessionService {
                 project_root: context.project_root,
                 environment: context.environment,
             },
+            conf: conf.unwrap_or_default(),
             project_id,
             current_directory,
             config: {
@@ -340,6 +343,7 @@ impl SessionService for MockSessionService {
                 project_root: None,
                 environment: None,
             },
+            conf: talos_types::SessionConf::default(),
             project_id: None,
             current_directory: None,
             config: {
@@ -385,10 +389,7 @@ impl SessionService for MockSessionService {
         Ok(())
     }
 
-    async fn delete_session(
-        &self,
-        _session_id: &str,
-    ) -> TalosResult<talos_types::SessionPatchAck> {
+    async fn delete_session(&self, _session_id: &str) -> TalosResult<talos_types::SessionPatchAck> {
         Ok(talos_types::SessionPatchAck { success: true })
     }
 
@@ -697,7 +698,8 @@ async fn test_put_and_get_memory_file_handlers_roundtrip() {
         axum::extract::Extension(test_auth()),
         Path("2026-04-04".to_string()),
         Json(talos_types::DocUpdateRequest {
-            content: "## [10:00] Example\nsession: session-1\n\n**Facts:**\n- stable fact\n".to_string(),
+            content: "## [10:00] Example\nsession: session-1\n\n**Facts:**\n- stable fact\n"
+                .to_string(),
             base_version: talos_types::ExpectedFileVersion::MustNotExist,
         }),
     )
@@ -714,7 +716,10 @@ async fn test_put_and_get_memory_file_handlers_roundtrip() {
     .await
     .expect("get memory file should succeed");
 
-    assert!(get_response.0["content"].as_str().unwrap().contains("stable fact"));
+    assert!(get_response.0["content"]
+        .as_str()
+        .unwrap()
+        .contains("stable fact"));
 
     let list_response = list_memory_files_handler(
         State(state),
@@ -743,13 +748,15 @@ async fn test_search_memory_files_handler_returns_matching_data() {
     let response = search_memory_files_handler(
         State(state),
         axum::extract::Extension(test_auth()),
-        Query(serde_json::from_value(serde_json::json!({
-            "q": "stable",
-            "limit": 5,
-            "date_from": "2026-04-01",
-            "date_to": "2026-04-30"
-        }))
-        .unwrap()),
+        Query(
+            serde_json::from_value(serde_json::json!({
+                "q": "stable",
+                "limit": 5,
+                "date_from": "2026-04-01",
+                "date_to": "2026-04-30"
+            }))
+            .unwrap(),
+        ),
     )
     .await
     .expect("search memory should succeed");
@@ -977,7 +984,7 @@ async fn test_submit_tool_approval_handler_returns_no_content() {
                 .body(Body::from(
                     serde_json::json!({
                         "call_id": "call-1",
-                        "tool_name": "exec_command",
+                        "tool_name": "Bash",
                         "approved": false,
                         "reason": "deny"
                     })

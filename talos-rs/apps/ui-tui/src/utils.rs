@@ -17,6 +17,19 @@ pub(crate) const APP_VERSION: &str = "v0.1.0";
 
 // ── Event labels ────────────────────────────────────────────────────────────
 
+pub(crate) fn display_tool_name(tool_name: &str) -> &str {
+    match tool_name {
+        "bash" | "Bash" => "Bash",
+        "read" | "Read" => "Read",
+        "grep" | "Grep" => "Grep",
+        "write" | "write_file" | "Write" => "Write",
+        "edit" | "Edit" => "Edit",
+        "memory_search" | "MemorySearch" => "MemorySearch",
+        "memory_get" | "MemoryGet" => "MemoryGet",
+        _ => tool_name,
+    }
+}
+
 // ── Text / display width ─────────────────────────────────────────────────────
 
 pub(crate) fn char_display_width(ch: char) -> usize {

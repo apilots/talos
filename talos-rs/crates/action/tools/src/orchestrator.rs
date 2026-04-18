@@ -136,34 +136,54 @@ impl RegistryOrchestrator {
 
         match governance.argument_override {
             ToolGovernanceArgumentOverride::None => {}
-            ToolGovernanceArgumentOverride::ExecCommandPermissions => {
+            ToolGovernanceArgumentOverride::BashCommandPermissions => {
                 let ToolCallPayload::Function { arguments } = &invocation.payload else {
                     return Err(TalosError::ToolError(
-                        "exec_command requires function payload".to_string(),
+                        "shell tool requires function payload".to_string(),
                     ));
                 };
-                if arguments.get("sandbox_permissions").and_then(Value::as_str)
-                    == Some("require_escalated")
-                {
+                let requested_escalation = arguments
+                    .get("dangerously_disable_sandbox")
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                    || arguments.get("sandbox_permissions").and_then(Value::as_str)
+                        == Some("require_escalated");
+                if requested_escalation {
                     override_applied = true;
                     governance.preferred_sandbox = ToolSandboxMode::DangerFullAccess;
                     governance.retry_without_sandbox = true;
                     let reason = arguments
-                        .get("justification")
+                        .get("description")
                         .and_then(Value::as_str)
                         .map(str::to_string)
                         .or_else(|| {
-                            Some("exec_command requested escalated permissions".to_string())
+                            arguments
+                                .get("justification")
+                                .and_then(Value::as_str)
+                                .map(str::to_string)
+                        })
+                        .or_else(|| {
+                            Some(format!(
+                                "{} requested escalated permissions",
+                                invocation.tool_name
+                            ))
                         });
                     match approval_policy {
                         ToolApprovalPolicy::Never => {
                             governance.default_approval = ToolApprovalRequirement::Forbidden {
                                 reason: reason.clone().unwrap_or_else(|| {
-                                    "exec_command escalation is disabled".to_string()
+                                    format!("{} escalation is disabled", invocation.tool_name)
                                 }),
                             };
                             policy_reason = Some(GovernanceDecisionReason::GlobalPolicy {
                                 policy: ToolApprovalPolicySnapshot::Never,
+                            });
+                        }
+                        ToolApprovalPolicy::Always => {
+                            governance.default_approval =
+                                ToolApprovalRequirement::NeedsApproval { reason };
+                            policy_reason = Some(GovernanceDecisionReason::GlobalPolicy {
+                                policy: ToolApprovalPolicySnapshot::Always,
                             });
                         }
                         ToolApprovalPolicy::OnRequest => {
@@ -175,6 +195,36 @@ impl RegistryOrchestrator {
                         }
                     }
                 }
+            }
+        }
+
+        if requires_session_approval(spec) {
+            match approval_policy {
+                ToolApprovalPolicy::Always
+                    if matches!(governance.default_approval, ToolApprovalRequirement::Skip) =>
+                {
+                    governance.default_approval = ToolApprovalRequirement::NeedsApproval {
+                        reason: Some(format!(
+                            "{} requires approval in this session",
+                            spec.definition.name
+                        )),
+                    };
+                    policy_reason = Some(GovernanceDecisionReason::GlobalPolicy {
+                        policy: ToolApprovalPolicySnapshot::Always,
+                    });
+                }
+                ToolApprovalPolicy::Never
+                    if matches!(
+                        governance.default_approval,
+                        ToolApprovalRequirement::NeedsApproval { .. }
+                    ) =>
+                {
+                    governance.default_approval = ToolApprovalRequirement::Skip;
+                    policy_reason = Some(GovernanceDecisionReason::GlobalPolicy {
+                        policy: ToolApprovalPolicySnapshot::Never,
+                    });
+                }
+                _ => {}
             }
         }
 
@@ -198,6 +248,15 @@ impl RegistryOrchestrator {
             });
         }
     }
+}
+
+fn requires_session_approval(spec: &RegisteredToolSpec) -> bool {
+    matches!(
+        spec.source,
+        crate::spec::ToolSource::Collaboration | crate::spec::ToolSource::Skill
+    ) || spec.behavior_flags.destructive
+        || spec.mutating
+        || spec.behavior_flags.requires_user_interaction
 }
 
 fn map_sandbox_mode(mode: &ToolSandboxModeConfig) -> ToolSandboxMode {
@@ -257,8 +316,8 @@ mod tests {
     fn exec_spec() -> RegisteredToolSpec {
         RegisteredToolSpec::new(
             ToolDefinition::new(
-                "exec_command",
-                "run command",
+                "Bash",
+                "run shell command",
                 Some(json!({ "type": "object" })),
             ),
             ToolSource::Local,
@@ -268,7 +327,7 @@ mod tests {
             ToolGovernanceSpec {
                 default_approval: ToolApprovalRequirement::Skip,
                 preferred_sandbox: ToolSandboxMode::UseDefault,
-                argument_override: ToolGovernanceArgumentOverride::ExecCommandPermissions,
+                argument_override: ToolGovernanceArgumentOverride::BashCommandPermissions,
                 retry_without_sandbox: true,
             },
         )
@@ -278,46 +337,37 @@ mod tests {
     fn test_plan_uses_default_governance_when_no_override() {
         let orchestrator = RegistryOrchestrator::from_context(&ToolContext::default());
         let spec = RegisteredToolSpec::new(
-            ToolDefinition::new(
-                "apply_patch",
-                "apply patch",
-                Some(json!({ "type": "object" })),
-            ),
+            ToolDefinition::new("Write", "write file", Some(json!({ "type": "object" }))),
             ToolSource::Local,
             ToolPayloadKind::Function,
             ToolParallelism::SerialOnly,
             true,
-            ToolGovernanceSpec {
-                default_approval: ToolApprovalRequirement::Skip,
-                preferred_sandbox: ToolSandboxMode::WorkspaceWrite,
-                argument_override: ToolGovernanceArgumentOverride::None,
-                retry_without_sandbox: false,
-            },
+            ToolGovernanceSpec::default(),
         );
         let plan = orchestrator
             .plan(
-                &ToolInvocation::function("call-1", "apply_patch", json!({})),
+                &ToolInvocation::function("call-1", "Write", json!({})),
                 &test_context(),
                 Some(&spec),
             )
             .expect("plan should succeed")
             .expect("plan should exist");
         assert_eq!(plan.approval, ToolApprovalRequirement::Skip);
-        assert_eq!(plan.sandbox_mode, ToolSandboxMode::WorkspaceWrite);
+        assert_eq!(plan.sandbox_mode, ToolSandboxMode::UseDefault);
     }
 
     #[test]
-    fn test_exec_command_override_requires_approval() {
+    fn test_bash_command_override_requires_approval() {
         let orchestrator = RegistryOrchestrator::from_context(&ToolContext::default());
         let plan = orchestrator
             .plan(
                 &ToolInvocation::function(
                     "call-1",
-                    "exec_command",
+                    "Bash",
                     json!({
-                        "cmd": "git pull",
-                        "sandbox_permissions": "require_escalated",
-                        "justification": "need to fetch remote changes"
+                        "command": "git pull",
+                        "dangerously_disable_sandbox": true,
+                        "description": "need to fetch remote changes"
                     }),
                 ),
                 &test_context(),
@@ -330,5 +380,81 @@ mod tests {
             plan.approval,
             ToolApprovalRequirement::NeedsApproval { .. }
         ));
+    }
+
+    #[test]
+    fn test_always_policy_requires_approval_for_mutating_tools() {
+        let mut config = AgentKernelConfig::default();
+        config.tools.approval_policy = ToolApprovalPolicy::Always;
+        let context = ToolDispatchContext::new(ToolContext::new_with_kernel_config(
+            "session-1",
+            "user-1",
+            Some(Arc::new(config)),
+        ));
+        let orchestrator = RegistryOrchestrator::from_context(context.tool_context());
+        let spec = RegisteredToolSpec::new(
+            ToolDefinition::new("Write", "write file", Some(json!({ "type": "object" }))),
+            ToolSource::Local,
+            ToolPayloadKind::Function,
+            ToolParallelism::SerialOnly,
+            true,
+            ToolGovernanceSpec::default(),
+        );
+
+        let plan = orchestrator
+            .plan(
+                &ToolInvocation::function("call-2", "Write", json!({ "file": "x" })),
+                &context,
+                Some(&spec),
+            )
+            .expect("plan should succeed")
+            .expect("plan should exist");
+
+        assert!(matches!(
+            plan.approval,
+            ToolApprovalRequirement::NeedsApproval { .. }
+        ));
+    }
+
+    #[test]
+    fn test_never_policy_skips_approval_for_collaboration_tools() {
+        let mut config = AgentKernelConfig::default();
+        config.tools.approval_policy = ToolApprovalPolicy::Never;
+        let context = ToolDispatchContext::new(ToolContext::new_with_kernel_config(
+            "session-1",
+            "user-1",
+            Some(Arc::new(config)),
+        ));
+        let orchestrator = RegistryOrchestrator::from_context(context.tool_context());
+        let spec = RegisteredToolSpec::new(
+            ToolDefinition::new(
+                "Agent",
+                "spawn sub-agent",
+                Some(json!({ "type": "object" })),
+            ),
+            ToolSource::Collaboration,
+            ToolPayloadKind::Function,
+            ToolParallelism::SerialOnly,
+            true,
+            ToolGovernanceSpec {
+                default_approval: ToolApprovalRequirement::NeedsApproval {
+                    reason: Some("tool spawns sub-agent work and requires approval".to_string()),
+                },
+                preferred_sandbox: ToolSandboxMode::UseDefault,
+                argument_override: ToolGovernanceArgumentOverride::None,
+                retry_without_sandbox: false,
+            },
+        );
+
+        let plan = orchestrator
+            .plan(
+                &ToolInvocation::function("call-3", "Agent", json!({ "description": "count" })),
+                &context,
+                Some(&spec),
+            )
+            .expect("plan should succeed")
+            .expect("plan should exist");
+
+        assert_eq!(plan.approval, ToolApprovalRequirement::Skip);
     }
 }

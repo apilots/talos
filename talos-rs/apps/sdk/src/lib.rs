@@ -23,8 +23,8 @@ pub use talos_types::talos::{
 pub use talos_types::{
     DocUpdateRequest, ExpectedFileVersion, MemoryFileDetail, MemoryFileSummary, ModelInfo,
     OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, ProjectPatch, ProjectRecord,
-    SessionAgentConf, SessionConf, SessionQuery, TalosSession, WorkspaceDocDetail, WorkspaceDocKind,
-    WorkspaceDocSummary,
+    SessionAgentConf, SessionConf, SessionQuery, TalosSession, WorkspaceDocDetail,
+    WorkspaceDocKind, WorkspaceDocSummary,
 };
 
 #[derive(Clone, Debug)]
@@ -48,6 +48,7 @@ impl Default for ClientConfig {
 pub struct SessionCreateParams {
     pub context: Option<TalosContext>,
     pub model: Option<String>,
+    pub conf: Option<SessionConf>,
     pub project_id: Option<String>,
     pub current_directory: Option<PathBuf>,
 }
@@ -63,6 +64,7 @@ pub struct SessionUpdate {
 struct CreateSessionRequest {
     context: TalosContext,
     model: Option<String>,
+    conf: Option<SessionConf>,
     project_id: Option<String>,
     current_directory: Option<PathBuf>,
 }
@@ -186,6 +188,7 @@ impl TalosClient {
                 .clone()
                 .unwrap_or_else(|| default_context("anonymous")),
             model: params.model.clone(),
+            conf: params.conf.clone(),
             project_id: params.project_id.clone(),
             current_directory: params.current_directory.clone(),
         };
@@ -210,10 +213,14 @@ impl TalosClient {
     }
 
     pub async fn list_sessions(&self) -> TalosResult<Vec<TalosSession>> {
-        self.list_sessions_with_query(&SessionQuery::default()).await
+        self.list_sessions_with_query(&SessionQuery::default())
+            .await
     }
 
-    pub async fn list_sessions_by_project(&self, project_id: &str) -> TalosResult<Vec<TalosSession>> {
+    pub async fn list_sessions_by_project(
+        &self,
+        project_id: &str,
+    ) -> TalosResult<Vec<TalosSession>> {
         self.list_sessions_with_query(&SessionQuery {
             user_id: None,
             channel_id: None,
@@ -223,7 +230,10 @@ impl TalosClient {
         .await
     }
 
-    pub async fn list_sessions_with_query(&self, query: &SessionQuery) -> TalosResult<Vec<TalosSession>> {
+    pub async fn list_sessions_with_query(
+        &self,
+        query: &SessionQuery,
+    ) -> TalosResult<Vec<TalosSession>> {
         let url = format!("{}/v1/sessions", self.config.gateway_url);
         let response = self
             .authorized(self.http_client.get(&url).query(query))
@@ -336,6 +346,7 @@ impl TalosClient {
                 agent: Some(SessionAgentConf {
                     model: Some(model.to_string()),
                 }),
+                tools: None,
             }),
             project_id: None,
             current_directory: None,
@@ -532,7 +543,10 @@ impl TalosClient {
         Ok(payload.data)
     }
 
-    pub async fn get_workspace_doc(&self, kind: WorkspaceDocKind) -> TalosResult<WorkspaceDocDetail> {
+    pub async fn get_workspace_doc(
+        &self,
+        kind: WorkspaceDocKind,
+    ) -> TalosResult<WorkspaceDocDetail> {
         let url = format!(
             "{}/v1/workspace/docs/{}",
             self.config.gateway_url,

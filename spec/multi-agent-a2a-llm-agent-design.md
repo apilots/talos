@@ -8,7 +8,7 @@
 - `PlannerKind::BuiltIn | PlanReAct`
 - `ToolRegistry` / `ToolExecutorPort` / `ToolDefinitionProvider`
 - `transfer_to` 类型化控制动作
-- `CollaborationRuntime` 与 `spawn_agent / send_input / wait_agent`
+- `CollaborationRuntime`（当前内部 collaboration primitive 运行时）
 - dynamic tool 的 pending / replay / timeout / transcript 提交能力
 
 同时，参考仓库 `~/data/ailabs/adk-python` 已形成一套较成熟的分层模型：
@@ -351,7 +351,8 @@ pub struct ChildContextInheritance {
 **Talos 落点**
 
 - 保留现有 `spawn_agent / send_input / wait_agent / close_agent`
-- 但把它明确定位为 session collaboration primitive
+- 但把它明确定位为内部 session collaboration primitive，而不是模型公开工具抽象
+- 模型公开层统一收敛到高层 `Agent` 工具
 - `wait_agent` 不再依赖仅进程内 watch
 - 应复用 dynamic tool pending/resume transcript 机制
 

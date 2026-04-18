@@ -217,13 +217,11 @@ impl LlmProvider for ApprovalMockProvider {
                 finish_reason: Some("tool_calls".to_string()),
                 tool_calls: Some(vec![FunctionCall::new(
                     "call_approval",
-                    "exec_command",
+                    "Bash",
                     json!({
-                        "cmd": "echo hi",
-                        "shell": "/bin/sh",
-                        "login": false,
-                        "sandbox_permissions": "require_escalated",
-                        "justification": "Please confirm the risky command."
+                        "command": "echo hi",
+                        "dangerously_disable_sandbox": true,
+                        "description": "Please confirm the risky command."
                     }),
                 )]),
             }),
@@ -665,14 +663,14 @@ async fn test_single_flow_stages_confirmation_event_for_pending_tool_approval() 
     assert!(result.events.iter().any(|event| matches!(
         &event.payload,
         EventPayload::ConfirmationRequest { payload }
-            if payload.tool_name == "exec_command"
+            if payload.tool_name == "Bash"
                 && payload.call_id == "call_approval"
                 && payload.prompt == "tool approval is required: Please confirm the risky command."
     )));
     assert!(ctx.session.events.iter().any(|event| matches!(
         &event.payload,
         SessionEventPayload::Confirmation { payload }
-            if payload.tool_name == "exec_command"
+            if payload.tool_name == "Bash"
                 && payload.call_id == "call_approval"
                 && payload.prompt == "tool approval is required: Please confirm the risky command."
     )));
@@ -921,8 +919,8 @@ fn test_is_read_only_tool_round_true_for_read_only_calls() {
         text: String::new(),
         reasoning: Vec::new(),
         tool_calls: vec![
-            FunctionCall::new("1", "read_file", json!({"path":"a"})),
-            FunctionCall::new("2", "web_search", json!({"query":"x"})),
+            FunctionCall::new("1", "Read", json!({"path":"a"})),
+            FunctionCall::new("2", "WebSearch", json!({"query":"x"})),
         ],
         streamed_tool_outputs: Vec::new(),
         output_items: Vec::new(),
@@ -934,11 +932,11 @@ fn test_is_read_only_tool_round_true_for_read_only_calls() {
 }
 
 #[test]
-fn test_is_read_only_tool_round_false_for_exec_command() {
+fn test_is_read_only_tool_round_false_for_bash() {
     let step = GeneralTurnStepResult {
         text: String::new(),
         reasoning: Vec::new(),
-        tool_calls: vec![FunctionCall::new("1", "exec_command", json!({"cmd":"ls"}))],
+        tool_calls: vec![FunctionCall::new("1", "Bash", json!({"command":"ls"}))],
         streamed_tool_outputs: Vec::new(),
         output_items: Vec::new(),
         usage: talos_types::talos::TalosUsage::default(),

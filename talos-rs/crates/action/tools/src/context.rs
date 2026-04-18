@@ -7,6 +7,11 @@ use talos_config::AgentKernelConfig;
 use talos_memory::MemoryStore;
 
 use crate::collaboration::CollaborationRuntime;
+use crate::state::{
+    get_session_tool_state, CatalogToolEntry, ContentReplacementState, DeferredToolState,
+    PermissionMode, ReadFileStateStore, SessionToolState, TaskStateEntry, TaskStateStore,
+    ToolCatalogState, ToolDecisionState, ToolPermissionContext, ToolResultBudgetState,
+};
 
 /// Execution context passed to tools.
 #[derive(Clone, Debug)]
@@ -18,6 +23,7 @@ pub struct ToolContext {
     pre_approved: bool,
     collaboration_runtime: Option<Arc<CollaborationRuntime>>,
     memory_store: Option<Arc<MemoryStore>>,
+    session_state: Arc<SessionToolState>,
 }
 
 impl ToolContext {
@@ -32,14 +38,16 @@ impl ToolContext {
         user_id: impl Into<String>,
         kernel_config: Option<Arc<AgentKernelConfig>>,
     ) -> Self {
+        let session_id = session_id.into();
         Self {
-            session_id: session_id.into(),
+            session_id: session_id.clone(),
             user_id: user_id.into(),
             state: Arc::new(DashMap::new()),
             kernel_config,
             pre_approved: false,
             collaboration_runtime: None,
             memory_store: None,
+            session_state: get_session_tool_state(&session_id),
         }
     }
 
@@ -67,6 +75,11 @@ impl ToolContext {
             Self::PROJECT_ROOT_STATE_KEY,
             Value::String(project_root.into().display().to_string()),
         );
+        self
+    }
+
+    pub fn with_catalog_snapshot(self, entries: Vec<CatalogToolEntry>) -> Self {
+        self.tool_catalog_state().replace(entries);
         self
     }
 
@@ -117,6 +130,50 @@ impl ToolContext {
             .map(|entry| (entry.key().clone(), entry.value().clone()))
             .collect()
     }
+
+    pub fn read_file_state(&self) -> &ReadFileStateStore {
+        &self.session_state.read_files
+    }
+
+    pub fn task_state_store(&self) -> &TaskStateStore {
+        &self.session_state.tasks
+    }
+
+    pub fn decision_state(&self) -> &ToolDecisionState {
+        &self.session_state.decisions
+    }
+
+    pub fn deferred_tool_state(&self) -> &DeferredToolState {
+        &self.session_state.deferred_tools
+    }
+
+    pub fn result_budget_state(&self) -> &ToolResultBudgetState {
+        &self.session_state.result_budget
+    }
+
+    pub fn tool_catalog_state(&self) -> &ToolCatalogState {
+        &self.session_state.catalog
+    }
+
+    pub fn content_replacement_state(&self) -> &ContentReplacementState {
+        &self.session_state.content_replacement
+    }
+
+    pub fn permission_context(&self) -> &ToolPermissionContext {
+        &self.session_state.permissions
+    }
+
+    pub fn permission_mode(&self) -> PermissionMode {
+        self.permission_context().mode()
+    }
+
+    pub fn set_permission_mode(&self, mode: PermissionMode) {
+        self.permission_context().set_mode(mode);
+    }
+
+    pub fn replace_tasks(&self, tasks: Vec<TaskStateEntry>) {
+        self.task_state_store().replace(tasks);
+    }
 }
 
 impl Default for ToolContext {
@@ -139,5 +196,15 @@ mod tests {
         let removed = context.remove_state("cursor");
         assert_eq!(removed, Some(serde_json::json!(10)));
         assert_eq!(context.get_state("cursor"), None);
+    }
+
+    #[test]
+    fn test_context_reuses_session_state() {
+        let context_a = ToolContext::new("shared-session", "user-1");
+        let context_b = ToolContext::new("shared-session", "user-1");
+
+        context_a.set_permission_mode(PermissionMode::Plan);
+
+        assert_eq!(context_b.permission_mode(), PermissionMode::Plan);
     }
 }

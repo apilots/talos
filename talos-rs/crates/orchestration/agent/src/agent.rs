@@ -164,10 +164,10 @@ impl AgentOrchestrator for AgentImpl {
         let phase = agent_request.phase.clone();
         let planning_instruction = agent_request.planning_instruction.clone();
         let transfer_to = agent_request.transfer_to.clone();
-        let kernel_agent = self.build_kernel_agent_for_request()?;
+        let kernel_config = agent_request.session.config.agent.kernel.clone();
+        let kernel_agent = self.build_kernel_agent_for_request(&kernel_config)?;
         let runtime = self.kernel_runtime.clone();
         let agent_id = self.id.clone();
-        let kernel_config = self.kernel_config.clone();
         let run_session_id = session_id.clone();
         let run_handle = tokio::spawn({
             async move {
@@ -265,7 +265,8 @@ impl AgentOrchestrator for AgentImpl {
             let phase = agent_request.phase.clone();
             let planning_instruction = agent_request.planning_instruction.clone();
             let transfer_to = agent_request.transfer_to.clone();
-            let kernel_agent = match this.build_kernel_agent_for_request() {
+            let kernel_config = agent_request.session.config.agent.kernel.clone();
+            let kernel_agent = match this.build_kernel_agent_for_request(&kernel_config) {
                 Ok(agent) => agent,
                 Err(err) => {
                     let _ = tx
@@ -299,7 +300,7 @@ impl AgentOrchestrator for AgentImpl {
                 transfer_to,
                 initial_state_bags: None,
                 session_environment: agent_request.session.context.environment.clone(),
-                kernel_config: Some(this.kernel_config.clone()),
+                kernel_config: Some(kernel_config),
                 stream_tx: Some(kernel_tx),
             };
 

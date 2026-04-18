@@ -26,24 +26,31 @@ impl Default for ToolPolicy {
             policy_type: PolicyType::Allow,
             tools: vec![
                 // File tools (runtime-based)
-                "read_file".to_string(),
-                "write".to_string(),
-                "edit".to_string(),
-                "list_dir".to_string(),
-                "grep_files".to_string(),
-                "apply_patch".to_string(),
+                "Read".to_string(),
+                "Glob".to_string(),
+                "Write".to_string(),
+                "Edit".to_string(),
+                "Grep".to_string(),
                 // Exec tools
-                "exec_command".to_string(),
-                "write_stdin".to_string(),
+                "Bash".to_string(),
+                "TaskOutput".to_string(),
+                "TaskStop".to_string(),
                 // Memory tools
-                "memory_search".to_string(),
-                "memory_get".to_string(),
+                "MemorySearch".to_string(),
+                "MemoryGet".to_string(),
                 // Network tools
-                "web_search".to_string(),
-                "web_fetch".to_string(),
-                "http_request".to_string(),
+                "WebFetch".to_string(),
+                "WebSearch".to_string(),
                 // Test tool
                 "echo_test".to_string(),
+                // State and discovery tools
+                "ToolSearch".to_string(),
+                "Skill".to_string(),
+                "TodoWrite".to_string(),
+                "EnterPlanMode".to_string(),
+                "ExitPlanMode".to_string(),
+                "AskUserQuestion".to_string(),
+                "Agent".to_string(),
             ]
             .into_iter()
             .collect(),
@@ -217,13 +224,11 @@ mod tests {
     fn test_default_policy_allows_memory_tools() {
         let policy = ToolPolicy::default();
 
-        assert!(policy.is_allowed("memory_search"));
-        assert!(policy.is_allowed("memory_get"));
-        assert!(policy.is_allowed("exec_command"));
-        assert!(policy.is_allowed("write_stdin"));
-        assert!(policy.is_allowed("read_file"));
-        assert!(policy.is_allowed("list_dir"));
-        assert!(policy.is_allowed("grep_files"));
-        assert!(policy.is_allowed("apply_patch"));
+        assert!(policy.is_allowed("MemorySearch"));
+        assert!(policy.is_allowed("MemoryGet"));
+        assert!(policy.is_allowed("Bash"));
+        assert!(policy.is_allowed("Read"));
+        assert!(policy.is_allowed("Grep"));
+        assert!(policy.is_allowed("Skill"));
     }
 }

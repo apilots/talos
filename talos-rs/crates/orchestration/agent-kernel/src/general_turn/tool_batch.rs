@@ -6,34 +6,38 @@ pub(crate) fn parse_retrieved_memory_items(
     payload: &Value,
 ) -> Vec<RetrievedMemoryItem> {
     match tool_name {
-        "memory_search" => match serde_json::from_value::<MemorySearchResponse>(payload.clone()) {
-            Ok(response) => response.into_retrieved_items(),
-            Err(err) => {
-                warn!(
-                    tool_name = %tool_name,
-                    error = %err,
-                    payload = %payload,
-                    "failed to parse memory_search payload"
-                );
-                Vec::new()
+        "MemorySearch" | "memory_search" => {
+            match serde_json::from_value::<MemorySearchResponse>(payload.clone()) {
+                Ok(response) => response.into_retrieved_items(),
+                Err(err) => {
+                    warn!(
+                        tool_name = %tool_name,
+                        error = %err,
+                        payload = %payload,
+                        "failed to parse MemorySearch payload"
+                    );
+                    Vec::new()
+                }
             }
-        },
-        "memory_get" => match serde_json::from_value::<MemoryGetResult>(payload.clone()) {
-            Ok(result) if !result.text.trim().is_empty() => vec![RetrievedMemoryItem {
-                path: result.path,
-                snippet: result.text.trim().to_string(),
-            }],
-            Ok(_) => Vec::new(),
-            Err(err) => {
-                warn!(
-                    tool_name = %tool_name,
-                    error = %err,
-                    payload = %payload,
-                    "failed to parse memory_get payload"
-                );
-                Vec::new()
+        }
+        "MemoryGet" | "memory_get" => {
+            match serde_json::from_value::<MemoryGetResult>(payload.clone()) {
+                Ok(result) if !result.text.trim().is_empty() => vec![RetrievedMemoryItem {
+                    path: result.path,
+                    snippet: result.text.trim().to_string(),
+                }],
+                Ok(_) => Vec::new(),
+                Err(err) => {
+                    warn!(
+                        tool_name = %tool_name,
+                        error = %err,
+                        payload = %payload,
+                        "failed to parse MemoryGet payload"
+                    );
+                    Vec::new()
+                }
             }
-        },
+        }
         _ => Vec::new(),
     }
 }
@@ -328,7 +332,7 @@ pub async fn execute_general_turn_tool_batch(
     stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
 ) -> TalosResult<GeneralTurnToolBatch> {
     let execution_context = ToolExecutionContext {
-        session_id: format!("agent-{}", prepared.agent_id),
+        session_id: prepared.session_id.clone(),
         user_id: user_id.to_string(),
         project_root: prepared.project_root.clone(),
         kernel_config,

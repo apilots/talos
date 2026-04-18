@@ -108,6 +108,7 @@ impl TuiAppState {
                 .create_session(&SessionCreateParams {
                     context: None,
                     model: Some(model_guard.clone()),
+                    conf: None,
                     project_id: None,
                     current_directory: None,
                 })

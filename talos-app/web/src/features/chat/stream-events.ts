@@ -89,8 +89,10 @@ export function applyStreamEvent(sessionId: string, event: TalosEvent) {
       );
       return;
     case "message_completed":
-      state.setPendingApproval(sessionId, undefined);
-      state.setSessionStatus(sessionId, undefined);
+      state.setSessionStatus(
+        sessionId,
+        stream?.pendingApproval ? "waiting_approval" : undefined,
+      );
       state.setStreamMeta(sessionId, {
         isStreaming: false,
         connectionState: "idle",

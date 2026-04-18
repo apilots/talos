@@ -318,6 +318,7 @@ export interface TalosSession {
     current_directory?: string | null;
     environment?: TalosSessionEnvironment | null;
   };
+  conf: SessionConf;
   project_id?: string | null;
   current_directory?: string | null;
   config: {
@@ -343,8 +344,15 @@ export interface SessionAgentConf {
   model?: string | null;
 }
 
+export type ToolApprovalPolicy = "on_request" | "always" | "never";
+
+export interface SessionToolsConf {
+  approval_policy?: ToolApprovalPolicy | null;
+}
+
 export interface SessionConf {
   agent?: SessionAgentConf | null;
+  tools?: SessionToolsConf | null;
 }
 
 export type OptionalProjectIdPatch =

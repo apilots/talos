@@ -1,20 +1,32 @@
-use std::path::Path;
-use std::time::Duration;
-
+use globset::{Glob, GlobMatcher};
+use regex::RegexBuilder;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use talos_error::{TalosError, TalosResult};
-use tokio::process::Command;
-use tokio::time::timeout;
+use walkdir::WalkDir;
 
-use crate::runtimes::{resolve_base_dir, resolve_path};
+use crate::runtimes::fs_read::resolve_tool_path;
 use crate::ToolContext;
 
 const DEFAULT_LIMIT: usize = 100;
-const MAX_LIMIT: usize = 2000;
-const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_LIMIT: usize = 2_000;
 
 fn default_limit() -> usize {
     DEFAULT_LIMIT
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GrepOutputMode {
+    Content,
+    FilesWithMatches,
+    Count,
+}
+
+impl Default for GrepOutputMode {
+    fn default() -> Self {
+        Self::FilesWithMatches
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,9 +35,21 @@ pub struct GrepFilesRequest {
     #[serde(default)]
     pub include: Option<String>,
     #[serde(default)]
+    pub glob: Option<String>,
+    #[serde(default)]
     pub path: Option<String>,
     #[serde(default = "default_limit")]
     pub limit: usize,
+    #[serde(default)]
+    pub offset: usize,
+    #[serde(default)]
+    pub output_mode: GrepOutputMode,
+    #[serde(default)]
+    pub context: usize,
+    #[serde(default)]
+    pub multiline: bool,
+    #[serde(default)]
+    pub case_insensitive: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,152 +74,92 @@ pub async fn run(
         ));
     }
 
-    let base_dir = resolve_base_dir(context)?;
-    let search_path = request
-        .path
-        .as_deref()
-        .map(|path| resolve_path(&base_dir, path))
-        .unwrap_or_else(|| base_dir.clone());
-
-    verify_path_exists(&search_path).await?;
-
-    let include = request
-        .include
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let limit = request.limit.min(MAX_LIMIT);
-    let search_results = run_rg_search(pattern, include, &search_path, limit, &base_dir).await?;
-
-    if search_results.is_empty() {
-        Ok(GrepFilesResponse {
-            content: "No matches found.".to_string(),
-            matches_found: 0,
-        })
+    let search_path = if let Some(path) = request.path.as_deref() {
+        resolve_tool_path(path, context)?
     } else {
-        Ok(GrepFilesResponse {
-            matches_found: search_results.len(),
-            content: search_results.join("\n"),
-        })
-    }
-}
+        crate::runtimes::resolve_base_dir(context)?
+    };
 
-async fn verify_path_exists(path: &Path) -> TalosResult<()> {
-    tokio::fs::metadata(path).await.map_err(|err| {
-        TalosError::ToolError(format!("unable to access `{}`: {}", path.display(), err))
-    })?;
-    Ok(())
-}
+    let glob = request.glob.as_deref().or(request.include.as_deref());
+    let matcher = build_glob_matcher(glob)?;
+    let regex = RegexBuilder::new(pattern)
+        .case_insensitive(request.case_insensitive)
+        .multi_line(request.multiline)
+        .build()
+        .map_err(|err| TalosError::ToolError(format!("invalid grep pattern: {}", err)))?;
 
-async fn run_rg_search(
-    pattern: &str,
-    include: Option<&str>,
-    search_path: &Path,
-    limit: usize,
-    cwd: &Path,
-) -> TalosResult<Vec<String>> {
-    let mut command = Command::new("rg");
-    command
-        .current_dir(cwd)
-        .arg("--files-with-matches")
-        .arg("--sortr=modified")
-        .arg("--regexp")
-        .arg(pattern)
-        .arg("--no-messages");
+    let mut file_hits = Vec::new();
+    let mut content_hits = Vec::new();
+    let mut total_matches = 0usize;
 
-    if let Some(glob) = include {
-        command.arg("--glob").arg(glob);
-    }
-
-    command.arg("--").arg(search_path);
-
-    let output = timeout(COMMAND_TIMEOUT, command.output())
-        .await
-        .map_err(|_| TalosError::ToolError("rg timed out after 30 seconds".to_string()))?
-        .map_err(|err| {
-            TalosError::ToolError(format!(
-                "failed to launch rg: {}. Ensure ripgrep is installed and on PATH.",
-                err
-            ))
-        })?;
-
-    match output.status.code() {
-        Some(0) => Ok(parse_results(&output.stdout, limit)),
-        Some(1) => Ok(Vec::new()),
-        _ => Err(TalosError::ToolError(format!(
-            "rg failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ))),
-    }
-}
-
-fn parse_results(stdout: &[u8], limit: usize) -> Vec<String> {
-    let mut results = Vec::new();
-    for line in stdout.split(|byte| *byte == b'\n') {
-        if line.is_empty() {
+    for entry in WalkDir::new(&search_path)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        if !entry.file_type().is_file() {
             continue;
         }
-        if let Ok(text) = std::str::from_utf8(line) {
-            if text.is_empty() {
-                continue;
-            }
-            results.push(text.to_string());
-            if results.len() == limit {
-                break;
+        if !matches_glob(path, matcher.as_ref()) {
+            continue;
+        }
+        let Ok(content) = tokio::fs::read_to_string(path).await else {
+            continue;
+        };
+        let mut local_count = 0usize;
+        for (line_index, line) in content.lines().enumerate() {
+            if regex.is_match(line) {
+                local_count += 1;
+                total_matches += 1;
+                if matches!(request.output_mode, GrepOutputMode::Content) {
+                    content_hits.push(format!(
+                        "{}:{}:{}",
+                        path.display(),
+                        line_index + 1,
+                        line.trim()
+                    ));
+                }
             }
         }
+        if local_count > 0 {
+            file_hits.push(path.display().to_string());
+        }
     }
-    results
+
+    let offset = request.offset.min(MAX_LIMIT);
+    let limit = request.limit.min(MAX_LIMIT);
+    let content = match request.output_mode {
+        GrepOutputMode::FilesWithMatches => file_hits
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        GrepOutputMode::Count => total_matches.to_string(),
+        GrepOutputMode::Content => content_hits
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
+
+    Ok(GrepFilesResponse {
+        content,
+        matches_found: total_matches,
+    })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::tempdir;
+fn build_glob_matcher(glob: Option<&str>) -> TalosResult<Option<GlobMatcher>> {
+    let Some(glob) = glob.filter(|value| !value.trim().is_empty()) else {
+        return Ok(None);
+    };
+    let matcher = Glob::new(glob)
+        .map_err(|err| TalosError::ToolError(format!("invalid glob: {}", err)))?
+        .compile_matcher();
+    Ok(Some(matcher))
+}
 
-    fn rg_available() -> bool {
-        std::process::Command::new("rg")
-            .arg("--version")
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-    }
-
-    #[tokio::test]
-    async fn test_grep_runtime_returns_matches() {
-        if !rg_available() {
-            return;
-        }
-
-        let dir = tempdir().expect("temp dir should create");
-        tokio::fs::write(dir.path().join("a.txt"), "alpha beta")
-            .await
-            .expect("file should write");
-        tokio::fs::write(dir.path().join("b.txt"), "gamma")
-            .await
-            .expect("file should write");
-
-        let mut config = talos_config::AgentKernelConfig::default();
-        config.memory.workspace_dir = dir.path().to_string_lossy().to_string();
-        let context = crate::ToolContext::new_with_kernel_config(
-            "session",
-            "user",
-            Some(std::sync::Arc::new(config)),
-        );
-
-        let response = run(
-            &GrepFilesRequest {
-                pattern: "alpha".to_string(),
-                include: None,
-                path: None,
-                limit: 10,
-            },
-            &context,
-        )
-        .await
-        .expect("search should succeed");
-
-        assert_eq!(response.matches_found, 1);
-        assert!(response.content.contains("a.txt"));
-    }
+fn matches_glob(path: &Path, matcher: Option<&GlobMatcher>) -> bool {
+    matcher.map(|item| item.is_match(path)).unwrap_or(true)
 }

@@ -16,11 +16,11 @@ export function AdminDashboardSection({
   const topTools = useMemo(
     () =>
       [
-        ["read_file", 1203],
-        ["exec_command", 421],
-        ["search_web", 389],
-        ["write_file", 201],
-        ["http_request", 98],
+        ["Read", 1203],
+        ["Bash", 421],
+        ["WebSearch", 389],
+        ["Write", 201],
+        ["WebFetch", 98],
       ] as const,
     [],
   );

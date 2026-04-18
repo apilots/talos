@@ -264,8 +264,11 @@ impl Storage for SqliteStorage {
             }
             if !existing.contains("current_directory") {
                 info!("Adding current_directory column to sessions schema");
-                self.execute("ALTER TABLE sessions ADD COLUMN current_directory TEXT", &[])
-                    .await?;
+                self.execute(
+                    "ALTER TABLE sessions ADD COLUMN current_directory TEXT",
+                    &[],
+                )
+                .await?;
             }
         }
 

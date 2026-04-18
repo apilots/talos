@@ -275,6 +275,7 @@ async fn test_history_enter_switches_session() {
             project_root: None,
             environment: None,
         },
+        conf: talos_client::SessionConf::default(),
         project_id: None,
         current_directory: None,
         config,

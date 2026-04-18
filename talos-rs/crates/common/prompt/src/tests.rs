@@ -5,7 +5,7 @@ use chrono::Utc;
 use serde_json::Value;
 use talos_llm_provider::Role;
 use talos_memory::{Memory, MemoryStore, TalosTurn};
-use talos_tools::{GrepFilesTool, Tool, ToolContext, ToolOutput, ToolRegistry};
+use talos_tools::{GrepTool, Tool, ToolContext, ToolOutput, ToolRegistry};
 use talos_types::talos::{StopReason, TalosOutputItem, TalosUsage};
 use talos_types::ModelInfo;
 use uuid::Uuid;
@@ -644,8 +644,8 @@ async fn test_prompt_builder_includes_recent_task_continuity_section() {
     let assembly = PromptBuilder::new()
         .session_continuity(Some(SessionContinuity {
             recent_verified_paths: vec!["/tmp/project/Cargo.toml".to_string()],
-            recent_successful_tools: vec!["grep_files".to_string(), "read_file".to_string()],
-            recent_failed_tools: vec!["exec_command".to_string()],
+            recent_successful_tools: vec!["Grep".to_string(), "Read".to_string()],
+            recent_failed_tools: vec!["Bash".to_string()],
             recent_unhelpful_patterns: vec![
                 "avoid retrying the same failing path or command".to_string()
             ],
@@ -746,7 +746,7 @@ async fn test_prompt_assembly_splits_static_prefix_and_dynamic_suffix_sections()
         .find(|section| section.kind == PromptSectionKind::ToolChoicePriority)
         .expect("tool choice priority should exist");
     assert!(tool_choice.content.contains("honor that tool"));
-    assert!(tool_choice.content.contains("prefer grep_files first"));
+    assert!(tool_choice.content.contains("prefer Grep first"));
     let compact_tool_routing = assembly
         .static_prefix_sections
         .iter()
@@ -772,12 +772,12 @@ async fn test_prompt_assembly_splits_static_prefix_and_dynamic_suffix_sections()
 #[tokio::test]
 async fn test_prompt_builder_splits_requested_tool_preference_template_and_hint() {
     let registry = ToolRegistry::new();
-    registry.register(Arc::new(GrepFilesTool));
+    registry.register(Arc::new(GrepTool));
 
     let assembly = PromptBuilder::new()
         .agent("talos", "assistant")
         .tools(&registry)
-        .user_input("Analyze the repository architecture and use grep_files first.")
+        .user_input("Analyze the repository architecture and use Grep first.")
         .assemble()
         .await
         .expect("prompt assembly should succeed");
@@ -796,12 +796,10 @@ async fn test_prompt_builder_splits_requested_tool_preference_template_and_hint(
         .iter()
         .find(|section| section.kind == PromptSectionKind::RequestedToolPreferenceHint)
         .expect("requested tool preference hint should exist");
+    assert!(requested_tool_preference_hint.content.contains("Grep"));
     assert!(requested_tool_preference_hint
         .content
-        .contains("grep_files"));
-    assert!(requested_tool_preference_hint
-        .content
-        .contains("start with grep_files rather than list_dir"));
+        .contains("start with Grep rather than Glob"));
 }
 
 #[tokio::test]

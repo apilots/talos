@@ -172,7 +172,11 @@ impl TuiApp {
             return;
         };
         let label = if approved { "approved" } else { "rejected" };
-        self.push_right_event(format!("tool approval {}: {}", label, approval.tool_name));
+        self.push_right_event(format!(
+            "tool approval {}: {}",
+            label,
+            crate::utils::display_tool_name(&approval.tool_name)
+        ));
 
         if let Err(err) = client
             .submit_tool_approval(
@@ -195,7 +199,10 @@ impl TuiApp {
         let continuation = if approved {
             String::new()
         } else {
-            format!("[Tool `{}` was rejected by user.]", approval.tool_name)
+            format!(
+                "[Tool `{}` was rejected by user.]",
+                crate::utils::display_tool_name(&approval.tool_name)
+            )
         };
         if let Err(err) = self.start_stream_for_message(continuation).await {
             self.push_block(
@@ -213,7 +220,10 @@ impl TuiApp {
     ) {
         let card_style = Style::default().bg(Color::Rgb(50, 35, 20)).fg(Color::White);
         f.render_widget(Block::default().style(card_style), area);
-        let title = format!(" ⚠  {} — 需要确认 ", approval.tool_name);
+        let title = format!(
+            " ⚠  {} — 需要确认 ",
+            crate::utils::display_tool_name(&approval.tool_name)
+        );
         let card = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Yellow))
@@ -227,7 +237,10 @@ impl TuiApp {
         let inner = card.inner(area);
         f.render_widget(card, area);
         let prompt_text = if approval.prompt.is_empty() {
-            format!("执行工具: {}", approval.tool_name)
+            format!(
+                "执行工具: {}",
+                crate::utils::display_tool_name(&approval.tool_name)
+            )
         } else {
             approval.prompt.clone()
         };

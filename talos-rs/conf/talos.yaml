@@ -19,6 +19,8 @@ agent:
     tool_result_max_bytes: 65536
     context_compaction_max_bytes: 262144
     default_workspace_id: "default"
+    tools:
+      enable_collaboration_tools: true
     planner_mode: "built_in"
     planner_selection: "auto"
     execution_mode: "single"

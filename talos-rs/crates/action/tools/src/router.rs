@@ -41,7 +41,7 @@ impl ToolRouter {
 
     pub fn normalize(
         &self,
-        invocation: ToolInvocation,
+        mut invocation: ToolInvocation,
         catalog: &ToolCatalog,
     ) -> TalosResult<ToolInvocation> {
         let spec = catalog.find(&invocation.tool_name).ok_or_else(|| {
@@ -53,6 +53,7 @@ impl ToolRouter {
                 invocation.tool_name
             )));
         }
+        invocation.tool_name = spec.definition.name.clone();
         Ok(invocation)
     }
 }

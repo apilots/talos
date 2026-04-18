@@ -54,7 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tool_context = HashMap::from([
         (
             "available_tools".to_string(),
-            "read_file, write_file, execute_command".to_string(),
+            "Read, Write, Bash".to_string(),
         ),
         (
             "conversation_history".to_string(),

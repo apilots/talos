@@ -26,10 +26,10 @@ fn built_in_tool_guidance() -> String {
     "Use available tools whenever they can verify facts, inspect the workspace, execute commands, \
 or fetch concrete results. Do not answer from memory when a tool can check the answer. If the user \
 explicitly names a tool and it can satisfy the next verification step, honor that tool first. For \
-codebase analysis, prefer grep_files before read_file, and use list_dir first only when directory \
-shape or path type is the missing fact. Use grep_files instead of shell grep or rg, read_file \
-instead of cat or head, and list_dir instead of ls or find. Do not replace grep_files, read_file, \
-or list_dir with exec_command when dedicated tools can answer directly. Use a direct answer only \
+codebase analysis, prefer Grep before Read, and use Glob first only when path \
+shape or path type is the missing fact. Use Grep instead of shell grep or rg, Read \
+instead of cat or head, and Glob instead of ls or find. Do not replace Grep, Read, \
+or Glob with Bash when dedicated tools can answer directly. Use a direct answer only \
 when no tool is needed."
         .to_string()
 }
@@ -276,8 +276,8 @@ mod tests {
         assert!(instruction.contains("Use available tools"));
         assert!(instruction.contains("Do not answer from memory"));
         assert!(instruction.contains("honor that tool first"));
-        assert!(instruction.contains("prefer grep_files before read_file"));
-        assert!(instruction.contains("use list_dir first only when directory shape"));
+        assert!(instruction.contains("prefer Grep before Read"));
+        assert!(instruction.contains("use Glob first only when path shape"));
         assert!(instruction.contains("instead of shell grep or rg"));
         assert!(instruction.contains("instead of cat or head"));
         assert!(instruction.contains("instead of ls or find"));
