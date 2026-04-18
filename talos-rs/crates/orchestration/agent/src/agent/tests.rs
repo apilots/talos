@@ -12,7 +12,9 @@ use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, Role, Usage,
 };
 use talos_memory::{Memory, TalosTurn};
-use talos_tools::{ReadTool, Tool, ToolContext, ToolOutput, ToolRegistry, WebSearchTool};
+use talos_tools::{
+    ReadTool, Tool, ToolContext, ToolOutputPayload, ToolRegistry, WebSearchTool,
+};
 use talos_tools_policy::ToolPolicy;
 use talos_types::talos::{
     StopReason as TalosStopReason, TalosInputItem, TalosOutputItem, TalosProvider, TalosSourceType,
@@ -44,20 +46,18 @@ impl Tool for StaticSearchTool {
         }))
     }
 
-    async fn execute(
+    async fn execute_payload(
         &self,
         input: serde_json::Value,
         _context: ToolContext,
-    ) -> TalosResult<ToolOutput> {
+    ) -> TalosResult<ToolOutputPayload> {
         let query = input
             .get("query")
             .and_then(|value| value.as_str())
             .unwrap_or_default();
-        Ok(ToolOutput {
-            success: true,
-            output: format!("Static search results for '{query}'"),
-            error: None,
-        })
+        Ok(ToolOutputPayload::success_text(format!(
+            "Static search results for '{query}'"
+        )))
     }
 }
 
@@ -217,6 +217,16 @@ async fn test_process_tool_calls() {
     let messages = result.unwrap();
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].role, Role::Tool);
+    let content = serde_json::from_str::<serde_json::Value>(&messages[0].content)
+        .expect("tool message should contain json");
+    assert_eq!(
+        content.get("ok").and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        content.get("result"),
+        Some(&json!({"result": "Static search results for 'test'"}))
+    );
 }
 
 #[tokio::test]

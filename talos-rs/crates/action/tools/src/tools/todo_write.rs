@@ -1,12 +1,12 @@
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
-use talos_error::{TalosError, TalosResult};
+use talos_error::TalosResult;
 
 use crate::runtimes::task_state_runtime::TaskStateRuntime;
 use crate::runtimes::task_state_types::{TodoItem, TodoStatus};
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy, ToolVisibility};
-use crate::{decode_tool_input, Tool, ToolContext, ToolOutput};
+use crate::{decode_tool_input, Tool, ToolContext, ToolOutputPayload};
 
 pub struct TodoWriteTool;
 
@@ -85,7 +85,11 @@ impl Tool for TodoWriteTool {
         }))
     }
 
-    async fn execute(&self, input: Value, context: ToolContext) -> TalosResult<ToolOutput> {
+    async fn execute_payload(
+        &self,
+        input: Value,
+        context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
         let request: TodoWriteRequest = decode_tool_input(input, self.name())?;
         let items = request
             .todos
@@ -97,14 +101,7 @@ impl Tool for TodoWriteTool {
             })
             .collect::<Vec<_>>();
         let snapshot = TaskStateRuntime::global().replace_todos(context.session_id(), items)?;
-        let output = serde_json::to_string(&snapshot).map_err(|err| {
-            TalosError::ToolError(format!("serialize todo_write response: {err}"))
-        })?;
-        Ok(ToolOutput {
-            success: true,
-            output,
-            error: None,
-        })
+        ToolOutputPayload::success_json(&snapshot, "serialize todo_write response")
     }
 }
 
@@ -119,8 +116,8 @@ mod tests {
     async fn todo_write_updates_session_todo_state() {
         let tool = TodoWriteTool;
         let session_id = format!("todo-write-{}", Uuid::new_v4());
-        let output = tool
-            .execute(
+        let payload = tool
+            .execute_payload(
                 serde_json::json!({
                     "todos": [
                         { "id": "t1", "content": "Inspect tool state", "status": "in_progress" },
@@ -132,7 +129,20 @@ mod tests {
             .await
             .expect("todo_write should succeed");
 
-        assert!(output.success);
+        let ToolOutputPayload::Function {
+            structured_content, ..
+        } = payload
+        else {
+            panic!("expected function payload");
+        };
+        assert_eq!(
+            structured_content
+                .as_ref()
+                .and_then(|value| value.get("items"))
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(2)
+        );
         let snapshot = TaskStateRuntime::global()
             .list_todos(&session_id)
             .expect("todo snapshot should exist");

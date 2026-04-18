@@ -1,5 +1,5 @@
 use super::*;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use talos_llm_provider::Usage;
 
 const MEMORY_PERSISTENCE_DECISION_PROMPT: &str = r#"Decide whether this sanitized session summary should be persisted.
@@ -17,6 +17,8 @@ Decision rules:
 - skip: transient execution logs, flush noise, raw tool traces, unstable details, malformed or content-free summaries
 
 Prefer skip over storing low-value or noisy information."#;
+
+const MEMORY_JSON_RETRY_LIMIT: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -274,30 +276,93 @@ fn render_sanitized_memory_decision_input(input: &SanitizedMemoryDecisionInput) 
     }
 }
 
+async fn request_json_with_retries<T>(
+    session_id: &str,
+    selected_model: &str,
+    llm_provider: Arc<dyn LlmProvider>,
+    system_prompt: &str,
+    user_prompt: String,
+    label: &str,
+) -> TalosResult<(T, Usage)>
+where
+    T: DeserializeOwned,
+{
+    let mut accumulated_usage = Usage::default();
+    let retry_suffix = "\n\nPrevious response was not valid JSON for the required schema. Retry and return ONLY valid JSON with all required fields. Do not add explanation, markdown, or extra text.";
+    let mut current_user_prompt = user_prompt.clone();
+    let mut last_error = None;
+
+    for attempt in 1..=MEMORY_JSON_RETRY_LIMIT {
+        let response = llm_provider
+            .chat(
+                ChatRequest::builder()
+                    .model(selected_model.to_string())
+                    .messages(vec![
+                        ChatMessage::system(system_prompt),
+                        ChatMessage::user(current_user_prompt.clone()),
+                    ])
+                    .build(),
+            )
+            .await?;
+        accumulated_usage.prompt_tokens = accumulated_usage
+            .prompt_tokens
+            .saturating_add(response.usage.prompt_tokens);
+        accumulated_usage.completion_tokens = accumulated_usage
+            .completion_tokens
+            .saturating_add(response.usage.completion_tokens);
+        accumulated_usage.total_tokens = accumulated_usage
+            .total_tokens
+            .saturating_add(response.usage.total_tokens);
+        accumulated_usage.cache_creation_input_tokens = sum_optional_tokens(
+            accumulated_usage.cache_creation_input_tokens,
+            response.usage.cache_creation_input_tokens,
+        );
+        accumulated_usage.cache_read_input_tokens = sum_optional_tokens(
+            accumulated_usage.cache_read_input_tokens,
+            response.usage.cache_read_input_tokens,
+        );
+
+        match serde_json::from_str(strip_json_fences(&response.content)) {
+            Ok(parsed) => return Ok((parsed, accumulated_usage)),
+            Err(err) => {
+                tracing::warn!(
+                    session_id = %session_id,
+                    attempt,
+                    error = %err,
+                    raw_response = %response.content,
+                    label,
+                    "received invalid json from memory helper model response"
+                );
+                last_error = Some(format!("{err}"));
+                if attempt == MEMORY_JSON_RETRY_LIMIT {
+                    break;
+                }
+                current_user_prompt = format!("{user_prompt}{retry_suffix}");
+            }
+        }
+    }
+
+    Err(talos_error::TalosError::ToolError(format!(
+        "parse {label} json after {MEMORY_JSON_RETRY_LIMIT} attempts: {}",
+        last_error.unwrap_or_else(|| "unknown parse error".to_string())
+    )))
+}
+
 async fn decide_memory_persistence(
+    session_id: &str,
     selected_model: &str,
     llm_provider: Arc<dyn LlmProvider>,
     sanitized_input: &str,
 ) -> TalosResult<(MemoryPersistenceDecision, Usage)> {
-    let response = llm_provider
-        .chat(
-            ChatRequest::builder()
-                .model(selected_model.to_string())
-                .messages(vec![
-                    ChatMessage::system(MEMORY_PERSISTENCE_DECISION_PROMPT),
-                    ChatMessage::user(sanitized_input.to_string()),
-                ])
-                .build(),
-        )
-        .await?;
-
-    let decision = serde_json::from_str(strip_json_fences(&response.content)).map_err(|err| {
-        talos_error::TalosError::ToolError(format!(
-            "parse memory persistence decision json: {}",
-            err
-        ))
-    })?;
-    Ok((decision, response.usage))
+    request_json_with_retries::<MemoryPersistenceDecision>(
+        session_id,
+        selected_model,
+        llm_provider,
+        MEMORY_PERSISTENCE_DECISION_PROMPT,
+        sanitized_input.to_string(),
+        "memory persistence decision",
+    )
+    .await
 }
 
 pub async fn flush_session_memory_with_report(
@@ -375,19 +440,17 @@ pub async fn flush_session_memory_with_report(
 
     let selected_model = selected_model.to_string();
     let llm_provider_for_summary = llm_provider.clone();
-    let request = ChatRequest::builder()
-        .model(selected_model.clone())
-        .messages(vec![
-            ChatMessage::system(MEMORY_SUMMARY_PROMPT),
-            ChatMessage::user(format!("Conversation transcript:\n{}", transcript)),
-        ])
-        .build();
-    let response = llm_provider_for_summary.chat(request).await?;
-    usage_report.record_usage(&response.usage);
-    let summary: SessionMemorySummary = serde_json::from_str(strip_json_fences(&response.content))
-        .map_err(|err| {
-            talos_error::TalosError::ToolError(format!("parse memory summary json: {}", err))
-        })?;
+    let transcript_prompt = format!("Conversation transcript:\n{}", transcript);
+    let (summary, summary_usage) = request_json_with_retries::<SessionMemorySummary>(
+        session_id,
+        &selected_model,
+        llm_provider_for_summary,
+        MEMORY_SUMMARY_PROMPT,
+        transcript_prompt,
+        "memory summary",
+    )
+    .await?;
+    usage_report.record_usage(&summary_usage);
     if summary.title.trim().is_empty() {
         tracing::debug!(session_id = %session_id, "skip memory flush because summary title is empty");
         return Ok(usage_report);
@@ -416,7 +479,8 @@ pub async fn flush_session_memory_with_report(
         return Ok(usage_report);
     };
     let (persistence, persistence_usage) =
-        decide_memory_persistence(&selected_model, llm_provider.clone(), &judge_input).await?;
+        decide_memory_persistence(session_id, &selected_model, llm_provider.clone(), &judge_input)
+            .await?;
     usage_report.record_usage(&persistence_usage);
     tracing::debug!(
         session_id = %session_id,

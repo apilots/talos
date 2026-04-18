@@ -5,7 +5,7 @@ use talos_error::{TalosError, TalosResult};
 
 use crate::runtimes::bash::{run_bash_command, BashCommandRequest, SandboxPermissions};
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy, ToolVisibility};
-use crate::{Tool, ToolContext, ToolOutput};
+use crate::{Tool, ToolContext, ToolOutputPayload};
 
 pub struct BashTool;
 
@@ -74,9 +74,25 @@ impl Tool for BashTool {
         }
     }
 
-    async fn execute(&self, input: Value, context: ToolContext) -> TalosResult<ToolOutput> {
-        let input: BashInput = serde_json::from_value(input)
-            .map_err(|err| TalosError::ToolError(format!("invalid Bash arguments: {}", err)))?;
+    fn validate_input(&self, input: &Value) -> TalosResult<()> {
+        parse_bash_input(input)?;
+        Ok(())
+    }
+
+    fn check_permissions(&self, input: &Value, context: &ToolContext) -> TalosResult<()> {
+        let input = parse_bash_input(input)?;
+        if input.dangerously_disable_sandbox && !context.pre_approved() {
+            return Err(TalosError::AuthorizationDenied);
+        }
+        Ok(())
+    }
+
+    async fn execute_payload(
+        &self,
+        input: Value,
+        context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
+        let input = parse_bash_input(&input)?;
         let request = BashCommandRequest {
             cmd: input.command,
             workdir: input.workdir,
@@ -94,12 +110,65 @@ impl Tool for BashTool {
             prefix_rule: None,
         };
         let response = run_bash_command(&request, &context).await?;
-        Ok(ToolOutput {
+        let structured = serde_json::to_value(&response)
+            .map_err(|err| TalosError::ToolError(format!("serialize Bash response: {}", err)))?;
+        let content = serde_json::to_string(&response)
+            .map_err(|err| TalosError::ToolError(format!("serialize Bash response: {}", err)))?;
+        Ok(ToolOutputPayload::Function {
+            content,
             success: true,
-            output: serde_json::to_string(&response).map_err(|err| {
-                TalosError::ToolError(format!("serialize Bash response: {}", err))
-            })?,
-            error: None,
+            structured_content: Some(structured),
         })
+    }
+}
+
+fn parse_bash_input(input: &Value) -> TalosResult<BashInput> {
+    let parsed: BashInput = serde_json::from_value(input.clone())
+        .map_err(|err| TalosError::ValidationError(format!("invalid Bash arguments: {err}")))?;
+    if parsed.command.trim().is_empty() {
+        return Err(TalosError::ValidationError(
+            "command must not be empty".to_string(),
+        ));
+    }
+    Ok(parsed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_input_rejects_missing_command() {
+        let tool = BashTool;
+        let error = tool
+            .validate_input(&serde_json::json!({"timeout": 10}))
+            .unwrap_err();
+
+        assert!(matches!(error, TalosError::ValidationError(_)));
+    }
+
+    #[test]
+    fn check_permissions_rejects_escalation_without_preapproval() {
+        let tool = BashTool;
+        let context = ToolContext::default();
+        let input = serde_json::json!({
+            "command": "echo hi",
+            "dangerously_disable_sandbox": true
+        });
+
+        let error = tool.check_permissions(&input, &context).unwrap_err();
+        assert!(matches!(error, TalosError::AuthorizationDenied));
+    }
+
+    #[test]
+    fn check_permissions_allows_escalation_with_preapproval() {
+        let tool = BashTool;
+        let context = ToolContext::default().with_pre_approved();
+        let input = serde_json::json!({
+            "command": "echo hi",
+            "dangerously_disable_sandbox": true
+        });
+
+        assert!(tool.check_permissions(&input, &context).is_ok());
     }
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 # shellcheck disable=SC1091
 source "${ROOT_DIR}/tests/integration/scripts/common.sh"
 
@@ -90,70 +90,6 @@ print(data.get("output_text", ""))
 PY
 }
 
-en_session_payload="$(create_session "lang-user-en")"
-en_session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${en_session_payload}")"
-en_session_id="$(session_id_from_json "${en_session_json}")"
-if [[ -z "${en_session_id}" ]]; then
-  echo "CASE messages_english_create_session FAIL response=${en_session_json}"
-  exit 1
-fi
-echo "CASE messages_english_create_session PASS session_id=${en_session_id}"
-
-english_input="Please respond in English with one short sentence containing 'english-ok'."
-english_payload="$(build_payload "${english_input}")"
-english_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${en_session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${english_payload}")"
-log_case_json "messages_english" "${english_payload}" "${english_json}"
-english_output="$(extract_output_text "${english_json}")"
-english_stop="$(json_get "${english_json}" "stop_reason")"
-if [[ -z "${english_output}" || "${english_stop}" == "error" || "${english_output}" == Error:* ]]; then
-  echo "CASE messages_english FAIL response=${english_json}"
-  exit 1
-fi
-if ! echo "${english_output}" | grep -qi "english-ok"; then
-  echo "CASE messages_english FAIL missing=english-ok output=${english_output}"
-  exit 1
-fi
-echo "CASE messages_english PASS"
-echo "DETAIL messages_english_output=${english_output}"
-
-zh_session_payload="$(create_session "lang-user-zh")"
-zh_session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${zh_session_payload}")"
-zh_session_id="$(session_id_from_json "${zh_session_json}")"
-if [[ -z "${zh_session_id}" ]]; then
-  echo "CASE messages_chinese_create_session FAIL response=${zh_session_json}"
-  exit 1
-fi
-echo "CASE messages_chinese_create_session PASS session_id=${zh_session_id}"
-
-chinese_input="请用中文回复一句话，并包含“中文通过”四个字。"
-chinese_payload="$(build_payload "${chinese_input}")"
-chinese_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${zh_session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${chinese_payload}")"
-log_case_json "messages_chinese" "${chinese_payload}" "${chinese_json}"
-chinese_output="$(extract_output_text "${chinese_json}")"
-chinese_stop="$(json_get "${chinese_json}" "stop_reason")"
-if [[ -z "${chinese_output}" || "${chinese_stop}" == "error" || "${chinese_output}" == Error:* ]]; then
-  echo "CASE messages_chinese FAIL response=${chinese_json}"
-  exit 1
-fi
-if ! echo "${chinese_output}" | grep -q "中文通过"; then
-  echo "CASE messages_chinese FAIL missing=中文通过 output=${chinese_output}"
-  exit 1
-fi
-echo "CASE messages_chinese PASS"
-echo "DETAIL messages_chinese_output=${chinese_output}"
-
 tool_session_payload="$(create_session "tool-user")"
 tool_session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
   -H "Content-Type: application/json" \
@@ -233,7 +169,7 @@ payload = {
 print(json.dumps(payload, ensure_ascii=False))
 PY
 )"
-stream_tool_log="${ROOT_DIR}/tests/integration/reports/tool_stream_events.log"
+stream_tool_log="$(scenario_report_path tool_stream_events.log)"
 curl -sS -N -X POST "${GATEWAY_URL}/v1/sessions/${stream_tool_session_id}/messages" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
@@ -269,8 +205,7 @@ from pathlib import Path
 path = Path(sys.argv[1])
 started = None
 completed = None
-lines = path.read_text().splitlines()
-for line in lines:
+for line in path.read_text().splitlines():
     if not line.startswith("data: "):
         continue
     payload = json.loads(line[6:])
@@ -294,84 +229,3 @@ if [[ "${stream_started_call_id}" != "${stream_completed_call_id}" ]]; then
   exit 1
 fi
 echo "CASE messages_tool_exec_stream PASS started=${stream_started_count} reasoning=${stream_reasoning_count} summary=${stream_summary_count} tool_queued=${stream_tool_queued_count} tool_executing=${stream_tool_executing_count} tool_progress=${stream_tool_progress_count} tool_started=${stream_tool_started_count} tool_completed=${stream_tool_completed_count} output=${stream_output_count} completed=${stream_completed_count} step_id=${stream_step_id_count} iteration=${stream_iteration_count} request_id=${stream_request_id_count}"
-
-memory_stream_session_payload="$(create_session "memory-user-stream")"
-memory_stream_session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${memory_stream_session_payload}")"
-memory_stream_session_id="$(session_id_from_json "${memory_stream_session_json}")"
-if [[ -z "${memory_stream_session_id}" ]]; then
-  echo "CASE messages_memory_search_stream_create_session FAIL response=${memory_stream_session_json}"
-  exit 1
-fi
-echo "CASE messages_memory_search_stream_create_session PASS session_id=${memory_stream_session_id}"
-
-memory_stream_payload="$(python3 - <<'PY'
-import json
-payload = {
-    "input": [
-        {
-            "type": "text",
-            "text": "You must call MemorySearch exactly once with query talos项目, then answer in one short sentence.",
-        }
-    ],
-    "stream": True,
-}
-print(json.dumps(payload, ensure_ascii=False))
-PY
-)"
-memory_stream_log="${ROOT_DIR}/tests/integration/reports/memory_search_stream_events.log"
-curl -sS -N -X POST "${GATEWAY_URL}/v1/sessions/${memory_stream_session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${memory_stream_payload}" > "${memory_stream_log}"
-log_case_json "messages_memory_search_stream" "${memory_stream_payload}" "$(cat "${memory_stream_log}")"
-
-memory_stream_tool_started_count="$(grep -c '^event: message.tool_call.started' "${memory_stream_log}" || true)"
-memory_stream_tool_completed_count="$(grep -c '^event: message.tool_call.completed' "${memory_stream_log}" || true)"
-memory_stream_completed_count="$(grep -c '^event: message.completed' "${memory_stream_log}" || true)"
-memory_stream_tool_started_name_count="$(grep -c '"name":"MemorySearch"' "${memory_stream_log}" || true)"
-memory_stream_tool_completed_name_count="$(grep -c '"tool":"MemorySearch"' "${memory_stream_log}" || true)"
-memory_stream_results_count="$(grep -c '"results"' "${memory_stream_log}" || true)"
-if [[ "${memory_stream_tool_started_count}" -lt 1 || "${memory_stream_tool_completed_count}" -lt 1 || "${memory_stream_completed_count}" -lt 1 ]]; then
-  echo "CASE messages_memory_search_stream FAIL tool_started=${memory_stream_tool_started_count} tool_completed=${memory_stream_tool_completed_count} completed=${memory_stream_completed_count}"
-  exit 1
-fi
-if [[ "${memory_stream_tool_started_name_count}" -lt 1 || "${memory_stream_tool_completed_name_count}" -lt 1 || "${memory_stream_results_count}" -lt 1 ]]; then
-  echo "CASE messages_memory_search_stream FAIL missing_memory_search_payload started_name=${memory_stream_tool_started_name_count} completed_name=${memory_stream_tool_completed_name_count} results=${memory_stream_results_count}"
-  exit 1
-fi
-memory_stream_call_ids="$(python3 - "${memory_stream_log}" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1])
-started = None
-completed = None
-lines = path.read_text().splitlines()
-for line in lines:
-    if not line.startswith("data: "):
-        continue
-    payload = json.loads(line[6:])
-    event_type = payload.get("event_type")
-    event_payload = payload.get("payload", {})
-    if event_type == "message_tool_call_started":
-        started = event_payload.get("call_id")
-    elif event_type == "message_tool_call_completed":
-        completed = event_payload.get("call_id")
-print(f"{started or ''}\t{completed or ''}")
-PY
-)"
-memory_stream_started_call_id="${memory_stream_call_ids%%$'\t'*}"
-memory_stream_completed_call_id="${memory_stream_call_ids#*$'\t'}"
-if [[ -z "${memory_stream_started_call_id}" || -z "${memory_stream_completed_call_id}" ]]; then
-  echo "CASE messages_memory_search_stream FAIL missing_call_id started=${memory_stream_started_call_id} completed=${memory_stream_completed_call_id}"
-  exit 1
-fi
-if [[ "${memory_stream_started_call_id}" != "${memory_stream_completed_call_id}" ]]; then
-  echo "CASE messages_memory_search_stream FAIL call_id_mismatch started=${memory_stream_started_call_id} completed=${memory_stream_completed_call_id}"
-  exit 1
-fi
-echo "CASE messages_memory_search_stream PASS tool_started=${memory_stream_tool_started_count} tool_completed=${memory_stream_tool_completed_count} completed=${memory_stream_completed_count} started_name=${memory_stream_tool_started_name_count} completed_name=${memory_stream_tool_completed_name_count} results=${memory_stream_results_count}"

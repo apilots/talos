@@ -1,12 +1,12 @@
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
-use talos_error::{TalosError, TalosResult};
+use talos_error::TalosResult;
 
 use crate::runtimes::task_state_runtime::TaskStateRuntime;
 use crate::runtimes::task_state_types::StructuredQuestionOption;
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy, ToolVisibility};
-use crate::{decode_tool_input, Tool, ToolContext, ToolOutput};
+use crate::{decode_tool_input, Tool, ToolContext, ToolOutputPayload};
 
 pub struct AskUserQuestionTool;
 
@@ -89,7 +89,11 @@ impl Tool for AskUserQuestionTool {
         }))
     }
 
-    async fn execute(&self, input: Value, context: ToolContext) -> TalosResult<ToolOutput> {
+    async fn execute_payload(
+        &self,
+        input: Value,
+        context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
         let request: AskUserQuestionRequest = decode_tool_input(input, self.name())?;
         let options = request
             .options
@@ -108,20 +112,11 @@ impl Tool for AskUserQuestionTool {
             request.allows_free_form.unwrap_or(true),
         )?;
 
-        // TODO(main-thread): mark this tool as requires_user_interaction in the
-        // shared spec/registry layer and bridge host answers back through
-        // `TaskStateRuntime::submit_question_answer`.
-
-        let output = serde_json::to_string(&serde_json::json!({
+        let value = serde_json::json!({
             "awaiting_user_response": true,
             "question": record,
-        }))
-        .map_err(|err| TalosError::ToolError(format!("serialize ask_user_question: {err}")))?;
-        Ok(ToolOutput {
-            success: true,
-            output,
-            error: None,
-        })
+        });
+        ToolOutputPayload::success_json(&value, "serialize ask_user_question")
     }
 }
 
@@ -137,8 +132,8 @@ mod tests {
         let tool = AskUserQuestionTool;
         let session_id = format!("ask-user-{}", Uuid::new_v4());
 
-        let output = tool
-            .execute(
+        let payload = tool
+            .execute_payload(
                 serde_json::json!({
                     "header": "Execution Mode",
                     "question": "How should the agent proceed?",
@@ -152,8 +147,19 @@ mod tests {
             .await
             .expect("ask_user_question should succeed");
 
-        assert!(output.success);
-        assert!(output.output.contains("\"awaiting_user_response\":true"));
+        let ToolOutputPayload::Function {
+            structured_content, ..
+        } = payload
+        else {
+            panic!("expected function payload");
+        };
+        assert_eq!(
+            structured_content
+                .as_ref()
+                .and_then(|value| value.get("awaiting_user_response"))
+                .and_then(Value::as_bool),
+            Some(true)
+        );
 
         let record = TaskStateRuntime::global()
             .latest_question(&session_id)

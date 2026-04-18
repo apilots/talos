@@ -14,7 +14,7 @@ use talos_llm_provider::{
     ChatChunk, ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, Role, ToolStream,
     ToolStreamEvent, Usage,
 };
-use talos_tools::{Tool, ToolContext, ToolOutput, ToolRegistry};
+use talos_tools::{Tool, ToolContext, ToolOutputPayload, ToolRegistry};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -93,16 +93,16 @@ impl Tool for EchoTool {
         }))
     }
 
-    async fn execute(&self, input: Value, _context: ToolContext) -> TalosResult<ToolOutput> {
+    async fn execute_payload(
+        &self,
+        input: Value,
+        _context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
         let message = input
             .get("message")
             .and_then(Value::as_str)
             .unwrap_or("missing");
-        Ok(ToolOutput {
-            success: true,
-            output: format!("echo:{message}"),
-            error: None,
-        })
+        Ok(ToolOutputPayload::success_text(format!("echo:{message}")))
     }
 }
 

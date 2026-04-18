@@ -352,6 +352,12 @@ pub struct ToolResultStreamData {
     #[serde(default)]
     pub content: Vec<TalosContentItem>,
     pub is_error: bool,
+    #[serde(default)]
+    pub semantic_events: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub envelope: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_turn_failure: Option<Value>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

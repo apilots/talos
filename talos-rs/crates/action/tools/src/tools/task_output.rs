@@ -5,7 +5,7 @@ use talos_error::{TalosError, TalosResult};
 
 use crate::runtimes::bash::{read_task_output_with_context, TaskOutputRequest};
 use crate::spec::{ToolBehaviorFlags, ToolVisibility};
-use crate::{Tool, ToolContext, ToolOutput};
+use crate::{Tool, ToolContext, ToolOutputPayload};
 
 pub struct TaskOutputTool;
 
@@ -57,7 +57,11 @@ impl Tool for TaskOutputTool {
         }
     }
 
-    async fn execute(&self, input: Value, context: ToolContext) -> TalosResult<ToolOutput> {
+    async fn execute_payload(
+        &self,
+        input: Value,
+        context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
         let input: TaskOutputInput = serde_json::from_value(input).map_err(|err| {
             TalosError::ToolError(format!("invalid TaskOutput arguments: {}", err))
         })?;
@@ -71,12 +75,6 @@ impl Tool for TaskOutputTool {
             &context,
         )
         .await?;
-        Ok(ToolOutput {
-            success: true,
-            output: serde_json::to_string(&response).map_err(|err| {
-                TalosError::ToolError(format!("serialize TaskOutput response: {}", err))
-            })?,
-            error: None,
-        })
+        ToolOutputPayload::success_json(&response, "serialize TaskOutput response")
     }
 }

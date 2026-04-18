@@ -300,9 +300,163 @@ async fn test_flush_session_memory_close_flush_uses_title_as_minimal_workspace_b
     .await
     .expect("close flush should append even when summary body is empty");
 
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    let day_file = workspace_dir.join("memory").join(format!("{}.md", today));
+    let memory_dir = workspace_dir.join("memory");
+    let mut day_files = std::fs::read_dir(&memory_dir)
+        .expect("workspace memory dir should exist")
+        .filter_map(|entry| entry.ok().map(|item| item.path()))
+        .collect::<Vec<_>>();
+    day_files.sort();
+    let day_file = day_files
+        .into_iter()
+        .last()
+        .expect("workspace memory file should exist");
     let content = std::fs::read_to_string(day_file).expect("workspace memory file should read");
     assert!(content.contains("session: s1"));
     assert!(content.contains("Close flush reminder"));
+}
+
+#[tokio::test]
+async fn test_flush_session_memory_retries_invalid_summary_response_before_success() {
+    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+    let memory_store = MemoryStore::new(workspace_dir.clone());
+    seed_recent_user_message(&memory_store).await;
+
+    let mut config = AgentKernelConfig::default();
+    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+
+    flush_session_memory(
+        "s1",
+        "summary-model",
+        Arc::new(SummaryProvider::new(vec![
+            "summary text without valid json".to_string(),
+            "{\"title\":\"Retried summary\",\"facts\":[\"remember retry\"]}".to_string(),
+            "{\"decision\":\"skip\",\"rationale\":\"low value\"}".to_string(),
+        ])),
+        &memory_store,
+        &config,
+        MemoryFlushPolicy::new(false, true, true),
+    )
+    .await
+    .expect("invalid summary json should retry and then succeed");
+
+    assert!(
+        memory_store
+            .load_summaries("s1", 10)
+            .await
+            .expect("summary load should succeed")
+            .is_empty(),
+        "skip decision should avoid summary persistence after retry"
+    );
+    assert!(
+        !workspace_dir.join("memory").exists(),
+        "skip decision should avoid workspace append after retry"
+    );
+}
+
+#[tokio::test]
+async fn test_flush_session_memory_retries_invalid_persistence_decision_before_success() {
+    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+    let memory_store = MemoryStore::new(workspace_dir.clone());
+    seed_recent_user_message(&memory_store).await;
+
+    let mut config = AgentKernelConfig::default();
+    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+
+    flush_session_memory(
+        "s1",
+        "summary-model",
+        Arc::new(SummaryProvider::new(vec![
+            "{\"title\":\"Skill recap\",\"facts\":[\"ToolSearch activated Skill\"]}".to_string(),
+            "{\"result\":\"not-a-decision\"}".to_string(),
+            "{\"decision\":\"durable\",\"rationale\":\"Contains durable tool routing facts.\"}".to_string(),
+        ])),
+        &memory_store,
+        &config,
+        MemoryFlushPolicy::new(false, true, true),
+    )
+    .await
+    .expect("invalid persistence decision should retry and then succeed");
+
+    assert_eq!(
+        memory_store
+            .load_summaries("s1", 10)
+            .await
+            .expect("summary load should succeed")
+            .len(),
+        1,
+        "durable retry result should persist one summary"
+    );
+    assert!(
+        workspace_dir.join("memory").exists(),
+        "durable retry result should append workspace memory"
+    );
+}
+
+#[tokio::test]
+async fn test_flush_session_memory_errors_after_invalid_summary_retry_budget() {
+    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+    let memory_store = MemoryStore::new(workspace_dir.clone());
+    seed_recent_user_message(&memory_store).await;
+
+    let mut config = AgentKernelConfig::default();
+    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+
+    let error = flush_session_memory(
+        "s1",
+        "summary-model",
+        Arc::new(SummaryProvider::new(vec![
+            "still invalid".to_string(),
+            "still invalid".to_string(),
+            "still invalid".to_string(),
+        ])),
+        &memory_store,
+        &config,
+        MemoryFlushPolicy::new(false, true, true),
+    )
+    .await
+    .expect_err("summary parsing should fail after retry budget");
+
+    assert!(
+        error
+            .to_string()
+            .contains("parse memory summary json after 3 attempts"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
+async fn test_flush_session_memory_errors_after_invalid_persistence_retry_budget() {
+    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+    let memory_store = MemoryStore::new(workspace_dir.clone());
+    seed_recent_user_message(&memory_store).await;
+
+    let mut config = AgentKernelConfig::default();
+    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+
+    let error = flush_session_memory(
+        "s1",
+        "summary-model",
+        Arc::new(SummaryProvider::new(vec![
+            "{\"title\":\"Skill recap\",\"facts\":[\"ToolSearch activated Skill\"]}".to_string(),
+            "{\"result\":\"invalid\"}".to_string(),
+            "{\"result\":\"invalid\"}".to_string(),
+            "{\"result\":\"invalid\"}".to_string(),
+        ])),
+        &memory_store,
+        &config,
+        MemoryFlushPolicy::new(false, true, true),
+    )
+    .await
+    .expect_err("persistence parsing should fail after retry budget");
+
+    assert!(
+        error
+            .to_string()
+            .contains("parse memory persistence decision json after 3 attempts"),
+        "{error}"
+    );
 }

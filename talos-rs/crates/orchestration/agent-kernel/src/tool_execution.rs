@@ -536,7 +536,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use talos_tools::spec::ToolBehaviorFlags;
-    use talos_tools::{Tool, ToolContext, ToolOutput, ToolRegistry};
+    use talos_tools::{Tool, ToolContext, ToolOutputPayload, ToolRegistry};
     use tokio::time::{sleep, Duration};
 
     struct ObservedDelayTool {
@@ -575,7 +575,11 @@ mod tests {
             }))
         }
 
-        async fn execute(&self, input: Value, _context: ToolContext) -> TalosResult<ToolOutput> {
+        async fn execute_payload(
+            &self,
+            input: Value,
+            _context: ToolContext,
+        ) -> TalosResult<ToolOutputPayload> {
             let label = input
                 .get("label")
                 .and_then(Value::as_str)
@@ -589,11 +593,7 @@ mod tests {
             let _ = self.max_concurrent.fetch_max(active, Ordering::SeqCst);
             sleep(Duration::from_millis(delay_ms)).await;
             self.concurrent.fetch_sub(1, Ordering::SeqCst);
-            Ok(ToolOutput {
-                success: true,
-                output: label,
-                error: None,
-            })
+            Ok(ToolOutputPayload::success_text(label))
         }
     }
 

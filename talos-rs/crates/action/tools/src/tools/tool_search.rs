@@ -5,7 +5,7 @@ use talos_error::{TalosError, TalosResult};
 
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
 use crate::state::CatalogToolEntry;
-use crate::{Tool, ToolContext, ToolOutput};
+use crate::{Tool, ToolContext, ToolOutputPayload};
 
 const DEFAULT_LIMIT: usize = 10;
 
@@ -81,7 +81,11 @@ impl Tool for ToolSearchTool {
         }))
     }
 
-    async fn execute(&self, input: Value, context: ToolContext) -> TalosResult<ToolOutput> {
+    async fn execute_payload(
+        &self,
+        input: Value,
+        context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
         let request: ToolSearchRequest = serde_json::from_value(input).map_err(|err| {
             TalosError::ToolError(format!("invalid tool_search arguments: {err}"))
         })?;
@@ -115,13 +119,7 @@ impl Tool for ToolSearchTool {
             matches,
         };
 
-        Ok(ToolOutput {
-            success: true,
-            output: serde_json::to_string(&response).map_err(|err| {
-                TalosError::ToolError(format!("serialize tool_search response: {err}"))
-            })?,
-            error: None,
-        })
+        ToolOutputPayload::success_json(&response, "serialize tool_search response")
     }
 }
 
@@ -161,7 +159,7 @@ mod tests {
 
         let tool = ToolSearchTool;
         let result = tool
-            .execute(
+            .execute_payload(
                 serde_json::json!({
                     "query": "web"
                 }),
@@ -169,9 +167,23 @@ mod tests {
             )
             .await
             .expect("tool_search should succeed");
-
-        assert!(result.output.contains("WebSearch"));
-        assert!(!result.output.contains("http_request"));
+        let ToolOutputPayload::Function {
+            structured_content,
+            ..
+        } = result
+        else {
+            panic!("expected function payload");
+        };
+        let matches = structured_content
+            .as_ref()
+            .and_then(|value| value.get("matches"))
+            .and_then(|value| value.as_array())
+            .expect("structured tool search response should expose matches");
+        assert_eq!(matches.len(), 1);
+        let matched_tool = matches[0]
+            .as_object()
+            .expect("tool item should be object");
+        assert_eq!(matched_tool["public_name"], "WebSearch");
         assert_eq!(
             context.deferred_tool_state().list(),
             vec!["WebSearch".to_string()]

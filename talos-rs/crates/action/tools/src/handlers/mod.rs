@@ -19,6 +19,14 @@ pub trait ToolHandler: Send + Sync {
 
     fn matches(&self, invocation: &ToolInvocation) -> bool;
 
+    async fn pre_execute(
+        &self,
+        _invocation: &ToolInvocation,
+        _context: &ToolDispatchContext,
+    ) -> TalosResult<()> {
+        Ok(())
+    }
+
     async fn is_mutating(&self, _invocation: &ToolInvocation) -> bool {
         false
     }

@@ -13,17 +13,113 @@ report_file="${ROOT_DIR}/tests/integration/reports/e2e_report_${timestamp}.md"
 latest_file="${ROOT_DIR}/tests/integration/reports/latest_report.md"
 mkdir -p "${ROOT_DIR}/tests/integration/reports"
 
-scenarios=(
-  "01_health_and_models.sh"
-  "02_session_lifecycle.sh"
-  "03_messages_http_sse.sh"
-  "04_cli_full_flow.sh"
-  "05_chat_bilingual_and_tools.sh"
-  "06_cli_stream_thinking_and_tools.sh"
-  "07_session_close_flushes_memory.sh"
-  "08_embedded_tui_quit_flushes_memory.sh"
-  "09_memory_and_workspace_docs_api.sh"
-)
+SCENARIO_ROOT="${ROOT_DIR}/tests/integration/scenarios"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  tests/integration/run_e2e.sh
+  tests/integration/run_e2e.sh --group 06_tools
+  tests/integration/run_e2e.sh --case 05_cli/full_flow
+
+Options:
+  --group <name>   Run all cases under scenarios/<name>/
+  --case <name>    Run one case by relative path or basename without .sh
+EOF
+}
+
+find_case_path() {
+  local case_name="$1"
+
+  if [[ -f "${SCENARIO_ROOT}/${case_name}.sh" ]]; then
+    printf '%s\n' "${SCENARIO_ROOT}/${case_name}.sh"
+    return 0
+  fi
+
+  if [[ -f "${SCENARIO_ROOT}/${case_name}" ]]; then
+    printf '%s\n' "${SCENARIO_ROOT}/${case_name}"
+    return 0
+  fi
+
+  find "${SCENARIO_ROOT}" -type f -name "${case_name}.sh" | sort
+}
+
+collect_group_cases() {
+  local group_name="$1"
+  local group_dir="${SCENARIO_ROOT}/${group_name}"
+
+  if [[ ! -d "${group_dir}" ]]; then
+    echo "Unknown scenario group: ${group_name}" >&2
+    exit 1
+  fi
+
+  find "${group_dir}" -type f -name '*.sh' | sort
+}
+
+append_lines_to_array() {
+  local line
+  while IFS= read -r line; do
+    [[ -n "${line}" ]] || continue
+    scenarios+=("${line}")
+  done
+}
+
+declare -a scenarios=()
+case_name=""
+group_name=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --case)
+      case_name="${2:-}"
+      shift 2
+      ;;
+    --group)
+      group_name="${2:-}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ -n "${case_name}" && -n "${group_name}" ]]; then
+  echo "--case and --group are mutually exclusive" >&2
+  exit 1
+fi
+
+if [[ -n "${case_name}" ]]; then
+  append_lines_to_array < <(find_case_path "${case_name}")
+  if [[ "${#scenarios[@]}" -eq 0 ]]; then
+    echo "Unknown scenario case: ${case_name}" >&2
+    exit 1
+  fi
+  if [[ "${#scenarios[@]}" -gt 1 ]]; then
+    echo "Ambiguous scenario case: ${case_name}" >&2
+    printf 'Matched:\n' >&2
+    printf '  %s\n' "${scenarios[@]}" >&2
+    exit 1
+  fi
+elif [[ -n "${group_name}" ]]; then
+  append_lines_to_array < <(collect_group_cases "${group_name}")
+else
+  scenarios=(
+    "${SCENARIO_ROOT}/01_health_and_models.sh"
+    "${SCENARIO_ROOT}/02_session_lifecycle.sh"
+    "${SCENARIO_ROOT}/03_messages_http_sse.sh"
+  )
+  append_lines_to_array < <(collect_group_cases "05_cli")
+  append_lines_to_array < <(collect_group_cases "06_tools")
+  append_lines_to_array < <(collect_group_cases "07_memory")
+  append_lines_to_array < <(collect_group_cases "08_tui")
+fi
 
 pass_count=0
 fail_count=0
@@ -43,16 +139,19 @@ fail_count=0
 export TALOS_BINARIES_READY=1
 
 for scenario in "${scenarios[@]}"; do
-  script_path="${ROOT_DIR}/tests/integration/scenarios/${scenario}"
-  log_file="${ROOT_DIR}/tests/integration/reports/${scenario%.sh}.log"
+  script_path="${scenario}"
+  scenario_name="${script_path#${SCENARIO_ROOT}/}"
+  scenario_report_dir="${ROOT_DIR}/tests/integration/reports/${scenario_name%.sh}"
+  log_file="${scenario_report_dir}/scenario.log"
+  mkdir -p "${scenario_report_dir}"
   scenario_started_at="$(python3 - <<'PY'
 import time
 print(time.time())
 PY
 )"
   chmod +x "${script_path}"
-  echo "Running ${scenario}..."
-  if "${script_path}" >"${log_file}" 2>&1; then
+  echo "Running ${scenario_name}..."
+  if TALOS_SCENARIO_NAME="${scenario_name%.sh}" TALOS_SCENARIO_REPORT_DIR="${scenario_report_dir}" "${script_path}" >"${log_file}" 2>&1; then
     status="PASS"
     pass_count=$((pass_count + 1))
   else
@@ -66,10 +165,10 @@ started = float(os.environ["SCENARIO_STARTED_AT"])
 print(f"{time.time() - started:.2f}")
 PY
 )"
-  echo "Finished ${scenario} (${status}) in ${scenario_elapsed_secs}s"
+  echo "Finished ${scenario_name} (${status}) in ${scenario_elapsed_secs}s"
 
   {
-    echo "### 场景 ${scenario}"
+    echo "### 场景 ${scenario_name}"
     echo
     echo "- 状态: ${status}"
     echo "- 耗时(秒): ${scenario_elapsed_secs}"

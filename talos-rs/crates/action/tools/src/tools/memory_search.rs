@@ -4,7 +4,7 @@ use talos_error::{TalosError, TalosResult};
 use talos_memory::{Memory, MemorySearchQuery, MemorySearchResponse};
 
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
-use crate::{Tool, ToolContext, ToolOutput};
+use crate::{Tool, ToolContext, ToolOutputPayload};
 
 fn resolve_search_defaults(context: &ToolContext) -> usize {
     context
@@ -62,7 +62,23 @@ impl Tool for MemorySearchTool {
         }))
     }
 
-    async fn execute(&self, input: Value, context: ToolContext) -> TalosResult<ToolOutput> {
+    fn validate_input(&self, input: &Value) -> TalosResult<()> {
+        let query = input
+            .get("query")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim();
+        if query.is_empty() {
+            return Err(TalosError::ValidationError("query is required".to_string()));
+        }
+        Ok(())
+    }
+
+    async fn execute_payload(
+        &self,
+        input: Value,
+        context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
         let Some(memory) = context.memory_store() else {
             return Err(TalosError::ToolError(
                 "memory_search requires an injected memory store in tool context".to_string(),
@@ -74,14 +90,6 @@ impl Tool for MemorySearchTool {
             .unwrap_or_default()
             .trim()
             .to_string();
-        if query.is_empty() {
-            return Ok(ToolOutput {
-                success: false,
-                output: String::new(),
-                error: Some("query is required".to_string()),
-            });
-        }
-
         let default_max_results = resolve_search_defaults(&context);
         let max_results = input
             .get("max_results")
@@ -92,15 +100,10 @@ impl Tool for MemorySearchTool {
         let results = memory
             .search_memory(&MemorySearchQuery { query, max_results })
             .await?;
-        let output = serde_json::to_string(&MemorySearchResponse { results }).map_err(|err| {
-            TalosError::ToolError(format!("serialize memory_search result: {}", err))
-        })?;
-
-        Ok(ToolOutput {
-            success: true,
-            output,
-            error: None,
-        })
+        ToolOutputPayload::success_json(
+            &MemorySearchResponse { results },
+            "serialize memory_search result",
+        )
     }
 }
 
@@ -210,11 +213,17 @@ mod tests {
         .with_memory_store(memory);
 
         let output = tool
-            .execute(serde_json::json!({ "query": "friday" }), context)
+            .execute_payload(serde_json::json!({ "query": "friday" }), context)
             .await
             .expect("tool should execute");
         let response: MemorySearchResponse =
-            serde_json::from_str(&output.output).expect("response should deserialize");
+            serde_json::from_value(match output {
+                ToolOutputPayload::Function { structured_content, .. } => {
+                    structured_content.expect("structured output should exist")
+                }
+                _ => panic!("expected function payload"),
+            })
+            .expect("response should deserialize");
 
         assert_eq!(response.results.len(), 1);
         assert_eq!(response.results[0].path, "memory/2026-03-25.md");
@@ -257,7 +266,7 @@ mod tests {
                 .with_memory_store(memory);
 
         let output = tool
-            .execute(
+            .execute_payload(
                 serde_json::json!({
                     "query": "friday",
                     "max_results": 4
@@ -267,7 +276,13 @@ mod tests {
             .await
             .expect("tool should execute");
         let response: MemorySearchResponse =
-            serde_json::from_str(&output.output).expect("response should deserialize");
+            serde_json::from_value(match output {
+                ToolOutputPayload::Function { structured_content, .. } => {
+                    structured_content.expect("structured output should exist")
+                }
+                _ => panic!("expected function payload"),
+            })
+            .expect("response should deserialize");
 
         assert_eq!(response.results.len(), 2);
     }
@@ -319,11 +334,17 @@ mod tests {
                 )));
 
         let output = tool
-            .execute(serde_json::json!({ "query": "tea" }), context)
+            .execute_payload(serde_json::json!({ "query": "tea" }), context)
             .await
             .expect("tool should execute");
         let response: MemorySearchResponse =
-            serde_json::from_str(&output.output).expect("response should deserialize");
+            serde_json::from_value(match output {
+                ToolOutputPayload::Function { structured_content, .. } => {
+                    structured_content.expect("structured output should exist")
+                }
+                _ => panic!("expected function payload"),
+            })
+            .expect("response should deserialize");
 
         assert_eq!(response.results.len(), 1);
         assert_eq!(response.results[0].path, expected_memory_path);
@@ -341,7 +362,7 @@ mod tests {
             Some(test_kernel_config(&workspace_dir)),
         );
         let error = tool
-            .execute(serde_json::json!({ "query": "friday" }), context)
+            .execute_payload(serde_json::json!({ "query": "friday" }), context)
             .await
             .expect_err("tool should fail when memory store is missing");
         assert!(matches!(error, TalosError::ToolError(_)));

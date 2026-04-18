@@ -7,7 +7,7 @@ use walkdir::WalkDir;
 
 use crate::runtimes::fs_read::resolve_tool_path;
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
-use crate::{Tool, ToolContext, ToolOutput};
+use crate::{Tool, ToolContext, ToolOutputPayload};
 
 pub struct GlobTool;
 
@@ -63,7 +63,11 @@ impl Tool for GlobTool {
         }
     }
 
-    async fn execute(&self, input: Value, context: ToolContext) -> TalosResult<ToolOutput> {
+    async fn execute_payload(
+        &self,
+        input: Value,
+        context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
         let input: GlobInput = serde_json::from_value(input)
             .map_err(|err| TalosError::ToolError(format!("invalid Glob arguments: {}", err)))?;
         let base = if let Some(path) = input.path.as_deref() {
@@ -93,11 +97,6 @@ impl Tool for GlobTool {
             }
         }
 
-        Ok(ToolOutput {
-            success: true,
-            output: serde_json::to_string(&results)
-                .map_err(|err| TalosError::ToolError(format!("serialize glob results: {}", err)))?,
-            error: None,
-        })
+        ToolOutputPayload::success_json(&results, "serialize glob results")
     }
 }

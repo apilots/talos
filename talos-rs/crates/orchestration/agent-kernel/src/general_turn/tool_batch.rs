@@ -1,5 +1,6 @@
 use super::*;
 use crate::ToolExecutionOutput;
+use talos_tools::ToolResultEnvelope;
 
 pub(crate) fn parse_retrieved_memory_items(
     tool_name: &str,
@@ -75,29 +76,39 @@ fn build_tool_result_payload(
     tool_name: &str,
     outcome: &ToolDispatchOutcome,
 ) -> (Value, bool, Option<Value>) {
+    let envelope = outcome.envelope();
+    let pending_arguments = envelope
+        .pending
+        .as_ref()
+        .and_then(|pending| pending.arguments.clone());
+    let next_turn_failure = envelope
+        .next_turn_failure_payload()
+        .and_then(|value| serde_json::to_value(value).ok());
+    let semantic_events = envelope
+        .semantic_events()
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+
     match outcome {
-        ToolDispatchOutcome::Pending { pending, .. } => match pending {
-            ToolPending::Approval { prompt, arguments } => (
+        ToolDispatchOutcome::Pending { pending, .. } => {
+            let error = match pending {
+                ToolPending::Approval { prompt, .. } => prompt.clone(),
+                ToolPending::Dynamic { .. } => "dynamic tool response is pending".to_string(),
+            };
+            (
                 serde_json::json!({
                     "ok": false,
                     "tool": tool_name,
-                    "error": prompt,
+                    "error": error,
                     "truncated": false,
+                    "envelope": envelope,
+                    "semantic_events": semantic_events,
                 }),
                 true,
-                Some(arguments.clone()),
-            ),
-            ToolPending::Dynamic { arguments } => (
-                serde_json::json!({
-                    "ok": false,
-                    "tool": tool_name,
-                    "error": "dynamic tool response is pending",
-                    "truncated": false,
-                }),
-                true,
-                Some(arguments.clone()),
-            ),
-        },
+                pending_arguments,
+            )
+        }
         ToolDispatchOutcome::Executed { payload } => match payload {
             ToolOutputPayload::Function {
                 content,
@@ -106,86 +117,73 @@ fn build_tool_result_payload(
             } => {
                 let truncated = content.contains("[truncated]");
                 if *success {
-                    if let Some(structured) = structured_content {
-                        (structured.clone(), false, None)
-                    } else {
-                        (
-                            serde_json::json!({
-                                "ok": true,
-                                "tool": tool_name,
-                                "result": content,
-                                "truncated": truncated,
-                            }),
-                            false,
-                            None,
-                        )
-                    }
+                    (
+                        envelope
+                            .structured_content
+                            .clone()
+                            .unwrap_or(serde_json::Value::Null),
+                        false,
+                        pending_arguments,
+                    )
                 } else {
-                    let error = structured_content
+                    let error = envelope
+                        .error
                         .as_ref()
-                        .and_then(|value| value.get("error"))
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                        .or_else(|| {
-                            if content.trim().is_empty() {
-                                None
-                            } else {
-                                Some(content.clone())
-                            }
-                        })
+                        .map(|item| item.message.clone())
                         .unwrap_or_else(|| "unknown error".to_string());
                     let mut value = serde_json::json!({
                         "ok": false,
                         "tool": tool_name,
                         "error": error,
                         "truncated": truncated,
+                        "envelope": envelope,
+                        "semantic_events": semantic_events,
                     });
                     if let Some(structured) = structured_content {
                         if let Some(object) = value.as_object_mut() {
                             object.insert("structured".to_string(), structured.clone());
                         }
                     }
-                    (value, true, None)
+                    if let Some(next_turn_failure) = next_turn_failure {
+                        if let Some(object) = value.as_object_mut() {
+                            object.insert("next_turn_failure".to_string(), next_turn_failure);
+                        }
+                    }
+                    (value, true, pending_arguments)
                 }
             }
-            ToolOutputPayload::Resource {
-                uri,
-                mime_type,
-                content,
-            } => (
-                serde_json::json!({
-                    "ok": true,
-                    "tool": tool_name,
-                    "uri": uri,
-                    "mime_type": mime_type,
-                    "content": content,
-                    "truncated": content.contains("[truncated]"),
-                }),
+            ToolOutputPayload::Resource { .. } => (
+                envelope
+                    .structured_content
+                    .clone()
+                    .unwrap_or(serde_json::Value::Null),
                 false,
-                None,
+                pending_arguments,
             ),
             ToolOutputPayload::Mcp { content, is_error } => {
                 if *is_error {
-                    (
-                        serde_json::json!({
-                            "ok": false,
-                            "tool": tool_name,
-                            "error": content,
-                            "truncated": content.contains("[truncated]"),
-                        }),
-                        true,
-                        None,
-                    )
+                    let mut value = serde_json::json!({
+                        "ok": false,
+                        "tool": tool_name,
+                        "error": content,
+                        "truncated": content.contains("[truncated]"),
+                        "envelope": envelope,
+                        "semantic_events": semantic_events,
+                    });
+                    if let Some(next_turn_failure) = next_turn_failure {
+                        if let Some(object) = value.as_object_mut() {
+                            object.insert("next_turn_failure".to_string(), next_turn_failure);
+                        }
+                    }
+                    (value, true, pending_arguments)
                 } else {
                     (
-                        serde_json::json!({
-                            "ok": true,
-                            "tool": tool_name,
-                            "result": content,
-                            "truncated": content.contains("[truncated]"),
-                        }),
+                        envelope
+                            .structured_content
+                            .clone()
+                            .unwrap_or(serde_json::Value::Null),
                         false,
-                        None,
+                        pending_arguments,
                     )
                 }
             }
@@ -198,22 +196,37 @@ struct ReducedToolExecutionOutput {
     is_error: bool,
     pending_arguments: Option<Value>,
     memory_payload: Value,
+    envelope: ToolResultEnvelope,
+    semantic_events: Vec<String>,
+    next_turn_failure: Option<Value>,
 }
 
 fn reduce_tool_execution_output(output: &ToolExecutionOutput) -> ReducedToolExecutionOutput {
+    let envelope = output.outcome.envelope();
     let (payload, is_error, pending_arguments) =
         build_tool_result_payload(&output.tool_name, &output.outcome);
     let memory_payload = output
         .outcome
         .payload()
-        .and_then(|payload| payload.structured_content())
-        .cloned()
-        .unwrap_or_else(|| payload.clone());
+        .map(|payload| payload.envelope())
+        .and_then(|envelope| envelope.structured_content)
+        .unwrap_or(serde_json::Value::Null);
+    let semantic_events = envelope
+        .semantic_events()
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let next_turn_failure = envelope
+        .next_turn_failure_payload()
+        .and_then(|value| serde_json::to_value(value).ok());
     ReducedToolExecutionOutput {
         payload,
         is_error,
         pending_arguments,
         memory_payload,
+        envelope,
+        semantic_events,
+        next_turn_failure,
     }
 }
 
@@ -232,6 +245,9 @@ pub(crate) async fn emit_tool_result_stream_event(
                 value: reduced.payload,
             }],
             is_error: reduced.is_error,
+            semantic_events: reduced.semantic_events,
+            envelope: serde_json::to_value(&reduced.envelope).ok(),
+            next_turn_failure: reduced.next_turn_failure,
         }),
     )
     .await;
@@ -265,6 +281,7 @@ pub(crate) fn collect_general_turn_tool_batch(
             call_id: output.call_id.clone(),
             tool: output.tool_name.clone(),
             payload: reduced.payload.clone(),
+            envelope: serde_json::to_value(&reduced.envelope).unwrap_or(Value::Null),
             is_error: reduced.is_error,
             truncated: reduced
                 .payload
@@ -274,6 +291,8 @@ pub(crate) fn collect_general_turn_tool_batch(
             size_bytes: serde_json::to_vec(&reduced.payload)
                 .map(|buf| buf.len())
                 .unwrap_or(0),
+            semantic_events: reduced.semantic_events.clone(),
+            next_turn_failure: reduced.next_turn_failure.clone(),
         });
         retrieved_memories.extend(parse_retrieved_memory_items(
             &output.tool_name,
@@ -387,4 +406,119 @@ pub fn apply_general_turn_tool_batch(
     }
 
     state.round += 1;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reduce_tool_execution_output_includes_next_turn_failure_payload() {
+        let output = ToolExecutionOutput {
+            call_id: "call-1".to_string(),
+            tool_name: "Read".to_string(),
+            outcome: ToolDispatchOutcome::executed(ToolOutputPayload::Function {
+                content: String::new(),
+                success: false,
+                structured_content: Some(serde_json::json!({
+                    "error": "path is required",
+                    "error_kind": "validation_failure",
+                    "retryable": true,
+                    "suggested_action": "fix the arguments and retry",
+                    "gate_source": "tool_semantic"
+                })),
+            }),
+            is_error: true,
+        };
+
+        let reduced = reduce_tool_execution_output(&output);
+        assert!(reduced.is_error);
+        assert_eq!(
+            reduced.envelope.status,
+            talos_tools::ToolResultStatus::Failure
+        );
+        assert!(reduced
+            .semantic_events
+            .contains(&"tool_use_error".to_string()));
+        let next_turn_failure = reduced
+            .next_turn_failure
+            .expect("next_turn_failure should be present");
+        assert_eq!(
+            next_turn_failure.get("strategy").and_then(Value::as_str),
+            Some("retry")
+        );
+        assert_eq!(
+            next_turn_failure.get("gate_source").and_then(Value::as_str),
+            Some("tool_semantic")
+        );
+    }
+
+    #[tokio::test]
+    async fn emit_tool_result_stream_event_includes_envelope_and_semantic_events() {
+        let output = ToolExecutionOutput {
+            call_id: "call-2".to_string(),
+            tool_name: "Bash".to_string(),
+            outcome: ToolDispatchOutcome::executed(ToolOutputPayload::Function {
+                content: String::new(),
+                success: false,
+                structured_content: Some(serde_json::json!({
+                    "error": "authorization denied",
+                    "error_kind": "permission_rejection",
+                    "retryable": false,
+                    "suggested_action": "request approval or choose a less privileged tool",
+                    "gate_source": "allow_list"
+                })),
+            }),
+            is_error: true,
+        };
+        let (tx, mut rx) = mpsc::channel(4);
+
+        emit_tool_result_stream_event(Some(&tx), &output).await;
+        let event = rx.recv().await.expect("tool result event should exist");
+
+        match event.data {
+            KernelStreamEventData::ToolResult(data) => {
+                assert!(data.is_error);
+                assert_eq!(
+                    data.semantic_events,
+                    vec![
+                        "tool_use_rejected".to_string(),
+                        "tool_use_complete".to_string()
+                    ]
+                );
+                assert!(data.envelope.is_some());
+                assert_eq!(
+                    data.next_turn_failure
+                        .as_ref()
+                        .and_then(|value| value.get("strategy"))
+                        .and_then(Value::as_str),
+                    Some("reject")
+                );
+            }
+            other => panic!("expected tool result event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reduce_tool_execution_output_uses_canonical_success_payload() {
+        let output = ToolExecutionOutput {
+            call_id: "call-3".to_string(),
+            tool_name: "Read".to_string(),
+            outcome: ToolDispatchOutcome::executed(ToolOutputPayload::success_text(
+                "plain text result",
+            )),
+            is_error: false,
+        };
+
+        let reduced = reduce_tool_execution_output(&output);
+        assert!(!reduced.is_error);
+        assert_eq!(
+            reduced.payload,
+            serde_json::json!({"result": "plain text result"})
+        );
+        assert_eq!(
+            reduced.memory_payload,
+            serde_json::json!({"result": "plain text result"})
+        );
+    }
 }

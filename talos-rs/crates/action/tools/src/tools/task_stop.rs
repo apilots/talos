@@ -5,7 +5,7 @@ use talos_error::{TalosError, TalosResult};
 
 use crate::runtimes::bash::stop_task_with_context;
 use crate::spec::{ToolBehaviorFlags, ToolVisibility};
-use crate::{Tool, ToolContext, ToolOutput};
+use crate::{Tool, ToolContext, ToolOutputPayload};
 
 pub struct TaskStopTool;
 
@@ -51,14 +51,15 @@ impl Tool for TaskStopTool {
         }
     }
 
-    async fn execute(&self, input: Value, context: ToolContext) -> TalosResult<ToolOutput> {
+    async fn execute_payload(
+        &self,
+        input: Value,
+        context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
         let input: TaskStopInput = serde_json::from_value(input)
             .map_err(|err| TalosError::ToolError(format!("invalid TaskStop arguments: {}", err)))?;
         stop_task_with_context(input.task_id, &context).await?;
-        Ok(ToolOutput {
-            success: true,
-            output: serde_json::json!({ "stopped": true, "task_id": input.task_id }).to_string(),
-            error: None,
-        })
+        let value = serde_json::json!({ "stopped": true, "task_id": input.task_id });
+        ToolOutputPayload::success_json(&value, "serialize TaskStop response")
     }
 }

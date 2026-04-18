@@ -7,7 +7,76 @@ HEALTH_URL="http://127.0.0.1:${PORT}/health"
 GATEWAY_URL="http://127.0.0.1:${PORT}"
 DEFAULT_TOKEN="talos-local-test-token"
 AUTH_TOKEN="${GATEWAY_TOKEN:-$DEFAULT_TOKEN}"
-SERVER_LOG="${ROOT_DIR}/tests/integration/reports/server.log"
+REPORT_ROOT="${ROOT_DIR}/tests/integration/reports"
+SCENARIO_REPORT_DIR="${TALOS_SCENARIO_REPORT_DIR:-${REPORT_ROOT}/manual}"
+SERVER_LOG="${SCENARIO_REPORT_DIR}/server.log"
+
+scenario_report_path() {
+  local name="$1"
+  printf '%s/%s\n' "${SCENARIO_REPORT_DIR}" "${name}"
+}
+
+find_listening_pid() {
+  if ! command -v lsof >/dev/null 2>&1; then
+    return 0
+  fi
+
+  lsof -t -nP -iTCP:"${PORT}" -sTCP:LISTEN | head -n 1 || true
+}
+
+wait_for_port_release() {
+  local max_retry="${1:-30}"
+  local retry=0
+  while (( retry < max_retry )); do
+    local existing_pid
+    existing_pid="$(find_listening_pid)"
+    if [[ -z "${existing_pid}" ]]; then
+      return 0
+    fi
+    retry=$((retry + 1))
+    sleep 1
+  done
+  return 1
+}
+
+terminate_pid() {
+  local pid="$1"
+  local signal="${2:-TERM}"
+
+  if [[ -z "${pid}" ]]; then
+    return 0
+  fi
+  if ! kill -0 "${pid}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  kill "-${signal}" "${pid}" >/dev/null 2>&1 || true
+}
+
+cleanup_stale_server() {
+  local existing_pid
+  existing_pid="$(find_listening_pid)"
+  if [[ -z "${existing_pid}" ]]; then
+    return 0
+  fi
+
+  local existing_comm
+  existing_comm="$(ps -o comm= -p "${existing_pid}" 2>/dev/null | tr -d '[:space:]' || true)"
+  existing_comm="$(basename "${existing_comm}")"
+  if [[ "${existing_comm}" != "talos" && "${existing_comm}" != "talos-server" ]]; then
+    echo "Port ${PORT} is already in use by PID ${existing_pid}. Stop the existing server first." >&2
+    exit 1
+  fi
+
+  terminate_pid "${existing_pid}" TERM
+  if ! wait_for_port_release 10; then
+    terminate_pid "${existing_pid}" KILL
+    if ! wait_for_port_release 5; then
+      echo "Port ${PORT} is still in use by stale Talos PID ${existing_pid} after forced shutdown." >&2
+      exit 1
+    fi
+  fi
+}
 
 load_env() {
   if [[ -f "${ROOT_DIR}/.env" ]]; then
@@ -25,6 +94,28 @@ prepare_talos_home() {
 
   mkdir -p "${test_home}/conf" "${test_home}/logs" "${test_home}/data"
   cp "${config_src}" "${config_dst}"
+  apply_test_config_overrides "${config_dst}"
+}
+
+apply_test_config_overrides() {
+  local config_path="$1"
+
+  CONFIG_PATH="${config_path}" python3 - <<'PY'
+import os
+from pathlib import Path
+
+config_path = Path(os.environ["CONFIG_PATH"])
+text = config_path.read_text()
+
+# Integration tests should avoid planner-selector quota variance.
+text = text.replace('planner_selection: "auto"', 'planner_selection: "static"', 1)
+
+# Prefer the direct Bailian provider for deterministic tool cases when available.
+if os.environ.get("BAILIAN_API_KEY", "").strip():
+    text = text.replace('provider: "anthropic"', 'provider: "bailian"', 1)
+
+config_path.write_text(text)
+PY
 }
 
 require_command() {
@@ -52,16 +143,9 @@ wait_for_health() {
 }
 
 start_server() {
-  if command -v lsof >/dev/null 2>&1; then
-    local existing_pid
-    existing_pid="$(lsof -t -nP -iTCP:"${PORT}" -sTCP:LISTEN | head -n 1 || true)"
-    if [[ -n "${existing_pid}" ]]; then
-      echo "Port ${PORT} is already in use by PID ${existing_pid}. Stop the existing server first." >&2
-      exit 1
-    fi
-  fi
+  cleanup_stale_server
 
-  mkdir -p "${ROOT_DIR}/tests/integration/reports"
+  mkdir -p "${SCENARIO_REPORT_DIR}"
   prepare_talos_home
   : > "${SERVER_LOG}"
   "${ROOT_DIR}/target/debug/talos" >>"${SERVER_LOG}" 2>&1 &
@@ -75,7 +159,11 @@ start_server() {
 
 stop_server() {
   if [[ -n "${TALOS_SERVER_PID:-}" ]]; then
-    kill "${TALOS_SERVER_PID}" >/dev/null 2>&1 || true
+    terminate_pid "${TALOS_SERVER_PID}" TERM
+    if ! wait_for_port_release 10; then
+      terminate_pid "${TALOS_SERVER_PID}" KILL
+      wait_for_port_release 5 || true
+    fi
     wait "${TALOS_SERVER_PID}" 2>/dev/null || true
     unset TALOS_SERVER_PID
   fi
@@ -89,7 +177,7 @@ build_binaries() {
     return 0
   fi
 
-  mkdir -p "${ROOT_DIR}/tests/integration/reports"
+  mkdir -p "${REPORT_ROOT}"
   (cd "${ROOT_DIR}" && cargo build -p talos -p talos-cli -p talos-ui-tui >/dev/null)
   export TALOS_BINARIES_READY=1
 }

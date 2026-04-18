@@ -5,7 +5,7 @@ use talos_error::{TalosError, TalosResult};
 
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy, ToolSource, ToolVisibility};
 use crate::state::CatalogToolEntry;
-use crate::{Tool, ToolContext, ToolOutput};
+use crate::{Tool, ToolContext, ToolOutputPayload};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SkillRequest {
@@ -75,7 +75,11 @@ impl Tool for SkillTool {
         }))
     }
 
-    async fn execute(&self, input: Value, context: ToolContext) -> TalosResult<ToolOutput> {
+    async fn execute_payload(
+        &self,
+        input: Value,
+        context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
         let request: SkillRequest = serde_json::from_value(input)
             .map_err(|err| TalosError::ToolError(format!("invalid skill arguments: {err}")))?;
         let query = request
@@ -97,14 +101,7 @@ impl Tool for SkillTool {
                 None => true,
             })
             .collect::<Vec<_>>();
-        let response = SkillResponse { skills };
-
-        Ok(ToolOutput {
-            success: true,
-            output: serde_json::to_string(&response)
-                .map_err(|err| TalosError::ToolError(format!("serialize skill response: {err}")))?,
-            error: None,
-        })
+        ToolOutputPayload::success_json(&SkillResponse { skills }, "serialize skill response")
     }
 }
 
@@ -139,11 +136,22 @@ mod tests {
 
         let tool = SkillTool;
         let result = tool
-            .execute(serde_json::json!({}), context)
+            .execute_payload(serde_json::json!({}), context)
             .await
             .expect("skill tool should succeed");
-
-        assert!(result.output.contains("skill_write_spec"));
-        assert!(!result.output.contains("web_search"));
+        let ToolOutputPayload::Function {
+            structured_content,
+            ..
+        } = result
+        else {
+            panic!("expected function payload");
+        };
+        let skills = structured_content
+            .as_ref()
+            .and_then(|value| value.get("skills"))
+            .and_then(|value| value.as_array())
+            .expect("structured skill response should expose skills");
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0]["public_name"], "skill_write_spec");
     }
 }

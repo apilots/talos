@@ -4,7 +4,7 @@ use talos_error::{TalosError, TalosResult};
 
 use crate::runtimes::web_search::{run, WebSearchRequest};
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
-use crate::{Tool, ToolContext, ToolOutput};
+use crate::{Tool, ToolContext, ToolOutputPayload};
 
 pub struct WebSearchTool;
 
@@ -71,16 +71,14 @@ impl Tool for WebSearchTool {
         }))
     }
 
-    async fn execute(&self, input: Value, _context: ToolContext) -> TalosResult<ToolOutput> {
+    async fn execute_payload(
+        &self,
+        input: Value,
+        _context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
         let request: WebSearchRequest = serde_json::from_value(input)
             .map_err(|err| TalosError::ToolError(format!("invalid web_search arguments: {err}")))?;
         let response = run(&request).await?;
-        Ok(ToolOutput {
-            success: true,
-            output: serde_json::to_string(&response).map_err(|err| {
-                TalosError::ToolError(format!("serialize web_search response: {err}"))
-            })?,
-            error: None,
-        })
+        ToolOutputPayload::success_json(&response, "serialize web_search response")
     }
 }

@@ -70,12 +70,21 @@ async fn test_stream_round_executes_tools_during_stream_and_emits_lifecycle_even
     let mut saw_queued = false;
     let mut saw_executing = false;
     let mut saw_result = false;
+    let mut saw_complete_semantic = false;
+    let mut saw_envelope = false;
     while let Ok(event) = rx.try_recv() {
         match event.data {
             KernelStreamEventData::ToolArgsDelta(_) => saw_args_delta = true,
             KernelStreamEventData::ToolQueued(_) => saw_queued = true,
             KernelStreamEventData::ToolExecuting(_) => saw_executing = true,
-            KernelStreamEventData::ToolResult(_) => saw_result = true,
+            KernelStreamEventData::ToolResult(data) => {
+                saw_result = true;
+                saw_complete_semantic = data
+                    .semantic_events
+                    .iter()
+                    .any(|item| item == "tool_use_complete");
+                saw_envelope = data.envelope.is_some();
+            }
             _ => {}
         }
     }
@@ -84,4 +93,6 @@ async fn test_stream_round_executes_tools_during_stream_and_emits_lifecycle_even
     assert!(saw_queued);
     assert!(saw_executing);
     assert!(saw_result);
+    assert!(saw_complete_semantic);
+    assert!(saw_envelope);
 }

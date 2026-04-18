@@ -1,12 +1,12 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use talos_error::{TalosError, TalosResult};
+use talos_error::TalosResult;
 
 use crate::runtimes::task_state_runtime::TaskStateRuntime;
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy, ToolVisibility};
 use crate::state::PermissionMode;
-use crate::{decode_tool_input, Tool, ToolContext, ToolOutput};
+use crate::{decode_tool_input, Tool, ToolContext, ToolOutputPayload};
 
 pub struct ExitPlanModeTool;
 
@@ -70,19 +70,20 @@ impl Tool for ExitPlanModeTool {
         }))
     }
 
-    async fn execute(&self, input: Value, context: ToolContext) -> TalosResult<ToolOutput> {
+    async fn execute_payload(
+        &self,
+        input: Value,
+        context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
         let request: ExitPlanModeRequest = decode_tool_input(input, self.name())?;
         let mode = TaskStateRuntime::global().exit_plan_mode(context.session_id());
-        let output = serde_json::to_string(&PlanModeResponse {
-            mode,
-            summary: request.summary,
-        })
-        .map_err(|err| TalosError::ToolError(format!("serialize exit_plan_mode: {err}")))?;
-        Ok(ToolOutput {
-            success: true,
-            output,
-            error: None,
-        })
+        ToolOutputPayload::success_json(
+            &PlanModeResponse {
+                mode,
+                summary: request.summary,
+            },
+            "serialize exit_plan_mode",
+        )
     }
 }
 
@@ -101,7 +102,7 @@ mod tests {
         let session_id = format!("exit-plan-{}", Uuid::new_v4());
 
         enter_tool
-            .execute(
+            .execute_payload(
                 serde_json::json!({}),
                 ToolContext::new(&session_id, "user-1"),
             )
@@ -109,18 +110,30 @@ mod tests {
             .expect("enter_plan_mode should succeed");
 
         let output = exit_tool
-            .execute(
+            .execute_payload(
                 serde_json::json!({ "summary": "Planning finished" }),
                 ToolContext::new(&session_id, "user-1"),
             )
             .await
             .expect("exit_plan_mode should succeed");
 
-        assert!(output.success);
         assert_eq!(
             TaskStateRuntime::global().current_permission_mode(&session_id),
             PermissionMode::Default
         );
-        assert!(output.output.contains("\"mode\":\"default\""));
+        match output {
+            ToolOutputPayload::Function {
+                success,
+                structured_content,
+                ..
+            } => {
+                assert!(success);
+                assert_eq!(structured_content, Some(serde_json::json!({
+                    "mode": "default",
+                    "summary": "Planning finished"
+                })));
+            }
+            other => panic!("expected function payload, got {other:?}"),
+        }
     }
 }

@@ -5,7 +5,7 @@ use chrono::Utc;
 use serde_json::Value;
 use talos_llm_provider::Role;
 use talos_memory::{Memory, MemoryStore, TalosTurn};
-use talos_tools::{GrepTool, Tool, ToolContext, ToolOutput, ToolRegistry};
+use talos_tools::{GrepTool, Tool, ToolContext, ToolOutputPayload, ToolRegistry};
 use talos_types::talos::{StopReason, TalosOutputItem, TalosUsage};
 use talos_types::ModelInfo;
 use uuid::Uuid;
@@ -24,16 +24,12 @@ impl Tool for EchoTool {
         "Echo input for testing"
     }
 
-    async fn execute(
+    async fn execute_payload(
         &self,
         _input: Value,
         _context: ToolContext,
-    ) -> talos_error::TalosResult<ToolOutput> {
-        Ok(ToolOutput {
-            success: true,
-            output: "ok".to_string(),
-            error: None,
-        })
+    ) -> talos_error::TalosResult<ToolOutputPayload> {
+        Ok(ToolOutputPayload::success_text("ok"))
     }
 }
 
@@ -52,16 +48,12 @@ impl Tool for VerboseTool {
         self.description
     }
 
-    async fn execute(
+    async fn execute_payload(
         &self,
         _input: Value,
         _context: ToolContext,
-    ) -> talos_error::TalosResult<ToolOutput> {
-        Ok(ToolOutput {
-            success: true,
-            output: "ok".to_string(),
-            error: None,
-        })
+    ) -> talos_error::TalosResult<ToolOutputPayload> {
+        Ok(ToolOutputPayload::success_text("ok"))
     }
 }
 

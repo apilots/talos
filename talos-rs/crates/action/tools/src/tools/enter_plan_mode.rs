@@ -1,12 +1,12 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use talos_error::{TalosError, TalosResult};
+use talos_error::TalosResult;
 
 use crate::runtimes::task_state_runtime::TaskStateRuntime;
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy, ToolVisibility};
 use crate::state::PermissionMode;
-use crate::{decode_tool_input, Tool, ToolContext, ToolOutput};
+use crate::{decode_tool_input, Tool, ToolContext, ToolOutputPayload};
 
 pub struct EnterPlanModeTool;
 
@@ -70,23 +70,20 @@ impl Tool for EnterPlanModeTool {
         }))
     }
 
-    async fn execute(&self, input: Value, context: ToolContext) -> TalosResult<ToolOutput> {
+    async fn execute_payload(
+        &self,
+        input: Value,
+        context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
         let request: EnterPlanModeRequest = decode_tool_input(input, self.name())?;
         let mode = TaskStateRuntime::global().enter_plan_mode(context.session_id());
-
-        // TODO(main-thread): feed PermissionMode::Plan into registry/orchestrator
-        // governance so plan mode affects approval policy rather than being state-only.
-
-        let output = serde_json::to_string(&PlanModeResponse {
-            mode,
-            reason: request.reason,
-        })
-        .map_err(|err| TalosError::ToolError(format!("serialize enter_plan_mode: {err}")))?;
-        Ok(ToolOutput {
-            success: true,
-            output,
-            error: None,
-        })
+        ToolOutputPayload::success_json(
+            &PlanModeResponse {
+                mode,
+                reason: request.reason,
+            },
+            "serialize enter_plan_mode",
+        )
     }
 }
 
@@ -103,18 +100,30 @@ mod tests {
         let session_id = format!("enter-plan-{}", Uuid::new_v4());
 
         let output = tool
-            .execute(
+            .execute_payload(
                 serde_json::json!({ "reason": "Need explicit planning" }),
                 ToolContext::new(&session_id, "user-1"),
             )
             .await
             .expect("enter_plan_mode should succeed");
 
-        assert!(output.success);
         assert_eq!(
             TaskStateRuntime::global().current_permission_mode(&session_id),
             PermissionMode::Plan
         );
-        assert!(output.output.contains("\"mode\":\"plan\""));
+        match output {
+            ToolOutputPayload::Function {
+                success,
+                structured_content,
+                ..
+            } => {
+                assert!(success);
+                assert_eq!(structured_content, Some(serde_json::json!({
+                    "mode": "plan",
+                    "reason": "Need explicit planning"
+                })));
+            }
+            other => panic!("expected function payload, got {other:?}"),
+        }
     }
 }

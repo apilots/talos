@@ -92,7 +92,7 @@ if [[ -z "${session_usage_total}" || "${session_usage_total}" -le 0 ]]; then
 fi
 echo "CASE messages_session_usage_after_non_stream PASS total_tokens=${session_usage_total}"
 
-sse_log="${ROOT_DIR}/tests/integration/reports/sse_events.log"
+sse_log="$(scenario_report_path sse_events.log)"
 sse_payload='{
   "input": [{"type":"text","text":"please answer with one short sentence"}],
   "stream": true,

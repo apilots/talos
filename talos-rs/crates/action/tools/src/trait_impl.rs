@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::{Tool, ToolContext, ToolOutput};
+use crate::{Tool, ToolContext, ToolOutputPayload};
 use talos_error::TalosResult;
 
 /// Test tool for echoing input
@@ -26,16 +26,16 @@ impl Tool for EchoTestTool {
         }))
     }
 
-    async fn execute(&self, input: Value, _context: ToolContext) -> TalosResult<ToolOutput> {
+    async fn execute_payload(
+        &self,
+        input: Value,
+        _context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
         let output = input
             .as_str()
             .map(ToString::to_string)
             .unwrap_or_else(|| input.to_string());
-        Ok(ToolOutput {
-            success: true,
-            output,
-            error: None,
-        })
+        Ok(ToolOutputPayload::success_text(output))
     }
 }
 
@@ -47,9 +47,21 @@ mod tests {
     async fn test_echo_tool() {
         let tool = EchoTestTool;
         let input = serde_json::json!("hello world");
-        let result = tool.execute(input, ToolContext::default()).await.unwrap();
+        let result = tool
+            .execute_payload(input, ToolContext::default())
+            .await
+            .unwrap();
 
-        assert!(result.success);
-        assert_eq!(result.output, "hello world");
+        match result {
+            ToolOutputPayload::Function {
+                success,
+                structured_content,
+                ..
+            } => {
+                assert!(success);
+                assert_eq!(structured_content, Some(serde_json::json!({"result": "hello world"})));
+            }
+            other => panic!("expected function payload, got {other:?}"),
+        }
     }
 }

@@ -1,10 +1,10 @@
 use async_trait::async_trait;
 use serde_json::Value;
-use talos_error::TalosResult;
+use talos_error::{TalosError, TalosResult};
 
 use crate::runtimes::fs_edit::{run, EditFileRequest};
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
-use crate::{Tool, ToolContext, ToolOutput};
+use crate::{Tool, ToolContext, ToolOutputPayload};
 
 /// Tool for editing file content with exact replacement semantics.
 pub struct EditTool;
@@ -81,17 +81,71 @@ impl Tool for EditTool {
         }
     }
 
-    async fn execute(&self, input: Value, context: ToolContext) -> TalosResult<ToolOutput> {
-        let request: EditFileRequest = serde_json::from_value(input).map_err(|err| {
-            talos_error::TalosError::ToolError(format!("invalid edit arguments: {}", err))
-        })?;
+    fn validate_input(&self, input: &Value) -> TalosResult<()> {
+        parse_edit_request(input)?;
+        Ok(())
+    }
+
+    async fn execute_payload(
+        &self,
+        input: Value,
+        context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
+        let request = parse_edit_request(&input)?;
         let result = run(&request, &context).await?;
-        Ok(ToolOutput {
+        let structured = serde_json::to_value(&result).map_err(|err| {
+            talos_error::TalosError::ToolError(format!("serialize edit response: {}", err))
+        })?;
+        let content = serde_json::to_string(&result).map_err(|err| {
+            talos_error::TalosError::ToolError(format!("serialize edit response: {}", err))
+        })?;
+        Ok(ToolOutputPayload::Function {
+            content,
             success: true,
-            output: serde_json::to_string(&result).map_err(|err| {
-                talos_error::TalosError::ToolError(format!("serialize edit response: {}", err))
-            })?,
-            error: None,
+            structured_content: Some(structured),
         })
+    }
+}
+
+fn parse_edit_request(input: &Value) -> TalosResult<EditFileRequest> {
+    let request: EditFileRequest = serde_json::from_value(input.clone())
+        .map_err(|err| TalosError::ValidationError(format!("invalid edit arguments: {err}")))?;
+
+    if request.path.is_none() && request.file_path.is_none() {
+        return Err(TalosError::ValidationError("path is required".to_string()));
+    }
+    let old_string = request.find.as_deref().or(request.old_string.as_deref());
+    if old_string.is_none() {
+        return Err(TalosError::ValidationError(
+            "find/old_string is required".to_string(),
+        ));
+    }
+    let new_string = request.replace.as_deref().or(request.new_string.as_deref());
+    if new_string.is_none() {
+        return Err(TalosError::ValidationError(
+            "replace/new_string is required".to_string(),
+        ));
+    }
+    if old_string == new_string {
+        return Err(TalosError::ValidationError(
+            "old_string and new_string must differ".to_string(),
+        ));
+    }
+
+    Ok(request)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_input_rejects_missing_required_fields() {
+        let tool = EditTool;
+        let error = tool
+            .validate_input(&serde_json::json!({"path": "demo.txt"}))
+            .unwrap_err();
+
+        assert!(matches!(error, TalosError::ValidationError(_)));
     }
 }

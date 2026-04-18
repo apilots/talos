@@ -1,6 +1,7 @@
-use crate::r#trait::ToolOutput;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use serde_json::Value;
+use talos_error::{TalosError, TalosResult};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -22,10 +23,68 @@ pub enum ToolRenderKind {
     Summary,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolResultStatus {
+    Success,
+    Failure,
+    Pending,
+    Rejected,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolRenderMessage {
     pub kind: ToolRenderKind,
     pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct ToolResultPolicyMeta {
+    pub max_inline_bytes: Option<usize>,
+    pub persisted_large_output: bool,
+    pub preview_lines: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ToolResultError {
+    pub message: String,
+    pub error_kind: ToolFailureKind,
+    pub retryable: bool,
+    pub suggested_action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gate_source: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ToolResultPendingMeta {
+    pub pending_kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arguments: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NextTurnFailurePayload {
+    pub error_kind: ToolFailureKind,
+    pub retryable: bool,
+    pub suggested_action: String,
+    pub strategy: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gate_source: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ToolResultEnvelope {
+    pub status: ToolResultStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub structured_content: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<ToolResultError>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending: Option<ToolResultPendingMeta>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy: Option<ToolResultPolicyMeta>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -66,6 +125,30 @@ pub enum ToolDispatchOutcome {
 }
 
 impl ToolOutputPayload {
+    pub fn success_text(content: impl Into<String>) -> Self {
+        let content = content.into();
+        Self::Function {
+            structured_content: Some(canonical_success_content(&content, None)),
+            content,
+            success: true,
+        }
+    }
+
+    pub fn success_json<T>(value: &T, context: &str) -> TalosResult<Self>
+    where
+        T: Serialize,
+    {
+        let structured_content = serde_json::to_value(value)
+            .map_err(|err| TalosError::ToolError(format!("{context}: {err}")))?;
+        let content = serde_json::to_string(value)
+            .map_err(|err| TalosError::ToolError(format!("{context}: {err}")))?;
+        Ok(Self::Function {
+            content,
+            success: true,
+            structured_content: Some(structured_content),
+        })
+    }
+
     pub fn is_error(&self) -> bool {
         match self {
             Self::Function { success, .. } => !success,
@@ -121,44 +204,128 @@ impl ToolOutputPayload {
     }
 
     pub fn summary_message(&self, tool_name: &str) -> ToolRenderMessage {
-        match self {
-            Self::Function {
-                success, content, ..
-            } => {
-                let text = if *success {
-                    build_compact_summary(content, "completed")
-                } else {
-                    build_compact_summary(
-                        self.error_message()
-                            .as_deref()
-                            .unwrap_or("tool execution failed"),
-                        "failed",
-                    )
-                };
-                ToolRenderMessage {
-                    kind: if *success {
-                        ToolRenderKind::Summary
-                    } else {
-                        ToolRenderKind::Error
-                    },
-                    text: format!("{tool_name}: {text}"),
-                }
-            }
-            Self::Resource { uri, .. } => ToolRenderMessage {
-                kind: ToolRenderKind::Summary,
-                text: format!("{tool_name}: returned resource {uri}"),
-            },
-            Self::Mcp { content, is_error } => ToolRenderMessage {
-                kind: if *is_error {
-                    ToolRenderKind::Error
-                } else {
-                    ToolRenderKind::Summary
+        let envelope = self.envelope();
+        match envelope.status {
+            ToolResultStatus::Success => match self {
+                Self::Resource { uri, .. } => ToolRenderMessage {
+                    kind: ToolRenderKind::Summary,
+                    text: format!("{tool_name}: returned resource {uri}"),
                 },
+                _ => ToolRenderMessage {
+                    kind: ToolRenderKind::Summary,
+                    text: format!(
+                        "{tool_name}: {}",
+                        build_compact_summary(self.content(), "completed")
+                    ),
+                },
+            },
+            ToolResultStatus::Rejected => ToolRenderMessage {
+                kind: ToolRenderKind::Rejected,
                 text: format!(
                     "{tool_name}: {}",
-                    build_compact_summary(content, "completed")
+                    envelope
+                        .error
+                        .as_ref()
+                        .map(|item| item.message.as_str())
+                        .unwrap_or("tool execution rejected")
                 ),
             },
+            ToolResultStatus::Failure => ToolRenderMessage {
+                kind: ToolRenderKind::Error,
+                text: format!(
+                    "{tool_name}: {}",
+                    envelope
+                        .error
+                        .as_ref()
+                        .map(|item| item.message.as_str())
+                        .unwrap_or("tool execution failed")
+                ),
+            },
+            ToolResultStatus::Pending => ToolRenderMessage {
+                kind: ToolRenderKind::Progress,
+                text: format!("{tool_name}: waiting for tool result"),
+            },
+        }
+    }
+
+    pub fn envelope(&self) -> ToolResultEnvelope {
+        match self {
+            Self::Function {
+                content,
+                success,
+                structured_content,
+            } => {
+                if *success {
+                    ToolResultEnvelope {
+                        status: ToolResultStatus::Success,
+                        structured_content: Some(canonical_success_content(
+                            content,
+                            structured_content.as_ref(),
+                        )),
+                        error: None,
+                        pending: None,
+                        policy: None,
+                    }
+                } else {
+                    let error = if let Some(structured) = structured_content.as_ref() {
+                        structured_error_from_value(structured).unwrap_or_else(|| {
+                            ToolResultError::from_message(if content.trim().is_empty() {
+                                "tool execution failed"
+                            } else {
+                                content
+                            })
+                        })
+                    } else {
+                        ToolResultError::from_message(if content.trim().is_empty() {
+                            "tool execution failed"
+                        } else {
+                            content
+                        })
+                    };
+                    ToolResultEnvelope {
+                        status: status_for_error_kind(error.error_kind),
+                        structured_content: structured_content.clone(),
+                        error: Some(error),
+                        pending: None,
+                        policy: None,
+                    }
+                }
+            }
+            Self::Resource {
+                uri,
+                mime_type,
+                content,
+            } => ToolResultEnvelope {
+                status: ToolResultStatus::Success,
+                structured_content: Some(serde_json::json!({
+                    "uri": uri,
+                    "mime_type": mime_type,
+                    "content": content,
+                })),
+                error: None,
+                pending: None,
+                policy: None,
+            },
+            Self::Mcp { content, is_error } => {
+                if *is_error {
+                    let error = ToolResultError::from_message(content);
+                    ToolResultEnvelope {
+                        status: status_for_error_kind(error.error_kind),
+                        structured_content: None,
+                        error: Some(error),
+                        pending: None,
+                        policy: None,
+                    }
+                } else {
+                    ToolResultEnvelope {
+                        status: ToolResultStatus::Success,
+                        structured_content: Some(canonical_success_content(content, None)),
+                        error: None,
+                        pending: None,
+                        policy: None,
+                    }
+                }
+            }
         }
     }
 }
@@ -236,33 +403,32 @@ impl ToolDispatchOutcome {
     }
 
     pub fn render_rejected_message(&self, tool_name: &str) -> Option<ToolRenderMessage> {
-        let payload = self.payload()?;
-        let error = payload.error_message()?;
-        let failure_kind = classify_error_kind(&error);
-        matches!(
-            failure_kind,
-            ToolFailureKind::PermissionRejection
-                | ToolFailureKind::GovernanceRejection
-                | ToolFailureKind::DeferredToolUnavailable
-        )
-        .then(|| ToolRenderMessage {
+        let envelope = self.envelope();
+        (envelope.status == ToolResultStatus::Rejected).then(|| ToolRenderMessage {
             kind: ToolRenderKind::Rejected,
-            text: format!("{tool_name}: {error}"),
+            text: format!(
+                "{tool_name}: {}",
+                envelope
+                    .error
+                    .as_ref()
+                    .map(|item| item.message.as_str())
+                    .unwrap_or("tool execution rejected")
+            ),
         })
     }
 
     pub fn render_error_message(&self, tool_name: &str) -> Option<ToolRenderMessage> {
-        let payload = self.payload()?;
-        let error = payload.error_message()?;
-        (!matches!(
-            classify_error_kind(&error),
-            ToolFailureKind::PermissionRejection
-                | ToolFailureKind::GovernanceRejection
-                | ToolFailureKind::DeferredToolUnavailable
-        ))
-        .then(|| ToolRenderMessage {
+        let envelope = self.envelope();
+        (envelope.status == ToolResultStatus::Failure).then(|| ToolRenderMessage {
             kind: ToolRenderKind::Error,
-            text: format!("{tool_name}: {error}"),
+            text: format!(
+                "{tool_name}: {}",
+                envelope
+                    .error
+                    .as_ref()
+                    .map(|item| item.message.as_str())
+                    .unwrap_or("tool execution failed")
+            ),
         })
     }
 
@@ -279,34 +445,31 @@ impl ToolDispatchOutcome {
     pub fn summarize_for_transcript(&self, tool_name: &str) -> String {
         self.summarize_for_model(tool_name).text
     }
-}
 
-impl From<ToolOutput> for ToolOutputPayload {
-    fn from(value: ToolOutput) -> Self {
-        let structured_success = serde_json::from_str::<Value>(&value.output).ok();
-        let structured_error = value.error.as_ref().map(|error| {
-            let error_kind = classify_error_kind(error);
-            serde_json::json!({
-                "error": error,
-                "error_kind": error_kind,
-                "retryable": matches!(
-                    error_kind,
-                    ToolFailureKind::ValidationFailure
-                        | ToolFailureKind::RuntimeFailure
-                        | ToolFailureKind::StaleWriteFailure
-                ),
-                "suggested_action": suggested_action_for_error(error_kind),
-            })
-        });
-
-        Self::Function {
-            content: value.output,
-            success: value.success,
-            structured_content: if value.success {
-                structured_success
-            } else {
-                structured_error
-            },
+    pub fn envelope(&self) -> ToolResultEnvelope {
+        match self {
+            Self::Executed { payload } => payload.envelope(),
+            Self::Pending { pending, .. } => {
+                let pending = match pending {
+                    ToolPending::Approval { prompt, arguments } => ToolResultPendingMeta {
+                        pending_kind: "approval".to_string(),
+                        prompt: Some(prompt.clone()),
+                        arguments: Some(arguments.clone()),
+                    },
+                    ToolPending::Dynamic { arguments } => ToolResultPendingMeta {
+                        pending_kind: "dynamic".to_string(),
+                        prompt: None,
+                        arguments: Some(arguments.clone()),
+                    },
+                };
+                ToolResultEnvelope {
+                    status: ToolResultStatus::Pending,
+                    structured_content: None,
+                    error: None,
+                    pending: Some(pending),
+                    policy: None,
+                }
+            }
         }
     }
 }
@@ -318,11 +481,128 @@ fn extract_error_message(value: Option<&Value>) -> Option<String> {
         .map(str::to_string)
 }
 
+impl ToolResultError {
+    pub fn from_message(message: impl AsRef<str>) -> Self {
+        let (cleaned, explicit_kind, gate_source) = extract_error_tags(message.as_ref());
+        let error_kind = explicit_kind.unwrap_or_else(|| classify_error_kind(cleaned.as_str()));
+        Self {
+            message: cleaned,
+            error_kind,
+            retryable: is_retryable(error_kind),
+            suggested_action: suggested_action_for_error(error_kind).to_string(),
+            gate_source,
+        }
+    }
+
+    pub fn next_turn_payload(&self) -> NextTurnFailurePayload {
+        NextTurnFailurePayload {
+            error_kind: self.error_kind,
+            retryable: self.retryable,
+            suggested_action: self.suggested_action.clone(),
+            strategy: strategy_for_error(self.error_kind).to_string(),
+            gate_source: self.gate_source.clone(),
+        }
+    }
+}
+
+impl ToolResultEnvelope {
+    pub fn semantic_events(&self) -> Vec<&'static str> {
+        match self.status {
+            ToolResultStatus::Pending => vec!["tool_use_progress"],
+            ToolResultStatus::Success => vec!["tool_use_summary", "tool_use_complete"],
+            ToolResultStatus::Rejected => vec!["tool_use_rejected", "tool_use_complete"],
+            ToolResultStatus::Failure => vec!["tool_use_error", "tool_use_complete"],
+        }
+    }
+
+    pub fn next_turn_failure_payload(&self) -> Option<NextTurnFailurePayload> {
+        self.error.as_ref().map(|error| error.next_turn_payload())
+    }
+}
+
+fn structured_error_from_value(value: &Value) -> Option<ToolResultError> {
+    let message = value
+        .get("error")
+        .or_else(|| value.get("message"))?
+        .as_str()?
+        .to_string();
+    let error_kind = value
+        .get("error_kind")
+        .and_then(|kind| serde_json::from_value::<ToolFailureKind>(kind.clone()).ok())
+        .unwrap_or_else(|| classify_error_kind(message.as_str()));
+    let retryable = value
+        .get("retryable")
+        .and_then(Value::as_bool)
+        .unwrap_or_else(|| is_retryable(error_kind));
+    let suggested_action = value
+        .get("suggested_action")
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| suggested_action_for_error(error_kind))
+        .to_string();
+    let gate_source = value
+        .get("gate_source")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| extract_error_tags(message.as_str()).2);
+    Some(ToolResultError {
+        message: extract_error_tags(message.as_str()).0,
+        error_kind,
+        retryable,
+        suggested_action,
+        gate_source,
+    })
+}
+
+fn extract_error_tags(error: &str) -> (String, Option<ToolFailureKind>, Option<String>) {
+    let mut remainder = error.trim();
+    let mut explicit_kind = None;
+    let mut gate_source = None;
+
+    while let Some(stripped) = remainder.strip_prefix('[') {
+        let Some(end) = stripped.find(']') else {
+            break;
+        };
+        let (segment, tail) = stripped.split_at(end);
+        if let Some((key, value)) = segment.split_once('=') {
+            match key {
+                "error_kind" => explicit_kind = tool_failure_kind_from_tag(value),
+                "gate_source" => gate_source = Some(value.to_string()),
+                _ => {}
+            }
+            remainder = tail.trim_start_matches(']').trim_start();
+            continue;
+        }
+        break;
+    }
+
+    (remainder.to_string(), explicit_kind, gate_source)
+}
+
+fn tool_failure_kind_from_tag(tag: &str) -> Option<ToolFailureKind> {
+    match tag {
+        "validation_failure" => Some(ToolFailureKind::ValidationFailure),
+        "permission_rejection" => Some(ToolFailureKind::PermissionRejection),
+        "governance_rejection" => Some(ToolFailureKind::GovernanceRejection),
+        "stale_write_failure" => Some(ToolFailureKind::StaleWriteFailure),
+        "deferred_tool_unavailable" => Some(ToolFailureKind::DeferredToolUnavailable),
+        "runtime_failure" => Some(ToolFailureKind::RuntimeFailure),
+        _ => None,
+    }
+}
+
 fn classify_error_kind(error: &str) -> ToolFailureKind {
-    let normalized = error.to_ascii_lowercase();
-    if normalized.contains("invalid") || normalized.contains("required") {
+    let (cleaned, explicit_kind, _) = extract_error_tags(error);
+    if let Some(kind) = explicit_kind {
+        return kind;
+    }
+    let normalized = cleaned.to_ascii_lowercase();
+    if normalized.contains("validation_failure")
+        || normalized.contains("invalid")
+        || normalized.contains("required")
+    {
         ToolFailureKind::ValidationFailure
-    } else if normalized.contains("authorization denied")
+    } else if normalized.contains("permission_rejection")
+        || normalized.contains("authorization denied")
         || normalized.contains("permission denied")
     {
         ToolFailureKind::PermissionRejection
@@ -334,6 +614,26 @@ fn classify_error_kind(error: &str) -> ToolFailureKind {
         ToolFailureKind::DeferredToolUnavailable
     } else {
         ToolFailureKind::RuntimeFailure
+    }
+}
+
+fn is_retryable(kind: ToolFailureKind) -> bool {
+    matches!(
+        kind,
+        ToolFailureKind::ValidationFailure
+            | ToolFailureKind::RuntimeFailure
+            | ToolFailureKind::StaleWriteFailure
+    )
+}
+
+fn status_for_error_kind(kind: ToolFailureKind) -> ToolResultStatus {
+    match kind {
+        ToolFailureKind::PermissionRejection
+        | ToolFailureKind::GovernanceRejection
+        | ToolFailureKind::DeferredToolUnavailable => ToolResultStatus::Rejected,
+        ToolFailureKind::ValidationFailure
+        | ToolFailureKind::StaleWriteFailure
+        | ToolFailureKind::RuntimeFailure => ToolResultStatus::Failure,
     }
 }
 
@@ -351,6 +651,22 @@ fn suggested_action_for_error(kind: ToolFailureKind) -> &'static str {
     }
 }
 
+fn strategy_for_error(kind: ToolFailureKind) -> &'static str {
+    match kind {
+        ToolFailureKind::ValidationFailure => "retry",
+        ToolFailureKind::PermissionRejection | ToolFailureKind::GovernanceRejection => "reject",
+        ToolFailureKind::StaleWriteFailure => "retry",
+        ToolFailureKind::DeferredToolUnavailable => "replan",
+        ToolFailureKind::RuntimeFailure => "retry",
+    }
+}
+
+fn canonical_success_content(content: &str, structured_content: Option<&Value>) -> Value {
+    structured_content
+        .cloned()
+        .unwrap_or_else(|| json!({ "result": content }))
+}
+
 fn build_compact_summary(content: &str, fallback: &str) -> String {
     let compact = content.split_whitespace().collect::<Vec<_>>().join(" ");
     if compact.is_empty() {
@@ -362,5 +678,80 @@ fn build_compact_summary(content: &str, fallback: &str) -> String {
         format!("{preview}...")
     } else {
         preview
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_result_envelope_preserves_structured_success_payload() {
+        let envelope = ToolOutputPayload::Function {
+            content: serde_json::json!({"result": "ok"}).to_string(),
+            success: true,
+            structured_content: Some(serde_json::json!({"result": "ok"})),
+        }
+        .envelope();
+        assert_eq!(envelope.status, ToolResultStatus::Success);
+        assert_eq!(
+            envelope.structured_content,
+            Some(serde_json::json!({"result": "ok"}))
+        );
+    }
+
+    #[test]
+    fn tool_result_envelope_wraps_plain_text_success_payload() {
+        let envelope = ToolOutputPayload::success_text("plain text result").envelope();
+        assert_eq!(envelope.status, ToolResultStatus::Success);
+        assert_eq!(
+            envelope.structured_content,
+            Some(serde_json::json!({"result": "plain text result"}))
+        );
+    }
+
+    #[test]
+    fn tool_dispatch_outcome_pending_maps_to_pending_meta() {
+        let outcome = ToolDispatchOutcome::pending_approval(
+            "Bash",
+            "need approval",
+            serde_json::json!({"command": "echo hi"}),
+        );
+
+        let envelope = outcome.envelope();
+        assert_eq!(envelope.status, ToolResultStatus::Pending);
+        let pending = envelope.pending.expect("pending metadata should exist");
+        assert_eq!(pending.pending_kind, "approval");
+        assert_eq!(pending.prompt.as_deref(), Some("need approval"));
+    }
+
+    #[test]
+    fn tagged_error_builds_next_turn_failure_payload() {
+        let envelope = ToolOutputPayload::Function {
+            content: String::new(),
+            success: false,
+            structured_content: Some(serde_json::json!({
+                "error": "path is required",
+                "error_kind": "validation_failure",
+                "retryable": true,
+                "suggested_action": "fix the arguments and retry",
+                "gate_source": "tool_semantic"
+            })),
+        }
+        .envelope();
+        assert_eq!(envelope.status, ToolResultStatus::Failure);
+        let next_turn_failure = envelope
+            .next_turn_failure_payload()
+            .expect("next turn payload should exist");
+        assert_eq!(
+            next_turn_failure.error_kind,
+            ToolFailureKind::ValidationFailure
+        );
+        assert!(next_turn_failure.retryable);
+        assert_eq!(next_turn_failure.strategy, "retry");
+        assert_eq!(
+            next_turn_failure.gate_source.as_deref(),
+            Some("tool_semantic")
+        );
     }
 }

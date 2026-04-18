@@ -29,6 +29,10 @@ use crate::ToolContext;
 
 const DEFAULT_TOOL_OUTPUT_MAX_BYTES: usize = 64 * 1024;
 const TOOL_OUTPUT_TRUNCATED_SUFFIX: &str = "\n...[truncated]";
+const GATE_SOURCE_ALLOW_LIST: &str = "allow_list";
+const GATE_SOURCE_TOOL_SEMANTIC: &str = "tool_semantic";
+const ERROR_KIND_PERMISSION_REJECTION: &str = "permission_rejection";
+const ERROR_KIND_VALIDATION_FAILURE: &str = "validation_failure";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolPromptEntry {
@@ -174,6 +178,39 @@ impl ToolRegistry {
         let returned_size = output.len();
 
         (output, true, raw_size, returned_size)
+    }
+
+    fn tagged_gate_message(error_kind: &str, gate_source: &str, message: &str) -> String {
+        format!("[error_kind={error_kind}][gate_source={gate_source}] {message}")
+    }
+
+    fn annotate_policy_error(error: TalosError) -> TalosError {
+        match error {
+            TalosError::AuthorizationDenied => TalosError::ToolError(Self::tagged_gate_message(
+                ERROR_KIND_PERMISSION_REJECTION,
+                GATE_SOURCE_ALLOW_LIST,
+                "authorization denied",
+            )),
+            other => other,
+        }
+    }
+
+    fn annotate_pre_execute_error(error: TalosError) -> TalosError {
+        match error {
+            TalosError::ValidationError(message) => {
+                TalosError::ValidationError(Self::tagged_gate_message(
+                    ERROR_KIND_VALIDATION_FAILURE,
+                    GATE_SOURCE_TOOL_SEMANTIC,
+                    message.as_str(),
+                ))
+            }
+            TalosError::AuthorizationDenied => TalosError::ToolError(Self::tagged_gate_message(
+                ERROR_KIND_PERMISSION_REJECTION,
+                GATE_SOURCE_TOOL_SEMANTIC,
+                "authorization denied",
+            )),
+            other => other,
+        }
     }
 
     fn truncate_structured_error(
@@ -524,10 +561,12 @@ impl ToolRegistry {
     ) -> TalosResult<ToolDispatchOutcome> {
         if let Some(spec) = self.tool_catalog().find(invocation.tool_name.as_str()) {
             self.policy_checker
-                .check_tool_access(spec.definition.name.as_str())?;
+                .check_tool_access(spec.definition.name.as_str())
+                .map_err(Self::annotate_policy_error)?;
         } else {
             self.policy_checker
-                .check_tool_access(invocation.tool_name.as_str())?;
+                .check_tool_access(invocation.tool_name.as_str())
+                .map_err(Self::annotate_policy_error)?;
         }
         self.execute_invocation_unchecked_with_context(invocation, context)
             .await
@@ -578,6 +617,10 @@ impl ToolRegistry {
                 invocation.tool_name
             )));
         }
+        handler
+            .pre_execute(&invocation, &context)
+            .await
+            .map_err(Self::annotate_pre_execute_error)?;
         handler.handle(invocation, context).await
     }
 
@@ -773,14 +816,68 @@ impl Default for ToolRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::register_core_local_tools;
     use crate::trait_impl::EchoTestTool;
-    use crate::ToolOutput;
+    use serde_json::json;
     use crate::{MemoryGetTool, MemorySearchTool, SkillTool, ToolSearchTool};
     use async_trait::async_trait;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
     use talos_config::AgentKernelConfig;
+    use talos_error::TalosError;
     use talos_tools_policy::ToolPolicy;
 
     struct LargeErrorTool;
+    struct ValidationGateTool {
+        executes: Arc<AtomicUsize>,
+    }
+    struct PermissionGateTool {
+        executes: Arc<AtomicUsize>,
+    }
+
+    fn assert_tagged_validation_error(
+        error: TalosError,
+        expected_gate_source: &str,
+        expected_fragment: &str,
+    ) {
+        match error {
+            TalosError::ValidationError(message) => {
+                assert!(
+                    message.contains("[error_kind=validation_failure]"),
+                    "missing validation error_kind tag: {message}"
+                );
+                assert!(
+                    message.contains(&format!("[gate_source={expected_gate_source}]")),
+                    "missing gate_source tag: {message}"
+                );
+                assert!(
+                    message.contains(expected_fragment),
+                    "missing expected fragment '{expected_fragment}': {message}"
+                );
+            }
+            other => panic!("expected ValidationError, got {other:?}"),
+        }
+    }
+
+    fn assert_tagged_permission_error(error: TalosError, expected_gate_source: &str) {
+        match error {
+            TalosError::ToolError(message) => {
+                assert!(
+                    message.contains("[error_kind=permission_rejection]"),
+                    "missing permission error_kind tag: {message}"
+                );
+                assert!(
+                    message.contains(&format!("[gate_source={expected_gate_source}]")),
+                    "missing gate_source tag: {message}"
+                );
+                assert!(
+                    message.contains("authorization denied"),
+                    "missing authorization fragment: {message}"
+                );
+            }
+            other => panic!("expected ToolError, got {other:?}"),
+        }
+    }
 
     fn test_kernel_config_with_output_limit(limit: usize) -> Arc<AgentKernelConfig> {
         let mut config = AgentKernelConfig::default();
@@ -798,12 +895,66 @@ mod tests {
             "Returns a large error string for testing"
         }
 
-        async fn execute(&self, _input: Value, _context: ToolContext) -> TalosResult<ToolOutput> {
-            Ok(ToolOutput {
+        async fn execute_payload(
+            &self,
+            _input: Value,
+            _context: ToolContext,
+        ) -> TalosResult<ToolOutputPayload> {
+            Ok(ToolOutputPayload::Function {
+                content: String::new(),
                 success: false,
-                output: String::new(),
-                error: Some("e".repeat(256)),
+                structured_content: Some(json!({ "error": "e".repeat(256) })),
             })
+        }
+    }
+
+    #[async_trait]
+    impl Tool for ValidationGateTool {
+        fn name(&self) -> &str {
+            "validation_gate"
+        }
+
+        fn description(&self) -> &str {
+            "Fails validation before execute"
+        }
+
+        fn validate_input(&self, _input: &Value) -> TalosResult<()> {
+            Err(TalosError::ValidationError(
+                "validation gate rejected input".to_string(),
+            ))
+        }
+
+        async fn execute_payload(
+            &self,
+            _input: Value,
+            _context: ToolContext,
+        ) -> TalosResult<ToolOutputPayload> {
+            self.executes.fetch_add(1, Ordering::SeqCst);
+            Ok(ToolOutputPayload::success_text("should not run"))
+        }
+    }
+
+    #[async_trait]
+    impl Tool for PermissionGateTool {
+        fn name(&self) -> &str {
+            "permission_gate"
+        }
+
+        fn description(&self) -> &str {
+            "Fails semantic permission before execute"
+        }
+
+        fn check_permissions(&self, _input: &Value, _context: &ToolContext) -> TalosResult<()> {
+            Err(TalosError::AuthorizationDenied)
+        }
+
+        async fn execute_payload(
+            &self,
+            _input: Value,
+            _context: ToolContext,
+        ) -> TalosResult<ToolOutputPayload> {
+            self.executes.fetch_add(1, Ordering::SeqCst);
+            Ok(ToolOutputPayload::success_text("should not run"))
         }
     }
 
@@ -851,11 +1002,7 @@ mod tests {
             .execute_invocation_with_context(invocation, ToolContext::default())
             .await;
 
-        assert!(result.is_err());
-        match result.err().unwrap() {
-            talos_error::TalosError::AuthorizationDenied => {}
-            _ => panic!("Expected AuthorizationDenied error"),
-        }
+        assert_tagged_permission_error(result.unwrap_err(), GATE_SOURCE_ALLOW_LIST);
     }
 
     #[tokio::test]
@@ -921,6 +1068,172 @@ mod tests {
             .unwrap();
         assert!(!result.is_error());
         assert_eq!(result.content(), "hello");
+    }
+
+    #[tokio::test]
+    async fn test_registry_pre_execute_validation_gate_runs_before_execute() {
+        let executes = Arc::new(AtomicUsize::new(0));
+        let tool = Arc::new(ValidationGateTool {
+            executes: executes.clone(),
+        });
+        let policy = ToolPolicy::allow_list(vec!["validation_gate"]);
+        let registry = ToolRegistry::new_with_policy(policy);
+        registry.register(tool);
+
+        let invocation = registry
+            .build_function_invocation(
+                "call-validation-gate",
+                "validation_gate",
+                serde_json::json!({"path": "demo.txt"}),
+            )
+            .unwrap();
+
+        let error = registry
+            .execute_invocation_with_context(invocation, ToolContext::default())
+            .await
+            .unwrap_err();
+
+        assert_tagged_validation_error(
+            error,
+            GATE_SOURCE_TOOL_SEMANTIC,
+            "validation gate rejected input",
+        );
+        assert_eq!(executes.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn test_registry_pre_execute_permission_gate_runs_after_allow_list() {
+        let executes = Arc::new(AtomicUsize::new(0));
+        let tool = Arc::new(PermissionGateTool {
+            executes: executes.clone(),
+        });
+        let policy = ToolPolicy::allow_list(vec!["permission_gate"]);
+        let registry = ToolRegistry::new_with_policy(policy);
+        registry.register(tool);
+
+        let invocation = registry
+            .build_function_invocation(
+                "call-permission-gate",
+                "permission_gate",
+                serde_json::json!({"path": "demo.txt"}),
+            )
+            .unwrap();
+
+        let error = registry
+            .execute_invocation_with_context(invocation, ToolContext::default())
+            .await
+            .unwrap_err();
+
+        assert_tagged_permission_error(error, GATE_SOURCE_TOOL_SEMANTIC);
+        assert_eq!(executes.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn test_read_tool_validation_returns_tagged_metadata() {
+        let policy = ToolPolicy::allow_list(vec!["Read"]);
+        let registry = ToolRegistry::new_with_policy(policy);
+        register_core_local_tools(&registry);
+
+        let invocation = registry
+            .build_function_invocation("call-read-validation", "Read", serde_json::json!({}))
+            .unwrap();
+
+        let error = registry
+            .execute_invocation_with_context(invocation, ToolContext::default())
+            .await
+            .unwrap_err();
+
+        assert_tagged_validation_error(error, GATE_SOURCE_TOOL_SEMANTIC, "path is required");
+    }
+
+    #[tokio::test]
+    async fn test_edit_tool_validation_returns_tagged_metadata() {
+        let policy = ToolPolicy::allow_list(vec!["Edit"]);
+        let registry = ToolRegistry::new_with_policy(policy);
+        register_core_local_tools(&registry);
+
+        let invocation = registry
+            .build_function_invocation(
+                "call-edit-validation",
+                "Edit",
+                serde_json::json!({"path": "demo.txt"}),
+            )
+            .unwrap();
+
+        let error = registry
+            .execute_invocation_with_context(invocation, ToolContext::default())
+            .await
+            .unwrap_err();
+
+        assert_tagged_validation_error(
+            error,
+            GATE_SOURCE_TOOL_SEMANTIC,
+            "find/old_string is required",
+        );
+    }
+
+    #[tokio::test]
+    async fn test_bash_tool_semantic_permission_returns_tagged_metadata() {
+        let policy = ToolPolicy::allow_list(vec!["Bash"]);
+        let registry = ToolRegistry::new_with_policy(policy);
+        register_core_local_tools(&registry);
+
+        let invocation = registry
+            .build_function_invocation(
+                "call-bash-semantic-permission",
+                "Bash",
+                serde_json::json!({
+                    "command": "echo hi",
+                    "dangerously_disable_sandbox": true
+                }),
+            )
+            .unwrap();
+
+        let error = registry
+            .execute_invocation_with_context(invocation, ToolContext::default())
+            .await
+            .unwrap_err();
+
+        assert_tagged_permission_error(error, GATE_SOURCE_TOOL_SEMANTIC);
+    }
+
+    #[tokio::test]
+    async fn test_outer_allow_list_and_semantic_gate_sources_are_distinguishable() {
+        let allow_list_registry =
+            ToolRegistry::new_with_policy(ToolPolicy::allow_list(vec!["Read"]));
+        register_core_local_tools(&allow_list_registry);
+        let allow_list_invocation = allow_list_registry
+            .build_function_invocation(
+                "call-bash-allow-list",
+                "Bash",
+                serde_json::json!({"command": "echo hi"}),
+            )
+            .unwrap();
+
+        let allow_list_error = allow_list_registry
+            .execute_invocation_with_context(allow_list_invocation, ToolContext::default())
+            .await
+            .unwrap_err();
+        assert_tagged_permission_error(allow_list_error, GATE_SOURCE_ALLOW_LIST);
+
+        let semantic_registry = ToolRegistry::new_with_policy(ToolPolicy::allow_list(vec!["Bash"]));
+        register_core_local_tools(&semantic_registry);
+        let semantic_invocation = semantic_registry
+            .build_function_invocation(
+                "call-bash-semantic",
+                "Bash",
+                serde_json::json!({
+                    "command": "echo hi",
+                    "dangerously_disable_sandbox": true
+                }),
+            )
+            .unwrap();
+
+        let semantic_error = semantic_registry
+            .execute_invocation_with_context(semantic_invocation, ToolContext::default())
+            .await
+            .unwrap_err();
+        assert_tagged_permission_error(semantic_error, GATE_SOURCE_TOOL_SEMANTIC);
     }
 
     #[tokio::test]

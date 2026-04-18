@@ -6,7 +6,7 @@ use talos_types::talos::StopReason;
 
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy, ToolVisibility};
 use crate::state::PermissionMode;
-use crate::{decode_tool_input, CollaborationAgentStatus, Tool, ToolContext, ToolOutput};
+use crate::{decode_tool_input, CollaborationAgentStatus, Tool, ToolContext, ToolOutputPayload};
 
 pub struct AgentTool;
 
@@ -170,7 +170,11 @@ impl Tool for AgentTool {
         }))
     }
 
-    async fn execute(&self, input: Value, context: ToolContext) -> TalosResult<ToolOutput> {
+    async fn execute_payload(
+        &self,
+        input: Value,
+        context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
         let request: AgentRequest = decode_tool_input(input, self.name())?;
         let task_prompt = request
             .prompt
@@ -201,9 +205,6 @@ impl Tool for AgentTool {
             .spawn_agent(context.user_id(), Some(initial_message))
             .await?;
 
-        // TODO(main-thread): register this facade in lib.rs/registry and hide the
-        // low-level collaboration tools from the model-facing catalog.
-
         let response = match execution_mode {
             AgentExecutionMode::Background => AgentResponse {
                 session_id,
@@ -228,7 +229,7 @@ impl Tool for AgentTool {
             }
         };
 
-        Ok(json_output(response)?)
+        ToolOutputPayload::success_json(&response, "serialize agent response")
     }
 }
 
@@ -241,7 +242,7 @@ mod tests {
     async fn agent_rejects_empty_task() {
         let tool = AgentTool;
         let error = tool
-            .execute(
+            .execute_payload(
                 serde_json::json!({ "prompt": "   ", "description": "Empty" }),
                 ToolContext::new("agent-empty-task", "user-1"),
             )
@@ -422,17 +423,4 @@ fn permission_mode_label(mode: PermissionMode) -> &'static str {
         PermissionMode::Default => "default",
         PermissionMode::Plan => "plan",
     }
-}
-
-fn json_output<T>(value: T) -> TalosResult<ToolOutput>
-where
-    T: Serialize,
-{
-    let output = serde_json::to_string(&value)
-        .map_err(|err| TalosError::ToolError(format!("serialize agent response: {err}")))?;
-    Ok(ToolOutput {
-        success: true,
-        output,
-        error: None,
-    })
 }

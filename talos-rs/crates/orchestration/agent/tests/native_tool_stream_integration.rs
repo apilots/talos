@@ -8,11 +8,30 @@ use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, Role, ToolStream,
     ToolStreamEvent, Usage,
 };
-use talos_tools::{Tool, ToolContext, ToolOutput, ToolRegistry};
+use talos_tools::{Tool, ToolContext, ToolOutputPayload, ToolRegistry};
 use talos_tools_policy::ToolPolicy;
 use talos_types::talos::{TalosInputItem, TalosProvider, TalosSourceType};
 use talos_types::{SessionContext, SessionState, TalosSession};
 use tokio::sync::mpsc;
+
+static SESSION_COUNTER: AtomicUsize = AtomicUsize::new(1);
+
+fn extract_tool_result_text(payload: &Value) -> Option<String> {
+    let result = payload.get("result")?;
+    result.as_str().map(str::to_string).or_else(|| {
+        result
+            .get("result")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    })
+}
+
+fn tool_message_reports_success(payload: &Value) -> bool {
+    payload
+        .get("ok")
+        .and_then(|value| value.as_bool())
+        .unwrap_or_else(|| payload.get("result").is_some())
+}
 
 #[derive(Default)]
 struct IntegrationState {
@@ -46,17 +65,17 @@ impl Tool for EchoTool {
         }))
     }
 
-    async fn execute(&self, input: Value, _context: ToolContext) -> TalosResult<ToolOutput> {
+    async fn execute_payload(
+        &self,
+        input: Value,
+        _context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
         self.state.tool_executions.fetch_add(1, Ordering::SeqCst);
         let message = input
             .get("message")
             .and_then(|v| v.as_str())
             .unwrap_or("missing");
-        Ok(ToolOutput {
-            success: true,
-            output: format!("echo:{message}"),
-            error: None,
-        })
+        Ok(ToolOutputPayload::success_text(format!("echo:{message}")))
     }
 }
 
@@ -106,8 +125,8 @@ impl LlmProvider for IntegrationMockProvider {
                 && msg.tool_call_id.as_deref() == Some("call_1")
         }) {
             if let Ok(payload) = serde_json::from_str::<Value>(&message.content) {
-                if payload.get("ok").and_then(|v| v.as_bool()) == Some(true) {
-                    if let Some(result) = payload.get("result").and_then(|v| v.as_str()) {
+                if tool_message_reports_success(&payload) {
+                    if let Some(result) = extract_tool_result_text(&payload) {
                         self.state
                             .captured_tool_result
                             .lock()
@@ -154,8 +173,8 @@ impl LlmProvider for IntegrationMockProvider {
                     && msg.tool_call_id.as_deref() == Some("call_1")
             }) {
                 if let Ok(payload) = serde_json::from_str::<Value>(&message.content) {
-                    if payload.get("ok").and_then(|v| v.as_bool()) == Some(true) {
-                        if let Some(result) = payload.get("result").and_then(|v| v.as_str()) {
+                    if tool_message_reports_success(&payload) {
+                        if let Some(result) = extract_tool_result_text(&payload) {
                             self.state
                                 .captured_tool_result
                                 .lock()
@@ -264,6 +283,10 @@ fn create_agent_with_tool(state: Arc<IntegrationState>) -> AgentImpl {
 }
 
 fn build_request(input: &str) -> OrchestratorRequest {
+    let session_id = format!(
+        "integration-session-{}",
+        SESSION_COUNTER.fetch_add(1, Ordering::SeqCst)
+    );
     OrchestratorRequest {
         session: TalosSession {
             title: "Untitled Session".to_string(),
@@ -271,7 +294,7 @@ fn build_request(input: &str) -> OrchestratorRequest {
             project_id: None,
             current_directory: None,
             context: SessionContext {
-                session_id: "integration-session".to_string(),
+                session_id: session_id.clone(),
                 workspace_id: Some("default".to_string()),
                 project_id: None,
                 current_directory: None,
@@ -304,7 +327,15 @@ async fn integration_tool_call_loop_executes_tool_and_returns_final_output() {
         .await
         .expect("agent should return a response");
 
-    assert!(response.output_text.contains("echo:ping"));
+    let captured_tool_result = state
+        .captured_tool_result
+        .lock()
+        .expect("captured_tool_result mutex poisoned")
+        .clone();
+    assert_eq!(captured_tool_result.as_deref(), Some("echo:ping"));
+    assert!(response
+        .output_text
+        .contains("Final answer after tool execution"));
     assert!(response.reasoning.is_empty());
     assert!(response.output_items.iter().any(|item| matches!(
         item,

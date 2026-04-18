@@ -229,7 +229,10 @@ pub struct ToolResultLog {
     pub(crate) call_id: String,
     pub(crate) tool: String,
     pub(crate) payload: Value,
+    pub(crate) envelope: Value,
     pub(crate) is_error: bool,
     pub(crate) truncated: bool,
     pub(crate) size_bytes: usize,
+    pub(crate) semantic_events: Vec<String>,
+    pub(crate) next_turn_failure: Option<Value>,
 }

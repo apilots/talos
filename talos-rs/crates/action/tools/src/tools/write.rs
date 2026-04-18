@@ -4,7 +4,7 @@ use talos_error::TalosResult;
 
 use crate::runtimes::fs_write::{run, WriteFileRequest};
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
-use crate::{Tool, ToolContext, ToolOutput};
+use crate::{Tool, ToolContext, ToolOutputPayload};
 
 /// Tool for writing content to a file
 pub struct WriteTool;
@@ -65,17 +65,15 @@ impl Tool for WriteTool {
         }
     }
 
-    async fn execute(&self, input: Value, context: ToolContext) -> TalosResult<ToolOutput> {
+    async fn execute_payload(
+        &self,
+        input: Value,
+        context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
         let request: WriteFileRequest = serde_json::from_value(input).map_err(|err| {
             talos_error::TalosError::ToolError(format!("invalid write arguments: {}", err))
         })?;
         let result = run(&request, &context).await?;
-        Ok(ToolOutput {
-            success: true,
-            output: serde_json::to_string(&result).map_err(|err| {
-                talos_error::TalosError::ToolError(format!("serialize write response: {}", err))
-            })?,
-            error: None,
-        })
+        ToolOutputPayload::success_json(&result, "serialize write response")
     }
 }
