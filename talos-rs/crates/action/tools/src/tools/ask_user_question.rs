@@ -41,7 +41,7 @@ impl Tool for AskUserQuestionTool {
     }
 
     fn description(&self) -> &str {
-        "Ask the user multiple-choice questions to clarify ambiguity, gather preferences, or make implementation decisions during execution."
+        "Ask the user a multiple-choice question to clarify ambiguity, gather preferences, or make an execution decision. Provide 2-3 options, and every option must include a non-empty id, label, and description."
     }
 
     fn visibility(&self) -> ToolVisibility {
@@ -69,19 +69,37 @@ impl Tool for AskUserQuestionTool {
         Some(serde_json::json!({
             "type": "object",
             "required": ["header", "question", "options"],
+            "examples": [{
+                "header": "Execution Mode",
+                "question": "Choose mode",
+                "options": [
+                    {
+                        "id": "plan",
+                        "label": "Plan",
+                        "description": "Explore the task before implementation"
+                    },
+                    {
+                        "id": "direct",
+                        "label": "Direct",
+                        "description": "Execute immediately with minimal planning"
+                    }
+                ]
+            }],
             "properties": {
-                "header": { "type": "string" },
-                "question": { "type": "string" },
+                "header": { "type": "string", "minLength": 1 },
+                "question": { "type": "string", "minLength": 1 },
                 "allows_free_form": { "type": "boolean" },
                 "options": {
                     "type": "array",
+                    "minItems": 2,
+                    "maxItems": 3,
                     "items": {
                         "type": "object",
                         "required": ["id", "label", "description"],
                         "properties": {
-                            "id": { "type": "string" },
-                            "label": { "type": "string" },
-                            "description": { "type": "string" }
+                            "id": { "type": "string", "minLength": 1 },
+                            "label": { "type": "string", "minLength": 1 },
+                            "description": { "type": "string", "minLength": 1 }
                         }
                     }
                 }

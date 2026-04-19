@@ -133,7 +133,7 @@ if ! echo "${plan_output}" | grep -Fq "PLAN_READY"; then
   exit 1
 fi
 
-exit_input="You must call tool 'ExitPlanMode' exactly once with summary Planning finished. After the tool call, respond with exactly EXIT_PLAN_MODE_OK"
+exit_input="You must call tool 'ExitPlanMode' exactly once with summary exactly \"Planning finished\". After the tool call, respond with exactly EXIT_PLAN_MODE_OK"
 exit_payload="$(build_payload "${exit_input}")"
 exit_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
   -H "Content-Type: application/json" \
