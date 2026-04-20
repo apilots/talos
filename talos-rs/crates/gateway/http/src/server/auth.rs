@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
-use talos_auth::{Auth, AuthResult, TokenType};
+use talos_auth::RequestIdentity;
 
 use super::errors::ApiError;
 use super::state::HttpApiState;
@@ -37,12 +37,13 @@ pub(super) async fn auth_middleware(
     next: Next,
 ) -> Result<Response, StatusCode> {
     let path = req.uri().path().to_string();
-    if path == "/health" {
+    if is_public_route(path.as_str()) {
         return Ok(next.run(req).await);
     }
 
     if state.auth_disabled {
-        req.extensions_mut().insert(mock_auth_result("mock-auth"));
+        req.extensions_mut()
+            .insert(RequestIdentity::mock_admin("mock-auth"));
         return Ok(next.run(req).await);
     }
 
@@ -57,32 +58,19 @@ pub(super) async fn auth_middleware(
         .as_ref()
         .is_some_and(|configured| configured == &token)
     {
-        mock_auth_result("static-token")
+        RequestIdentity::mock_admin("static-token")
     } else {
         state
-            .auth
-            .verify(&token)
+            .auth_service
+            .verify_access_token(&token)
             .await
             .map_err(|_| StatusCode::UNAUTHORIZED)?
     };
-
-    if !auth_result.is_valid {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
 
     req.extensions_mut().insert(auth_result);
     Ok(next.run(req).await)
 }
 
-fn mock_auth_result(user_id: &str) -> AuthResult {
-    AuthResult {
-        user_id: user_id.to_string(),
-        expires_at: u64::MAX,
-        is_valid: true,
-        token_type: TokenType::Service,
-        scopes: vec!["*".to_string()],
-        allowed_channels: vec!["*".to_string()],
-        act_as: Some("*".to_string()),
-        issuer: Some("mock-auth".to_string()),
-    }
+fn is_public_route(path: &str) -> bool {
+    matches!(path, "/health" | "/v1/auth/register" | "/v1/auth/login")
 }

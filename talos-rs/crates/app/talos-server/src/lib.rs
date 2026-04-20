@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use talos_agent::{AgentImpl, AgentOrchestrator};
+use talos_auth::{AuthManager, AuthService, DatabaseUserStore, JwtAuth, JwtConfig, UserService};
 use talos_channel::{ChannelServer, TelegramChannel};
 use talos_config::Config;
 use talos_coordinator::{Coordinator, CoordinatorImpl};
@@ -211,7 +212,9 @@ pub async fn start_server(
     })
     .await?;
     let storage: Arc<dyn talos_storage::Storage> = Arc::from(storage_impl);
-    let session_store: Arc<dyn SessionStore> = Arc::new(DatabaseSessionStore::new(storage).await?);
+    let session_store: Arc<dyn SessionStore> =
+        Arc::new(DatabaseSessionStore::new(storage.clone()).await?);
+    let user_store = Arc::new(DatabaseUserStore::new(storage.clone()).await?);
 
     let router: Arc<dyn Router> = Arc::new(RouterImpl::new());
     if let Err(err) = router
@@ -261,12 +264,30 @@ pub async fn start_server(
     let request_handler: Arc<dyn RequestHandler> = coordinator.clone();
     let session_service: Arc<dyn SessionService> = coordinator.clone();
     let gateway: Arc<dyn Gateway> = Arc::new(GatewayImpl::new(request_handler.clone()));
+    let jwt_auth = Arc::new(JwtAuth::with_config(JwtConfig {
+        secret: config
+            .gateway
+            .jwt_secret
+            .clone()
+            .unwrap_or_else(|| "talos-dev-jwt-secret".to_string()),
+        expiry_days: config.gateway.access_token_ttl_days,
+        issuer: "talos".to_string(),
+    }));
+    let auth_manager = Arc::new(AuthManager::new(
+        user_store,
+        jwt_auth,
+        config.gateway.allow_register,
+    ));
+    let auth_service: Arc<dyn AuthService> = auth_manager.clone();
+    let user_service: Arc<dyn UserService> = auth_manager.clone();
 
     let default_model = config.llm.model.clone();
     let model_catalog = resolve_model_catalog(&config, &default_model);
     let mut http_server = HttpServer::new(
         gateway,
         session_service,
+        auth_service,
+        user_service,
         config.clone(),
         llm_provider.clone(),
         config.gateway.host.clone(),

@@ -177,6 +177,8 @@ gateway:
   token: ${GATEWAY_TOKEN}  # 环境变量
   jwt_secret: ${JWT_SECRET}
   auth: false
+  access_token_ttl_days: 30
+  allow_register: true
 
 # 渠道配置
 channels:

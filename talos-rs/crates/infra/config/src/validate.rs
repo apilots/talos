@@ -9,7 +9,6 @@ const REQUIRED_CONFIG_PATHS: &[&str] = &[
     "agent.model",
     "gateway.host",
     "gateway.port",
-    "gateway.token",
     "gateway.auth",
     "llm.provider",
     "llm.model",
@@ -255,14 +254,17 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             "gateway.port must be > 0".to_string(),
         ));
     }
-    let Some(token) = config.gateway.token.as_ref() else {
+    if let Some(token) = config.gateway.token.as_ref() {
+        if token.trim().is_empty() || is_unresolved_placeholder(token) {
+            return Err(TalosError::InvalidConfiguration(
+                "gateway.token is empty or unresolved placeholder".to_string(),
+            ));
+        }
+    }
+
+    if config.gateway.access_token_ttl_days == 0 {
         return Err(TalosError::InvalidConfiguration(
-            "gateway.token is required".to_string(),
-        ));
-    };
-    if token.trim().is_empty() || is_unresolved_placeholder(token) {
-        return Err(TalosError::InvalidConfiguration(
-            "gateway.token is empty or unresolved placeholder".to_string(),
+            "gateway.access_token_ttl_days must be > 0".to_string(),
         ));
     }
 

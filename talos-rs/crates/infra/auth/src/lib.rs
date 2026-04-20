@@ -1,110 +1,286 @@
-//! Talos Authentication Layer
-//!
-//! Provides JWT-based authentication and device pairing.
-//!
-//! # Example
-//!
-//! ```rust,no_run
-//! use talos_auth::{Auth, JwtAuth};
-//!
-//! #[tokio::main]
-//! async fn main() {
-//!     let auth = JwtAuth::new("secret-key");
-//!     let token = auth.issue("user-123").await.unwrap();
-//!     let result = auth.verify(&token).await.unwrap();
-//!     assert_eq!(result.user_id, "user-123");
-//! }
-//! ```
-
 mod jwt;
 mod pairing;
+mod password;
+mod service;
+mod store;
 
-pub use jwt::{JwtAuth, JwtConfig};
+pub use jwt::{AccessTokenClaims, IssuedAccessToken, JwtAuth, JwtConfig};
 pub use pairing::{DevicePairing, PairingCode, PairingResult};
+pub use password::{validate_password, PasswordService};
+pub use service::{AuthManager, AuthService, UserService};
+pub use store::{DatabaseUserStore, InMemoryUserStore, UserStore};
 
-use async_trait::async_trait;
-use talos_error::TalosResult;
+use serde::{Deserialize, Serialize};
 
-/// Authentication result
-#[derive(Debug, Clone)]
-pub struct AuthResult {
-    pub user_id: String,
-    pub expires_at: u64,
-    pub is_valid: bool,
-    pub token_type: TokenType,
-    pub scopes: Vec<String>,
-    pub allowed_channels: Vec<String>,
-    pub act_as: Option<String>,
-    pub issuer: Option<String>,
-}
-
-/// Token role category.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TokenType {
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum UserRole {
+    #[default]
     User,
-    Service,
+    Admin,
 }
 
-/// Auth trait - Authentication interface
-#[async_trait]
-pub trait Auth: Send + Sync {
-    /// Verify a token and return auth result
-    async fn verify(&self, token: &str) -> TalosResult<AuthResult>;
+impl UserRole {
+    pub fn is_admin(self) -> bool {
+        matches!(self, Self::Admin)
+    }
 
-    /// Issue a new token for a user
-    async fn issue(&self, user_id: &str) -> TalosResult<String>;
-
-    /// Refresh an existing token
-    async fn refresh(&self, old_token: &str) -> TalosResult<String>;
-
-    /// Revoke a token
-    async fn revoke(&self, token: &str) -> TalosResult<()>;
+    pub fn as_storage_value(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Admin => "admin",
+        }
+    }
 }
 
-/// Device pairing code format
-#[derive(Debug, Clone)]
-pub struct DeviceCode {
-    pub code: String,
-    pub expires_at: u64,
-    pub device_id: String,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AuthScope {
+    SessionsRead,
+    SessionsWrite,
+    ProjectsRead,
+    ProjectsWrite,
+    MessagesWrite,
+    ModelsRead,
+    MemoryRead,
+    MemoryWrite,
+    WorkspaceDocsRead,
+    WorkspaceDocsWrite,
+    UsersRead,
+    UsersWrite,
 }
 
-impl DeviceCode {
-    /// Generate a new device code (6 digits)
-    pub fn generate(device_id: &str, expiry_secs: u64) -> Self {
-        let code = format!("{:06}", rand::random::<u32>() % 1000000);
-        let expires_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            + expiry_secs;
-
-        Self {
-            code,
-            expires_at,
-            device_id: device_id.to_string(),
+impl AuthScope {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SessionsRead => "sessions:read",
+            Self::SessionsWrite => "sessions:write",
+            Self::ProjectsRead => "projects:read",
+            Self::ProjectsWrite => "projects:write",
+            Self::MessagesWrite => "messages:write",
+            Self::ModelsRead => "models:read",
+            Self::MemoryRead => "memory:read",
+            Self::MemoryWrite => "memory:write",
+            Self::WorkspaceDocsRead => "workspace_docs:read",
+            Self::WorkspaceDocsWrite => "workspace_docs:write",
+            Self::UsersRead => "users:read",
+            Self::UsersWrite => "users:write",
         }
     }
 
-    /// Check if the code is expired
-    pub fn is_expired(&self) -> bool {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        now > self.expires_at
+    pub fn from_str(value: &str) -> talos_error::TalosResult<Self> {
+        match value {
+            "sessions:read" => Ok(Self::SessionsRead),
+            "sessions:write" => Ok(Self::SessionsWrite),
+            "projects:read" => Ok(Self::ProjectsRead),
+            "projects:write" => Ok(Self::ProjectsWrite),
+            "messages:write" => Ok(Self::MessagesWrite),
+            "models:read" => Ok(Self::ModelsRead),
+            "memory:read" => Ok(Self::MemoryRead),
+            "memory:write" => Ok(Self::MemoryWrite),
+            "workspace_docs:read" => Ok(Self::WorkspaceDocsRead),
+            "workspace_docs:write" => Ok(Self::WorkspaceDocsWrite),
+            "users:read" => Ok(Self::UsersRead),
+            "users:write" => Ok(Self::UsersWrite),
+            other => Err(talos_error::TalosError::AuthError(format!(
+                "unknown auth scope: {}",
+                other
+            ))),
+        }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestIdentity {
+    pub user_id: String,
+    pub username: Option<String>,
+    pub role: UserRole,
+    pub scopes: Vec<AuthScope>,
+}
 
-    #[test]
-    fn test_device_code() {
-        let code = DeviceCode::generate("device-123", 300);
-        assert_eq!(code.code.len(), 6);
-        assert_eq!(code.device_id, "device-123");
-        assert!(!code.is_expired());
+impl RequestIdentity {
+    pub fn is_admin(&self) -> bool {
+        self.role.is_admin()
     }
+
+    pub fn mock_admin(user_id: impl Into<String>) -> Self {
+        Self {
+            user_id: user_id.into(),
+            username: None,
+            role: UserRole::Admin,
+            scopes: default_scopes_for_role(UserRole::Admin),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UserRecord {
+    pub user_id: String,
+    pub username: String,
+    pub email: Option<String>,
+    #[serde(skip_serializing)]
+    pub password_hash: String,
+    pub role: UserRole,
+    pub token_version: u64,
+    pub disabled: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateUserRecord {
+    pub user_id: String,
+    pub username: String,
+    pub email: Option<String>,
+    pub password_hash: String,
+    pub role: UserRole,
+    pub token_version: u64,
+    pub disabled: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+impl From<CreateUserRecord> for UserRecord {
+    fn from(value: CreateUserRecord) -> Self {
+        Self {
+            user_id: value.user_id,
+            username: value.username,
+            email: value.email,
+            password_hash: value.password_hash,
+            role: value.role,
+            token_version: value.token_version,
+            disabled: value.disabled,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct UserPatch {
+    pub username: Option<String>,
+    pub email: Option<String>,
+    pub role: Option<UserRole>,
+    pub disabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UserDto {
+    pub user_id: String,
+    pub username: String,
+    pub email: Option<String>,
+    pub role: UserRole,
+    pub disabled: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+impl From<UserRecord> for UserDto {
+    fn from(value: UserRecord) -> Self {
+        Self {
+            user_id: value.user_id,
+            username: value.username,
+            email: value.email,
+            role: value.role,
+            disabled: value.disabled,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Capabilities {
+    pub is_admin: bool,
+    pub role: UserRole,
+    pub scopes: Vec<String>,
+}
+
+impl Capabilities {
+    pub fn from_role(role: UserRole, scopes: &[AuthScope]) -> Self {
+        Self {
+            is_admin: role.is_admin(),
+            role,
+            scopes: scopes
+                .iter()
+                .map(AuthScope::as_str)
+                .map(str::to_string)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthResponse {
+    pub access_token: String,
+    pub token_type: String,
+    pub expires_at: u64,
+    pub user: UserDto,
+    pub capabilities: Capabilities,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterRequest {
+    pub username: String,
+    pub password: String,
+    #[serde(default)]
+    pub email: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoginRequest {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UpdateCurrentUserRequest {
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminCreateUserRequest {
+    pub username: String,
+    pub password: String,
+    #[serde(default)]
+    pub email: Option<String>,
+    pub role: UserRole,
+    #[serde(default)]
+    pub disabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AdminPatchUserRequest {
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub password: Option<String>,
+    #[serde(default)]
+    pub role: Option<UserRole>,
+    #[serde(default)]
+    pub disabled: Option<bool>,
+}
+
+pub fn default_scopes_for_role(role: UserRole) -> Vec<AuthScope> {
+    let mut scopes = vec![
+        AuthScope::SessionsRead,
+        AuthScope::SessionsWrite,
+        AuthScope::ProjectsRead,
+        AuthScope::ProjectsWrite,
+        AuthScope::MessagesWrite,
+        AuthScope::ModelsRead,
+        AuthScope::MemoryRead,
+        AuthScope::MemoryWrite,
+        AuthScope::WorkspaceDocsRead,
+        AuthScope::WorkspaceDocsWrite,
+    ];
+    if role.is_admin() {
+        scopes.push(AuthScope::UsersRead);
+        scopes.push(AuthScope::UsersWrite);
+    }
+    scopes
 }

@@ -3,6 +3,7 @@ import {
   TalosClient,
   type HttpAdapter,
   type HttpRequestOptions,
+  TalosHttpError,
   type StreamAdapter,
   type StreamRequestOptions,
 } from "@talos/sdk-core";
@@ -32,7 +33,13 @@ class BrowserHttpAdapter implements HttpAdapter {
 
     if (!response.ok) {
       const body = await response.text();
-      throw new Error(`${options?.method ?? "GET"} ${url} failed with status ${response.status}: ${body}`);
+      throw new TalosHttpError({
+        method: options?.method ?? "GET",
+        status: response.status,
+        statusText: response.statusText,
+        body,
+        url,
+      });
     }
 
     if (response.status === 204) {

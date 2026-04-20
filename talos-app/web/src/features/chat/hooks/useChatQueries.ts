@@ -54,7 +54,7 @@ export function useSessionsQuery() {
     queryFn: listSessions,
   });
 
-  const data = (query.data ?? [])
+  const data = [...(query.data ?? [])]
     .sort((left, right) => right.state.last_activity - left.state.last_activity)
     .filter((session) => {
       if (threadFilter === "all") {
@@ -76,7 +76,7 @@ export function useSessionsQuery() {
 
 export function useProjectsQuery() {
   const connectionKey = useConnectionKey();
-  const mergeProjects = useAppStore((state) => state.mergeProjects);
+  const replaceProjects = useAppStore((state) => state.replaceProjects);
   const query = useQuery({
     queryKey: [...chatKeys.all, connectionKey, "projects"] as const,
     queryFn: listProjects,
@@ -86,8 +86,8 @@ export function useProjectsQuery() {
     if (!query.data) {
       return;
     }
-    mergeProjects(query.data);
-  }, [mergeProjects, query.data]);
+    replaceProjects(query.data);
+  }, [query.data, replaceProjects]);
 
   return query;
 }

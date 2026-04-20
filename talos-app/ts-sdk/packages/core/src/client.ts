@@ -7,8 +7,15 @@ import type {
   MemorySearchParams,
   MemorySearchResult,
   ModelInfo,
+  UserDto,
   ProjectPatch,
   ProjectRecord,
+  RegisterRequest,
+  LoginRequest,
+  AuthResponse,
+  UpdateCurrentUserRequest,
+  AdminCreateUserRequest,
+  AdminPatchUserRequest,
   SessionConf,
   SessionQuery,
   SessionUpdate,
@@ -72,6 +79,78 @@ export class TalosClient {
     const serialized = params.toString();
     return serialized ? `${this.url(path)}?${serialized}` : this.url(path);
   }
+
+  auth = {
+    register: async (request: RegisterRequest): Promise<AuthResponse> => {
+      return this.http.request<AuthResponse>(this.url("/v1/auth/register"), {
+        method: "POST",
+        body: JSON.stringify(request),
+      });
+    },
+    login: async (request: LoginRequest): Promise<AuthResponse> => {
+      return this.http.request<AuthResponse>(this.url("/v1/auth/login"), {
+        method: "POST",
+        body: JSON.stringify(request),
+      });
+    },
+    logout: async (): Promise<void> => {
+      await this.http.request<void>(this.url("/v1/auth/logout"), {
+        method: "POST",
+      });
+    },
+  };
+
+  user = {
+    current: async (): Promise<UserDto> => {
+      return this.http.request<UserDto>(this.url("/v1/user"));
+    },
+    update: async (request: UpdateCurrentUserRequest): Promise<UserDto> => {
+      return this.http.request<UserDto>(this.url("/v1/user"), {
+        method: "PATCH",
+        body: JSON.stringify(request),
+      });
+    },
+  };
+
+  admin = {
+    users: {
+      list: async (): Promise<UserDto[]> => {
+        const response = await this.http.request<{ data: UserDto[] }>(this.url("/v1/admin/users"));
+        return response.data;
+      },
+      create: async (request: AdminCreateUserRequest): Promise<UserDto> => {
+        return this.http.request<UserDto>(this.url("/v1/admin/users"), {
+          method: "POST",
+          body: JSON.stringify(request),
+        });
+      },
+      patch: async (userId: string, request: AdminPatchUserRequest): Promise<UserDto> => {
+        return this.http.request<UserDto>(this.url(`/v1/admin/users/${userId}`), {
+          method: "PATCH",
+          body: JSON.stringify(request),
+        });
+      },
+      delete: async (userId: string): Promise<void> => {
+        await this.http.request<void>(this.url(`/v1/admin/users/${userId}`), {
+          method: "DELETE",
+        });
+      },
+    },
+    sessions: {
+      list: async (query?: SessionQuery): Promise<TalosSession[]> => {
+        const response = await this.http.request<{ data: TalosSession[] }>(
+          this.urlWithQuery("/v1/admin/sessions", query),
+        );
+        return response.data;
+      },
+    },
+    projects: {
+      list: async (): Promise<ProjectRecord[]> => {
+        const response = await this.http.request<{ data: ProjectRecord[] }>(this.url("/v1/admin/projects"));
+        return response.data;
+      },
+    },
+  };
 
   models = {
     list: async (): Promise<ModelInfo[]> => {

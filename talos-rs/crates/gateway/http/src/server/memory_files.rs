@@ -8,7 +8,7 @@ use chrono::NaiveDate;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use talos_auth::AuthResult;
+use talos_auth::RequestIdentity;
 use talos_error::{TalosError, TalosResult};
 use talos_memory::{Memory, MemoryIndexFile, MemorySearchQuery, MemoryStore};
 use talos_types::{DocUpdateRequest, MemoryFileDetail, MemoryFileSummary};
@@ -217,7 +217,7 @@ where
 
 pub(super) async fn list_memory_files_handler(
     State(state): State<Arc<HttpApiState>>,
-    _auth: axum::extract::Extension<AuthResult>,
+    _auth: axum::extract::Extension<RequestIdentity>,
     Query(query): Query<MemoryFilesQuery>,
 ) -> Result<Json<Value>, ApiError> {
     let file_list_config = &state.base_config.agent.kernel.memory;
@@ -296,7 +296,7 @@ pub(super) async fn list_memory_files_handler(
 
 pub(super) async fn get_memory_file_handler(
     State(state): State<Arc<HttpApiState>>,
-    _auth: axum::extract::Extension<AuthResult>,
+    _auth: axum::extract::Extension<RequestIdentity>,
     Path(date): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     let Some(detail) = load_memory_detail(state.as_ref(), &date).await? else {
@@ -311,7 +311,7 @@ pub(super) async fn get_memory_file_handler(
 
 pub(super) async fn put_memory_file_handler(
     State(state): State<Arc<HttpApiState>>,
-    _auth: axum::extract::Extension<AuthResult>,
+    _auth: axum::extract::Extension<RequestIdentity>,
     Path(date): Path<String>,
     Json(request): Json<DocUpdateRequest>,
 ) -> Result<Json<Value>, ApiError> {
@@ -349,7 +349,7 @@ pub(super) async fn put_memory_file_handler(
 
 pub(super) async fn search_memory_files_handler(
     State(state): State<Arc<HttpApiState>>,
-    _auth: axum::extract::Extension<AuthResult>,
+    _auth: axum::extract::Extension<RequestIdentity>,
     Query(query): Query<MemorySearchHttpQuery>,
 ) -> Result<Json<Value>, ApiError> {
     if query.q.trim().is_empty() {

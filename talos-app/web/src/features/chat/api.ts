@@ -62,6 +62,10 @@ export async function listSessions() {
   return getTalosClient().sessions.list();
 }
 
+export async function listAdminSessions() {
+  return getTalosClient().admin.sessions.list();
+}
+
 export async function listSessionsByProject(projectId: string) {
   return getTalosClient().sessions.list({ project_id: projectId });
 }

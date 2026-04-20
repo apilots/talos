@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import {
@@ -7,40 +6,56 @@ import {
   useModelsQuery,
   useSessionsQuery,
 } from "../hooks/useChatQueries";
+import { logoutUser } from "@/features/auth/api";
 import { useAppStore } from "@/shared/store/app-store";
 import { getEffectiveSessionStatus } from "@/shared/types/domain";
-import { Sidebar, type SidebarThreadItem } from "@/widgets/sidebar/Sidebar";
+import { Sidebar } from "@/widgets/sidebar/Sidebar";
 
 export function SidebarContainer() {
   const location = useLocation();
   const navigate = useNavigate();
   const { data: models } = useModelsQuery();
-  const sessionsQuery = useSessionsQuery();
   const createSession = useCreateSessionMutation();
   const deleteSession = useDeleteSessionMutation();
   const threadFilter = useAppStore((state) => state.threadFilter);
   const setThreadFilter = useAppStore((state) => state.setThreadFilter);
-  const defaultApprovalMode = useAppStore((state) => state.connection.defaultApprovalMode);
+  const connection = useAppStore((state) => state.connection);
+  const setConnection = useAppStore((state) => state.setConnection);
   const aliases = useAppStore((state) => state.sessionAliases);
   const statuses = useAppStore((state) => state.transientStatuses);
   const streams = useAppStore((state) => state.streams);
+  const sessionsQuery = useSessionsQuery();
 
-  const threads = useMemo<SidebarThreadItem[]>(() => {
-    return (sessionsQuery.data ?? []).slice(0, 120).map((session) => {
-      const sessionId = session.context.session_id;
-      return {
-        id: sessionId,
-        label: aliases[sessionId] ?? session.title,
-        status: getEffectiveSessionStatus(statuses[sessionId], streams[sessionId]),
-        model: session.config.llm?.model ?? session.config.agent?.model ?? "unknown",
-        lastActivityAt: session.state.last_activity,
-        createdAt: session.state.created_at,
-      };
-    });
-  }, [aliases, sessionsQuery.data, statuses, streams]);
+  const threads = (sessionsQuery.data ?? []).map((session) => {
+    const sessionId = session.context.session_id;
+    return {
+      id: sessionId,
+      label: aliases[sessionId] ?? session.title,
+      status: getEffectiveSessionStatus(statuses[sessionId], streams[sessionId]),
+      model: session.config.llm?.model ?? session.config.agent?.model ?? "unknown",
+      lastActivityAt: session.state.last_activity,
+      createdAt: session.state.created_at,
+    };
+  });
+
+  async function handleLogout() {
+    try {
+      await logoutUser();
+    } finally {
+      setConnection({
+        authToken: "",
+        authStatus: "unauthenticated",
+        authRole: "user",
+        authUsername: "web-user",
+        userId: "web-user",
+      });
+      navigate("/auth/login");
+    }
+  }
 
   return (
     <Sidebar
+      connection={connection}
       currentPath={location.pathname}
       isHomePage={location.pathname === "/"}
       onDeleteThread={async (sessionId) => {
@@ -53,7 +68,7 @@ export function SidebarContainer() {
         const model = models?.[0]?.id;
         const session = await createSession.mutateAsync({
           model,
-          approvalMode: defaultApprovalMode,
+          approvalMode: connection.defaultApprovalMode,
         });
         navigate(`/sessions/${session.context.session_id}`);
       }}
@@ -70,6 +85,7 @@ export function SidebarContainer() {
       threadCount={sessionsQuery.data?.length ?? 0}
       threadFilter={threadFilter}
       threads={threads}
+      onLogout={handleLogout}
     />
   );
 }

@@ -59,7 +59,6 @@ export function AdminPage() {
           {activeSection === "users" ? <AdminUsersSection /> : null}
           {activeSection === "sessions" ? (
             <AdminSessionsSection
-              connection={connection}
               sessionRows={sessionRows}
               sessionSearch={sessionSearch}
               setSessionSearch={setSessionSearch}

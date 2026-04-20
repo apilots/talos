@@ -3,12 +3,13 @@ use std::sync::Arc;
 
 use tokio::sync::{Mutex, RwLock};
 
-use talos_auth::JwtAuth;
+use talos_auth::{AuthService, UserService};
 use talos_gateway::Gateway;
 use talos_llm_provider::LlmProvider;
 use talos_types::talos::TalosMessageResponse;
 use talos_types::{ModelInfo, SessionService, TalosConfig};
 
+use super::access::ResourceAccessService;
 use super::lifecycle::ServerLifecycle;
 
 #[derive(Clone, Default)]
@@ -30,10 +31,11 @@ impl FileLockRegistry {
 #[derive(Clone)]
 pub(super) struct HttpApiState {
     pub(super) gateway: Arc<dyn Gateway>,
-    pub(super) session_service: Arc<dyn SessionService>,
+    pub(super) access_service: Arc<ResourceAccessService>,
     pub(super) base_config: TalosConfig,
     pub(super) llm_provider: Arc<dyn LlmProvider>,
-    pub(super) auth: Arc<JwtAuth>,
+    pub(super) auth_service: Arc<dyn AuthService>,
+    pub(super) user_service: Arc<dyn UserService>,
     pub(super) static_token: Option<String>,
     pub(super) auth_disabled: bool,
     pub(super) idempotency_cache: Arc<RwLock<HashMap<String, TalosMessageResponse>>>,
@@ -49,7 +51,9 @@ impl HttpApiState {
         session_service: Arc<dyn SessionService>,
         base_config: TalosConfig,
         llm_provider: Arc<dyn LlmProvider>,
-        jwt_secret: String,
+        auth_service: Arc<dyn AuthService>,
+        user_service: Arc<dyn UserService>,
+        _jwt_secret: String,
         static_token: Option<String>,
         auth_disabled: bool,
         models: Vec<ModelInfo>,
@@ -59,7 +63,9 @@ impl HttpApiState {
             session_service,
             base_config,
             llm_provider,
-            jwt_secret,
+            auth_service,
+            user_service,
+            _jwt_secret,
             static_token,
             auth_disabled,
             models,
@@ -72,18 +78,21 @@ impl HttpApiState {
         session_service: Arc<dyn SessionService>,
         base_config: TalosConfig,
         llm_provider: Arc<dyn LlmProvider>,
-        jwt_secret: String,
+        auth_service: Arc<dyn AuthService>,
+        user_service: Arc<dyn UserService>,
+        _jwt_secret: String,
         static_token: Option<String>,
         auth_disabled: bool,
         models: Vec<ModelInfo>,
         lifecycle: Arc<ServerLifecycle>,
     ) -> Self {
         Self {
+            access_service: Arc::new(ResourceAccessService::new(session_service.clone())),
             gateway,
-            session_service,
             base_config,
             llm_provider,
-            auth: Arc::new(JwtAuth::new(&jwt_secret)),
+            auth_service,
+            user_service,
             static_token,
             auth_disabled,
             idempotency_cache: Arc::new(RwLock::new(HashMap::new())),

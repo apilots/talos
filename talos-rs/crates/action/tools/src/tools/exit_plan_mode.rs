@@ -128,10 +128,13 @@ mod tests {
                 ..
             } => {
                 assert!(success);
-                assert_eq!(structured_content, Some(serde_json::json!({
-                    "mode": "default",
-                    "summary": "Planning finished"
-                })));
+                assert_eq!(
+                    structured_content,
+                    Some(serde_json::json!({
+                        "mode": "default",
+                        "summary": "Planning finished"
+                    }))
+                );
             }
             other => panic!("expected function payload, got {other:?}"),
         }

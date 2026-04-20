@@ -2,32 +2,44 @@
 
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createJSONStorage } from "zustand/middleware";
+import type { PropsWithChildren } from "react";
 
 import "@/shared/i18n/setup";
 import { useAppStore } from "@/shared/store/app-store";
 import { useAdminPage } from "./useAdminPage";
 
 vi.mock("@/features/chat", () => ({
-  useModelsQuery: () => ({
-    data: [{ id: "glm-5", name: "GLM-5", provider: "zhipu", context_window: 128000, max_tokens: 8192 }],
-  }),
-  useSessionsQuery: () => ({
-    data: [
+  listAdminSessions: () =>
+    Promise.resolve([
       {
         title: "Review frontend architecture",
+        owner_user_id: "owner-1",
         config: { llm: { model: "glm-5" } },
-        context: { session_id: "sess-1" },
+        context: { session_id: "sess-1", user_id: "source-1" },
         state: { last_activity: Date.now() - 1_000, created_at: Date.now() - 10_000 },
       },
       {
         title: "Fix admin layout",
+        owner_user_id: "owner-2",
         config: { llm: { model: "gpt-4.1" } },
-        context: { session_id: "sess-2" },
+        context: { session_id: "sess-2", user_id: "source-2" },
         state: { last_activity: Date.now() - 2_000, created_at: Date.now() - 20_000 },
       },
-    ],
+    ]),
+  useConnectionKey: () => "test-connection",
+  useModelsQuery: () => ({
+    data: [{ id: "glm-5", name: "GLM-5", provider: "zhipu", context_window: 128000, max_tokens: 8192 }],
   }),
+}));
+
+vi.mock("@/features/auth", () => ({
+  listUsers: () =>
+    Promise.resolve([
+      { user_id: "owner-1", username: "xujiang" },
+      { user_id: "owner-2", username: "admin" },
+    ]),
 }));
 
 vi.mock("@/features/connection", () => ({
@@ -43,6 +55,20 @@ vi.mock("@/features/connection", () => ({
 }));
 
 describe("useAdminPage", () => {
+  function createWrapper() {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+        },
+      },
+    });
+
+    return function Wrapper({ children }: PropsWithChildren) {
+      return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+    };
+  }
+
   beforeEach(() => {
     const storage = new Map<string, string>();
     useAppStore.persist.setOptions({
@@ -63,7 +89,7 @@ describe("useAdminPage", () => {
   });
 
   it("derives localized metrics from the current queries", async () => {
-    const { result } = renderHook(() => useAdminPage());
+    const { result } = renderHook(() => useAdminPage(), { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(result.current.metrics).toHaveLength(4);
@@ -73,13 +99,13 @@ describe("useAdminPage", () => {
   });
 
   it("filters session rows by search query", async () => {
-    const { result } = renderHook(() => useAdminPage());
+    const { result } = renderHook(() => useAdminPage(), { wrapper: createWrapper() });
 
     result.current.setSessionSearch("frontend");
 
     await waitFor(() => {
       expect(result.current.sessionRows).toHaveLength(1);
-      expect(result.current.sessionRows[0]?.context.session_id).toBe("sess-1");
+      expect(result.current.sessionRows[0]?.session.context.session_id).toBe("sess-1");
     });
   });
 });

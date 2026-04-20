@@ -114,6 +114,12 @@ text = text.replace('planner_selection: "auto"', 'planner_selection: "static"', 
 if os.environ.get("BAILIAN_API_KEY", "").strip():
     text = text.replace('provider: "anthropic"', 'provider: "bailian"', 1)
 
+if os.environ.get("TALOS_TEST_ENABLE_JWT_AUTH", "").strip() == "1":
+    text = text.replace('token: "talos-local-test-token"', 'token: ~', 1)
+    text = text.replace('jwt_secret: ${JWT_SECRET}', 'jwt_secret: "talos-test-jwt-secret"', 1)
+    text = text.replace('auth: false', 'auth: true', 1)
+    text = text.replace('allow_register: true', 'allow_register: true', 1)
+
 config_path.write_text(text)
 PY
 }
@@ -246,13 +252,31 @@ log_case_json() {
   local case_name="$1"
   local request_payload="${2:-}"
   local response_payload="${3:-}"
-  CASE_NAME="$case_name" REQUEST_JSON="$request_payload" RESPONSE_JSON="$response_payload" python3 - <<'PY'
+  local request_file
+  local response_file
+  request_file="$(mktemp)"
+  response_file="$(mktemp)"
+  printf '%s' "${request_payload}" > "${request_file}"
+  printf '%s' "${response_payload}" > "${response_file}"
+  CASE_NAME="$case_name" REQUEST_JSON_FILE="${request_file}" RESPONSE_JSON_FILE="${response_file}" python3 - <<'PY'
 import json
 import os
 
 case_name = os.environ.get("CASE_NAME", "")
-request_raw = os.environ.get("REQUEST_JSON", "")
-response_raw = os.environ.get("RESPONSE_JSON", "")
+request_file = os.environ.get("REQUEST_JSON_FILE", "")
+response_file = os.environ.get("RESPONSE_JSON_FILE", "")
+
+def load_text(path: str) -> str:
+    if not path:
+        return ""
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return handle.read()
+    except Exception:
+        return ""
+
+request_raw = load_text(request_file)
+response_raw = load_text(response_file)
 
 def parse_json(raw: str):
     if not raw:
@@ -269,4 +293,5 @@ record = {
 }
 print("DETAIL_JSON " + json.dumps(record, ensure_ascii=False))
 PY
+  rm -f "${request_file}" "${response_file}"
 }

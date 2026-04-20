@@ -560,6 +560,7 @@ impl SessionManager {
         &self,
         name: String,
         directory: PathBuf,
+        owner_user_id: String,
     ) -> TalosResult<ProjectRecord> {
         if !directory.is_absolute() {
             return Err(TalosError::ValidationError(format!(
@@ -579,7 +580,9 @@ impl SessionManager {
                 directory.display()
             )));
         }
-        self.session_store.create_project(&name, &directory).await
+        self.session_store
+            .create_project_for_owner(&name, &directory, &owner_user_id)
+            .await
     }
 
     pub(super) async fn patch_project(

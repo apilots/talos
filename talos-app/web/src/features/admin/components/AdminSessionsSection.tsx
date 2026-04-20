@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import type { AdminPageState } from "../hooks/useAdminPage";
@@ -8,15 +9,41 @@ import { Input } from "@/shared/ui/Input";
 import { Panel } from "@/shared/ui/Panel";
 
 export function AdminSessionsSection({
-  connection,
   sessionRows,
   sessionSearch,
   setSessionSearch,
 }: Pick<
   AdminPageState,
-  "connection" | "sessionRows" | "sessionSearch" | "setSessionSearch"
+  "sessionRows" | "sessionSearch" | "setSessionSearch"
 >) {
   const { t } = useTranslation("admin");
+  const navigate = useNavigate();
+
+  function sessionTone(status: "running" | "waiting_approval" | "done" | "error") {
+    if (status === "running") {
+      return "success";
+    }
+    if (status === "waiting_approval") {
+      return "warning";
+    }
+    if (status === "error") {
+      return "danger";
+    }
+    return "default";
+  }
+
+  function sessionLabel(status: "running" | "waiting_approval" | "done" | "error") {
+    if (status === "waiting_approval") {
+      return t("states.needsApproval");
+    }
+    if (status === "error") {
+      return t("states.rejected");
+    }
+    if (status === "done") {
+      return t("states.done");
+    }
+    return t("states.running");
+  }
 
   return (
     <Panel className="rounded-[1.4rem] border-border/80 bg-card/82 p-5">
@@ -33,24 +60,41 @@ export function AdminSessionsSection({
         />
       </div>
       <div className="space-y-3">
-        {sessionRows.map((session) => (
+        <div className="grid grid-cols-[110px_minmax(0,1fr)_150px_96px_132px] gap-4 px-4 text-xs uppercase tracking-[0.16em] text-muted">
+          <div>{t("sessionsPanel.status")}</div>
+          <div>{t("sessionsPanel.session")}</div>
+          <div>{t("sessionsPanel.owner")}</div>
+          <div className="text-right">{t("sessionsPanel.actions")}</div>
+          <div>{t("sessionsPanel.updated")}</div>
+        </div>
+        {sessionRows.map((row) => (
           <div
-            className="grid grid-cols-[84px_minmax(0,1fr)_120px_110px_120px] items-center gap-4 rounded-[1.2rem] border border-border/80 bg-background/45 px-4 py-4"
-            key={session.context.session_id}
+            className="grid grid-cols-[110px_minmax(0,1fr)_150px_96px_132px] items-center gap-4 rounded-[1.2rem] border border-border/80 bg-background/45 px-4 py-4"
+            key={row.session.context.session_id}
           >
-            <Badge tone="success">{t("states.running")}</Badge>
+            <Badge tone={sessionTone(row.status)}>{sessionLabel(row.status)}</Badge>
             <div className="min-w-0">
-              <div className="truncate text-sm font-medium text-ink">{session.title}</div>
-              <div className="mt-1 truncate text-xs text-muted">{session.context.session_id}</div>
+              <div className="truncate text-sm font-medium text-ink">{row.label}</div>
+              <div className="mt-1 truncate text-xs text-muted">{row.session.context.session_id}</div>
             </div>
-            <div className="text-sm text-muted">{connection.userId}</div>
-            <div className="text-sm text-muted">{formatRelativeTime(session.state.last_activity)}</div>
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost">{t("sessionsPanel.view")}</Button>
-              <Button variant="danger">{t("sessionsPanel.stop")}</Button>
+            <div className="min-w-0 text-sm text-muted">{row.ownerLabel}</div>
+            <div className="flex justify-end">
+              <Button
+                onClick={() => navigate(`/sessions/${row.session.context.session_id}`)}
+                type="button"
+                variant="ghost"
+              >
+                {t("sessionsPanel.view")}
+              </Button>
             </div>
+            <div className="text-sm text-muted">{formatRelativeTime(row.session.state.last_activity)}</div>
           </div>
         ))}
+        {sessionRows.length === 0 ? (
+          <div className="rounded-[1.2rem] border border-dashed border-border/80 px-4 py-8 text-sm text-muted">
+            {t("sessionsPanel.empty")}
+          </div>
+        ) : null}
       </div>
     </Panel>
   );

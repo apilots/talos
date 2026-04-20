@@ -11,6 +11,7 @@ serde_json = "1.0"
 reqwest = { version = "0.11", features = ["json", "stream"] }
 futures-util = "0.3"
 talos-types = { path = "../../crates/common/types" }
+talos-auth = { workspace = true }
 talos-error = { path = "../../crates/infra/error" }
 
 [dev-dependencies]

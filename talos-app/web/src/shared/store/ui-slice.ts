@@ -18,6 +18,7 @@ export interface UiSlice {
   setActiveProjectId: (projectId: string) => void;
   addProject: (project: ProjectRecord) => void;
   mergeProjects: (projects: ProjectRecord[], preferredProjectId?: string) => void;
+  replaceProjects: (projects: ProjectRecord[], preferredProjectId?: string) => void;
 }
 
 export type UiSliceSetter = (updater: (state: UiSlice) => Partial<UiSlice>) => void;
@@ -68,6 +69,24 @@ export function mergeById<T extends { id: string }>(defaults: T[], persisted?: T
 }
 
 export function createUiSlice(set: UiSliceSetter): UiSlice {
+  function resolveActiveProjectId(
+    projects: ProjectRecord[],
+    currentProjectId: string,
+    preferredProjectId?: string,
+  ) {
+    const activeProjectExists = projects.some((project) => project.id === currentProjectId);
+    const shouldFollowPreferred =
+      !activeProjectExists || currentProjectId === defaultProjects[0].id;
+
+    if (shouldFollowPreferred && preferredProjectId) {
+      return preferredProjectId;
+    }
+    if (activeProjectExists) {
+      return currentProjectId;
+    }
+    return projects[0]?.id ?? defaultProjects[0].id;
+  }
+
   return {
     uiTheme: "light",
     locale: "en",
@@ -88,17 +107,25 @@ export function createUiSlice(set: UiSliceSetter): UiSlice {
     mergeProjects: (projects, preferredProjectId) =>
       set((state) => {
         const merged = normalizeProjects([...state.projects, ...projects]);
-        const activeProjectExists = merged.some((project) => project.id === state.activeProjectId);
-        const shouldFollowPreferred =
-          !activeProjectExists || state.activeProjectId === defaultProjects[0].id;
         return {
           projects: merged,
-          activeProjectId:
-            shouldFollowPreferred && preferredProjectId
-              ? preferredProjectId
-              : activeProjectExists
-                ? state.activeProjectId
-                : merged[0]?.id ?? defaultProjects[0].id,
+          activeProjectId: resolveActiveProjectId(
+            merged,
+            state.activeProjectId,
+            preferredProjectId,
+          ),
+        };
+      }),
+    replaceProjects: (projects, preferredProjectId) =>
+      set((state) => {
+        const normalized = normalizeProjects(projects);
+        return {
+          projects: normalized,
+          activeProjectId: resolveActiveProjectId(
+            normalized,
+            state.activeProjectId,
+            preferredProjectId,
+          ),
         };
       }),
   };

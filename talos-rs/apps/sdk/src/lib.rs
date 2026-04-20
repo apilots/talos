@@ -10,6 +10,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use tokio::sync::mpsc;
 
+pub use talos_auth::{AuthResponse, LoginRequest, RegisterRequest, UserRole};
 use talos_error::{TalosError, TalosResult};
 pub use talos_types::talos::{
     StopReason, TalosContentItem, TalosContext, TalosEvent, TalosEventPayload, TalosEventType,
@@ -169,6 +170,56 @@ impl TalosClient {
         Self::new(ClientConfig::default())
     }
 
+    pub fn gateway_url(&self) -> &str {
+        &self.config.gateway_url
+    }
+
+    pub fn auth_token(&self) -> Option<&str> {
+        self.config.auth_token.as_deref()
+    }
+
+    pub fn set_auth_token(&mut self, auth_token: Option<String>) {
+        self.config.auth_token = auth_token;
+    }
+
+    pub async fn auth_register(&self, request: &RegisterRequest) -> TalosResult<AuthResponse> {
+        let url = format!("{}/v1/auth/register", self.config.gateway_url);
+        let response = self
+            .http_client
+            .post(&url)
+            .json(request)
+            .send()
+            .await
+            .map_err(|e| Self::request_error("POST", &url, e))?;
+        Self::decode_json(response, "POST", &url).await
+    }
+
+    pub async fn auth_login(&self, request: &LoginRequest) -> TalosResult<AuthResponse> {
+        let url = format!("{}/v1/auth/login", self.config.gateway_url);
+        let response = self
+            .http_client
+            .post(&url)
+            .json(request)
+            .send()
+            .await
+            .map_err(|e| Self::request_error("POST", &url, e))?;
+        Self::decode_json(response, "POST", &url).await
+    }
+
+    pub async fn auth_logout(&self) -> TalosResult<()> {
+        let url = format!("{}/v1/auth/logout", self.config.gateway_url);
+        let response = self
+            .authorized(self.http_client.post(&url))
+            .send()
+            .await
+            .map_err(|e| Self::request_error("POST", &url, e))?;
+
+        if !response.status().is_success() {
+            return Err(Self::http_error(response, "POST", &url).await);
+        }
+        Ok(())
+    }
+
     pub async fn list_models(&self) -> TalosResult<Vec<ModelInfo>> {
         let url = format!("{}/v1/models", self.config.gateway_url);
         let response = self
@@ -226,6 +277,7 @@ impl TalosClient {
             channel_id: None,
             provider: None,
             project_id: Some(project_id.to_string()),
+            owner_user_id: None,
         })
         .await
     }

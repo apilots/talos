@@ -236,6 +236,7 @@ impl talos_session_store::SessionStore for TitleTestSessionStore {
         let record = SessionRecord {
             id: "created-session".to_string(),
             title: DEFAULT_SESSION_TITLE.to_string(),
+            owner_user_id: context.user_id.clone(),
             context: context.clone(),
             model: requested_model.unwrap_or(default_model).to_string(),
             created_at: 0,
@@ -386,9 +387,19 @@ impl talos_session_store::SessionStore for TitleTestSessionStore {
         name: &str,
         directory: &std::path::PathBuf,
     ) -> TalosResult<ProjectRecord> {
+        self.create_project_for_owner(name, directory, "").await
+    }
+
+    async fn create_project_for_owner(
+        &self,
+        name: &str,
+        directory: &std::path::PathBuf,
+        owner_user_id: &str,
+    ) -> TalosResult<ProjectRecord> {
         Ok(ProjectRecord {
             project_id: "project-test".to_string(),
             name: name.to_string(),
+            owner_user_id: owner_user_id.to_string(),
             directory: directory.clone(),
             created_at: 0,
             updated_at: 0,
@@ -727,6 +738,7 @@ async fn test_compact_session_routes_to_session_agent_and_records_usage() {
     let session_record = SessionRecord {
         id: "session-compact".to_string(),
         title: DEFAULT_SESSION_TITLE.to_string(),
+        owner_user_id: "user-1".to_string(),
         context: TalosContext {
             source_type: TalosSourceType::Im,
             provider: TalosProvider::Telegram,
@@ -778,6 +790,7 @@ async fn test_clear_session_routes_to_session_agent_and_resets_session_state() {
     let session_record = SessionRecord {
         id: "session-clear".to_string(),
         title: "Old Title".to_string(),
+        owner_user_id: "user-1".to_string(),
         context: TalosContext {
             source_type: TalosSourceType::Im,
             provider: TalosProvider::Telegram,
@@ -833,6 +846,7 @@ async fn test_delete_session_clears_agent_state_and_removes_record() {
     let session_record = SessionRecord {
         id: "session-delete".to_string(),
         title: "Delete Me".to_string(),
+        owner_user_id: "user-1".to_string(),
         context: TalosContext {
             source_type: TalosSourceType::Im,
             provider: TalosProvider::Telegram,
@@ -886,6 +900,7 @@ async fn test_delete_session_rejects_active_turn() {
     let session_record = SessionRecord {
         id: "session-busy".to_string(),
         title: DEFAULT_SESSION_TITLE.to_string(),
+        owner_user_id: "user-1".to_string(),
         context: TalosContext {
             source_type: TalosSourceType::Im,
             provider: TalosProvider::Telegram,
@@ -930,6 +945,7 @@ async fn test_delete_session_rejects_pending_memory_flush() {
     let session_record = SessionRecord {
         id: "session-flushing".to_string(),
         title: DEFAULT_SESSION_TITLE.to_string(),
+        owner_user_id: "user-1".to_string(),
         context: TalosContext {
             source_type: TalosSourceType::Im,
             provider: TalosProvider::Telegram,
@@ -974,6 +990,7 @@ async fn test_first_turn_assigns_deterministic_session_title() {
     let session_record = SessionRecord {
         id: "session-1".to_string(),
         title: DEFAULT_SESSION_TITLE.to_string(),
+        owner_user_id: "user-1".to_string(),
         context: TalosContext {
             source_type: TalosSourceType::Im,
             provider: TalosProvider::Telegram,
@@ -1039,6 +1056,7 @@ async fn test_cancel_active_turn_routes_to_session_agent_and_is_noop_safe() {
     let session_record = SessionRecord {
         id: "session-cancel".to_string(),
         title: DEFAULT_SESSION_TITLE.to_string(),
+        owner_user_id: "user-1".to_string(),
         context: TalosContext {
             source_type: TalosSourceType::Im,
             provider: TalosProvider::Telegram,
@@ -1223,6 +1241,7 @@ async fn test_remote_session_ignores_current_directory_patch_for_root_resolution
     let session_store = Arc::new(TitleTestSessionStore::new(SessionRecord {
         id: "session-1".to_string(),
         title: DEFAULT_SESSION_TITLE.to_string(),
+        owner_user_id: "user-1".to_string(),
         context: TalosContext::new(
             TalosSourceType::Cli,
             TalosProvider::Cli,

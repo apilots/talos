@@ -12,9 +12,7 @@ use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, Role, Usage,
 };
 use talos_memory::{Memory, TalosTurn};
-use talos_tools::{
-    ReadTool, Tool, ToolContext, ToolOutputPayload, ToolRegistry, WebSearchTool,
-};
+use talos_tools::{ReadTool, Tool, ToolContext, ToolOutputPayload, ToolRegistry, WebSearchTool};
 use talos_tools_policy::ToolPolicy;
 use talos_types::talos::{
     StopReason as TalosStopReason, TalosInputItem, TalosOutputItem, TalosProvider, TalosSourceType,

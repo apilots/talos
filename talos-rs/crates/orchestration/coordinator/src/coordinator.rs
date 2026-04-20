@@ -540,8 +540,11 @@ impl SessionService for CoordinatorImpl {
         &self,
         name: String,
         directory: std::path::PathBuf,
+        owner_user_id: String,
     ) -> TalosResult<ProjectRecord> {
-        self.sessions.create_project(name, directory).await
+        self.sessions
+            .create_project(name, directory, owner_user_id)
+            .await
     }
 
     async fn patch_project(

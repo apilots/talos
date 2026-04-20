@@ -1,3 +1,5 @@
+mod access;
+mod admin_users;
 mod auth;
 mod errors;
 mod file_support;
@@ -8,6 +10,7 @@ mod misc;
 mod projects;
 mod sessions;
 mod state;
+mod user_profile;
 mod workspace_docs;
 
 use std::sync::Arc;
@@ -19,6 +22,10 @@ use tokio_util::sync::CancellationToken;
 use tower_http::cors::CorsLayer;
 use tracing::{error, info};
 
+use self::admin_users::{
+    create_admin_user_handler, delete_admin_user_handler, list_admin_projects_handler,
+    list_admin_sessions_handler, list_admin_users_handler, patch_admin_user_handler,
+};
 use self::auth::{auth_middleware, lifecycle_gate_middleware};
 pub use self::lifecycle::{ServerLifecycle, ServerLifecycleState};
 use self::memory_files::{
@@ -39,21 +46,25 @@ use self::sessions::{
     get_session_turns_handler, list_sessions_handler, patch_session_handler,
 };
 use self::state::HttpApiState;
+use self::user_profile::{
+    current_user_handler, login_handler, logout_handler, patch_current_user_handler,
+    register_handler,
+};
 use self::workspace_docs::{
     get_workspace_doc_handler, list_workspace_docs_handler, put_workspace_doc_handler,
 };
+use talos_auth::{AuthService, UserService};
 use talos_error::TalosResult;
 use talos_gateway::Gateway;
 use talos_llm_provider::LlmProvider;
 use talos_types::{ModelInfo, SessionService, TalosConfig};
 
-const DEFAULT_SCOPE_MESSAGES_WRITE: &str = "messages:write";
-const DEFAULT_SCOPE_SESSIONS_WRITE: &str = "sessions:write";
-
 /// HTTP Server for the Talos Gateway.
 pub struct HttpServer {
     gateway: Arc<dyn Gateway>,
     session_service: Arc<dyn SessionService>,
+    auth_service: Arc<dyn AuthService>,
+    user_service: Arc<dyn UserService>,
     base_config: TalosConfig,
     llm_provider: Arc<dyn LlmProvider>,
     host: String,
@@ -70,6 +81,8 @@ impl HttpServer {
     pub fn new(
         gateway: Arc<dyn Gateway>,
         session_service: Arc<dyn SessionService>,
+        auth_service: Arc<dyn AuthService>,
+        user_service: Arc<dyn UserService>,
         base_config: TalosConfig,
         llm_provider: Arc<dyn LlmProvider>,
         host: impl Into<String>,
@@ -80,6 +93,8 @@ impl HttpServer {
         Self {
             gateway,
             session_service,
+            auth_service,
+            user_service,
             base_config,
             llm_provider,
             host: host.into(),
@@ -135,6 +150,8 @@ impl HttpServer {
             self.session_service.clone(),
             self.base_config.clone(),
             self.llm_provider.clone(),
+            self.auth_service.clone(),
+            self.user_service.clone(),
             self.jwt_secret.clone(),
             self.static_token.clone(),
             self.auth_disabled,
@@ -144,7 +161,24 @@ impl HttpServer {
 
         let app = Router::new()
             .route("/health", get(health_handler))
+            .route("/v1/auth/register", post(register_handler))
+            .route("/v1/auth/login", post(login_handler))
             .route("/v1/models", get(list_models_handler))
+            .route("/v1/auth/logout", post(logout_handler))
+            .route(
+                "/v1/user",
+                get(current_user_handler).patch(patch_current_user_handler),
+            )
+            .route(
+                "/v1/admin/users",
+                get(list_admin_users_handler).post(create_admin_user_handler),
+            )
+            .route(
+                "/v1/admin/users/:user_id",
+                axum::routing::patch(patch_admin_user_handler).delete(delete_admin_user_handler),
+            )
+            .route("/v1/admin/sessions", get(list_admin_sessions_handler))
+            .route("/v1/admin/projects", get(list_admin_projects_handler))
             .route(
                 "/v1/sessions",
                 get(list_sessions_handler).post(create_session_handler),

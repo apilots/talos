@@ -6,6 +6,7 @@ export {
   createSession,
   getSession,
   getSessionTurns,
+  listAdminSessions,
   listModels,
   listSessionsByProject,
   listSessions,

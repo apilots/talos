@@ -33,6 +33,64 @@ export interface TalosContext {
   environment?: TalosSessionEnvironment | null;
 }
 
+export type UserRole = "user" | "admin";
+
+export interface Capabilities {
+  is_admin: boolean;
+  role: UserRole;
+  scopes: string[];
+}
+
+export interface UserDto {
+  user_id: string;
+  username: string;
+  email?: string | null;
+  role: UserRole;
+  disabled: boolean;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface AuthResponse {
+  access_token: string;
+  token_type: string;
+  expires_at: number;
+  user: UserDto;
+  capabilities: Capabilities;
+}
+
+export interface RegisterRequest {
+  username: string;
+  password: string;
+  email?: string | null;
+}
+
+export interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+export interface UpdateCurrentUserRequest {
+  username?: string;
+  email?: string | null;
+}
+
+export interface AdminCreateUserRequest {
+  username: string;
+  password: string;
+  email?: string | null;
+  role: UserRole;
+  disabled?: boolean;
+}
+
+export interface AdminPatchUserRequest {
+  username?: string;
+  email?: string | null;
+  password?: string;
+  role?: UserRole;
+  disabled?: boolean;
+}
+
 export interface TalosUsage {
   input_tokens: number;
   output_tokens: number;
@@ -304,6 +362,7 @@ export interface SessionRecord {
 
 export interface TalosSession {
   title: string;
+  owner_user_id?: string;
   context: {
     session_id: string;
     workspace_id?: string | null;
@@ -335,6 +394,7 @@ export interface TalosSession {
 
 export interface SessionQuery {
   user_id?: string;
+  owner_user_id?: string;
   channel_id?: string;
   provider?: string;
   project_id?: string;
@@ -371,6 +431,7 @@ export interface SessionUpdate {
 
 export interface ProjectRecord {
   project_id: string;
+  owner_user_id?: string;
   name: string;
   directory: string;
   created_at: number;

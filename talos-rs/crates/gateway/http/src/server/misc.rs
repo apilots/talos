@@ -6,8 +6,7 @@ use axum::response::Json;
 use serde_json::{json, Value};
 use tokio::signal;
 
-use talos_auth::{AuthResult, TokenType};
-use talos_types::talos::{TalosContext, TalosEventType, TalosInputItem};
+use talos_types::talos::{TalosEventType, TalosInputItem};
 
 use super::errors::ApiError;
 use super::state::HttpApiState;
@@ -59,67 +58,6 @@ pub(super) fn validate_model_supported(state: &HttpApiState, model: &str) -> Res
         "invalid_request",
         format!("unsupported model: {}", model),
     ))
-}
-
-pub(super) fn validate_auth_context(
-    auth: &AuthResult,
-    context: &TalosContext,
-    required_scope: &str,
-) -> Result<(), ApiError> {
-    match auth.token_type {
-        TokenType::User => {
-            if auth.user_id != context.user_id {
-                return Err(ApiError::new(
-                    StatusCode::FORBIDDEN,
-                    "forbidden",
-                    "user token mismatch",
-                ));
-            }
-            Ok(())
-        }
-        TokenType::Service => {
-            if let Some(act_as) = &auth.act_as {
-                if act_as != "*" && act_as != &context.user_id {
-                    return Err(ApiError::new(
-                        StatusCode::FORBIDDEN,
-                        "forbidden",
-                        "act_as mismatch",
-                    ));
-                }
-            } else {
-                return Err(ApiError::new(
-                    StatusCode::FORBIDDEN,
-                    "forbidden",
-                    "service token requires act_as",
-                ));
-            }
-
-            if !auth.allowed_channels.is_empty()
-                && !auth
-                    .allowed_channels
-                    .iter()
-                    .any(|v| v == "*" || context.channel_id.as_deref() == Some(v.as_str()))
-            {
-                return Err(ApiError::new(
-                    StatusCode::FORBIDDEN,
-                    "forbidden",
-                    "channel not allowed",
-                ));
-            }
-
-            if !auth.scopes.is_empty()
-                && !auth.scopes.iter().any(|v| v == "*" || v == required_scope)
-            {
-                return Err(ApiError::new(
-                    StatusCode::FORBIDDEN,
-                    "forbidden",
-                    "scope not allowed",
-                ));
-            }
-
-            Ok(())
-        }
-    }
 }
 
 pub(super) fn talos_event_name(event_type: &TalosEventType) -> &'static str {

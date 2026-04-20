@@ -114,6 +114,7 @@ else
     "${SCENARIO_ROOT}/01_health_and_models.sh"
     "${SCENARIO_ROOT}/02_session_lifecycle.sh"
     "${SCENARIO_ROOT}/03_messages_http_sse.sh"
+    "${SCENARIO_ROOT}/04_auth.sh"
   )
   append_lines_to_array < <(collect_group_cases "05_cli")
   append_lines_to_array < <(collect_group_cases "06_tools")

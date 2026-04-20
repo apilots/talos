@@ -216,14 +216,13 @@ mod tests {
             .execute_payload(serde_json::json!({ "query": "friday" }), context)
             .await
             .expect("tool should execute");
-        let response: MemorySearchResponse =
-            serde_json::from_value(match output {
-                ToolOutputPayload::Function { structured_content, .. } => {
-                    structured_content.expect("structured output should exist")
-                }
-                _ => panic!("expected function payload"),
-            })
-            .expect("response should deserialize");
+        let response: MemorySearchResponse = serde_json::from_value(match output {
+            ToolOutputPayload::Function {
+                structured_content, ..
+            } => structured_content.expect("structured output should exist"),
+            _ => panic!("expected function payload"),
+        })
+        .expect("response should deserialize");
 
         assert_eq!(response.results.len(), 1);
         assert_eq!(response.results[0].path, "memory/2026-03-25.md");
@@ -275,14 +274,13 @@ mod tests {
             )
             .await
             .expect("tool should execute");
-        let response: MemorySearchResponse =
-            serde_json::from_value(match output {
-                ToolOutputPayload::Function { structured_content, .. } => {
-                    structured_content.expect("structured output should exist")
-                }
-                _ => panic!("expected function payload"),
-            })
-            .expect("response should deserialize");
+        let response: MemorySearchResponse = serde_json::from_value(match output {
+            ToolOutputPayload::Function {
+                structured_content, ..
+            } => structured_content.expect("structured output should exist"),
+            _ => panic!("expected function payload"),
+        })
+        .expect("response should deserialize");
 
         assert_eq!(response.results.len(), 2);
     }
@@ -337,14 +335,13 @@ mod tests {
             .execute_payload(serde_json::json!({ "query": "tea" }), context)
             .await
             .expect("tool should execute");
-        let response: MemorySearchResponse =
-            serde_json::from_value(match output {
-                ToolOutputPayload::Function { structured_content, .. } => {
-                    structured_content.expect("structured output should exist")
-                }
-                _ => panic!("expected function payload"),
-            })
-            .expect("response should deserialize");
+        let response: MemorySearchResponse = serde_json::from_value(match output {
+            ToolOutputPayload::Function {
+                structured_content, ..
+            } => structured_content.expect("structured output should exist"),
+            _ => panic!("expected function payload"),
+        })
+        .expect("response should deserialize");
 
         assert_eq!(response.results.len(), 1);
         assert_eq!(response.results[0].path, expected_memory_path);

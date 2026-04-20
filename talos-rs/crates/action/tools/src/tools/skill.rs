@@ -140,8 +140,7 @@ mod tests {
             .await
             .expect("skill tool should succeed");
         let ToolOutputPayload::Function {
-            structured_content,
-            ..
+            structured_content, ..
         } = result
         else {
             panic!("expected function payload");

@@ -10,19 +10,19 @@ use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tracing::error;
 use uuid::Uuid;
 
-use talos_auth::AuthResult;
+use talos_auth::RequestIdentity;
 use talos_gateway::GatewayRequest;
 use talos_types::talos::{
     TalosContext, TalosMessageRequest, TalosMessageResponse, TalosOutputItem,
 };
 
 use super::errors::ApiError;
-use super::misc::{talos_event_name, validate_auth_context, validate_text_input};
+use super::misc::{talos_event_name, validate_text_input};
 use super::state::HttpApiState;
 
 pub(super) async fn session_message_handler(
     State(state): State<Arc<HttpApiState>>,
-    auth: axum::extract::Extension<AuthResult>,
+    actor: axum::extract::Extension<RequestIdentity>,
     headers: HeaderMap,
     Path(session_id): Path<String>,
     Json(request): Json<TalosMessageRequest>,
@@ -30,37 +30,24 @@ pub(super) async fn session_message_handler(
     let stream = request.stream.unwrap_or(false);
 
     if stream {
-        return stream_session_message(state, auth.0, session_id, request).await;
+        return stream_session_message(state, actor.0, session_id, request).await;
     }
 
-    let response = process_session_message(state, auth.0, headers, session_id, request).await?;
+    let response = process_session_message(state, actor.0, headers, session_id, request).await?;
     Ok(Json(response).into_response())
 }
 
 pub(super) async fn stream_session_message(
     state: Arc<HttpApiState>,
-    auth: AuthResult,
+    actor: RequestIdentity,
     session_id: String,
     request: TalosMessageRequest,
 ) -> Result<Response, ApiError> {
-    let Some(session) = state
-        .session_service
-        .get_session(&session_id)
+    let session = state
+        .access_service
+        .get_session(&actor, &session_id)
         .await
-        .map_err(|e| {
-            ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "internal_error",
-                e.to_string(),
-            )
-        })?
-    else {
-        return Err(ApiError::new(
-            StatusCode::NOT_FOUND,
-            "invalid_request",
-            "session not found",
-        ));
-    };
+        .map_err(map_session_message_error)?;
 
     let context = TalosContext {
         source_type: session.context.source_type.clone(),
@@ -73,7 +60,6 @@ pub(super) async fn stream_session_message(
         project_root: session.context.project_root.clone(),
         environment: session.context.environment.clone(),
     };
-    validate_auth_context(&auth, &context, super::DEFAULT_SCOPE_MESSAGES_WRITE)?;
     validate_text_input(&request.input)?;
     let gateway_request = GatewayRequest {
         session_id: session_id.clone(),
@@ -116,29 +102,16 @@ pub(super) async fn stream_session_message(
 
 pub(super) async fn process_session_message(
     state: Arc<HttpApiState>,
-    auth: AuthResult,
+    actor: RequestIdentity,
     headers: HeaderMap,
     session_id: String,
     request: TalosMessageRequest,
 ) -> Result<TalosMessageResponse, ApiError> {
-    let Some(session) = state
-        .session_service
-        .get_session(&session_id)
+    let session = state
+        .access_service
+        .get_session(&actor, &session_id)
         .await
-        .map_err(|e| {
-            ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "internal_error",
-                e.to_string(),
-            )
-        })?
-    else {
-        return Err(ApiError::new(
-            StatusCode::NOT_FOUND,
-            "invalid_request",
-            "session not found",
-        ));
-    };
+        .map_err(map_session_message_error)?;
 
     let context = TalosContext {
         source_type: session.context.source_type.clone(),
@@ -151,7 +124,6 @@ pub(super) async fn process_session_message(
         project_root: session.context.project_root.clone(),
         environment: session.context.environment.clone(),
     };
-    validate_auth_context(&auth, &context, super::DEFAULT_SCOPE_MESSAGES_WRITE)?;
     let idempotency_key = headers
         .get("Idempotency-Key")
         .and_then(|v| v.to_str().ok())
@@ -232,12 +204,14 @@ pub(super) struct DynamicToolResultRequest {
 
 pub(super) async fn submit_tool_approval_handler(
     State(state): State<Arc<HttpApiState>>,
+    actor: axum::extract::Extension<RequestIdentity>,
     Path(session_id): Path<String>,
     Json(body): Json<ToolApprovalRequest>,
 ) -> impl IntoResponse {
     match state
-        .session_service
+        .access_service
         .submit_tool_approval(
+            &actor.0,
             &session_id,
             &body.call_id,
             &body.tool_name,
@@ -258,12 +232,14 @@ pub(super) async fn submit_tool_approval_handler(
 
 pub(super) async fn submit_dynamic_tool_result_handler(
     State(state): State<Arc<HttpApiState>>,
+    actor: axum::extract::Extension<RequestIdentity>,
     Path(session_id): Path<String>,
     Json(body): Json<DynamicToolResultRequest>,
 ) -> impl IntoResponse {
     match state
-        .session_service
+        .access_service
         .submit_dynamic_tool_result(
+            &actor.0,
             &session_id,
             &body.call_id,
             &body.tool_name,
@@ -279,5 +255,20 @@ pub(super) async fn submit_dynamic_tool_result_handler(
             e.to_string(),
         )
         .into_response(),
+    }
+}
+
+fn map_session_message_error(error: talos_error::TalosError) -> ApiError {
+    match error {
+        talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
+            StatusCode::NOT_FOUND,
+            "invalid_request",
+            "session not found",
+        ),
+        other => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            other.to_string(),
+        ),
     }
 }

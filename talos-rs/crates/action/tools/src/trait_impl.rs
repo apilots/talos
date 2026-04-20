@@ -59,7 +59,10 @@ mod tests {
                 ..
             } => {
                 assert!(success);
-                assert_eq!(structured_content, Some(serde_json::json!({"result": "hello world"})));
+                assert_eq!(
+                    structured_content,
+                    Some(serde_json::json!({"result": "hello world"}))
+                );
             }
             other => panic!("expected function payload, got {other:?}"),
         }

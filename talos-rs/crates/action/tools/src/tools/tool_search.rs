@@ -168,8 +168,7 @@ mod tests {
             .await
             .expect("tool_search should succeed");
         let ToolOutputPayload::Function {
-            structured_content,
-            ..
+            structured_content, ..
         } = result
         else {
             panic!("expected function payload");
@@ -180,9 +179,7 @@ mod tests {
             .and_then(|value| value.as_array())
             .expect("structured tool search response should expose matches");
         assert_eq!(matches.len(), 1);
-        let matched_tool = matches[0]
-            .as_object()
-            .expect("tool item should be object");
+        let matched_tool = matches[0].as_object().expect("tool item should be object");
         assert_eq!(matched_tool["public_name"], "WebSearch");
         assert_eq!(
             context.deferred_tool_state().list(),

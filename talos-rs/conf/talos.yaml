@@ -6,6 +6,8 @@ gateway:
   token: "talos-local-test-token"
   jwt_secret: ${JWT_SECRET}
   auth: false
+  access_token_ttl_days: 30
+  allow_register: true
 
 agent:
   name: "talos"

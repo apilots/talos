@@ -118,10 +118,13 @@ mod tests {
                 ..
             } => {
                 assert!(success);
-                assert_eq!(structured_content, Some(serde_json::json!({
-                    "mode": "plan",
-                    "reason": "Need explicit planning"
-                })));
+                assert_eq!(
+                    structured_content,
+                    Some(serde_json::json!({
+                        "mode": "plan",
+                        "reason": "Need explicit planning"
+                    }))
+                );
             }
             other => panic!("expected function payload, got {other:?}"),
         }

@@ -6,7 +6,7 @@ use axum::http::StatusCode;
 use axum::response::Json;
 use serde_json::{json, Value};
 
-use talos_auth::AuthResult;
+use talos_auth::RequestIdentity;
 use talos_error::TalosError;
 use talos_types::{DocUpdateRequest, WorkspaceDocDetail, WorkspaceDocKind, WorkspaceDocSummary};
 
@@ -83,7 +83,7 @@ fn map_write_error(err: TalosError) -> ApiError {
 
 pub(super) async fn list_workspace_docs_handler(
     State(state): State<Arc<HttpApiState>>,
-    _auth: axum::extract::Extension<AuthResult>,
+    _auth: axum::extract::Extension<RequestIdentity>,
 ) -> Result<Json<Value>, ApiError> {
     let mut docs = Vec::new();
     for kind in [
@@ -107,7 +107,7 @@ pub(super) async fn list_workspace_docs_handler(
 
 pub(super) async fn get_workspace_doc_handler(
     State(state): State<Arc<HttpApiState>>,
-    _auth: axum::extract::Extension<AuthResult>,
+    _auth: axum::extract::Extension<RequestIdentity>,
     Path(kind): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     let kind = parse_doc_kind(&kind)?;
@@ -116,7 +116,7 @@ pub(super) async fn get_workspace_doc_handler(
 
 pub(super) async fn put_workspace_doc_handler(
     State(state): State<Arc<HttpApiState>>,
-    _auth: axum::extract::Extension<AuthResult>,
+    _auth: axum::extract::Extension<RequestIdentity>,
     Path(kind): Path<String>,
     Json(request): Json<DocUpdateRequest>,
 ) -> Result<Json<Value>, ApiError> {
@@ -140,7 +140,9 @@ mod tests {
     use std::path::PathBuf;
 
     use axum::response::IntoResponse;
-    use talos_auth::TokenType;
+    use talos_auth::{
+        AuthManager, AuthService, InMemoryUserStore, JwtAuth, RequestIdentity, UserService,
+    };
     use talos_error::{TalosError, TalosResult};
     use talos_gateway::{Gateway, GatewayRequest, GatewayResponse};
     use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
@@ -156,17 +158,19 @@ mod tests {
     struct NoopSessionService;
     struct NoopLlmProvider;
 
-    fn test_auth() -> axum::extract::Extension<AuthResult> {
-        axum::extract::Extension(AuthResult {
-            user_id: "workspace-doc-test".to_string(),
-            expires_at: u64::MAX,
-            is_valid: true,
-            token_type: TokenType::Service,
-            scopes: vec!["*".to_string()],
-            allowed_channels: vec!["*".to_string()],
-            act_as: Some("*".to_string()),
-            issuer: Some("workspace-doc-test".to_string()),
-        })
+    fn test_auth() -> axum::extract::Extension<RequestIdentity> {
+        axum::extract::Extension(RequestIdentity::mock_admin("workspace-doc-test"))
+    }
+
+    fn test_auth_services() -> (Arc<dyn AuthService>, Arc<dyn UserService>) {
+        let manager = Arc::new(AuthManager::new(
+            Arc::new(InMemoryUserStore::default()),
+            Arc::new(JwtAuth::new("test-secret")),
+            true,
+        ));
+        let auth_service: Arc<dyn AuthService> = manager.clone();
+        let user_service: Arc<dyn UserService> = manager;
+        (auth_service, user_service)
     }
 
     fn test_model_info() -> ModelInfo {
@@ -189,11 +193,14 @@ mod tests {
         std::fs::create_dir_all(&workspace_dir).expect("workspace dir should exist");
         let mut config = TalosConfig::default();
         config.agent.kernel.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+        let (auth_service, user_service) = test_auth_services();
         let state = Arc::new(HttpApiState::new(
             Arc::new(NoopGateway),
             Arc::new(NoopSessionService),
             config,
             Arc::new(NoopLlmProvider),
+            auth_service,
+            user_service,
             "test-secret".to_string(),
             None,
             true,
@@ -374,6 +381,7 @@ mod tests {
             &self,
             _name: String,
             _directory: PathBuf,
+            _owner_user_id: String,
         ) -> TalosResult<ProjectRecord> {
             Err(TalosError::ToolError(
                 "not used in workspace docs tests".to_string(),

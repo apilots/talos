@@ -262,6 +262,16 @@ impl Storage for SqliteStorage {
                 self.execute("ALTER TABLE sessions ADD COLUMN project_id TEXT", &[])
                     .await?;
             }
+            if !existing.contains("owner_user_id") {
+                info!("Adding owner_user_id column to sessions schema");
+                self.execute("ALTER TABLE sessions ADD COLUMN owner_user_id TEXT", &[])
+                    .await?;
+                self.execute(
+                    "UPDATE sessions SET owner_user_id = user_id WHERE owner_user_id IS NULL OR owner_user_id = ''",
+                    &[],
+                )
+                .await?;
+            }
             if !existing.contains("current_directory") {
                 info!("Adding current_directory column to sessions schema");
                 self.execute(
@@ -293,6 +303,7 @@ impl Storage for SqliteStorage {
                 usage_json TEXT,
                 conf_json TEXT,
                 project_id TEXT,
+                owner_user_id TEXT NOT NULL,
                 current_directory TEXT
             )
         "#;
@@ -318,11 +329,32 @@ impl Storage for SqliteStorage {
         self.execute(create_bindings, &[]).await?;
         debug!("Bindings table created/verified");
 
+        if self.table_exists("projects").await? {
+            let project_columns = self.query("PRAGMA table_info(projects)", &[]).await?;
+            let mut existing = std::collections::HashSet::new();
+            for row in project_columns {
+                if let Some(name) = row.get_string("name") {
+                    existing.insert(name);
+                }
+            }
+            if !existing.contains("owner_user_id") {
+                info!("Adding owner_user_id column to projects schema");
+                self.execute("ALTER TABLE projects ADD COLUMN owner_user_id TEXT", &[])
+                    .await?;
+                self.execute(
+                    "UPDATE projects SET owner_user_id = '' WHERE owner_user_id IS NULL",
+                    &[],
+                )
+                .await?;
+            }
+        }
+
         let create_projects = r#"
             CREATE TABLE IF NOT EXISTS projects (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id TEXT UNIQUE NOT NULL,
                 name TEXT NOT NULL,
+                owner_user_id TEXT NOT NULL,
                 directory TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
@@ -331,6 +363,39 @@ impl Storage for SqliteStorage {
 
         self.execute(create_projects, &[]).await?;
         debug!("Projects table created/verified");
+
+        if self.table_exists("users").await? {
+            let user_columns = self.query("PRAGMA table_info(users)", &[]).await?;
+            let mut existing = std::collections::HashSet::new();
+            for row in user_columns {
+                if let Some(name) = row.get_string("name") {
+                    existing.insert(name);
+                }
+            }
+            if !existing.contains("email") {
+                info!("Adding email column to users schema");
+                self.execute("ALTER TABLE users ADD COLUMN email TEXT", &[])
+                    .await?;
+            }
+        }
+
+        let create_users = r#"
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT UNIQUE NOT NULL,
+                username TEXT UNIQUE NOT NULL,
+                email TEXT,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL,
+                token_version INTEGER NOT NULL,
+                disabled INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+        "#;
+
+        self.execute(create_users, &[]).await?;
+        debug!("Users table created/verified");
 
         info!("Database schema initialization complete");
         Ok(())

@@ -61,17 +61,9 @@ export function SettingsServerConnectionPanel({
               value={draft.serverUrl}
             />
           </FieldBlock>
-          <FieldBlock label={t("settings:fields.userId")}>
-            <Input onChange={(event) => setDraft((current) => ({ ...current, userId: event.target.value }))} value={draft.userId} />
-          </FieldBlock>
         </div>
         <FieldBlock label={t("settings:fields.authToken")}>
-          <Input
-            autoComplete="current-password"
-            onChange={(event) => setDraft((current) => ({ ...current, authToken: event.target.value }))}
-            type="password"
-            value={draft.authToken}
-          />
+          <Input autoComplete="current-password" readOnly title={t("settings:fields.authManagedByLogin")} type="password" value="" />
         </FieldBlock>
         <div className="grid gap-4 md:grid-cols-3">
           <ToggleRow

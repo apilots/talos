@@ -7,7 +7,7 @@ use axum::response::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use talos_auth::AuthResult;
+use talos_auth::RequestIdentity;
 use talos_types::ProjectPatch;
 
 use super::errors::ApiError;
@@ -29,11 +29,11 @@ pub(super) struct PatchProjectRequest {
 
 pub(super) async fn list_projects_handler(
     State(state): State<Arc<HttpApiState>>,
-    _auth: axum::extract::Extension<AuthResult>,
+    actor: axum::extract::Extension<RequestIdentity>,
 ) -> Result<Json<Value>, ApiError> {
     let projects = state
-        .session_service
-        .list_projects()
+        .access_service
+        .list_projects(&actor.0)
         .await
         .map_err(map_project_error)?;
     Ok(Json(json!({ "data": projects })))
@@ -41,32 +41,25 @@ pub(super) async fn list_projects_handler(
 
 pub(super) async fn get_project_handler(
     State(state): State<Arc<HttpApiState>>,
-    _auth: axum::extract::Extension<AuthResult>,
+    actor: axum::extract::Extension<RequestIdentity>,
     Path(project_id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    let Some(project) = state
-        .session_service
-        .get_project(&project_id)
+    let project = state
+        .access_service
+        .get_project(&actor.0, &project_id)
         .await
-        .map_err(map_project_error)?
-    else {
-        return Err(ApiError::new(
-            StatusCode::NOT_FOUND,
-            "invalid_request",
-            "project not found",
-        ));
-    };
+        .map_err(map_project_error)?;
     Ok(Json(json!(project)))
 }
 
 pub(super) async fn create_project_handler(
     State(state): State<Arc<HttpApiState>>,
-    _auth: axum::extract::Extension<AuthResult>,
+    actor: axum::extract::Extension<RequestIdentity>,
     Json(request): Json<CreateProjectRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let project = state
-        .session_service
-        .create_project(request.name, request.directory)
+        .access_service
+        .create_project(&actor.0, request.name, request.directory)
         .await
         .map_err(map_project_error)?;
     Ok(Json(json!(project)))
@@ -74,7 +67,7 @@ pub(super) async fn create_project_handler(
 
 pub(super) async fn patch_project_handler(
     State(state): State<Arc<HttpApiState>>,
-    _auth: axum::extract::Extension<AuthResult>,
+    actor: axum::extract::Extension<RequestIdentity>,
     Path(project_id): Path<String>,
     Json(request): Json<PatchProjectRequest>,
 ) -> Result<Json<Value>, ApiError> {
@@ -86,30 +79,23 @@ pub(super) async fn patch_project_handler(
         ));
     }
 
-    let Some(project) = state
-        .session_service
-        .patch_project(&project_id, ProjectPatch { name: request.name })
+    let project = state
+        .access_service
+        .patch_project(&actor.0, &project_id, ProjectPatch { name: request.name })
         .await
-        .map_err(map_project_error)?
-    else {
-        return Err(ApiError::new(
-            StatusCode::NOT_FOUND,
-            "invalid_request",
-            "project not found",
-        ));
-    };
+        .map_err(map_project_error)?;
 
     Ok(Json(json!(project)))
 }
 
 pub(super) async fn delete_project_handler(
     State(state): State<Arc<HttpApiState>>,
-    _auth: axum::extract::Extension<AuthResult>,
+    actor: axum::extract::Extension<RequestIdentity>,
     Path(project_id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     state
-        .session_service
-        .delete_project(&project_id)
+        .access_service
+        .delete_project(&actor.0, &project_id)
         .await
         .map_err(map_project_delete_error)?;
     Ok(Json(json!({ "success": true })))
@@ -117,6 +103,9 @@ pub(super) async fn delete_project_handler(
 
 fn map_project_error(error: talos_error::TalosError) -> ApiError {
     match error {
+        talos_error::TalosError::ResourceNotFound(message) => {
+            ApiError::new(StatusCode::NOT_FOUND, "invalid_request", message)
+        }
         talos_error::TalosError::ValidationError(message) => {
             ApiError::new(StatusCode::BAD_REQUEST, "invalid_request", message)
         }

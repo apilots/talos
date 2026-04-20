@@ -818,9 +818,9 @@ mod tests {
     use super::*;
     use crate::register_core_local_tools;
     use crate::trait_impl::EchoTestTool;
-    use serde_json::json;
     use crate::{MemoryGetTool, MemorySearchTool, SkillTool, ToolSearchTool};
     use async_trait::async_trait;
+    use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use talos_config::AgentKernelConfig;

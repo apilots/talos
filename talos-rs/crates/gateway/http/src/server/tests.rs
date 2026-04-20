@@ -5,7 +5,9 @@ use axum::http::{HeaderMap, Request, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
 use serde_json::Value;
-use talos_auth::{AuthResult, TokenType};
+use talos_auth::{
+    AuthManager, AuthService, InMemoryUserStore, JwtAuth, RequestIdentity, UserService,
+};
 use talos_gateway::GatewayRequest;
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
 use talos_types::talos::{
@@ -53,11 +55,14 @@ fn isolated_test_config() -> (talos_types::TalosConfig, std::path::PathBuf) {
 }
 
 fn test_state(auth_disabled: bool, static_token: Option<&str>) -> Arc<HttpApiState> {
+    let (auth_service, user_service) = test_auth_services();
     Arc::new(HttpApiState::new(
         Arc::new(MockGateway),
         Arc::new(MockSessionService),
         test_config(),
         Arc::new(MockLlmProvider),
+        auth_service,
+        user_service,
         "test-secret".to_string(),
         static_token.map(str::to_string),
         auth_disabled,
@@ -70,16 +75,30 @@ fn test_state_with_config(
     auth_disabled: bool,
     static_token: Option<&str>,
 ) -> Arc<HttpApiState> {
+    let (auth_service, user_service) = test_auth_services();
     Arc::new(HttpApiState::new(
         Arc::new(MockGateway),
         Arc::new(MockSessionService),
         config,
         Arc::new(MockLlmProvider),
+        auth_service,
+        user_service,
         "test-secret".to_string(),
         static_token.map(str::to_string),
         auth_disabled,
         vec![test_model_info()],
     ))
+}
+
+fn test_auth_services() -> (Arc<dyn AuthService>, Arc<dyn UserService>) {
+    let manager = Arc::new(AuthManager::new(
+        Arc::new(InMemoryUserStore::default()),
+        Arc::new(JwtAuth::new("test-secret")),
+        true,
+    ));
+    let auth_service: Arc<dyn AuthService> = manager.clone();
+    let user_service: Arc<dyn UserService> = manager;
+    (auth_service, user_service)
 }
 
 #[async_trait::async_trait]
@@ -283,6 +302,7 @@ impl SessionService for MockSessionService {
     ) -> TalosResult<talos_types::TalosSession> {
         Ok(talos_types::TalosSession {
             title: "Untitled Session".to_string(),
+            owner_user_id: context.user_id.clone(),
             context: talos_types::SessionContext {
                 session_id: "mock-session".to_string(),
                 workspace_id: None,
@@ -328,6 +348,7 @@ impl SessionService for MockSessionService {
         }
         Ok(Some(talos_types::TalosSession {
             title: "Untitled Session".to_string(),
+            owner_user_id: "static-token".to_string(),
             context: talos_types::SessionContext {
                 session_id: "mock-session".to_string(),
                 workspace_id: None,
@@ -441,10 +462,12 @@ impl SessionService for MockSessionService {
         &self,
         name: String,
         directory: std::path::PathBuf,
+        _owner_user_id: String,
     ) -> TalosResult<talos_types::ProjectRecord> {
         Ok(talos_types::ProjectRecord {
             project_id: "project-mock".to_string(),
             name,
+            owner_user_id: "static-token".to_string(),
             directory,
             created_at: 0,
             updated_at: 0,
@@ -465,17 +488,8 @@ impl SessionService for MockSessionService {
     }
 }
 
-fn test_auth() -> AuthResult {
-    AuthResult {
-        user_id: "static-token".to_string(),
-        expires_at: u64::MAX,
-        is_valid: true,
-        token_type: TokenType::Service,
-        scopes: vec!["*".to_string()],
-        allowed_channels: vec!["*".to_string()],
-        act_as: Some("*".to_string()),
-        issuer: Some("static-token".to_string()),
-    }
+fn test_auth() -> RequestIdentity {
+    RequestIdentity::mock_admin("static-token")
 }
 
 fn test_context() -> TalosContext {
@@ -767,9 +781,12 @@ async fn test_search_memory_files_handler_returns_matching_data() {
 
 #[test]
 fn test_http_server_listen_addr_uses_configured_host() {
+    let (auth_service, user_service) = test_auth_services();
     let server = HttpServer::new(
         Arc::new(MockGateway),
         Arc::new(MockSessionService),
+        auth_service,
+        user_service,
         test_config(),
         Arc::new(MockLlmProvider),
         "127.0.0.1",
@@ -825,11 +842,14 @@ async fn test_models_allow_no_token_when_auth_disabled() {
 async fn test_lifecycle_gate_rejects_new_requests_when_quiescing() {
     let lifecycle = Arc::new(ServerLifecycle::new());
     lifecycle.store(ServerLifecycleState::Quiescing);
+    let (auth_service, user_service) = test_auth_services();
     let state = Arc::new(HttpApiState::new_with_lifecycle(
         Arc::new(MockGateway),
         Arc::new(MockSessionService),
         test_config(),
         Arc::new(MockLlmProvider),
+        auth_service,
+        user_service,
         "test-secret".to_string(),
         None,
         true,
@@ -861,11 +881,14 @@ async fn test_lifecycle_gate_rejects_new_requests_when_quiescing() {
 async fn test_lifecycle_gate_allows_health_when_quiescing() {
     let lifecycle = Arc::new(ServerLifecycle::new());
     lifecycle.store(ServerLifecycleState::Quiescing);
+    let (auth_service, user_service) = test_auth_services();
     let state = Arc::new(HttpApiState::new_with_lifecycle(
         Arc::new(MockGateway),
         Arc::new(MockSessionService),
         test_config(),
         Arc::new(MockLlmProvider),
+        auth_service,
+        user_service,
         "test-secret".to_string(),
         None,
         true,
@@ -973,6 +996,7 @@ async fn test_submit_tool_approval_handler_returns_no_content() {
             "/v1/sessions/:session_id/tool-approvals",
             post(submit_tool_approval_handler),
         )
+        .layer(axum::Extension(test_auth()))
         .with_state(state);
 
     let resp = app

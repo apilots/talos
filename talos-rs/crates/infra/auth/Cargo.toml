@@ -17,6 +17,7 @@ jsonwebtoken = "9"
 
 # Error handling
 talos-error = { path = "../error" }
+talos-storage = { path = "../storage" }
 
 # Serialization
 serde = { workspace = true }
@@ -28,3 +29,5 @@ tracing = { workspace = true }
 # Utils
 uuid = { workspace = true }
 rand = "0.8"
+argon2 = "0.5"
+chrono = { workspace = true }

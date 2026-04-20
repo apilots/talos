@@ -1,8 +1,9 @@
-import { lazy, Suspense, type ReactNode } from "react";
-import { createBrowserRouter } from "react-router-dom";
+import { type ReactNode, lazy, Suspense } from "react";
+import { Navigate, createBrowserRouter } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { AppLayout } from "@/app/layouts/AppLayout";
+import { useConnectionSettings } from "@/features/connection";
 
 const ChatHomePage = lazy(() =>
   import("@/pages/chat/ChatHomePage").then((module) => ({ default: module.ChatHomePage })),
@@ -28,6 +29,37 @@ const SettingsPage = lazy(() =>
 const AdminPage = lazy(() =>
   import("@/pages/admin/AdminPage").then((module) => ({ default: module.AdminPage })),
 );
+const AuthPage = lazy(() =>
+  import("@/pages/auth/AuthPage").then((module) => ({ default: module.AuthPage })),
+);
+
+function RequireAuth({ children }: { children: ReactNode }) {
+  const { connection } = useConnectionSettings();
+  if (connection.authStatus === "loading" || connection.authStatus === "unknown") {
+    return <AuthLoading />;
+  }
+  if (connection.authStatus !== "authenticated") {
+    return <Navigate replace to="/auth/login" />;
+  }
+  return <>{children}</>;
+}
+
+function RequireAdmin({ children }: { children: ReactNode }) {
+  const { connection } = useConnectionSettings();
+  if (connection.authStatus === "loading" || connection.authStatus === "unknown") {
+    return <AuthLoading />;
+  }
+  if (connection.authStatus !== "authenticated" || connection.authRole !== "admin") {
+    return <Navigate replace to="/" />;
+  }
+
+  return <>{children}</>;
+}
+
+function AuthLoading() {
+  const { t } = useTranslation("common");
+  return <div className="flex h-screen items-center justify-center text-sm text-muted">{t("loading")}</div>;
+}
 
 function withSuspense(element: ReactNode) {
   function LoadingFallback() {
@@ -40,8 +72,12 @@ function withSuspense(element: ReactNode) {
 
 export const router = createBrowserRouter([
   {
+    path: "/auth/login",
+    element: withSuspense(<AuthPage />),
+  },
+  {
     path: "/",
-    element: <AppLayout />,
+    element: <RequireAuth>{<AppLayout />}</RequireAuth>,
     children: [
       {
         index: true,
@@ -73,7 +109,11 @@ export const router = createBrowserRouter([
       },
       {
         path: "admin",
-        element: withSuspense(<AdminPage />),
+        element: withSuspense(
+          <RequireAdmin>
+            <AdminPage />
+          </RequireAdmin>,
+        ),
       },
     ],
   },

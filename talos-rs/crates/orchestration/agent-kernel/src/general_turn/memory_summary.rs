@@ -478,9 +478,13 @@ pub async fn flush_session_memory_with_report(
         tracing::debug!(session_id = %session_id, "skip memory flush because sanitized judge input is empty");
         return Ok(usage_report);
     };
-    let (persistence, persistence_usage) =
-        decide_memory_persistence(session_id, &selected_model, llm_provider.clone(), &judge_input)
-            .await?;
+    let (persistence, persistence_usage) = decide_memory_persistence(
+        session_id,
+        &selected_model,
+        llm_provider.clone(),
+        &judge_input,
+    )
+    .await?;
     usage_report.record_usage(&persistence_usage);
     tracing::debug!(
         session_id = %session_id,

@@ -370,7 +370,8 @@ async fn test_flush_session_memory_retries_invalid_persistence_decision_before_s
         Arc::new(SummaryProvider::new(vec![
             "{\"title\":\"Skill recap\",\"facts\":[\"ToolSearch activated Skill\"]}".to_string(),
             "{\"result\":\"not-a-decision\"}".to_string(),
-            "{\"decision\":\"durable\",\"rationale\":\"Contains durable tool routing facts.\"}".to_string(),
+            "{\"decision\":\"durable\",\"rationale\":\"Contains durable tool routing facts.\"}"
+                .to_string(),
         ])),
         &memory_store,
         &config,
