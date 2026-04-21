@@ -6,8 +6,8 @@ use axum::response::Json;
 use serde_json::{json, Value};
 
 use talos_auth::{
-    AdminCreateUserRequest, AdminPatchUserRequest, LoginRequest, RegisterRequest, RequestIdentity,
-    UpdateCurrentUserRequest,
+    AdminCreateUserRequest, AdminPatchUserRequest, CreateUserTokenRequest, LoginRequest,
+    RegisterRequest, RequestIdentity, UpdateCurrentUserRequest,
 };
 
 use super::errors::ApiError;
@@ -72,6 +72,44 @@ pub(super) async fn patch_current_user_handler(
         .await
         .map_err(map_auth_error)?;
     Ok(Json(json!(user)))
+}
+
+pub(super) async fn list_user_tokens_handler(
+    State(state): State<Arc<HttpApiState>>,
+    actor: axum::extract::Extension<RequestIdentity>,
+) -> Result<Json<Value>, ApiError> {
+    let tokens = state
+        .auth_service
+        .list_tokens(&actor.0)
+        .await
+        .map_err(map_auth_error)?;
+    Ok(Json(json!({ "data": tokens })))
+}
+
+pub(super) async fn create_user_token_handler(
+    State(state): State<Arc<HttpApiState>>,
+    actor: axum::extract::Extension<RequestIdentity>,
+    Json(request): Json<CreateUserTokenRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let token = state
+        .auth_service
+        .create_token(&actor.0, &request.name)
+        .await
+        .map_err(map_auth_error)?;
+    Ok(Json(json!(token)))
+}
+
+pub(super) async fn delete_user_token_handler(
+    State(state): State<Arc<HttpApiState>>,
+    actor: axum::extract::Extension<RequestIdentity>,
+    Path(token_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    state
+        .auth_service
+        .revoke_token(&actor.0, &token_id)
+        .await
+        .map_err(map_auth_error)?;
+    Ok(Json(json!({ "success": true })))
 }
 
 pub(super) async fn list_admin_users_handler(

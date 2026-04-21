@@ -174,11 +174,13 @@ agent:
 gateway:
   host: 127.0.0.1
   port: 18789
-  token: ${GATEWAY_TOKEN}  # 环境变量
   jwt_secret: ${JWT_SECRET}
   auth: false
   access_token_ttl_days: 30
   allow_register: true
+  auth_cache:
+    enabled: true
+    ttl_seconds: 300
 
 # 渠道配置
 channels:

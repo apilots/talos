@@ -50,8 +50,8 @@ export function useAdminPage() {
         return {
           session,
           sessionId,
-          ownerUserId: session.owner_user_id ?? "",
-          ownerLabel: ownerLabels.get(session.owner_user_id ?? "") ?? session.owner_user_id ?? "",
+          ownerUserId: session.user_id ?? "",
+          ownerLabel: ownerLabels.get(session.user_id ?? "") ?? session.user_id ?? "",
           sourceUserId: session.context.user_id,
           label: sessionAliases[sessionId] ?? session.title,
           model: session.config.llm?.model ?? session.config.agent?.model ?? "unknown",

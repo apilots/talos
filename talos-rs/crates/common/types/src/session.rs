@@ -10,7 +10,7 @@ use talos_config::ToolApprovalPolicy;
 pub struct SessionRecord {
     pub id: String,
     pub title: String,
-    pub owner_user_id: String,
+    pub user_id: String,
     pub context: talos::TalosContext,
     pub model: String,
     pub created_at: u64,
@@ -36,7 +36,7 @@ impl SessionRecord {
         Self {
             id: session.context.session_id.clone(),
             title: session.title.clone(),
-            owner_user_id: session.owner_user_id.clone(),
+            user_id: session.user_id.clone(),
             context: talos::TalosContext {
                 source_type: session.context.source_type.clone(),
                 provider: session.context.provider.clone(),
@@ -132,7 +132,7 @@ impl SessionState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TalosSession {
     pub title: String,
-    pub owner_user_id: String,
+    pub user_id: String,
     pub context: SessionContext,
     #[serde(default)]
     pub conf: SessionConf,
@@ -229,7 +229,7 @@ impl TalosSession {
 
         Ok(Self {
             title: record.title.clone(),
-            owner_user_id: record.owner_user_id.clone(),
+            user_id: record.user_id.clone(),
             context: SessionContext::from_record(record, workspace_id),
             conf: record.conf.clone(),
             project_id: record.project_id.clone(),
@@ -259,8 +259,6 @@ pub struct SessionQuery {
     pub channel_id: Option<String>,
     pub provider: Option<String>,
     pub project_id: Option<String>,
-    #[serde(default)]
-    pub owner_user_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -318,7 +316,7 @@ pub struct SessionConf {
 pub struct ProjectRecord {
     pub project_id: String,
     pub name: String,
-    pub owner_user_id: String,
+    pub user_id: String,
     pub directory: PathBuf,
     pub created_at: i64,
     pub updated_at: i64,
@@ -398,7 +396,7 @@ pub trait SessionService: Send + Sync {
         &self,
         name: String,
         directory: PathBuf,
-        owner_user_id: String,
+        user_id: String,
     ) -> crate::TalosResult<ProjectRecord>;
 
     async fn patch_project(

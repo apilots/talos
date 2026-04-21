@@ -7,8 +7,11 @@ mod store;
 pub use jwt::{AccessTokenClaims, IssuedAccessToken, JwtAuth, JwtConfig};
 pub use pairing::{DevicePairing, PairingCode, PairingResult};
 pub use password::{validate_password, PasswordService};
-pub use service::{AuthManager, AuthService, UserService};
-pub use store::{DatabaseUserStore, InMemoryUserStore, UserStore};
+pub use service::{AuthCacheConfig, AuthManager, AuthService, UserService};
+pub use store::{
+    DatabaseUserStore, DatabaseUserTokenStore, InMemoryUserStore, InMemoryUserTokenStore,
+    UserStore, UserTokenStore,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -95,11 +98,20 @@ pub struct RequestIdentity {
     pub username: Option<String>,
     pub role: UserRole,
     pub scopes: Vec<AuthScope>,
+    pub auth_disabled: bool,
 }
 
 impl RequestIdentity {
     pub fn is_admin(&self) -> bool {
         self.role.is_admin()
+    }
+
+    pub fn bypasses_auth(&self) -> bool {
+        self.auth_disabled
+    }
+
+    pub fn has_full_access(&self) -> bool {
+        self.auth_disabled || self.is_admin()
     }
 
     pub fn mock_admin(user_id: impl Into<String>) -> Self {
@@ -108,6 +120,17 @@ impl RequestIdentity {
             username: None,
             role: UserRole::Admin,
             scopes: default_scopes_for_role(UserRole::Admin),
+            auth_disabled: false,
+        }
+    }
+
+    pub fn auth_disabled() -> Self {
+        Self {
+            user_id: "auth-disabled".to_string(),
+            username: None,
+            role: UserRole::User,
+            scopes: default_scopes_for_role(UserRole::Admin),
+            auth_disabled: true,
         }
     }
 }
@@ -172,6 +195,28 @@ pub struct UserDto {
     pub disabled: bool,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserTokenMeta {
+    pub token_id: String,
+    pub name: String,
+    pub prefix: String,
+    pub created_at: i64,
+    pub last_used_at: Option<i64>,
+    pub expires_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateUserTokenResult {
+    pub token_id: String,
+    pub raw_token: String,
+    pub prefix: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateUserTokenRequest {
+    pub name: String,
 }
 
 impl From<UserRecord> for UserDto {

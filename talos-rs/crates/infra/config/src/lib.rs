@@ -12,7 +12,7 @@
 //! 使用 `${VAR_NAME}` 语法：
 //! ```yaml
 //! gateway:
-//!   token: ${GATEWAY_TOKEN}
+//!   jwt_secret: ${JWT_SECRET}
 //! ```
 //!
 //! # 使用方式
@@ -43,10 +43,10 @@ pub use domains::agent::{
 pub use domains::kernel::AgentKernelConfig;
 pub use domains::memory::AgentKernelMemoryConfig;
 pub use domains::network::{
-    ChannelConfig, ChannelsConfig, DmPolicy, DmScope, GatewayConfig, GroupPolicy, LlmConfig,
-    ModelCompatConfig, ModelCostConfig, ModelInputKind, ProviderConfig, ProviderModelConfig,
-    TelegramAccountConfig, TelegramChannelsConfig, TelegramGroupConfig, TelegramMode,
-    TelegramTopicConfig, ThinkingFormat,
+    ChannelConfig, ChannelsConfig, DmPolicy, DmScope, GatewayAuthCacheConfig, GatewayConfig,
+    GroupPolicy, LlmConfig, ModelCompatConfig, ModelCostConfig, ModelInputKind, ProviderConfig,
+    ProviderModelConfig, TelegramAccountConfig, TelegramChannelsConfig, TelegramGroupConfig,
+    TelegramMode, TelegramTopicConfig, ThinkingFormat,
 };
 pub use domains::prompt::{
     AgentKernelBootstrapPromptConfig, AgentKernelPromptConfig, BootstrapPromptWarningMode,
@@ -58,11 +58,11 @@ pub use domains::tools::{
     LocalExecToolConfig, McpServerConfig, McpToolConfig, McpTransportConfig, ToolApprovalPolicy,
     ToolSandboxModeConfig, ToolSandboxPolicy, ToolsRuntimeConfig,
 };
-pub use service::{LlmConfigManager, LlmConfigService};
-pub use store::{InMemoryLlmConfigStore, LlmConfigStore, YamlLlmConfigStore};
 pub use paths::{
     resolve_runtime_path, resolve_talos_home, sanitize_agent_name, set_talos_home, TalosPaths,
 };
+pub use service::{LlmConfigManager, LlmConfigService};
+pub use store::{InMemoryLlmConfigStore, LlmConfigStore, YamlLlmConfigStore};
 
 /// 主配置结构
 #[derive(Debug, Clone, Serialize, Deserialize)]

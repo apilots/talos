@@ -8,6 +8,8 @@ fn test_default_config() {
     assert!(!config.gateway.auth);
     assert_eq!(config.gateway.access_token_ttl_days, 30);
     assert!(config.gateway.allow_register);
+    assert!(config.gateway.auth_cache.enabled);
+    assert_eq!(config.gateway.auth_cache.ttl_seconds, 300);
     assert_eq!(config.storage.database_type, DatabaseType::Sqlite);
     assert!(config.storage.connection_string.ends_with("/data/talos.db"));
     assert_eq!(
@@ -107,7 +109,6 @@ agent:
 gateway:
   host: 127.0.0.1
   port: 18789
-  token: token
   auth: false
   jwt_secret: jwt
 logging:
@@ -234,6 +235,18 @@ fn test_validate_runtime_rejects_zero_access_token_ttl() {
 }
 
 #[test]
+fn test_validate_runtime_rejects_zero_auth_cache_ttl() {
+    let mut config = Config::default();
+    config.gateway.auth_cache.ttl_seconds = 0;
+    config.llm.provider = "ollama".to_string();
+    config.llm.model = "qwen-max".to_string();
+    config.agent.model = "qwen-max".to_string();
+    config.llm.ollama.base_url = Some("http://localhost:11434".to_string());
+
+    assert!(config.validate_runtime().is_err());
+}
+
+#[test]
 fn test_load_from_path_fails_when_required_keys_missing() {
     let temp_file =
         std::env::temp_dir().join(format!("talos-config-missing-{}.yaml", std::process::id()));
@@ -257,7 +270,6 @@ agent:
 gateway:
   host: 127.0.0.1
   port: 18789
-  token: token
   auth: false
   jwt_secret: jwt
 logging:
@@ -306,7 +318,6 @@ agent:
 gateway:
   host: 127.0.0.1
   port: 18789
-  token: token
   auth: false
 llm:
   provider: ollama
@@ -380,7 +391,6 @@ agent:
 gateway:
   host: 127.0.0.1
   port: 18789
-  token: token
   auth: false
   jwt_secret: jwt
 logging:
@@ -427,7 +437,6 @@ agent:
 gateway:
   host: 127.0.0.1
   port: 18789
-  token: token
   auth: false
 llm:
   provider: ollama

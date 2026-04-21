@@ -277,7 +277,6 @@ impl TalosClient {
             channel_id: None,
             provider: None,
             project_id: Some(project_id.to_string()),
-            owner_user_id: None,
         })
         .await
     }
@@ -902,6 +901,7 @@ mod tests {
 
         let session = TalosSession {
             title: "Untitled Session".to_string(),
+            user_id: "u".to_string(),
             context: talos_types::SessionContext {
                 session_id: "sess_1".to_string(),
                 workspace_id: None,
@@ -917,6 +917,7 @@ mod tests {
                 project_root: None,
                 environment: None,
             },
+            conf: talos_types::SessionConf::default(),
             project_id: None,
             current_directory: None,
             config,

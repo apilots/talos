@@ -41,9 +41,9 @@ pub(super) async fn auth_middleware(
         return Ok(next.run(req).await);
     }
 
+    // auth_disabled is used for local/integration testing and bypasses all auth checks.
     if state.auth_disabled {
-        req.extensions_mut()
-            .insert(RequestIdentity::mock_admin("mock-auth"));
+        req.extensions_mut().insert(RequestIdentity::auth_disabled());
         return Ok(next.run(req).await);
     }
 
@@ -53,19 +53,11 @@ pub(super) async fn auth_middleware(
         _ => return Err(StatusCode::UNAUTHORIZED),
     };
 
-    let auth_result = if state
-        .static_token
-        .as_ref()
-        .is_some_and(|configured| configured == &token)
-    {
-        RequestIdentity::mock_admin("static-token")
-    } else {
-        state
-            .auth_service
-            .verify_access_token(&token)
-            .await
-            .map_err(|_| StatusCode::UNAUTHORIZED)?
-    };
+    let auth_result = state
+        .auth_service
+        .verify_access_token(&token)
+        .await
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
     req.extensions_mut().insert(auth_result);
     Ok(next.run(req).await)

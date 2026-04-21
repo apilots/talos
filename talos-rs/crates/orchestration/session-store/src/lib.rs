@@ -71,7 +71,7 @@ pub trait SessionStore: Send + Sync {
         &self,
         name: &str,
         directory: &PathBuf,
-        owner_user_id: &str,
+        user_id: &str,
     ) -> TalosResult<ProjectRecord>;
 
     async fn patch_project(
@@ -131,7 +131,7 @@ impl DatabaseSessionStore {
     }
 
     async fn fetch_session_row(&self, session_key: &str) -> TalosResult<Option<Row>> {
-        let sql = "SELECT session_key, title, user_id, owner_user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, usage_json, conf_json, project_id, current_directory FROM sessions WHERE session_key = ?";
+        let sql = "SELECT session_key, title, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, usage_json, conf_json, project_id, current_directory FROM sessions WHERE session_key = ?";
         let rows = self.storage.query(sql, &[session_key]).await?;
         Ok(rows.into_iter().next())
     }
@@ -171,11 +171,7 @@ impl DatabaseSessionStore {
                 .get_string("title")
                 .filter(|title| !title.trim().is_empty())
                 .unwrap_or_else(|| DEFAULT_SESSION_TITLE.to_string()),
-            owner_user_id: row
-                .get_string("owner_user_id")
-                .filter(|value| !value.trim().is_empty())
-                .or_else(|| row.get_string("user_id"))
-                .unwrap_or_default(),
+            user_id: row.get_string("user_id").unwrap_or_default(),
             context,
             model,
             created_at: row
@@ -235,7 +231,7 @@ impl DatabaseSessionStore {
         ProjectRecord {
             project_id: row.get_string("project_id").unwrap_or_default(),
             name: row.get_string("name").unwrap_or_default(),
-            owner_user_id: row.get_string("owner_user_id").unwrap_or_default(),
+            user_id: row.get_string("user_id").unwrap_or_default(),
             directory: row
                 .get_string("directory")
                 .map(PathBuf::from)
@@ -286,7 +282,7 @@ impl SessionStore for DatabaseSessionStore {
         let record = SessionRecord {
             id: session_id.clone(),
             title: DEFAULT_SESSION_TITLE.to_string(),
-            owner_user_id: context.user_id.clone(),
+            user_id: context.user_id.clone(),
             context: context.clone(),
             model: model.clone(),
             created_at: now.try_into().unwrap_or_default(),
@@ -315,7 +311,6 @@ impl SessionStore for DatabaseSessionStore {
                 "created_at".to_string(),
                 "last_activity".to_string(),
                 "title".to_string(),
-                "owner_user_id".to_string(),
                 "context_json".to_string(),
                 "model".to_string(),
                 "message_count".to_string(),
@@ -344,7 +339,6 @@ impl SessionStore for DatabaseSessionStore {
                 Value::Number(now.into()),
                 Value::Number(now.into()),
                 Value::String(record.title.clone()),
-                Value::String(record.owner_user_id.clone()),
                 Value::String(context_json),
                 Value::String(model),
                 Value::Number(0.into()),
@@ -395,7 +389,6 @@ impl SessionStore for DatabaseSessionStore {
                 vec![
                     "last_activity".to_string(),
                     "title".to_string(),
-                    "owner_user_id".to_string(),
                     "context_json".to_string(),
                     "model".to_string(),
                     "message_count".to_string(),
@@ -407,7 +400,6 @@ impl SessionStore for DatabaseSessionStore {
                 vec![
                     Value::Number(now.into()),
                     Value::String(record.title.clone()),
-                    Value::String(record.owner_user_id.clone()),
                     Value::String(context_json),
                     Value::String(record.model.clone()),
                     Value::Number(serde_json::Number::from(record.message_count)),
@@ -446,7 +438,7 @@ impl SessionStore for DatabaseSessionStore {
         let record = SessionRecord {
             id: session_key.clone(),
             title: DEFAULT_SESSION_TITLE.to_string(),
-            owner_user_id: context.user_id.clone(),
+            user_id: context.user_id.clone(),
             context: context.clone(),
             model: model.clone(),
             created_at: now.try_into().unwrap_or_default(),
@@ -475,7 +467,6 @@ impl SessionStore for DatabaseSessionStore {
                 "created_at".to_string(),
                 "last_activity".to_string(),
                 "title".to_string(),
-                "owner_user_id".to_string(),
                 "context_json".to_string(),
                 "model".to_string(),
                 "message_count".to_string(),
@@ -504,7 +495,6 @@ impl SessionStore for DatabaseSessionStore {
                 Value::Number(now.into()),
                 Value::Number(now.into()),
                 Value::String(record.title.clone()),
-                Value::String(record.owner_user_id.clone()),
                 Value::String(context_json),
                 Value::String(model),
                 Value::Number(0.into()),
@@ -526,7 +516,7 @@ impl SessionStore for DatabaseSessionStore {
     }
 
     async fn list_session_records(&self, query: &SessionQuery) -> TalosResult<Vec<SessionRecord>> {
-        let mut sql = "SELECT session_key, title, user_id, owner_user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, usage_json, conf_json, project_id, current_directory FROM sessions".to_string();
+        let mut sql = "SELECT session_key, title, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, usage_json, conf_json, project_id, current_directory FROM sessions".to_string();
         let mut clauses = Vec::new();
         let mut params = Vec::new();
         if let Some(user_id) = query.user_id.as_deref() {
@@ -540,10 +530,6 @@ impl SessionStore for DatabaseSessionStore {
         if let Some(project_id) = query.project_id.as_deref() {
             clauses.push("project_id = ?");
             params.push(project_id.to_string());
-        }
-        if let Some(owner_user_id) = query.owner_user_id.as_deref() {
-            clauses.push("owner_user_id = ?");
-            params.push(owner_user_id.to_string());
         }
         if !clauses.is_empty() {
             sql.push_str(" WHERE ");
@@ -811,14 +797,14 @@ impl SessionStore for DatabaseSessionStore {
     }
 
     async fn list_projects(&self) -> TalosResult<Vec<ProjectRecord>> {
-        let sql = "SELECT p.project_id, p.name, p.owner_user_id, p.directory, p.created_at, p.updated_at, COUNT(s.session_key) AS session_count FROM projects p LEFT JOIN sessions s ON s.project_id = p.project_id GROUP BY p.project_id, p.name, p.owner_user_id, p.directory, p.created_at, p.updated_at ORDER BY p.created_at DESC";
+        let sql = "SELECT p.project_id, p.name, p.user_id, p.directory, p.created_at, p.updated_at, COUNT(s.session_key) AS session_count FROM projects p LEFT JOIN sessions s ON s.project_id = p.project_id GROUP BY p.project_id, p.name, p.user_id, p.directory, p.created_at, p.updated_at ORDER BY p.created_at DESC";
         let rows = self.storage.query(sql, &[]).await?;
         Ok(rows.iter().map(Self::parse_project_record).collect())
     }
 
     async fn get_project(&self, project_id: &str) -> TalosResult<Option<ProjectRecord>> {
         let sql =
-            "SELECT p.project_id, p.name, p.owner_user_id, p.directory, p.created_at, p.updated_at, COUNT(s.session_key) AS session_count FROM projects p LEFT JOIN sessions s ON s.project_id = p.project_id WHERE p.project_id = ? GROUP BY p.project_id, p.name, p.owner_user_id, p.directory, p.created_at, p.updated_at";
+            "SELECT p.project_id, p.name, p.user_id, p.directory, p.created_at, p.updated_at, COUNT(s.session_key) AS session_count FROM projects p LEFT JOIN sessions s ON s.project_id = p.project_id WHERE p.project_id = ? GROUP BY p.project_id, p.name, p.user_id, p.directory, p.created_at, p.updated_at";
         let rows = self.storage.query(sql, &[project_id]).await?;
         Ok(rows
             .into_iter()
@@ -834,13 +820,13 @@ impl SessionStore for DatabaseSessionStore {
         &self,
         name: &str,
         directory: &PathBuf,
-        owner_user_id: &str,
+        user_id: &str,
     ) -> TalosResult<ProjectRecord> {
         let now = chrono::Utc::now().timestamp_millis();
         let record = ProjectRecord {
             project_id: uuid::Uuid::now_v7().to_string(),
             name: name.to_string(),
-            owner_user_id: owner_user_id.to_string(),
+            user_id: user_id.to_string(),
             directory: directory.clone(),
             created_at: now,
             updated_at: now,
@@ -850,7 +836,7 @@ impl SessionStore for DatabaseSessionStore {
             vec![
                 "project_id".to_string(),
                 "name".to_string(),
-                "owner_user_id".to_string(),
+                "user_id".to_string(),
                 "directory".to_string(),
                 "created_at".to_string(),
                 "updated_at".to_string(),
@@ -858,7 +844,7 @@ impl SessionStore for DatabaseSessionStore {
             vec![
                 Value::String(record.project_id.clone()),
                 Value::String(record.name.clone()),
-                Value::String(record.owner_user_id.clone()),
+                Value::String(record.user_id.clone()),
                 Value::String(record.directory.display().to_string()),
                 Value::Number(now.into()),
                 Value::Number(now.into()),
@@ -940,7 +926,7 @@ impl SessionStore for MockSessionStore {
         Ok(SessionRecord {
             id: DatabaseSessionStore::new_session_id(),
             title: DEFAULT_SESSION_TITLE.to_string(),
-            owner_user_id: context.user_id.clone(),
+            user_id: context.user_id.clone(),
             context: context.clone(),
             model: requested_model.unwrap_or(default_model).to_string(),
             created_at: 0,
@@ -967,7 +953,7 @@ impl SessionStore for MockSessionStore {
         Ok(SessionRecord {
             id: DatabaseSessionStore::stable_session_key(context, agent_id, &dm_scope),
             title: DEFAULT_SESSION_TITLE.to_string(),
-            owner_user_id: context.user_id.clone(),
+            user_id: context.user_id.clone(),
             context: context.clone(),
             model: requested_model.unwrap_or(default_model).to_string(),
             created_at: 0,
@@ -986,7 +972,7 @@ impl SessionStore for MockSessionStore {
         Ok(Some(SessionRecord {
             id: session_id.to_string(),
             title: DEFAULT_SESSION_TITLE.to_string(),
-            owner_user_id: "mock-user".to_string(),
+            user_id: "mock-user".to_string(),
             context: TalosContext {
                 source_type: TalosSourceType::System,
                 provider: TalosProvider::System,
@@ -1057,7 +1043,7 @@ impl SessionStore for MockSessionStore {
         Ok(ProjectRecord {
             project_id: "project-mock".to_string(),
             name: name.to_string(),
-            owner_user_id: String::new(),
+            user_id: String::new(),
             directory: directory.clone(),
             created_at: 0,
             updated_at: 0,
@@ -1069,12 +1055,12 @@ impl SessionStore for MockSessionStore {
         &self,
         name: &str,
         directory: &PathBuf,
-        owner_user_id: &str,
+        user_id: &str,
     ) -> TalosResult<ProjectRecord> {
         Ok(ProjectRecord {
             project_id: "project-mock".to_string(),
             name: name.to_string(),
-            owner_user_id: owner_user_id.to_string(),
+            user_id: user_id.to_string(),
             directory: directory.clone(),
             created_at: 0,
             updated_at: 0,
@@ -1454,7 +1440,6 @@ mod scope_tests {
                 channel_id: None,
                 provider: None,
                 project_id: Some("project-1".to_string()),
-                owner_user_id: None,
             })
             .await
             .expect("list sessions should succeed");

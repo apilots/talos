@@ -362,7 +362,7 @@ export interface SessionRecord {
 
 export interface TalosSession {
   title: string;
-  owner_user_id?: string;
+  user_id?: string;
   context: {
     session_id: string;
     workspace_id?: string | null;
@@ -394,7 +394,6 @@ export interface TalosSession {
 
 export interface SessionQuery {
   user_id?: string;
-  owner_user_id?: string;
   channel_id?: string;
   provider?: string;
   project_id?: string;
@@ -431,7 +430,7 @@ export interface SessionUpdate {
 
 export interface ProjectRecord {
   project_id: string;
-  owner_user_id?: string;
+  user_id?: string;
   name: string;
   directory: string;
   created_at: number;

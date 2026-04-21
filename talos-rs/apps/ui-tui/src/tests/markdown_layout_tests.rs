@@ -260,6 +260,7 @@ async fn test_history_enter_switches_session() {
     config.llm.model = "claude-3".to_string();
     app.history_sessions = vec![TalosSession {
         title: "Fix tui paste".to_string(),
+        user_id: "u".to_string(),
         context: talos_types::SessionContext {
             session_id: "hist-sess-1".to_string(),
             workspace_id: None,

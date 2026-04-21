@@ -33,17 +33,17 @@ impl LlmConfigStore for YamlLlmConfigStore {
             ))
         })?;
 
-        let root: serde_yaml::Value = serde_yaml::from_str(&text).map_err(|e| {
-            TalosError::ConfigError(format!("failed to parse yaml: {}", e))
-        })?;
+        let root: serde_yaml::Value = serde_yaml::from_str(&text)
+            .map_err(|e| TalosError::ConfigError(format!("failed to parse yaml: {}", e)))?;
 
         let llm_node = root
             .get("llm")
             .cloned()
             .unwrap_or(serde_yaml::Value::Mapping(Default::default()));
 
-        serde_yaml::from_value(llm_node)
-            .map_err(|e| TalosError::ConfigError(format!("failed to deserialize llm config: {}", e)))
+        serde_yaml::from_value(llm_node).map_err(|e| {
+            TalosError::ConfigError(format!("failed to deserialize llm config: {}", e))
+        })
     }
 
     fn save(&self, llm: &LlmConfig) -> TalosResult<LlmConfig> {
@@ -55,12 +55,12 @@ impl LlmConfigStore for YamlLlmConfigStore {
             ))
         })?;
 
-        let mut root: serde_yaml::Value = serde_yaml::from_str(&text).map_err(|e| {
-            TalosError::ConfigError(format!("failed to parse yaml: {}", e))
-        })?;
+        let mut root: serde_yaml::Value = serde_yaml::from_str(&text)
+            .map_err(|e| TalosError::ConfigError(format!("failed to parse yaml: {}", e)))?;
 
-        let llm_value = serde_yaml::to_value(llm)
-            .map_err(|e| TalosError::ConfigError(format!("failed to serialize llm config: {}", e)))?;
+        let llm_value = serde_yaml::to_value(llm).map_err(|e| {
+            TalosError::ConfigError(format!("failed to serialize llm config: {}", e))
+        })?;
 
         match &mut root {
             serde_yaml::Value::Mapping(map) => {
@@ -139,7 +139,6 @@ mod tests {
         format!(
             r#"gateway:
   port: 8080
-  token: ${{JWT_SECRET}}
 llm:
   provider: anthropic
   model: claude-3-5-sonnet
@@ -181,9 +180,18 @@ llm:
         store.save(&llm).unwrap();
 
         let raw = std::fs::read_to_string(file.path()).unwrap();
-        assert!(raw.contains("port: 8080"), "gateway section must be preserved");
-        assert!(raw.contains("${{JWT_SECRET}}") || raw.contains("${JWT_SECRET}"), "jwt secret placeholder must be preserved");
-        assert!(raw.contains("new-model"), "updated model name must be present");
+        assert!(
+            raw.contains("port: 8080"),
+            "gateway section must be preserved"
+        );
+        assert!(
+            raw.contains("gateway:"),
+            "gateway section header must be preserved"
+        );
+        assert!(
+            raw.contains("new-model"),
+            "updated model name must be present"
+        );
     }
 
     #[test]

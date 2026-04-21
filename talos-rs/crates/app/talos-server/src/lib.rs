@@ -2,7 +2,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use talos_agent::{AgentImpl, AgentOrchestrator};
-use talos_auth::{AuthManager, AuthService, DatabaseUserStore, JwtAuth, JwtConfig, UserService};
+use talos_auth::{
+    AuthCacheConfig, AuthManager, AuthService, DatabaseUserStore, JwtAuth, JwtConfig, UserService,
+    UserStore, UserTokenStore,
+};
 use talos_channel::{ChannelServer, TelegramChannel};
 use talos_config::{Config, LlmConfigManager, LlmConfigService, TalosPaths, YamlLlmConfigStore};
 use talos_coordinator::{Coordinator, CoordinatorImpl};
@@ -214,7 +217,9 @@ pub async fn start_server(
     let storage: Arc<dyn talos_storage::Storage> = Arc::from(storage_impl);
     let session_store: Arc<dyn SessionStore> =
         Arc::new(DatabaseSessionStore::new(storage.clone()).await?);
-    let user_store = Arc::new(DatabaseUserStore::new(storage.clone()).await?);
+    let user_store_impl = Arc::new(DatabaseUserStore::new(storage.clone()).await?);
+    let user_store: Arc<dyn UserStore> = user_store_impl.clone();
+    let token_store: Arc<dyn UserTokenStore> = user_store_impl;
 
     let router: Arc<dyn Router> = Arc::new(RouterImpl::new());
     if let Err(err) = router
@@ -275,16 +280,20 @@ pub async fn start_server(
     }));
     let auth_manager = Arc::new(AuthManager::new(
         user_store,
+        token_store,
         jwt_auth,
         config.gateway.allow_register,
+        AuthCacheConfig {
+            enabled: config.gateway.auth_cache.enabled,
+            ttl_seconds: config.gateway.auth_cache.ttl_seconds,
+        },
     ));
     let auth_service: Arc<dyn AuthService> = auth_manager.clone();
     let user_service: Arc<dyn UserService> = auth_manager.clone();
 
     let config_path = TalosPaths::resolve().config_file;
     let llm_store = Arc::new(YamlLlmConfigStore::new(config_path));
-    let llm_config_service: Arc<dyn LlmConfigService> =
-        Arc::new(LlmConfigManager::new(llm_store));
+    let llm_config_service: Arc<dyn LlmConfigService> = Arc::new(LlmConfigManager::new(llm_store));
 
     let default_model = config.llm.model.clone();
     let model_catalog = resolve_model_catalog(&config.llm);
@@ -307,6 +316,8 @@ pub async fn start_server(
         .and_then(|value| value.auth_disabled)
         .unwrap_or(!config.gateway.auth);
 
+    // gateway.auth only controls HTTP auth middleware.
+    // PAT authentication is part of verify_access_token and active whenever auth middleware is enabled.
     if auth_disabled {
         http_server = http_server.with_auth_disabled(true);
     } else {
@@ -318,9 +329,6 @@ pub async fn start_server(
                     )
                 })?,
             );
-        }
-        if let Some(token) = config.gateway.token.clone() {
-            http_server = http_server.with_static_token(token);
         }
     }
 
@@ -442,7 +450,6 @@ async fn create_llm_provider(
         ))),
     }
 }
-
 
 #[cfg(test)]
 mod tests {

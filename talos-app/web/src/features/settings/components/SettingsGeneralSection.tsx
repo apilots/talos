@@ -80,7 +80,7 @@ export function SettingsGeneralSection({
           subtitle={t("settings:fields.defaultApprovalsDetail")}
           title={t("settings:fields.defaultApprovals")}
         />
-        <div className="mt-6 grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+        <div className="mt-6 max-w-sm">
           <FieldBlock label={t("settings:fields.defaultApprovals")}>
             <select
               className="w-full rounded-2xl border border-border bg-surface/85 px-4 py-3 text-sm outline-none transition focus:border-brand/50"
@@ -95,10 +95,8 @@ export function SettingsGeneralSection({
               <option value="needs_approval">{getApprovalModeLabel("needs_approval")}</option>
               <option value="skip">{getApprovalModeLabel("skip")}</option>
             </select>
+            <p className="mt-2 text-xs text-muted">{getApprovalModeHint(draft.defaultApprovalMode)}</p>
           </FieldBlock>
-          <div className="rounded-[1.2rem] border border-border/80 bg-background/45 p-4 text-sm text-muted">
-            {getApprovalModeHint(draft.defaultApprovalMode)}
-          </div>
         </div>
       </Panel>
     </div>

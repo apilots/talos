@@ -38,7 +38,6 @@ pub(super) struct HttpApiState {
     pub(super) llm_provider: Arc<dyn LlmProvider>,
     pub(super) auth_service: Arc<dyn AuthService>,
     pub(super) user_service: Arc<dyn UserService>,
-    pub(super) static_token: Option<String>,
     pub(super) auth_disabled: bool,
     pub(super) idempotency_cache: Arc<RwLock<HashMap<String, TalosMessageResponse>>>,
     pub(super) file_locks: FileLockRegistry,
@@ -57,7 +56,6 @@ impl HttpApiState {
         auth_service: Arc<dyn AuthService>,
         user_service: Arc<dyn UserService>,
         _jwt_secret: String,
-        static_token: Option<String>,
         auth_disabled: bool,
         models: Vec<ModelInfo>,
     ) -> Self {
@@ -73,7 +71,6 @@ impl HttpApiState {
             auth_service,
             user_service,
             _jwt_secret,
-            static_token,
             auth_disabled,
             models,
             llm_config_service,
@@ -89,7 +86,6 @@ impl HttpApiState {
         auth_service: Arc<dyn AuthService>,
         user_service: Arc<dyn UserService>,
         _jwt_secret: String,
-        static_token: Option<String>,
         auth_disabled: bool,
         models: Vec<ModelInfo>,
         llm_config_service: Arc<dyn LlmConfigService>,
@@ -102,7 +98,6 @@ impl HttpApiState {
             llm_provider,
             auth_service,
             user_service,
-            static_token,
             auth_disabled,
             idempotency_cache: Arc::new(RwLock::new(HashMap::new())),
             file_locks: FileLockRegistry::default(),
@@ -116,10 +111,9 @@ impl HttpApiState {
     /// recreated here; API key / base URL changes take effect on next server start.
     pub(super) fn reload_llm(&self, new_config: &LlmConfig) -> TalosResult<()> {
         let new_catalog = resolve_model_catalog(new_config);
-        *self
-            .models
-            .try_write()
-            .map_err(|_| talos_error::TalosError::ConfigError("models lock poisoned".to_string()))? = new_catalog;
+        *self.models.try_write().map_err(|_| {
+            talos_error::TalosError::ConfigError("models lock poisoned".to_string())
+        })? = new_catalog;
         Ok(())
     }
 }

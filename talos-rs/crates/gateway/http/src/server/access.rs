@@ -25,7 +25,9 @@ impl ResourceAccessService {
         project_id: Option<String>,
         current_directory: Option<std::path::PathBuf>,
     ) -> TalosResult<TalosSession> {
-        context.user_id = actor.user_id.clone();
+        if !actor.has_full_access() {
+            context.user_id = actor.user_id.clone();
+        }
         if let Some(project_id_ref) = project_id.as_deref() {
             self.ensure_project_access(actor, project_id_ref).await?;
         }
@@ -39,7 +41,9 @@ impl ResourceAccessService {
         actor: &RequestIdentity,
         mut query: SessionQuery,
     ) -> TalosResult<Vec<TalosSession>> {
-        query.owner_user_id = Some(actor.user_id.clone());
+        if !actor.has_full_access() {
+            query.user_id = Some(actor.user_id.clone());
+        }
         let sessions = self.session_service.list_sessions(query).await?;
         Ok(self.filter_sessions(actor, sessions))
     }
@@ -232,12 +236,12 @@ impl ResourceAccessService {
         actor: &RequestIdentity,
         sessions: Vec<TalosSession>,
     ) -> Vec<TalosSession> {
-        if actor.is_admin() {
+        if actor.has_full_access() {
             return sessions;
         }
         sessions
             .into_iter()
-            .filter(|session| session.owner_user_id == actor.user_id)
+            .filter(|session| session.user_id == actor.user_id)
             .collect()
     }
 
@@ -246,9 +250,12 @@ impl ResourceAccessService {
         actor: &RequestIdentity,
         projects: Vec<ProjectRecord>,
     ) -> Vec<ProjectRecord> {
+        if actor.has_full_access() {
+            return projects;
+        }
         projects
             .into_iter()
-            .filter(|project| project.owner_user_id == actor.user_id)
+            .filter(|project| project.user_id == actor.user_id)
             .collect()
     }
 
@@ -257,7 +264,7 @@ impl ResourceAccessService {
         actor: &RequestIdentity,
         session: &TalosSession,
     ) -> TalosResult<()> {
-        if actor.is_admin() || session.owner_user_id == actor.user_id {
+        if actor.has_full_access() || session.user_id == actor.user_id {
             return Ok(());
         }
         Err(TalosError::ResourceNotFound(format!(
@@ -271,7 +278,7 @@ impl ResourceAccessService {
         actor: &RequestIdentity,
         project: &ProjectRecord,
     ) -> TalosResult<()> {
-        if actor.is_admin() || project.owner_user_id == actor.user_id {
+        if actor.has_full_access() || project.user_id == actor.user_id {
             return Ok(());
         }
         Err(TalosError::ResourceNotFound(format!(
@@ -295,9 +302,341 @@ impl ResourceAccessService {
     }
 
     fn require_admin(&self, actor: &RequestIdentity) -> TalosResult<()> {
-        if actor.is_admin() {
+        if actor.has_full_access() {
             return Ok(());
         }
         Err(TalosError::AuthError("admin access required".to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    use async_trait::async_trait;
+    use talos_auth::UserRole;
+    use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TalosUsage};
+    use talos_types::{
+        ProjectPatch, ProjectRecord, SessionPatch, SessionPatchAck, SessionQuery, SessionService,
+        TalosConfig, TalosSession,
+    };
+
+    use super::ResourceAccessService;
+    use talos_auth::RequestIdentity;
+    use talos_error::TalosResult;
+
+    #[derive(Default)]
+    struct RecordingSessionService {
+        created_contexts: Mutex<Vec<TalosContext>>,
+        listed_queries: Mutex<Vec<SessionQuery>>,
+    }
+
+    #[async_trait]
+    impl SessionService for RecordingSessionService {
+        async fn create_session(
+            &self,
+            context: TalosContext,
+            _model: Option<String>,
+            conf: Option<talos_types::SessionConf>,
+            project_id: Option<String>,
+            current_directory: Option<PathBuf>,
+        ) -> TalosResult<TalosSession> {
+            self.created_contexts.lock().unwrap().push(context.clone());
+            Ok(TalosSession {
+                title: "Untitled Session".to_string(),
+                user_id: context.user_id.clone(),
+                context: talos_types::SessionContext {
+                    session_id: "session-1".to_string(),
+                    workspace_id: None,
+                    source_type: context.source_type,
+                    provider: context.provider,
+                    user_id: context.user_id,
+                    message_id: context.message_id,
+                    trace_id: context.trace_id,
+                    channel_id: context.channel_id,
+                    thread_id: context.thread_id,
+                    project_id: project_id.clone(),
+                    current_directory: current_directory.clone(),
+                    project_root: context.project_root,
+                    environment: context.environment,
+                },
+                conf: conf.unwrap_or_default(),
+                project_id,
+                current_directory,
+                config: TalosConfig::default(),
+                state: talos_types::SessionState::default(),
+            })
+        }
+
+        async fn list_sessions(&self, query: SessionQuery) -> TalosResult<Vec<TalosSession>> {
+            self.listed_queries.lock().unwrap().push(query.clone());
+            Ok(vec![TalosSession {
+                title: "Untitled Session".to_string(),
+                user_id: query.user_id.clone().unwrap_or_else(|| "external-user".to_string()),
+                context: talos_types::SessionContext {
+                    session_id: "session-1".to_string(),
+                    workspace_id: None,
+                    source_type: TalosSourceType::Http,
+                    provider: TalosProvider::Http,
+                    user_id: query.user_id.unwrap_or_else(|| "external-user".to_string()),
+                    message_id: "message-1".to_string(),
+                    trace_id: "trace-1".to_string(),
+                    channel_id: Some("web".to_string()),
+                    thread_id: None,
+                    project_id: None,
+                    current_directory: None,
+                    project_root: None,
+                    environment: None,
+                },
+                conf: talos_types::SessionConf::default(),
+                project_id: None,
+                current_directory: None,
+                config: TalosConfig::default(),
+                state: talos_types::SessionState {
+                    created_at: 0,
+                    last_activity: 0,
+                    message_count: 0,
+                    usage: TalosUsage::default(),
+                },
+            }])
+        }
+
+        async fn get_session(&self, _session_id: &str) -> TalosResult<Option<TalosSession>> {
+            Ok(None)
+        }
+
+        async fn patch_session(
+            &self,
+            _session_id: &str,
+            _patch: SessionPatch,
+        ) -> TalosResult<SessionPatchAck> {
+            Ok(SessionPatchAck { success: true })
+        }
+
+        async fn compact_session(&self, _session_id: &str) -> TalosResult<TalosSession> {
+            unreachable!("not used in tests")
+        }
+
+        async fn clear_session(&self, _session_id: &str) -> TalosResult<TalosSession> {
+            unreachable!("not used in tests")
+        }
+
+        async fn close_session(&self, _session_id: &str) -> TalosResult<()> {
+            Ok(())
+        }
+
+        async fn delete_session(&self, _session_id: &str) -> TalosResult<SessionPatchAck> {
+            Ok(SessionPatchAck { success: true })
+        }
+
+        async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
+            Ok(())
+        }
+
+        async fn submit_tool_approval(
+            &self,
+            _session_id: &str,
+            _call_id: &str,
+            _tool_name: &str,
+            _approved: bool,
+            _reason: Option<String>,
+        ) -> TalosResult<()> {
+            Ok(())
+        }
+
+        async fn submit_dynamic_tool_result(
+            &self,
+            _session_id: &str,
+            _call_id: &str,
+            _tool_name: &str,
+            _output: String,
+            _success: bool,
+        ) -> TalosResult<()> {
+            Ok(())
+        }
+
+        async fn get_session_turns(
+            &self,
+            _session_id: &str,
+        ) -> TalosResult<Vec<talos_types::talos::TalosMessageResponse>> {
+            Ok(Vec::new())
+        }
+
+        async fn list_projects(&self) -> TalosResult<Vec<ProjectRecord>> {
+            Ok(vec![
+                ProjectRecord {
+                    project_id: "project-1".to_string(),
+                    name: "Project 1".to_string(),
+                    user_id: "user-1".to_string(),
+                    directory: PathBuf::from("/tmp/project-1"),
+                    created_at: 0,
+                    updated_at: 0,
+                    session_count: 0,
+                },
+                ProjectRecord {
+                    project_id: "project-2".to_string(),
+                    name: "Project 2".to_string(),
+                    user_id: "user-2".to_string(),
+                    directory: PathBuf::from("/tmp/project-2"),
+                    created_at: 0,
+                    updated_at: 0,
+                    session_count: 0,
+                },
+            ])
+        }
+
+        async fn get_project(&self, _project_id: &str) -> TalosResult<Option<ProjectRecord>> {
+            Ok(None)
+        }
+
+        async fn create_project(
+            &self,
+            _name: String,
+            _directory: PathBuf,
+            _user_id: String,
+        ) -> TalosResult<ProjectRecord> {
+            unreachable!("not used in tests")
+        }
+
+        async fn patch_project(
+            &self,
+            _project_id: &str,
+            _patch: ProjectPatch,
+        ) -> TalosResult<Option<ProjectRecord>> {
+            Ok(None)
+        }
+
+        async fn delete_project(&self, _project_id: &str) -> TalosResult<()> {
+            Ok(())
+        }
+    }
+
+    fn test_context(user_id: &str) -> TalosContext {
+        TalosContext::new(
+            TalosSourceType::Http,
+            TalosProvider::Http,
+            user_id,
+            "msg-1",
+            "trace-1",
+        )
+        .with_channel_id("web")
+    }
+
+    fn member_identity() -> RequestIdentity {
+        RequestIdentity {
+            user_id: "member-user".to_string(),
+            username: Some("member".to_string()),
+            role: UserRole::User,
+            scopes: Vec::new(),
+            auth_disabled: false,
+        }
+    }
+
+    fn admin_identity() -> RequestIdentity {
+        RequestIdentity::mock_admin("admin-user")
+    }
+
+    #[tokio::test]
+    async fn create_session_rewrites_context_for_member_actor() {
+        let service = Arc::new(RecordingSessionService::default());
+        let access = ResourceAccessService::new(service.clone());
+
+        let session = access
+            .create_session(
+                &member_identity(),
+                test_context("external-user"),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("create_session should succeed");
+
+        assert_eq!(session.context.user_id, "member-user");
+        assert_eq!(
+            service.created_contexts.lock().unwrap()[0].user_id,
+            "member-user"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_session_preserves_context_for_admin_actor() {
+        let service = Arc::new(RecordingSessionService::default());
+        let access = ResourceAccessService::new(service.clone());
+
+        let session = access
+            .create_session(
+                &admin_identity(),
+                test_context("external-user"),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("create_session should succeed");
+
+        assert_eq!(session.context.user_id, "external-user");
+        assert_eq!(
+            service.created_contexts.lock().unwrap()[0].user_id,
+            "external-user"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_sessions_scopes_owner_for_member_actor() {
+        let service = Arc::new(RecordingSessionService::default());
+        let access = ResourceAccessService::new(service.clone());
+
+        let _ = access
+            .list_sessions(
+                &member_identity(),
+                SessionQuery {
+                    user_id: Some("external-user".to_string()),
+                    channel_id: Some("web".to_string()),
+                    provider: Some("http".to_string()),
+                    project_id: None,
+                },
+            )
+            .await
+            .expect("list_sessions should succeed");
+
+        assert_eq!(service.listed_queries.lock().unwrap()[0].user_id.as_deref(), Some("member-user"));
+    }
+
+    #[tokio::test]
+    async fn list_sessions_does_not_force_owner_for_admin_actor() {
+        let service = Arc::new(RecordingSessionService::default());
+        let access = ResourceAccessService::new(service.clone());
+
+        let _ = access
+            .list_sessions(
+                &admin_identity(),
+                SessionQuery {
+                    user_id: Some("external-user".to_string()),
+                    channel_id: Some("web".to_string()),
+                    provider: Some("http".to_string()),
+                    project_id: None,
+                },
+            )
+            .await
+            .expect("list_sessions should succeed");
+
+        assert_eq!(service.listed_queries.lock().unwrap()[0].user_id.as_deref(), Some("external-user"));
+    }
+
+    #[tokio::test]
+    async fn list_projects_keeps_admin_visibility() {
+        let service = Arc::new(RecordingSessionService::default());
+        let access = ResourceAccessService::new(service);
+
+        let projects = access
+            .list_projects(&admin_identity())
+            .await
+            .expect("list_projects should succeed");
+
+        assert_eq!(projects.len(), 2);
     }
 }

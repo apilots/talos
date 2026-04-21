@@ -45,7 +45,6 @@ async fn test_embedded_quit_flushes_memory_after_runtime_shutdown() {
     config.gateway.host = "127.0.0.1".to_string();
     config.gateway.port = port;
     config.gateway.auth = false;
-    config.gateway.token = Some("embedded-test-token".to_string());
     config.logging.stdout = false;
     config.llm.model = "glm-5".to_string();
     config.storage.connection_string = db_path.to_string_lossy().to_string();

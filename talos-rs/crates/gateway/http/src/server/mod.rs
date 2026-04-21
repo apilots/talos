@@ -48,7 +48,8 @@ use self::sessions::{
 };
 use self::state::HttpApiState;
 use self::user_profile::{
-    current_user_handler, login_handler, logout_handler, patch_current_user_handler,
+    create_user_token_handler, current_user_handler, delete_user_token_handler,
+    list_user_tokens_handler, login_handler, logout_handler, patch_current_user_handler,
     register_handler,
 };
 use self::workspace_docs::{
@@ -73,7 +74,6 @@ pub struct HttpServer {
     host: String,
     port: u16,
     jwt_secret: String,
-    static_token: Option<String>,
     auth_disabled: bool,
     models: Vec<ModelInfo>,
     lifecycle: Arc<ServerLifecycle>,
@@ -105,7 +105,6 @@ impl HttpServer {
             host: host.into(),
             port,
             jwt_secret: String::new(),
-            static_token: None,
             auth_disabled: false,
             models,
             lifecycle: Arc::new(ServerLifecycle::new()),
@@ -115,12 +114,6 @@ impl HttpServer {
     /// Override JWT secret used by the HTTP auth middleware.
     pub fn with_jwt_secret(mut self, jwt_secret: impl Into<String>) -> Self {
         self.jwt_secret = jwt_secret.into();
-        self
-    }
-
-    /// Set a static bearer token used for deterministic integration tests.
-    pub fn with_static_token(mut self, token: impl Into<String>) -> Self {
-        self.static_token = Some(token.into());
         self
     }
 
@@ -158,7 +151,6 @@ impl HttpServer {
             self.auth_service.clone(),
             self.user_service.clone(),
             self.jwt_secret.clone(),
-            self.static_token.clone(),
             self.auth_disabled,
             self.models.clone(),
             self.llm_config_service.clone(),
@@ -174,6 +166,14 @@ impl HttpServer {
             .route(
                 "/v1/user",
                 get(current_user_handler).patch(patch_current_user_handler),
+            )
+            .route(
+                "/v1/user/tokens",
+                get(list_user_tokens_handler).post(create_user_token_handler),
+            )
+            .route(
+                "/v1/user/tokens/:token_id",
+                axum::routing::delete(delete_user_token_handler),
             )
             .route(
                 "/v1/admin/users",

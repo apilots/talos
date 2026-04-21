@@ -39,7 +39,7 @@ fn test_session_context_and_state_from_record() {
     let record = SessionRecord {
         id: "session-1".to_string(),
         title: "Untitled Session".to_string(),
-        owner_user_id: "user-1".to_string(),
+        user_id: "user-1".to_string(),
         context: talos::TalosContext {
             source_type: talos::TalosSourceType::Im,
             provider: talos::TalosProvider::Telegram,
@@ -83,7 +83,7 @@ fn test_talos_session_from_record_applies_conf_override() {
     let mut record = SessionRecord {
         id: "session-1".to_string(),
         title: "Untitled Session".to_string(),
-        owner_user_id: "user-1".to_string(),
+        user_id: "user-1".to_string(),
         context: talos::TalosContext {
             source_type: talos::TalosSourceType::Http,
             provider: talos::TalosProvider::Http,
@@ -118,7 +118,7 @@ fn test_talos_session_from_record_applies_tool_approval_override() {
     let record = SessionRecord {
         id: "session-approval".to_string(),
         title: "Untitled Session".to_string(),
-        owner_user_id: "user-1".to_string(),
+        user_id: "user-1".to_string(),
         context: talos::TalosContext {
             source_type: talos::TalosSourceType::Http,
             provider: talos::TalosProvider::Http,
@@ -235,7 +235,6 @@ fn test_session_query_roundtrip_with_project_id() {
         channel_id: Some("channel-1".to_string()),
         provider: Some("http".to_string()),
         project_id: Some("project-1".to_string()),
-        owner_user_id: Some("user-1".to_string()),
     };
 
     let encoded = serde_json::to_string(&query).unwrap();
@@ -245,7 +244,6 @@ fn test_session_query_roundtrip_with_project_id() {
     assert_eq!(decoded.channel_id.as_deref(), Some("channel-1"));
     assert_eq!(decoded.provider.as_deref(), Some("http"));
     assert_eq!(decoded.project_id.as_deref(), Some("project-1"));
-    assert_eq!(decoded.owner_user_id.as_deref(), Some("user-1"));
 }
 
 #[test]
@@ -253,7 +251,7 @@ fn test_project_record_roundtrip_with_session_count() {
     let record = ProjectRecord {
         project_id: "project-1".to_string(),
         name: "repo".to_string(),
-        owner_user_id: "user-1".to_string(),
+        user_id: "user-1".to_string(),
         directory: std::path::PathBuf::from("/repo"),
         created_at: 1,
         updated_at: 2,

@@ -47,10 +47,7 @@ pub(super) async fn get_admin_llm_handler(
     actor: axum::extract::Extension<RequestIdentity>,
 ) -> Result<Json<LlmConfig>, ApiError> {
     require_admin(&actor.0)?;
-    let llm = state
-        .llm_config_service
-        .get()
-        .map_err(map_admin_error)?;
+    let llm = state.llm_config_service.get().map_err(map_admin_error)?;
     Ok(Json(llm))
 }
 
@@ -65,10 +62,7 @@ pub(super) async fn put_admin_llm_handler(
         .update(llm)
         .map_err(map_admin_error)?;
     state.reload_llm(&new_llm).map_err(map_admin_error)?;
-    let result = state
-        .llm_config_service
-        .get()
-        .map_err(map_admin_error)?;
+    let result = state.llm_config_service.get().map_err(map_admin_error)?;
     Ok(Json(result))
 }
 

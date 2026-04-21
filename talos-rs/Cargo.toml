@@ -80,8 +80,11 @@ futures-util = "0.3"
 
 # Utils
 uuid = { version = "1", features = ["v4", "serde"] }
+base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
+sha2 = "0.10"
+moka = { version = "0.12", features = ["sync"] }
 
 # HTTP Client for tests
 reqwest = { version = "0.11", features = ["json"] }

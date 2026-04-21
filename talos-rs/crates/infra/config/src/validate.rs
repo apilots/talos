@@ -254,17 +254,14 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             "gateway.port must be > 0".to_string(),
         ));
     }
-    if let Some(token) = config.gateway.token.as_ref() {
-        if token.trim().is_empty() || is_unresolved_placeholder(token) {
-            return Err(TalosError::InvalidConfiguration(
-                "gateway.token is empty or unresolved placeholder".to_string(),
-            ));
-        }
-    }
-
     if config.gateway.access_token_ttl_days == 0 {
         return Err(TalosError::InvalidConfiguration(
             "gateway.access_token_ttl_days must be > 0".to_string(),
+        ));
+    }
+    if config.gateway.auth_cache.ttl_seconds == 0 {
+        return Err(TalosError::InvalidConfiguration(
+            "gateway.auth_cache.ttl_seconds must be > 0".to_string(),
         ));
     }
 

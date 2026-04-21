@@ -262,16 +262,6 @@ impl Storage for SqliteStorage {
                 self.execute("ALTER TABLE sessions ADD COLUMN project_id TEXT", &[])
                     .await?;
             }
-            if !existing.contains("owner_user_id") {
-                info!("Adding owner_user_id column to sessions schema");
-                self.execute("ALTER TABLE sessions ADD COLUMN owner_user_id TEXT", &[])
-                    .await?;
-                self.execute(
-                    "UPDATE sessions SET owner_user_id = user_id WHERE owner_user_id IS NULL OR owner_user_id = ''",
-                    &[],
-                )
-                .await?;
-            }
             if !existing.contains("current_directory") {
                 info!("Adding current_directory column to sessions schema");
                 self.execute(
@@ -303,7 +293,6 @@ impl Storage for SqliteStorage {
                 usage_json TEXT,
                 conf_json TEXT,
                 project_id TEXT,
-                owner_user_id TEXT NOT NULL,
                 current_directory TEXT
             )
         "#;
@@ -337,12 +326,12 @@ impl Storage for SqliteStorage {
                     existing.insert(name);
                 }
             }
-            if !existing.contains("owner_user_id") {
-                info!("Adding owner_user_id column to projects schema");
-                self.execute("ALTER TABLE projects ADD COLUMN owner_user_id TEXT", &[])
+            if !existing.contains("user_id") {
+                info!("Adding user_id column to projects schema");
+                self.execute("ALTER TABLE projects ADD COLUMN user_id TEXT", &[])
                     .await?;
                 self.execute(
-                    "UPDATE projects SET owner_user_id = '' WHERE owner_user_id IS NULL",
+                    "UPDATE projects SET user_id = COALESCE(NULLIF(owner_user_id, ''), '') WHERE user_id IS NULL OR user_id = ''",
                     &[],
                 )
                 .await?;
@@ -354,7 +343,7 @@ impl Storage for SqliteStorage {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id TEXT UNIQUE NOT NULL,
                 name TEXT NOT NULL,
-                owner_user_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
                 directory TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
@@ -397,6 +386,33 @@ impl Storage for SqliteStorage {
         self.execute(create_users, &[]).await?;
         debug!("Users table created/verified");
 
+        let create_user_tokens = r#"
+            CREATE TABLE IF NOT EXISTS user_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                token_id TEXT UNIQUE NOT NULL,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                token_hash TEXT UNIQUE NOT NULL,
+                prefix TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                last_used_at INTEGER,
+                expires_at INTEGER
+            )
+        "#;
+
+        self.execute(create_user_tokens, &[]).await?;
+        self.execute(
+            "CREATE INDEX IF NOT EXISTS idx_user_tokens_user_id ON user_tokens(user_id)",
+            &[],
+        )
+        .await?;
+        self.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_tokens_token_hash ON user_tokens(token_hash)",
+            &[],
+        )
+        .await?;
+        debug!("User tokens table created/verified");
+
         info!("Database schema initialization complete");
         Ok(())
     }
@@ -413,6 +429,8 @@ mod tests {
         // Test table exists
         let exists = storage.table_exists("sessions").await.unwrap();
         assert!(exists);
+        let user_tokens_exists = storage.table_exists("user_tokens").await.unwrap();
+        assert!(user_tokens_exists);
 
         // Test bindings insert and query
         let row = Row::new(

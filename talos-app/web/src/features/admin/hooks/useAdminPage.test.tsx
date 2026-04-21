@@ -15,14 +15,14 @@ vi.mock("@/features/chat", () => ({
     Promise.resolve([
       {
         title: "Review frontend architecture",
-        owner_user_id: "owner-1",
+        user_id: "owner-1",
         config: { llm: { model: "glm-5" } },
         context: { session_id: "sess-1", user_id: "source-1" },
         state: { last_activity: Date.now() - 1_000, created_at: Date.now() - 10_000 },
       },
       {
         title: "Fix admin layout",
-        owner_user_id: "owner-2",
+        user_id: "owner-2",
         config: { llm: { model: "gpt-4.1" } },
         context: { session_id: "sess-2", user_id: "source-2" },
         state: { last_activity: Date.now() - 2_000, created_at: Date.now() - 20_000 },

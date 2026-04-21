@@ -141,7 +141,8 @@ mod tests {
 
     use axum::response::IntoResponse;
     use talos_auth::{
-        AuthManager, AuthService, InMemoryUserStore, JwtAuth, RequestIdentity, UserService,
+        AuthCacheConfig, AuthManager, AuthService, InMemoryUserStore, InMemoryUserTokenStore,
+        JwtAuth, RequestIdentity, UserService,
     };
     use talos_error::{TalosError, TalosResult};
     use talos_gateway::{Gateway, GatewayRequest, GatewayResponse};
@@ -165,8 +166,10 @@ mod tests {
     fn test_auth_services() -> (Arc<dyn AuthService>, Arc<dyn UserService>) {
         let manager = Arc::new(AuthManager::new(
             Arc::new(InMemoryUserStore::default()),
+            Arc::new(InMemoryUserTokenStore::default()),
             Arc::new(JwtAuth::new("test-secret")),
             true,
+            AuthCacheConfig::default(),
         ));
         let auth_service: Arc<dyn AuthService> = manager.clone();
         let user_service: Arc<dyn UserService> = manager;
@@ -202,7 +205,6 @@ mod tests {
             auth_service,
             user_service,
             "test-secret".to_string(),
-            None,
             true,
             vec![test_model_info()],
         ));
@@ -381,7 +383,7 @@ mod tests {
             &self,
             _name: String,
             _directory: PathBuf,
-            _owner_user_id: String,
+            _user_id: String,
         ) -> TalosResult<ProjectRecord> {
             Err(TalosError::ToolError(
                 "not used in workspace docs tests".to_string(),

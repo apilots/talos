@@ -11,13 +11,12 @@ pub struct GatewayConfig {
     #[serde(default = "default_port")]
     pub port: u16,
 
-    /// Auth token
-    #[serde(default)]
-    pub token: Option<String>,
-
     /// Enable gateway auth checks.
     #[serde(default)]
     pub auth: bool,
+
+    /// User PAT support is part of auth middleware path and is enabled together with `auth`.
+    /// There is no separate on/off toggle currently for PATs.
 
     /// JWT secret used by gateway auth middleware.
     #[serde(default)]
@@ -30,6 +29,21 @@ pub struct GatewayConfig {
     /// Allow public user registration.
     #[serde(default = "default_allow_register")]
     pub allow_register: bool,
+
+    /// Authentication cache settings shared by JWT user-state checks and user token lookups.
+    #[serde(default)]
+    pub auth_cache: GatewayAuthCacheConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayAuthCacheConfig {
+    /// Enable auth-related in-memory caches.
+    #[serde(default = "default_auth_cache_enabled")]
+    pub enabled: bool,
+
+    /// Cache TTL in seconds.
+    #[serde(default = "default_auth_cache_ttl_seconds")]
+    pub ttl_seconds: u64,
 }
 
 fn default_host() -> String {
@@ -48,16 +62,33 @@ fn default_allow_register() -> bool {
     true
 }
 
+fn default_auth_cache_enabled() -> bool {
+    true
+}
+
+fn default_auth_cache_ttl_seconds() -> u64 {
+    300
+}
+
+impl Default for GatewayAuthCacheConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_auth_cache_enabled(),
+            ttl_seconds: default_auth_cache_ttl_seconds(),
+        }
+    }
+}
+
 impl Default for GatewayConfig {
     fn default() -> Self {
         Self {
             host: default_host(),
             port: default_port(),
-            token: None,
             auth: false,
             jwt_secret: None,
             access_token_ttl_days: default_access_token_ttl_days(),
             allow_register: default_allow_register(),
+            auth_cache: GatewayAuthCacheConfig::default(),
         }
     }
 }

@@ -266,6 +266,7 @@ impl GatewayClient for MockGatewayClient {
         let state = self.state.lock().unwrap();
         Ok(TalosSession {
             title: "Untitled Session".to_string(),
+            user_id: "test-user".to_string(),
             context: talos_types::SessionContext {
                 session_id: state.session_id.clone(),
                 workspace_id: None,
@@ -303,6 +304,7 @@ impl GatewayClient for MockGatewayClient {
         let state = self.state.lock().unwrap();
         Ok(TalosSession {
             title: "Untitled Session".to_string(),
+            user_id: "test-user".to_string(),
             context: talos_types::SessionContext {
                 session_id: state.session_id.clone(),
                 workspace_id: None,
@@ -363,6 +365,7 @@ impl GatewayClient for MockGatewayClient {
         state.updated_model = Some(model.to_string());
         Ok(TalosSession {
             title: "Untitled Session".to_string(),
+            user_id: "test-user".to_string(),
             context: talos_types::SessionContext {
                 session_id: state.session_id.clone(),
                 workspace_id: None,
@@ -402,6 +405,7 @@ impl GatewayClient for MockGatewayClient {
         state.session_usage.total_tokens = state.session_usage.total_tokens.saturating_add(42);
         Ok(TalosSession {
             title: "Untitled Session".to_string(),
+            user_id: "test-user".to_string(),
             context: talos_types::SessionContext {
                 session_id: state.session_id.clone(),
                 workspace_id: None,
@@ -441,6 +445,7 @@ impl GatewayClient for MockGatewayClient {
         state.session_usage = talos_types::talos::TalosUsage::default();
         Ok(TalosSession {
             title: "Untitled Session".to_string(),
+            user_id: "test-user".to_string(),
             context: talos_types::SessionContext {
                 session_id: state.session_id.clone(),
                 workspace_id: None,

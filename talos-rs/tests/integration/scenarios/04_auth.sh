@@ -91,7 +91,7 @@ print("false")
 start_server
 trap stop_server EXIT
 
-admin_register_payload='{"username":"alice-admin","password":"password123"}'
+admin_register_payload='{"username":"alice-admin","password":"password123","email":"alice-admin@example.com"}'
 request_json POST "${GATEWAY_URL}/v1/auth/register" "${admin_register_payload}"
 log_case_json "auth_register_admin" "${admin_register_payload}" "${HTTP_BODY}"
 if [[ "${HTTP_STATUS}" != "200" ]]; then
@@ -107,7 +107,7 @@ if [[ -z "${admin_token}" || "${admin_role}" != "admin" || -z "${admin_user_id}"
 fi
 echo "CASE auth_register_admin PASS role=${admin_role}"
 
-user_register_payload='{"username":"bob-user","password":"password123"}'
+user_register_payload='{"username":"bob-user","password":"password123","email":"bob-user@example.com"}'
 request_json POST "${GATEWAY_URL}/v1/auth/register" "${user_register_payload}"
 log_case_json "auth_register_user" "${user_register_payload}" "${HTTP_BODY}"
 if [[ "${HTTP_STATUS}" != "200" ]]; then
@@ -187,7 +187,7 @@ if [[ "${HTTP_STATUS}" != "200" ]]; then
   exit 1
 fi
 project_id="$(json_get "${HTTP_BODY}" "project_id")"
-project_owner_id="$(json_get "${HTTP_BODY}" "owner_user_id")"
+project_owner_id="$(json_get "${HTTP_BODY}" "user_id")"
 if [[ -z "${project_id}" || "${project_owner_id}" != "${user_user_id}" ]]; then
   echo "CASE auth_create_project FAIL body=${HTTP_BODY}"
   exit 1
@@ -217,7 +217,7 @@ if [[ "${HTTP_STATUS}" != "200" ]]; then
   exit 1
 fi
 session_id="$(session_id_from_json "${HTTP_BODY}")"
-session_owner_id="$(json_get "${HTTP_BODY}" "owner_user_id")"
+session_owner_id="$(json_get "${HTTP_BODY}" "user_id")"
 session_context_user_id="$(json_get "${HTTP_BODY}" "context.user_id")"
 if [[ -z "${session_id}" || "${session_owner_id}" != "${user_user_id}" || "${session_context_user_id}" != "${user_user_id}" ]]; then
   echo "CASE auth_create_session FAIL body=${HTTP_BODY}"
