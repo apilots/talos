@@ -321,6 +321,10 @@ impl SessionService for CoordinatorImpl {
         self.sessions.list_sessions(query).await
     }
 
+    async fn count_sessions(&self, query: SessionQuery) -> TalosResult<usize> {
+        self.sessions.count_sessions(query).await
+    }
+
     async fn get_session(&self, session_id: &str) -> TalosResult<Option<TalosSession>> {
         self.sessions.get_session(session_id).await
     }

@@ -161,6 +161,17 @@ fn map_write_error(err: TalosError) -> ApiError {
     }
 }
 
+fn require_admin_write(actor: &RequestIdentity) -> Result<(), ApiError> {
+    if actor.has_full_access() {
+        return Ok(());
+    }
+    Err(ApiError::new(
+        StatusCode::FORBIDDEN,
+        "forbidden",
+        "admin access required",
+    ))
+}
+
 async fn restore_previous_memory_file(
     path: &std::path::Path,
     previous_content: Option<&str>,
@@ -311,10 +322,11 @@ pub(super) async fn get_memory_file_handler(
 
 pub(super) async fn put_memory_file_handler(
     State(state): State<Arc<HttpApiState>>,
-    _auth: axum::extract::Extension<RequestIdentity>,
+    auth: axum::extract::Extension<RequestIdentity>,
     Path(date): Path<String>,
     Json(request): Json<DocUpdateRequest>,
 ) -> Result<Json<Value>, ApiError> {
+    require_admin_write(&auth.0)?;
     let path = memory_file_path(state.as_ref(), &date)?;
     with_file_lock(state.as_ref(), &path, async {
         let existing = read_optional(&path).await?;
@@ -410,6 +422,8 @@ pub(super) async fn search_memory_files_handler(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::response::IntoResponse;
+    use talos_auth::{default_scopes_for_role, UserRole};
 
     #[test]
     fn test_date_in_range_applies_before_date_after_primary_range_filter() {
@@ -479,5 +493,19 @@ mod tests {
             .expect("restored file should read");
         assert_eq!(restored, "old content");
         let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_require_admin_write_rejects_non_admin() {
+        let actor = RequestIdentity {
+            user_id: "member-1".to_string(),
+            username: Some("member".to_string()),
+            role: UserRole::User,
+            scopes: default_scopes_for_role(UserRole::User),
+            auth_disabled: false,
+        };
+
+        let error = require_admin_write(&actor).expect_err("non-admin should be rejected");
+        assert_eq!(error.into_response().status(), StatusCode::FORBIDDEN);
     }
 }

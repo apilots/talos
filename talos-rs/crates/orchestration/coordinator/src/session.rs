@@ -415,6 +415,10 @@ impl SessionManager {
         Ok(sessions)
     }
 
+    pub(super) async fn count_sessions(&self, query: SessionQuery) -> TalosResult<usize> {
+        self.session_store.count_session_records(&query).await
+    }
+
     pub(super) async fn get_session(&self, session_id: &str) -> TalosResult<Option<TalosSession>> {
         if let Some(session) = self.get_cached_session(session_id).await {
             return Ok(Some(session));

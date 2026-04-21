@@ -1,6 +1,5 @@
 import type { SettingsPageState } from "../hooks/useSettingsPage";
 import { SettingsServerConnectionPanel } from "./SettingsServerConnectionPanel";
-import { SettingsWorkspaceDocsPanel } from "./SettingsWorkspaceDocsPanel";
 
 export function SettingsServerSection({
   connection,
@@ -31,22 +30,19 @@ export function SettingsServerSection({
   | "terminalApproval"
 >) {
   return (
-    <div className="space-y-5">
-      <SettingsServerConnectionPanel
-        connection={connection}
-        draft={draft}
-        models={models}
-        safeFileReads={safeFileReads}
-        safeFileWrites={safeFileWrites}
-        setConnection={setConnection}
-        setDraft={setDraft}
-        setLocale={setLocale}
-        setSafeFileReads={setSafeFileReads}
-        setSafeFileWrites={setSafeFileWrites}
-        setTerminalApproval={setTerminalApproval}
-        terminalApproval={terminalApproval}
-      />
-      <SettingsWorkspaceDocsPanel />
-    </div>
+    <SettingsServerConnectionPanel
+      connection={connection}
+      draft={draft}
+      models={models}
+      safeFileReads={safeFileReads}
+      safeFileWrites={safeFileWrites}
+      setConnection={setConnection}
+      setDraft={setDraft}
+      setLocale={setLocale}
+      setSafeFileReads={setSafeFileReads}
+      setSafeFileWrites={setSafeFileWrites}
+      setTerminalApproval={setTerminalApproval}
+      terminalApproval={terminalApproval}
+    />
   );
 }

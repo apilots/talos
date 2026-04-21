@@ -5,7 +5,7 @@ pub(super) use super::user_profile::{
 
 use std::sync::Arc;
 
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
 use serde_json::{json, Value};
@@ -17,17 +17,57 @@ use talos_types::SessionQuery;
 use super::errors::ApiError;
 use super::state::HttpApiState;
 
+const DEFAULT_ADMIN_SESSION_PAGE_SIZE: usize = 20;
+const MAX_ADMIN_SESSION_PAGE_SIZE: usize = 100;
+
 pub(super) async fn list_admin_sessions_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
-    Query(query): Query<SessionQuery>,
+    Query(mut query): Query<SessionQuery>,
 ) -> Result<Json<Value>, ApiError> {
+    let limit = query
+        .limit
+        .unwrap_or(DEFAULT_ADMIN_SESSION_PAGE_SIZE)
+        .clamp(1, MAX_ADMIN_SESSION_PAGE_SIZE);
+    let offset = query.offset.unwrap_or(0);
+    query.limit = Some(limit);
+    query.offset = Some(offset);
+
+    let mut count_query = query.clone();
+    count_query.limit = None;
+    count_query.offset = None;
+
     let sessions = state
         .access_service
         .list_admin_sessions(&actor.0, query)
         .await
         .map_err(map_admin_error)?;
-    Ok(Json(json!({ "data": sessions })))
+    let total = state
+        .access_service
+        .count_admin_sessions(&actor.0, count_query)
+        .await
+        .map_err(map_admin_error)?;
+    Ok(Json(json!({
+        "data": sessions,
+        "pagination": {
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    })))
+}
+
+pub(super) async fn delete_admin_session_handler(
+    State(state): State<Arc<HttpApiState>>,
+    actor: axum::extract::Extension<RequestIdentity>,
+    Path(session_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let ack = state
+        .access_service
+        .delete_admin_session(&actor.0, &session_id)
+        .await
+        .map_err(map_admin_delete_session_error)?;
+    Ok(Json(json!({ "success": ack.success })))
 }
 
 pub(super) async fn list_admin_projects_handler(
@@ -93,5 +133,14 @@ fn map_admin_error(error: talos_error::TalosError) -> ApiError {
             "internal_error",
             other.to_string(),
         ),
+    }
+}
+
+fn map_admin_delete_session_error(error: talos_error::TalosError) -> ApiError {
+    match error {
+        talos_error::TalosError::ValidationError(message) => {
+            ApiError::new(StatusCode::CONFLICT, "invalid_request", message)
+        }
+        other => map_admin_error(other),
     }
 }

@@ -259,6 +259,8 @@ pub struct SessionQuery {
     pub channel_id: Option<String>,
     pub provider: Option<String>,
     pub project_id: Option<String>,
+    pub limit: Option<usize>,
+    pub offset: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -346,6 +348,8 @@ pub trait SessionService: Send + Sync {
     ) -> crate::TalosResult<TalosSession>;
 
     async fn list_sessions(&self, query: SessionQuery) -> crate::TalosResult<Vec<TalosSession>>;
+
+    async fn count_sessions(&self, query: SessionQuery) -> crate::TalosResult<usize>;
 
     async fn get_session(&self, session_id: &str) -> crate::TalosResult<Option<TalosSession>>;
 

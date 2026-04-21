@@ -397,6 +397,19 @@ export interface SessionQuery {
   channel_id?: string;
   provider?: string;
   project_id?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface PaginationMeta {
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  pagination: PaginationMeta;
 }
 
 export interface SessionAgentConf {

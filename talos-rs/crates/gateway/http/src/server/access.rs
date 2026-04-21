@@ -25,7 +25,7 @@ impl ResourceAccessService {
         project_id: Option<String>,
         current_directory: Option<std::path::PathBuf>,
     ) -> TalosResult<TalosSession> {
-        if !actor.has_full_access() {
+        if !actor.bypasses_auth() {
             context.user_id = actor.user_id.clone();
         }
         if let Some(project_id_ref) = project_id.as_deref() {
@@ -41,7 +41,7 @@ impl ResourceAccessService {
         actor: &RequestIdentity,
         mut query: SessionQuery,
     ) -> TalosResult<Vec<TalosSession>> {
-        if !actor.has_full_access() {
+        if !actor.bypasses_auth() {
             query.user_id = Some(actor.user_id.clone());
         }
         let sessions = self.session_service.list_sessions(query).await?;
@@ -108,6 +108,15 @@ impl ResourceAccessService {
         session_id: &str,
     ) -> TalosResult<SessionPatchAck> {
         let _session = self.get_session(actor, session_id).await?;
+        self.session_service.delete_session(session_id).await
+    }
+
+    pub(super) async fn delete_admin_session(
+        &self,
+        actor: &RequestIdentity,
+        session_id: &str,
+    ) -> TalosResult<SessionPatchAck> {
+        self.require_admin(actor)?;
         self.session_service.delete_session(session_id).await
     }
 
@@ -223,6 +232,15 @@ impl ResourceAccessService {
         self.session_service.list_sessions(query).await
     }
 
+    pub(super) async fn count_admin_sessions(
+        &self,
+        actor: &RequestIdentity,
+        query: SessionQuery,
+    ) -> TalosResult<usize> {
+        self.require_admin(actor)?;
+        self.session_service.count_sessions(query).await
+    }
+
     pub(super) async fn list_admin_projects(
         &self,
         actor: &RequestIdentity,
@@ -236,7 +254,7 @@ impl ResourceAccessService {
         actor: &RequestIdentity,
         sessions: Vec<TalosSession>,
     ) -> Vec<TalosSession> {
-        if actor.has_full_access() {
+        if actor.bypasses_auth() {
             return sessions;
         }
         sessions
@@ -250,7 +268,7 @@ impl ResourceAccessService {
         actor: &RequestIdentity,
         projects: Vec<ProjectRecord>,
     ) -> Vec<ProjectRecord> {
-        if actor.has_full_access() {
+        if actor.bypasses_auth() {
             return projects;
         }
         projects
@@ -264,7 +282,7 @@ impl ResourceAccessService {
         actor: &RequestIdentity,
         session: &TalosSession,
     ) -> TalosResult<()> {
-        if actor.has_full_access() || session.user_id == actor.user_id {
+        if actor.bypasses_auth() || session.user_id == actor.user_id {
             return Ok(());
         }
         Err(TalosError::ResourceNotFound(format!(
@@ -278,7 +296,7 @@ impl ResourceAccessService {
         actor: &RequestIdentity,
         project: &ProjectRecord,
     ) -> TalosResult<()> {
-        if actor.has_full_access() || project.user_id == actor.user_id {
+        if actor.bypasses_auth() || project.user_id == actor.user_id {
             return Ok(());
         }
         Err(TalosError::ResourceNotFound(format!(
@@ -330,6 +348,8 @@ mod tests {
     struct RecordingSessionService {
         created_contexts: Mutex<Vec<TalosContext>>,
         listed_queries: Mutex<Vec<SessionQuery>>,
+        counted_queries: Mutex<Vec<SessionQuery>>,
+        deleted_sessions: Mutex<Vec<String>>,
     }
 
     #[async_trait]
@@ -373,7 +393,10 @@ mod tests {
             self.listed_queries.lock().unwrap().push(query.clone());
             Ok(vec![TalosSession {
                 title: "Untitled Session".to_string(),
-                user_id: query.user_id.clone().unwrap_or_else(|| "external-user".to_string()),
+                user_id: query
+                    .user_id
+                    .clone()
+                    .unwrap_or_else(|| "external-user".to_string()),
                 context: talos_types::SessionContext {
                     session_id: "session-1".to_string(),
                     workspace_id: None,
@@ -402,6 +425,11 @@ mod tests {
             }])
         }
 
+        async fn count_sessions(&self, query: SessionQuery) -> TalosResult<usize> {
+            self.counted_queries.lock().unwrap().push(query);
+            Ok(42)
+        }
+
         async fn get_session(&self, _session_id: &str) -> TalosResult<Option<TalosSession>> {
             Ok(None)
         }
@@ -426,7 +454,11 @@ mod tests {
             Ok(())
         }
 
-        async fn delete_session(&self, _session_id: &str) -> TalosResult<SessionPatchAck> {
+        async fn delete_session(&self, session_id: &str) -> TalosResult<SessionPatchAck> {
+            self.deleted_sessions
+                .lock()
+                .unwrap()
+                .push(session_id.to_string());
             Ok(SessionPatchAck { success: true })
         }
 
@@ -562,7 +594,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_session_preserves_context_for_admin_actor() {
+    async fn create_session_rewrites_context_for_admin_actor_on_regular_routes() {
         let service = Arc::new(RecordingSessionService::default());
         let access = ResourceAccessService::new(service.clone());
 
@@ -578,10 +610,10 @@ mod tests {
             .await
             .expect("create_session should succeed");
 
-        assert_eq!(session.context.user_id, "external-user");
+        assert_eq!(session.context.user_id, "admin-user");
         assert_eq!(
             service.created_contexts.lock().unwrap()[0].user_id,
-            "external-user"
+            "admin-user"
         );
     }
 
@@ -598,16 +630,21 @@ mod tests {
                     channel_id: Some("web".to_string()),
                     provider: Some("http".to_string()),
                     project_id: None,
+                    limit: None,
+                    offset: None,
                 },
             )
             .await
             .expect("list_sessions should succeed");
 
-        assert_eq!(service.listed_queries.lock().unwrap()[0].user_id.as_deref(), Some("member-user"));
+        assert_eq!(
+            service.listed_queries.lock().unwrap()[0].user_id.as_deref(),
+            Some("member-user")
+        );
     }
 
     #[tokio::test]
-    async fn list_sessions_does_not_force_owner_for_admin_actor() {
+    async fn list_sessions_scopes_owner_for_admin_actor_on_regular_routes() {
         let service = Arc::new(RecordingSessionService::default());
         let access = ResourceAccessService::new(service.clone());
 
@@ -619,16 +656,21 @@ mod tests {
                     channel_id: Some("web".to_string()),
                     provider: Some("http".to_string()),
                     project_id: None,
+                    limit: None,
+                    offset: None,
                 },
             )
             .await
             .expect("list_sessions should succeed");
 
-        assert_eq!(service.listed_queries.lock().unwrap()[0].user_id.as_deref(), Some("external-user"));
+        assert_eq!(
+            service.listed_queries.lock().unwrap()[0].user_id.as_deref(),
+            Some("admin-user")
+        );
     }
 
     #[tokio::test]
-    async fn list_projects_keeps_admin_visibility() {
+    async fn list_projects_scopes_admin_to_owned_resources_on_regular_routes() {
         let service = Arc::new(RecordingSessionService::default());
         let access = ResourceAccessService::new(service);
 
@@ -637,6 +679,91 @@ mod tests {
             .await
             .expect("list_projects should succeed");
 
+        assert!(projects.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_admin_sessions_keeps_admin_visibility() {
+        let service = Arc::new(RecordingSessionService::default());
+        let access = ResourceAccessService::new(service.clone());
+
+        let _ = access
+            .list_admin_sessions(
+                &admin_identity(),
+                SessionQuery {
+                    user_id: Some("external-user".to_string()),
+                    channel_id: Some("web".to_string()),
+                    provider: Some("http".to_string()),
+                    project_id: None,
+                    limit: Some(20),
+                    offset: Some(40),
+                },
+            )
+            .await
+            .expect("list_admin_sessions should succeed");
+
+        assert_eq!(
+            service.listed_queries.lock().unwrap()[0].user_id.as_deref(),
+            Some("external-user")
+        );
+    }
+
+    #[tokio::test]
+    async fn count_admin_sessions_keeps_admin_visibility() {
+        let service = Arc::new(RecordingSessionService::default());
+        let access = ResourceAccessService::new(service.clone());
+
+        let total = access
+            .count_admin_sessions(
+                &admin_identity(),
+                SessionQuery {
+                    user_id: Some("external-user".to_string()),
+                    channel_id: Some("web".to_string()),
+                    provider: Some("http".to_string()),
+                    project_id: None,
+                    limit: Some(20),
+                    offset: Some(40),
+                },
+            )
+            .await
+            .expect("count_admin_sessions should succeed");
+
+        assert_eq!(total, 42);
+        assert_eq!(
+            service.counted_queries.lock().unwrap()[0]
+                .user_id
+                .as_deref(),
+            Some("external-user")
+        );
+    }
+
+    #[tokio::test]
+    async fn list_admin_projects_keeps_admin_visibility() {
+        let service = Arc::new(RecordingSessionService::default());
+        let access = ResourceAccessService::new(service);
+
+        let projects = access
+            .list_admin_projects(&admin_identity())
+            .await
+            .expect("list_admin_projects should succeed");
+
         assert_eq!(projects.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn delete_admin_session_bypasses_regular_visibility_scoping() {
+        let service = Arc::new(RecordingSessionService::default());
+        let access = ResourceAccessService::new(service.clone());
+
+        let ack = access
+            .delete_admin_session(&admin_identity(), "external-session")
+            .await
+            .expect("delete_admin_session should succeed");
+
+        assert!(ack.success);
+        assert_eq!(
+            service.deleted_sessions.lock().unwrap().as_slice(),
+            &["external-session".to_string()]
+        );
     }
 }

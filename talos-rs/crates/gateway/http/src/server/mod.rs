@@ -23,9 +23,9 @@ use tower_http::cors::CorsLayer;
 use tracing::{error, info};
 
 use self::admin_users::{
-    create_admin_user_handler, delete_admin_user_handler, get_admin_llm_handler,
-    list_admin_projects_handler, list_admin_sessions_handler, list_admin_users_handler,
-    patch_admin_user_handler, put_admin_llm_handler,
+    create_admin_user_handler, delete_admin_session_handler, delete_admin_user_handler,
+    get_admin_llm_handler, list_admin_projects_handler, list_admin_sessions_handler,
+    list_admin_users_handler, patch_admin_user_handler, put_admin_llm_handler,
 };
 use self::auth::{auth_middleware, lifecycle_gate_middleware};
 pub use self::lifecycle::{ServerLifecycle, ServerLifecycleState};
@@ -184,6 +184,10 @@ impl HttpServer {
                 axum::routing::patch(patch_admin_user_handler).delete(delete_admin_user_handler),
             )
             .route("/v1/admin/sessions", get(list_admin_sessions_handler))
+            .route(
+                "/v1/admin/sessions/:session_id",
+                axum::routing::delete(delete_admin_session_handler),
+            )
             .route("/v1/admin/projects", get(list_admin_projects_handler))
             .route(
                 "/v1/admin/llm",

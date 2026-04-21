@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
-import { useCreateProjectMutation } from "@/features/chat";
+import { useCreateProjectMutation, useDeleteProjectMutation } from "@/features/chat";
 import { ProjectRow, useProjectsPageState, type ProjectSort } from "@/features/projects";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/Button";
@@ -16,16 +16,25 @@ function deriveProjectName(directory: string) {
   return normalized.split("/").filter(Boolean).at(-1) || "";
 }
 
+function parseProjectDeleteError(error: unknown, t: (key: string, options?: Record<string, unknown>) => string) {
+  if (error instanceof Error && error.message === "PROJECT_DELETE_CONFLICT") {
+    return t("projects:deleteProjectBlocked");
+  }
+  return String(error);
+}
+
 export function ProjectsPage() {
   const { t } = useTranslation(["projects", "common"]);
   const navigate = useNavigate();
   const createProject = useCreateProjectMutation();
+  const deleteProject = useDeleteProjectMutation();
   const { filteredProjects, projectsQuery, query, setQuery, setSort, sort } = useProjectsPageState();
   const [createOpen, setCreateOpen] = useState(false);
   const [path, setPath] = useState("");
   const [name, setName] = useState("");
   const [nameTouched, setNameTouched] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const isCreating = createProject.isPending;
   const showEmpty = !projectsQuery.isLoading && !projectsQuery.isError && filteredProjects.length === 0;
@@ -48,6 +57,18 @@ export function ProjectsPage() {
     setName("");
     setNameTouched(false);
     setFormError(null);
+  }
+
+  async function handleDeleteProject(projectId: string, projectName: string) {
+    if (!window.confirm(t("projects:deleteProjectConfirm", { name: projectName }))) {
+      return;
+    }
+    setDeleteError(null);
+    try {
+      await deleteProject.mutateAsync(projectId);
+    } catch (error) {
+      setDeleteError(parseProjectDeleteError(error, t));
+    }
   }
 
   async function handleCreateProject() {
@@ -95,7 +116,10 @@ export function ProjectsPage() {
           <div className="border-b border-border/55 p-5">
             <Input
               className="h-12 bg-background/66"
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => {
+                setDeleteError(null);
+                setQuery(event.target.value);
+              }}
               placeholder={t("projects:searchProjects")}
               value={query}
             />
@@ -113,6 +137,11 @@ export function ProjectsPage() {
                 ))}
               </select>
             </div>
+            {deleteError ? (
+              <div className="mt-4 rounded-[var(--radius-control)] border border-danger/20 bg-danger/5 px-3 py-2 text-sm text-danger">
+                {deleteError}
+              </div>
+            ) : null}
           </div>
 
           {projectsQuery.isLoading ? (
@@ -136,8 +165,17 @@ export function ProjectsPage() {
             <div className="grid gap-4 p-5 md:grid-cols-2">
               {filteredProjects.map((project) => (
                 <ProjectRow
+                  deleteDisabled={(project.sessionCount ?? 0) > 0}
+                  deleteDisabledReason={t("projects:deleteProjectDisabledHint")}
+                  deleteLabel={
+                    deleteProject.isPending && deleteProject.variables === project.id
+                      ? t("projects:deletingProject")
+                      : t("common:delete")
+                  }
+                  deleting={deleteProject.isPending && deleteProject.variables === project.id}
                   key={project.id}
                   label={t("projects:projectRowAria", { name: project.name })}
+                  onDelete={() => void handleDeleteProject(project.id, project.name)}
                   onSelect={() => navigate(`/projects/${project.id}`)}
                   project={project}
                 />

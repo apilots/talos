@@ -43,7 +43,8 @@ pub(super) async fn auth_middleware(
 
     // auth_disabled is used for local/integration testing and bypasses all auth checks.
     if state.auth_disabled {
-        req.extensions_mut().insert(RequestIdentity::auth_disabled());
+        req.extensions_mut()
+            .insert(RequestIdentity::auth_disabled());
         return Ok(next.run(req).await);
     }
 

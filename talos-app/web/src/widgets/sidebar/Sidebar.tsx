@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { FolderOpen, HardDriveUpload, LogOut, MemoryStick, Plus, Settings2, Shield, SlidersHorizontal, Trash2 } from "lucide-react";
+import { FileText, FolderOpen, HardDriveUpload, LogOut, MemoryStick, Plus, Settings2, Shield, SlidersHorizontal, Trash2 } from "lucide-react";
 import { Link, NavLink } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -202,6 +202,7 @@ export function Sidebar({
 
       <nav className="mt-5 space-y-1 border-t border-border/80 pt-5">
         <NavItem icon={<MemoryStick size={16} />} label={t("sidebar:memory")} to="/memory" />
+        <NavItem icon={<FileText size={16} />} label={t("sidebar:workspaceDocs")} to="/workspace-docs" />
         <NavItem icon={<HardDriveUpload size={16} />} label={t("sidebar:files")} to="/files" />
         <NavItem icon={<Settings2 size={16} />} label={t("sidebar:settings")} to="/settings" />
         {connection.authRole === "admin" ? <NavItem icon={<Shield size={16} />} label={t("sidebar:admin")} to="/admin" /> : null}

@@ -11,6 +11,7 @@ import type {
   UserDto,
   ProjectPatch,
   ProjectRecord,
+  PaginatedResponse,
   RegisterRequest,
   LoginRequest,
   AuthResponse,
@@ -138,11 +139,15 @@ export class TalosClient {
       },
     },
     sessions: {
-      list: async (query?: SessionQuery): Promise<TalosSession[]> => {
-        const response = await this.http.request<{ data: TalosSession[] }>(
+      list: async (query?: SessionQuery): Promise<PaginatedResponse<TalosSession>> => {
+        return this.http.request<PaginatedResponse<TalosSession>>(
           this.urlWithQuery("/v1/admin/sessions", query),
         );
-        return response.data;
+      },
+      delete: async (sessionId: string): Promise<void> => {
+        await this.http.request<void>(this.url(`/v1/admin/sessions/${sessionId}`), {
+          method: "DELETE",
+        });
       },
     },
     projects: {

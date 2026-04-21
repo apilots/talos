@@ -81,6 +81,17 @@ fn map_write_error(err: TalosError) -> ApiError {
     }
 }
 
+fn require_admin_write(actor: &RequestIdentity) -> Result<(), ApiError> {
+    if actor.has_full_access() {
+        return Ok(());
+    }
+    Err(ApiError::new(
+        StatusCode::FORBIDDEN,
+        "forbidden",
+        "admin access required",
+    ))
+}
+
 pub(super) async fn list_workspace_docs_handler(
     State(state): State<Arc<HttpApiState>>,
     _auth: axum::extract::Extension<RequestIdentity>,
@@ -116,10 +127,11 @@ pub(super) async fn get_workspace_doc_handler(
 
 pub(super) async fn put_workspace_doc_handler(
     State(state): State<Arc<HttpApiState>>,
-    _auth: axum::extract::Extension<RequestIdentity>,
+    auth: axum::extract::Extension<RequestIdentity>,
     Path(kind): Path<String>,
     Json(request): Json<DocUpdateRequest>,
 ) -> Result<Json<Value>, ApiError> {
+    require_admin_write(&auth.0)?;
     let kind = parse_doc_kind(&kind)?;
     let path = workspace_doc_path(state.as_ref(), kind);
     with_file_lock(state.as_ref(), &path, async {
@@ -161,6 +173,16 @@ mod tests {
 
     fn test_auth() -> axum::extract::Extension<RequestIdentity> {
         axum::extract::Extension(RequestIdentity::mock_admin("workspace-doc-test"))
+    }
+
+    fn test_user_auth() -> axum::extract::Extension<RequestIdentity> {
+        axum::extract::Extension(RequestIdentity {
+            user_id: "workspace-doc-user".to_string(),
+            username: Some("member".to_string()),
+            role: talos_auth::UserRole::User,
+            scopes: talos_auth::default_scopes_for_role(talos_auth::UserRole::User),
+            auth_disabled: false,
+        })
     }
 
     fn test_auth_services() -> (Arc<dyn AuthService>, Arc<dyn UserService>) {
@@ -281,6 +303,12 @@ mod tests {
         }
 
         async fn list_sessions(&self, _query: SessionQuery) -> TalosResult<Vec<TalosSession>> {
+            Err(TalosError::ToolError(
+                "not used in workspace docs tests".to_string(),
+            ))
+        }
+
+        async fn count_sessions(&self, _query: SessionQuery) -> TalosResult<usize> {
             Err(TalosError::ToolError(
                 "not used in workspace docs tests".to_string(),
             ))
@@ -471,6 +499,26 @@ mod tests {
         assert_eq!(docs.len(), 5);
         assert_eq!(docs[0]["kind"], "soul");
         assert_eq!(docs[4]["kind"], "memory");
+        let _ = std::fs::remove_dir_all(workspace_dir);
+    }
+
+    #[tokio::test]
+    async fn test_put_workspace_doc_handler_rejects_non_admin() {
+        let (state, workspace_dir) = test_state();
+
+        let error = put_workspace_doc_handler(
+            State(state),
+            test_user_auth(),
+            Path("soul".to_string()),
+            Json(DocUpdateRequest {
+                content: "# Shared doc".to_string(),
+                base_version: talos_types::ExpectedFileVersion::MustNotExist,
+            }),
+        )
+        .await
+        .expect_err("non-admin should not write workspace docs");
+
+        assert_eq!(error.into_response().status(), StatusCode::FORBIDDEN);
         let _ = std::fs::remove_dir_all(workspace_dir);
     }
 }

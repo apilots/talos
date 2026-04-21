@@ -41,6 +41,8 @@ pub trait SessionStore: Send + Sync {
 
     async fn list_session_records(&self, query: &SessionQuery) -> TalosResult<Vec<SessionRecord>>;
 
+    async fn count_session_records(&self, query: &SessionQuery) -> TalosResult<usize>;
+
     async fn patch_session_record(
         &self,
         session_id: &str,
@@ -536,6 +538,16 @@ impl SessionStore for DatabaseSessionStore {
             sql.push_str(&clauses.join(" AND "));
         }
         sql.push_str(" ORDER BY last_activity DESC");
+        if let Some(limit) = query.limit {
+            sql.push_str(" LIMIT ?");
+            params.push(limit.to_string());
+        } else if query.offset.is_some() {
+            sql.push_str(" LIMIT -1");
+        }
+        if let Some(offset) = query.offset {
+            sql.push_str(" OFFSET ?");
+            params.push(offset.to_string());
+        }
 
         let params_ref = params.iter().map(String::as_str).collect::<Vec<_>>();
         let rows = self.storage.query(&sql, &params_ref).await?;
@@ -552,6 +564,42 @@ impl SessionStore for DatabaseSessionStore {
             records.push(record);
         }
         Ok(records)
+    }
+
+    async fn count_session_records(&self, query: &SessionQuery) -> TalosResult<usize> {
+        if query.provider.is_some() {
+            let mut count_query = query.clone();
+            count_query.limit = None;
+            count_query.offset = None;
+            return Ok(self.list_session_records(&count_query).await?.len());
+        }
+
+        let mut sql = "SELECT COUNT(*) as total FROM sessions".to_string();
+        let mut clauses = Vec::new();
+        let mut params = Vec::new();
+        if let Some(user_id) = query.user_id.as_deref() {
+            clauses.push("user_id = ?");
+            params.push(user_id.to_string());
+        }
+        if let Some(channel_id) = query.channel_id.as_deref() {
+            clauses.push("channel = ?");
+            params.push(channel_id.to_string());
+        }
+        if let Some(project_id) = query.project_id.as_deref() {
+            clauses.push("project_id = ?");
+            params.push(project_id.to_string());
+        }
+        if !clauses.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&clauses.join(" AND "));
+        }
+
+        let params_ref = params.iter().map(String::as_str).collect::<Vec<_>>();
+        let rows = self.storage.query(&sql, &params_ref).await?;
+        let Some(row) = rows.first() else {
+            return Ok(0);
+        };
+        Ok(row.get_i64("total").unwrap_or_default().max(0) as usize)
     }
 
     async fn patch_session_record(
@@ -999,6 +1047,10 @@ impl SessionStore for MockSessionStore {
         Ok(Vec::new())
     }
 
+    async fn count_session_records(&self, _query: &SessionQuery) -> TalosResult<usize> {
+        Ok(0)
+    }
+
     async fn patch_session_record(
         &self,
         session_id: &str,
@@ -1440,6 +1492,8 @@ mod scope_tests {
                 channel_id: None,
                 provider: None,
                 project_id: Some("project-1".to_string()),
+                limit: None,
+                offset: None,
             })
             .await
             .expect("list sessions should succeed");
@@ -1447,6 +1501,85 @@ mod scope_tests {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].id, first.id);
         assert_ne!(records[0].id, second.id);
+    }
+
+    #[tokio::test]
+    async fn test_list_session_records_respects_limit_and_offset() {
+        let storage = Arc::new(SqliteStorage::new("sqlite::memory:").await.unwrap());
+        let store = DatabaseSessionStore::new(storage).await.unwrap();
+
+        let first = store
+            .create_session(
+                &sample_context(),
+                "agent-a",
+                "qwen-max",
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("create first session should succeed");
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        let second = store
+            .create_session(
+                &sample_context(),
+                "agent-a",
+                "qwen-max",
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("create second session should succeed");
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        let third = store
+            .create_session(
+                &sample_context(),
+                "agent-a",
+                "qwen-max",
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("create third session should succeed");
+
+        let records = store
+            .list_session_records(&SessionQuery {
+                user_id: None,
+                channel_id: None,
+                provider: None,
+                project_id: None,
+                limit: Some(1),
+                offset: Some(1),
+            })
+            .await
+            .expect("list paged sessions should succeed");
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].id, second.id);
+        assert_ne!(records[0].id, first.id);
+        assert_ne!(records[0].id, third.id);
+        assert_eq!(
+            store
+                .count_session_records(&SessionQuery {
+                    user_id: None,
+                    channel_id: None,
+                    provider: None,
+                    project_id: None,
+                    limit: Some(1),
+                    offset: Some(1),
+                })
+                .await
+                .expect("count sessions should succeed"),
+            3
+        );
     }
 
     #[tokio::test]

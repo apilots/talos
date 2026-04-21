@@ -22,6 +22,7 @@ use talos_types::talos::{
 use talos_types::SessionQuery;
 use tower::util::ServiceExt;
 
+use crate::server::admin_users::{delete_admin_session_handler, list_admin_sessions_handler};
 use crate::server::messages::{process_session_message, stream_session_message};
 use crate::server::user_profile::{create_user_token_handler, list_user_tokens_handler};
 
@@ -338,6 +339,10 @@ impl SessionService for MockSessionService {
         _query: talos_types::SessionQuery,
     ) -> TalosResult<Vec<talos_types::TalosSession>> {
         Ok(Vec::new())
+    }
+
+    async fn count_sessions(&self, _query: talos_types::SessionQuery) -> TalosResult<usize> {
+        Ok(0)
     }
 
     async fn get_session(
@@ -691,6 +696,46 @@ async fn test_delete_session_handler_returns_success() {
     .expect("delete session should succeed");
 
     assert_eq!(response.0["success"], serde_json::Value::Bool(true));
+}
+
+#[tokio::test]
+async fn test_delete_admin_session_handler_returns_success() {
+    let state = test_state(false);
+
+    let response = delete_admin_session_handler(
+        State(state),
+        axum::extract::Extension(test_auth()),
+        Path("mock-session".to_string()),
+    )
+    .await
+    .expect("delete admin session should succeed");
+
+    assert_eq!(response.0["success"], serde_json::Value::Bool(true));
+}
+
+#[tokio::test]
+async fn test_list_admin_sessions_handler_returns_pagination_payload() {
+    let state = test_state(false);
+
+    let response = list_admin_sessions_handler(
+        State(state),
+        axum::extract::Extension(test_auth()),
+        Query(SessionQuery {
+            user_id: None,
+            channel_id: None,
+            provider: None,
+            project_id: None,
+            limit: Some(25),
+            offset: Some(50),
+        }),
+    )
+    .await
+    .expect("list admin sessions should succeed");
+
+    assert_eq!(response.0["data"], serde_json::Value::Array(Vec::new()));
+    assert_eq!(response.0["pagination"]["total"], 0);
+    assert_eq!(response.0["pagination"]["limit"], 25);
+    assert_eq!(response.0["pagination"]["offset"], 50);
 }
 
 #[tokio::test]

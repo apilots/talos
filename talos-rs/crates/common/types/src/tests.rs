@@ -235,6 +235,8 @@ fn test_session_query_roundtrip_with_project_id() {
         channel_id: Some("channel-1".to_string()),
         provider: Some("http".to_string()),
         project_id: Some("project-1".to_string()),
+        limit: Some(20),
+        offset: Some(40),
     };
 
     let encoded = serde_json::to_string(&query).unwrap();
@@ -244,6 +246,8 @@ fn test_session_query_roundtrip_with_project_id() {
     assert_eq!(decoded.channel_id.as_deref(), Some("channel-1"));
     assert_eq!(decoded.provider.as_deref(), Some("http"));
     assert_eq!(decoded.project_id.as_deref(), Some("project-1"));
+    assert_eq!(decoded.limit, Some(20));
+    assert_eq!(decoded.offset, Some(40));
 }
 
 #[test]

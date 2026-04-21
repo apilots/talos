@@ -277,6 +277,8 @@ impl TalosClient {
             channel_id: None,
             provider: None,
             project_id: Some(project_id.to_string()),
+            limit: None,
+            offset: None,
         })
         .await
     }

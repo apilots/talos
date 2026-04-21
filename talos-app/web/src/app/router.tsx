@@ -20,6 +20,9 @@ const ProjectSessionsPage = lazy(() =>
 const MemoryPage = lazy(() =>
   import("@/pages/memory/MemoryPage").then((module) => ({ default: module.MemoryPage })),
 );
+const WorkspaceDocsPage = lazy(() =>
+  import("@/pages/workspace-docs/WorkspaceDocsPage").then((module) => ({ default: module.WorkspaceDocsPage })),
+);
 const FilesPage = lazy(() =>
   import("@/pages/files/FilesPage").then((module) => ({ default: module.FilesPage })),
 );
@@ -98,6 +101,10 @@ export const router = createBrowserRouter([
       {
         path: "memory",
         element: withSuspense(<MemoryPage />),
+      },
+      {
+        path: "workspace-docs",
+        element: withSuspense(<WorkspaceDocsPage />),
       },
       {
         path: "files",

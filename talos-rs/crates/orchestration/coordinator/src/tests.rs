@@ -285,6 +285,10 @@ impl talos_session_store::SessionStore for TitleTestSessionStore {
         Ok(self.sessions.lock().unwrap().values().cloned().collect())
     }
 
+    async fn count_session_records(&self, _query: &SessionQuery) -> TalosResult<usize> {
+        Ok(self.sessions.lock().unwrap().len())
+    }
+
     async fn patch_session_record(
         &self,
         session_id: &str,

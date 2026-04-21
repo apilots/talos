@@ -7,6 +7,7 @@ import {
   compactSession,
   createProject,
   createSession,
+  deleteProject,
   deleteSession,
   getSession,
   getSessionTurns,
@@ -158,6 +159,17 @@ export function useCreateProjectMutation() {
     mutationFn: createProject,
     onSuccess: async (project) => {
       mergeProjects([project], project.id);
+      await queryClient.invalidateQueries({ queryKey: [...chatKeys.all, connectionKey, "projects"] });
+    },
+  });
+}
+
+export function useDeleteProjectMutation() {
+  const connectionKey = useConnectionKey();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: deleteProject,
+    onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: [...chatKeys.all, connectionKey, "projects"] });
     },
   });

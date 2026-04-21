@@ -48,7 +48,7 @@ export function AdminDashboardSection({
         <Panel className="rounded-[1.4rem] border-border/80 bg-card/82 p-5">
           <div className="text-sm font-medium text-ink">{t("dashboardCards.activeAgentTasks")}</div>
           <div className="mt-4 space-y-3">
-            {(sessions.data ?? []).slice(0, 3).map((session) => (
+            {(sessions.data?.data ?? []).slice(0, 3).map((session) => (
               <div
                 className="rounded-[1.15rem] border border-border/80 bg-background/45 p-4"
                 key={session.context.session_id}

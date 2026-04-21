@@ -1,6 +1,8 @@
+import { TalosHttpError } from "@talos/sdk";
 import type {
   ModelInfo,
   ProjectRecord as ApiProjectRecord,
+  SessionQuery,
   SessionUpdate,
   TalosContext,
   TalosEvent,
@@ -62,8 +64,12 @@ export async function listSessions() {
   return getTalosClient().sessions.list();
 }
 
-export async function listAdminSessions() {
-  return getTalosClient().admin.sessions.list();
+export async function listAdminSessions(query?: SessionQuery) {
+  return getTalosClient().admin.sessions.list(query);
+}
+
+export async function deleteAdminSession(sessionId: string) {
+  await getTalosClient().admin.sessions.delete(sessionId);
 }
 
 export async function listSessionsByProject(projectId: string) {
@@ -104,6 +110,17 @@ export async function createProject(input: string | CreateProjectInput) {
     directory,
   });
   return mapProjectRecord(record);
+}
+
+export async function deleteProject(projectId: string) {
+  try {
+    await getTalosClient().projects.delete(projectId);
+  } catch (error) {
+    if (error instanceof TalosHttpError && error.status === 409) {
+      throw new Error("PROJECT_DELETE_CONFLICT");
+    }
+    throw error;
+  }
 }
 
 export async function updateSessionProject(sessionId: string, project?: ProjectRecord) {
