@@ -22,7 +22,13 @@ pub(super) async fn health_handler() -> Json<Value> {
 pub(super) async fn list_models_handler(
     State(state): State<Arc<HttpApiState>>,
 ) -> Result<Json<Value>, ApiError> {
-    let data: Vec<Value> = state.models.iter().map(|model| json!(model)).collect();
+    let data: Vec<Value> = state
+        .models
+        .read()
+        .await
+        .iter()
+        .map(|model| json!(model))
+        .collect();
     Ok(Json(json!({ "data": data })))
 }
 
@@ -49,7 +55,12 @@ pub(super) fn validate_text_input(input: &[TalosInputItem]) -> Result<(), ApiErr
 }
 
 pub(super) fn validate_model_supported(state: &HttpApiState, model: &str) -> Result<(), ApiError> {
-    if state.models.iter().any(|entry| entry.id == model) {
+    if state
+        .models
+        .try_read()
+        .map(|g| g.iter().any(|entry| entry.id == model))
+        .unwrap_or(false)
+    {
         return Ok(());
     }
 

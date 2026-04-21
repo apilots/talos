@@ -4,6 +4,5 @@ export {
   SettingsAppearanceSection,
   SettingsGeneralSection,
   SettingsKeysSection,
-  SettingsModelsSection,
   SettingsServerSection,
 } from "./components";

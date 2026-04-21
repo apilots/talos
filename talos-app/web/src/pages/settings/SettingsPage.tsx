@@ -5,7 +5,6 @@ import {
   SettingsAppearanceSection,
   SettingsGeneralSection,
   SettingsKeysSection,
-  SettingsModelsSection,
   SettingsServerSection,
   useSettingsPage,
 } from "@/features/settings";
@@ -24,8 +23,6 @@ export function SettingsPage() {
     setActiveTab,
     draft,
     setDraft,
-    defaultModel,
-    setDefaultModel,
     desktopNotifications,
     setDesktopNotifications,
     safeFileReads,
@@ -35,12 +32,10 @@ export function SettingsPage() {
     terminalApproval,
     setTerminalApproval,
     models,
-    modelCards,
   } = useSettingsPage();
   const tabs = useMemo(
     () => [
       { id: "general", label: t("settings:tabs.general") },
-      { id: "models", label: t("settings:tabs.models") },
       { id: "keys", label: t("settings:tabs.keys") },
       { id: "appearance", label: t("settings:tabs.appearance") },
       { id: "server", label: t("settings:tabs.server") },
@@ -63,7 +58,7 @@ export function SettingsPage() {
                   : "text-muted hover:bg-background/45 hover:text-ink",
               ].join(" ")}
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as "general" | "models" | "keys" | "appearance" | "server")}
+              onClick={() => setActiveTab(tab.id as "general" | "keys" | "appearance" | "server")}
               type="button"
             >
               {tab.label}
@@ -74,10 +69,6 @@ export function SettingsPage() {
 
       {activeTab === "general" ? (
         <SettingsGeneralSection draft={draft} locale={locale} setDraft={setDraft} setLocale={setLocale} uiTheme={uiTheme} />
-      ) : null}
-
-      {activeTab === "models" ? (
-        <SettingsModelsSection defaultModel={defaultModel} modelCards={modelCards} models={models} setDefaultModel={setDefaultModel} />
       ) : null}
 
       {activeTab === "keys" ? <SettingsKeysSection /> : null}

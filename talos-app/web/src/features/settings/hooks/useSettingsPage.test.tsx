@@ -46,14 +46,6 @@ describe("useSettingsPage", () => {
     }));
   });
 
-  it("hydrates the default model from the first available model", async () => {
-    const { result } = renderHook(() => useSettingsPage());
-
-    await waitFor(() => {
-      expect(result.current.defaultModel).toBe("glm-5");
-    });
-  });
-
   it("tracks connection changes into the local draft", async () => {
     const { result, rerender } = renderHook(() => useSettingsPage());
 

@@ -782,6 +782,11 @@ async fn test_search_memory_files_handler_returns_matching_data() {
 #[test]
 fn test_http_server_listen_addr_uses_configured_host() {
     let (auth_service, user_service) = test_auth_services();
+    let llm_config_service: Arc<dyn talos_config::LlmConfigService> = Arc::new(
+        talos_config::LlmConfigManager::new(Arc::new(talos_config::InMemoryLlmConfigStore::new(
+            Default::default(),
+        ))),
+    );
     let server = HttpServer::new(
         Arc::new(MockGateway),
         Arc::new(MockSessionService),
@@ -789,6 +794,7 @@ fn test_http_server_listen_addr_uses_configured_host() {
         user_service,
         test_config(),
         Arc::new(MockLlmProvider),
+        llm_config_service,
         "127.0.0.1",
         8080,
         "qwen-plus",
@@ -843,6 +849,11 @@ async fn test_lifecycle_gate_rejects_new_requests_when_quiescing() {
     let lifecycle = Arc::new(ServerLifecycle::new());
     lifecycle.store(ServerLifecycleState::Quiescing);
     let (auth_service, user_service) = test_auth_services();
+    let llm_svc: Arc<dyn talos_config::LlmConfigService> = Arc::new(
+        talos_config::LlmConfigManager::new(Arc::new(talos_config::InMemoryLlmConfigStore::new(
+            Default::default(),
+        ))),
+    );
     let state = Arc::new(HttpApiState::new_with_lifecycle(
         Arc::new(MockGateway),
         Arc::new(MockSessionService),
@@ -854,6 +865,7 @@ async fn test_lifecycle_gate_rejects_new_requests_when_quiescing() {
         None,
         true,
         vec![test_model_info()],
+        llm_svc,
         lifecycle,
     ));
     let app = Router::new()
@@ -882,6 +894,11 @@ async fn test_lifecycle_gate_allows_health_when_quiescing() {
     let lifecycle = Arc::new(ServerLifecycle::new());
     lifecycle.store(ServerLifecycleState::Quiescing);
     let (auth_service, user_service) = test_auth_services();
+    let llm_svc: Arc<dyn talos_config::LlmConfigService> = Arc::new(
+        talos_config::LlmConfigManager::new(Arc::new(talos_config::InMemoryLlmConfigStore::new(
+            Default::default(),
+        ))),
+    );
     let state = Arc::new(HttpApiState::new_with_lifecycle(
         Arc::new(MockGateway),
         Arc::new(MockSessionService),
@@ -893,6 +910,7 @@ async fn test_lifecycle_gate_allows_health_when_quiescing() {
         None,
         true,
         vec![test_model_info()],
+        llm_svc,
         lifecycle,
     ));
     let app = Router::new()

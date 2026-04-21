@@ -4,10 +4,12 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
 use talos_auth::{AuthService, UserService};
+use talos_config::{LlmConfig, LlmConfigService};
+use talos_error::TalosResult;
 use talos_gateway::Gateway;
 use talos_llm_provider::LlmProvider;
 use talos_types::talos::TalosMessageResponse;
-use talos_types::{ModelInfo, SessionService, TalosConfig};
+use talos_types::{resolve_model_catalog, ModelInfo, SessionService, TalosConfig};
 
 use super::access::ResourceAccessService;
 use super::lifecycle::ServerLifecycle;
@@ -40,7 +42,8 @@ pub(super) struct HttpApiState {
     pub(super) auth_disabled: bool,
     pub(super) idempotency_cache: Arc<RwLock<HashMap<String, TalosMessageResponse>>>,
     pub(super) file_locks: FileLockRegistry,
-    pub(super) models: Arc<Vec<ModelInfo>>,
+    pub(super) models: Arc<RwLock<Vec<ModelInfo>>>,
+    pub(super) llm_config_service: Arc<dyn LlmConfigService>,
     pub(super) lifecycle: Arc<ServerLifecycle>,
 }
 
@@ -58,6 +61,10 @@ impl HttpApiState {
         auth_disabled: bool,
         models: Vec<ModelInfo>,
     ) -> Self {
+        use talos_config::{InMemoryLlmConfigStore, LlmConfigManager};
+        let llm_config_service: Arc<dyn LlmConfigService> = Arc::new(LlmConfigManager::new(
+            Arc::new(InMemoryLlmConfigStore::new(base_config.llm.clone())),
+        ));
         Self::new_with_lifecycle(
             gateway,
             session_service,
@@ -69,6 +76,7 @@ impl HttpApiState {
             static_token,
             auth_disabled,
             models,
+            llm_config_service,
             Arc::new(ServerLifecycle::new()),
         )
     }
@@ -84,6 +92,7 @@ impl HttpApiState {
         static_token: Option<String>,
         auth_disabled: bool,
         models: Vec<ModelInfo>,
+        llm_config_service: Arc<dyn LlmConfigService>,
         lifecycle: Arc<ServerLifecycle>,
     ) -> Self {
         Self {
@@ -97,8 +106,20 @@ impl HttpApiState {
             auth_disabled,
             idempotency_cache: Arc::new(RwLock::new(HashMap::new())),
             file_locks: FileLockRegistry::default(),
-            models: Arc::new(models),
+            models: Arc::new(RwLock::new(models)),
+            llm_config_service,
             lifecycle,
         }
+    }
+
+    /// Hot-reload the model catalog from a new LlmConfig. The LLM provider is not
+    /// recreated here; API key / base URL changes take effect on next server start.
+    pub(super) fn reload_llm(&self, new_config: &LlmConfig) -> TalosResult<()> {
+        let new_catalog = resolve_model_catalog(new_config);
+        *self
+            .models
+            .try_write()
+            .map_err(|_| talos_error::TalosError::ConfigError("models lock poisoned".to_string()))? = new_catalog;
+        Ok(())
     }
 }

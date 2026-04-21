@@ -23,8 +23,9 @@ use tower_http::cors::CorsLayer;
 use tracing::{error, info};
 
 use self::admin_users::{
-    create_admin_user_handler, delete_admin_user_handler, list_admin_projects_handler,
-    list_admin_sessions_handler, list_admin_users_handler, patch_admin_user_handler,
+    create_admin_user_handler, delete_admin_user_handler, get_admin_llm_handler,
+    list_admin_projects_handler, list_admin_sessions_handler, list_admin_users_handler,
+    patch_admin_user_handler, put_admin_llm_handler,
 };
 use self::auth::{auth_middleware, lifecycle_gate_middleware};
 pub use self::lifecycle::{ServerLifecycle, ServerLifecycleState};
@@ -54,6 +55,7 @@ use self::workspace_docs::{
     get_workspace_doc_handler, list_workspace_docs_handler, put_workspace_doc_handler,
 };
 use talos_auth::{AuthService, UserService};
+use talos_config::LlmConfigService;
 use talos_error::TalosResult;
 use talos_gateway::Gateway;
 use talos_llm_provider::LlmProvider;
@@ -67,6 +69,7 @@ pub struct HttpServer {
     user_service: Arc<dyn UserService>,
     base_config: TalosConfig,
     llm_provider: Arc<dyn LlmProvider>,
+    llm_config_service: Arc<dyn LlmConfigService>,
     host: String,
     port: u16,
     jwt_secret: String,
@@ -85,6 +88,7 @@ impl HttpServer {
         user_service: Arc<dyn UserService>,
         base_config: TalosConfig,
         llm_provider: Arc<dyn LlmProvider>,
+        llm_config_service: Arc<dyn LlmConfigService>,
         host: impl Into<String>,
         port: u16,
         _default_model: impl Into<String>,
@@ -97,6 +101,7 @@ impl HttpServer {
             user_service,
             base_config,
             llm_provider,
+            llm_config_service,
             host: host.into(),
             port,
             jwt_secret: String::new(),
@@ -156,6 +161,7 @@ impl HttpServer {
             self.static_token.clone(),
             self.auth_disabled,
             self.models.clone(),
+            self.llm_config_service.clone(),
             self.lifecycle.clone(),
         ));
 
@@ -179,6 +185,10 @@ impl HttpServer {
             )
             .route("/v1/admin/sessions", get(list_admin_sessions_handler))
             .route("/v1/admin/projects", get(list_admin_projects_handler))
+            .route(
+                "/v1/admin/llm",
+                get(get_admin_llm_handler).put(put_admin_llm_handler),
+            )
             .route(
                 "/v1/sessions",
                 get(list_sessions_handler).post(create_session_handler),

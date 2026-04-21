@@ -505,3 +505,45 @@ export interface ToolApprovalRequest {
   approved: boolean;
   reason?: string | null;
 }
+
+export type ModelInputKind = "text" | "image" | "audio" | "video" | "file";
+
+export type ThinkingFormat = "open_ai" | "anthropic" | "qwen";
+
+export interface ModelCompatConfig {
+  thinking_format?: ThinkingFormat | null;
+}
+
+export interface ModelCostConfig {
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_write: number;
+}
+
+export interface ProviderModelConfig {
+  id: string;
+  name: string;
+  context_window: number;
+  max_tokens: number;
+  reasoning: boolean;
+  input: ModelInputKind[];
+  cost: ModelCostConfig;
+  compat: ModelCompatConfig;
+}
+
+export interface ProviderConfig {
+  api_key?: string | null;
+  base_url?: string | null;
+  enabled: boolean;
+  models: ProviderModelConfig[];
+}
+
+export interface LlmConfig {
+  provider: string;
+  model: string;
+  anthropic: ProviderConfig;
+  openai: ProviderConfig;
+  bailian: ProviderConfig;
+  ollama: ProviderConfig;
+}

@@ -32,6 +32,8 @@ use talos_logging::LoggingConfig;
 pub mod domains;
 pub mod loader;
 pub mod paths;
+pub mod service;
+pub mod store;
 pub mod validate;
 
 pub type TalosTimezone = chrono_tz::Tz;
@@ -56,6 +58,8 @@ pub use domains::tools::{
     LocalExecToolConfig, McpServerConfig, McpToolConfig, McpTransportConfig, ToolApprovalPolicy,
     ToolSandboxModeConfig, ToolSandboxPolicy, ToolsRuntimeConfig,
 };
+pub use service::{LlmConfigManager, LlmConfigService};
+pub use store::{InMemoryLlmConfigStore, LlmConfigStore, YamlLlmConfigStore};
 pub use paths::{
     resolve_runtime_path, resolve_talos_home, sanitize_agent_name, set_talos_home, TalosPaths,
 };

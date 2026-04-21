@@ -4,7 +4,7 @@ use std::time::Duration;
 use talos_agent::{AgentImpl, AgentOrchestrator};
 use talos_auth::{AuthManager, AuthService, DatabaseUserStore, JwtAuth, JwtConfig, UserService};
 use talos_channel::{ChannelServer, TelegramChannel};
-use talos_config::Config;
+use talos_config::{Config, LlmConfigManager, LlmConfigService, TalosPaths, YamlLlmConfigStore};
 use talos_coordinator::{Coordinator, CoordinatorImpl};
 use talos_error::{TalosError, TalosResult};
 use talos_gateway::{Gateway, GatewayImpl};
@@ -20,7 +20,7 @@ use talos_tools::{
     register_collaboration_tools, register_core_local_tools, register_network_tools,
     CollaborationRuntime, ToolRegistry,
 };
-use talos_types::{ModelInfo, RequestHandler, SessionService};
+use talos_types::{resolve_model_catalog, RequestHandler, SessionService};
 use tokio::signal;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -281,8 +281,13 @@ pub async fn start_server(
     let auth_service: Arc<dyn AuthService> = auth_manager.clone();
     let user_service: Arc<dyn UserService> = auth_manager.clone();
 
+    let config_path = TalosPaths::resolve().config_file;
+    let llm_store = Arc::new(YamlLlmConfigStore::new(config_path));
+    let llm_config_service: Arc<dyn LlmConfigService> =
+        Arc::new(LlmConfigManager::new(llm_store));
+
     let default_model = config.llm.model.clone();
-    let model_catalog = resolve_model_catalog(&config, &default_model);
+    let model_catalog = resolve_model_catalog(&config.llm);
     let mut http_server = HttpServer::new(
         gateway,
         session_service,
@@ -290,6 +295,7 @@ pub async fn start_server(
         user_service,
         config.clone(),
         llm_provider.clone(),
+        llm_config_service,
         config.gateway.host.clone(),
         config.gateway.port,
         default_model,
@@ -437,52 +443,6 @@ async fn create_llm_provider(
     }
 }
 
-fn resolve_provider_models(config: &Config) -> Vec<ModelInfo> {
-    let provider = config.llm.provider.clone();
-    let provider_models = match config.llm.provider.as_str() {
-        "anthropic" => config.llm.anthropic.models.clone(),
-        "openai" => config.llm.openai.models.clone(),
-        "bailian" => config.llm.bailian.models.clone(),
-        "ollama" => config.llm.ollama.models.clone(),
-        _ => Vec::new(),
-    };
-
-    provider_models
-        .into_iter()
-        .filter(|model| !model.id.trim().is_empty())
-        .map(|model| ModelInfo {
-            id: model.id.clone(),
-            name: model.display_name().to_string(),
-            provider: provider.clone(),
-            context_window: model.context_window,
-            max_tokens: model.max_tokens,
-            reasoning: model.reasoning,
-            input: model.input.clone(),
-            cost: model.cost.clone(),
-            compat: model.compat.clone(),
-        })
-        .collect()
-}
-
-fn resolve_model_catalog(config: &Config, default_model: &str) -> Vec<ModelInfo> {
-    let mut models = resolve_provider_models(config);
-    if !models.iter().any(|model| model.id == default_model) {
-        models.push(ModelInfo {
-            id: default_model.to_string(),
-            name: default_model.to_string(),
-            provider: config.llm.provider.clone(),
-            context_window: 0,
-            max_tokens: 0,
-            reasoning: false,
-            input: Vec::new(),
-            cost: Default::default(),
-            compat: Default::default(),
-        });
-    }
-    models.sort_by(|left, right| left.id.cmp(&right.id));
-    models.dedup_by(|left, right| left.id == right.id);
-    models
-}
 
 #[cfg(test)]
 mod tests {

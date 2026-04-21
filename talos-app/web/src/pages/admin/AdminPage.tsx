@@ -18,7 +18,7 @@ import {
 
 export function AdminPage() {
   const { t } = useTranslation(["admin"]);
-  const { sessions, models, connection, metrics, activeSection, setActiveSection, sessionSearch, setSessionSearch, sessionRows } =
+  const { sessions, connection, metrics, activeSection, setActiveSection, sessionSearch, setSessionSearch, sessionRows } =
     useAdminPage();
   const sectionLabels = useMemo<Record<AdminSection, string>>(
     () => ({
@@ -66,7 +66,7 @@ export function AdminPage() {
           ) : null}
           {activeSection === "tools" ? <AdminToolsSection /> : null}
           {activeSection === "audit" ? <AdminAuditSection /> : null}
-          {activeSection === "models" ? <AdminModelsSection models={models} /> : null}
+          {activeSection === "models" ? <AdminModelsSection /> : null}
           {activeSection === "system" ? <AdminSystemSection connection={connection} /> : null}
         </div>
       </div>

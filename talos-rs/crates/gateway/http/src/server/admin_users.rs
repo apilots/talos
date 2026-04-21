@@ -11,6 +11,7 @@ use axum::response::Json;
 use serde_json::{json, Value};
 
 use talos_auth::RequestIdentity;
+use talos_config::LlmConfig;
 use talos_types::SessionQuery;
 
 use super::errors::ApiError;
@@ -39,6 +40,47 @@ pub(super) async fn list_admin_projects_handler(
         .await
         .map_err(map_admin_error)?;
     Ok(Json(json!({ "data": projects })))
+}
+
+pub(super) async fn get_admin_llm_handler(
+    State(state): State<Arc<HttpApiState>>,
+    actor: axum::extract::Extension<RequestIdentity>,
+) -> Result<Json<LlmConfig>, ApiError> {
+    require_admin(&actor.0)?;
+    let llm = state
+        .llm_config_service
+        .get()
+        .map_err(map_admin_error)?;
+    Ok(Json(llm))
+}
+
+pub(super) async fn put_admin_llm_handler(
+    State(state): State<Arc<HttpApiState>>,
+    actor: axum::extract::Extension<RequestIdentity>,
+    Json(llm): Json<LlmConfig>,
+) -> Result<Json<LlmConfig>, ApiError> {
+    require_admin(&actor.0)?;
+    let new_llm = state
+        .llm_config_service
+        .update(llm)
+        .map_err(map_admin_error)?;
+    state.reload_llm(&new_llm).map_err(map_admin_error)?;
+    let result = state
+        .llm_config_service
+        .get()
+        .map_err(map_admin_error)?;
+    Ok(Json(result))
+}
+
+fn require_admin(actor: &RequestIdentity) -> Result<(), ApiError> {
+    if actor.role.is_admin() {
+        return Ok(());
+    }
+    Err(ApiError::new(
+        StatusCode::FORBIDDEN,
+        "forbidden",
+        "admin access required",
+    ))
 }
 
 fn map_admin_error(error: talos_error::TalosError) -> ApiError {
