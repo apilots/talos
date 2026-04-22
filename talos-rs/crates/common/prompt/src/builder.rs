@@ -7,7 +7,7 @@ use talos_types::{talos::TalosSessionEnvironment, ModelInfo};
 use tokio::fs;
 
 use crate::types::*;
-use crate::{assembler, bootstrap, renderer};
+use crate::{assembler, bootstrap, renderer, PromptBlock};
 
 /// Unified prompt builder for kernel turns.
 pub struct PromptBuilder<'a> {
@@ -263,4 +263,8 @@ impl<'a> PromptBuilder<'a> {
 
 pub fn render_prompt_assembly(assembly: &PromptAssembly) -> Vec<ChatMessage> {
     renderer::render_assembly(assembly)
+}
+
+pub fn render_prompt_blocks(assembly: &PromptAssembly) -> Vec<PromptBlock> {
+    renderer::render_prompt_blocks(assembly)
 }

@@ -1,18 +1,9 @@
-use crate::{PromptSection, PromptSectionKind};
-
-const DYNAMIC_SUFFIX_DROP_ORDER: &[PromptSectionKind] = &[
-    PromptSectionKind::ExpandedToolCatalog,
-    PromptSectionKind::RetrievedMemories,
-    PromptSectionKind::RecentMessages,
-    PromptSectionKind::SessionSummary,
-    PromptSectionKind::RequestedToolPreferenceHint,
-    PromptSectionKind::RecentTaskContinuity,
-    PromptSectionKind::ProjectContext,
-];
+use crate::{regions, PromptSection, PromptSectionKind};
 
 pub(crate) fn enrich_sections(sections: &mut [PromptSection]) {
     for section in sections {
-        section.estimated_tokens = estimate_text_tokens(&section.content);
+        section.estimated_tokens =
+            estimate_text_tokens(&crate::renderer::render_section_text(section));
     }
 }
 
@@ -41,11 +32,11 @@ pub(crate) fn trim_dynamic_suffix_to_budget(
         return;
     }
 
-    for kind in DYNAMIC_SUFFIX_DROP_ORDER {
+    for kind in regions::DYNAMIC_SUFFIX_DROP_ORDER {
         while estimate_sections_tokens(sections) > budget {
             let Some(index) = sections
                 .iter()
-                .position(|section| section.kind == *kind && !section.required)
+                .position(|section| section.kind == *kind && !section.is_required())
             else {
                 break;
             };
@@ -63,19 +54,13 @@ pub(crate) fn trim_dynamic_suffix_to_budget(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BudgetTier, CacheScope, TruncationMode};
 
     fn section(kind: PromptSectionKind, content: &str) -> PromptSection {
         PromptSection {
             kind,
-            title: None,
-            content: content.to_string(),
+            payload: content.to_string(),
             role: None,
-            cache_scope: CacheScope::None,
-            tier: BudgetTier::Supplemental,
-            required: false,
             estimated_tokens: estimate_text_tokens(content),
-            truncation_mode: TruncationMode::DropWhole,
         }
     }
 
@@ -83,7 +68,6 @@ mod tests {
     fn test_trim_dynamic_suffix_follows_spec_drop_order() {
         let uniform_content = "12345678";
         let mut sections = vec![
-            section(PromptSectionKind::ProjectContext, uniform_content),
             section(PromptSectionKind::SessionSummary, uniform_content),
             section(
                 PromptSectionKind::RequestedToolPreferenceHint,

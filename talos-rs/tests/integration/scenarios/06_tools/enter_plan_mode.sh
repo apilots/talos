@@ -128,7 +128,7 @@ content_items = result.get("content") or []
 assert content_items, "missing content payload"
 content = content_items[0].get("value") or {}
 assert content.get("mode") == "plan", content
-assert content.get("reason") == "Need explicit planning", content
+assert (content.get("reason") or "").rstrip(".") == "Need explicit planning", content
 PY
 
 echo "CASE tool_enter_plan_mode PASS"

@@ -199,7 +199,7 @@ mod tests {
             },
         ];
         diagnostics.dropped_sections = vec![PromptSectionKind::RecentMessages];
-        diagnostics.truncated_sections = vec![PromptSectionKind::ProjectContext];
+        diagnostics.truncated_sections = vec![PromptSectionKind::ExpandedToolCatalog];
 
         let config = AgentKernelConfig::default();
         let warnings = derive_prompt_warnings(&diagnostics, &config);

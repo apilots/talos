@@ -119,6 +119,10 @@ if os.environ.get("TALOS_TEST_ENABLE_JWT_AUTH", "").strip() == "1":
     text = text.replace('jwt_secret: ${JWT_SECRET}', 'jwt_secret: "talos-test-jwt-secret"', 1)
     text = text.replace('auth: false', 'auth: true', 1)
     text = text.replace('allow_register: true', 'allow_register: true', 1)
+else:
+    # Most integration scenarios exercise product flows, not auth.
+    # Keep gateway auth disabled unless a scenario explicitly opts into JWT auth.
+    text = text.replace('auth: true', 'auth: false', 1)
 
 config_path.write_text(text)
 PY

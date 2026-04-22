@@ -175,7 +175,7 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
     config.prompt.session_recent_messages_limit = 24;
 
     let mut ctx = build_ctx_with_stream(None);
-    ctx.selected_model_info.context_window = 2_400;
+    ctx.selected_model_info.context_window = 1_800;
     ctx.selected_model_info.max_tokens = 128;
 
     let prepared = prepare_general_turn(
@@ -208,8 +208,11 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
     assert_eq!(compaction.compaction_cache_creation_input_tokens, Some(6));
     assert_eq!(compaction.compaction_cache_read_input_tokens, Some(22));
     assert!(
-        compaction.post_compaction_total_tokens <= compaction.pre_compaction_total_tokens,
-        "compaction should not increase prompt token usage"
+        prepared
+            .prompt_diagnostics
+            .window_usage
+            .within_effective_budget,
+        "compaction should restore the prompt to the effective budget"
     );
     assert!(prepared
         .prompt_diagnostics

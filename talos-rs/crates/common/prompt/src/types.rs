@@ -1,7 +1,12 @@
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeSet;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
-use talos_config::{AgentKernelMemoryConfig, AgentKernelPromptConfig, ReservedOutputPolicy};
+use talos_config::{
+    default_timezone, AgentKernelMemoryConfig, AgentKernelPromptConfig, ReservedOutputPolicy,
+    ToolsRuntimeConfig,
+};
 use talos_error::{TalosError, TalosResult};
 use talos_memory::TalosMessageRole;
 
@@ -163,18 +168,21 @@ pub enum BootstrapFileScope {
 #[serde(rename_all = "snake_case")]
 pub enum PromptSectionKind {
     IdentityCore,
-    RuntimeSessionContext,
     EvidenceToolingPolicy,
     ToolChoicePriority,
     RequestedToolPreferenceTemplate,
     RequestedToolPreferenceHint,
     FailureRecoveryPolicy,
-    CompactToolRouting,
     ExpandedToolCatalog,
     TaskProtocolLibrary,
     CommunicationPolicy,
     PlanningInstruction,
-    ProjectContext,
+    BootstrapSoul,
+    BootstrapIdentity,
+    BootstrapUser,
+    BootstrapHeartbeat,
+    BootstrapMemory,
+    BootstrapAgents,
     RecentTaskContinuity,
     SessionSummary,
     RecentMessages,
@@ -191,12 +199,11 @@ pub enum BudgetTier {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum CacheScope {
-    Static,
-    Workspace,
-    // Default to the safest behavior for newly added sections until their reuse boundary is explicit.
+pub enum SectionCacheScope {
+    StaticPrefixEligible,
+    WorkspaceStable,
     #[default]
-    None,
+    DynamicOnly,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -206,17 +213,37 @@ pub enum TruncationMode {
     TrimTail,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RegionPlacement {
+    StaticPrefixRequired,
+    DynamicSuffixRequired,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RegionEnvelopePolicy {
+    PlainTextRequired,
+    XmlEnvelopeRequired,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RegionPriority {
+    Highest,
+    High,
+    MediumHigh,
+    Medium,
+    MediumLow,
+    Low,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptSection {
     pub kind: PromptSectionKind,
-    pub title: Option<String>,
-    pub content: String,
+    pub payload: String,
     pub role: Option<TalosMessageRole>,
-    pub cache_scope: CacheScope,
-    pub tier: BudgetTier,
-    pub required: bool,
     pub estimated_tokens: usize,
-    pub truncation_mode: TruncationMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -248,8 +275,67 @@ pub struct PromptDiagnostics {
 pub struct PromptAssembly {
     pub static_prefix_sections: Vec<PromptSection>,
     pub dynamic_suffix_sections: Vec<PromptSection>,
+    pub request_context_injection: RequestContextInjection,
     pub user_input: String,
     pub diagnostics: PromptDiagnostics,
+    pub cache_state: PromptCacheState,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RequestContextInjection {
+    pub appended_system_context: Option<String>,
+    pub prepended_user_context_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PromptBlockKind {
+    Attribution,
+    StaticPrefix,
+    DynamicSuffix,
+    AppendedSystemContext,
+    PrependedUserContextMessage,
+    UserInput,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PromptBlockCacheScope {
+    StablePrefix,
+    ScopedReusable,
+    NoCache,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptBlock {
+    pub kind: PromptBlockKind,
+    pub text: String,
+    pub cache_scope: PromptBlockCacheScope,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PromptCacheBreakReason {
+    PromptVersionChanged,
+    ToolCatalogChanged,
+    BootstrapChanged,
+    ModelChanged,
+    ManualClear,
+    ManualCompact,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PromptCacheState {
+    pub prompt_version: String,
+    pub static_prefix_fingerprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bootstrap_fingerprint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_catalog_fingerprint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_fingerprint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_break_reason: Option<PromptCacheBreakReason>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -425,9 +511,119 @@ impl Default for PromptLoadPolicy {
 }
 
 /// Prompt build configuration.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptBuildConfig {
     pub load_policy: PromptLoadPolicy,
     pub prompt: AgentKernelPromptConfig,
     pub memory: AgentKernelMemoryConfig,
+    pub tools: ToolsRuntimeConfig,
+    #[serde(default = "default_timezone")]
+    pub timezone: String,
+}
+
+impl Default for PromptBuildConfig {
+    fn default() -> Self {
+        Self {
+            load_policy: PromptLoadPolicy::default(),
+            prompt: AgentKernelPromptConfig::default(),
+            memory: AgentKernelMemoryConfig::default(),
+            tools: ToolsRuntimeConfig::default(),
+            timezone: default_timezone(),
+        }
+    }
+}
+
+impl PromptSection {
+    pub fn is_required(&self) -> bool {
+        crate::regions::region_template(self.kind).required
+    }
+
+    pub fn cache_scope(&self) -> SectionCacheScope {
+        crate::regions::region_template(self.kind).cache_scope
+    }
+
+    pub fn tier(&self) -> BudgetTier {
+        crate::regions::region_template(self.kind).tier
+    }
+
+    pub fn truncation_mode(&self) -> TruncationMode {
+        crate::regions::region_template(self.kind).truncation_mode
+    }
+
+    pub fn placement(&self) -> RegionPlacement {
+        crate::regions::region_template(self.kind).placement
+    }
+
+    pub fn envelope_policy(&self) -> RegionEnvelopePolicy {
+        crate::regions::region_template(self.kind).envelope_policy
+    }
+
+    pub fn title(&self) -> &'static str {
+        crate::regions::region_template(self.kind).title
+    }
+
+    pub fn framing_prompt(&self) -> &'static str {
+        crate::regions::region_template(self.kind).framing_prompt
+    }
+
+    pub fn stable_name(&self) -> &'static str {
+        crate::regions::region_template(self.kind).stable_name
+    }
+
+    pub fn region_role(&self) -> &'static str {
+        crate::regions::region_template(self.kind).role
+    }
+
+    pub fn priority(&self) -> RegionPriority {
+        crate::regions::region_template(self.kind).priority
+    }
+}
+
+impl PromptBlockCacheScope {
+    pub fn is_cacheable(self) -> bool {
+        !matches!(self, Self::NoCache)
+    }
+}
+
+impl RegionPriority {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Highest => "highest",
+            Self::High => "high",
+            Self::MediumHigh => "medium_high",
+            Self::Medium => "medium",
+            Self::MediumLow => "medium_low",
+            Self::Low => "low",
+        }
+    }
+}
+
+pub fn compute_prompt_fingerprint(parts: &[&str]) -> String {
+    let mut hasher = DefaultHasher::new();
+    for part in parts {
+        part.hash(&mut hasher);
+    }
+    format!("{:016x}", hasher.finish())
+}
+
+pub fn determine_prompt_cache_break_reason(
+    previous: &PromptCacheState,
+    current: &PromptCacheState,
+) -> Option<PromptCacheBreakReason> {
+    if previous.prompt_version != current.prompt_version {
+        return Some(PromptCacheBreakReason::PromptVersionChanged);
+    }
+    if previous.model_fingerprint != current.model_fingerprint {
+        return Some(PromptCacheBreakReason::ModelChanged);
+    }
+    if previous.bootstrap_fingerprint != current.bootstrap_fingerprint {
+        return Some(PromptCacheBreakReason::BootstrapChanged);
+    }
+    if previous.tool_catalog_fingerprint != current.tool_catalog_fingerprint {
+        return Some(PromptCacheBreakReason::ToolCatalogChanged);
+    }
+    if previous.static_prefix_fingerprint != current.static_prefix_fingerprint {
+        return Some(PromptCacheBreakReason::PromptVersionChanged);
+    }
+    None
 }

@@ -90,6 +90,8 @@ fn build_prompt_builder<'a>(
             load_policy,
             prompt: kernel_config.prompt.clone(),
             memory: kernel_config.memory.clone(),
+            tools: kernel_config.tools.clone(),
+            timezone: kernel_config.timezone.clone(),
         })
         .tools(tool_definition_provider)
         .memory_store(session_id, memory_store)
@@ -251,9 +253,23 @@ fn prompt_warning_key(warning: &KernelWarning) -> Option<String> {
         KernelWarning::PromptBootstrapFileDropped(payload) => {
             Some(format!("dropped:{:?}:{}", payload.file_kind, payload.path))
         }
-        KernelWarning::PromptDynamicSectionDropped(_)
-        | KernelWarning::PromptDynamicSectionTruncated(_) => None,
+        KernelWarning::PromptDynamicSectionDropped(payload) => Some(format!(
+            "dynamic_dropped:{}",
+            serialize_section_kinds(&payload.sections)
+        )),
+        KernelWarning::PromptDynamicSectionTruncated(payload) => Some(format!(
+            "dynamic_truncated:{}",
+            serialize_section_kinds(&payload.sections)
+        )),
     }
+}
+
+fn serialize_section_kinds(sections: &[PromptSectionKind]) -> String {
+    sections
+        .iter()
+        .map(|section| format!("{section:?}"))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn filter_prompt_warnings(
@@ -835,4 +851,41 @@ pub async fn run_general_turn(
         prompt_diagnostics,
         warnings,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        KernelWarning, PromptDynamicSectionDroppedWarning, PromptDynamicSectionTruncatedWarning,
+    };
+
+    #[test]
+    fn test_prompt_warning_key_includes_dynamic_dropped_sections() {
+        let warning =
+            KernelWarning::PromptDynamicSectionDropped(PromptDynamicSectionDroppedWarning {
+                sections: vec![
+                    PromptSectionKind::ExpandedToolCatalog,
+                    PromptSectionKind::RecentMessages,
+                ],
+            });
+
+        assert_eq!(
+            prompt_warning_key(&warning).as_deref(),
+            Some("dynamic_dropped:ExpandedToolCatalog,RecentMessages")
+        );
+    }
+
+    #[test]
+    fn test_prompt_warning_key_includes_dynamic_truncated_sections() {
+        let warning =
+            KernelWarning::PromptDynamicSectionTruncated(PromptDynamicSectionTruncatedWarning {
+                sections: vec![PromptSectionKind::RecentMessages],
+            });
+
+        assert_eq!(
+            prompt_warning_key(&warning).as_deref(),
+            Some("dynamic_truncated:RecentMessages")
+        );
+    }
 }
