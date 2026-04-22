@@ -5,7 +5,10 @@ use std::future::pending;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use talos_agent_kernel::StopReason as KernelStopReason;
-use talos_agent_kernel::{KernelBuilder, RunRequest, RunResponse, Runner};
+use talos_agent_kernel::{
+    ExecutionSummaryStreamData, KernelBuilder, KernelStreamEvent, KernelStreamEventData,
+    KernelStreamEventType, PromptWarningEventData, RunRequest, RunResponse, Runner,
+};
 use talos_config::AgentKernelConfig;
 use talos_error::TalosResult;
 use talos_llm_provider::{
@@ -159,6 +162,7 @@ fn build_temp_agent() -> (TempDir, AgentImpl) {
 fn build_test_session(session_id: &str, workspace_id: &str) -> TalosSession {
     TalosSession {
         title: "Untitled Session".to_string(),
+        user_id: "local-user".to_string(),
         conf: SessionConf::default(),
         project_id: None,
         current_directory: None,
@@ -270,6 +274,64 @@ async fn test_add_tool() {
 
     let tools = agent.tool_registry.list_tool_names();
     assert!(tools.contains(&"WebSearch".to_string()));
+}
+
+#[test]
+fn test_map_kernel_stream_event_drops_prompt_warning() {
+    let payload: PromptWarningEventData = serde_json::from_value(json!({
+        "warning": {
+            "type": "prompt_dynamic_section_dropped",
+            "payload": {
+                "sections": ["recent_messages"]
+            }
+        },
+        "agent_id": "agent-1",
+        "session_id": "session-1",
+        "phase": "execution"
+    }))
+    .expect("prompt warning payload should deserialize");
+    let event = KernelStreamEvent::new(
+        KernelStreamEventType::PromptWarning,
+        KernelStreamEventData::PromptWarning(payload),
+    );
+    let mut item_index = 5;
+
+    let mapped = AgentImpl::map_kernel_stream_event(event, "req-1", &mut item_index);
+
+    assert!(
+        mapped.is_none(),
+        "prompt warning should not be exposed upstream"
+    );
+    assert_eq!(
+        item_index, 5,
+        "dropped prompt warning should not consume item index"
+    );
+}
+
+#[test]
+fn test_map_kernel_stream_event_keeps_execution_summary() {
+    let event = KernelStreamEvent::new(
+        KernelStreamEventType::ExecutionSummary,
+        KernelStreamEventData::ExecutionSummary(ExecutionSummaryStreamData {
+            text: "Executed 1 tool call".to_string(),
+            round: None,
+        }),
+    );
+    let mut item_index = 2;
+
+    let mapped = AgentImpl::map_kernel_stream_event(event, "req-1", &mut item_index);
+
+    match mapped {
+        Some(OrchestratorEvent::MessageExecutionSummary(payload)) => {
+            assert_eq!(payload.text, "Executed 1 tool call");
+            assert_eq!(payload.item_index, 2);
+        }
+        other => panic!("unexpected mapped event: {other:?}"),
+    }
+    assert_eq!(
+        item_index, 3,
+        "execution summary should still consume item index"
+    );
 }
 
 #[tokio::test]

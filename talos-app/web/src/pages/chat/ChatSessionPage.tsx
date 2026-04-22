@@ -293,7 +293,7 @@ export function ChatSessionPage() {
             projects={projects}
             runtimeMode={connection.runtimeMode}
             selectedModel={currentModel}
-            compact
+            showProjectSelector={false}
           />
         </div>
       </div>

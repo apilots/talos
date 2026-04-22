@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import type { SettingsPageState } from "../hooks/useSettingsPage";
 import { Panel } from "@/shared/ui/Panel";
-import { FieldBlock, SectionHeader } from "./SectionPrimitives";
+import { SectionHeader } from "./SectionPrimitives";
 
 export function SettingsAppearanceSection({
   uiTheme,
@@ -23,32 +23,40 @@ export function SettingsAppearanceSection({
         subtitle={t("settings:appearanceDetail")}
         title={t("settings:appearanceTitle")}
       />
-      <div className="mt-6 grid gap-4 md:grid-cols-2">
-        <FieldBlock label={t("settings:fields.theme")}>
+      <div className="mt-5 divide-y divide-border/60">
+        <div className="flex items-center justify-between gap-6 py-4">
+          <span className="text-sm text-ink">{t("settings:fields.theme")}</span>
           <select
-            className="w-full rounded-2xl border border-border bg-surface/85 px-4 py-3 text-sm outline-none transition focus:border-brand/50"
+            className="w-36 rounded-xl border border-border bg-surface/85 px-3 py-2 text-sm outline-none transition focus:border-brand/50"
             onChange={(event) => setUiTheme(event.target.value as "dark" | "light")}
             value={uiTheme}
           >
             <option value="dark">{t("common:themeBlack")}</option>
             <option value="light">{t("common:themeWhite")}</option>
           </select>
-        </FieldBlock>
+        </div>
         <button
-          className={[
-            "rounded-[1.2rem] border px-4 py-4 text-left text-sm transition",
-            desktopNotifications
-              ? "border-brand/40 bg-brand/10 text-brand"
-              : "border-border bg-background/45 text-muted",
-          ].join(" ")}
+          className="flex w-full items-center justify-between gap-6 py-4 text-left"
           onClick={() => setDesktopNotifications((current) => !current)}
           type="button"
         >
-          <div className="font-medium">{t("settings:desktopNotifications")}</div>
-          <div className="mt-2 text-xs leading-6">
-            {desktopNotifications
-              ? t("settings:desktopNotificationsEnabled")
-              : t("settings:desktopNotificationsDisabled")}
+          <div>
+            <div className="text-sm text-ink">{t("settings:desktopNotifications")}</div>
+            <div className="mt-0.5 text-xs text-muted">
+              {desktopNotifications
+                ? t("settings:desktopNotificationsEnabled")
+                : t("settings:desktopNotificationsDisabled")}
+            </div>
+          </div>
+          <div
+            className={[
+              "shrink-0 rounded-full px-3 py-1 text-xs font-medium transition",
+              desktopNotifications
+                ? "bg-brand/12 text-brand"
+                : "bg-background/60 text-muted",
+            ].join(" ")}
+          >
+            {desktopNotifications ? t("settings:toggleOn") : t("settings:toggleOff")}
           </div>
         </button>
       </div>

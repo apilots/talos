@@ -44,7 +44,7 @@ export function TextMessageBlock({
               ? "flex-1 border border-border/70 bg-background/34 text-muted"
               : isSystem
                 ? "flex-1 border border-border/65 bg-background/40 text-muted"
-                : "flex-1 border border-border/70 bg-card/88 px-5 py-4 text-ink shadow-[0_12px_28px_rgba(95,84,64,0.04)] md:px-6 md:py-[1.15rem]",
+                : "flex-1 border border-border bg-card/88 px-5 py-4 text-ink shadow-[0_12px_28px_rgba(95,84,64,0.04)] md:px-6 md:py-[1.15rem]",
         )}
       >
         <div>

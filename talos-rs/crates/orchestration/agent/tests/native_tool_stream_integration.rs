@@ -290,6 +290,7 @@ fn build_request(input: &str) -> OrchestratorRequest {
     OrchestratorRequest {
         session: TalosSession {
             title: "Untitled Session".to_string(),
+            user_id: "integration-user".to_string(),
             conf: talos_types::SessionConf::default(),
             project_id: None,
             current_directory: None,

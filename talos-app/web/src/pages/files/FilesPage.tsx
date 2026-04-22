@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { FileCode2, FileImage, FileSpreadsheet, FileText, Grid2x2, List, Plus, Trash2, Upload } from "lucide-react";
 
 import { classifyFile, formatFileMeta, useFilesPage, type FileCategory } from "@/features/files";
-import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
 import { Panel } from "@/shared/ui/Panel";
 
@@ -39,32 +38,43 @@ export function FilesPage() {
     <div className="flex h-full w-full flex-col overflow-hidden">
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 px-8 py-7">
-      <Panel className="rounded-[1.35rem] border-border/80 bg-card/82 p-4.5">
+      <Panel className="rounded-[1.35rem] border-border/80 bg-card/82 px-5 py-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Input
-            className="max-w-md"
+            className="min-w-0 flex-1"
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t("files:searchPlaceholder")}
             value={query}
           />
-          <div className="flex flex-wrap items-center justify-end gap-3">
-            <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <button
-                className="rounded-2xl border border-border bg-card/80 p-2.5 text-muted transition hover:border-brand/40 hover:text-ink"
+                className={[
+                  "rounded-xl border p-2 transition",
+                  view === "list"
+                    ? "border-brand/40 bg-brand/10 text-brand"
+                    : "border-border bg-card/80 text-muted hover:border-brand/30 hover:text-ink",
+                ].join(" ")}
                 onClick={() => setView("list")}
                 type="button"
               >
-                <List size={16} />
+                <List size={15} />
               </button>
               <button
-                className="rounded-2xl border border-border bg-card/80 p-2.5 text-muted transition hover:border-brand/40 hover:text-ink"
+                className={[
+                  "rounded-xl border p-2 transition",
+                  view === "grid"
+                    ? "border-brand/40 bg-brand/10 text-brand"
+                    : "border-border bg-card/80 text-muted hover:border-brand/30 hover:text-ink",
+                ].join(" ")}
                 onClick={() => setView("grid")}
                 type="button"
               >
-                <Grid2x2 size={16} />
+                <Grid2x2 size={15} />
               </button>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="h-5 w-px bg-border/70" />
+            <div className="flex flex-wrap items-center gap-1.5">
               {(Object.keys(categoryLabels) as FileCategory[]).map((itemCategory) => (
                 <button
                   className={[
@@ -95,6 +105,21 @@ export function FilesPage() {
         </Panel>
       ) : view === "grid" ? (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <button
+            className="rounded-[1.3rem] border border-dashed border-border/80 bg-card/60 p-4 text-left transition hover:border-brand/40 hover:bg-card/90"
+            onClick={addFile}
+            type="button"
+          >
+            <div className="flex h-full flex-col gap-4">
+              <div className="flex size-11 items-center justify-center rounded-2xl border border-dashed border-border bg-background/50 text-brand">
+                <Plus size={18} />
+              </div>
+              <div className="space-y-2">
+                <div className="text-base font-medium text-ink">{t("files:upload")}</div>
+                <p className="text-sm leading-6 text-muted">{t("files:dragHint")}</p>
+              </div>
+            </div>
+          </button>
           {filteredItems.map((item) => {
             const fileCategory = classifyFile(item);
             return (
@@ -163,18 +188,6 @@ export function FilesPage() {
         </Panel>
       )}
 
-      <Panel className="rounded-[1.4rem] border-border/80 border-dashed bg-card/60 p-8 text-center">
-        <div className="mx-auto flex size-14 items-center justify-center rounded-3xl border border-border bg-background/55 text-brand">
-          <Upload size={22} />
-        </div>
-        <div className="mt-4 text-sm text-muted">{t("files:dragHint")}</div>
-        <div className="mt-5 flex items-center justify-center">
-          <Button onClick={addFile} variant="secondary">
-            <Plus size={16} />
-            {t("files:upload")}
-          </Button>
-        </div>
-      </Panel>
         </div>
       </div>
     </div>

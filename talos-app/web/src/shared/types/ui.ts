@@ -2,6 +2,7 @@ import type { TalosToolProgressKind } from "./protocol";
 
 export type RuntimeMode = "cloud" | "local";
 export type ApprovalMode = "needs_approval" | "skip";
+export type ReasoningLevel = "low" | "medium" | "high" | "extra_high";
 export type ThreadFilter = "all" | "running" | "waiting_approval" | "done" | "error";
 export type SessionUiStatus = "running" | "waiting_approval" | "done" | "error";
 

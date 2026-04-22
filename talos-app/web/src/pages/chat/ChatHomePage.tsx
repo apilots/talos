@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { FolderPlus } from "lucide-react";
 
 import {
   ChatComposer,
@@ -10,18 +9,11 @@ import {
   useModelsQuery,
   useProjectsQuery,
 } from "@/features/chat";
-import { Button } from "@/shared/ui/Button";
-import { Input } from "@/shared/ui/Input";
 import { useAppStore } from "@/shared/store/app-store";
-import {
-  describeProjectDirectory,
-  getApprovalModeLabel,
-  isUnboundProject,
-  resolveProjectRecord,
-} from "@/shared/types/domain";
+import { getApprovalModeLabel, resolveProjectRecord } from "@/shared/types/domain";
 
 export function ChatHomePage() {
-  const { t } = useTranslation(["chat", "common"]);
+  const { t } = useTranslation(["chat"]);
   const navigate = useNavigate();
   const { data: models } = useModelsQuery();
   useProjectsQuery();
@@ -33,7 +25,6 @@ export function ChatHomePage() {
   const connection = useAppStore((state) => state.connection);
   const setConnection = useAppStore((state) => state.setConnection);
   const [draft, setDraft] = useState("");
-  const [customPath, setCustomPath] = useState("");
   const [selectedModel, setSelectedModel] = useState<string | undefined>(models?.[0]?.id);
 
   const activeProject = useMemo(
@@ -59,84 +50,21 @@ export function ChatHomePage() {
       approvalMode: connection.defaultApprovalMode,
     });
     navigate(`/sessions/${session.context.session_id}`, {
-      state: initialPrompt?.trim()
-        ? {
-            initialPrompt,
-          }
-        : undefined,
+      state: initialPrompt?.trim() ? { initialPrompt } : undefined,
     });
   }
 
-  async function handleCreateProject() {
-    const directory = customPath.trim();
-    if (!directory) {
-      return;
-    }
-    const project = await createProject.mutateAsync(directory);
+  async function handleCreateProject(path: string) {
+    const project = await createProject.mutateAsync(path);
     setActiveProjectId(project.id);
-    setCustomPath("");
   }
 
   return (
-    <div className="relative flex h-full overflow-y-auto px-8 py-8">
-      <div className="pointer-events-none absolute inset-0 opacity-80">
-        <div className="absolute left-[14%] top-[14%] h-40 w-40 rounded-full bg-brand/10 blur-3xl" />
-        <div className="absolute bottom-[10%] right-[16%] h-56 w-56 rounded-full bg-info/8 blur-3xl" />
-      </div>
-      <div className="relative mx-auto my-auto w-full max-w-[820px]">
-        <div className="mb-4 text-center">
-          <div className="text-[11px] uppercase tracking-[0.22em] text-brand/80">{t("chat:newThread")}</div>
-          <h1 className="mt-3 font-display text-[29px] font-semibold tracking-[-0.05em] text-ink">
-            {t("chat:startPromptTitle")}
-          </h1>
-          <div className="mt-3 flex items-center justify-center gap-2 text-xs text-muted">
-            <span className="rounded-full border border-border/70 bg-card/80 px-3 py-1 text-ink">
-              {activeProject.name}
-            </span>
-            <span className="truncate rounded-full border border-border/70 bg-background/55 px-3 py-1">
-              {describeProjectDirectory(activeProject.directory)}
-            </span>
-          </div>
-        </div>
-
-        <div className="mb-3 rounded-[1.35rem] border border-border/70 bg-card/72 p-2.5 backdrop-blur">
-          <div className="grid gap-2.5 md:grid-cols-[minmax(0,0.95fr)_minmax(0,1.2fr)_auto]">
-            <select
-              className="w-full rounded-2xl border border-border bg-card/92 px-4 py-2.5 text-sm text-ink outline-none transition focus:border-brand/50"
-              onChange={(event) => setActiveProjectId(event.target.value)}
-              value={activeProject?.id}
-            >
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {isUnboundProject(project.id)
-                    ? t("common:noProject")
-                    : `${project.name} · ${describeProjectDirectory(project.directory)}`}
-                </option>
-              ))}
-            </select>
-            <Input
-              onChange={(event) => setCustomPath(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  void handleCreateProject();
-                }
-              }}
-              placeholder="/path/to/project"
-              value={customPath}
-            />
-            <Button
-              onClick={() => {
-                void handleCreateProject();
-              }}
-              type="button"
-              variant="secondary"
-            >
-              <FolderPlus size={16} />
-              {t("chat:addPath")}
-            </Button>
-          </div>
-        </div>
-
+    <div className="flex h-full flex-col items-center justify-center px-8">
+      <div className="w-full max-w-[660px]">
+        <h1 className="mb-8 text-center text-[26px] font-semibold tracking-tight text-ink">
+          {t("chat:startPromptTitle")}
+        </h1>
         <div className="space-y-2">
           <ChatComposer
             activeProjectId={activeProject?.id ?? activeProjectId}
@@ -146,6 +74,7 @@ export function ChatHomePage() {
             isStreaming={false}
             models={(models ?? []).map((model) => ({ id: model.id, name: model.name }))}
             onApprovalModeChange={(mode) => setConnection({ defaultApprovalMode: mode })}
+            onCreateProject={handleCreateProject}
             onDraftChange={setDraft}
             onModelChange={setSelectedModel}
             onProjectChange={setActiveProjectId}
@@ -158,7 +87,7 @@ export function ChatHomePage() {
             projects={projects}
             runtimeMode={connection.runtimeMode}
             selectedModel={selectedModel}
-            showProjectSelector={false}
+            showProjectSelector
           />
           <div className="pl-2 text-[10px] text-muted">
             {t("chat:firstSessionUses", { mode: getApprovalModeLabel(connection.defaultApprovalMode) })}

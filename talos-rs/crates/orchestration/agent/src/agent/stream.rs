@@ -148,16 +148,10 @@ impl AgentImpl {
                     },
                 ))
             }
-            (KernelStreamEventType::PromptWarning, KernelStreamEventData::PromptWarning(data)) => {
-                Some(OrchestratorEvent::MessageExecutionSummary(
-                    OrchestratorMessageExecutionSummaryEvent {
-                        request_id: request_id.to_string(),
-                        text: format!("Prompt warning: {:?}", data.warning),
-                        item_index: current_index,
-                        iteration,
-                        step_id,
-                    },
-                ))
+            (KernelStreamEventType::PromptWarning, KernelStreamEventData::PromptWarning(_)) => {
+                // TODO: Route prompt warnings through a dedicated diagnostics mechanism
+                // instead of dropping them at the agent streaming boundary.
+                None
             }
             (
                 KernelStreamEventType::ConfirmationRequest,
