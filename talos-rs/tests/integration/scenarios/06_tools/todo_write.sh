@@ -99,7 +99,7 @@ if [[ -z "${session_id}" ]]; then
 fi
 echo "CASE todo_write_create_session PASS session_id=${session_id}"
 
-todo_input="You must call tool 'TodoWrite' exactly once with a todo item id ${TODO_ID}, content inspect integration coverage, status in_progress. After the tool call, respond with exactly TODO_WRITE_OK:${TODO_ID}"
+todo_input="You must call tool 'TodoWrite' exactly once with a todo item id ${TODO_ID}, content placeholder test todo only, status in_progress. After the tool call, respond with exactly TODO_WRITE_OK:${TODO_ID}"
 todo_payload="$(build_payload "${todo_input}")"
 todo_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
   -H "Content-Type: application/json" \

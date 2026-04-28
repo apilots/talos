@@ -30,6 +30,14 @@ pub enum PromptMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
+pub enum DynamicTrimPolicy {
+    #[default]
+    TrimToBudget,
+    PreserveAll,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum PlannerMode {
     None,
     #[default]
@@ -186,6 +194,8 @@ pub enum PromptSectionKind {
     RecentTaskContinuity,
     SessionSummary,
     RecentMessages,
+    RecentToolHistory,
+    RecentToolOutputs,
     RetrievedMemories,
 }
 
@@ -204,13 +214,6 @@ pub enum SectionCacheScope {
     WorkspaceStable,
     #[default]
     DynamicOnly,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TruncationMode {
-    DropWhole,
-    TrimTail,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -261,7 +264,6 @@ pub struct PromptDiagnostics {
     pub mode: PromptMode,
     pub included_sections: Vec<PromptSectionKind>,
     pub dropped_sections: Vec<PromptSectionKind>,
-    pub truncated_sections: Vec<PromptSectionKind>,
     pub bootstrap_files: Vec<BootstrapFileDiagnostic>,
     pub total_estimated_tokens: usize,
     pub static_estimated_tokens: usize,
@@ -347,18 +349,43 @@ pub enum ContinuityAnswerMode {
     Mixed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContinuityToolOutcome {
+    Success,
+    Failure,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ContinuityToolSummary {
+    pub tool_name: String,
+    pub outcome: ContinuityToolOutcome,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VerifiedPathEvidence {
+    pub path: String,
+    pub source_tool: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct SessionContinuity {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub recent_goal: String,
     #[serde(default)]
-    pub recent_verified_paths: Vec<String>,
+    pub verified_paths: Vec<VerifiedPathEvidence>,
     #[serde(default)]
-    pub recent_successful_tools: Vec<String>,
+    pub tool_summaries: Vec<ContinuityToolSummary>,
     #[serde(default)]
-    pub recent_failed_tools: Vec<String>,
+    pub pending_tasks: Vec<String>,
     #[serde(default)]
     pub recent_unhelpful_patterns: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recent_answer_mode: Option<ContinuityAnswerMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_failure: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_next_step: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -383,12 +410,42 @@ pub struct PromptWindowUsage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactionTrimUnitKind {
+    OldestHistoryItem,
+    OldToolOutput,
+    OldAssistantToolExchange,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionHistoryCompactionTrigger {
+    ThresholdExceeded,
+    HardThresholdExceeded,
+    BudgetExceeded,
+    HistorySectionsDropped,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionHistoryCompactionOutcome {
+    Applied,
+    RejectedMissingSummary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionHistoryCompaction {
+    pub trigger: SessionHistoryCompactionTrigger,
+    pub outcome: SessionHistoryCompactionOutcome,
     pub pre_compaction_total_tokens: usize,
     pub post_compaction_total_tokens: usize,
     pub recent_messages_before: usize,
     pub recent_messages_after: usize,
     pub summary_sections_after: usize,
+    pub trimmed_context_unit_count: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trimmed_context_unit_kind: Option<CompactionTrimUnitKind>,
+    pub fallback_section_drop_applied: bool,
     pub compaction_request_count: u32,
     pub compaction_input_tokens: u32,
     pub compaction_output_tokens: u32,
@@ -456,11 +513,7 @@ fn resolve_reserved_output_tokens(
 ) -> usize {
     match policy {
         ReservedOutputPolicy::UseModelDefault => {
-            if model_max_output_tokens > 0 {
-                model_max_output_tokens
-            } else {
-                derive_reserved_output_tokens(context_window)
-            }
+            resolve_model_default_reserved_output_tokens(context_window, model_max_output_tokens)
         }
         ReservedOutputPolicy::Fixed { tokens } => *tokens,
         ReservedOutputPolicy::Ratio {
@@ -476,12 +529,28 @@ fn resolve_reserved_output_tokens(
     }
 }
 
+fn resolve_model_default_reserved_output_tokens(
+    context_window: usize,
+    model_max_output_tokens: usize,
+) -> usize {
+    if context_window == 0 {
+        return model_max_output_tokens;
+    }
+
+    let derived_budget = derive_reserved_output_tokens(context_window);
+    if model_max_output_tokens == 0 {
+        return derived_budget;
+    }
+
+    model_max_output_tokens.min(derived_budget)
+}
+
 fn derive_reserved_output_tokens(context_window: usize) -> usize {
     if context_window == 0 {
         return 0;
     }
 
-    (context_window / 8).clamp(1_024, 8_192)
+    (context_window / 8).clamp(1_024, 8_192).min(context_window)
 }
 
 /// Prompt context loading policy.
@@ -489,8 +558,17 @@ fn derive_reserved_output_tokens(context_window: usize) -> usize {
 pub struct PromptLoadPolicy {
     pub include_session_summary: bool,
     pub include_recent_messages: bool,
+    pub include_recent_tool_history: bool,
+    pub include_recent_tool_outputs: bool,
     pub include_retrieved_memories: bool,
     pub session_recent_limit: usize,
+    pub session_recent_max_chars: usize,
+    pub recent_tool_history_limit: usize,
+    pub recent_tool_history_max_chars: usize,
+    pub recent_tool_outputs_limit: usize,
+    pub recent_tool_outputs_max_chars: usize,
+    pub session_summary_recent_count: usize,
+    pub session_summary_max_chars: usize,
     pub retrieved_memory_max_items: usize,
     pub retrieved_memory_max_chars: usize,
     pub unified_recent_limit: usize,
@@ -501,8 +579,17 @@ impl Default for PromptLoadPolicy {
         Self {
             include_session_summary: true,
             include_recent_messages: true,
+            include_recent_tool_history: true,
+            include_recent_tool_outputs: true,
             include_retrieved_memories: true,
             session_recent_limit: 24,
+            session_recent_max_chars: 4_000,
+            recent_tool_history_limit: 8,
+            recent_tool_history_max_chars: 600,
+            recent_tool_outputs_limit: 8,
+            recent_tool_outputs_max_chars: 2_000,
+            session_summary_recent_count: 2,
+            session_summary_max_chars: 1_200,
             retrieved_memory_max_items: 4,
             retrieved_memory_max_chars: 2000,
             unified_recent_limit: 10,
@@ -544,10 +631,6 @@ impl PromptSection {
 
     pub fn tier(&self) -> BudgetTier {
         crate::regions::region_template(self.kind).tier
-    }
-
-    pub fn truncation_mode(&self) -> TruncationMode {
-        crate::regions::region_template(self.kind).truncation_mode
     }
 
     pub fn placement(&self) -> RegionPlacement {

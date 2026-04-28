@@ -285,31 +285,69 @@ async fn test_prompt_builder_keeps_history_without_legacy_budget_caps() {
     assert!(assembly.diagnostics.dropped_sections.is_empty());
 }
 
-#[tokio::test]
-async fn test_prompt_builder_resolves_effective_prompt_budget_from_model_info() {
-    let assembly = PromptBuilder::new()
-        .model_info(ModelInfo {
-            id: "qwen-max".to_string(),
-            name: "qwen-max".to_string(),
-            provider: "bailian".to_string(),
-            context_window: 32_768,
-            max_tokens: 8_192,
-            reasoning: false,
-            input: Vec::new(),
-            cost: Default::default(),
-            compat: Default::default(),
-        })
-        .user_input("latest")
-        .assemble()
-        .await
-        .expect("prompt build should succeed");
+#[test]
+fn test_prompt_window_usage_caps_model_default_reserved_output_tokens() {
+    let window_usage = PromptWindowUsage::resolve(
+        &PromptBuildConfig::default().prompt,
+        32_768,
+        81_920,
+        1_024,
+        2_048,
+    );
 
-    let window_usage = &assembly.diagnostics.window_usage;
     assert!(window_usage.window_resolved);
     assert_eq!(window_usage.context_window, 32_768);
+    assert_eq!(window_usage.reserved_output_tokens, 4_096);
+    assert_eq!(window_usage.compaction_buffer_tokens, 4_096);
+    assert_eq!(window_usage.effective_prompt_budget, 24_576);
+}
+
+#[test]
+fn test_prompt_window_usage_preserves_smaller_model_max_output_tokens() {
+    let window_usage = PromptWindowUsage::resolve(
+        &PromptBuildConfig::default().prompt,
+        16_384,
+        256,
+        1_024,
+        2_048,
+    );
+
+    assert_eq!(window_usage.reserved_output_tokens, 256);
+    assert_eq!(window_usage.compaction_buffer_tokens, 4_096);
+    assert_eq!(window_usage.effective_prompt_budget, 12_032);
+}
+
+#[test]
+fn test_prompt_window_usage_keeps_model_default_when_context_window_is_unresolved() {
+    let window_usage =
+        PromptWindowUsage::resolve(&PromptBuildConfig::default().prompt, 0, 8_192, 1_024, 2_048);
+
+    assert!(!window_usage.window_resolved);
     assert_eq!(window_usage.reserved_output_tokens, 8_192);
     assert_eq!(window_usage.compaction_buffer_tokens, 4_096);
-    assert_eq!(window_usage.effective_prompt_budget, 20_480);
+    assert_eq!(window_usage.effective_prompt_budget, 0);
+    assert!(window_usage.within_effective_budget);
+}
+
+#[test]
+fn test_prompt_window_usage_clamps_fixed_policy_and_ratio_branches_independently() {
+    let mut fixed_config = PromptBuildConfig::default();
+    fixed_config.prompt.window.reserved_output_tokens =
+        talos_config::ReservedOutputPolicy::Fixed { tokens: 512 };
+    let fixed_usage = PromptWindowUsage::resolve(&fixed_config.prompt, 4_096, 8_192, 256, 256);
+    assert_eq!(fixed_usage.reserved_output_tokens, 512);
+    assert_eq!(fixed_usage.compaction_buffer_tokens, 1_024);
+    assert_eq!(fixed_usage.effective_prompt_budget, 2_560);
+
+    let mut ratio_config = PromptBuildConfig::default();
+    ratio_config.prompt.window.reserved_output_tokens = talos_config::ReservedOutputPolicy::Ratio {
+        numerator: 1,
+        denominator: 4,
+    };
+    let ratio_usage = PromptWindowUsage::resolve(&ratio_config.prompt, 8_192, 8_192, 256, 256);
+    assert_eq!(ratio_usage.reserved_output_tokens, 2_048);
+    assert_eq!(ratio_usage.compaction_buffer_tokens, 2_048);
+    assert_eq!(ratio_usage.effective_prompt_budget, 4_096);
 }
 
 #[tokio::test]
@@ -533,13 +571,34 @@ async fn test_prompt_builder_uses_absent_placeholder_for_missing_bootstrap_slot(
 async fn test_prompt_builder_includes_recent_task_continuity_section_with_xml_envelope() {
     let assembly = PromptBuilder::new()
         .session_continuity(Some(SessionContinuity {
-            recent_verified_paths: vec!["/tmp/project/Cargo.toml".to_string()],
-            recent_successful_tools: vec!["Grep".to_string(), "Read".to_string()],
-            recent_failed_tools: vec!["Bash".to_string()],
+            recent_goal: "inspect the prompt builder continuity output".to_string(),
+            verified_paths: vec![VerifiedPathEvidence {
+                path: "/tmp/project/Cargo.toml".to_string(),
+                source_tool: "Read".to_string(),
+            }],
+            tool_summaries: vec![
+                ContinuityToolSummary {
+                    tool_name: "Grep".to_string(),
+                    outcome: ContinuityToolOutcome::Success,
+                },
+                ContinuityToolSummary {
+                    tool_name: "Read".to_string(),
+                    outcome: ContinuityToolOutcome::Success,
+                },
+                ContinuityToolSummary {
+                    tool_name: "Bash".to_string(),
+                    outcome: ContinuityToolOutcome::Failure,
+                },
+            ],
+            pending_tasks: vec!["complete the answer from the verified evidence".to_string()],
             recent_unhelpful_patterns: vec![
                 "avoid retrying the same failing path or command".to_string()
             ],
             recent_answer_mode: Some(ContinuityAnswerMode::CodeFirst),
+            last_failure: Some("Bash returned an error".to_string()),
+            suggested_next_step: Some(
+                "answer from the verified evidence without re-reading the same paths".to_string(),
+            ),
         }))
         .user_input("hello")
         .assemble()
@@ -553,8 +612,49 @@ async fn test_prompt_builder_includes_recent_task_continuity_section_with_xml_en
     assert!(dynamic_block
         .text
         .contains("<region-name>recent_task_continuity</region-name>"));
+    assert!(dynamic_block
+        .text
+        .contains("- recent_goal: inspect the prompt builder continuity output"));
+    assert!(dynamic_block
+        .text
+        .contains("- pending_tasks: complete the answer from the verified evidence"));
     assert!(dynamic_block.text.contains("code_first"));
+    assert!(dynamic_block
+        .text
+        .contains("- last_failure: Bash returned an error"));
+    assert!(dynamic_block.text.contains(
+        "- suggested_next_step: answer from the verified evidence without re-reading the same paths"
+    ));
     assert!(!dynamic_block.text.contains("<region-guidance>"));
+}
+
+#[test]
+fn test_session_continuity_round_trips_with_pending_tasks() {
+    let continuity = SessionContinuity {
+        recent_goal: "inspect the staged continuity payload".to_string(),
+        verified_paths: vec![VerifiedPathEvidence {
+            path: "/tmp/project/Cargo.toml".to_string(),
+            source_tool: "Read".to_string(),
+        }],
+        tool_summaries: vec![ContinuityToolSummary {
+            tool_name: "Read".to_string(),
+            outcome: ContinuityToolOutcome::Success,
+        }],
+        pending_tasks: vec!["complete the answer from the verified evidence".to_string()],
+        recent_unhelpful_patterns: vec![
+            "avoid re-reading the same path when no new evidence is needed".to_string(),
+        ],
+        recent_answer_mode: Some(ContinuityAnswerMode::CodeFirst),
+        last_failure: None,
+        suggested_next_step: Some(
+            "answer from the verified evidence without re-reading the same paths".to_string(),
+        ),
+    };
+
+    let value = serde_json::to_value(&continuity).expect("continuity should serialize");
+    let decoded: SessionContinuity =
+        serde_json::from_value(value).expect("continuity should deserialize");
+    assert_eq!(decoded, continuity);
 }
 
 #[tokio::test]
@@ -607,6 +707,315 @@ async fn test_recent_messages_render_as_single_xml_region() {
     );
     assert!(dynamic_block.text.contains("- user: user says 0"));
     assert!(dynamic_block.text.contains("- assistant: assistant says 1"));
+}
+
+#[tokio::test]
+async fn test_recent_tool_history_renders_as_single_xml_region() {
+    let memory = MemoryStore::new(std::env::temp_dir().join(Uuid::new_v4().to_string()));
+    for idx in 0..2 {
+        let turn_id = format!("tool-turn-{idx}");
+        let timestamp = Utc::now();
+        memory
+            .append_turn(&TalosTurn {
+                turn_id: turn_id.clone(),
+                session_id: "tool-session".to_string(),
+                seq: memory
+                    .next_turn_seq("tool-session")
+                    .await
+                    .expect("seq should load"),
+                timestamp,
+                items: vec![
+                    TalosOutputItem::ToolCall {
+                        call_id: format!("call-{idx}"),
+                        name: "Read".to_string(),
+                        arguments: serde_json::json!({"path": format!("/tmp/tool-{idx}.txt")}),
+                    },
+                    TalosOutputItem::ToolResult {
+                        call_id: format!("call-{idx}"),
+                        tool_name: "Read".to_string(),
+                        content: vec![talos_types::talos::TalosContentItem::Text {
+                            text: format!("tool result {}", idx),
+                        }],
+                        is_error: false,
+                    },
+                ],
+                usage: TalosUsage::default(),
+                stop_reason: StopReason::EndTurn,
+            })
+            .await
+            .expect("append should succeed");
+    }
+
+    let assembly = PromptBuilder::new()
+        .memory_store("tool-session", &memory)
+        .user_input("latest")
+        .assemble()
+        .await
+        .expect("prompt assembly should succeed");
+
+    let dynamic_block = render_prompt_blocks(&assembly)
+        .into_iter()
+        .find(|block| block.kind == PromptBlockKind::DynamicSuffix)
+        .expect("dynamic block should exist");
+    assert_eq!(
+        dynamic_block
+            .text
+            .matches("<region-name>recent_tool_history</region-name>")
+            .count(),
+        1
+    );
+    assert!(dynamic_block
+        .text
+        .contains("- tool: Read | outcome: succeeded"));
+    assert!(dynamic_block.text.contains("preview: tool result 1"));
+}
+
+#[tokio::test]
+async fn test_recent_tool_history_can_be_disabled() {
+    let memory = MemoryStore::new(std::env::temp_dir().join(Uuid::new_v4().to_string()));
+    memory
+        .append_turn(&TalosTurn {
+            turn_id: "tool-turn-disable".to_string(),
+            session_id: "tool-session-disable".to_string(),
+            seq: memory
+                .next_turn_seq("tool-session-disable")
+                .await
+                .expect("seq should load"),
+            timestamp: Utc::now(),
+            items: vec![
+                TalosOutputItem::ToolCall {
+                    call_id: "call-disable".to_string(),
+                    name: "Read".to_string(),
+                    arguments: serde_json::json!({"path": "/tmp/disabled.txt"}),
+                },
+                TalosOutputItem::ToolResult {
+                    call_id: "call-disable".to_string(),
+                    tool_name: "Read".to_string(),
+                    content: vec![talos_types::talos::TalosContentItem::Text {
+                        text: "tool result disabled".to_string(),
+                    }],
+                    is_error: false,
+                },
+            ],
+            usage: TalosUsage::default(),
+            stop_reason: StopReason::EndTurn,
+        })
+        .await
+        .expect("append should succeed");
+
+    let assembly = PromptBuilder::new()
+        .memory_store("tool-session-disable", &memory)
+        .include_recent_tool_history(false)
+        .user_input("latest")
+        .assemble()
+        .await
+        .expect("prompt assembly should succeed");
+
+    assert!(!assembly
+        .dynamic_suffix_sections
+        .iter()
+        .any(|section| section.kind == PromptSectionKind::RecentToolHistory));
+}
+
+#[tokio::test]
+async fn test_recent_tool_outputs_render_as_single_xml_region() {
+    let memory = MemoryStore::new(std::env::temp_dir().join(Uuid::new_v4().to_string()));
+    for idx in 0..2 {
+        let turn_id = format!("tool-output-turn-{idx}");
+        let timestamp = Utc::now();
+        memory
+            .append_turn(&TalosTurn {
+                turn_id: turn_id.clone(),
+                session_id: "tool-output-session".to_string(),
+                seq: memory
+                    .next_turn_seq("tool-output-session")
+                    .await
+                    .expect("seq should load"),
+                timestamp,
+                items: vec![TalosOutputItem::ToolResult {
+                    call_id: format!("call-{idx}"),
+                    tool_name: "Read".to_string(),
+                    content: vec![talos_types::talos::TalosContentItem::Text {
+                        text: format!("tool output {}", idx),
+                    }],
+                    is_error: false,
+                }],
+                usage: TalosUsage::default(),
+                stop_reason: StopReason::EndTurn,
+            })
+            .await
+            .expect("append should succeed");
+    }
+
+    let assembly = PromptBuilder::new()
+        .memory_store("tool-output-session", &memory)
+        .user_input("latest")
+        .assemble()
+        .await
+        .expect("prompt assembly should succeed");
+
+    let dynamic_block = render_prompt_blocks(&assembly)
+        .into_iter()
+        .find(|block| block.kind == PromptBlockKind::DynamicSuffix)
+        .expect("dynamic block should exist");
+    assert_eq!(
+        dynamic_block
+            .text
+            .matches("<region-name>recent_tool_outputs</region-name>")
+            .count(),
+        1
+    );
+    assert!(dynamic_block
+        .text
+        .contains("- tool: Read | status: ok | output: tool output 1"));
+}
+
+#[tokio::test]
+async fn test_recent_tool_outputs_can_be_disabled() {
+    let memory = MemoryStore::new(std::env::temp_dir().join(Uuid::new_v4().to_string()));
+    memory
+        .append_turn(&TalosTurn {
+            turn_id: "tool-output-turn-disable".to_string(),
+            session_id: "tool-output-session-disable".to_string(),
+            seq: memory
+                .next_turn_seq("tool-output-session-disable")
+                .await
+                .expect("seq should load"),
+            timestamp: Utc::now(),
+            items: vec![TalosOutputItem::ToolResult {
+                call_id: "call-disable".to_string(),
+                tool_name: "Read".to_string(),
+                content: vec![talos_types::talos::TalosContentItem::Text {
+                    text: "tool output disabled".to_string(),
+                }],
+                is_error: false,
+            }],
+            usage: TalosUsage::default(),
+            stop_reason: StopReason::EndTurn,
+        })
+        .await
+        .expect("append should succeed");
+
+    let assembly = PromptBuilder::new()
+        .memory_store("tool-output-session-disable", &memory)
+        .include_recent_tool_outputs(false)
+        .user_input("latest")
+        .assemble()
+        .await
+        .expect("prompt assembly should succeed");
+
+    assert!(!assembly
+        .dynamic_suffix_sections
+        .iter()
+        .any(|section| section.kind == PromptSectionKind::RecentToolOutputs));
+}
+
+#[tokio::test]
+async fn test_recent_messages_respect_total_char_budget() {
+    let memory = MemoryStore::new(std::env::temp_dir().join(Uuid::new_v4().to_string()));
+    for idx in 0..3 {
+        memory
+            .append_turn(&TalosTurn {
+                turn_id: format!("recent-budget-turn-{idx}"),
+                session_id: "recent-budget-session".to_string(),
+                seq: memory
+                    .next_turn_seq("recent-budget-session")
+                    .await
+                    .expect("seq should load"),
+                timestamp: Utc::now(),
+                items: vec![TalosOutputItem::UserInput {
+                    text: format!("recent budget user message {idx} {}", "x".repeat(40)),
+                }],
+                usage: TalosUsage::default(),
+                stop_reason: StopReason::EndTurn,
+            })
+            .await
+            .expect("append should succeed");
+    }
+
+    let mut config = PromptBuildConfig::default();
+    config.load_policy.session_recent_max_chars = 90;
+
+    let assembly = PromptBuilder::new()
+        .config(config)
+        .memory_store("recent-budget-session", &memory)
+        .user_input("latest")
+        .assemble()
+        .await
+        .expect("prompt assembly should succeed");
+
+    let dynamic_block = render_prompt_blocks(&assembly)
+        .into_iter()
+        .find(|block| block.kind == PromptBlockKind::DynamicSuffix)
+        .expect("dynamic block should exist");
+    assert!(!dynamic_block.text.contains("recent budget user message 0"));
+    assert!(dynamic_block.text.contains("recent budget user message 2"));
+}
+
+#[tokio::test]
+async fn test_recent_tool_sections_respect_total_char_budget() {
+    let memory = MemoryStore::new(std::env::temp_dir().join(Uuid::new_v4().to_string()));
+    for idx in 0..3 {
+        memory
+            .append_turn(&TalosTurn {
+                turn_id: format!("tool-budget-turn-{idx}"),
+                session_id: "tool-budget-session".to_string(),
+                seq: memory
+                    .next_turn_seq("tool-budget-session")
+                    .await
+                    .expect("seq should load"),
+                timestamp: Utc::now(),
+                items: vec![
+                    TalosOutputItem::ToolCall {
+                        call_id: format!("call-{idx}"),
+                        name: "Read".to_string(),
+                        arguments: serde_json::json!({
+                            "path": format!("/tmp/tool-budget-{idx}.txt"),
+                            "marker": format!("history-{idx}-{}", "y".repeat(30)),
+                        }),
+                    },
+                    TalosOutputItem::ToolResult {
+                        call_id: format!("call-{idx}"),
+                        tool_name: "Read".to_string(),
+                        content: vec![talos_types::talos::TalosContentItem::Text {
+                            text: format!("tool output {idx} {}", "z".repeat(40)),
+                        }],
+                        is_error: false,
+                    },
+                ],
+                usage: TalosUsage::default(),
+                stop_reason: StopReason::EndTurn,
+            })
+            .await
+            .expect("append should succeed");
+    }
+
+    let mut config = PromptBuildConfig::default();
+    config.load_policy.recent_tool_history_max_chars = 160;
+    config.load_policy.recent_tool_outputs_max_chars = 80;
+
+    let assembly = PromptBuilder::new()
+        .config(config)
+        .memory_store("tool-budget-session", &memory)
+        .user_input("latest")
+        .assemble()
+        .await
+        .expect("prompt assembly should succeed");
+
+    let tool_history = assembly
+        .dynamic_suffix_sections
+        .iter()
+        .find(|section| section.kind == PromptSectionKind::RecentToolHistory)
+        .expect("tool history section should exist");
+    let tool_outputs = assembly
+        .dynamic_suffix_sections
+        .iter()
+        .find(|section| section.kind == PromptSectionKind::RecentToolOutputs)
+        .expect("tool outputs section should exist");
+    assert!(!tool_history.payload.contains("history-0"));
+    assert!(tool_history.payload.contains("history-2"));
+    assert!(!tool_outputs.payload.contains("tool output 0"));
+    assert!(tool_outputs.payload.contains("tool output 2"));
 }
 
 #[tokio::test]

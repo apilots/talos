@@ -1,5 +1,15 @@
 # Talos Prompt & Tools 改进方案（修订版）
 
+> Status: historical draft. This document predates the current `PromptBuilder`
+> region model and the compaction-governance redesign.
+> For the current implementation baseline, use:
+> - `spec/prompt-builder-claude-code-alignment-design.md`
+> - `spec/context-window-threshold-compaction-governance-design.md`
+>
+> References such as `ProjectContext` and the old `Identity`/tooling mixed layout
+> are preserved here only for historical comparison and should not be used as the
+> current design source of truth.
+
 > 基于对 Claude Code CLI 源码的深度调研，对 Talos 现有 prompt 和 tools 设计进行差距分析和改进设计。
 > 本文档已根据评审意见修订，纠正了对现状的错误描述，并收敛了 4 个主要问题点。
 

@@ -2,8 +2,7 @@
 //!
 //! Tests verify default values and boundary conditions for kernel configuration.
 
-use talos_config::{AgentKernelConfig, Config, PlannerMode, PlannerSelection};
-use talos_error::TalosError;
+use talos_config::{AgentKernelConfig, PlannerMode, PlannerSelection};
 
 /// Tests that AgentKernelConfig default values match the specification.
 ///
@@ -116,10 +115,6 @@ fn test_boundary_validation() {
         config.prompt.bootstrap.max_chars_per_file, 8_000,
         "prompt.bootstrap.max_chars_per_file should default to 8000"
     );
-    assert_eq!(
-        config.prompt.bootstrap.max_chars_total, 24_000,
-        "prompt.bootstrap.max_chars_total should default to 24000"
-    );
 
     assert!(
         !config.memory.workspace_dir.trim().is_empty(),
@@ -130,8 +125,16 @@ fn test_boundary_validation() {
         "memory.hot_recent_messages must be > 0"
     );
     assert!(
-        config.prompt.session_recent_messages_limit > 0,
-        "prompt.session_recent_messages_limit must be > 0"
+        config.compaction.recent_messages_keep > 0,
+        "compaction.recent_messages_keep must be > 0"
+    );
+    assert!(
+        config.compaction.recent_messages_max_chars > 0,
+        "compaction.recent_messages_max_chars must be > 0"
+    );
+    assert!(
+        config.compaction.compacted_recent_messages_max_chars > 0,
+        "compaction.compacted_recent_messages_max_chars must be > 0"
     );
     assert_eq!(
         config.memory.root_memory_filename, "MEMORY.md",
@@ -144,10 +147,20 @@ fn test_boundary_validation() {
 fn test_nested_config_defaults() {
     let config = AgentKernelConfig::default();
 
-    assert!(config.prompt.include_session_summary);
-    assert!(config.prompt.include_recent_messages);
-    assert!(config.prompt.include_retrieved_memories);
-    assert!(config.prompt.session_recent_messages_limit > 0);
+    assert!(config.compaction.recent_messages_keep > 0);
+    assert!(config.compaction.recent_messages_max_chars > 0);
+    assert!(config.compaction.compacted_recent_messages_keep > 0);
+    assert!(config.compaction.compacted_recent_messages_max_chars > 0);
+    assert!(config.compaction.recent_summaries_keep > 0);
+    assert!(config.compaction.compacted_summary_max_chars > 0);
+    assert!(config.compaction.source_recent_tool_results_limit > 0);
+    assert!(config.compaction.tool_output_max_chars > 0);
+    assert!(config.compaction.compacted_tool_output_max_chars > 0);
+    assert!(config.compaction.source_recent_tool_exchanges_limit > 0);
+    assert!(config.compaction.tool_exchange_max_chars > 0);
+    assert!(config.compaction.compacted_tool_exchange_max_chars > 0);
+    assert!(config.compaction.retrieved_memories_keep > 0);
+    assert!(config.compaction.compacted_retrieved_memory_max_chars > 0);
     assert!(config.prompt.bootstrap.include_memory);
 
     assert!(config.memory.workspace_memory_flush_enabled);
@@ -162,23 +175,4 @@ fn test_config_clone() {
     assert_eq!(original.max_iters, cloned.max_iters);
     assert_eq!(original.planner_mode, cloned.planner_mode);
     assert_eq!(original.planner_selection, cloned.planner_selection);
-}
-
-#[test]
-fn test_bootstrap_char_budget_relationship_validation() {
-    let mut config = AgentKernelConfig::default();
-    config.prompt.bootstrap.max_chars_per_file = 8_000;
-    config.prompt.bootstrap.max_chars_total = 4_000;
-
-    let err = Config {
-        agent: talos_config::AgentConfig {
-            kernel: config,
-            ..talos_config::AgentConfig::default()
-        },
-        ..Config::default()
-    }
-    .validate_runtime()
-    .expect_err("invalid bootstrap char budget should fail");
-
-    assert!(matches!(err, TalosError::InvalidConfiguration(_)));
 }

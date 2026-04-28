@@ -492,7 +492,7 @@ impl AuthManager {
     }
 
     fn require_admin(actor: &RequestIdentity) -> TalosResult<()> {
-        if actor.role.is_admin() {
+        if actor.has_full_access() {
             return Ok(());
         }
         Err(TalosError::AuthError("admin access required".to_string()))
@@ -860,5 +860,26 @@ mod tests {
             .await
             .expect("revoke should succeed");
         assert!(service.verify_access_token(&token.raw_token).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_list_users_allows_auth_disabled_actor() {
+        let service = service(true);
+        service
+            .register(RegisterRequest {
+                username: "alice".to_string(),
+                password: "password123".to_string(),
+                email: Some("alice@example.com".to_string()),
+            })
+            .await
+            .expect("register should succeed");
+
+        let users = service
+            .list_users(&RequestIdentity::auth_disabled())
+            .await
+            .expect("auth disabled actor should list users");
+
+        assert_eq!(users.len(), 1);
+        assert_eq!(users[0].username, "alice");
     }
 }

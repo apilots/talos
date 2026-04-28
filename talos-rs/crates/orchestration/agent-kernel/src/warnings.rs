@@ -9,7 +9,6 @@ pub enum KernelWarning {
     PromptBootstrapFileTruncated(PromptBootstrapFileTruncatedWarning),
     PromptBootstrapFileDropped(PromptBootstrapFileDroppedWarning),
     PromptDynamicSectionDropped(PromptDynamicSectionDroppedWarning),
-    PromptDynamicSectionTruncated(PromptDynamicSectionTruncatedWarning),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -43,11 +42,6 @@ pub struct PromptBootstrapFileDroppedWarning {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PromptDynamicSectionDroppedWarning {
-    pub sections: Vec<PromptSectionKind>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PromptDynamicSectionTruncatedWarning {
     pub sections: Vec<PromptSectionKind>,
 }
 
@@ -137,14 +131,6 @@ pub(crate) fn derive_prompt_warnings(
         ));
     }
 
-    if !diagnostics.truncated_sections.is_empty() {
-        warnings.push(KernelWarning::PromptDynamicSectionTruncated(
-            PromptDynamicSectionTruncatedWarning {
-                sections: diagnostics.truncated_sections.clone(),
-            },
-        ));
-    }
-
     warnings
 }
 
@@ -159,7 +145,6 @@ mod tests {
             mode: PromptMode::Full,
             included_sections: vec![PromptSectionKind::IdentityCore],
             dropped_sections: Vec::new(),
-            truncated_sections: Vec::new(),
             bootstrap_files: Vec::new(),
             total_estimated_tokens: 10,
             static_estimated_tokens: 4,
@@ -170,7 +155,7 @@ mod tests {
     }
 
     #[test]
-    fn test_derive_prompt_warnings_covers_all_first_version_kinds() {
+    fn test_derive_prompt_warnings_covers_all_active_kinds() {
         let mut diagnostics = base_diagnostics();
         diagnostics.bootstrap_files = vec![
             BootstrapFileDiagnostic {
@@ -199,7 +184,6 @@ mod tests {
             },
         ];
         diagnostics.dropped_sections = vec![PromptSectionKind::RecentMessages];
-        diagnostics.truncated_sections = vec![PromptSectionKind::ExpandedToolCatalog];
 
         let config = AgentKernelConfig::default();
         let warnings = derive_prompt_warnings(&diagnostics, &config);
@@ -216,9 +200,6 @@ mod tests {
         assert!(warnings
             .iter()
             .any(|warning| matches!(warning, KernelWarning::PromptDynamicSectionDropped(_))));
-        assert!(warnings
-            .iter()
-            .any(|warning| matches!(warning, KernelWarning::PromptDynamicSectionTruncated(_))));
     }
 
     #[test]

@@ -33,19 +33,10 @@ agent:
         reserved_output_tokens:
           kind: "use_model_default"
         compaction_buffer_tokens: 4096
-      include_session_summary: true
-      include_recent_messages: true
-      session_recent_messages_limit: 24
-      include_retrieved_memories: true
-      session_summary_recent_count: 2
-      session_summary_max_chars: 1200
-      retrieved_memory_max_items: 4
-      retrieved_memory_max_chars: 2000
       bootstrap:
         enabled: true
         auto_create_missing_files: true
         max_chars_per_file: 8000
-        max_chars_total: 24000
         warning_mode: "once"
         include_agents: true
         include_soul: true
@@ -53,6 +44,28 @@ agent:
         include_user: true
         include_heartbeat: true
         include_memory: true
+    compaction:
+      trigger_ratio_percent: 85
+      hard_ratio_percent: 95
+      recent_messages_keep: 24
+      recent_messages_max_chars: 4000
+      compacted_recent_messages_keep: 2
+      compacted_recent_messages_max_chars: 1200
+      recent_summaries_keep: 2
+      summary_max_chars: 1200
+      compacted_summary_max_chars: 800
+      source_recent_messages_limit: 48
+      source_recent_tool_results_limit: 12
+      tool_output_keep_last: 2
+      tool_output_max_chars: 2000
+      compacted_tool_output_max_chars: 600
+      source_recent_tool_exchanges_limit: 12
+      tool_exchange_keep_last: 2
+      tool_exchange_max_chars: 600
+      compacted_tool_exchange_max_chars: 300
+      retrieved_memories_keep: 4
+      retrieved_memory_max_chars: 2000
+      compacted_retrieved_memory_max_chars: 800
     memory:
       hot_recent_messages: 64
       compaction_threshold_bytes: 262144

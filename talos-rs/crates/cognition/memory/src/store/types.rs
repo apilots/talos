@@ -249,17 +249,57 @@ pub struct SummaryRecord {
     pub content: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionToolResultContext {
+    pub header: RecordHeader,
+    pub tool_name: String,
+    pub content: String,
+    #[serde(default)]
+    pub is_error: bool,
+    #[serde(default)]
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionToolExchangeOutcome {
+    Succeeded,
+    Failed,
+    Pending,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionToolExchangeContext {
+    pub header: RecordHeader,
+    pub call_id: String,
+    pub tool_name: String,
+    pub arguments_preview: String,
+    pub outcome: SessionToolExchangeOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_preview: Option<String>,
+    #[serde(default)]
+    pub output_truncated: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SessionPromptContext {
     #[serde(default)]
     pub summaries: Vec<SummaryRecord>,
     #[serde(default)]
     pub recent_messages: Vec<TalosMessage>,
+    #[serde(default)]
+    pub recent_tool_results: Vec<SessionToolResultContext>,
+    #[serde(default)]
+    pub recent_tool_exchanges: Vec<SessionToolExchangeContext>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionPromptContextConfig {
     pub recent_messages_limit: usize,
+    pub recent_tool_results_limit: usize,
+    pub tool_output_max_chars: usize,
+    pub recent_tool_exchanges_limit: usize,
+    pub tool_exchange_max_chars: usize,
     pub include_summary: bool,
     pub summary_recent_count: usize,
     pub summary_max_chars: usize,
@@ -269,6 +309,10 @@ impl Default for SessionPromptContextConfig {
     fn default() -> Self {
         Self {
             recent_messages_limit: 24,
+            recent_tool_results_limit: 8,
+            tool_output_max_chars: 2_000,
+            recent_tool_exchanges_limit: 8,
+            tool_exchange_max_chars: 600,
             include_summary: true,
             summary_recent_count: 2,
             summary_max_chars: 1200,

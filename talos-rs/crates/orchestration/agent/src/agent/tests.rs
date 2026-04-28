@@ -24,6 +24,7 @@ use talos_types::talos::{
 use talos_types::{SessionConf, SessionContext, SessionState, TalosSession};
 use tempfile::TempDir;
 use tokio::sync::Notify;
+use tokio::time::{timeout, Duration};
 
 struct StaticSearchTool;
 
@@ -630,6 +631,139 @@ async fn test_cancel_active_turn_aborts_only_current_session_turn() {
         }
     }
     assert_eq!(second_stop_reason, Some(TalosStopReason::EndTurn));
+}
+
+#[tokio::test]
+async fn test_run_stream_queues_second_active_turn_for_same_session() {
+    let mut agent = build_test_agent();
+    let started = Arc::new(Notify::new());
+    agent.kernel_runtime = Arc::new(
+        KernelBuilder::new()
+            .with_runner(Arc::new(SequencedRunner {
+                started: started.clone(),
+                calls: AtomicUsize::new(0),
+            }))
+            .build(),
+    );
+    let session = build_test_session("session-busy", "workspace-a");
+
+    let mut first_stream = agent
+        .run_stream(OrchestratorRequest {
+            session: session.clone(),
+            input: vec![TalosInputItem::Text {
+                text: "first".to_string(),
+            }],
+        })
+        .await
+        .expect("first stream should start");
+    started.notified().await;
+
+    let mut second_stream = agent
+        .run_stream(OrchestratorRequest {
+            session: session.clone(),
+            input: vec![TalosInputItem::Text {
+                text: "second".to_string(),
+            }],
+        })
+        .await
+        .expect("second stream should still return a receiver");
+
+    assert!(
+        timeout(Duration::from_millis(100), second_stream.recv())
+            .await
+            .is_err(),
+        "queued stream should wait until the active turn finishes"
+    );
+
+    agent
+        .cancel_active_turn(&session.context.session_id)
+        .await
+        .expect("cancel should succeed");
+
+    let mut first_stop_reason = None;
+    while let Some(event) = first_stream.recv().await {
+        if let OrchestratorEvent::MessageCompleted(payload) = event {
+            first_stop_reason = Some(payload.stop_reason);
+            break;
+        }
+    }
+    assert_eq!(first_stop_reason, Some(TalosStopReason::Cancelled));
+
+    let mut second_stop_reason = None;
+    while let Some(event) = second_stream.recv().await {
+        if let OrchestratorEvent::MessageCompleted(payload) = event {
+            second_stop_reason = Some(payload.stop_reason);
+            break;
+        }
+    }
+    assert_eq!(second_stop_reason, Some(TalosStopReason::EndTurn));
+}
+
+#[tokio::test]
+async fn test_run_queues_second_active_turn_for_same_session() {
+    let mut agent = build_test_agent();
+    let started = Arc::new(Notify::new());
+    agent.kernel_runtime = Arc::new(
+        KernelBuilder::new()
+            .with_runner(Arc::new(SequencedRunner {
+                started: started.clone(),
+                calls: AtomicUsize::new(0),
+            }))
+            .build(),
+    );
+    let agent = Arc::new(agent);
+    let session = build_test_session("session-run-queue", "workspace-a");
+
+    let first_agent = agent.clone();
+    let first_session = session.clone();
+    let first_run = tokio::spawn(async move {
+        first_agent
+            .run(OrchestratorRequest {
+                session: first_session,
+                input: vec![TalosInputItem::Text {
+                    text: "first".to_string(),
+                }],
+            })
+            .await
+    });
+    started.notified().await;
+
+    let second_agent = agent.clone();
+    let second_session = session.clone();
+    let mut second_run = Box::pin(tokio::spawn(async move {
+        second_agent
+            .run(OrchestratorRequest {
+                session: second_session,
+                input: vec![TalosInputItem::Text {
+                    text: "second".to_string(),
+                }],
+            })
+            .await
+    }));
+
+    assert!(
+        timeout(Duration::from_millis(100), &mut second_run)
+            .await
+            .is_err(),
+        "queued unary turn should not finish while the active turn is still running"
+    );
+
+    agent
+        .cancel_active_turn(&session.context.session_id)
+        .await
+        .expect("cancel should succeed");
+
+    let first_result = first_run
+        .await
+        .expect("first join should succeed")
+        .expect("first execution should complete");
+    assert_eq!(first_result.stop_reason, TalosStopReason::Cancelled);
+
+    let second_result = second_run
+        .await
+        .expect("second join should succeed")
+        .expect("queued execution should complete");
+    assert_eq!(second_result.stop_reason, TalosStopReason::EndTurn);
 }
 
 struct MockLlmProvider;

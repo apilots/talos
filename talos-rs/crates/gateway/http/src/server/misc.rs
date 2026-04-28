@@ -11,11 +11,12 @@ use talos_types::talos::{TalosEventType, TalosInputItem};
 use super::errors::ApiError;
 use super::state::HttpApiState;
 
-pub(super) async fn health_handler() -> Json<Value> {
+pub(super) async fn health_handler(State(state): State<Arc<HttpApiState>>) -> Json<Value> {
     Json(json!({
         "status": "healthy",
         "service": "talos-gateway-http",
         "timestamp": chrono::Utc::now().to_rfc3339(),
+        "auth_enabled": !state.auth_disabled,
     }))
 }
 

@@ -23,9 +23,10 @@ use talos_memory::{
     TalosMessageRole, TalosTurn, ToolCallRecord,
 };
 use talos_prompt::{
-    render_prompt_assembly, ContinuityAnswerMode, PromptBuildConfig, PromptBuilder,
-    PromptDiagnostics, PromptLoadPolicy, PromptPhase, PromptWarningState, SessionContinuity,
-    SessionHistoryCompaction,
+    render_prompt_assembly, CompactionTrimUnitKind, ContinuityAnswerMode, PromptBuildConfig,
+    PromptBuilder, PromptDiagnostics, PromptLoadPolicy, PromptPhase, PromptWarningState,
+    SessionContinuity, SessionHistoryCompaction, SessionHistoryCompactionOutcome,
+    SessionHistoryCompactionTrigger,
 };
 use talos_tools::{
     ToolDefinitionProvider, ToolDispatchOutcome, ToolExecutorPort, ToolOutputPayload, ToolPending,
@@ -77,13 +78,16 @@ pub use memory_summary::{
     flush_session_memory, flush_session_memory_with_report, MemoryFlushPolicy,
     MemoryFlushUsageReport,
 };
-pub(crate) use prepare::{build_session_continuity, stage_session_state_update};
+pub(crate) use prepare::{
+    build_session_continuity, next_session_compaction_state, stage_session_state_update,
+};
 pub use prepare::{
     execute_general_turn_loop, persist_general_turn_artifacts, prepare_general_turn,
     run_general_turn,
 };
 pub(crate) use prepare::{
-    LAST_PROMPT_DIAGNOSTICS_STATE_KEY, PROMPT_WARNING_STATE_KEY, SESSION_CONTINUITY_STATE_KEY,
+    LAST_PROMPT_DIAGNOSTICS_STATE_KEY, PROMPT_WARNING_STATE_KEY, SESSION_COMPACTION_STATE_KEY,
+    SESSION_CONTINUITY_STATE_KEY,
 };
 pub(crate) use step_execute::emit_stream_event;
 #[cfg(test)]
@@ -97,7 +101,7 @@ pub use tool_batch::{apply_general_turn_tool_batch, execute_general_turn_tool_ba
 pub use types::{
     ExecutedTurnArtifacts, GeneralTurnLoopState, GeneralTurnResult, GeneralTurnStepDisposition,
     GeneralTurnStepRequest, GeneralTurnStepResult, GeneralTurnToolBatch, ModelFinishReason,
-    PlanReActLoopState, PreparedGeneralTurn, StreamingToolExecutionConfig,
+    PlanReActLoopState, PreparedGeneralTurn, SessionCompactionState, StreamingToolExecutionConfig,
 };
 pub(crate) use types::{
     ForcedFinalizationCause, PendingDynamicToolRequest, PendingToolConfirmation,

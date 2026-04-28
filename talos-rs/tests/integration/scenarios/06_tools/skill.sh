@@ -97,7 +97,6 @@ if [[ -z "${session_id}" ]]; then
 fi
 echo "CASE skill_create_session PASS session_id=${session_id}"
 
-skill_input="You must call tool 'Skill' exactly once with query write. After the tool call, respond with exactly SKILL_TOOL_OK"
 discover_input="You must call tool 'ToolSearch' exactly once with query Skill. After the tool call, respond with exactly SKILL_DISCOVERED"
 discover_payload="$(build_payload "${discover_input}")"
 discover_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \

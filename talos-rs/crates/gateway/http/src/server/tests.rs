@@ -22,9 +22,13 @@ use talos_types::talos::{
 use talos_types::SessionQuery;
 use tower::util::ServiceExt;
 
-use crate::server::admin_users::{delete_admin_session_handler, list_admin_sessions_handler};
+use crate::server::admin_users::{
+    delete_admin_session_handler, get_admin_llm_handler, list_admin_sessions_handler,
+};
 use crate::server::messages::{process_session_message, stream_session_message};
-use crate::server::user_profile::{create_user_token_handler, list_user_tokens_handler};
+use crate::server::user_profile::{
+    create_user_token_handler, list_admin_users_handler, list_user_tokens_handler,
+};
 
 struct MockGateway;
 struct MockSessionService;
@@ -511,7 +515,10 @@ fn test_context() -> TalosContext {
 
 #[tokio::test]
 async fn test_health() {
-    let app = Router::new().route("/health", get(health_handler));
+    let state = test_state(false);
+    let app = Router::new()
+        .route("/health", get(health_handler))
+        .with_state(state);
     let resp = app
         .oneshot(
             Request::builder()
@@ -522,6 +529,34 @@ async fn test_health() {
         .await
         .expect("request should succeed");
     assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .expect("body should be readable");
+    let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
+    assert_eq!(payload["auth_enabled"], true);
+}
+
+#[tokio::test]
+async fn test_health_reports_auth_disabled() {
+    let state = test_state(true);
+    let app = Router::new()
+        .route("/health", get(health_handler))
+        .with_state(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/health")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should succeed");
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .expect("body should be readable");
+    let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
+    assert_eq!(payload["auth_enabled"], false);
 }
 
 #[tokio::test]
@@ -929,6 +964,60 @@ async fn test_models_allow_no_token_when_auth_disabled() {
         .await
         .expect("request should succeed");
     assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_list_sessions_allows_anonymous_route_when_auth_disabled() {
+    let state = test_state(true);
+    let app = Router::new()
+        .route("/v1/sessions", get(list_sessions_handler))
+        .with_state(state.clone())
+        .layer(middleware::from_fn_with_state(state, auth_middleware));
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/sessions")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should succeed");
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .expect("body should be readable");
+    let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
+    assert!(payload["data"].is_array());
+}
+
+#[tokio::test]
+async fn test_list_admin_users_allows_auth_disabled_actor() {
+    let state = test_state(true);
+    let response = list_admin_users_handler(
+        State(state),
+        axum::extract::Extension(RequestIdentity::auth_disabled()),
+    )
+    .await
+    .expect("auth disabled actor should access admin users");
+    let body = response.0;
+    let data = body
+        .get("data")
+        .and_then(Value::as_array)
+        .expect("data array should exist");
+    assert!(data.is_empty());
+}
+
+#[tokio::test]
+async fn test_get_admin_llm_allows_auth_disabled_actor() {
+    let state = test_state(true);
+    let response = get_admin_llm_handler(
+        State(state),
+        axum::extract::Extension(RequestIdentity::auth_disabled()),
+    )
+    .await
+    .expect("auth disabled actor should access admin llm");
+    assert_eq!(response.0.provider, "anthropic");
 }
 
 #[tokio::test]

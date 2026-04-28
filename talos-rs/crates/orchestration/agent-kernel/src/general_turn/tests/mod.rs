@@ -56,11 +56,32 @@ struct SummaryProvider {
     responses: Mutex<VecDeque<String>>,
 }
 
+struct RecordingSummaryProvider {
+    responses: Mutex<VecDeque<String>>,
+    user_prompts: Mutex<Vec<String>>,
+}
+
 impl SummaryProvider {
     fn new(responses: Vec<String>) -> Self {
         Self {
             responses: Mutex::new(VecDeque::from(responses)),
         }
+    }
+}
+
+impl RecordingSummaryProvider {
+    fn new(responses: Vec<String>) -> Self {
+        Self {
+            responses: Mutex::new(VecDeque::from(responses)),
+            user_prompts: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn recorded_user_prompts(&self) -> Vec<String> {
+        self.user_prompts
+            .lock()
+            .expect("recording summary provider mutex should lock")
+            .clone()
     }
 }
 
@@ -480,6 +501,58 @@ impl LlmProvider for SummaryProvider {
             .expect("summary provider mutex should lock")
             .pop_front()
             .expect("summary provider should have a queued response");
+        Ok(ChatResponse {
+            content: response,
+            reasoning: Vec::new(),
+            model: "summary-model".to_string(),
+            usage: Usage {
+                prompt_tokens: 13,
+                completion_tokens: 7,
+                total_tokens: 20,
+                cache_creation_input_tokens: Some(3),
+                cache_read_input_tokens: Some(11),
+            },
+            finish_reason: Some("stop".to_string()),
+            tool_calls: None,
+        })
+    }
+
+    async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
+        let (_tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(1);
+        Ok(ChatStream::new(rx))
+    }
+
+    fn default_model(&self) -> &str {
+        "summary-model"
+    }
+}
+
+#[async_trait]
+impl LlmProvider for RecordingSummaryProvider {
+    fn name(&self) -> &str {
+        "recording-summary-provider"
+    }
+
+    async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+        if let Some(user_prompt) = request
+            .messages
+            .iter()
+            .rev()
+            .find(|message| message.role == talos_llm_provider::Role::User)
+            .map(|message| message.content.clone())
+        {
+            self.user_prompts
+                .lock()
+                .expect("recording summary provider prompt mutex should lock")
+                .push(user_prompt);
+        }
+
+        let response = self
+            .responses
+            .lock()
+            .expect("recording summary provider mutex should lock")
+            .pop_front()
+            .expect("recording summary provider should have a queued response");
         Ok(ChatResponse {
             content: response,
             reasoning: Vec::new(),

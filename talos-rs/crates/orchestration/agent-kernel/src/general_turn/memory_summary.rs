@@ -34,12 +34,40 @@ struct MemoryPersistenceDecision {
     rationale: String,
 }
 
+trait MemoryJsonValidator {
+    fn validate(&self) -> TalosResult<()>;
+}
+
+impl MemoryJsonValidator for SessionMemorySummary {
+    fn validate(&self) -> TalosResult<()> {
+        if self.title.trim().is_empty() {
+            return Err(talos_error::TalosError::ToolError(
+                "memory summary title must not be blank".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl MemoryJsonValidator for MemoryPersistenceDecision {
+    fn validate(&self) -> TalosResult<()> {
+        if self.rationale.trim().is_empty() {
+            return Err(talos_error::TalosError::ToolError(
+                "memory persistence rationale must not be blank".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MemoryFlushUsageReport {
     pub request_count: u32,
     pub input_tokens: u32,
     pub output_tokens: u32,
     pub total_tokens: u32,
+    pub trimmed_context_unit_count: u32,
+    pub trimmed_context_unit_kind: Option<CompactionTrimUnitKind>,
     pub cache_creation_input_tokens: Option<u32>,
     pub cache_read_input_tokens: Option<u32>,
 }
@@ -72,6 +100,7 @@ pub struct MemoryFlushPolicy {
     pub enforce_threshold: bool,
     pub persist_session_summary: bool,
     pub flush_workspace_memory: bool,
+    pub compact_input_budget_tokens: Option<usize>,
 }
 
 impl MemoryFlushPolicy {
@@ -84,6 +113,7 @@ impl MemoryFlushPolicy {
             enforce_threshold,
             persist_session_summary,
             flush_workspace_memory,
+            compact_input_budget_tokens: None,
         }
     }
 
@@ -98,6 +128,27 @@ impl MemoryFlushPolicy {
     pub const fn has_persistence_target(self) -> bool {
         self.persist_session_summary || self.flush_workspace_memory
     }
+
+    pub const fn with_compaction_input_budget_tokens(mut self, budget: Option<usize>) -> Self {
+        self.compact_input_budget_tokens = budget;
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CompactableTranscriptUnitKind {
+    HistoryTurn,
+    ToolExchange,
+    ToolResult,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CompactableTranscriptUnit {
+    kind: CompactableTranscriptUnitKind,
+    record_id: String,
+    turn_id: Option<String>,
+    timestamp: chrono::DateTime<chrono::Utc>,
+    rendered: String,
 }
 
 fn render_summary_body(summary: &SessionMemorySummary) -> String {
@@ -181,6 +232,239 @@ fn sanitize_memory_line(text: &str) -> Option<String> {
     }
 
     Some(trimmed.to_string())
+}
+
+fn render_transcript_line(message: &talos_memory::TalosMessage) -> Option<String> {
+    let text = message.text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    Some(match message.role {
+        TalosMessageRole::User => format!("User: {}", text),
+        TalosMessageRole::Assistant => format!("Assistant: {}", text),
+        TalosMessageRole::System => format!("System: {}", text),
+    })
+}
+
+fn render_tool_result_line(result: &talos_memory::SessionToolResultContext) -> Option<String> {
+    let content = result.content.trim();
+    if content.is_empty() {
+        return None;
+    }
+
+    let status = if result.is_error { "error" } else { "ok" };
+    let suffix = if result.truncated { " [truncated]" } else { "" };
+    Some(format!(
+        "Tool {} result ({status}){suffix}: {}",
+        result.tool_name, content
+    ))
+}
+
+fn render_tool_exchange_line(
+    exchange: &talos_memory::SessionToolExchangeContext,
+) -> Option<String> {
+    let arguments = exchange.arguments_preview.trim();
+    let output_preview = exchange
+        .output_preview
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty());
+    if arguments.is_empty() && output_preview.is_none() {
+        return None;
+    }
+
+    let outcome = match exchange.outcome {
+        talos_memory::SessionToolExchangeOutcome::Succeeded => "ok",
+        talos_memory::SessionToolExchangeOutcome::Failed => "error",
+        talos_memory::SessionToolExchangeOutcome::Pending => "pending",
+    };
+    let mut rendered = format!(
+        "Tool exchange {} ({outcome}) args: {}",
+        exchange.tool_name, arguments
+    );
+    if let Some(output_preview) = output_preview {
+        let suffix = if exchange.output_truncated {
+            " [truncated]"
+        } else {
+            ""
+        };
+        rendered.push_str(&format!(" | preview{suffix}: {output_preview}"));
+    }
+    Some(rendered)
+}
+
+fn estimate_transcript_tokens(text: &str) -> usize {
+    let chars = text.chars().count();
+    if chars == 0 {
+        0
+    } else {
+        (chars + 3) / 4
+    }
+}
+
+fn render_transcript(units: &[CompactableTranscriptUnit]) -> String {
+    units
+        .iter()
+        .map(|unit| unit.rendered.trim())
+        .filter(|rendered| !rendered.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn build_compactable_transcript_units(
+    context: &talos_memory::SessionPromptContext,
+) -> Vec<CompactableTranscriptUnit> {
+    let mut units = Vec::new();
+    for message in &context.recent_messages {
+        let turn_id = message.header.turn_id.clone();
+        let rendered = match render_transcript_line(message) {
+            Some(rendered) => rendered,
+            None => continue,
+        };
+        let can_append = turn_id.is_some()
+            && units
+                .last()
+                .map(|unit: &CompactableTranscriptUnit| {
+                    unit.kind == CompactableTranscriptUnitKind::HistoryTurn
+                        && unit.turn_id == turn_id
+                })
+                .unwrap_or(false);
+        if can_append {
+            let unit = units.last_mut().expect("last unit should exist");
+            unit.rendered.push('\n');
+            unit.rendered.push_str(&rendered);
+        } else {
+            units.push(CompactableTranscriptUnit {
+                kind: CompactableTranscriptUnitKind::HistoryTurn,
+                record_id: message.header.id.clone(),
+                turn_id,
+                timestamp: message.header.timestamp,
+                rendered,
+            });
+        }
+    }
+
+    for result in &context.recent_tool_results {
+        let Some(rendered) = render_tool_result_line(result) else {
+            continue;
+        };
+        units.push(CompactableTranscriptUnit {
+            kind: CompactableTranscriptUnitKind::ToolResult,
+            record_id: result.header.id.clone(),
+            turn_id: result.header.turn_id.clone(),
+            timestamp: result.header.timestamp,
+            rendered,
+        });
+    }
+
+    for exchange in &context.recent_tool_exchanges {
+        let Some(rendered) = render_tool_exchange_line(exchange) else {
+            continue;
+        };
+        units.push(CompactableTranscriptUnit {
+            kind: CompactableTranscriptUnitKind::ToolExchange,
+            record_id: exchange.header.id.clone(),
+            turn_id: exchange.header.turn_id.clone(),
+            timestamp: exchange.header.timestamp,
+            rendered,
+        });
+    }
+
+    units.sort_by(|left, right| {
+        left.timestamp
+            .cmp(&right.timestamp)
+            .then_with(|| match (&left.kind, &right.kind) {
+                (
+                    CompactableTranscriptUnitKind::HistoryTurn,
+                    CompactableTranscriptUnitKind::ToolExchange
+                    | CompactableTranscriptUnitKind::ToolResult,
+                ) => std::cmp::Ordering::Less,
+                (
+                    CompactableTranscriptUnitKind::ToolExchange,
+                    CompactableTranscriptUnitKind::ToolResult,
+                ) => std::cmp::Ordering::Less,
+                (
+                    CompactableTranscriptUnitKind::ToolResult,
+                    CompactableTranscriptUnitKind::HistoryTurn
+                    | CompactableTranscriptUnitKind::ToolExchange,
+                )
+                | (
+                    CompactableTranscriptUnitKind::ToolExchange,
+                    CompactableTranscriptUnitKind::HistoryTurn,
+                ) => std::cmp::Ordering::Greater,
+                _ => std::cmp::Ordering::Equal,
+            })
+    });
+    units
+}
+
+fn trim_transcript_units_to_budget(
+    context: &talos_memory::SessionPromptContext,
+    transcript_budget_tokens: usize,
+    tool_output_keep_last: usize,
+    tool_exchange_keep_last: usize,
+) -> (
+    Vec<CompactableTranscriptUnit>,
+    usize,
+    Option<CompactionTrimUnitKind>,
+) {
+    let mut units = build_compactable_transcript_units(context);
+    if transcript_budget_tokens == 0 {
+        return (units, 0, None);
+    }
+
+    let mut trimmed_units = 0;
+    let mut trimmed_kind = None;
+    loop {
+        let transcript = render_transcript(&units);
+        if estimate_transcript_tokens(&transcript) <= transcript_budget_tokens {
+            return (units, trimmed_units, trimmed_kind);
+        }
+
+        let tool_result_indexes = units
+            .iter()
+            .enumerate()
+            .filter_map(|(index, unit)| {
+                (unit.kind == CompactableTranscriptUnitKind::ToolResult).then_some(index)
+            })
+            .collect::<Vec<_>>();
+        if tool_result_indexes.len() > tool_output_keep_last {
+            let index = tool_result_indexes[0];
+            units.remove(index);
+            trimmed_units += 1;
+            trimmed_kind.get_or_insert(CompactionTrimUnitKind::OldToolOutput);
+            continue;
+        }
+
+        let tool_exchange_indexes = units
+            .iter()
+            .enumerate()
+            .filter_map(|(index, unit)| {
+                (unit.kind == CompactableTranscriptUnitKind::ToolExchange).then_some(index)
+            })
+            .collect::<Vec<_>>();
+        if tool_exchange_indexes.len() > tool_exchange_keep_last {
+            let index = tool_exchange_indexes[0];
+            units.remove(index);
+            trimmed_units += 1;
+            trimmed_kind.get_or_insert(CompactionTrimUnitKind::OldAssistantToolExchange);
+            continue;
+        }
+
+        if let Some(index) = units
+            .iter()
+            .position(|unit| unit.kind == CompactableTranscriptUnitKind::HistoryTurn)
+        {
+            units.remove(index);
+            trimmed_units += 1;
+            if trimmed_kind.is_none() {
+                trimmed_kind = Some(CompactionTrimUnitKind::OldestHistoryItem);
+            }
+            continue;
+        }
+
+        return (units, trimmed_units, trimmed_kind);
+    }
 }
 
 pub(crate) fn build_sanitized_memory_decision_input(
@@ -285,7 +569,7 @@ async fn request_json_with_retries<T>(
     label: &str,
 ) -> TalosResult<(T, Usage)>
 where
-    T: DeserializeOwned,
+    T: DeserializeOwned + MemoryJsonValidator,
 {
     let mut accumulated_usage = Usage::default();
     let retry_suffix = "\n\nPrevious response was not valid JSON for the required schema. Retry and return ONLY valid JSON with all required fields. Do not add explanation, markdown, or extra text.";
@@ -322,8 +606,25 @@ where
             response.usage.cache_read_input_tokens,
         );
 
-        match serde_json::from_str(strip_json_fences(&response.content)) {
-            Ok(parsed) => return Ok((parsed, accumulated_usage)),
+        match serde_json::from_str::<T>(strip_json_fences(&response.content)) {
+            Ok(parsed) => match parsed.validate() {
+                Ok(()) => return Ok((parsed, accumulated_usage)),
+                Err(err) => {
+                    tracing::warn!(
+                        session_id = %session_id,
+                        attempt,
+                        error = %err,
+                        raw_response = %response.content,
+                        label,
+                        "received invalid structured content from memory helper model response"
+                    );
+                    last_error = Some(err.to_string());
+                    if attempt == MEMORY_JSON_RETRY_LIMIT {
+                        break;
+                    }
+                    current_user_prompt = format!("{user_prompt}{retry_suffix}");
+                }
+            },
             Err(err) => {
                 tracing::warn!(
                     session_id = %session_id,
@@ -406,39 +707,90 @@ pub async fn flush_session_memory_with_report(
         .build_session_prompt_context(
             session_id,
             &SessionPromptContextConfig {
-                recent_messages_limit: 48,
+                recent_messages_limit: kernel_config.compaction.source_recent_messages_limit,
+                recent_tool_results_limit: kernel_config
+                    .compaction
+                    .source_recent_tool_results_limit,
+                tool_output_max_chars: kernel_config.compaction.tool_output_max_chars,
+                recent_tool_exchanges_limit: kernel_config
+                    .compaction
+                    .source_recent_tool_exchanges_limit,
+                tool_exchange_max_chars: kernel_config.compaction.tool_exchange_max_chars,
                 include_summary: false,
                 summary_recent_count: 0,
                 summary_max_chars: 0,
             },
         )
         .await?;
-    if context.recent_messages.is_empty() {
+    if context.recent_messages.is_empty()
+        && context.recent_tool_results.is_empty()
+        && context.recent_tool_exchanges.is_empty()
+    {
         tracing::debug!(session_id = %session_id, "skip memory flush because session prompt context is empty");
         return Ok(usage_report);
     }
-    let transcript = context
-        .recent_messages
-        .iter()
-        .filter_map(|message| {
-            let text = message.text.trim();
-            if text.is_empty() {
-                return None;
-            }
-            Some(match message.role {
-                TalosMessageRole::User => format!("User: {}", text),
-                TalosMessageRole::Assistant => format!("Assistant: {}", text),
-                TalosMessageRole::System => format!("System: {}", text),
+    let mut compaction_context = context.clone();
+    if let Some(transcript_budget_tokens) = policy.compact_input_budget_tokens {
+        let (trimmed_units, trimmed_unit_count, trimmed_unit_kind) =
+            trim_transcript_units_to_budget(
+                &compaction_context,
+                transcript_budget_tokens,
+                kernel_config.compaction.tool_output_keep_last,
+                kernel_config.compaction.tool_exchange_keep_last,
+            );
+        if trimmed_unit_count > 0 {
+            tracing::debug!(
+                session_id = %session_id,
+                transcript_budget_tokens,
+                trimmed_unit_count,
+                trimmed_unit_kind = ?trimmed_unit_kind,
+                "trimmed transcript units before memory compaction"
+            );
+        }
+        usage_report.trimmed_context_unit_count = trimmed_unit_count as u32;
+        usage_report.trimmed_context_unit_kind = trimmed_unit_kind;
+        let kept_history_message_ids = trimmed_units
+            .iter()
+            .filter_map(|unit| {
+                (unit.kind == CompactableTranscriptUnitKind::HistoryTurn)
+                    .then_some(unit.record_id.clone())
             })
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+            .collect::<std::collections::HashSet<_>>();
+        let kept_tool_result_ids = trimmed_units
+            .iter()
+            .filter_map(|unit| {
+                (unit.kind == CompactableTranscriptUnitKind::ToolResult)
+                    .then_some(unit.record_id.clone())
+            })
+            .collect::<std::collections::HashSet<_>>();
+        let kept_tool_exchange_ids = trimmed_units
+            .iter()
+            .filter_map(|unit| {
+                (unit.kind == CompactableTranscriptUnitKind::ToolExchange)
+                    .then_some(unit.record_id.clone())
+            })
+            .collect::<std::collections::HashSet<_>>();
+        compaction_context
+            .recent_messages
+            .retain(|message| kept_history_message_ids.contains(&message.header.id));
+        compaction_context
+            .recent_tool_results
+            .retain(|result| kept_tool_result_ids.contains(&result.header.id));
+        compaction_context
+            .recent_tool_exchanges
+            .retain(|exchange| kept_tool_exchange_ids.contains(&exchange.header.id));
+    }
+    let transcript = render_transcript(&build_compactable_transcript_units(&compaction_context));
     if transcript.trim().is_empty() {
         tracing::debug!(session_id = %session_id, "skip memory flush because transcript is empty");
         return Ok(usage_report);
     }
 
-    let selected_model = selected_model.to_string();
+    let selected_model = kernel_config
+        .compaction
+        .model
+        .clone()
+        .unwrap_or_else(|| selected_model.to_string());
     let llm_provider_for_summary = llm_provider.clone();
     let transcript_prompt = format!("Conversation transcript:\n{}", transcript);
     let (summary, summary_usage) = request_json_with_retries::<SessionMemorySummary>(
@@ -473,7 +825,7 @@ pub async fn flush_session_memory_with_report(
         }
         return Ok(usage_report);
     }
-    let sanitized_input = build_sanitized_memory_decision_input(&context, &summary);
+    let sanitized_input = build_sanitized_memory_decision_input(&compaction_context, &summary);
     let Some(judge_input) = render_sanitized_memory_decision_input(&sanitized_input) else {
         tracing::debug!(session_id = %session_id, "skip memory flush because sanitized judge input is empty");
         return Ok(usage_report);
@@ -496,7 +848,7 @@ pub async fn flush_session_memory_with_report(
         return Ok(usage_report);
     }
     let latest_seq = memory_store.latest_seq(session_id).await?;
-    let source_turn_count = context
+    let source_turn_count = compaction_context
         .recent_messages
         .iter()
         .filter_map(|item| item.header.turn_id.as_deref())

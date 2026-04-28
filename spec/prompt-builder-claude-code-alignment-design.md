@@ -197,9 +197,11 @@ Talos 必须定义一份固定的 canonical region order。默认顺序如下：
 3. `RecentTaskContinuity`
 4. `SessionSummary`
 5. `RecentMessages`
-6. `RetrievedMemories`
-7. `ExpandedToolCatalog`
-8. 其他 session-variant region
+6. `RecentToolHistory`
+7. `RecentToolOutputs`
+8. `RetrievedMemories`
+9. `ExpandedToolCatalog`
+10. 其他 session-variant region
 
 要求：
 
@@ -1624,7 +1626,6 @@ pub struct PromptSection {
     pub tier: BudgetTier,
     pub required: bool,
     pub estimated_tokens: usize,
-    pub truncation_mode: TruncationMode,
 }
 ```
 

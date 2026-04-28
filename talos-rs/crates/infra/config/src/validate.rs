@@ -158,21 +158,6 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             "agent.kernel.memory.hot_recent_messages must be > 0".to_string(),
         ));
     }
-    if config.agent.kernel.prompt.session_recent_messages_limit == 0 {
-        return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.prompt.session_recent_messages_limit must be > 0".to_string(),
-        ));
-    }
-    if config.agent.kernel.prompt.session_summary_recent_count == 0 {
-        return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.prompt.session_summary_recent_count must be > 0".to_string(),
-        ));
-    }
-    if config.agent.kernel.prompt.session_summary_max_chars == 0 {
-        return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.prompt.session_summary_max_chars must be > 0".to_string(),
-        ));
-    }
     if config.agent.kernel.memory.compaction_threshold_bytes == 0 {
         return Err(TalosError::InvalidConfiguration(
             "agent.kernel.memory.compaction_threshold_bytes must be > 0".to_string(),
@@ -205,22 +190,216 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             "agent.kernel.prompt.bootstrap.max_chars_per_file must be > 0".to_string(),
         ));
     }
-    if config.agent.kernel.prompt.bootstrap.max_chars_total == 0 {
-        return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.prompt.bootstrap.max_chars_total must be > 0".to_string(),
-        ));
-    }
-    if config.agent.kernel.prompt.bootstrap.max_chars_total
-        < config.agent.kernel.prompt.bootstrap.max_chars_per_file
-    {
-        return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.prompt.bootstrap.max_chars_total must be >= agent.kernel.prompt.bootstrap.max_chars_per_file".to_string(),
-        ));
-    }
     if config.agent.kernel.prompt.window.compaction_buffer_tokens == 0 {
         return Err(TalosError::InvalidConfiguration(
             "agent.kernel.prompt.window.compaction_buffer_tokens must be > 0".to_string(),
         ));
+    }
+    if config.agent.kernel.compaction.trigger_ratio_percent == 0
+        || config.agent.kernel.compaction.trigger_ratio_percent >= 100
+    {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.trigger_ratio_percent must be in 1..100".to_string(),
+        ));
+    }
+    if config.agent.kernel.compaction.hard_ratio_percent == 0
+        || config.agent.kernel.compaction.hard_ratio_percent > 100
+    {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.hard_ratio_percent must be in 1..=100".to_string(),
+        ));
+    }
+    if config.agent.kernel.compaction.trigger_ratio_percent
+        >= config.agent.kernel.compaction.hard_ratio_percent
+    {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.trigger_ratio_percent must be < agent.kernel.compaction.hard_ratio_percent".to_string(),
+        ));
+    }
+    if config.agent.kernel.compaction.recent_messages_keep == 0 {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.recent_messages_keep must be > 0".to_string(),
+        ));
+    }
+    if config.agent.kernel.compaction.recent_messages_max_chars == 0 {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.recent_messages_max_chars must be > 0".to_string(),
+        ));
+    }
+    if config
+        .agent
+        .kernel
+        .compaction
+        .compacted_recent_messages_max_chars
+        == 0
+    {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.compacted_recent_messages_max_chars must be > 0".to_string(),
+        ));
+    }
+    if config
+        .agent
+        .kernel
+        .compaction
+        .compacted_recent_messages_max_chars
+        > config.agent.kernel.compaction.recent_messages_max_chars
+    {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.compacted_recent_messages_max_chars must be <= agent.kernel.compaction.recent_messages_max_chars".to_string(),
+        ));
+    }
+    if config
+        .agent
+        .kernel
+        .compaction
+        .compacted_recent_messages_keep
+        == 0
+    {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.compacted_recent_messages_keep must be > 0".to_string(),
+        ));
+    }
+    if config.agent.kernel.compaction.recent_summaries_keep == 0 {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.recent_summaries_keep must be > 0".to_string(),
+        ));
+    }
+    if config.agent.kernel.compaction.summary_max_chars == 0 {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.summary_max_chars must be > 0".to_string(),
+        ));
+    }
+    if config.agent.kernel.compaction.compacted_summary_max_chars == 0 {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.compacted_summary_max_chars must be > 0".to_string(),
+        ));
+    }
+    if config.agent.kernel.compaction.compacted_summary_max_chars
+        > config.agent.kernel.compaction.summary_max_chars
+    {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.compacted_summary_max_chars must be <= agent.kernel.compaction.summary_max_chars".to_string(),
+        ));
+    }
+    if config.agent.kernel.compaction.source_recent_messages_limit == 0 {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.source_recent_messages_limit must be > 0".to_string(),
+        ));
+    }
+    if config
+        .agent
+        .kernel
+        .compaction
+        .source_recent_tool_results_limit
+        == 0
+    {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.source_recent_tool_results_limit must be > 0".to_string(),
+        ));
+    }
+    if config.agent.kernel.compaction.tool_output_max_chars == 0 {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.tool_output_max_chars must be > 0".to_string(),
+        ));
+    }
+    if config
+        .agent
+        .kernel
+        .compaction
+        .compacted_tool_output_max_chars
+        == 0
+    {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.compacted_tool_output_max_chars must be > 0".to_string(),
+        ));
+    }
+    if config
+        .agent
+        .kernel
+        .compaction
+        .compacted_tool_output_max_chars
+        > config.agent.kernel.compaction.tool_output_max_chars
+    {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.compacted_tool_output_max_chars must be <= agent.kernel.compaction.tool_output_max_chars".to_string(),
+        ));
+    }
+    if config
+        .agent
+        .kernel
+        .compaction
+        .source_recent_tool_exchanges_limit
+        == 0
+    {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.source_recent_tool_exchanges_limit must be > 0".to_string(),
+        ));
+    }
+    if config.agent.kernel.compaction.tool_exchange_max_chars == 0 {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.tool_exchange_max_chars must be > 0".to_string(),
+        ));
+    }
+    if config
+        .agent
+        .kernel
+        .compaction
+        .compacted_tool_exchange_max_chars
+        == 0
+    {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.compacted_tool_exchange_max_chars must be > 0".to_string(),
+        ));
+    }
+    if config
+        .agent
+        .kernel
+        .compaction
+        .compacted_tool_exchange_max_chars
+        > config.agent.kernel.compaction.tool_exchange_max_chars
+    {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.compacted_tool_exchange_max_chars must be <= agent.kernel.compaction.tool_exchange_max_chars".to_string(),
+        ));
+    }
+    if config.agent.kernel.compaction.retrieved_memories_keep == 0 {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.retrieved_memories_keep must be > 0".to_string(),
+        ));
+    }
+    if config.agent.kernel.compaction.retrieved_memory_max_chars == 0 {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.retrieved_memory_max_chars must be > 0".to_string(),
+        ));
+    }
+    if config
+        .agent
+        .kernel
+        .compaction
+        .compacted_retrieved_memory_max_chars
+        == 0
+    {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.compacted_retrieved_memory_max_chars must be > 0".to_string(),
+        ));
+    }
+    if config
+        .agent
+        .kernel
+        .compaction
+        .compacted_retrieved_memory_max_chars
+        > config.agent.kernel.compaction.retrieved_memory_max_chars
+    {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.compaction.compacted_retrieved_memory_max_chars must be <= agent.kernel.compaction.retrieved_memory_max_chars".to_string(),
+        ));
+    }
+    if let Some(model) = config.agent.kernel.compaction.model.as_ref() {
+        if model.trim().is_empty() || is_unresolved_placeholder(model) {
+            return Err(TalosError::InvalidConfiguration(
+                "agent.kernel.compaction.model is empty or unresolved placeholder".to_string(),
+            ));
+        }
     }
     match &config.agent.kernel.prompt.window.reserved_output_tokens {
         crate::ReservedOutputPolicy::UseModelDefault => {}

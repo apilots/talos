@@ -149,8 +149,8 @@ impl AgentImpl {
                 ))
             }
             (KernelStreamEventType::PromptWarning, KernelStreamEventData::PromptWarning(_)) => {
-                // TODO: Route prompt warnings through a dedicated diagnostics mechanism
-                // instead of dropping them at the agent streaming boundary.
+                // Prompt warnings stay on the kernel diagnostics path and are not forwarded
+                // through the public agent streaming event surface.
                 None
             }
             (

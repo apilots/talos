@@ -9,7 +9,7 @@ import { Badge } from "@/shared/ui/Badge";
 import type { SessionUiStatus, ThreadFilter } from "@/shared/types/ui";
 
 type AuthConnectionState = {
-  authStatus: "unknown" | "loading" | "authenticated" | "unauthenticated";
+  authStatus: "unknown" | "loading" | "authenticated" | "unauthenticated" | "open";
   authRole: "user" | "admin";
   authUsername: string;
   userId: string;
@@ -73,7 +73,8 @@ export function Sidebar({
       : threadFilter === "waiting_approval"
         ? t("sidebar:awaitingApproval")
         : threadFilter.replaceAll("_", " ");
-  const roleLabel = connection.authRole === "admin" ? "Admin" : "Pro";
+  const roleLabel =
+    connection.authStatus === "open" ? "Open" : connection.authRole === "admin" ? "Admin" : "Pro";
   const avatarLabel = connection.authUsername.trim().charAt(0).toUpperCase() || "U";
 
   useEffect(() => {
@@ -205,11 +206,13 @@ export function Sidebar({
         <NavItem icon={<FileText size={16} />} label={t("sidebar:workspaceDocs")} to="/workspace-docs" />
         <NavItem icon={<HardDriveUpload size={16} />} label={t("sidebar:files")} to="/files" />
         <NavItem icon={<Settings2 size={16} />} label={t("sidebar:settings")} to="/settings" />
-        {connection.authRole === "admin" ? <NavItem icon={<Shield size={16} />} label={t("sidebar:admin")} to="/admin" /> : null}
+        {connection.authStatus === "open" || connection.authRole === "admin" ? (
+          <NavItem icon={<Shield size={16} />} label={t("sidebar:admin")} to="/admin" />
+        ) : null}
       </nav>
 
       <div className="relative mt-4 border-t border-border/80 pt-4" ref={accountMenuRef}>
-        {accountMenuOpen ? (
+        {accountMenuOpen && connection.authStatus !== "open" ? (
           <div className="absolute bottom-[calc(100%+0.5rem)] left-0 right-0 z-20 rounded-[1rem] border border-border/80 bg-card p-1.5 shadow-[0_20px_36px_rgba(95,84,64,0.16)]">
             <button
               className="flex w-full items-center gap-2 rounded-[0.85rem] px-3 py-2 text-sm text-ink transition hover:bg-background/75"
@@ -227,7 +230,12 @@ export function Sidebar({
         <button
           aria-expanded={accountMenuOpen}
           className="flex w-full items-center gap-3 rounded-[0.95rem] px-2 py-2 text-left transition hover:bg-card/70"
-          onClick={() => setAccountMenuOpen((open) => !open)}
+          onClick={() => {
+            if (connection.authStatus === "open") {
+              return;
+            }
+            setAccountMenuOpen((open) => !open);
+          }}
           type="button"
         >
           <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-background/85 text-xs font-semibold text-ink">

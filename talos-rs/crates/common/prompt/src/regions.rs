@@ -1,6 +1,6 @@
 use crate::{
     BudgetTier, PromptSectionKind, RegionEnvelopePolicy, RegionPlacement, RegionPriority,
-    SectionCacheScope, TruncationMode, WorkspaceBootstrapFileKind,
+    SectionCacheScope, WorkspaceBootstrapFileKind,
 };
 
 pub const PROMPT_ARCHITECTURE_VERSION: &str = "prompt_arch_v2";
@@ -17,7 +17,6 @@ pub struct PromptSectionTemplate {
     pub cache_scope: SectionCacheScope,
     pub tier: BudgetTier,
     pub required: bool,
-    pub truncation_mode: TruncationMode,
     pub envelope_policy: RegionEnvelopePolicy,
     pub bootstrap_kind: Option<WorkspaceBootstrapFileKind>,
 }
@@ -34,7 +33,6 @@ macro_rules! template {
         $cache_scope:expr,
         $tier:expr,
         $required:expr,
-        $truncation_mode:expr,
         $envelope_policy:expr,
         $bootstrap_kind:expr
     ) => {
@@ -49,7 +47,6 @@ macro_rules! template {
             cache_scope: $cache_scope,
             tier: $tier,
             required: $required,
-            truncation_mode: $truncation_mode,
             envelope_policy: $envelope_policy,
             bootstrap_kind: $bootstrap_kind,
         }
@@ -78,6 +75,8 @@ pub const DYNAMIC_SUFFIX_ORDER: &[PromptSectionKind] = &[
     PromptSectionKind::RecentTaskContinuity,
     PromptSectionKind::SessionSummary,
     PromptSectionKind::RecentMessages,
+    PromptSectionKind::RecentToolHistory,
+    PromptSectionKind::RecentToolOutputs,
     PromptSectionKind::RetrievedMemories,
     PromptSectionKind::ExpandedToolCatalog,
 ];
@@ -85,6 +84,8 @@ pub const DYNAMIC_SUFFIX_ORDER: &[PromptSectionKind] = &[
 pub const DYNAMIC_SUFFIX_DROP_ORDER: &[PromptSectionKind] = &[
     PromptSectionKind::ExpandedToolCatalog,
     PromptSectionKind::RetrievedMemories,
+    PromptSectionKind::RecentToolOutputs,
+    PromptSectionKind::RecentToolHistory,
     PromptSectionKind::RecentMessages,
     PromptSectionKind::SessionSummary,
     PromptSectionKind::RequestedToolPreferenceHint,
@@ -115,7 +116,6 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             SectionCacheScope::StaticPrefixEligible,
             BudgetTier::Critical,
             true,
-            TruncationMode::TrimTail,
             RegionEnvelopePolicy::PlainTextRequired,
             None
         ),
@@ -130,7 +130,6 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             SectionCacheScope::StaticPrefixEligible,
             BudgetTier::Critical,
             true,
-            TruncationMode::TrimTail,
             RegionEnvelopePolicy::PlainTextRequired,
             None
         ),
@@ -145,7 +144,6 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             SectionCacheScope::StaticPrefixEligible,
             BudgetTier::Critical,
             true,
-            TruncationMode::TrimTail,
             RegionEnvelopePolicy::PlainTextRequired,
             None
         ),
@@ -160,7 +158,6 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             SectionCacheScope::StaticPrefixEligible,
             BudgetTier::Critical,
             true,
-            TruncationMode::TrimTail,
             RegionEnvelopePolicy::PlainTextRequired,
             None
         ),
@@ -175,7 +172,6 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             SectionCacheScope::DynamicOnly,
             BudgetTier::Important,
             false,
-            TruncationMode::DropWhole,
             RegionEnvelopePolicy::PlainTextRequired,
             None
         ),
@@ -190,7 +186,6 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             SectionCacheScope::StaticPrefixEligible,
             BudgetTier::Critical,
             true,
-            TruncationMode::TrimTail,
             RegionEnvelopePolicy::PlainTextRequired,
             None
         ),
@@ -205,7 +200,6 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             SectionCacheScope::DynamicOnly,
             BudgetTier::Important,
             false,
-            TruncationMode::DropWhole,
             RegionEnvelopePolicy::XmlEnvelopeRequired,
             None
         ),
@@ -220,7 +214,6 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             SectionCacheScope::StaticPrefixEligible,
             BudgetTier::Important,
             true,
-            TruncationMode::TrimTail,
             RegionEnvelopePolicy::PlainTextRequired,
             None
         ),
@@ -235,7 +228,6 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             SectionCacheScope::StaticPrefixEligible,
             BudgetTier::Supplemental,
             false,
-            TruncationMode::TrimTail,
             RegionEnvelopePolicy::PlainTextRequired,
             None
         ),
@@ -250,7 +242,6 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             SectionCacheScope::DynamicOnly,
             BudgetTier::Critical,
             true,
-            TruncationMode::TrimTail,
             RegionEnvelopePolicy::PlainTextRequired,
             None
         ),
@@ -265,7 +256,6 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             SectionCacheScope::DynamicOnly,
             BudgetTier::Important,
             false,
-            TruncationMode::DropWhole,
             RegionEnvelopePolicy::XmlEnvelopeRequired,
             None
         ),
@@ -280,7 +270,6 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             SectionCacheScope::DynamicOnly,
             BudgetTier::Important,
             false,
-            TruncationMode::TrimTail,
             RegionEnvelopePolicy::PlainTextRequired,
             None
         ),
@@ -295,7 +284,34 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             SectionCacheScope::DynamicOnly,
             BudgetTier::Supplemental,
             false,
-            TruncationMode::DropWhole,
+            RegionEnvelopePolicy::XmlEnvelopeRequired,
+            None
+        ),
+        PromptSectionKind::RecentToolHistory => template!(
+            PromptSectionKind::RecentToolHistory,
+            "recent_tool_history",
+            "# Recent Tool History",
+            RegionPriority::Medium,
+            RegionPlacement::DynamicSuffixRequired,
+            "recent_tool_history",
+            "This section contains recent tool exchanges from the current session.\nUse it to avoid repeating the same tool calls and to reuse recent tool-grounded evidence.\nPrefer newer exchanges over older ones when they conflict.",
+            SectionCacheScope::DynamicOnly,
+            BudgetTier::Important,
+            false,
+            RegionEnvelopePolicy::XmlEnvelopeRequired,
+            None
+        ),
+        PromptSectionKind::RecentToolOutputs => template!(
+            PromptSectionKind::RecentToolOutputs,
+            "recent_tool_outputs",
+            "# Recent Tool Outputs",
+            RegionPriority::MediumLow,
+            RegionPlacement::DynamicSuffixRequired,
+            "recent_tool_outputs",
+            "This section contains recent tool outputs from the current session.\nUse it to reuse concrete recent results without repeating the same tool call.\nTreat it as volatile execution context and prefer newer outputs when they conflict.",
+            SectionCacheScope::DynamicOnly,
+            BudgetTier::Supplemental,
+            false,
             RegionEnvelopePolicy::XmlEnvelopeRequired,
             None
         ),
@@ -310,7 +326,6 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             SectionCacheScope::DynamicOnly,
             BudgetTier::Supplemental,
             false,
-            TruncationMode::DropWhole,
             RegionEnvelopePolicy::XmlEnvelopeRequired,
             None
         ),
@@ -325,7 +340,6 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             SectionCacheScope::WorkspaceStable,
             BudgetTier::Important,
             false,
-            TruncationMode::TrimTail,
             RegionEnvelopePolicy::PlainTextRequired,
             Some(WorkspaceBootstrapFileKind::Soul)
         ),
@@ -340,7 +354,6 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             SectionCacheScope::WorkspaceStable,
             BudgetTier::Important,
             false,
-            TruncationMode::TrimTail,
             RegionEnvelopePolicy::PlainTextRequired,
             Some(WorkspaceBootstrapFileKind::Identity)
         ),
@@ -355,7 +368,6 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             SectionCacheScope::WorkspaceStable,
             BudgetTier::Important,
             false,
-            TruncationMode::TrimTail,
             RegionEnvelopePolicy::PlainTextRequired,
             Some(WorkspaceBootstrapFileKind::User)
         ),
@@ -370,7 +382,6 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             SectionCacheScope::WorkspaceStable,
             BudgetTier::Important,
             false,
-            TruncationMode::TrimTail,
             RegionEnvelopePolicy::PlainTextRequired,
             Some(WorkspaceBootstrapFileKind::Heartbeat)
         ),
@@ -385,7 +396,6 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             SectionCacheScope::WorkspaceStable,
             BudgetTier::Important,
             false,
-            TruncationMode::TrimTail,
             RegionEnvelopePolicy::PlainTextRequired,
             Some(WorkspaceBootstrapFileKind::Memory)
         ),
@@ -400,7 +410,6 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             SectionCacheScope::WorkspaceStable,
             BudgetTier::Important,
             false,
-            TruncationMode::TrimTail,
             RegionEnvelopePolicy::PlainTextRequired,
             Some(WorkspaceBootstrapFileKind::Agents)
         ),

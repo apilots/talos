@@ -6,11 +6,12 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::path_policy;
 use crate::store::{
-    MemoryStore, SessionPromptContext, SessionPromptContextConfig, SessionTranscriptBranch,
+    MemoryStore, SessionPromptContext, SessionPromptContextConfig, SessionToolExchangeContext,
+    SessionToolExchangeOutcome, SessionToolResultContext, SessionTranscriptBranch,
     SessionTranscriptRecord, SummaryRecord, TalosMessage, TalosTurn,
 };
 use crate::{RecordHeader, TalosMessageRole};
-use talos_types::talos::TalosOutputItem;
+use talos_types::talos::{TalosContentItem, TalosOutputItem};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -198,6 +199,18 @@ fn truncate_chars(input: &str, max_chars: usize) -> String {
     input.chars().take(max_chars).collect::<String>()
 }
 
+fn render_tool_result_content(content: &[TalosContentItem]) -> String {
+    content
+        .iter()
+        .map(|item| match item {
+            TalosContentItem::Text { text } => text.trim().to_string(),
+            TalosContentItem::Json { value } => value.to_string(),
+        })
+        .filter(|item| !item.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn recent_messages_from_turn(turn: &TalosTurn) -> Vec<TalosMessage> {
     turn.items
         .iter()
@@ -227,6 +240,133 @@ fn recent_messages_from_turn(turn: &TalosTurn) -> Vec<TalosMessage> {
             | TalosOutputItem::ExecutionSummary { .. }
             | TalosOutputItem::ToolCall { .. }
             | TalosOutputItem::ToolResult { .. } => None,
+        })
+        .collect()
+}
+
+fn recent_tool_results_from_turn(
+    turn: &TalosTurn,
+    max_chars: usize,
+) -> Vec<SessionToolResultContext> {
+    turn.items
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| match item {
+            TalosOutputItem::ToolResult {
+                tool_name,
+                content,
+                is_error,
+                ..
+            } => {
+                let rendered = render_tool_result_content(content);
+                if rendered.is_empty() {
+                    return None;
+                }
+                let truncated = max_chars > 0 && rendered.chars().count() > max_chars;
+                Some(SessionToolResultContext {
+                    header: RecordHeader {
+                        id: format!("{}:tool_result:{}", turn.turn_id, index),
+                        session_id: turn.session_id.clone(),
+                        turn_id: Some(turn.turn_id.clone()),
+                        timestamp: turn.timestamp,
+                    },
+                    tool_name: tool_name.clone(),
+                    content: if max_chars > 0 {
+                        truncate_chars(&rendered, max_chars)
+                    } else {
+                        rendered
+                    },
+                    is_error: *is_error,
+                    truncated,
+                })
+            }
+            TalosOutputItem::UserInput { .. }
+            | TalosOutputItem::Reasoning { .. }
+            | TalosOutputItem::ExecutionSummary { .. }
+            | TalosOutputItem::OutputText { .. }
+            | TalosOutputItem::ToolCall { .. } => None,
+        })
+        .collect()
+}
+
+fn recent_tool_exchanges_from_turn(
+    turn: &TalosTurn,
+    max_chars: usize,
+) -> Vec<SessionToolExchangeContext> {
+    let tool_results = turn
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            TalosOutputItem::ToolResult {
+                call_id,
+                tool_name,
+                content,
+                is_error,
+            } => {
+                let rendered = render_tool_result_content(content);
+                let output_truncated = max_chars > 0 && rendered.chars().count() > max_chars;
+                Some((
+                    call_id.clone(),
+                    (
+                        tool_name.clone(),
+                        if max_chars > 0 {
+                            truncate_chars(&rendered, max_chars)
+                        } else {
+                            rendered
+                        },
+                        *is_error,
+                        output_truncated,
+                    ),
+                ))
+            }
+            _ => None,
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+
+    turn.items
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| match item {
+            TalosOutputItem::ToolCall {
+                call_id,
+                name,
+                arguments,
+            } => {
+                let arguments_rendered = arguments.to_string();
+                let (outcome, output_preview, output_truncated) = tool_results
+                    .get(call_id)
+                    .map(|(_tool_name, output_preview, is_error, output_truncated)| {
+                        (
+                            if *is_error {
+                                SessionToolExchangeOutcome::Failed
+                            } else {
+                                SessionToolExchangeOutcome::Succeeded
+                            },
+                            (!output_preview.trim().is_empty()).then_some(output_preview.clone()),
+                            *output_truncated,
+                        )
+                    })
+                    .unwrap_or((SessionToolExchangeOutcome::Pending, None, false));
+                Some(SessionToolExchangeContext {
+                    header: RecordHeader {
+                        id: format!("{}:tool_exchange:{}", turn.turn_id, index),
+                        session_id: turn.session_id.clone(),
+                        turn_id: Some(turn.turn_id.clone()),
+                        timestamp: turn.timestamp,
+                    },
+                    call_id: call_id.clone(),
+                    tool_name: name.clone(),
+                    arguments_preview: if max_chars > 0 {
+                        truncate_chars(&arguments_rendered, max_chars)
+                    } else {
+                        arguments_rendered
+                    },
+                    outcome,
+                    output_preview,
+                    output_truncated,
+                })
+            }
+            _ => None,
         })
         .collect()
 }
@@ -384,6 +524,40 @@ pub(crate) async fn build_session_prompt_context(
         }
     };
 
+    let recent_tool_results = if config.recent_tool_results_limit == 0 {
+        Vec::new()
+    } else {
+        let turns = load_turns(store, session_id).await?;
+        let mut tool_results = turns
+            .into_iter()
+            .flat_map(|turn| recent_tool_results_from_turn(&turn, config.tool_output_max_chars))
+            .collect::<Vec<_>>();
+        if tool_results.len() > config.recent_tool_results_limit {
+            let start = tool_results
+                .len()
+                .saturating_sub(config.recent_tool_results_limit);
+            tool_results = tool_results.split_off(start);
+        }
+        tool_results
+    };
+
+    let recent_tool_exchanges = if config.recent_tool_exchanges_limit == 0 {
+        Vec::new()
+    } else {
+        let turns = load_turns(store, session_id).await?;
+        let mut tool_exchanges = turns
+            .into_iter()
+            .flat_map(|turn| recent_tool_exchanges_from_turn(&turn, config.tool_exchange_max_chars))
+            .collect::<Vec<_>>();
+        if tool_exchanges.len() > config.recent_tool_exchanges_limit {
+            let start = tool_exchanges
+                .len()
+                .saturating_sub(config.recent_tool_exchanges_limit);
+            tool_exchanges = tool_exchanges.split_off(start);
+        }
+        tool_exchanges
+    };
+
     let summaries = if config.include_summary && config.summary_recent_count > 0 {
         let mut records = load_summaries(store, session_id, config.summary_recent_count).await?;
         if config.summary_max_chars > 0 {
@@ -399,6 +573,8 @@ pub(crate) async fn build_session_prompt_context(
     Ok(SessionPromptContext {
         summaries,
         recent_messages,
+        recent_tool_results,
+        recent_tool_exchanges,
     })
 }
 

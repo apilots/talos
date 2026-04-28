@@ -13,7 +13,8 @@ pub use retrieval::{strip_json_fences, MemorySearchResponse};
 pub use store::{
     MemoryGetResult, MemoryIndexFile, MemoryIndexSection, MemorySearchQuery, MemorySearchResult,
     MemoryStore, RecordHeader, RetrievedMemoryItem, SessionMemorySummary, SessionPromptContext,
-    SessionPromptContextConfig, SessionTranscriptActions, SessionTranscriptApprovalResponsePayload,
+    SessionPromptContextConfig, SessionToolExchangeContext, SessionToolExchangeOutcome,
+    SessionToolResultContext, SessionTranscriptActions, SessionTranscriptApprovalResponsePayload,
     SessionTranscriptAuthPayload, SessionTranscriptAuthor, SessionTranscriptBranch,
     SessionTranscriptCompaction, SessionTranscriptCompactionPayload,
     SessionTranscriptConfirmationPayload, SessionTranscriptDynamicToolRequestPayload,

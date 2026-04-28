@@ -1,12 +1,13 @@
 use super::*;
 use crate::{EventAuthor, ExecutionBranch, SessionEvent, SessionEventKind, SessionEventPayload};
 use serde::de::DeserializeOwned;
-use talos_prompt::PromptSectionKind;
+use talos_prompt::{DynamicTrimPolicy, PromptSectionKind};
 use talos_tools::{PermissionMode, ToolSelectionPhase, ToolSelectionRequest};
 
 pub(crate) const SESSION_CONTINUITY_STATE_KEY: &str = "session_continuity";
 pub(crate) const PROMPT_WARNING_STATE_KEY: &str = "prompt_warning_state";
 pub(crate) const LAST_PROMPT_DIAGNOSTICS_STATE_KEY: &str = "last_prompt_diagnostics";
+pub(crate) const SESSION_COMPACTION_STATE_KEY: &str = "session_compaction_state";
 
 fn split_prompt_prefix_messages(messages: &[ChatMessage], input: &str) -> Vec<ChatMessage> {
     let Some(last_message) = messages.last() else {
@@ -20,13 +21,33 @@ fn split_prompt_prefix_messages(messages: &[ChatMessage], input: &str) -> Vec<Ch
 
 fn build_prompt_load_policy(kernel_config: &AgentKernelConfig) -> PromptLoadPolicy {
     PromptLoadPolicy {
-        include_session_summary: kernel_config.prompt.include_session_summary,
-        include_recent_messages: kernel_config.prompt.include_recent_messages,
-        include_retrieved_memories: kernel_config.prompt.include_retrieved_memories,
-        session_recent_limit: kernel_config.prompt.session_recent_messages_limit,
-        retrieved_memory_max_items: kernel_config.prompt.retrieved_memory_max_items,
-        retrieved_memory_max_chars: kernel_config.prompt.retrieved_memory_max_chars,
+        include_session_summary: true,
+        include_recent_messages: true,
+        include_recent_tool_history: true,
+        include_recent_tool_outputs: true,
+        include_retrieved_memories: true,
+        session_recent_limit: kernel_config.compaction.recent_messages_keep,
+        session_recent_max_chars: kernel_config.compaction.recent_messages_max_chars,
+        recent_tool_history_limit: kernel_config.compaction.source_recent_tool_exchanges_limit,
+        recent_tool_history_max_chars: kernel_config.compaction.tool_exchange_max_chars,
+        recent_tool_outputs_limit: kernel_config.compaction.source_recent_tool_results_limit,
+        recent_tool_outputs_max_chars: kernel_config.compaction.tool_output_max_chars,
+        session_summary_recent_count: kernel_config.compaction.recent_summaries_keep,
+        session_summary_max_chars: kernel_config.compaction.summary_max_chars,
+        retrieved_memory_max_items: kernel_config.compaction.retrieved_memories_keep,
+        retrieved_memory_max_chars: kernel_config.compaction.retrieved_memory_max_chars,
         unified_recent_limit: 10,
+    }
+}
+
+fn build_initial_prompt_load_policy(
+    kernel_config: &AgentKernelConfig,
+    compaction_state: Option<&SessionCompactionState>,
+) -> PromptLoadPolicy {
+    if compaction_state.is_some_and(SessionCompactionState::is_recovery) {
+        build_compacted_prompt_load_policy(kernel_config)
+    } else {
+        build_prompt_load_policy(kernel_config)
     }
 }
 
@@ -56,12 +77,35 @@ fn build_compacted_prompt_load_policy(kernel_config: &AgentKernelConfig) -> Prom
     PromptLoadPolicy {
         include_session_summary: true,
         include_recent_messages: true,
-        include_retrieved_memories: kernel_config.prompt.include_retrieved_memories,
-        session_recent_limit: kernel_config.prompt.session_summary_recent_count.max(1),
-        retrieved_memory_max_items: kernel_config.prompt.retrieved_memory_max_items,
-        retrieved_memory_max_chars: kernel_config.prompt.retrieved_memory_max_chars,
+        include_recent_tool_history: true,
+        include_recent_tool_outputs: true,
+        include_retrieved_memories: true,
+        session_recent_limit: kernel_config
+            .compaction
+            .compacted_recent_messages_keep
+            .max(1),
+        session_recent_max_chars: kernel_config.compaction.compacted_recent_messages_max_chars,
+        recent_tool_history_limit: kernel_config.compaction.tool_exchange_keep_last.max(1),
+        recent_tool_history_max_chars: kernel_config.compaction.compacted_tool_exchange_max_chars,
+        recent_tool_outputs_limit: kernel_config.compaction.tool_output_keep_last.max(1),
+        recent_tool_outputs_max_chars: kernel_config.compaction.compacted_tool_output_max_chars,
+        session_summary_recent_count: kernel_config.compaction.recent_summaries_keep.max(1),
+        session_summary_max_chars: kernel_config.compaction.compacted_summary_max_chars,
+        retrieved_memory_max_items: kernel_config.compaction.retrieved_memories_keep,
+        retrieved_memory_max_chars: kernel_config
+            .compaction
+            .compacted_retrieved_memory_max_chars,
         unified_recent_limit: 10,
     }
+}
+
+fn resolve_compaction_input_budget_tokens(model_info: &talos_types::ModelInfo) -> Option<usize> {
+    let context_window = model_info.context_window as usize;
+    if context_window == 0 {
+        return None;
+    }
+
+    Some((context_window / 2).clamp(256, 16_384).min(context_window))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -80,6 +124,7 @@ fn build_prompt_builder<'a>(
     project_root: Option<std::path::PathBuf>,
     session_continuity: Option<SessionContinuity>,
     load_policy: PromptLoadPolicy,
+    dynamic_trim_policy: DynamicTrimPolicy,
 ) -> TalosResult<PromptBuilder<'a>> {
     Ok(PromptBuilder::new()
         .agent(agent_name.to_string(), agent_description.to_string())
@@ -99,6 +144,7 @@ fn build_prompt_builder<'a>(
         .session_environment(session_environment)
         .project_root(project_root)
         .session_continuity(session_continuity)
+        .dynamic_trim_policy(dynamic_trim_policy)
         .user_input(input.to_string()))
 }
 
@@ -122,6 +168,92 @@ fn history_sections_were_dropped(prompt_assembly: &talos_prompt::PromptAssembly)
         })
 }
 
+fn prompt_budget_usage_percent(window_usage: &talos_prompt::PromptWindowUsage) -> Option<u8> {
+    if !window_usage.window_resolved {
+        return None;
+    }
+
+    if window_usage.effective_prompt_budget == 0 {
+        return Some(100);
+    }
+
+    let usage_percent =
+        (window_usage.total_tokens.saturating_mul(100)) / window_usage.effective_prompt_budget;
+    Some(usage_percent.min(100) as u8)
+}
+
+fn determine_history_compaction_trigger(
+    prompt_assembly: &talos_prompt::PromptAssembly,
+    kernel_config: &AgentKernelConfig,
+) -> Option<SessionHistoryCompactionTrigger> {
+    let history_reduction_needed = history_sections_were_dropped(prompt_assembly);
+    let window_usage = &prompt_assembly.diagnostics.window_usage;
+    if !window_usage.window_resolved {
+        return None;
+    }
+
+    if !window_usage.within_effective_budget {
+        Some(SessionHistoryCompactionTrigger::BudgetExceeded)
+    } else if prompt_budget_usage_percent(window_usage)
+        .is_some_and(|usage| usage >= kernel_config.compaction.hard_ratio_percent)
+    {
+        Some(SessionHistoryCompactionTrigger::HardThresholdExceeded)
+    } else if prompt_budget_usage_percent(window_usage)
+        .is_some_and(|usage| usage >= kernel_config.compaction.trigger_ratio_percent)
+    {
+        Some(SessionHistoryCompactionTrigger::ThresholdExceeded)
+    } else if history_reduction_needed {
+        Some(SessionHistoryCompactionTrigger::HistorySectionsDropped)
+    } else {
+        None
+    }
+}
+
+fn is_recoverable_compaction_parse_error(error: &talos_error::TalosError) -> bool {
+    let message = error.to_string();
+    message.contains("parse memory summary json after")
+        || message.contains("parse memory persistence decision json after")
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn rebuild_prompt_assembly(
+    agent_name: &str,
+    agent_description: &str,
+    input: &str,
+    tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
+    memory_store: Arc<MemoryStore>,
+    kernel_config: &AgentKernelConfig,
+    session_id: &str,
+    phase: PromptPhase,
+    planning_instruction: Option<String>,
+    selected_model_info: talos_types::ModelInfo,
+    session_environment: Option<talos_types::talos::TalosSessionEnvironment>,
+    project_root: Option<std::path::PathBuf>,
+    session_continuity: Option<SessionContinuity>,
+    load_policy: PromptLoadPolicy,
+    dynamic_trim_policy: DynamicTrimPolicy,
+) -> TalosResult<talos_prompt::PromptAssembly> {
+    build_prompt_builder(
+        agent_name,
+        agent_description,
+        input,
+        tool_definition_provider.as_ref(),
+        memory_store.as_ref(),
+        kernel_config,
+        session_id,
+        phase,
+        planning_instruction,
+        selected_model_info,
+        session_environment,
+        project_root,
+        session_continuity,
+        load_policy,
+        dynamic_trim_policy,
+    )?
+    .assemble()
+    .await
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn compact_session_history_if_needed(
     prompt_assembly: &talos_prompt::PromptAssembly,
@@ -140,14 +272,15 @@ async fn compact_session_history_if_needed(
     session_environment: Option<talos_types::talos::TalosSessionEnvironment>,
     project_root: Option<std::path::PathBuf>,
     session_continuity: Option<SessionContinuity>,
-) -> TalosResult<Option<(talos_prompt::PromptAssembly, SessionHistoryCompaction)>> {
-    let window_usage = &prompt_assembly.diagnostics.window_usage;
-    let history_reduction_needed = history_sections_were_dropped(prompt_assembly);
-    if !window_usage.window_resolved
-        || (window_usage.within_effective_budget && !history_reduction_needed)
-    {
+) -> TalosResult<
+    Option<(
+        Option<talos_prompt::PromptAssembly>,
+        SessionHistoryCompaction,
+    )>,
+> {
+    let Some(trigger) = determine_history_compaction_trigger(prompt_assembly, kernel_config) else {
         return Ok(None);
-    }
+    };
 
     let pre_recent_messages = count_section_kind(
         &prompt_assembly.dynamic_suffix_sections,
@@ -155,22 +288,54 @@ async fn compact_session_history_if_needed(
     );
     let flush_workspace_memory = kernel_config.memory.workspace_memory_flush_enabled
         && kernel_config.memory.workspace_memory_flush_on_compaction;
-    let compaction_usage = flush_session_memory_with_report(
+    let compaction_usage = match flush_session_memory_with_report(
         session_id,
         selected_model,
         llm_provider,
         memory_store.as_ref(),
         kernel_config,
-        MemoryFlushPolicy::new(false, true, flush_workspace_memory),
+        MemoryFlushPolicy::new(false, true, flush_workspace_memory)
+            .with_compaction_input_budget_tokens(resolve_compaction_input_budget_tokens(
+                &selected_model_info,
+            )),
     )
-    .await?;
+    .await
+    {
+        Ok(report) => report,
+        Err(error) if is_recoverable_compaction_parse_error(&error) => {
+            return Ok(Some((
+                None,
+                SessionHistoryCompaction {
+                    trigger,
+                    outcome: SessionHistoryCompactionOutcome::RejectedMissingSummary,
+                    pre_compaction_total_tokens: prompt_assembly.diagnostics.total_estimated_tokens,
+                    post_compaction_total_tokens: prompt_assembly
+                        .diagnostics
+                        .total_estimated_tokens,
+                    recent_messages_before: pre_recent_messages,
+                    recent_messages_after: pre_recent_messages,
+                    summary_sections_after: 0,
+                    trimmed_context_unit_count: 0,
+                    trimmed_context_unit_kind: None,
+                    fallback_section_drop_applied: false,
+                    compaction_request_count: 0,
+                    compaction_input_tokens: 0,
+                    compaction_output_tokens: 0,
+                    compaction_total_tokens: 0,
+                    compaction_cache_creation_input_tokens: None,
+                    compaction_cache_read_input_tokens: None,
+                },
+            )));
+        }
+        Err(error) => return Err(error),
+    };
 
-    let compacted_builder = build_prompt_builder(
+    let compacted_assembly = rebuild_prompt_assembly(
         agent_name,
         agent_description,
         input,
-        tool_definition_provider.as_ref(),
-        memory_store.as_ref(),
+        tool_definition_provider,
+        memory_store,
         kernel_config,
         session_id,
         phase,
@@ -180,28 +345,36 @@ async fn compact_session_history_if_needed(
         project_root,
         session_continuity,
         build_compacted_prompt_load_policy(kernel_config),
-    )?;
-    let compacted_assembly = compacted_builder.assemble().await?;
+        DynamicTrimPolicy::PreserveAll,
+    )
+    .await?;
     let summary_sections_after = count_section_kind(
         &compacted_assembly.dynamic_suffix_sections,
         PromptSectionKind::SessionSummary,
     );
-    if summary_sections_after == 0 {
-        return Ok(None);
-    }
-
     let recent_messages_after = count_section_kind(
         &compacted_assembly.dynamic_suffix_sections,
         PromptSectionKind::RecentMessages,
     );
+    let post_compaction_total_tokens = compacted_assembly.diagnostics.total_estimated_tokens;
+    let outcome = if summary_sections_after > 0 {
+        SessionHistoryCompactionOutcome::Applied
+    } else {
+        SessionHistoryCompactionOutcome::RejectedMissingSummary
+    };
     Ok(Some((
-        compacted_assembly.clone(),
+        (summary_sections_after > 0).then_some(compacted_assembly),
         SessionHistoryCompaction {
+            trigger,
+            outcome,
             pre_compaction_total_tokens: prompt_assembly.diagnostics.total_estimated_tokens,
-            post_compaction_total_tokens: compacted_assembly.diagnostics.total_estimated_tokens,
+            post_compaction_total_tokens,
             recent_messages_before: pre_recent_messages,
             recent_messages_after,
             summary_sections_after,
+            trimmed_context_unit_count: compaction_usage.trimmed_context_unit_count,
+            trimmed_context_unit_kind: compaction_usage.trimmed_context_unit_kind,
+            fallback_section_drop_applied: false,
             compaction_request_count: compaction_usage.request_count,
             compaction_input_tokens: compaction_usage.input_tokens,
             compaction_output_tokens: compaction_usage.output_tokens,
@@ -241,6 +414,42 @@ fn load_session_state_value<T: DeserializeOwned>(ctx: &InvocationContext, key: &
         .and_then(|value| serde_json::from_value(value.clone()).ok())
 }
 
+fn blocked_compaction_error(session_id: &str) -> talos_error::TalosError {
+    talos_error::TalosError::ValidationError(format!(
+        "session `{session_id}` is blocked because prompt budget remains exhausted after compaction; reset_session or create a new session to continue"
+    ))
+}
+
+fn build_blocked_compaction_state() -> SessionCompactionState {
+    SessionCompactionState::blocked_prompt_budget_exhausted()
+}
+
+fn build_compressing_compaction_state() -> SessionCompactionState {
+    SessionCompactionState::compressing()
+}
+
+pub(crate) fn next_session_compaction_state(
+    diagnostics: &PromptDiagnostics,
+) -> SessionCompactionState {
+    if diagnostics
+        .session_history_compaction
+        .as_ref()
+        .is_some_and(|report| report.outcome == SessionHistoryCompactionOutcome::Applied)
+    {
+        SessionCompactionState::recovery()
+    } else {
+        SessionCompactionState::normal()
+    }
+}
+
+fn prompt_budget_still_exhausted(prompt_assembly: &talos_prompt::PromptAssembly) -> bool {
+    prompt_budget_still_exhausted_from_diagnostics(&prompt_assembly.diagnostics)
+}
+
+fn prompt_budget_still_exhausted_from_diagnostics(diagnostics: &PromptDiagnostics) -> bool {
+    diagnostics.window_usage.window_resolved && !diagnostics.window_usage.within_effective_budget
+}
+
 fn prompt_warning_key(warning: &KernelWarning) -> Option<String> {
     match warning {
         KernelWarning::PromptBootstrapFileMissing(payload) => {
@@ -255,10 +464,6 @@ fn prompt_warning_key(warning: &KernelWarning) -> Option<String> {
         }
         KernelWarning::PromptDynamicSectionDropped(payload) => Some(format!(
             "dynamic_dropped:{}",
-            serialize_section_kinds(&payload.sections)
-        )),
-        KernelWarning::PromptDynamicSectionTruncated(payload) => Some(format!(
-            "dynamic_truncated:{}",
             serialize_section_kinds(&payload.sections)
         )),
     }
@@ -320,9 +525,52 @@ pub(crate) fn stage_session_state_update(
     crate::flow::stage_session_event(ctx, event);
 }
 
+fn build_continuity_last_failure(executed: &ExecutedTurnArtifacts) -> Option<String> {
+    executed
+        .tool_result_log
+        .iter()
+        .rev()
+        .find(|log| log.is_error)
+        .map(|log| format!("{} returned an error", log.tool))
+}
+
+fn build_continuity_suggested_next_step(
+    last_failure: Option<&str>,
+    verified_paths: &[talos_prompt::VerifiedPathEvidence],
+    tool_summaries: &[talos_prompt::ContinuityToolSummary],
+) -> String {
+    if last_failure.is_some() {
+        "adjust the failing path, command, or tool arguments before retrying".to_string()
+    } else if !verified_paths.is_empty() {
+        "answer from the verified evidence without re-reading the same paths".to_string()
+    } else if tool_summaries.is_empty() {
+        "answer directly unless new evidence is required".to_string()
+    } else {
+        "continue with a narrower follow-up tool step".to_string()
+    }
+}
+
+fn build_continuity_pending_tasks(
+    last_failure: Option<&str>,
+    verified_paths: &[talos_prompt::VerifiedPathEvidence],
+    tool_summaries: &[talos_prompt::ContinuityToolSummary],
+) -> Vec<String> {
+    if last_failure.is_some() {
+        vec!["fix the failing tool step and retry".to_string()]
+    } else if !verified_paths.is_empty() {
+        vec!["complete the answer from the verified evidence".to_string()]
+    } else if tool_summaries.is_empty() {
+        Vec::new()
+    } else {
+        vec!["continue with a narrower follow-up tool step".to_string()]
+    }
+}
+
 pub(crate) fn build_session_continuity(
+    input: &str,
     executed: &ExecutedTurnArtifacts,
 ) -> Option<SessionContinuity> {
+    let recent_goal = input.trim().to_string();
     let failed_call_ids = executed
         .tool_result_log
         .iter()
@@ -330,25 +578,42 @@ pub(crate) fn build_session_continuity(
         .map(|log| log.call_id.clone())
         .collect::<std::collections::HashSet<_>>();
 
-    let mut recent_verified_paths = Vec::new();
-    let mut recent_successful_tools = Vec::new();
-    let mut recent_failed_tools = Vec::new();
+    let mut verified_paths: Vec<talos_prompt::VerifiedPathEvidence> = Vec::new();
+    let mut tool_summaries: Vec<talos_prompt::ContinuityToolSummary> = Vec::new();
     let mut grep_patterns = Vec::new();
 
     for call in &executed.tool_call_log {
         let tool_name = call.name.clone();
         if failed_call_ids.contains(&call.call_id) {
-            if !recent_failed_tools.contains(&tool_name) {
-                recent_failed_tools.push(tool_name);
+            if !tool_summaries.iter().any(|summary| {
+                summary.tool_name == tool_name
+                    && summary.outcome == talos_prompt::ContinuityToolOutcome::Failure
+            }) {
+                tool_summaries.push(talos_prompt::ContinuityToolSummary {
+                    tool_name: tool_name.clone(),
+                    outcome: talos_prompt::ContinuityToolOutcome::Failure,
+                });
             }
-        } else if !recent_successful_tools.contains(&tool_name) {
-            recent_successful_tools.push(tool_name.clone());
+        } else if !tool_summaries.iter().any(|summary| {
+            summary.tool_name == tool_name
+                && summary.outcome == talos_prompt::ContinuityToolOutcome::Success
+        }) {
+            tool_summaries.push(talos_prompt::ContinuityToolSummary {
+                tool_name: tool_name.clone(),
+                outcome: talos_prompt::ContinuityToolOutcome::Success,
+            });
         }
 
         for key in ["file_path", "dir_path", "path"] {
             if let Some(path) = call.arguments.get(key).and_then(|value| value.as_str()) {
-                if !recent_verified_paths.contains(&path.to_string()) {
-                    recent_verified_paths.push(path.to_string());
+                if !verified_paths
+                    .iter()
+                    .any(|evidence: &talos_prompt::VerifiedPathEvidence| evidence.path == path)
+                {
+                    verified_paths.push(talos_prompt::VerifiedPathEvidence {
+                        path: path.to_string(),
+                        source_tool: tool_name.clone(),
+                    });
                 }
                 break;
             }
@@ -366,7 +631,10 @@ pub(crate) fn build_session_continuity(
     }
 
     let mut recent_unhelpful_patterns = Vec::new();
-    if !recent_failed_tools.is_empty() {
+    if tool_summaries
+        .iter()
+        .any(|summary| summary.outcome == talos_prompt::ContinuityToolOutcome::Failure)
+    {
         recent_unhelpful_patterns
             .push("avoid retrying the same failing path or command".to_string());
     }
@@ -382,16 +650,16 @@ pub(crate) fn build_session_continuity(
         }
     }
     if executed.tool_call_log.len() > 1
-        && recent_verified_paths.len() < executed.tool_call_log.len().min(3)
+        && verified_paths.len() < executed.tool_call_log.len().min(3)
     {
         recent_unhelpful_patterns
             .push("avoid re-reading the same path when no new evidence is needed".to_string());
     }
 
-    let recent_answer_mode = if recent_successful_tools
-        .iter()
-        .any(|tool| matches!(tool.as_str(), "Grep" | "Read" | "Glob"))
-    {
+    let recent_answer_mode = if tool_summaries.iter().any(|summary| {
+        summary.outcome == talos_prompt::ContinuityToolOutcome::Success
+            && matches!(summary.tool_name.as_str(), "Grep" | "Read" | "Glob")
+    }) {
         Some(ContinuityAnswerMode::CodeFirst)
     } else if executed.tool_call_log.is_empty() {
         Some(ContinuityAnswerMode::DirectAnswer)
@@ -399,20 +667,34 @@ pub(crate) fn build_session_continuity(
         Some(ContinuityAnswerMode::Mixed)
     };
 
-    if recent_verified_paths.is_empty()
-        && recent_successful_tools.is_empty()
-        && recent_failed_tools.is_empty()
+    let last_failure = build_continuity_last_failure(executed);
+    let suggested_next_step = Some(build_continuity_suggested_next_step(
+        last_failure.as_deref(),
+        &verified_paths,
+        &tool_summaries,
+    ));
+    let pending_tasks =
+        build_continuity_pending_tasks(last_failure.as_deref(), &verified_paths, &tool_summaries);
+
+    if recent_goal.is_empty()
+        && verified_paths.is_empty()
+        && tool_summaries.is_empty()
+        && pending_tasks.is_empty()
         && recent_unhelpful_patterns.is_empty()
         && recent_answer_mode.is_none()
+        && last_failure.is_none()
     {
         None
     } else {
         Some(SessionContinuity {
-            recent_verified_paths: recent_verified_paths.into_iter().take(4).collect(),
-            recent_successful_tools: recent_successful_tools.into_iter().take(4).collect(),
-            recent_failed_tools: recent_failed_tools.into_iter().take(4).collect(),
+            recent_goal,
+            verified_paths: verified_paths.into_iter().take(4).collect(),
+            tool_summaries: tool_summaries.into_iter().take(4).collect(),
+            pending_tasks: pending_tasks.into_iter().take(2).collect(),
             recent_unhelpful_patterns: recent_unhelpful_patterns.into_iter().take(3).collect(),
             recent_answer_mode,
+            last_failure,
+            suggested_next_step,
         })
     }
 }
@@ -432,6 +714,14 @@ pub async fn prepare_general_turn(
     let agent_id = ctx.agent_id.clone();
     let selected_model = ctx.selected_model_id().to_string();
     let stream_tx = ctx.stream_tx.clone();
+    let session_compaction_state =
+        load_session_state_value::<SessionCompactionState>(ctx, SESSION_COMPACTION_STATE_KEY);
+    if session_compaction_state
+        .as_ref()
+        .is_some_and(SessionCompactionState::is_blocked)
+    {
+        return Err(blocked_compaction_error(&session_id));
+    }
     let session_continuity =
         load_session_state_value::<SessionContinuity>(ctx, SESSION_CONTINUITY_STATE_KEY);
 
@@ -440,12 +730,14 @@ pub async fn prepare_general_turn(
         crate::TurnPhase::Execution => PromptPhase::Execution,
     };
 
-    let prompt_builder = build_prompt_builder(
+    let initial_load_policy =
+        build_initial_prompt_load_policy(kernel_config, session_compaction_state.as_ref());
+    let mut prompt_assembly = rebuild_prompt_assembly(
         agent_name,
         agent_description,
         input,
-        tool_definition_provider.as_ref(),
-        memory_store.as_ref(),
+        tool_definition_provider.clone(),
+        memory_store.clone(),
         kernel_config,
         &session_id,
         phase,
@@ -454,9 +746,23 @@ pub async fn prepare_general_turn(
         ctx.session_environment.clone(),
         ctx.project_root.clone(),
         session_continuity.clone(),
-        build_prompt_load_policy(kernel_config),
-    )?;
-    let mut prompt_assembly = prompt_builder.assemble().await?;
+        initial_load_policy.clone(),
+        DynamicTrimPolicy::PreserveAll,
+    )
+    .await?;
+    let mut session_history_compaction = None;
+    if determine_history_compaction_trigger(&prompt_assembly, kernel_config).is_some() {
+        if let Ok(value) = serde_json::to_value(build_compressing_compaction_state()) {
+            stage_session_state_update(
+                ctx,
+                &session_id,
+                &invocation_id,
+                ExecutionBranch::ModelThinking,
+                SESSION_COMPACTION_STATE_KEY,
+                value,
+            );
+        }
+    }
     if let Some((compacted_assembly, compaction)) = compact_session_history_if_needed(
         &prompt_assembly,
         agent_name,
@@ -473,21 +779,61 @@ pub async fn prepare_general_turn(
         ctx.planning_instruction.clone(),
         ctx.session_environment.clone(),
         ctx.project_root.clone(),
-        session_continuity,
+        session_continuity.clone(),
     )
     .await?
     {
         tracing::debug!(
             session_id = %session_id,
             agent_id = %agent_id,
+            outcome = ?compaction.outcome,
             pre_tokens = compaction.pre_compaction_total_tokens,
             post_tokens = compaction.post_compaction_total_tokens,
             recent_messages_before = compaction.recent_messages_before,
             recent_messages_after = compaction.recent_messages_after,
             summary_sections_after = compaction.summary_sections_after,
-            "session history compaction rebuilt prompt"
+            trimmed_context_unit_count = compaction.trimmed_context_unit_count,
+            "session history compaction attempted prompt rebuild"
         );
-        prompt_assembly = compacted_assembly;
+        if let Some(compacted_assembly) = compacted_assembly {
+            prompt_assembly = compacted_assembly;
+        }
+        session_history_compaction = Some(compaction);
+    }
+
+    if prompt_budget_still_exhausted(&prompt_assembly) {
+        let fallback_load_policy = if session_history_compaction
+            .as_ref()
+            .map(|report| report.outcome == SessionHistoryCompactionOutcome::Applied)
+            .unwrap_or(false)
+        {
+            build_compacted_prompt_load_policy(kernel_config)
+        } else {
+            initial_load_policy
+        };
+        prompt_assembly = rebuild_prompt_assembly(
+            agent_name,
+            agent_description,
+            input,
+            tool_definition_provider.clone(),
+            memory_store.clone(),
+            kernel_config,
+            &session_id,
+            phase,
+            ctx.planning_instruction.clone(),
+            ctx.selected_model_info.clone(),
+            ctx.session_environment.clone(),
+            ctx.project_root.clone(),
+            session_continuity,
+            fallback_load_policy,
+            DynamicTrimPolicy::TrimToBudget,
+        )
+        .await?;
+    }
+
+    if let Some(mut compaction) = session_history_compaction {
+        compaction.fallback_section_drop_applied =
+            !prompt_assembly.diagnostics.dropped_sections.is_empty();
         prompt_assembly.diagnostics.session_history_compaction = Some(compaction);
     }
     let prompt_diagnostics = prompt_assembly.diagnostics.clone();
@@ -501,7 +847,6 @@ pub async fn prepare_general_turn(
         prompt_mode = ?prompt_diagnostics.mode,
         included_sections = ?prompt_diagnostics.included_sections,
         dropped_sections = ?prompt_diagnostics.dropped_sections,
-        truncated_sections = ?prompt_diagnostics.truncated_sections,
         context_window_tokens = prompt_diagnostics.window_usage.context_window,
         reserved_output_tokens = prompt_diagnostics.window_usage.reserved_output_tokens,
         compaction_buffer_tokens = prompt_diagnostics.window_usage.compaction_buffer_tokens,
@@ -792,6 +1137,19 @@ pub async fn run_general_turn(
             );
         }
     }
+    if prompt_budget_still_exhausted_from_diagnostics(&prepared.prompt_diagnostics) {
+        if let Ok(value) = serde_json::to_value(build_blocked_compaction_state()) {
+            stage_session_state_update(
+                ctx,
+                &prepared.session_id,
+                &prepared.invocation_id,
+                ExecutionBranch::ModelThinking,
+                SESSION_COMPACTION_STATE_KEY,
+                value,
+            );
+        }
+        return Err(blocked_compaction_error(&prepared.session_id));
+    }
     let executed = execute_general_turn_loop(
         prepared.clone(),
         agent_name,
@@ -830,7 +1188,17 @@ pub async fn run_general_turn(
         kernel_config,
     )
     .await;
-    if let Some(session_continuity) = build_session_continuity(&executed) {
+    if let Ok(value) = serde_json::to_value(next_session_compaction_state(&prompt_diagnostics)) {
+        stage_session_state_update(
+            ctx,
+            &prepared.session_id,
+            &prepared.invocation_id,
+            ExecutionBranch::ModelThinking,
+            SESSION_COMPACTION_STATE_KEY,
+            value,
+        );
+    }
+    if let Some(session_continuity) = build_session_continuity(input, &executed) {
         if let Ok(value) = serde_json::to_value(session_continuity) {
             stage_session_state_update(
                 ctx,
@@ -856,9 +1224,103 @@ pub async fn run_general_turn(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        KernelWarning, PromptDynamicSectionDroppedWarning, PromptDynamicSectionTruncatedWarning,
-    };
+    use crate::{KernelWarning, PromptDynamicSectionDroppedWarning};
+    use serde_json::json;
+
+    fn build_executed_turn_artifacts(
+        tool_call_log: Vec<ToolCallRecord>,
+        tool_result_log: Vec<ToolResultLog>,
+    ) -> ExecutedTurnArtifacts {
+        ExecutedTurnArtifacts {
+            output_text: "ok".to_string(),
+            output_items: Vec::new(),
+            stop_reason: StopReason::EndTurn,
+            usage: TalosUsage::default(),
+            reasoning_log: Vec::new(),
+            tool_call_log,
+            tool_result_log,
+            saw_output_delta: false,
+        }
+    }
+
+    #[test]
+    fn test_build_session_continuity_records_recent_goal_failure_and_retry_guidance() {
+        let executed = build_executed_turn_artifacts(
+            vec![ToolCallRecord {
+                call_id: "call-1".to_string(),
+                name: "Bash".to_string(),
+                arguments: json!({"path": "/tmp/project/src/lib.rs"}),
+            }],
+            vec![ToolResultLog {
+                call_id: "call-1".to_string(),
+                tool: "Bash".to_string(),
+                payload: json!({"error": "permission denied"}),
+                envelope: json!({}),
+                is_error: true,
+                truncated: false,
+                size_bytes: 0,
+                semantic_events: Vec::new(),
+                next_turn_failure: None,
+            }],
+        );
+
+        let continuity =
+            build_session_continuity("Inspect the failing file update flow.", &executed)
+                .expect("continuity should be built");
+
+        assert_eq!(
+            continuity.recent_goal,
+            "Inspect the failing file update flow."
+        );
+        assert_eq!(
+            continuity.last_failure.as_deref(),
+            Some("Bash returned an error")
+        );
+        assert_eq!(
+            continuity.suggested_next_step.as_deref(),
+            Some("adjust the failing path, command, or tool arguments before retrying")
+        );
+        assert_eq!(
+            continuity.pending_tasks,
+            vec!["fix the failing tool step and retry".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_build_session_continuity_prefers_verified_evidence_guidance_without_failure() {
+        let executed = build_executed_turn_artifacts(
+            vec![ToolCallRecord {
+                call_id: "call-1".to_string(),
+                name: "Read".to_string(),
+                arguments: json!({"path": "/tmp/project/Cargo.toml"}),
+            }],
+            vec![ToolResultLog {
+                call_id: "call-1".to_string(),
+                tool: "Read".to_string(),
+                payload: json!({"content": "[package]"}),
+                envelope: json!({}),
+                is_error: false,
+                truncated: false,
+                size_bytes: 0,
+                semantic_events: Vec::new(),
+                next_turn_failure: None,
+            }],
+        );
+
+        let continuity = build_session_continuity("Summarize the package setup.", &executed)
+            .expect("continuity should be built");
+
+        assert_eq!(continuity.recent_goal, "Summarize the package setup.");
+        assert_eq!(continuity.last_failure, None);
+        assert_eq!(
+            continuity.suggested_next_step.as_deref(),
+            Some("answer from the verified evidence without re-reading the same paths")
+        );
+        assert_eq!(
+            continuity.pending_tasks,
+            vec!["complete the answer from the verified evidence".to_string()]
+        );
+    }
 
     #[test]
     fn test_prompt_warning_key_includes_dynamic_dropped_sections() {
@@ -873,19 +1335,6 @@ mod tests {
         assert_eq!(
             prompt_warning_key(&warning).as_deref(),
             Some("dynamic_dropped:ExpandedToolCatalog,RecentMessages")
-        );
-    }
-
-    #[test]
-    fn test_prompt_warning_key_includes_dynamic_truncated_sections() {
-        let warning =
-            KernelWarning::PromptDynamicSectionTruncated(PromptDynamicSectionTruncatedWarning {
-                sections: vec![PromptSectionKind::RecentMessages],
-            });
-
-        assert_eq!(
-            prompt_warning_key(&warning).as_deref(),
-            Some("dynamic_truncated:RecentMessages")
         );
     }
 }

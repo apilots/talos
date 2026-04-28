@@ -89,7 +89,7 @@ pub use types::{
 pub use warnings::{
     KernelWarning, PromptBootstrapDropReason, PromptBootstrapFileDroppedWarning,
     PromptBootstrapFileMissingWarning, PromptBootstrapFileTruncatedWarning,
-    PromptDynamicSectionDroppedWarning, PromptDynamicSectionTruncatedWarning,
+    PromptDynamicSectionDroppedWarning,
 };
 
 pub fn default_plugin_manager() -> Arc<InvocationPluginManager> {

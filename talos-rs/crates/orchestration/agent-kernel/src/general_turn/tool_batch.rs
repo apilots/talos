@@ -391,17 +391,15 @@ pub fn apply_general_turn_tool_batch(
         .retrieved_memories
         .extend(batch.retrieved_memories.clone());
 
-    if kernel_config.prompt.include_retrieved_memories {
-        if let Some(message) = build_retrieved_memories_message(
-            &state.retrieved_memories,
-            kernel_config.prompt.retrieved_memory_max_items,
-            kernel_config.prompt.retrieved_memory_max_chars,
-        ) {
-            if !state.messages.iter().rev().take(4).any(|item| {
-                item.role == talos_llm_provider::Role::System && item.content == message.content
-            }) {
-                state.messages.push(message);
-            }
+    if let Some(message) = build_retrieved_memories_message(
+        &state.retrieved_memories,
+        kernel_config.compaction.retrieved_memories_keep,
+        kernel_config.compaction.retrieved_memory_max_chars,
+    ) {
+        if !state.messages.iter().rev().take(4).any(|item| {
+            item.role == talos_llm_provider::Role::System && item.content == message.content
+        }) {
+            state.messages.push(message);
         }
     }
 

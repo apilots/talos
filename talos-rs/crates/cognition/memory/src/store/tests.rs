@@ -62,6 +62,10 @@ async fn test_turn_roundtrip_and_context_dedup() {
             session_id,
             &SessionPromptContextConfig {
                 recent_messages_limit: 8,
+                recent_tool_results_limit: 0,
+                tool_output_max_chars: 0,
+                recent_tool_exchanges_limit: 0,
+                tool_exchange_max_chars: 0,
                 include_summary: false,
                 summary_recent_count: 0,
                 summary_max_chars: 0,
@@ -338,6 +342,10 @@ async fn test_build_prompt_context_includes_summary() {
             session_id,
             &SessionPromptContextConfig {
                 recent_messages_limit: 10,
+                recent_tool_results_limit: 0,
+                tool_output_max_chars: 0,
+                recent_tool_exchanges_limit: 0,
+                tool_exchange_max_chars: 0,
                 include_summary: true,
                 summary_recent_count: 4,
                 summary_max_chars: 0,
@@ -401,6 +409,10 @@ async fn test_prompt_context_still_builds_after_schema_change() {
             session_id,
             &SessionPromptContextConfig {
                 recent_messages_limit: 10,
+                recent_tool_results_limit: 10,
+                tool_output_max_chars: 32,
+                recent_tool_exchanges_limit: 10,
+                tool_exchange_max_chars: 32,
                 include_summary: false,
                 summary_recent_count: 0,
                 summary_max_chars: 0,
@@ -412,6 +424,15 @@ async fn test_prompt_context_still_builds_after_schema_change() {
     assert_eq!(context.recent_messages.len(), 2);
     assert_eq!(context.recent_messages[0].text, "hello");
     assert_eq!(context.recent_messages[1].text, "world");
+    assert_eq!(context.recent_tool_results.len(), 1);
+    assert_eq!(context.recent_tool_results[0].tool_name, "Read");
+    assert_eq!(context.recent_tool_results[0].content, "result");
+    assert_eq!(context.recent_tool_exchanges.len(), 1);
+    assert_eq!(context.recent_tool_exchanges[0].tool_name, "Read");
+    assert_eq!(
+        context.recent_tool_exchanges[0].arguments_preview,
+        "{\"path\":\"/tmp/example.txt\"}"
+    );
     assert!(context.recent_messages.iter().all(|message| {
         matches!(
             message.role,

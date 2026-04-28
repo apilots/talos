@@ -1,11 +1,12 @@
 use super::*;
 use crate::{
     general_turn::{
-        build_read_only_nudge_message, build_session_continuity, run_forced_finalization_step,
-        should_force_finalization_for_empty_response, should_force_finalization_for_step,
-        should_inject_read_only_nudge, stage_session_state_update,
-        stop_reason_for_forced_finalization, ForcedFinalizationCause, ToolLoopGuardState,
-        LAST_PROMPT_DIAGNOSTICS_STATE_KEY, PROMPT_WARNING_STATE_KEY, SESSION_CONTINUITY_STATE_KEY,
+        build_read_only_nudge_message, build_session_continuity, next_session_compaction_state,
+        run_forced_finalization_step, should_force_finalization_for_empty_response,
+        should_force_finalization_for_step, should_inject_read_only_nudge,
+        stage_session_state_update, stop_reason_for_forced_finalization, ForcedFinalizationCause,
+        SessionCompactionState, ToolLoopGuardState, LAST_PROMPT_DIAGNOSTICS_STATE_KEY,
+        PROMPT_WARNING_STATE_KEY, SESSION_COMPACTION_STATE_KEY, SESSION_CONTINUITY_STATE_KEY,
     },
     StreamingToolExecutionConfig, ToolExecutionContext,
 };
@@ -248,6 +249,29 @@ impl BaseLlmFlow for SingleFlow {
                     value,
                 );
             }
+        }
+        if prepared.prompt_diagnostics.window_usage.window_resolved
+            && !prepared
+                .prompt_diagnostics
+                .window_usage
+                .within_effective_budget
+        {
+            if let Ok(value) =
+                serde_json::to_value(SessionCompactionState::blocked_prompt_budget_exhausted())
+            {
+                stage_session_state_update(
+                    ctx,
+                    &prepared.session_id,
+                    &prepared.invocation_id,
+                    request.branch,
+                    SESSION_COMPACTION_STATE_KEY,
+                    value,
+                );
+            }
+            return Err(talos_error::TalosError::ValidationError(format!(
+                "session `{}` is blocked because prompt budget remains exhausted after compaction; reset_session or create a new session to continue",
+                prepared.session_id
+            )));
         }
         stage_session_event(
             ctx,
@@ -806,7 +830,18 @@ impl BaseLlmFlow for SingleFlow {
         if let Ok(value) = serde_json::to_value(&prompt_diagnostics) {
             ctx.set_request_state(LAST_PROMPT_DIAGNOSTICS_STATE_KEY, value);
         }
-        if let Some(session_continuity) = build_session_continuity(&executed) {
+        if let Ok(value) = serde_json::to_value(next_session_compaction_state(&prompt_diagnostics))
+        {
+            stage_session_state_update(
+                ctx,
+                &prepared.session_id,
+                &prepared.invocation_id,
+                request.branch,
+                SESSION_COMPACTION_STATE_KEY,
+                value,
+            );
+        }
+        if let Some(session_continuity) = build_session_continuity(input, &executed) {
             if let Ok(value) = serde_json::to_value(session_continuity) {
                 stage_session_state_update(
                     ctx,

@@ -1,8 +1,8 @@
 use crate::{
     bootstrap, budget, diagnostics, regions, BootstrapFileDiagnostic, ContinuityAnswerMode,
-    PromptAssembly, PromptBuilder, PromptCacheState, PromptDiagnostics, PromptMode, PromptPhase,
-    PromptSection, PromptSectionKind, PromptWindowUsage, RequestContextInjection,
-    WorkspaceBootstrapFile,
+    ContinuityToolOutcome, DynamicTrimPolicy, PromptAssembly, PromptBuilder, PromptCacheState,
+    PromptDiagnostics, PromptMode, PromptPhase, PromptSection, PromptSectionKind,
+    PromptWindowUsage, RequestContextInjection, WorkspaceBootstrapFile,
 };
 use chrono::Utc;
 use std::path::Path;
@@ -169,22 +169,48 @@ fn build_recent_task_continuity_payload(builder: &PromptBuilder<'_>) -> Option<S
     let continuity = builder.session_continuity.as_ref()?;
     let mut lines = Vec::new();
 
-    if !continuity.recent_verified_paths.is_empty() {
+    if !continuity.recent_goal.trim().is_empty() {
+        lines.push(format!("- recent_goal: {}", continuity.recent_goal.trim()));
+    }
+    if !continuity.verified_paths.is_empty() {
         lines.push(format!(
             "- recent_verified_paths: {}",
-            continuity.recent_verified_paths.join(", ")
+            continuity
+                .verified_paths
+                .iter()
+                .map(|evidence| evidence.path.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
-    if !continuity.recent_successful_tools.is_empty() {
+    let successful_tools = continuity
+        .tool_summaries
+        .iter()
+        .filter(|summary| summary.outcome == ContinuityToolOutcome::Success)
+        .map(|summary| summary.tool_name.as_str())
+        .collect::<Vec<_>>();
+    if !successful_tools.is_empty() {
         lines.push(format!(
             "- recent_successful_tools: {}",
-            continuity.recent_successful_tools.join(", ")
+            successful_tools.join(", ")
         ));
     }
-    if !continuity.recent_failed_tools.is_empty() {
+    let failed_tools = continuity
+        .tool_summaries
+        .iter()
+        .filter(|summary| summary.outcome == ContinuityToolOutcome::Failure)
+        .map(|summary| summary.tool_name.as_str())
+        .collect::<Vec<_>>();
+    if !failed_tools.is_empty() {
         lines.push(format!(
             "- recent_failed_tools: {}",
-            continuity.recent_failed_tools.join(", ")
+            failed_tools.join(", ")
+        ));
+    }
+    if !continuity.pending_tasks.is_empty() {
+        lines.push(format!(
+            "- pending_tasks: {}",
+            continuity.pending_tasks.join("; ")
         ));
     }
     if !continuity.recent_unhelpful_patterns.is_empty() {
@@ -203,6 +229,18 @@ fn build_recent_task_continuity_payload(builder: &PromptBuilder<'_>) -> Option<S
                 ContinuityAnswerMode::Mixed => "mixed",
             }
         ));
+    }
+    if let Some(last_failure) = continuity.last_failure.as_deref() {
+        let normalized = last_failure.trim();
+        if !normalized.is_empty() {
+            lines.push(format!("- last_failure: {}", normalized));
+        }
+    }
+    if let Some(next_step) = continuity.suggested_next_step.as_deref() {
+        let normalized = next_step.trim();
+        if !normalized.is_empty() {
+            lines.push(format!("- suggested_next_step: {}", normalized));
+        }
     }
 
     (!lines.is_empty()).then(|| lines.join("\n"))
@@ -228,12 +266,126 @@ fn build_recent_message_payload(role: &talos_memory::TalosMessageRole, text: &st
     format!("- {}: {}", role_label(role), text.trim())
 }
 
-fn build_recent_messages_payload(messages: &[talos_memory::TalosMessage]) -> Option<String> {
+fn truncate_to_char_limit(value: &str, max_chars: usize) -> String {
+    let trimmed = value.trim();
+    if max_chars == 0 || trimmed.is_empty() {
+        return String::new();
+    }
+
+    let total_chars = trimmed.chars().count();
+    if total_chars <= max_chars {
+        return trimmed.to_string();
+    }
+
+    if max_chars <= 3 {
+        return trimmed.chars().take(max_chars).collect();
+    }
+
+    let prefix = trimmed.chars().take(max_chars - 3).collect::<String>();
+    format!("{prefix}...")
+}
+
+fn build_capped_list_payload(lines: Vec<String>, max_chars: usize) -> Option<String> {
+    if max_chars == 0 {
+        return None;
+    }
+    let mut selected = Vec::new();
+    let mut combined_chars = 0usize;
+    for line in lines.into_iter().rev() {
+        let normalized = line.trim();
+        if normalized.is_empty() {
+            continue;
+        }
+        let separator_chars = usize::from(!selected.is_empty());
+        if combined_chars + separator_chars >= max_chars {
+            break;
+        }
+        let remaining_chars = max_chars - combined_chars - separator_chars;
+        let capped_line = truncate_to_char_limit(normalized, remaining_chars);
+        if capped_line.is_empty() {
+            break;
+        }
+        let line_was_truncated = capped_line.chars().count() < normalized.chars().count();
+        combined_chars += separator_chars + capped_line.chars().count();
+        selected.push(capped_line);
+        if line_was_truncated {
+            break;
+        }
+    }
+    if selected.is_empty() {
+        return None;
+    }
+    selected.reverse();
+    Some(selected.join("\n"))
+}
+
+fn build_recent_messages_payload(
+    messages: &[talos_memory::TalosMessage],
+    max_chars: usize,
+) -> Option<String> {
     let lines = messages
         .iter()
         .map(|message| build_recent_message_payload(&message.role, &message.text))
         .collect::<Vec<_>>();
-    (!lines.is_empty()).then(|| lines.join("\n"))
+    build_capped_list_payload(lines, max_chars)
+}
+
+fn build_recent_tool_history_payload(
+    exchanges: &[talos_memory::SessionToolExchangeContext],
+    max_chars: usize,
+) -> Option<String> {
+    let lines = exchanges
+        .iter()
+        .map(|exchange| {
+            let outcome = match exchange.outcome {
+                talos_memory::SessionToolExchangeOutcome::Succeeded => "succeeded",
+                talos_memory::SessionToolExchangeOutcome::Failed => "failed",
+                talos_memory::SessionToolExchangeOutcome::Pending => "pending",
+            };
+            let mut line = format!(
+                "- tool: {} | outcome: {} | args: {}",
+                exchange.tool_name,
+                outcome,
+                exchange.arguments_preview.trim()
+            );
+            if let Some(output_preview) = exchange
+                .output_preview
+                .as_ref()
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+            {
+                let suffix = if exchange.output_truncated {
+                    " [truncated]"
+                } else {
+                    ""
+                };
+                line.push_str(&format!(" | preview{suffix}: {output_preview}"));
+            }
+            line
+        })
+        .collect::<Vec<_>>();
+    build_capped_list_payload(lines, max_chars)
+}
+
+fn build_recent_tool_outputs_payload(
+    results: &[talos_memory::SessionToolResultContext],
+    max_chars: usize,
+) -> Option<String> {
+    let lines = results
+        .iter()
+        .map(|result| {
+            let status = if result.is_error { "error" } else { "ok" };
+            let suffix = if result.truncated { " [truncated]" } else { "" };
+            format!(
+                "- tool: {} | status: {} | output{}: {}",
+                result.tool_name,
+                status,
+                suffix,
+                result.content.trim()
+            )
+        })
+        .collect::<Vec<_>>();
+    build_capped_list_payload(lines, max_chars)
 }
 
 fn build_retrieved_memories_payload(builder: &PromptBuilder<'_>) -> Option<String> {
@@ -549,6 +701,8 @@ async fn load_dynamic_sections(builder: &PromptBuilder<'_>) -> TalosResult<Vec<P
     if let (Some(memory_store), Some(session_id)) = (builder.memory_store, builder.session_id) {
         let include_summary = builder.config.load_policy.include_session_summary;
         let include_recent = builder.config.load_policy.include_recent_messages;
+        let include_recent_tool_history = builder.config.load_policy.include_recent_tool_history;
+        let include_recent_tool_outputs = builder.config.load_policy.include_recent_tool_outputs;
         let context = memory_store
             .build_session_prompt_context(
                 session_id,
@@ -558,9 +712,29 @@ async fn load_dynamic_sections(builder: &PromptBuilder<'_>) -> TalosResult<Vec<P
                     } else {
                         0
                     },
+                    recent_tool_results_limit: if include_recent_tool_outputs {
+                        builder.config.load_policy.recent_tool_outputs_limit
+                    } else {
+                        0
+                    },
+                    tool_output_max_chars: if include_recent_tool_outputs {
+                        builder.config.load_policy.recent_tool_outputs_max_chars
+                    } else {
+                        0
+                    },
+                    recent_tool_exchanges_limit: if include_recent_tool_history {
+                        builder.config.load_policy.recent_tool_history_limit
+                    } else {
+                        0
+                    },
+                    tool_exchange_max_chars: if include_recent_tool_history {
+                        builder.config.load_policy.recent_tool_history_max_chars
+                    } else {
+                        0
+                    },
                     include_summary,
-                    summary_recent_count: builder.config.prompt.session_summary_recent_count,
-                    summary_max_chars: builder.config.prompt.session_summary_max_chars,
+                    summary_recent_count: builder.config.load_policy.session_summary_recent_count,
+                    summary_max_chars: builder.config.load_policy.session_summary_max_chars,
                 },
             )
             .await?;
@@ -578,8 +752,29 @@ async fn load_dynamic_sections(builder: &PromptBuilder<'_>) -> TalosResult<Vec<P
         }
 
         if include_recent {
-            if let Some(payload) = build_recent_messages_payload(&context.recent_messages) {
+            if let Some(payload) = build_recent_messages_payload(
+                &context.recent_messages,
+                builder.config.load_policy.session_recent_max_chars,
+            ) {
                 sections.push(section(PromptSectionKind::RecentMessages, payload));
+            }
+        }
+
+        if include_recent_tool_history {
+            if let Some(payload) = build_recent_tool_history_payload(
+                &context.recent_tool_exchanges,
+                builder.config.load_policy.recent_tool_history_max_chars,
+            ) {
+                sections.push(section(PromptSectionKind::RecentToolHistory, payload));
+            }
+        }
+
+        if include_recent_tool_outputs {
+            if let Some(payload) = build_recent_tool_outputs_payload(
+                &context.recent_tool_results,
+                builder.config.load_policy.recent_tool_outputs_max_chars,
+            ) {
+                sections.push(section(PromptSectionKind::RecentToolOutputs, payload));
             }
         }
     }
@@ -661,7 +856,6 @@ fn build_diagnostics(
     dynamic_sections: &[PromptSection],
     bootstrap_diagnostics: Vec<BootstrapFileDiagnostic>,
     dropped_sections: Vec<PromptSectionKind>,
-    truncated_sections: Vec<PromptSectionKind>,
     window_usage: PromptWindowUsage,
 ) -> PromptDiagnostics {
     diagnostics::build_prompt_diagnostics(
@@ -670,7 +864,6 @@ fn build_diagnostics(
         dynamic_sections,
         bootstrap_diagnostics,
         dropped_sections,
-        truncated_sections,
         window_usage,
     )
 }
@@ -691,13 +884,15 @@ pub(crate) async fn assemble(builder: &PromptBuilder<'_>) -> TalosResult<PromptA
 
     let static_prefix_tokens = budget::estimate_sections_tokens(&static_prefix_sections);
     let mut dropped_sections = Vec::new();
-    let truncated_sections = Vec::new();
     let mut window_usage = resolve_window_usage(
         builder,
         static_prefix_tokens,
         budget::estimate_sections_tokens(&dynamic_suffix_sections),
     );
-    if window_usage.window_resolved && !window_usage.within_effective_budget {
+    if matches!(builder.dynamic_trim_policy, DynamicTrimPolicy::TrimToBudget)
+        && window_usage.window_resolved
+        && !window_usage.within_effective_budget
+    {
         let dynamic_budget = window_usage
             .effective_prompt_budget
             .saturating_sub(static_prefix_tokens);
@@ -723,7 +918,6 @@ pub(crate) async fn assemble(builder: &PromptBuilder<'_>) -> TalosResult<PromptA
         &dynamic_suffix_sections,
         bootstrap_diagnostics,
         dropped_sections,
-        truncated_sections,
         window_usage,
     );
     let cache_state = build_cache_state(&static_prefix_sections, &dynamic_suffix_sections, builder);

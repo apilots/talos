@@ -1,5 +1,15 @@
 # Prompt Cache Boundary And Context Window Governance Design
 
+> Status: historical draft. This document was written before the current `PromptBuilder`
+> alignment and context-window compaction work landed.
+> The current implementation baseline is defined by:
+> - `spec/prompt-builder-claude-code-alignment-design.md`
+> - `spec/context-window-threshold-compaction-governance-design.md`
+>
+> Names such as `RuntimeSessionContext`, `ProjectContext`, `CompactToolRouting`,
+> and `BootstrapProjectContext` are historical references only and do not describe
+> the current prompt architecture.
+
 ## 1. 背景
 
 Talos 当前 prompt 治理仍保留 `max_static_tokens` 与 `max_dynamic_tokens` 两个独立预算上限。这套机制在早期控制 prompt 体积时有效，但随着系统 prompt、bootstrap、memory、continuity、tool catalog 逐步增强，问题已经暴露得很明确：
@@ -416,16 +426,17 @@ Talos 要对齐 `claude-code` 的核心决策：
 
 1. `ExpandedToolCatalog`
 2. `RetrievedMemories`
-3. `RecentMessages`
-4. `SessionSummary`
-5. `RequestedToolPreferenceHint`
-6. `RecentTaskContinuity`
-7. `BootstrapProjectContext`
+3. `RecentToolOutputs`
+4. `RecentToolHistory`
+5. `RecentMessages`
+6. `SessionSummary`
+7. `RequestedToolPreferenceHint`
+8. `RecentTaskContinuity`
 
 说明：
 
 - 这里的 pre-compaction trim 允许在预算危机时先 drop 历史 section，避免单轮请求直接卡死在 over-budget 状态
-- 一旦 `RecentMessages` / `SessionSummary` 被裁掉，kernel 应继续触发 compaction，将这次 history reduction 固化为后续轮次可复用的 summary
+- 一旦 `RecentToolOutputs` / `RecentToolHistory` / `RecentMessages` / `SessionSummary` 被裁掉，kernel 应继续触发 compaction，将这次 history reduction 固化为后续轮次可复用的 summary
 - continuity 和 bootstrap 项目规则比详细 tool catalog 更重要，因此在 history 之后再被裁
 
 ---
@@ -450,8 +461,9 @@ Talos 要对齐 `claude-code` 的核心决策：
 
 - compaction buffer
 - output reserve strategy
-- section trimming policy
 - bootstrap include 开关
+
+历史/summary/retrieved memories 的保留策略不再继续挂在 `prompt` 域，统一进入 `agent.kernel.compaction`。
 
 ### 7.2 新强类型对象
 
@@ -609,7 +621,30 @@ Talos 需要新增或强化以下指标：
 - 删除 `max_static_tokens`
 - 删除 `max_dynamic_tokens`
 - 新增 `PromptWindowPolicy` 对应配置
+- 新增 `AgentKernelCompactionConfig`，统一承载：
+  - `model`
+  - `recent_messages_keep`
+  - `recent_messages_max_chars`
+  - `compacted_recent_messages_keep`
+  - `compacted_recent_messages_max_chars`
+  - `recent_summaries_keep`
+  - `summary_max_chars`
+  - `compacted_summary_max_chars`
+  - `source_recent_messages_limit`
+  - `source_recent_tool_results_limit`
+  - `tool_output_keep_last`
+  - `tool_output_max_chars`
+  - `compacted_tool_output_max_chars`
+  - `source_recent_tool_exchanges_limit`
+  - `tool_exchange_keep_last`
+  - `tool_exchange_max_chars`
+  - `compacted_tool_exchange_max_chars`
+  - `retrieved_memories_keep`
+  - `retrieved_memory_max_chars`
+  - `compacted_retrieved_memory_max_chars`
 - 更新默认配置、loader、validator、tests
+
+最近动态区 (`RecentMessages` / `RecentToolHistory` / `RecentToolOutputs`) 命中总字符预算时，装配顺序应采用 `latest-first` 保留策略，优先保留最新上下文，而不是优先保留旧内容。
 
 ### 11.2 `talos_prompt`
 

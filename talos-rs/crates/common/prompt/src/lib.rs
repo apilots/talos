@@ -27,10 +27,12 @@ pub use regions::{
 pub use template::PromptTemplate;
 pub use types::{
     compute_prompt_fingerprint, determine_prompt_cache_break_reason, BootstrapFileDiagnostic,
-    BootstrapFileScope, BudgetTier, ContinuityAnswerMode, PlannerMode, PromptAssembly, PromptBlock,
-    PromptBlockCacheScope, PromptBlockKind, PromptBuildConfig, PromptCacheBreakReason,
+    BootstrapFileScope, BudgetTier, CompactionTrimUnitKind, ContinuityAnswerMode,
+    ContinuityToolOutcome, ContinuityToolSummary, DynamicTrimPolicy, PlannerMode, PromptAssembly,
+    PromptBlock, PromptBlockCacheScope, PromptBlockKind, PromptBuildConfig, PromptCacheBreakReason,
     PromptCacheState, PromptDiagnostics, PromptLoadPolicy, PromptMode, PromptPhase, PromptSection,
     PromptSectionKind, PromptWarningState, PromptWindowUsage, RegionEnvelopePolicy,
     RegionPlacement, RegionPriority, RequestContextInjection, SectionCacheScope, SessionContinuity,
-    SessionHistoryCompaction, TruncationMode, WorkspaceBootstrapFile, WorkspaceBootstrapFileKind,
+    SessionHistoryCompaction, SessionHistoryCompactionOutcome, SessionHistoryCompactionTrigger,
+    VerifiedPathEvidence, WorkspaceBootstrapFile, WorkspaceBootstrapFileKind,
 };

@@ -78,6 +78,10 @@ Based on the request and available tools, decide if a tool should be used. If ye
                 DEFAULT_SESSION_ID,
                 &SessionPromptContextConfig {
                     recent_messages_limit: 5,
+                    recent_tool_results_limit: 0,
+                    tool_output_max_chars: 0,
+                    recent_tool_exchanges_limit: 0,
+                    tool_exchange_max_chars: 0,
                     include_summary: false,
                     summary_recent_count: 0,
                     summary_max_chars: 0,

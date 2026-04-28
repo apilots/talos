@@ -26,7 +26,8 @@ export function SidebarContainer() {
   const streams = useAppStore((state) => state.streams);
   const sessionsQuery = useSessionsQuery();
 
-  const threads = (sessionsQuery.data ?? []).map((session) => {
+  const sessions = sessionsQuery.data ?? [];
+  const threads = sessions.map((session) => {
     const sessionId = session.context.session_id;
     return {
       id: sessionId,
@@ -82,7 +83,7 @@ export function SidebarContainer() {
         )
       }
       onSelectThread={(sessionId) => navigate(`/sessions/${sessionId}`)}
-      threadCount={sessionsQuery.data?.length ?? 0}
+      threadCount={sessions.length}
       threadFilter={threadFilter}
       threads={threads}
       onLogout={handleLogout}

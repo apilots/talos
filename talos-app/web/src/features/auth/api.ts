@@ -9,6 +9,14 @@ import type {
 } from "@talos/sdk";
 
 import { getTalosClient } from "@/shared/api/client";
+import { getConnectionSettings } from "@/shared/store/app-store";
+
+export interface HealthResponse {
+  status: string;
+  service: string;
+  timestamp: string;
+  auth_enabled: boolean;
+}
 
 export async function registerUser(request: RegisterRequest): Promise<AuthResponse> {
   return getTalosClient().auth.register(request);
@@ -24,6 +32,19 @@ export async function logoutUser(): Promise<void> {
 
 export async function getCurrentUser(): Promise<UserDto> {
   return getTalosClient().user.current();
+}
+
+export async function getGatewayHealth(): Promise<HealthResponse> {
+  const { serverUrl } = getConnectionSettings();
+  const response = await fetch(new URL("/health", serverUrl).toString(), {
+    headers: {
+      Accept: "application/json",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText}`);
+  }
+  return response.json() as Promise<HealthResponse>;
 }
 
 export async function updateCurrentUser(request: UpdateCurrentUserRequest): Promise<UserDto> {

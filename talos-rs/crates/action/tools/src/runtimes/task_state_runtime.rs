@@ -109,9 +109,9 @@ impl TaskStateRuntime {
             *guard = Some(record.clone());
         }
 
-        // TODO(main-thread): wire gateway/UI responders to `submit_question_answer`
-        // so AskUserQuestion can complete a full host roundtrip instead of only
-        // recording a pending structured question in-process.
+        // Host responders are not connected here; AskUserQuestion currently records
+        // the pending structured question in-process, and completion resumes only
+        // after a caller invokes `submit_question_answer`.
 
         Ok(record)
     }

@@ -50,12 +50,89 @@ fn test_kernel_defaults() {
         config.agent.kernel.prompt.window.reserved_output_tokens,
         ReservedOutputPolicy::UseModelDefault
     );
-    assert!(config.agent.kernel.prompt.include_session_summary);
-    assert!(config.agent.kernel.prompt.include_recent_messages);
-    assert!(config.agent.kernel.prompt.include_retrieved_memories);
-    assert_eq!(config.agent.kernel.prompt.session_recent_messages_limit, 24);
-    assert_eq!(config.agent.kernel.prompt.session_summary_recent_count, 2);
-    assert_eq!(config.agent.kernel.prompt.session_summary_max_chars, 1200);
+    assert_eq!(config.agent.kernel.compaction.model, None);
+    assert_eq!(config.agent.kernel.compaction.trigger_ratio_percent, 85);
+    assert_eq!(config.agent.kernel.compaction.hard_ratio_percent, 95);
+    assert_eq!(config.agent.kernel.compaction.recent_messages_keep, 24);
+    assert_eq!(
+        config.agent.kernel.compaction.recent_messages_max_chars,
+        4000
+    );
+    assert_eq!(
+        config
+            .agent
+            .kernel
+            .compaction
+            .compacted_recent_messages_keep,
+        2
+    );
+    assert_eq!(
+        config
+            .agent
+            .kernel
+            .compaction
+            .compacted_recent_messages_max_chars,
+        1200
+    );
+    assert_eq!(config.agent.kernel.compaction.recent_summaries_keep, 2);
+    assert_eq!(config.agent.kernel.compaction.summary_max_chars, 1200);
+    assert_eq!(
+        config.agent.kernel.compaction.compacted_summary_max_chars,
+        800
+    );
+    assert_eq!(
+        config.agent.kernel.compaction.source_recent_messages_limit,
+        48
+    );
+    assert_eq!(
+        config
+            .agent
+            .kernel
+            .compaction
+            .source_recent_tool_results_limit,
+        12
+    );
+    assert_eq!(config.agent.kernel.compaction.tool_output_keep_last, 2);
+    assert_eq!(config.agent.kernel.compaction.tool_output_max_chars, 2000);
+    assert_eq!(
+        config
+            .agent
+            .kernel
+            .compaction
+            .compacted_tool_output_max_chars,
+        600
+    );
+    assert_eq!(
+        config
+            .agent
+            .kernel
+            .compaction
+            .source_recent_tool_exchanges_limit,
+        12
+    );
+    assert_eq!(config.agent.kernel.compaction.tool_exchange_keep_last, 2);
+    assert_eq!(config.agent.kernel.compaction.tool_exchange_max_chars, 600);
+    assert_eq!(
+        config
+            .agent
+            .kernel
+            .compaction
+            .compacted_tool_exchange_max_chars,
+        300
+    );
+    assert_eq!(config.agent.kernel.compaction.retrieved_memories_keep, 4);
+    assert_eq!(
+        config.agent.kernel.compaction.retrieved_memory_max_chars,
+        2000
+    );
+    assert_eq!(
+        config
+            .agent
+            .kernel
+            .compaction
+            .compacted_retrieved_memory_max_chars,
+        800
+    );
     assert!(config.agent.kernel.prompt.bootstrap.enabled);
     assert!(
         config
@@ -69,7 +146,6 @@ fn test_kernel_defaults() {
         config.agent.kernel.prompt.bootstrap.max_chars_per_file,
         8_000
     );
-    assert_eq!(config.agent.kernel.prompt.bootstrap.max_chars_total, 24_000);
     assert!(config.agent.kernel.prompt.bootstrap.include_memory);
     assert_eq!(config.timezone, "UTC");
     assert_eq!(config.agent.kernel.timezone, config.timezone);
@@ -223,6 +299,35 @@ models:
 }
 
 #[test]
+fn test_provider_models_allow_abnormal_output_metadata_for_prompt_budget_repair() {
+    let yaml = r#"
+enabled: true
+api_key: sk-test
+base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+models:
+  - id: qwen-max
+    name: qwen-max
+    context_window: 32768
+    max_tokens: 81920
+    reasoning: false
+    input: [text]
+    cost:
+      input: 0.1
+      output: 0.2
+      cache_read: 0.01
+      cache_write: 0.02
+    compat:
+      thinking_format: qwen
+"#;
+
+    let provider: ProviderConfig =
+        serde_yaml::from_str(yaml).expect("provider config should parse");
+    let model = &provider.models[0];
+    assert_eq!(model.context_window, 32_768);
+    assert_eq!(model.max_tokens, 81_920);
+}
+
+#[test]
 fn test_validate_runtime_rejects_zero_access_token_ttl() {
     let mut config = Config::default();
     config.gateway.access_token_ttl_days = 0;
@@ -302,11 +407,127 @@ llm:
     .expect("config without prompt block should load");
     let _ = std::fs::remove_file(&temp_file);
 
-    assert!(config.agent.kernel.prompt.include_session_summary);
-    assert!(config.agent.kernel.prompt.include_recent_messages);
-    assert_eq!(config.agent.kernel.prompt.session_recent_messages_limit, 24);
-    assert_eq!(config.agent.kernel.prompt.session_summary_recent_count, 2);
-    assert_eq!(config.agent.kernel.prompt.session_summary_max_chars, 1200);
+    assert_eq!(config.agent.kernel.compaction.recent_messages_keep, 24);
+    assert_eq!(
+        config.agent.kernel.compaction.recent_messages_max_chars,
+        4000
+    );
+    assert_eq!(
+        config
+            .agent
+            .kernel
+            .compaction
+            .compacted_recent_messages_keep,
+        2
+    );
+    assert_eq!(
+        config
+            .agent
+            .kernel
+            .compaction
+            .compacted_recent_messages_max_chars,
+        1200
+    );
+    assert_eq!(config.agent.kernel.compaction.recent_summaries_keep, 2);
+    assert_eq!(config.agent.kernel.compaction.summary_max_chars, 1200);
+    assert_eq!(
+        config.agent.kernel.compaction.compacted_summary_max_chars,
+        800
+    );
+    assert_eq!(
+        config
+            .agent
+            .kernel
+            .compaction
+            .source_recent_tool_results_limit,
+        12
+    );
+    assert_eq!(config.agent.kernel.compaction.tool_output_keep_last, 2);
+    assert_eq!(config.agent.kernel.compaction.tool_output_max_chars, 2000);
+    assert_eq!(
+        config
+            .agent
+            .kernel
+            .compaction
+            .compacted_tool_output_max_chars,
+        600
+    );
+    assert_eq!(
+        config
+            .agent
+            .kernel
+            .compaction
+            .source_recent_tool_exchanges_limit,
+        12
+    );
+    assert_eq!(config.agent.kernel.compaction.tool_exchange_keep_last, 2);
+    assert_eq!(config.agent.kernel.compaction.tool_exchange_max_chars, 600);
+    assert_eq!(
+        config
+            .agent
+            .kernel
+            .compaction
+            .compacted_tool_exchange_max_chars,
+        300
+    );
+    assert_eq!(
+        config
+            .agent
+            .kernel
+            .compaction
+            .compacted_retrieved_memory_max_chars,
+        800
+    );
+}
+
+#[test]
+fn test_compacted_char_budgets_cannot_exceed_normal_budgets() {
+    let yaml = r#"
+agent:
+  name: talos
+  model: qwen-plus
+  kernel:
+    compaction:
+      recent_messages_max_chars: 100
+      compacted_recent_messages_max_chars: 120
+    memory:
+      workspace_dir: /tmp/talos-config-invalid-compaction
+gateway:
+  host: 127.0.0.1
+  port: 18789
+  auth: false
+  jwt_secret: jwt
+logging:
+  level: info
+  format: text
+  stdout: true
+storage:
+  database_type: sqlite
+  connection_string: /tmp/custom.db
+  max_connections: 5
+llm:
+  provider: ollama
+  model: qwen-plus
+  anthropic: { enabled: false }
+  openai: { enabled: false }
+  bailian: { enabled: false }
+  ollama:
+    enabled: true
+    base_url: http://localhost:11434
+"#;
+    let temp_file = std::env::temp_dir().join(format!(
+        "talos-config-invalid-compaction-{}.yaml",
+        std::process::id()
+    ));
+    std::fs::write(&temp_file, yaml).expect("failed to write temp config");
+    let result = Config::load_from_path(Some(
+        temp_file
+            .to_str()
+            .expect("temp path should be valid unicode"),
+    ));
+    let _ = std::fs::remove_file(&temp_file);
+
+    let _ = result.expect_err("invalid compacted char budget should fail");
 }
 
 #[test]
@@ -384,8 +605,11 @@ agent:
         reserved_output_tokens:
           kind: use_model_default
         compaction_buffer_tokens: 4096
-      include_session_summary: true
-      include_recent_messages: true
+    compaction:
+      recent_messages_keep: 16
+      compacted_recent_messages_keep: 2
+      recent_summaries_keep: 2
+      summary_max_chars: 1000
     memory:
       workspace_dir: /tmp/custom
 gateway:

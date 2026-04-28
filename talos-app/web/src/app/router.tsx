@@ -41,7 +41,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
   if (connection.authStatus === "loading" || connection.authStatus === "unknown") {
     return <AuthLoading />;
   }
-  if (connection.authStatus !== "authenticated") {
+  if (connection.authStatus !== "authenticated" && connection.authStatus !== "open") {
     return <Navigate replace to="/auth/login" />;
   }
   return <>{children}</>;
@@ -52,7 +52,10 @@ function RequireAdmin({ children }: { children: ReactNode }) {
   if (connection.authStatus === "loading" || connection.authStatus === "unknown") {
     return <AuthLoading />;
   }
-  if (connection.authStatus !== "authenticated" || connection.authRole !== "admin") {
+  const hasAdminAccess =
+    connection.authStatus === "open" ||
+    (connection.authStatus === "authenticated" && connection.authRole === "admin");
+  if (!hasAdminAccess) {
     return <Navigate replace to="/" />;
   }
 

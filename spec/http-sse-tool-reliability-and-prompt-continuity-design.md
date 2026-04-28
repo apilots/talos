@@ -91,14 +91,14 @@
 
 真实 SSE 流里多次出现：
 
-- `PromptDynamicSectionTruncated(... sections: [Tooling])`
-- `PromptDynamicSectionDropped(... sections: [PlanningInstruction])`
+- `PromptDynamicSectionDropped(... sections: [ExpandedToolCatalog])`
+- `PromptDynamicSectionDropped(... sections: [RecentMessages])`
 
-在当前实现中，这两个 section 仍属于高价值行为约束来源。一旦被裁剪：
+在当前实现中，这些 dynamic section 仍属于高价值上下文来源。一旦被裁剪：
 
 - 用户显式指定工具的优先级会下降
 - “专用工具优先、不要回退 shell”的约束会被削弱
-- `PlanReAct` 模式下的工作协议也会变弱
+- 历史连续性与局部行为约束会同步变弱
 
 结论：
 

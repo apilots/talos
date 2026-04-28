@@ -1,5 +1,7 @@
-use super::{ActiveTurnHandle, AgentImpl};
+use super::{ActiveTurnHandle, AgentImpl, QueuedTurn};
 use chrono::Utc;
+use dashmap::mapref::entry::Entry;
+use std::collections::VecDeque;
 use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_memory::Memory;
@@ -13,24 +15,79 @@ use talos_types::{talos::TalosUsage, TalosSession};
 use uuid::Uuid;
 
 impl AgentImpl {
-    fn ensure_session_is_idle(&self, session_id: &str, action: &str) -> TalosResult<()> {
+    async fn ensure_session_is_idle(&self, session_id: &str, action: &str) -> TalosResult<()> {
         if self.active_turns.contains_key(session_id) {
             return Err(TalosError::ValidationError(format!(
                 "cannot {} session `{}` while a turn is active",
                 action, session_id
             )));
         }
+        if self.has_queued_turns(session_id).await {
+            return Err(TalosError::ValidationError(format!(
+                "cannot {} session `{}` while queued turns are pending",
+                action, session_id
+            )));
+        }
         Ok(())
     }
 
-    pub(crate) fn register_active_turn(&self, session_id: &str, handle: ActiveTurnHandle) {
-        if let Some(previous) = self.active_turns.insert(session_id.to_string(), handle) {
-            previous.execution_task.abort();
+    pub(crate) fn try_reserve_active_turn(&self, session_id: &str) -> TalosResult<()> {
+        match self.active_turns.entry(session_id.to_string()) {
+            Entry::Occupied(_) => Err(TalosError::ValidationError(format!(
+                "cannot start a new turn for session `{session_id}` while another turn is active"
+            ))),
+            Entry::Vacant(entry) => {
+                entry.insert(ActiveTurnHandle::Reserved);
+                Ok(())
+            }
+        }
+    }
+
+    pub(crate) fn activate_reserved_turn(
+        &self,
+        session_id: &str,
+        execution_task: tokio::task::AbortHandle,
+    ) -> TalosResult<()> {
+        match self.active_turns.entry(session_id.to_string()) {
+            Entry::Occupied(mut entry) => {
+                entry.insert(ActiveTurnHandle::Running { execution_task });
+                Ok(())
+            }
+            Entry::Vacant(_) => Err(TalosError::InternalError(format!(
+                "missing reserved active turn slot for session `{session_id}`"
+            ))),
         }
     }
 
     pub(crate) fn clear_active_turn(&self, session_id: &str) {
         self.active_turns.remove(session_id);
+    }
+
+    pub(crate) async fn enqueue_turn(&self, session_id: &str, queued_turn: QueuedTurn) -> usize {
+        let mut backlogs = self.session_backlogs.lock().await;
+        let backlog = backlogs
+            .entry(session_id.to_string())
+            .or_insert_with(VecDeque::new);
+        backlog.push_back(queued_turn);
+        backlog.len()
+    }
+
+    pub(crate) async fn dequeue_next_turn(&self, session_id: &str) -> Option<QueuedTurn> {
+        let mut backlogs = self.session_backlogs.lock().await;
+        let backlog = backlogs.get_mut(session_id)?;
+        let next = backlog.pop_front();
+        if backlog.is_empty() {
+            backlogs.remove(session_id);
+        }
+        next
+    }
+
+    pub(crate) async fn has_queued_turns(&self, session_id: &str) -> bool {
+        self.session_backlogs
+            .lock()
+            .await
+            .get(session_id)
+            .is_some_and(|backlog| !backlog.is_empty())
     }
 
     pub(crate) async fn drain_pending_memory_flushes(&self, timeout: Duration) -> TalosResult<()> {
@@ -187,7 +244,7 @@ impl AgentImpl {
         session: TalosSession,
     ) -> TalosResult<TalosUsage> {
         let session_id = session.context.session_id.clone();
-        self.ensure_session_is_idle(&session_id, "compact")?;
+        self.ensure_session_is_idle(&session_id, "compact").await?;
         let selected_model = if session.config.llm.model.trim().is_empty() {
             self.model.clone()
         } else {
@@ -219,7 +276,7 @@ impl AgentImpl {
 
     pub(crate) async fn clear_session_impl(&self, session: TalosSession) -> TalosResult<()> {
         let session_id = session.context.session_id.clone();
-        self.ensure_session_is_idle(&session_id, "clear")?;
+        self.ensure_session_is_idle(&session_id, "clear").await?;
         self.memory_store.reset_session(&session_id).await
     }
 

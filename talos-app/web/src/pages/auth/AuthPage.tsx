@@ -23,7 +23,7 @@ export function AuthPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (connection.authStatus === "authenticated") {
+    if (connection.authStatus === "authenticated" || connection.authStatus === "open") {
       navigate("/");
     }
   }, [connection.authStatus, navigate]);

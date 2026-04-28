@@ -2,7 +2,7 @@ import type { ApprovalMode, RuntimeMode } from "@/shared/types/ui";
 
 const defaultServerUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 type UserRole = "user" | "admin";
-type AuthStatus = "unknown" | "loading" | "authenticated" | "unauthenticated";
+type AuthStatus = "unknown" | "loading" | "authenticated" | "unauthenticated" | "open";
 
 export interface ConnectionState {
   serverUrl: string;
@@ -29,10 +29,10 @@ export function createConnectionSlice(set: ConnectionSliceSetter): ConnectionSli
     connection: {
       serverUrl: defaultServerUrl,
       authToken: "",
-      authStatus: "unauthenticated",
+      authStatus: "unknown",
       authRole: "user",
-      authUsername: "web-user",
-      userId: "web-user",
+      authUsername: "Anonymous",
+      userId: "anonymous",
       runtimeMode: "cloud",
       defaultApprovalMode: "needs_approval",
     },

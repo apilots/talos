@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -34,14 +34,21 @@ export function SettingsPage() {
     models,
   } = useSettingsPage();
   const tabs = useMemo(
-    () => [
-      { id: "general", label: t("settings:tabs.general") },
-      { id: "keys", label: t("settings:tabs.keys") },
-      { id: "appearance", label: t("settings:tabs.appearance") },
-      { id: "server", label: t("settings:tabs.server") },
-    ],
-    [t],
+    () =>
+      [
+        { id: "general", label: t("settings:tabs.general") },
+        connection.authStatus === "open" ? null : { id: "keys", label: t("settings:tabs.keys") },
+        { id: "appearance", label: t("settings:tabs.appearance") },
+        { id: "server", label: t("settings:tabs.server") },
+      ].filter(Boolean) as Array<{ id: string; label: string }>,
+    [connection.authStatus, t],
   );
+
+  useEffect(() => {
+    if (connection.authStatus === "open" && activeTab === "keys") {
+      setActiveTab("general");
+    }
+  }, [activeTab, connection.authStatus, setActiveTab]);
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
@@ -71,7 +78,7 @@ export function SettingsPage() {
         <SettingsGeneralSection draft={draft} locale={locale} setDraft={setDraft} setLocale={setLocale} uiTheme={uiTheme} />
       ) : null}
 
-      {activeTab === "keys" ? <SettingsKeysSection /> : null}
+      {activeTab === "keys" && connection.authStatus !== "open" ? <SettingsKeysSection /> : null}
 
       {activeTab === "appearance" ? (
         <SettingsAppearanceSection

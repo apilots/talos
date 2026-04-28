@@ -1,9 +1,10 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use dashmap::DashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::AbortHandle;
 use uuid::Uuid;
 
@@ -44,8 +45,20 @@ pub(crate) enum KernelExecutionMode {
 }
 
 #[derive(Clone)]
-pub(crate) struct ActiveTurnHandle {
-    execution_task: AbortHandle,
+pub(crate) enum ActiveTurnHandle {
+    Reserved,
+    Running { execution_task: AbortHandle },
+}
+
+pub(crate) enum QueuedTurn {
+    Unary {
+        request: OrchestratorRequest,
+        response_tx: oneshot::Sender<TalosResult<OrchestratorExecution>>,
+    },
+    Stream {
+        request: OrchestratorRequest,
+        event_tx: mpsc::Sender<OrchestratorEvent>,
+    },
 }
 
 #[derive(Clone)]
@@ -60,6 +73,7 @@ pub struct AgentImpl {
     kernel_config: AgentKernelConfig,
     pub kernel_runtime: Arc<KernelRuntime>,
     active_turns: Arc<DashMap<String, ActiveTurnHandle>>,
+    session_backlogs: Arc<Mutex<HashMap<String, VecDeque<QueuedTurn>>>>,
     memory_flush_manager: Arc<MemoryFlushManager>,
 }
 
@@ -90,6 +104,7 @@ impl AgentImpl {
             kernel_config,
             kernel_runtime: Arc::new(KernelRuntime::new_default()),
             active_turns: Arc::new(DashMap::new()),
+            session_backlogs: Arc::new(Mutex::new(HashMap::new())),
             memory_flush_manager: Arc::new(MemoryFlushManager::new()),
         }
     }
@@ -132,30 +147,68 @@ After receiving tool outputs, continue reasoning and provide the final response.
             available_tools.join(", ")
         )
     }
-}
 
-#[async_trait]
-impl Agent for AgentImpl {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    async fn execute_tool(
+    async fn reserve_or_enqueue_unary_turn(
         &self,
-        tool_name: &str,
-        args: serde_json::Value,
-    ) -> TalosResult<AgentResponse> {
-        self.execute_tool_internal(tool_name, args).await
-    }
-}
+        request: OrchestratorRequest,
+    ) -> TalosResult<Option<oneshot::Receiver<TalosResult<OrchestratorExecution>>>> {
+        let session_id = request.session.context.session_id.clone();
+        if self.has_queued_turns(&session_id).await {
+            let (response_tx, response_rx) = oneshot::channel();
+            self.enqueue_turn(
+                &session_id,
+                QueuedTurn::Unary {
+                    request,
+                    response_tx,
+                },
+            )
+            .await;
+            return Ok(Some(response_rx));
+        }
 
-#[async_trait]
-impl AgentOrchestrator for AgentImpl {
-    fn id(&self) -> &str {
-        &self.id
+        match self.try_reserve_active_turn(&session_id) {
+            Ok(()) => Ok(None),
+            Err(_) => {
+                let (response_tx, response_rx) = oneshot::channel();
+                self.enqueue_turn(
+                    &session_id,
+                    QueuedTurn::Unary {
+                        request,
+                        response_tx,
+                    },
+                )
+                .await;
+                Ok(Some(response_rx))
+            }
+        }
     }
 
-    async fn run(&self, request: OrchestratorRequest) -> TalosResult<OrchestratorExecution> {
+    async fn reserve_or_enqueue_stream_turn(
+        &self,
+        request: OrchestratorRequest,
+        event_tx: mpsc::Sender<OrchestratorEvent>,
+    ) -> TalosResult<bool> {
+        let session_id = request.session.context.session_id.clone();
+        if self.has_queued_turns(&session_id).await {
+            self.enqueue_turn(&session_id, QueuedTurn::Stream { request, event_tx })
+                .await;
+            return Ok(false);
+        }
+
+        match self.try_reserve_active_turn(&session_id) {
+            Ok(()) => Ok(true),
+            Err(_) => {
+                self.enqueue_turn(&session_id, QueuedTurn::Stream { request, event_tx })
+                    .await;
+                Ok(false)
+            }
+        }
+    }
+
+    async fn execute_reserved_run(
+        &self,
+        request: OrchestratorRequest,
+    ) -> TalosResult<OrchestratorExecution> {
         let agent_request = self.to_agent_request(request);
         let input = Self::extract_text_input(&agent_request.input);
         let invocation_id = format!("inv-{}", Utc::now().timestamp_millis());
@@ -165,7 +218,13 @@ impl AgentOrchestrator for AgentImpl {
         let planning_instruction = agent_request.planning_instruction.clone();
         let transfer_to = agent_request.transfer_to.clone();
         let kernel_config = agent_request.session.config.agent.kernel.clone();
-        let kernel_agent = self.build_kernel_agent_for_request(&kernel_config)?;
+        let kernel_agent = match self.build_kernel_agent_for_request(&kernel_config) {
+            Ok(agent) => agent,
+            Err(err) => {
+                self.finish_active_turn_and_resume(&session_id).await;
+                return Err(err);
+            }
+        };
         let runtime = self.kernel_runtime.clone();
         let agent_id = self.id.clone();
         let run_session_id = session_id.clone();
@@ -199,56 +258,50 @@ impl AgentOrchestrator for AgentImpl {
                     .await
             }
         });
-        self.register_active_turn(
-            &session_id,
-            ActiveTurnHandle {
-                execution_task: run_handle.abort_handle(),
-            },
-        );
+        let abort_handle = run_handle.abort_handle();
+        if let Err(err) = self.activate_reserved_turn(&session_id, abort_handle) {
+            run_handle.abort();
+            self.finish_active_turn_and_resume(&session_id).await;
+            return Err(err);
+        }
+
         let result = match run_handle.await {
-            Ok(Ok(result)) => result,
-            Ok(Err(err)) => {
-                self.clear_active_turn(&session_id);
-                return Err(err);
+            Ok(Ok(result)) => {
+                let reasoning = Self::collect_reasoning(&result.output_items);
+                Ok(OrchestratorExecution {
+                    output_text: result.output_text,
+                    output_items: result.output_items,
+                    reasoning,
+                    stop_reason: kernel::map_stop_reason(result.stop_reason),
+                    usage: result.usage,
+                    task_count: result.task_results.len() as u32,
+                    session_id: session_id.clone(),
+                })
             }
-            Err(err) if err.is_cancelled() => {
-                self.clear_active_turn(&session_id);
-                return Ok(OrchestratorExecution {
-                    output_text: String::new(),
-                    output_items: Vec::new(),
-                    reasoning: Vec::new(),
-                    stop_reason: TalosStopReason::Cancelled,
-                    usage: TalosUsage::default(),
-                    task_count: 0,
-                    session_id,
-                });
-            }
-            Err(err) => {
-                self.clear_active_turn(&session_id);
-                return Err(TalosError::InternalError(format!(
-                    "kernel task join failed: {}",
-                    err
-                )));
-            }
+            Ok(Err(err)) => Err(err),
+            Err(err) if err.is_cancelled() => Ok(OrchestratorExecution {
+                output_text: String::new(),
+                output_items: Vec::new(),
+                reasoning: Vec::new(),
+                stop_reason: TalosStopReason::Cancelled,
+                usage: TalosUsage::default(),
+                task_count: 0,
+                session_id: session_id.clone(),
+            }),
+            Err(err) => Err(TalosError::InternalError(format!(
+                "kernel task join failed: {}",
+                err
+            ))),
         };
-        self.clear_active_turn(&session_id);
-        let reasoning = Self::collect_reasoning(&result.output_items);
-        Ok(OrchestratorExecution {
-            output_text: result.output_text,
-            output_items: result.output_items,
-            reasoning,
-            stop_reason: kernel::map_stop_reason(result.stop_reason),
-            usage: result.usage,
-            task_count: result.task_results.len() as u32,
-            session_id,
-        })
+        self.finish_active_turn_and_resume(&session_id).await;
+        result
     }
 
-    async fn run_stream(
+    fn spawn_reserved_stream_turn(
         &self,
         request: OrchestratorRequest,
-    ) -> TalosResult<mpsc::Receiver<OrchestratorEvent>> {
-        let (tx, rx) = mpsc::channel(256);
+        tx: mpsc::Sender<OrchestratorEvent>,
+    ) {
         let this = self.clone();
         let stream_task = tokio::spawn(async move {
             let agent_request = this.to_agent_request(request);
@@ -277,6 +330,7 @@ impl AgentOrchestrator for AgentImpl {
                             },
                         ))
                         .await;
+                    this.finish_active_turn_and_resume(&session_id).await;
                     return;
                 }
             };
@@ -318,12 +372,20 @@ impl AgentOrchestrator for AgentImpl {
 
             let run_handle =
                 tokio::spawn(async move { runtime.run_turn(kernel_agent, kernel_input).await });
-            this.register_active_turn(
-                &session_id,
-                ActiveTurnHandle {
-                    execution_task: run_handle.abort_handle(),
-                },
-            );
+            let abort_handle = run_handle.abort_handle();
+            if let Err(err) = this.activate_reserved_turn(&session_id, abort_handle) {
+                run_handle.abort();
+                let _ = tx
+                    .send(OrchestratorEvent::MessageError(
+                        OrchestratorMessageErrorEvent {
+                            request_id: request_id.clone(),
+                            error: err.to_string(),
+                        },
+                    ))
+                    .await;
+                this.finish_active_turn_and_resume(&session_id).await;
+                return;
+            }
 
             let mut item_index = 0_u64;
             while let Some(kernel_event) = kernel_rx.recv().await {
@@ -386,9 +448,86 @@ impl AgentOrchestrator for AgentImpl {
                         .await;
                 }
             }
-            this.clear_active_turn(&session_id);
+            this.finish_active_turn_and_resume(&session_id).await;
         });
         drop(stream_task);
+    }
+
+    async fn finish_active_turn_and_resume(&self, session_id: &str) {
+        if let Some(queued_turn) = self.dequeue_next_turn(session_id).await {
+            self.active_turns
+                .insert(session_id.to_string(), ActiveTurnHandle::Reserved);
+            self.dispatch_queued_turn(queued_turn);
+        } else {
+            self.clear_active_turn(session_id);
+        }
+    }
+
+    fn dispatch_queued_turn(&self, queued_turn: QueuedTurn) {
+        match queued_turn {
+            QueuedTurn::Unary {
+                request,
+                response_tx,
+            } => {
+                let this = self.clone();
+                let task = tokio::spawn(async move {
+                    let result = this.execute_reserved_run(request).await;
+                    let _ = response_tx.send(result);
+                });
+                drop(task);
+            }
+            QueuedTurn::Stream { request, event_tx } => {
+                self.spawn_reserved_stream_turn(request, event_tx);
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl Agent for AgentImpl {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    async fn execute_tool(
+        &self,
+        tool_name: &str,
+        args: serde_json::Value,
+    ) -> TalosResult<AgentResponse> {
+        self.execute_tool_internal(tool_name, args).await
+    }
+}
+
+#[async_trait]
+impl AgentOrchestrator for AgentImpl {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    async fn run(&self, request: OrchestratorRequest) -> TalosResult<OrchestratorExecution> {
+        if let Some(response_rx) = self.reserve_or_enqueue_unary_turn(request.clone()).await? {
+            return response_rx.await.map_err(|err| {
+                TalosError::InternalError(format!(
+                    "queued orchestrator execution channel closed: {}",
+                    err
+                ))
+            })?;
+        }
+
+        self.execute_reserved_run(request).await
+    }
+
+    async fn run_stream(
+        &self,
+        request: OrchestratorRequest,
+    ) -> TalosResult<mpsc::Receiver<OrchestratorEvent>> {
+        let (tx, rx) = mpsc::channel(256);
+        let should_start_now = self
+            .reserve_or_enqueue_stream_turn(request.clone(), tx.clone())
+            .await?;
+        if should_start_now {
+            self.spawn_reserved_stream_turn(request, tx);
+        }
         Ok(rx)
     }
 
@@ -421,10 +560,12 @@ impl AgentOrchestrator for AgentImpl {
     }
 
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()> {
-        let Some((_, handle)) = self.active_turns.remove(session_id) else {
+        let Some(handle) = self.active_turns.get(session_id) else {
             return Ok(());
         };
-        handle.execution_task.abort();
+        if let ActiveTurnHandle::Running { execution_task } = handle.value() {
+            execution_task.abort();
+        }
         Ok(())
     }
 

@@ -14,7 +14,7 @@ type MemoryViewMode = "preview" | "edit";
 export function MemoryPage() {
   const { t } = useTranslation(["memory", "common"]);
   const { connection } = useConnectionSettings();
-  const canEdit = connection.authRole === "admin";
+  const canEdit = connection.authStatus === "open" || connection.authRole === "admin";
   const [viewMode, setViewMode] = useState<MemoryViewMode>("preview");
   const {
     query,

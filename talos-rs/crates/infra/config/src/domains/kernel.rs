@@ -5,6 +5,196 @@ use crate::{
     ExecutionMode, PlanReActPolicy, PlannerMode, PlannerSelection, ToolsRuntimeConfig,
 };
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AgentKernelCompactionConfig {
+    #[serde(default)]
+    pub model: Option<String>,
+
+    #[serde(default = "default_kernel_compaction_trigger_ratio_percent")]
+    pub trigger_ratio_percent: u8,
+
+    #[serde(default = "default_kernel_compaction_hard_ratio_percent")]
+    pub hard_ratio_percent: u8,
+
+    #[serde(default = "default_kernel_compaction_recent_messages_keep")]
+    pub recent_messages_keep: usize,
+
+    #[serde(default = "default_kernel_compaction_recent_messages_max_chars")]
+    pub recent_messages_max_chars: usize,
+
+    #[serde(default = "default_kernel_compaction_compacted_recent_messages_keep")]
+    pub compacted_recent_messages_keep: usize,
+
+    #[serde(default = "default_kernel_compaction_compacted_recent_messages_max_chars")]
+    pub compacted_recent_messages_max_chars: usize,
+
+    #[serde(default = "default_kernel_compaction_recent_summaries_keep")]
+    pub recent_summaries_keep: usize,
+
+    #[serde(default = "default_kernel_compaction_summary_max_chars")]
+    pub summary_max_chars: usize,
+
+    #[serde(default = "default_kernel_compaction_compacted_summary_max_chars")]
+    pub compacted_summary_max_chars: usize,
+
+    #[serde(default = "default_kernel_compaction_source_recent_messages_limit")]
+    pub source_recent_messages_limit: usize,
+
+    #[serde(default = "default_kernel_compaction_source_recent_tool_results_limit")]
+    pub source_recent_tool_results_limit: usize,
+
+    #[serde(default = "default_kernel_compaction_tool_output_keep_last")]
+    pub tool_output_keep_last: usize,
+
+    #[serde(default = "default_kernel_compaction_tool_output_max_chars")]
+    pub tool_output_max_chars: usize,
+
+    #[serde(default = "default_kernel_compaction_compacted_tool_output_max_chars")]
+    pub compacted_tool_output_max_chars: usize,
+
+    #[serde(default = "default_kernel_compaction_source_recent_tool_exchanges_limit")]
+    pub source_recent_tool_exchanges_limit: usize,
+
+    #[serde(default = "default_kernel_compaction_tool_exchange_keep_last")]
+    pub tool_exchange_keep_last: usize,
+
+    #[serde(default = "default_kernel_compaction_tool_exchange_max_chars")]
+    pub tool_exchange_max_chars: usize,
+
+    #[serde(default = "default_kernel_compaction_compacted_tool_exchange_max_chars")]
+    pub compacted_tool_exchange_max_chars: usize,
+
+    #[serde(default = "default_kernel_compaction_retrieved_memories_keep")]
+    pub retrieved_memories_keep: usize,
+
+    #[serde(default = "default_kernel_compaction_retrieved_memory_max_chars")]
+    pub retrieved_memory_max_chars: usize,
+
+    #[serde(default = "default_kernel_compaction_compacted_retrieved_memory_max_chars")]
+    pub compacted_retrieved_memory_max_chars: usize,
+}
+
+fn default_kernel_compaction_trigger_ratio_percent() -> u8 {
+    85
+}
+
+fn default_kernel_compaction_hard_ratio_percent() -> u8 {
+    95
+}
+
+fn default_kernel_compaction_recent_messages_keep() -> usize {
+    24
+}
+
+fn default_kernel_compaction_recent_messages_max_chars() -> usize {
+    4_000
+}
+
+fn default_kernel_compaction_compacted_recent_messages_keep() -> usize {
+    2
+}
+
+fn default_kernel_compaction_compacted_recent_messages_max_chars() -> usize {
+    1_200
+}
+
+fn default_kernel_compaction_recent_summaries_keep() -> usize {
+    2
+}
+
+fn default_kernel_compaction_summary_max_chars() -> usize {
+    1_200
+}
+
+fn default_kernel_compaction_compacted_summary_max_chars() -> usize {
+    800
+}
+
+fn default_kernel_compaction_source_recent_messages_limit() -> usize {
+    48
+}
+
+fn default_kernel_compaction_source_recent_tool_results_limit() -> usize {
+    12
+}
+
+fn default_kernel_compaction_tool_output_keep_last() -> usize {
+    2
+}
+
+fn default_kernel_compaction_tool_output_max_chars() -> usize {
+    2_000
+}
+
+fn default_kernel_compaction_compacted_tool_output_max_chars() -> usize {
+    600
+}
+
+fn default_kernel_compaction_source_recent_tool_exchanges_limit() -> usize {
+    12
+}
+
+fn default_kernel_compaction_tool_exchange_keep_last() -> usize {
+    2
+}
+
+fn default_kernel_compaction_tool_exchange_max_chars() -> usize {
+    600
+}
+
+fn default_kernel_compaction_compacted_tool_exchange_max_chars() -> usize {
+    300
+}
+
+fn default_kernel_compaction_retrieved_memories_keep() -> usize {
+    4
+}
+
+fn default_kernel_compaction_retrieved_memory_max_chars() -> usize {
+    2_000
+}
+
+fn default_kernel_compaction_compacted_retrieved_memory_max_chars() -> usize {
+    800
+}
+
+impl Default for AgentKernelCompactionConfig {
+    fn default() -> Self {
+        Self {
+            model: None,
+            trigger_ratio_percent: default_kernel_compaction_trigger_ratio_percent(),
+            hard_ratio_percent: default_kernel_compaction_hard_ratio_percent(),
+            recent_messages_keep: default_kernel_compaction_recent_messages_keep(),
+            recent_messages_max_chars: default_kernel_compaction_recent_messages_max_chars(),
+            compacted_recent_messages_keep:
+                default_kernel_compaction_compacted_recent_messages_keep(),
+            compacted_recent_messages_max_chars:
+                default_kernel_compaction_compacted_recent_messages_max_chars(),
+            recent_summaries_keep: default_kernel_compaction_recent_summaries_keep(),
+            summary_max_chars: default_kernel_compaction_summary_max_chars(),
+            compacted_summary_max_chars: default_kernel_compaction_compacted_summary_max_chars(),
+            source_recent_messages_limit: default_kernel_compaction_source_recent_messages_limit(),
+            source_recent_tool_results_limit:
+                default_kernel_compaction_source_recent_tool_results_limit(),
+            tool_output_keep_last: default_kernel_compaction_tool_output_keep_last(),
+            tool_output_max_chars: default_kernel_compaction_tool_output_max_chars(),
+            compacted_tool_output_max_chars:
+                default_kernel_compaction_compacted_tool_output_max_chars(),
+            source_recent_tool_exchanges_limit:
+                default_kernel_compaction_source_recent_tool_exchanges_limit(),
+            tool_exchange_keep_last: default_kernel_compaction_tool_exchange_keep_last(),
+            tool_exchange_max_chars: default_kernel_compaction_tool_exchange_max_chars(),
+            compacted_tool_exchange_max_chars:
+                default_kernel_compaction_compacted_tool_exchange_max_chars(),
+            retrieved_memories_keep: default_kernel_compaction_retrieved_memories_keep(),
+            retrieved_memory_max_chars: default_kernel_compaction_retrieved_memory_max_chars(),
+            compacted_retrieved_memory_max_chars:
+                default_kernel_compaction_compacted_retrieved_memory_max_chars(),
+        }
+    }
+}
+
 /// Agent kernel runtime configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -68,6 +258,10 @@ pub struct AgentKernelConfig {
     /// Prompt builder defaults
     #[serde(default)]
     pub prompt: AgentKernelPromptConfig,
+
+    /// Context compaction policy and model override.
+    #[serde(default)]
+    pub compaction: AgentKernelCompactionConfig,
 
     /// Memory store defaults
     #[serde(default)]
@@ -152,6 +346,7 @@ impl Default for AgentKernelConfig {
             execution_children: default_kernel_execution_children(),
             execution_loop_iters: default_kernel_execution_loop_iters(),
             prompt: AgentKernelPromptConfig::default(),
+            compaction: AgentKernelCompactionConfig::default(),
             memory: AgentKernelMemoryConfig::default(),
             tools: ToolsRuntimeConfig::default(),
             mcp: AgentKernelMcpConfig::default(),

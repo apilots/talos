@@ -153,6 +153,28 @@ agent:
     execution_mode: single
     execution_children: 2
     execution_loop_iters: 3
+    compaction:
+      trigger_ratio_percent: 85
+      hard_ratio_percent: 95
+      recent_messages_keep: 24
+      recent_messages_max_chars: 4000
+      compacted_recent_messages_keep: 2
+      compacted_recent_messages_max_chars: 1200
+      recent_summaries_keep: 2
+      summary_max_chars: 1200
+      compacted_summary_max_chars: 800
+      source_recent_messages_limit: 48
+      source_recent_tool_results_limit: 12
+      tool_output_keep_last: 2
+      tool_output_max_chars: 2000
+      compacted_tool_output_max_chars: 600
+      source_recent_tool_exchanges_limit: 12
+      tool_exchange_keep_last: 2
+      tool_exchange_max_chars: 600
+      compacted_tool_exchange_max_chars: 300
+      retrieved_memories_keep: 4
+      retrieved_memory_max_chars: 2000
+      compacted_retrieved_memory_max_chars: 800
     memory:
       hot_recent_messages: 64
       compaction_threshold_bytes: 262144

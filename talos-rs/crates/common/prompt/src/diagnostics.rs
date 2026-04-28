@@ -9,7 +9,6 @@ pub(crate) fn build_prompt_diagnostics(
     dynamic_sections: &[PromptSection],
     bootstrap_files: Vec<BootstrapFileDiagnostic>,
     dropped_sections: Vec<PromptSectionKind>,
-    truncated_sections: Vec<PromptSectionKind>,
     window_usage: PromptWindowUsage,
 ) -> PromptDiagnostics {
     let static_estimated_tokens = budget::estimate_sections_tokens(static_sections);
@@ -23,7 +22,6 @@ pub(crate) fn build_prompt_diagnostics(
             .map(|section| section.kind)
             .collect(),
         dropped_sections,
-        truncated_sections,
         bootstrap_files,
         total_estimated_tokens: static_estimated_tokens + dynamic_estimated_tokens,
         static_estimated_tokens,

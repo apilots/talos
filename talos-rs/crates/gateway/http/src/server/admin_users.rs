@@ -107,7 +107,7 @@ pub(super) async fn put_admin_llm_handler(
 }
 
 fn require_admin(actor: &RequestIdentity) -> Result<(), ApiError> {
-    if actor.role.is_admin() {
+    if actor.has_full_access() {
         return Ok(());
     }
     Err(ApiError::new(

@@ -27,12 +27,63 @@ impl AgentImpl {
         kernel_config.context_compaction_max_bytes =
             kernel_config.context_compaction_max_bytes.max(8 * 1024);
         kernel_config.memory.hot_recent_messages = kernel_config.memory.hot_recent_messages.max(1);
-        kernel_config.prompt.session_recent_messages_limit =
-            kernel_config.prompt.session_recent_messages_limit.max(1);
-        kernel_config.prompt.session_summary_recent_count =
-            kernel_config.prompt.session_summary_recent_count.max(1);
-        kernel_config.prompt.session_summary_max_chars =
-            kernel_config.prompt.session_summary_max_chars.max(128);
+        kernel_config.compaction.recent_messages_keep =
+            kernel_config.compaction.recent_messages_keep.max(1);
+        kernel_config.compaction.recent_messages_max_chars =
+            kernel_config.compaction.recent_messages_max_chars.max(128);
+        kernel_config.compaction.compacted_recent_messages_keep = kernel_config
+            .compaction
+            .compacted_recent_messages_keep
+            .max(1);
+        kernel_config.compaction.compacted_recent_messages_max_chars = kernel_config
+            .compaction
+            .compacted_recent_messages_max_chars
+            .max(128)
+            .min(kernel_config.compaction.recent_messages_max_chars);
+        kernel_config.compaction.recent_summaries_keep =
+            kernel_config.compaction.recent_summaries_keep.max(1);
+        kernel_config.compaction.summary_max_chars =
+            kernel_config.compaction.summary_max_chars.max(128);
+        kernel_config.compaction.compacted_summary_max_chars = kernel_config
+            .compaction
+            .compacted_summary_max_chars
+            .max(128)
+            .min(kernel_config.compaction.summary_max_chars);
+        kernel_config.compaction.source_recent_messages_limit =
+            kernel_config.compaction.source_recent_messages_limit.max(1);
+        kernel_config.compaction.source_recent_tool_results_limit = kernel_config
+            .compaction
+            .source_recent_tool_results_limit
+            .max(1);
+        kernel_config.compaction.tool_output_max_chars =
+            kernel_config.compaction.tool_output_max_chars.max(128);
+        kernel_config.compaction.compacted_tool_output_max_chars = kernel_config
+            .compaction
+            .compacted_tool_output_max_chars
+            .max(128)
+            .min(kernel_config.compaction.tool_output_max_chars);
+        kernel_config.compaction.source_recent_tool_exchanges_limit = kernel_config
+            .compaction
+            .source_recent_tool_exchanges_limit
+            .max(1);
+        kernel_config.compaction.tool_exchange_max_chars =
+            kernel_config.compaction.tool_exchange_max_chars.max(64);
+        kernel_config.compaction.compacted_tool_exchange_max_chars = kernel_config
+            .compaction
+            .compacted_tool_exchange_max_chars
+            .max(64)
+            .min(kernel_config.compaction.tool_exchange_max_chars);
+        kernel_config.compaction.retrieved_memories_keep =
+            kernel_config.compaction.retrieved_memories_keep.max(1);
+        kernel_config.compaction.retrieved_memory_max_chars =
+            kernel_config.compaction.retrieved_memory_max_chars.max(128);
+        kernel_config
+            .compaction
+            .compacted_retrieved_memory_max_chars = kernel_config
+            .compaction
+            .compacted_retrieved_memory_max_chars
+            .max(128)
+            .min(kernel_config.compaction.retrieved_memory_max_chars);
         kernel_config.memory.compaction_threshold_bytes =
             kernel_config.memory.compaction_threshold_bytes.max(1024);
         kernel_config.memory.search_max_results = kernel_config.memory.search_max_results.max(1);

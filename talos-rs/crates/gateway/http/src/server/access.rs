@@ -25,9 +25,7 @@ impl ResourceAccessService {
         project_id: Option<String>,
         current_directory: Option<std::path::PathBuf>,
     ) -> TalosResult<TalosSession> {
-        if !actor.bypasses_auth() {
-            context.user_id = actor.user_id.clone();
-        }
+        context.user_id = actor.user_id.clone();
         if let Some(project_id_ref) = project_id.as_deref() {
             self.ensure_project_access(actor, project_id_ref).await?;
         }
@@ -41,9 +39,7 @@ impl ResourceAccessService {
         actor: &RequestIdentity,
         mut query: SessionQuery,
     ) -> TalosResult<Vec<TalosSession>> {
-        if !actor.bypasses_auth() {
-            query.user_id = Some(actor.user_id.clone());
-        }
+        query.user_id = Some(actor.user_id.clone());
         let sessions = self.session_service.list_sessions(query).await?;
         Ok(self.filter_sessions(actor, sessions))
     }
@@ -254,9 +250,6 @@ impl ResourceAccessService {
         actor: &RequestIdentity,
         sessions: Vec<TalosSession>,
     ) -> Vec<TalosSession> {
-        if actor.bypasses_auth() {
-            return sessions;
-        }
         sessions
             .into_iter()
             .filter(|session| session.user_id == actor.user_id)
@@ -268,9 +261,6 @@ impl ResourceAccessService {
         actor: &RequestIdentity,
         projects: Vec<ProjectRecord>,
     ) -> Vec<ProjectRecord> {
-        if actor.bypasses_auth() {
-            return projects;
-        }
         projects
             .into_iter()
             .filter(|project| project.user_id == actor.user_id)
@@ -282,7 +272,7 @@ impl ResourceAccessService {
         actor: &RequestIdentity,
         session: &TalosSession,
     ) -> TalosResult<()> {
-        if actor.bypasses_auth() || session.user_id == actor.user_id {
+        if session.user_id == actor.user_id {
             return Ok(());
         }
         Err(TalosError::ResourceNotFound(format!(
@@ -296,7 +286,7 @@ impl ResourceAccessService {
         actor: &RequestIdentity,
         project: &ProjectRecord,
     ) -> TalosResult<()> {
-        if actor.bypasses_auth() || project.user_id == actor.user_id {
+        if project.user_id == actor.user_id {
             return Ok(());
         }
         Err(TalosError::ResourceNotFound(format!(
@@ -569,6 +559,10 @@ mod tests {
         RequestIdentity::mock_admin("admin-user")
     }
 
+    fn open_identity() -> RequestIdentity {
+        RequestIdentity::auth_disabled()
+    }
+
     #[tokio::test]
     async fn create_session_rewrites_context_for_member_actor() {
         let service = Arc::new(RecordingSessionService::default());
@@ -670,12 +664,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn list_sessions_scopes_owner_for_open_actor_on_regular_routes() {
+        let service = Arc::new(RecordingSessionService::default());
+        let access = ResourceAccessService::new(service.clone());
+
+        let _ = access
+            .list_sessions(
+                &open_identity(),
+                SessionQuery {
+                    user_id: Some("external-user".to_string()),
+                    channel_id: Some("web".to_string()),
+                    provider: Some("http".to_string()),
+                    project_id: None,
+                    limit: None,
+                    offset: None,
+                },
+            )
+            .await
+            .expect("list_sessions should succeed");
+
+        assert_eq!(
+            service.listed_queries.lock().unwrap()[0].user_id.as_deref(),
+            Some("anonymous")
+        );
+    }
+
+    #[tokio::test]
     async fn list_projects_scopes_admin_to_owned_resources_on_regular_routes() {
         let service = Arc::new(RecordingSessionService::default());
         let access = ResourceAccessService::new(service);
 
         let projects = access
             .list_projects(&admin_identity())
+            .await
+            .expect("list_projects should succeed");
+
+        assert!(projects.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_projects_scopes_open_actor_to_anonymous_resources_on_regular_routes() {
+        let service = Arc::new(RecordingSessionService::default());
+        let access = ResourceAccessService::new(service);
+
+        let projects = access
+            .list_projects(&open_identity())
             .await
             .expect("list_projects should succeed");
 

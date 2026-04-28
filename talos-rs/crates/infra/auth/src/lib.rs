@@ -126,10 +126,10 @@ impl RequestIdentity {
 
     pub fn auth_disabled() -> Self {
         Self {
-            user_id: "auth-disabled".to_string(),
+            user_id: "anonymous".to_string(),
             username: None,
             role: UserRole::User,
-            scopes: default_scopes_for_role(UserRole::Admin),
+            scopes: default_scopes_for_role(UserRole::User),
             auth_disabled: true,
         }
     }

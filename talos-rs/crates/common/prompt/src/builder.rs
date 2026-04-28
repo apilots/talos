@@ -27,6 +27,7 @@ pub struct PromptBuilder<'a> {
     pub(crate) session_continuity: Option<SessionContinuity>,
     pub(crate) model_info: Option<ModelInfo>,
     pub(crate) config: PromptBuildConfig,
+    pub(crate) dynamic_trim_policy: DynamicTrimPolicy,
 }
 
 impl<'a> Default for PromptBuilder<'a> {
@@ -54,6 +55,7 @@ impl<'a> PromptBuilder<'a> {
             session_continuity: None,
             model_info: None,
             config: PromptBuildConfig::default(),
+            dynamic_trim_policy: DynamicTrimPolicy::TrimToBudget,
         }
     }
 
@@ -104,6 +106,11 @@ impl<'a> PromptBuilder<'a> {
         self
     }
 
+    pub fn dynamic_trim_policy(mut self, policy: DynamicTrimPolicy) -> Self {
+        self.dynamic_trim_policy = policy;
+        self
+    }
+
     pub fn retrieved_memories(mut self, memories: Vec<RetrievedMemoryItem>) -> Self {
         self.retrieved_memories = memories;
         self
@@ -136,6 +143,16 @@ impl<'a> PromptBuilder<'a> {
 
     pub fn include_recent_messages(mut self, include: bool) -> Self {
         self.config.load_policy.include_recent_messages = include;
+        self
+    }
+
+    pub fn include_recent_tool_history(mut self, include: bool) -> Self {
+        self.config.load_policy.include_recent_tool_history = include;
+        self
+    }
+
+    pub fn include_recent_tool_outputs(mut self, include: bool) -> Self {
+        self.config.load_policy.include_recent_tool_outputs = include;
         self
     }
 

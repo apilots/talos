@@ -100,7 +100,6 @@ async fn test_execute_general_turn_loop_forces_summary_when_budget_is_exhausted(
             mode: talos_prompt::PromptMode::Full,
             included_sections: Vec::new(),
             dropped_sections: Vec::new(),
-            truncated_sections: Vec::new(),
             bootstrap_files: Vec::new(),
             total_estimated_tokens: 0,
             static_estimated_tokens: 0,
