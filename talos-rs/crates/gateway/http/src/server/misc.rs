@@ -85,6 +85,9 @@ pub(super) fn talos_event_name(event_type: &TalosEventType) -> &'static str {
         TalosEventType::MessageToolCallProgressDelta => "message.tool_call.progress_delta",
         TalosEventType::MessageToolCallCompleted => "message.tool_call.completed",
         TalosEventType::MessageToolCallPendingApproval => "message.tool_call.pending_approval",
+        TalosEventType::MessageToolCallPendingDynamicResult => {
+            "message.tool_call.pending_dynamic_result"
+        }
         TalosEventType::MessageCompleted => "message.completed",
         TalosEventType::MessageError => "message.error",
     }

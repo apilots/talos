@@ -6,6 +6,7 @@ export {
   createSession,
   deleteAdminSession,
   deleteSession,
+  getActiveTurn,
   getSession,
   getSessionTurns,
   listAdminSessions,
@@ -13,7 +14,8 @@ export {
   listSessionsByProject,
   listSessions,
   sendMessage,
-  sendMessageStream,
+  sendMessageEvents,
+  retryMessageEvents,
   submitToolApproval,
   updateSessionApprovalMode,
   updateSessionModel,
@@ -32,6 +34,7 @@ export {
   useModelsQuery,
   useProjectsQuery,
   useSessionActions,
+  useActiveTurnQuery,
   useSessionQuery,
   useSessionsQuery,
   useSessionTurnsQuery,
@@ -45,4 +48,4 @@ export { useSessionMessageStream } from "./hooks/useSessionMessageStream";
 export { useSessionReconnect } from "./hooks/useSessionReconnect";
 export { useSessionStreaming } from "./hooks/useSessionStreaming";
 export { createChatSlice, type ChatSlice, type ChatSliceSetter } from "./store";
-export { applyStreamEvent } from "./stream-events";
+export { applyActiveTurnSnapshot, applyStreamEvent } from "./stream-events";

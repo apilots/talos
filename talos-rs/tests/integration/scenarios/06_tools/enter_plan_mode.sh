@@ -57,7 +57,6 @@ import os
 
 payload = {
     "input": [{"type": "text", "text": os.environ["INPUT_TEXT"]}],
-    "stream": False,
     "workspace_id": None,
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -99,10 +98,7 @@ echo "CASE enter_plan_mode_create_session PASS session_id=${session_id}"
 
 enter_input="You must call tool 'EnterPlanMode' exactly once with reason Need explicit planning. After the tool call, respond with exactly ENTER_PLAN_MODE_OK"
 enter_payload="$(build_payload "${enter_input}")"
-enter_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${enter_payload}")"
+enter_json="$(send_message_response "${session_id}" "${enter_payload}" "enter")"
 log_case_json "tool_enter_plan_mode" "${enter_payload}" "${enter_json}"
 
 enter_output="$(extract_output_text "${enter_json}")"

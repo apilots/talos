@@ -21,7 +21,7 @@ pub trait GatewayClient: Send + Sync {
     ) -> TalosResult<TalosSession>;
     async fn compact_session(&self, session_id: &str) -> TalosResult<TalosSession>;
     async fn clear_session(&self, session_id: &str) -> TalosResult<TalosSession>;
-    async fn send_message_stream(
+    async fn send_message_events(
         &self,
         session_id: &str,
         request: &TalosMessageRequest,
@@ -80,12 +80,12 @@ impl GatewayClient for TalosClient {
         TalosClient::clear_session(self, session_id).await
     }
 
-    async fn send_message_stream(
+    async fn send_message_events(
         &self,
         session_id: &str,
         request: &TalosMessageRequest,
     ) -> TalosResult<mpsc::Receiver<TalosEvent>> {
-        TalosClient::send_message_stream(self, session_id, request).await
+        TalosClient::send_message_events(self, session_id, request).await
     }
 
     async fn submit_tool_approval(

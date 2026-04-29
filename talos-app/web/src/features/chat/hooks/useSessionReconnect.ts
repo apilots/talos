@@ -4,13 +4,21 @@ import { useSessionQueryInvalidation } from "./useSessionQueryInvalidation";
 import { useAppStore } from "@/shared/store/app-store";
 import type { StreamSessionState } from "@/shared/types/ui";
 
+const RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000, 12_000] as const;
+
+function reconnectDelayMs(attempt: number) {
+  return RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)];
+}
+
 export function useSessionReconnect({
   hasActiveConnection,
+  reconnectMessage,
   serverMessageCount,
   sessionId,
   streamState,
 }: {
   hasActiveConnection: () => boolean;
+  reconnectMessage: (messageId: string) => Promise<void>;
   serverMessageCount?: number;
   sessionId: string;
   streamState?: StreamSessionState;
@@ -19,13 +27,13 @@ export function useSessionReconnect({
   const { connectionKey, invalidateSessionQueries, queryClient } = useSessionQueryInvalidation(sessionId);
 
   useEffect(() => {
-    if (!streamState?.isStreaming || streamState.pendingApproval) {
+    if (!streamState?.isStreaming || streamState.pendingUserAction || streamState.pendingApproval) {
       return;
     }
 
     const timeoutId = window.setTimeout(() => {
       const currentStream = useAppStore.getState().streams[sessionId];
-      if (!currentStream?.isStreaming || currentStream.pendingApproval) {
+      if (!currentStream?.isStreaming || currentStream.pendingUserAction || currentStream.pendingApproval) {
         return;
       }
       if (currentStream.connectionState === "cancelling") {
@@ -37,6 +45,8 @@ export function useSessionReconnect({
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: true,
         connectionState: "detached",
+        reconnectAttempt: 0,
+        showReconnectControls: false,
       });
       useAppStore.getState().setSessionStatus(sessionId, "running");
     }, 350);
@@ -47,6 +57,7 @@ export function useSessionReconnect({
     sessionId,
     streamState?.connectionState,
     streamState?.isStreaming,
+    streamState?.pendingUserAction,
     streamState?.pendingApproval,
   ]);
 
@@ -86,6 +97,7 @@ export function useSessionReconnect({
     }
 
     let disposed = false;
+    const attempt = streamState.reconnectAttempt ?? 0;
     const refresh = async () => {
       await invalidateSessionQueries();
 
@@ -97,23 +109,68 @@ export function useSessionReconnect({
       if (!currentStream?.isStreaming) {
         return;
       }
-      if (currentStream.connectionState === "reconnecting") {
+      if (hasActiveConnection()) {
+        return;
+      }
+      if ((currentStream.reconnectAttempt ?? 0) >= RECONNECT_DELAYS_MS.length) {
         useAppStore.getState().setStreamMeta(sessionId, {
           connectionState: "detached",
+          showReconnectControls: true,
+        });
+        return;
+      }
+      if (
+        currentStream.activeMessageId &&
+        !currentStream.pendingUserAction &&
+        !currentStream.pendingApproval
+      ) {
+        const nextAttempt = (currentStream.reconnectAttempt ?? 0) + 1;
+        useAppStore.getState().setStreamMeta(sessionId, {
+          connectionState: "reconnecting",
+          reconnectAttempt: nextAttempt,
+          showReconnectControls: false,
+        });
+        try {
+          await reconnectMessage(currentStream.activeMessageId);
+          return;
+        } catch {
+          if (disposed) {
+            return;
+          }
+          const failedStream = useAppStore.getState().streams[sessionId];
+          const exhausted = (failedStream?.reconnectAttempt ?? nextAttempt) >= RECONNECT_DELAYS_MS.length;
+          useAppStore.getState().setStreamMeta(sessionId, {
+            connectionState: "detached",
+            showReconnectControls: exhausted,
+          });
+          return;
+        }
+      }
+      if (currentStream.connectionState === "reconnecting") {
+        const exhausted = (currentStream.reconnectAttempt ?? 0) >= RECONNECT_DELAYS_MS.length;
+        useAppStore.getState().setStreamMeta(sessionId, {
+          connectionState: "detached",
+          showReconnectControls: exhausted,
         });
       }
     };
-
-    void refresh();
-    const intervalId = window.setInterval(() => {
+    const timeoutId = window.setTimeout(() => {
       void refresh();
-    }, 4_000);
+    }, reconnectDelayMs(attempt));
 
     return () => {
       disposed = true;
-      window.clearInterval(intervalId);
+      window.clearTimeout(timeoutId);
     };
-  }, [invalidateSessionQueries, sessionId, streamState?.connectionState, streamState?.isStreaming]);
+  }, [
+    hasActiveConnection,
+    invalidateSessionQueries,
+    reconnectMessage,
+    sessionId,
+    streamState?.connectionState,
+    streamState?.isStreaming,
+    streamState?.reconnectAttempt,
+  ]);
 
   return {
     retryStream: async () => {
@@ -122,7 +179,14 @@ export function useSessionReconnect({
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: true,
         connectionState: "reconnecting",
+        reconnectAttempt: 0,
+        showReconnectControls: false,
       });
+      const currentStream = useAppStore.getState().streams[sessionId];
+      if (currentStream?.activeMessageId) {
+        await reconnectMessage(currentStream.activeMessageId);
+        return;
+      }
       await invalidateSessionQueries();
     },
   };

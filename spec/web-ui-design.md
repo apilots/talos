@@ -1718,14 +1718,11 @@ pub enum AgentTrigger { Autonomous, User }
 
 路由已存在，但结构或语义存在差异，需后端配合调整后前端再对接：
 
-#### `POST /v1/sessions/{id}/messages`（流式行为）
+#### `POST /v1/sessions/{id}/messages`（执行观察）
 
-- **现状**：支持 `{ stream: true }` 参数，返回 inline request-bound SSE 流，连接随响应结束而关闭。
-- **差异**：Spec 定义了独立的持久化 Transcript 流（`GET /v1/sessions/{id}/stream`），
-  前端 SSE 客户端应使用持久化流，而非绑定在 POST 响应上。
-- **建议**：POST messages 继续返回 `{ request_id, ... }` JSON 响应（`stream: false` 或不传），
-  流式内容通过独立的 `GET /v1/sessions/{id}/stream` 推送。
-  后端可保留 inline stream 作为过渡（已有 TUI 依赖），但前端 MVP 直接使用独立流。
+- **现状**：POST 只返回 `{ request_id, message_id, turn_id, status }` ack。
+- **事件流**：运行态渲染通过 `GET /v1/sessions/{id}/events?after_event_id=...` 获取。
+- **恢复**：前端保存最后消费的 `event_id`，刷新或断线后按 cursor 增量 replay。
 
 #### `PATCH /v1/sessions/{id}`（结构变更）
 

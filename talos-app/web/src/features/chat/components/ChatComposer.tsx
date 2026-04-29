@@ -275,7 +275,7 @@ export function ChatComposer({
         </div>
 
         {/* Bottom toolbar */}
-        <div className="flex items-center gap-1 px-3 pb-3 pt-1.5">
+        <div className="flex flex-wrap items-center gap-1 px-3 pb-3 pt-1.5">
           <button
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border/70 text-muted outline-none transition hover:border-brand/40 hover:text-brand focus:outline-none"
             type="button"
@@ -293,7 +293,7 @@ export function ChatComposer({
             <option value="skip">{t("chat:fullAccess")}</option>
           </InlineSelect>
 
-          <div className="flex-1" />
+          <div className="min-w-4 flex-1" />
 
           {/* Model + Reasoning — non-compact only */}
           {!compact && (
@@ -319,7 +319,7 @@ export function ChatComposer({
 
         {/* Bottom context row — project picker + runtime mode */}
         <div className="border-t border-border/50">
-          <div className="flex items-center gap-1 px-3">
+          <div className="flex flex-wrap items-center gap-1 px-3">
             {showCollapsibleProject && (
               <>
                 <button

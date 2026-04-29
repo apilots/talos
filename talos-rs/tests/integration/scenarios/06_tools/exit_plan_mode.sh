@@ -57,7 +57,6 @@ import os
 
 payload = {
     "input": [{"type": "text", "text": os.environ["INPUT_TEXT"]}],
-    "stream": False,
     "workspace_id": None,
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -99,10 +98,7 @@ echo "CASE exit_plan_mode_create_session PASS session_id=${session_id}"
 
 enter_input="You must call tool 'EnterPlanMode' exactly once with reason Need explicit planning. After the tool call, respond with exactly PLAN_ENTERED"
 enter_payload="$(build_payload "${enter_input}")"
-enter_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${enter_payload}")"
+enter_json="$(send_message_response "${session_id}" "${enter_payload}" "enter")"
 log_case_json "seed_enter_plan_mode_before_exit" "${enter_payload}" "${enter_json}"
 
 enter_output="$(extract_output_text "${enter_json}")"
@@ -117,10 +113,7 @@ fi
 
 plan_input="You are now in plan mode. Respond with exactly two concise numbered steps for validating tool coverage, then end with PLAN_READY."
 plan_payload="$(build_payload "${plan_input}")"
-plan_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${plan_payload}")"
+plan_json="$(send_message_response "${session_id}" "${plan_payload}" "plan")"
 log_case_json "seed_plan_content_before_exit" "${plan_payload}" "${plan_json}"
 
 plan_output="$(extract_output_text "${plan_json}")"
@@ -135,10 +128,7 @@ fi
 
 exit_input="You must call tool 'ExitPlanMode' exactly once with summary exactly \"Planning finished\". After the tool call, respond with exactly EXIT_PLAN_MODE_OK"
 exit_payload="$(build_payload "${exit_input}")"
-exit_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${exit_payload}")"
+exit_json="$(send_message_response "${session_id}" "${exit_payload}" "exit")"
 log_case_json "tool_exit_plan_mode" "${exit_payload}" "${exit_json}"
 
 exit_output="$(extract_output_text "${exit_json}")"

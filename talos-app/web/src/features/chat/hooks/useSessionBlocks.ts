@@ -23,6 +23,7 @@ export function useSessionBlocks({
       liveBlocks.length > 0 ||
       (streamState?.isStreaming ?? false) ||
       Boolean(streamState?.error) ||
+      Boolean(streamState?.pendingUserAction) ||
       Boolean(streamState?.pendingApproval);
     const nextBlocks = [...historyBlocks, ...(shouldShowLiveBlocks ? liveBlocks : [])];
     const hasLiveResponse = liveBlocks.some(
@@ -35,6 +36,7 @@ export function useSessionBlocks({
     const shouldShowWaitingPlaceholder =
       Boolean(streamState?.isStreaming) &&
       !streamState?.pendingApproval &&
+      !streamState?.pendingUserAction &&
       !streamState?.error &&
       !hasLiveResponse &&
       streamState?.connectionState !== "cancelling" &&
@@ -70,6 +72,7 @@ export function useSessionBlocks({
     streamState?.connectionState,
     streamState?.error,
     streamState?.isStreaming,
+    streamState?.pendingUserAction,
     streamState?.pendingApproval,
     t,
     turns,

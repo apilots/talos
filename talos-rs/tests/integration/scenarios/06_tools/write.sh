@@ -71,7 +71,6 @@ import os
 
 payload = {
     "input": [{"type": "text", "text": os.environ["INPUT_TEXT"]}],
-    "stream": False,
     "workspace_id": None,
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -113,10 +112,7 @@ echo "CASE write_create_session PASS session_id=${session_id}"
 
 write_input="You must call tool 'Write' exactly once to create notes/write_target.txt with content ${WRITE_MARKER}. After the tool call, respond with exactly WRITE_OK:${WRITE_MARKER}"
 write_payload="$(build_payload "${write_input}")"
-write_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${write_payload}")"
+write_json="$(send_message_response "${session_id}" "${write_payload}" "write")"
 log_case_json "tool_write" "${write_payload}" "${write_json}"
 
 write_output="$(extract_output_text "${write_json}")"

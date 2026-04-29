@@ -7,6 +7,7 @@ import type {
   TalosContext,
   TalosEvent,
   TalosMessageRequest,
+  TalosMessageRetryRequest,
   TalosMessageResponse,
   TalosSession,
   ToolApprovalRequest,
@@ -181,6 +182,10 @@ export async function clearSession(sessionId: string) {
   return getTalosClient().sessions.clear(sessionId);
 }
 
+export async function getActiveTurn(sessionId: string) {
+  return getTalosClient().sessions.activeTurn(sessionId);
+}
+
 export async function sendMessage(sessionId: string, text: string) {
   const request: TalosMessageRequest = {
     input: [{ type: "text", text }],
@@ -188,7 +193,7 @@ export async function sendMessage(sessionId: string, text: string) {
   return getTalosClient().messages.send(sessionId, request);
 }
 
-export async function sendMessageStream(
+export async function sendMessageEvents(
   sessionId: string,
   text: string,
   onEvent: (event: TalosEvent) => void,
@@ -197,7 +202,25 @@ export async function sendMessageStream(
   const request: TalosMessageRequest = {
     input: [{ type: "text", text }],
   };
-  return getTalosClient().messages.sendStream(sessionId, request, onEvent, signal);
+  return getTalosClient().messages.sendEvents(sessionId, request, onEvent, signal);
+}
+
+export async function retryMessageEvents(
+  sessionId: string,
+  request: TalosMessageRetryRequest,
+  onEvent: (event: TalosEvent) => void,
+  signal?: AbortSignal,
+) {
+  return getTalosClient().messages.retryEvents(sessionId, request, onEvent, signal);
+}
+
+export async function subscribeSessionEventsForMessage(
+  sessionId: string,
+  messageId: string,
+  onEvent: (event: TalosEvent) => void,
+  signal?: AbortSignal,
+) {
+  return getTalosClient().messages.eventsForMessage(sessionId, messageId, onEvent, signal);
 }
 
 export async function submitToolApproval(
@@ -216,5 +239,6 @@ export function belongsToProject(session: TalosSession, project?: ProjectRecord)
 
 export type ChatApiModel = ModelInfo;
 export type ChatApiSession = TalosSession;
+export type ChatApiActiveTurn = Awaited<ReturnType<typeof getActiveTurn>>;
 export type ChatApiSessionDetail = TalosSession;
 export type ChatApiTurns = TalosMessageResponse[];

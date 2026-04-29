@@ -11,6 +11,13 @@ use talos_auth::{
 };
 use talos_gateway::GatewayRequest;
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
+use talos_session_store::{
+    ActiveTurnRecord, ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, IdempotencyRecord,
+    IdempotencyReservation, IdempotencyStatus, MessageCommandAck, MessageIdempotencyStore,
+    NewSessionEvent, PendingDynamicToolResult, PendingToolApproval, PendingUserAction,
+    SessionEventId, SessionEventRecord, SessionEventRetentionConfig, SessionEventService,
+    SessionEventStore,
+};
 use talos_types::talos::{
     StopReason, TalosContext, TalosEvent, TalosEventPayload, TalosEventType, TalosInputItem,
     TalosMessageCompletedEvent, TalosMessageOutputDeltaEvent, TalosMessageRequest,
@@ -25,12 +32,16 @@ use tower::util::ServiceExt;
 use crate::server::admin_users::{
     delete_admin_session_handler, get_admin_llm_handler, list_admin_sessions_handler,
 };
-use crate::server::messages::{process_session_message, stream_session_message};
+use crate::server::events::{get_active_turn_handler, subscribe_session_events_handler};
+use crate::server::messages::{
+    retry_message_attempt_handler, session_message_handler, submit_message_command,
+};
 use crate::server::user_profile::{
     create_user_token_handler, list_admin_users_handler, list_user_tokens_handler,
 };
 
 struct MockGateway;
+struct SilentGateway;
 struct MockSessionService;
 struct MockLlmProvider;
 
@@ -63,9 +74,12 @@ fn isolated_test_config() -> (talos_types::TalosConfig, std::path::PathBuf) {
 
 fn test_state(auth_disabled: bool) -> Arc<HttpApiState> {
     let (auth_service, user_service) = test_auth_services();
+    let event_store = Arc::new(RecordingEventStore::default());
     Arc::new(HttpApiState::new(
         Arc::new(MockGateway),
         Arc::new(MockSessionService),
+        event_service_from_store(event_store.clone()),
+        event_store,
         test_config(),
         Arc::new(MockLlmProvider),
         auth_service,
@@ -81,9 +95,12 @@ fn test_state_with_config(
     auth_disabled: bool,
 ) -> Arc<HttpApiState> {
     let (auth_service, user_service) = test_auth_services();
+    let event_store = Arc::new(RecordingEventStore::default());
     Arc::new(HttpApiState::new(
         Arc::new(MockGateway),
         Arc::new(MockSessionService),
+        event_service_from_store(event_store.clone()),
+        event_store,
         config,
         Arc::new(MockLlmProvider),
         auth_service,
@@ -92,6 +109,262 @@ fn test_state_with_config(
         auth_disabled,
         vec![test_model_info()],
     ))
+}
+
+fn test_event_service() -> Arc<SessionEventService> {
+    let store = Arc::new(RecordingEventStore::default());
+    event_service_from_store(store)
+}
+
+fn event_service_from_store(store: Arc<RecordingEventStore>) -> Arc<SessionEventService> {
+    let event_store: Arc<dyn SessionEventStore> = store.clone();
+    let active_turn_store: Arc<dyn ActiveTurnStore> = store;
+    Arc::new(SessionEventService::new(
+        event_store,
+        active_turn_store,
+        SessionEventRetentionConfig::default(),
+    ))
+}
+
+fn test_state_with_event_store(
+    auth_disabled: bool,
+    store: Arc<RecordingEventStore>,
+) -> Arc<HttpApiState> {
+    test_state_with_gateway_event_store_config(
+        Arc::new(MockGateway),
+        auth_disabled,
+        store,
+        test_config(),
+    )
+}
+
+fn test_state_with_gateway_event_store_config(
+    gateway: Arc<dyn Gateway>,
+    auth_disabled: bool,
+    store: Arc<RecordingEventStore>,
+    config: talos_types::TalosConfig,
+) -> Arc<HttpApiState> {
+    let (auth_service, user_service) = test_auth_services();
+    Arc::new(HttpApiState::new(
+        gateway,
+        Arc::new(MockSessionService),
+        event_service_from_store(store.clone()),
+        store,
+        config,
+        Arc::new(MockLlmProvider),
+        auth_service,
+        user_service,
+        "test-secret".to_string(),
+        auth_disabled,
+        vec![test_model_info()],
+    ))
+}
+
+#[derive(Default)]
+struct RecordingEventStore {
+    events: std::sync::Mutex<Vec<SessionEventRecord>>,
+    active_turns: std::sync::Mutex<std::collections::HashMap<String, ActiveTurnRecord>>,
+    idempotency_records:
+        std::sync::Mutex<std::collections::HashMap<(String, String), IdempotencyRecord>>,
+}
+
+#[async_trait::async_trait]
+impl SessionEventStore for RecordingEventStore {
+    async fn append_event(&self, event: NewSessionEvent) -> TalosResult<SessionEventRecord> {
+        let mut events = self.events.lock().unwrap();
+        let event_seq = (events.len() as i64) + 1;
+        let record = SessionEventRecord {
+            event_seq,
+            event_id: SessionEventId::from_seq(event_seq),
+            session_id: event.session_id,
+            turn_id: event.turn_id,
+            message_id: event.message_id,
+            sequence: event.sequence,
+            event_type: event.event_type,
+            payload: event.payload,
+            created_at: event.created_at,
+        };
+        events.push(record.clone());
+        Ok(record)
+    }
+
+    async fn list_events_after(
+        &self,
+        session_id: &str,
+        after_event_id: Option<&SessionEventId>,
+        limit: usize,
+    ) -> TalosResult<Vec<SessionEventRecord>> {
+        let after = match after_event_id {
+            Some(event_id) => event_id.event_seq()?,
+            None => 0,
+        };
+        Ok(self
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event.session_id == session_id && event.event_seq > after)
+            .take(limit)
+            .cloned()
+            .collect())
+    }
+
+    async fn latest_event_id(&self, session_id: &str) -> TalosResult<Option<SessionEventId>> {
+        Ok(self
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|event| event.session_id == session_id)
+            .map(|event| event.event_id.clone()))
+    }
+
+    async fn oldest_event_id(&self, session_id: &str) -> TalosResult<Option<SessionEventId>> {
+        Ok(self
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|event| event.session_id == session_id)
+            .map(|event| event.event_id.clone()))
+    }
+
+    async fn delete_completed_events_before(
+        &self,
+        _before_timestamp_ms: i64,
+        _limit: usize,
+    ) -> TalosResult<u64> {
+        Ok(0)
+    }
+
+    async fn delete_overflow_events_per_session(
+        &self,
+        _max_events_per_session: usize,
+        _limit: usize,
+    ) -> TalosResult<u64> {
+        Ok(0)
+    }
+}
+
+#[async_trait::async_trait]
+impl ActiveTurnStore for RecordingEventStore {
+    async fn upsert_active_turn(&self, update: ActiveTurnUpdate) -> TalosResult<()> {
+        self.active_turns.lock().unwrap().insert(
+            update.session_id.clone(),
+            ActiveTurnRecord {
+                session_id: update.session_id,
+                turn_id: update.turn_id,
+                message_id: update.message_id,
+                status: update.status,
+                last_event_id: update.last_event_id,
+                pending_user_action: update.pending_user_action,
+                updated_at: update.updated_at,
+            },
+        );
+        Ok(())
+    }
+
+    async fn get_active_turn(&self, session_id: &str) -> TalosResult<Option<ActiveTurnRecord>> {
+        Ok(self.active_turns.lock().unwrap().get(session_id).cloned())
+    }
+
+    async fn clear_active_turn(&self, session_id: &str) -> TalosResult<()> {
+        self.active_turns.lock().unwrap().remove(session_id);
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl MessageIdempotencyStore for RecordingEventStore {
+    async fn get(
+        &self,
+        session_id: &str,
+        idempotency_key: &str,
+    ) -> TalosResult<Option<IdempotencyRecord>> {
+        Ok(self
+            .idempotency_records
+            .lock()
+            .unwrap()
+            .get(&(session_id.to_string(), idempotency_key.to_string()))
+            .cloned())
+    }
+
+    async fn reserve(
+        &self,
+        session_id: &str,
+        idempotency_key: &str,
+        request_hash: &str,
+        turn_id: &str,
+        now_ms: i64,
+        expires_at_ms: Option<i64>,
+    ) -> TalosResult<IdempotencyReservation> {
+        let mut records = self.idempotency_records.lock().unwrap();
+        let key = (session_id.to_string(), idempotency_key.to_string());
+        if let Some(record) = records.get(&key) {
+            if record
+                .expires_at
+                .is_some_and(|expires_at| expires_at <= now_ms)
+            {
+                records.remove(&key);
+            } else {
+                return Ok(IdempotencyReservation::Existing(record.clone()));
+            }
+        }
+        let record = IdempotencyRecord {
+            session_id: session_id.to_string(),
+            idempotency_key: idempotency_key.to_string(),
+            request_hash: request_hash.to_string(),
+            turn_id: turn_id.to_string(),
+            message_id: None,
+            status: IdempotencyStatus::Pending,
+            ack: None,
+            created_at: now_ms,
+            updated_at: now_ms,
+            expires_at: expires_at_ms,
+        };
+        records.insert(key, record.clone());
+        Ok(IdempotencyReservation::Reserved(record))
+    }
+
+    async fn complete(
+        &self,
+        session_id: &str,
+        idempotency_key: &str,
+        status: IdempotencyStatus,
+        message_id: Option<&str>,
+        ack: &MessageCommandAck,
+        now_ms: i64,
+    ) -> TalosResult<()> {
+        let mut records = self.idempotency_records.lock().unwrap();
+        let key = (session_id.to_string(), idempotency_key.to_string());
+        if let Some(record) = records.get_mut(&key) {
+            record.status = status;
+            record.message_id = message_id.map(ToString::to_string);
+            record.ack = Some(ack.clone());
+            record.updated_at = now_ms;
+        }
+        Ok(())
+    }
+
+    async fn mark_stale_pending_failed(
+        &self,
+        older_than_ms: i64,
+        limit: usize,
+    ) -> TalosResult<u64> {
+        let mut changed = 0;
+        let mut records = self.idempotency_records.lock().unwrap();
+        for record in records.values_mut() {
+            if changed >= limit {
+                break;
+            }
+            if record.status == IdempotencyStatus::Pending && record.updated_at < older_than_ms {
+                record.status = IdempotencyStatus::FailedNoFirstEvent;
+                changed += 1;
+            }
+        }
+        Ok(changed as u64)
+    }
 }
 
 fn test_auth_services() -> (Arc<dyn AuthService>, Arc<dyn UserService>) {
@@ -283,6 +556,36 @@ impl Gateway for MockGateway {
                 }),
             };
             let _ = tx.send(completed).await;
+        });
+        Ok(rx)
+    }
+
+    async fn start(&self) -> TalosResult<()> {
+        Ok(())
+    }
+
+    async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl Gateway for SilentGateway {
+    async fn handle_request(
+        &self,
+        _request: GatewayRequest,
+    ) -> TalosResult<talos_gateway::GatewayResponse> {
+        unreachable!("silent gateway is only used by async stream tests")
+    }
+
+    async fn handle_request_stream(
+        &self,
+        _request: GatewayRequest,
+    ) -> TalosResult<tokio::sync::mpsc::Receiver<TalosEvent>> {
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            drop(tx);
         });
         Ok(rx)
     }
@@ -912,6 +1215,8 @@ fn test_http_server_listen_addr_uses_configured_host() {
     let server = HttpServer::new(
         Arc::new(MockGateway),
         Arc::new(MockSessionService),
+        test_event_service(),
+        Arc::new(RecordingEventStore::default()),
         auth_service,
         user_service,
         test_config(),
@@ -1032,6 +1337,8 @@ async fn test_lifecycle_gate_rejects_new_requests_when_quiescing() {
     let state = Arc::new(HttpApiState::new_with_lifecycle(
         Arc::new(MockGateway),
         Arc::new(MockSessionService),
+        test_event_service(),
+        Arc::new(RecordingEventStore::default()),
         test_config(),
         Arc::new(MockLlmProvider),
         auth_service,
@@ -1075,6 +1382,8 @@ async fn test_lifecycle_gate_allows_health_when_quiescing() {
     let state = Arc::new(HttpApiState::new_with_lifecycle(
         Arc::new(MockGateway),
         Arc::new(MockSessionService),
+        test_event_service(),
+        Arc::new(RecordingEventStore::default()),
         test_config(),
         Arc::new(MockLlmProvider),
         auth_service,
@@ -1107,18 +1416,18 @@ async fn test_lifecycle_gate_allows_health_when_quiescing() {
 }
 
 #[tokio::test]
-async fn test_process_session_message() {
-    let state = test_state(false);
+async fn test_submit_message_command_returns_async_ack() {
+    let event_store = Arc::new(RecordingEventStore::default());
+    let state = test_state_with_event_store(false, event_store.clone());
 
     let request = TalosMessageRequest {
         input: vec![TalosInputItem::Text {
             text: "hello".to_string(),
         }],
-        stream: Some(false),
         workspace_id: None,
     };
 
-    let result = process_session_message(
+    let result = submit_message_command(
         state,
         test_auth(),
         HeaderMap::new(),
@@ -1129,38 +1438,674 @@ async fn test_process_session_message() {
     .expect("message should be processed");
 
     assert_eq!(result.session_id, "mock-session");
-    assert_eq!(result.stop_reason, talos_types::talos::StopReason::EndTurn);
-    assert_eq!(result.reasoning.len(), 1);
-    assert!(matches!(
-        result.output.first(),
-        Some(TalosOutputItem::OutputText { text }) if text == "mock content"
-    ));
+    assert_eq!(result.message_id.as_deref(), Some("msg_mock"));
+    assert_eq!(result.status, IdempotencyStatus::Accepted);
+    assert!(result.turn_id.starts_with("turn_"));
+
+    let recorded = event_store.events.lock().unwrap().clone();
+    assert!(!recorded.is_empty());
+    assert_eq!(recorded[0].event_type, TalosEventType::MessageStarted);
+    assert_eq!(recorded[0].message_id, "msg_mock");
 }
 
 #[tokio::test]
-async fn test_stream_session_message_uses_gateway_stream_path() {
-    let state = test_state(false);
+async fn test_session_message_handler_reuses_idempotent_ack() {
+    let event_store = Arc::new(RecordingEventStore::default());
+    let state = test_state_with_event_store(false, event_store.clone());
+    let app = Router::new()
+        .route(
+            "/v1/sessions/:session_id/messages",
+            post(session_message_handler),
+        )
+        .layer(axum::Extension(test_auth()))
+        .with_state(state);
+    let body = serde_json::json!({
+        "input": [{ "type": "text", "text": "hello" }]
+    })
+    .to_string();
 
+    let first = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/sessions/mock-session/messages")
+                .header("content-type", "application/json")
+                .header("idempotency-key", "idem-1")
+                .body(Body::from(body.clone()))
+                .expect("request should build"),
+        )
+        .await
+        .expect("first request should succeed");
+    assert_eq!(first.status(), StatusCode::ACCEPTED);
+    let first_body = axum::body::to_bytes(first.into_body(), usize::MAX)
+        .await
+        .expect("first body should be readable");
+    let first_payload: Value =
+        serde_json::from_slice(&first_body).expect("first payload should be json");
+
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    let recorded_before = event_store.events.lock().unwrap().len();
+
+    let second = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/sessions/mock-session/messages")
+                .header("content-type", "application/json")
+                .header("idempotency-key", "idem-1")
+                .body(Body::from(body))
+                .expect("request should build"),
+        )
+        .await
+        .expect("second request should succeed");
+    assert_eq!(second.status(), StatusCode::ACCEPTED);
+    let second_body = axum::body::to_bytes(second.into_body(), usize::MAX)
+        .await
+        .expect("second body should be readable");
+    let second_payload: Value =
+        serde_json::from_slice(&second_body).expect("second payload should be json");
+
+    assert_eq!(first_payload["turn_id"], second_payload["turn_id"]);
+    assert_eq!(first_payload["message_id"], second_payload["message_id"]);
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    assert_eq!(event_store.events.lock().unwrap().len(), recorded_before);
+}
+
+#[tokio::test]
+async fn test_session_message_handler_rejects_idempotency_hash_conflict() {
+    let event_store = Arc::new(RecordingEventStore::default());
+    let state = test_state_with_event_store(false, event_store);
+    let app = Router::new()
+        .route(
+            "/v1/sessions/:session_id/messages",
+            post(session_message_handler),
+        )
+        .layer(axum::Extension(test_auth()))
+        .with_state(state);
+
+    let first_body = serde_json::json!({
+        "input": [{ "type": "text", "text": "hello" }]
+    })
+    .to_string();
+    let second_body = serde_json::json!({
+        "input": [{ "type": "text", "text": "different" }]
+    })
+    .to_string();
+
+    let first = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/sessions/mock-session/messages")
+                .header("content-type", "application/json")
+                .header("idempotency-key", "idem-conflict")
+                .body(Body::from(first_body))
+                .expect("request should build"),
+        )
+        .await
+        .expect("first request should succeed");
+    assert_eq!(first.status(), StatusCode::ACCEPTED);
+
+    let second = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/sessions/mock-session/messages")
+                .header("content-type", "application/json")
+                .header("idempotency-key", "idem-conflict")
+                .body(Body::from(second_body))
+                .expect("request should build"),
+        )
+        .await
+        .expect("second request should succeed");
+
+    assert_eq!(second.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn test_submit_message_command_timeout_stores_failed_idempotency() {
+    let event_store = Arc::new(RecordingEventStore::default());
+    let mut config = test_config();
+    config.agent.kernel.session_events.first_event_timeout_ms = 1;
+    let state = test_state_with_gateway_event_store_config(
+        Arc::new(SilentGateway),
+        false,
+        event_store,
+        config,
+    );
     let request = TalosMessageRequest {
         input: vec![TalosInputItem::Text {
             text: "hello".to_string(),
         }],
-        stream: Some(true),
         workspace_id: None,
     };
+    let mut headers = HeaderMap::new();
+    headers.insert("idempotency-key", "timeout-key".parse().unwrap());
 
-    let response = stream_session_message(state, test_auth(), "mock-session".to_string(), request)
-        .await
-        .expect("stream message should succeed");
+    let err = submit_message_command(
+        state.clone(),
+        test_auth(),
+        headers.clone(),
+        "mock-session".to_string(),
+        request.clone(),
+    )
+    .await
+    .expect_err("first request should timeout");
+    assert_eq!(err.into_response().status(), StatusCode::GATEWAY_TIMEOUT);
 
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+    let retry = submit_message_command(
+        state,
+        test_auth(),
+        headers,
+        "mock-session".to_string(),
+        request,
+    )
+    .await
+    .expect("retry should return failed terminal ack");
+    assert_eq!(retry.status, IdempotencyStatus::FailedNoFirstEvent);
+    assert!(retry.message_id.is_some());
+}
+
+#[tokio::test]
+async fn test_retry_message_attempt_rejects_running_active_turn() {
+    let event_store = Arc::new(RecordingEventStore::default());
+    event_store.active_turns.lock().unwrap().insert(
+        "mock-session".to_string(),
+        ActiveTurnRecord {
+            session_id: "mock-session".to_string(),
+            turn_id: "turn-running".to_string(),
+            message_id: Some("msg-running".to_string()),
+            status: ActiveTurnStatus::Running,
+            last_event_id: Some(SessionEventId::from_seq(3)),
+            pending_user_action: None,
+            updated_at: 123,
+        },
+    );
+    let state = test_state_with_event_store(false, event_store);
+    let app = Router::new()
+        .route(
+            "/v1/sessions/:session_id/message-attempts",
+            post(retry_message_attempt_handler),
+        )
+        .layer(axum::Extension(test_auth()))
+        .with_state(state);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/sessions/mock-session/message-attempts")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "client_message_id": "client-1",
+                        "retry_of_message_id": "msg-running",
+                        "input": [{"type": "text", "text": "retry"}],
+                        "workspace_id": null
+                    })
+                    .to_string(),
+                ))
+                .expect("request should build"),
+        )
         .await
-        .expect("stream body should be readable");
+        .expect("request should succeed");
+
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .expect("error body should be readable");
+    let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
+    assert_eq!(payload["code"], "retry_active_turn_running");
+}
+
+#[tokio::test]
+async fn test_retry_message_attempt_rejects_completed_active_turn() {
+    let event_store = Arc::new(RecordingEventStore::default());
+    event_store.active_turns.lock().unwrap().insert(
+        "mock-session".to_string(),
+        ActiveTurnRecord {
+            session_id: "mock-session".to_string(),
+            turn_id: "turn-completed".to_string(),
+            message_id: Some("msg-completed".to_string()),
+            status: ActiveTurnStatus::Completed,
+            last_event_id: Some(SessionEventId::from_seq(4)),
+            pending_user_action: None,
+            updated_at: 124,
+        },
+    );
+    let state = test_state_with_event_store(false, event_store);
+    let app = Router::new()
+        .route(
+            "/v1/sessions/:session_id/message-attempts",
+            post(retry_message_attempt_handler),
+        )
+        .layer(axum::Extension(test_auth()))
+        .with_state(state);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/sessions/mock-session/message-attempts")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "client_message_id": "client-1",
+                        "retry_of_message_id": "msg-completed",
+                        "input": [{"type": "text", "text": "retry"}],
+                        "workspace_id": null
+                    })
+                    .to_string(),
+                ))
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .expect("error body should be readable");
+    let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
+    assert_eq!(payload["code"], "retry_source_completed");
+}
+
+#[tokio::test]
+async fn test_retry_message_attempt_allows_failed_active_turn() {
+    let event_store = Arc::new(RecordingEventStore::default());
+    event_store.active_turns.lock().unwrap().insert(
+        "mock-session".to_string(),
+        ActiveTurnRecord {
+            session_id: "mock-session".to_string(),
+            turn_id: "turn-failed".to_string(),
+            message_id: Some("msg-failed".to_string()),
+            status: ActiveTurnStatus::Failed,
+            last_event_id: Some(SessionEventId::from_seq(5)),
+            pending_user_action: None,
+            updated_at: 125,
+        },
+    );
+    let state = test_state_with_event_store(false, event_store);
+    let app = Router::new()
+        .route(
+            "/v1/sessions/:session_id/message-attempts",
+            post(retry_message_attempt_handler),
+        )
+        .layer(axum::Extension(test_auth()))
+        .with_state(state);
+
+    let request_body = serde_json::json!({
+        "client_message_id": "client-1",
+        "retry_of_message_id": "msg-failed",
+        "input": [{"type": "text", "text": "retry"}],
+        "workspace_id": null
+    })
+    .to_string();
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/sessions/mock-session/message-attempts")
+                .header("content-type", "application/json")
+                .header("idempotency-key", "retry-attempt-1")
+                .body(Body::from(request_body.clone()))
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .expect("ack body should be readable");
+    let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
+    assert_eq!(payload["message_id"], "msg_mock");
+    assert_eq!(payload["status"], "accepted");
+
+    let retry_resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/sessions/mock-session/message-attempts")
+                .header("content-type", "application/json")
+                .header("idempotency-key", "ignored-client-key")
+                .body(Body::from(request_body))
+                .expect("request should build"),
+        )
+        .await
+        .expect("retry request should succeed");
+
+    assert_eq!(retry_resp.status(), StatusCode::ACCEPTED);
+    let retry_body = axum::body::to_bytes(retry_resp.into_body(), usize::MAX)
+        .await
+        .expect("retry ack body should be readable");
+    let retry_payload: Value =
+        serde_json::from_slice(&retry_body).expect("retry payload should be valid json");
+    assert_eq!(retry_payload["turn_id"], payload["turn_id"]);
+    assert_eq!(retry_payload["message_id"], payload["message_id"]);
+}
+
+#[tokio::test]
+async fn test_subscribe_session_events_replays_after_cursor() {
+    let state = test_state(false);
+    let first = state
+        .event_service
+        .record_talos_event(
+            Some("turn-1".to_string()),
+            TalosEvent {
+                event_type: TalosEventType::MessageStarted,
+                message_id: "msg-1".to_string(),
+                session_id: "mock-session".to_string(),
+                sequence: 0,
+                payload: TalosEventPayload::MessageStarted(TalosMessageStartedEvent {
+                    request_id: "req-1".to_string(),
+                    model: "qwen-plus".to_string(),
+                    usage: TalosUsage::default(),
+                    iteration: 0,
+                    step_id: "start".to_string(),
+                }),
+            },
+        )
+        .await
+        .expect("first event should record");
+    let second = state
+        .event_service
+        .record_talos_event(
+            Some("turn-1".to_string()),
+            TalosEvent {
+                event_type: TalosEventType::MessageOutputDelta,
+                message_id: "msg-1".to_string(),
+                session_id: "mock-session".to_string(),
+                sequence: 1,
+                payload: TalosEventPayload::MessageOutputDelta(TalosMessageOutputDeltaEvent {
+                    request_id: "req-1".to_string(),
+                    delta: "delta after reconnect".to_string(),
+                    item_index: 0,
+                    iteration: 1,
+                    step_id: "step-1".to_string(),
+                }),
+            },
+        )
+        .await
+        .expect("second event should record");
+    let app = Router::new()
+        .route(
+            "/v1/sessions/:session_id/events",
+            get(subscribe_session_events_handler),
+        )
+        .layer(axum::Extension(test_auth()))
+        .with_state(state);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/v1/sessions/mock-session/events?after_event_id={}",
+                    first.event_id
+                ))
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .expect("event body should be readable");
     let body_text = String::from_utf8_lossy(&body);
-    assert!(body_text.contains("stream only content"));
-    assert!(body_text.contains("event: message.tool_call.queued"));
-    assert!(body_text.contains("event: message.tool_call.executing"));
-    assert!(body_text.contains("event: message.tool_call.progress_delta"));
+    assert!(body_text.contains("event: message.output.delta"));
+    assert!(body_text.contains(second.event_id.as_str()));
+    assert!(body_text.contains("delta after reconnect"));
+    assert!(!body_text.contains("event: message.started"));
+}
+
+#[tokio::test]
+async fn test_subscribe_session_events_replay_continues_after_historical_terminal() {
+    let state = test_state(false);
+    state
+        .event_service
+        .record_talos_event(
+            Some("turn-1".to_string()),
+            TalosEvent {
+                event_type: TalosEventType::MessageCompleted,
+                message_id: "msg-1".to_string(),
+                session_id: "mock-session".to_string(),
+                sequence: 0,
+                payload: TalosEventPayload::MessageCompleted(TalosMessageCompletedEvent {
+                    request_id: "req-1".to_string(),
+                    stop_reason: StopReason::EndTurn,
+                    usage: TalosUsage::default(),
+                    total_output_items: 1,
+                    iteration: 0,
+                    step_id: "done".to_string(),
+                    task_count: 0,
+                }),
+            },
+        )
+        .await
+        .expect("historical terminal event should record");
+    let second = state
+        .event_service
+        .record_talos_event(
+            Some("turn-2".to_string()),
+            TalosEvent {
+                event_type: TalosEventType::MessageOutputDelta,
+                message_id: "msg-2".to_string(),
+                session_id: "mock-session".to_string(),
+                sequence: 0,
+                payload: TalosEventPayload::MessageOutputDelta(TalosMessageOutputDeltaEvent {
+                    request_id: "req-2".to_string(),
+                    delta: "second turn output".to_string(),
+                    item_index: 0,
+                    iteration: 0,
+                    step_id: "step-1".to_string(),
+                }),
+            },
+        )
+        .await
+        .expect("second turn event should record");
+    state
+        .event_service
+        .record_talos_event(
+            Some("turn-2".to_string()),
+            TalosEvent {
+                event_type: TalosEventType::MessageCompleted,
+                message_id: "msg-2".to_string(),
+                session_id: "mock-session".to_string(),
+                sequence: 1,
+                payload: TalosEventPayload::MessageCompleted(TalosMessageCompletedEvent {
+                    request_id: "req-2".to_string(),
+                    stop_reason: StopReason::EndTurn,
+                    usage: TalosUsage::default(),
+                    total_output_items: 1,
+                    iteration: 1,
+                    step_id: "done".to_string(),
+                    task_count: 0,
+                }),
+            },
+        )
+        .await
+        .expect("second terminal event should record");
+
+    let app = Router::new()
+        .route(
+            "/v1/sessions/:session_id/events",
+            get(subscribe_session_events_handler),
+        )
+        .layer(axum::Extension(test_auth()))
+        .with_state(state);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/sessions/mock-session/events")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .expect("event body should be readable");
+    let body_text = String::from_utf8_lossy(&body);
+    assert!(body_text.contains("event: message.completed"));
+    assert!(body_text.contains(second.event_id.as_str()));
+    assert!(body_text.contains("second turn output"));
+}
+
+#[tokio::test]
+async fn test_get_active_turn_handler_returns_active_state() {
+    let event_store = Arc::new(RecordingEventStore::default());
+    event_store.active_turns.lock().unwrap().insert(
+        "mock-session".to_string(),
+        ActiveTurnRecord {
+            session_id: "mock-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            message_id: Some("msg-1".to_string()),
+            status: ActiveTurnStatus::Running,
+            last_event_id: Some(SessionEventId::from_seq(7)),
+            pending_user_action: None,
+            updated_at: 123,
+        },
+    );
+    let state = test_state_with_event_store(false, event_store);
+    let app = Router::new()
+        .route(
+            "/v1/sessions/:session_id/active-turn",
+            get(get_active_turn_handler),
+        )
+        .layer(axum::Extension(test_auth()))
+        .with_state(state);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/sessions/mock-session/active-turn")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .expect("active turn body should be readable");
+    let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
+    assert_eq!(payload["status"], "running");
+    assert_eq!(payload["turn_id"], "turn-1");
+    assert_eq!(payload["last_event_id"], "ev_00000000000000000007");
+}
+
+#[tokio::test]
+async fn test_get_active_turn_handler_returns_pending_approval_action() {
+    let event_store = Arc::new(RecordingEventStore::default());
+    event_store.active_turns.lock().unwrap().insert(
+        "mock-session".to_string(),
+        ActiveTurnRecord {
+            session_id: "mock-session".to_string(),
+            turn_id: "turn-approval".to_string(),
+            message_id: Some("msg-approval".to_string()),
+            status: ActiveTurnStatus::WaitingUserAction,
+            last_event_id: Some(SessionEventId::from_seq(8)),
+            pending_user_action: Some(PendingUserAction::ToolApproval(PendingToolApproval {
+                call_id: "call-approval".to_string(),
+                tool_name: "Bash".to_string(),
+                prompt: "Approve command?".to_string(),
+                arguments: serde_json::json!({"cmd": "date"}),
+            })),
+            updated_at: 124,
+        },
+    );
+    let state = test_state_with_event_store(false, event_store);
+    let app = Router::new()
+        .route(
+            "/v1/sessions/:session_id/active-turn",
+            get(get_active_turn_handler),
+        )
+        .layer(axum::Extension(test_auth()))
+        .with_state(state);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/sessions/mock-session/active-turn")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .expect("active turn body should be readable");
+    let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
+    assert_eq!(payload["status"], "waiting_user_action");
+    assert_eq!(payload["pending_user_action"]["type"], "tool_approval");
+    assert_eq!(payload["pending_user_action"]["call_id"], "call-approval");
+    assert_eq!(payload["pending_user_action"]["tool_name"], "Bash");
+    assert_eq!(payload["pending_user_action"]["prompt"], "Approve command?");
+}
+
+#[tokio::test]
+async fn test_get_active_turn_handler_returns_pending_dynamic_action() {
+    let event_store = Arc::new(RecordingEventStore::default());
+    event_store.active_turns.lock().unwrap().insert(
+        "mock-session".to_string(),
+        ActiveTurnRecord {
+            session_id: "mock-session".to_string(),
+            turn_id: "turn-dynamic".to_string(),
+            message_id: Some("msg-dynamic".to_string()),
+            status: ActiveTurnStatus::WaitingUserAction,
+            last_event_id: Some(SessionEventId::from_seq(9)),
+            pending_user_action: Some(PendingUserAction::DynamicToolResult(
+                PendingDynamicToolResult {
+                    call_id: "call-dynamic".to_string(),
+                    tool_name: "ExternalTool".to_string(),
+                },
+            )),
+            updated_at: 125,
+        },
+    );
+    let state = test_state_with_event_store(false, event_store);
+    let app = Router::new()
+        .route(
+            "/v1/sessions/:session_id/active-turn",
+            get(get_active_turn_handler),
+        )
+        .layer(axum::Extension(test_auth()))
+        .with_state(state);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/sessions/mock-session/active-turn")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .expect("active turn body should be readable");
+    let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
+    assert_eq!(payload["status"], "waiting_user_action");
+    assert_eq!(
+        payload["pending_user_action"]["type"],
+        "dynamic_tool_result"
+    );
+    assert_eq!(payload["pending_user_action"]["call_id"], "call-dynamic");
+    assert_eq!(payload["pending_user_action"]["tool_name"], "ExternalTool");
 }
 
 #[tokio::test]

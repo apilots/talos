@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 
-import { sendMessageStream } from "../api";
+import { retryMessageEvents, sendMessageEvents, subscribeSessionEventsForMessage } from "../api";
 import { applyStreamEvent } from "../stream-events";
 
 export function useSessionMessageStream(sessionId: string) {
@@ -12,14 +12,14 @@ export function useSessionMessageStream(sessionId: string) {
     };
   }, []);
 
-  const streamMessage = useCallback(
+  const eventMessage = useCallback(
     async (text: string) => {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
 
       try {
-        await sendMessageStream(
+        await sendMessageEvents(
           sessionId,
           text,
           (event) => applyStreamEvent(sessionId, event),
@@ -39,11 +39,69 @@ export function useSessionMessageStream(sessionId: string) {
     abortRef.current = null;
   }, []);
 
+  const reconnectMessage = useCallback(
+    async (messageId: string) => {
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      try {
+        await subscribeSessionEventsForMessage(
+          sessionId,
+          messageId,
+          (event) => applyStreamEvent(sessionId, event),
+          controller.signal,
+        );
+      } finally {
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+        }
+      }
+    },
+    [sessionId],
+  );
+
+  const retryMessage = useCallback(
+    async ({
+      clientMessageId,
+      retryOfMessageId,
+      text,
+    }: {
+      clientMessageId: string;
+      retryOfMessageId: string;
+      text: string;
+    }) => {
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      try {
+        await retryMessageEvents(
+          sessionId,
+          {
+            client_message_id: clientMessageId,
+            retry_of_message_id: retryOfMessageId,
+            input: [{ type: "text", text }],
+          },
+          (event) => applyStreamEvent(sessionId, event),
+          controller.signal,
+        );
+      } finally {
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+        }
+      }
+    },
+    [sessionId],
+  );
+
   const hasActiveConnection = useCallback(() => abortRef.current !== null, []);
 
   return {
-    streamMessage,
+    eventMessage,
     cancelStream,
+    reconnectMessage,
+    retryMessage,
     hasActiveConnection,
   };
 }

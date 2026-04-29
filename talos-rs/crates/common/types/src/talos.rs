@@ -3,7 +3,7 @@ use std::fmt;
 use std::path::PathBuf;
 use uuid::Uuid;
 
-/// Talos gateway protocol types shared by native and compatibility APIs.
+/// Talos gateway protocol types shared by server and client components.
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -317,8 +317,6 @@ pub struct TalosReasoning {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TalosMessageRequest {
     pub input: Vec<TalosInputItem>,
-    #[serde(default)]
-    pub stream: Option<bool>,
     pub workspace_id: Option<String>,
 }
 
@@ -386,6 +384,7 @@ pub enum TalosEventType {
     MessageToolCallProgressDelta,
     MessageToolCallCompleted,
     MessageToolCallPendingApproval,
+    MessageToolCallPendingDynamicResult,
     MessageCompleted,
     MessageError,
 }
@@ -542,6 +541,15 @@ pub struct TalosMessageToolCallPendingApprovalEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TalosMessageToolCallPendingDynamicResultEvent {
+    pub request_id: String,
+    pub call_id: String,
+    pub tool_name: String,
+    pub arguments: serde_json::Value,
+    pub step_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TalosMessageCompletedEvent {
     pub request_id: String,
     pub stop_reason: StopReason,
@@ -572,6 +580,7 @@ pub enum TalosEventPayload {
     MessageToolCallProgressDelta(TalosMessageToolCallProgressDeltaEvent),
     MessageToolCallCompleted(TalosMessageToolCallCompletedEvent),
     MessageToolCallPendingApproval(TalosMessageToolCallPendingApprovalEvent),
+    MessageToolCallPendingDynamicResult(TalosMessageToolCallPendingDynamicResultEvent),
     MessageCompleted(TalosMessageCompletedEvent),
     MessageError(TalosMessageErrorEvent),
 }

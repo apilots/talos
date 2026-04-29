@@ -126,7 +126,6 @@ impl TuiAppState {
                     input: vec![TalosInputItem::Text {
                         text: message.to_string(),
                     }],
-                    stream: Some(false),
                     workspace_id: None,
                 },
             )

@@ -145,8 +145,12 @@ export type TalosOutputItem =
 
 export interface TalosMessageRequest {
   input: TalosInputItem[];
-  stream?: boolean | null;
   workspace_id?: string | null;
+}
+
+export interface TalosMessageRetryRequest extends TalosMessageRequest {
+  client_message_id: string;
+  retry_of_message_id: string;
 }
 
 export interface TalosMessageResponse {
@@ -158,6 +162,20 @@ export interface TalosMessageResponse {
   reasoning: TalosReasoning[];
   stop_reason: StopReason;
   usage: TalosUsage;
+}
+
+export type TalosMessageCommandStatus =
+  | "pending"
+  | "accepted"
+  | "failed"
+  | "failed_no_first_event";
+
+export interface TalosMessageAck {
+  request_id: string;
+  message_id?: string | null;
+  session_id: string;
+  turn_id: string;
+  status: TalosMessageCommandStatus;
 }
 
 export type TalosEventType =
@@ -172,6 +190,7 @@ export type TalosEventType =
   | "message_tool_call_progress_delta"
   | "message_tool_call_completed"
   | "message_tool_call_pending_approval"
+  | "message_tool_call_pending_dynamic_result"
   | "message_completed"
   | "message_error";
 
@@ -291,6 +310,14 @@ export interface TalosMessageToolCallPendingApprovalEvent {
   step_id: string;
 }
 
+export interface TalosMessageToolCallPendingDynamicResultEvent {
+  request_id: string;
+  call_id: string;
+  tool_name: string;
+  arguments: unknown;
+  step_id: string;
+}
+
 export interface TalosMessageCompletedEvent {
   request_id: string;
   stop_reason: StopReason;
@@ -321,6 +348,10 @@ export type TalosEventPayload =
       type: "message_tool_call_pending_approval";
       data: TalosMessageToolCallPendingApprovalEvent;
     }
+  | {
+      type: "message_tool_call_pending_dynamic_result";
+      data: TalosMessageToolCallPendingDynamicResultEvent;
+    }
   | { type: "message_completed"; data: TalosMessageCompletedEvent }
   | { type: "message_error"; data: TalosMessageErrorEvent };
 
@@ -332,6 +363,55 @@ export interface TalosEvent {
   payload: {
     type: TalosEventType;
   } & Record<string, unknown>;
+}
+
+export interface TalosSessionEventRecord {
+  event_seq: number;
+  event_id: string;
+  session_id: string;
+  turn_id?: string | null;
+  message_id: string;
+  sequence: number;
+  event_type: TalosEventType;
+  payload: {
+    type: TalosEventType;
+  } & Record<string, unknown>;
+  created_at: number;
+}
+
+export type TalosActiveTurnStatus =
+  | "running"
+  | "waiting_user_action"
+  | "cancelling"
+  | "completed"
+  | "failed";
+
+export interface TalosPendingToolApproval {
+  type: "tool_approval";
+  call_id: string;
+  tool_name: string;
+  prompt: string;
+  arguments: unknown;
+}
+
+export interface TalosPendingDynamicToolResult {
+  type: "dynamic_tool_result";
+  call_id: string;
+  tool_name: string;
+}
+
+export type TalosPendingUserAction =
+  | TalosPendingToolApproval
+  | TalosPendingDynamicToolResult;
+
+export interface TalosActiveTurn {
+  session_id: string;
+  turn_id?: string | null;
+  message_id?: string | null;
+  status: TalosActiveTurnStatus;
+  last_event_id?: string | null;
+  pending_user_action?: TalosPendingUserAction | null;
+  updated_at: number;
 }
 
 export interface ModelInfo {

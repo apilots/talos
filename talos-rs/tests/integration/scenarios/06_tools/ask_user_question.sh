@@ -57,7 +57,6 @@ import os
 
 payload = {
     "input": [{"type": "text", "text": os.environ["INPUT_TEXT"]}],
-    "stream": False,
     "workspace_id": None,
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -99,10 +98,7 @@ echo "CASE ask_user_question_create_session PASS session_id=${session_id}"
 
 question_input="You must call tool 'AskUserQuestion' exactly once with header Execution Mode, question Choose mode, options plan and direct. After the tool call, respond with exactly ASK_USER_QUESTION_OK"
 question_payload="$(build_payload "${question_input}")"
-question_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${question_payload}")"
+question_json="$(send_message_response "${session_id}" "${question_payload}" "question")"
 log_case_json "tool_ask_user_question" "${question_payload}" "${question_json}"
 
 question_output="$(extract_output_text "${question_json}")"

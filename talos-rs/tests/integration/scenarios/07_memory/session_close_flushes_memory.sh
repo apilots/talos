@@ -63,14 +63,10 @@ message_payload='{
       "text": "__MESSAGE_MARKER__ Please remember that this session should be flushed on close."
     }
   ],
-  "stream": false,
   "workspace_id": null
 }'
 message_payload="${message_payload/__MESSAGE_MARKER__/${message_marker}}"
-message_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${message_payload}")"
+message_json="$(send_message_response "${session_id}" "${message_payload}" "message")"
 log_case_json "send_message_for_close_flush" "${message_payload}" "${message_json}"
 message_session_id="$(json_get "${message_json}" "session_id")"
 if [[ "${message_session_id}" != "${session_id}" ]]; then

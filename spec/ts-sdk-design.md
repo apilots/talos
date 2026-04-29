@@ -41,12 +41,12 @@
 |--------|-------------|------------|--------|
 | Session CRUD（create/list/get/patch/delete）| ✅ | 必须 ✅ | — |
 | Session 操作（cancel / compact / clear）| ✅ | 必须 ✅ | — |
-| 消息发送（同步）| ✅ `send_message` | 必须 ✅ | — |
-| 消息发送（inline stream，request-bound）| ✅ `send_message_stream` | 必须 ✅ | — |
+| 消息提交（async ack）| ✅ `send_message` | 必须 ✅ | — |
+| Session Events SSE（持久化，`after_event_id`）| ✅ `subscribe_session_events` / `send_message_events` | 必须 ✅ | — |
 | 工具审批提交 | ✅ `submit_tool_approval` | 必须 ✅ | — |
 | 模型列表 | ✅ `list_models` | 必须 ✅ | — |
 | 动态工具结果提交 | ❌ 未实现 | ❌ 未实现 | 后端上线后同批跟进 |
-| Transcript SSE 流（持久化，`after_seq`）| ❌ 未实现 | ❌ 未实现 | 后端上线后同批跟进 |
+| Transcript SSE 流（持久化，`after_event_id`）| ✅ 已由 session events 覆盖 | 必须 ✅ | — |
 | 全局 SSE 流（`/v1/events`）| ❌ 未实现 | ❌ 未实现 | 后端上线后同批跟进 |
 | EffectiveApprovalPolicy 查询 + 切换 | ❌ 未实现 | ❌ 未实现 | 后端上线后同批跟进 |
 | Project CRUD | ❌ 未实现 | ❌ 未实现 | Phase 1 后端上线后 |

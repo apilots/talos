@@ -8,7 +8,7 @@ use talos_config::{LlmConfig, LlmConfigService};
 use talos_error::TalosResult;
 use talos_gateway::Gateway;
 use talos_llm_provider::LlmProvider;
-use talos_types::talos::TalosMessageResponse;
+use talos_session_store::{MessageIdempotencyStore, SessionEventService};
 use talos_types::{resolve_model_catalog, ModelInfo, SessionService, TalosConfig};
 
 use super::access::ResourceAccessService;
@@ -34,12 +34,13 @@ impl FileLockRegistry {
 pub(super) struct HttpApiState {
     pub(super) gateway: Arc<dyn Gateway>,
     pub(super) access_service: Arc<ResourceAccessService>,
+    pub(super) event_service: Arc<SessionEventService>,
+    pub(super) idempotency_store: Arc<dyn MessageIdempotencyStore>,
     pub(super) base_config: TalosConfig,
     pub(super) llm_provider: Arc<dyn LlmProvider>,
     pub(super) auth_service: Arc<dyn AuthService>,
     pub(super) user_service: Arc<dyn UserService>,
     pub(super) auth_disabled: bool,
-    pub(super) idempotency_cache: Arc<RwLock<HashMap<String, TalosMessageResponse>>>,
     pub(super) file_locks: FileLockRegistry,
     pub(super) models: Arc<RwLock<Vec<ModelInfo>>>,
     pub(super) llm_config_service: Arc<dyn LlmConfigService>,
@@ -51,6 +52,8 @@ impl HttpApiState {
     pub(super) fn new(
         gateway: Arc<dyn Gateway>,
         session_service: Arc<dyn SessionService>,
+        event_service: Arc<SessionEventService>,
+        idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
         llm_provider: Arc<dyn LlmProvider>,
         auth_service: Arc<dyn AuthService>,
@@ -66,6 +69,8 @@ impl HttpApiState {
         Self::new_with_lifecycle(
             gateway,
             session_service,
+            event_service,
+            idempotency_store,
             base_config,
             llm_provider,
             auth_service,
@@ -81,6 +86,8 @@ impl HttpApiState {
     pub(super) fn new_with_lifecycle(
         gateway: Arc<dyn Gateway>,
         session_service: Arc<dyn SessionService>,
+        event_service: Arc<SessionEventService>,
+        idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
         llm_provider: Arc<dyn LlmProvider>,
         auth_service: Arc<dyn AuthService>,
@@ -93,13 +100,14 @@ impl HttpApiState {
     ) -> Self {
         Self {
             access_service: Arc::new(ResourceAccessService::new(session_service.clone())),
+            event_service,
+            idempotency_store,
             gateway,
             base_config,
             llm_provider,
             auth_service,
             user_service,
             auth_disabled,
-            idempotency_cache: Arc::new(RwLock::new(HashMap::new())),
             file_locks: FileLockRegistry::default(),
             models: Arc::new(RwLock::new(models)),
             llm_config_service,

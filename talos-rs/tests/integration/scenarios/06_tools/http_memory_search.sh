@@ -70,16 +70,12 @@ payload = {
             "text": "You must call MemorySearch exactly once with query talos项目, then answer in one short sentence.",
         }
     ],
-    "stream": True,
 }
 print(json.dumps(payload, ensure_ascii=False))
 PY
 )"
 memory_stream_log="$(scenario_report_path memory_search_stream_events.log)"
-curl -sS -N -X POST "${GATEWAY_URL}/v1/sessions/${memory_stream_session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${memory_stream_payload}" > "${memory_stream_log}"
+send_message_sse_log "${memory_stream_session_id}" "${memory_stream_payload}" "${memory_stream_log}"
 log_case_json "messages_memory_search_stream" "${memory_stream_payload}" "$(cat "${memory_stream_log}")"
 
 memory_stream_tool_started_count="$(grep -c '^event: message.tool_call.started' "${memory_stream_log}" || true)"

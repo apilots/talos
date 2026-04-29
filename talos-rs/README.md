@@ -118,8 +118,7 @@ curl -X POST http://localhost:8080/v1/sessions/<session_id>/messages \
   -d '{
     "input": [
       { "type": "text", "text": "Hello, how are you?" }
-    ],
-    "stream": false
+    ]
   }'
 ```
 

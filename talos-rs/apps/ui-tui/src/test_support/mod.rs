@@ -479,7 +479,7 @@ impl GatewayClient for MockGatewayClient {
         })
     }
 
-    async fn send_message_stream(
+    async fn send_message_events(
         &self,
         session_id: &str,
         request: &TalosMessageRequest,

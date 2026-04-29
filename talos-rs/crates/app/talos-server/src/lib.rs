@@ -17,7 +17,10 @@ use talos_llm_bailian::BailianProvider;
 use talos_llm_openai::OpenAIProvider;
 use talos_logging::LogGuard;
 use talos_router::{Binding, MatchRule, Router, RouterImpl};
-use talos_session_store::{DatabaseSessionStore, SessionStore};
+use talos_session_store::{
+    ActiveTurnStore, DatabaseSessionStore, MessageIdempotencyStore, SessionEventRetentionConfig,
+    SessionEventService, SessionEventStore, SessionStore,
+};
 use talos_storage::{create_storage, StorageConfig};
 use talos_tools::{
     register_collaboration_tools, register_core_local_tools, register_network_tools,
@@ -215,8 +218,21 @@ pub async fn start_server(
     })
     .await?;
     let storage: Arc<dyn talos_storage::Storage> = Arc::from(storage_impl);
-    let session_store: Arc<dyn SessionStore> =
-        Arc::new(DatabaseSessionStore::new(storage.clone()).await?);
+    let session_store_impl = Arc::new(DatabaseSessionStore::new(storage.clone()).await?);
+    let session_store: Arc<dyn SessionStore> = session_store_impl.clone();
+    let event_store: Arc<dyn SessionEventStore> = session_store_impl.clone();
+    let active_turn_store: Arc<dyn ActiveTurnStore> = session_store_impl.clone();
+    let idempotency_store: Arc<dyn MessageIdempotencyStore> = session_store_impl.clone();
+    let event_service = Arc::new(SessionEventService::new(
+        event_store,
+        active_turn_store,
+        SessionEventRetentionConfig {
+            retention_hours: config.agent.kernel.session_events.retention_hours,
+            max_events_per_session: config.agent.kernel.session_events.max_events_per_session,
+            gc_interval_minutes: config.agent.kernel.session_events.gc_interval_minutes,
+            gc_batch_size: config.agent.kernel.session_events.gc_batch_size,
+        },
+    ));
     let user_store_impl = Arc::new(DatabaseUserStore::new(storage.clone()).await?);
     let user_store: Arc<dyn UserStore> = user_store_impl.clone();
     let token_store: Arc<dyn UserTokenStore> = user_store_impl;
@@ -300,6 +316,8 @@ pub async fn start_server(
     let mut http_server = HttpServer::new(
         gateway,
         session_service,
+        event_service,
+        idempotency_store,
         auth_service,
         user_service,
         config.clone(),

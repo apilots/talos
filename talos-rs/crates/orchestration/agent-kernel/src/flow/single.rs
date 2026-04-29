@@ -318,7 +318,7 @@ impl BaseLlmFlow for SingleFlow {
                 step_request.streaming_tool_execution = Some(StreamingToolExecutionConfig {
                     execution_mode: self.settings.tool_execution_mode,
                     execution_context: ToolExecutionContext {
-                        session_id: format!("agent-{}", prepared.agent_id),
+                        session_id: prepared.session_id.clone(),
                         user_id: self.agent_name.clone(),
                         project_root: prepared.project_root.clone(),
                         kernel_config: kernel_config.clone(),
@@ -760,6 +760,20 @@ impl BaseLlmFlow for SingleFlow {
                                         tool_name: confirmation.tool_name.clone(),
                                         prompt: confirmation.prompt.clone(),
                                         arguments: confirmation.arguments.clone(),
+                                    },
+                                ),
+                            ))
+                            .await;
+                    }
+                    for dynamic_request in &tool_batch.pending_dynamic_requests {
+                        let _ = tx
+                            .send(KernelStreamEvent::new(
+                                KernelStreamEventType::DynamicToolRequest,
+                                KernelStreamEventData::DynamicToolRequest(
+                                    crate::DynamicToolRequestStreamData {
+                                        call_id: dynamic_request.call_id.clone(),
+                                        tool_name: dynamic_request.tool_name.clone(),
+                                        arguments: dynamic_request.arguments.clone(),
                                     },
                                 ),
                             ))

@@ -57,7 +57,6 @@ import os
 
 payload = {
     "input": [{"type": "text", "text": os.environ["INPUT_TEXT"]}],
-    "stream": False,
     "workspace_id": None,
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -99,10 +98,7 @@ echo "CASE web_search_create_session PASS session_id=${session_id}"
 
 search_input="Within this single turn, first call tool 'ToolSearch' with query WebSearch to activate it, then call tool 'WebSearch' exactly once with query site:example.com Example Domain, allowed_domains example.com, and limit 3. After both tool calls, respond with exactly WEB_SEARCH_OK"
 search_payload="$(build_payload "${search_input}")"
-search_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${search_payload}")"
+search_json="$(send_message_response "${session_id}" "${search_payload}" "search")"
 log_case_json "tool_web_search" "${search_payload}" "${search_json}"
 
 search_output="$(extract_output_text "${search_json}")"

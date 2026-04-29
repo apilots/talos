@@ -9,8 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::io::Write;
 use talos_client::{
     ClientConfig, SessionCreateParams, TalosClient, TalosContext, TalosEventPayload,
-    TalosEventType, TalosInputItem, TalosMessageRequest, TalosMessageResponse, TalosOutputItem,
-    TalosThinkingSource, TalosThinkingStage,
+    TalosEventType, TalosInputItem, TalosMessageRequest, TalosThinkingSource, TalosThinkingStage,
 };
 use talos_config::Config;
 
@@ -67,7 +66,7 @@ enum ChatCommands {
         /// User ID
         #[arg(long)]
         user: Option<String>,
-        /// Use SSE stream response
+        /// Render events as they arrive
         #[arg(long, default_value_t = false)]
         stream: bool,
     },
@@ -81,7 +80,7 @@ enum ChatCommands {
         /// Model override for this request (optional)
         #[arg(short, long)]
         model: Option<String>,
-        /// Use SSE stream response
+        /// Render events as they arrive
         #[arg(long, default_value_t = false)]
         stream: bool,
     },
@@ -96,7 +95,7 @@ enum ChatCommands {
         /// Model override
         #[arg(short, long)]
         model: Option<String>,
-        /// Use SSE stream response
+        /// Render events as they arrive
         #[arg(long, default_value_t = false)]
         stream: bool,
     },
@@ -145,7 +144,7 @@ enum SessionCommands {
         /// Model to use in this interactive session
         #[arg(short, long)]
         model: Option<String>,
-        /// Use SSE stream response
+        /// Render events as they arrive
         #[arg(long, default_value_t = false)]
         stream: bool,
     },
@@ -451,13 +450,12 @@ async fn execute_info_command(_client: &TalosClient) -> Result<(), Box<dyn std::
 fn build_message_request(
     message: &str,
     _model: Option<String>,
-    stream: bool,
+    _stream: bool,
 ) -> TalosMessageRequest {
     TalosMessageRequest {
         input: vec![TalosInputItem::Text {
             text: message.to_string(),
         }],
-        stream: Some(stream),
         workspace_id: None,
     }
 }
@@ -469,162 +467,48 @@ async fn send_and_render_message(
     stream: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
     if !stream {
-        let response = client.send_message(session_id, request).await?;
-        for item in &response.output {
-            match item {
-                TalosOutputItem::Reasoning { text } => {
-                    let trimmed = text.trim();
-                    if !trimmed.is_empty() {
-                        eprintln!("REASONING {}", trimmed);
-                    }
-                }
-                TalosOutputItem::ExecutionSummary { text } => {
-                    let trimmed = text.trim();
-                    if !trimmed.is_empty() {
-                        eprintln!("SUMMARY {}", trimmed);
-                    }
-                }
-                TalosOutputItem::ToolCall { call_id, name, .. } => {
-                    eprintln!("TOOL_CALL name={} call_id={}", name, call_id);
-                }
-                TalosOutputItem::ToolResult {
-                    call_id, is_error, ..
-                } => {
-                    eprintln!("TOOL_RESULT call_id={} is_error={}", call_id, is_error);
-                }
-                TalosOutputItem::OutputText { .. } | TalosOutputItem::UserInput { .. } => {}
+        let ack = client.send_message(session_id, request).await?;
+        let message_id = ack
+            .message_id
+            .clone()
+            .ok_or_else(|| format!("message ack did not include message_id: {}", ack.turn_id))?;
+        let mut output_text = String::new();
+        let mut output_stream = std::io::stdout();
+        let mut events = client.subscribe_session_events(session_id, None).await?;
+
+        while let Some(record) = events.recv().await {
+            if record.message_id != message_id {
+                continue;
+            }
+            if render_event(
+                &record.event_type,
+                &record.payload,
+                &mut output_text,
+                &mut output_stream,
+            )? {
+                break;
             }
         }
-        let text = extract_output_text(&response);
-        println!("{}", text);
-        return Ok(text);
+
+        if !output_text.is_empty() && !output_text.ends_with('\n') {
+            println!();
+        }
+
+        return Ok(output_text);
     }
 
     let mut output_text = String::new();
     let mut output_stream = std::io::stdout();
-    let mut events = client.send_message_stream(session_id, request).await?;
+    let mut events = client.send_message_events(session_id, request).await?;
 
     while let Some(event) = events.recv().await {
-        match (&event.event_type, &event.payload) {
-            (
-                TalosEventType::MessageReasoningDelta,
-                TalosEventPayload::MessageReasoningDelta(payload),
-            ) => {
-                if !payload.delta.trim().is_empty() {
-                    eprintln!(
-                        "THINKING[{}:{}][iter={}][{}] {}",
-                        format_thinking_source(payload.source),
-                        format_thinking_stage(payload.stage),
-                        payload.iteration,
-                        payload.step_id,
-                        payload.delta
-                    );
-                }
-            }
-            (
-                TalosEventType::MessageExecutionSummary,
-                TalosEventPayload::MessageExecutionSummary(payload),
-            ) => {
-                if !payload.text.trim().is_empty() {
-                    eprintln!(
-                        "SUMMARY[iter={}][{}] {}",
-                        payload.iteration, payload.step_id, payload.text
-                    );
-                }
-            }
-            (
-                TalosEventType::MessageOutputDelta,
-                TalosEventPayload::MessageOutputDelta(payload),
-            ) => {
-                output_text.push_str(&payload.delta);
-                write!(output_stream, "{}", payload.delta)?;
-                output_stream.flush()?;
-            }
-            (
-                TalosEventType::MessageToolCallStarted,
-                TalosEventPayload::MessageToolCallStarted(payload),
-            ) => {
-                eprintln!(
-                    "TOOL_CALL_STARTED name={} internal={} call_id={} step={}",
-                    display_tool_name(&payload.name),
-                    payload.name,
-                    payload.call_id,
-                    payload.step_id
-                );
-            }
-            (
-                TalosEventType::MessageToolCallArgsDelta,
-                TalosEventPayload::MessageToolCallArgsDelta(payload),
-            ) => {
-                eprintln!(
-                    "TOOL_CALL_ARGS_DELTA tool={} internal={} call_id={} step={} delta={}",
-                    payload
-                        .tool_name
-                        .as_deref()
-                        .map(display_tool_name)
-                        .unwrap_or("unknown"),
-                    payload.tool_name.as_deref().unwrap_or("unknown"),
-                    payload.call_id.as_deref().unwrap_or("pending"),
-                    payload.step_id,
-                    payload.delta
-                );
-            }
-            (
-                TalosEventType::MessageToolCallQueued,
-                TalosEventPayload::MessageToolCallQueued(payload),
-            ) => {
-                eprintln!(
-                    "TOOL_CALL_QUEUED tool={} internal={} call_id={} step={}",
-                    display_tool_name(&payload.tool_name),
-                    payload.tool_name,
-                    payload.call_id,
-                    payload.step_id
-                );
-            }
-            (
-                TalosEventType::MessageToolCallExecuting,
-                TalosEventPayload::MessageToolCallExecuting(payload),
-            ) => {
-                eprintln!(
-                    "TOOL_CALL_EXECUTING tool={} internal={} call_id={} step={}",
-                    display_tool_name(&payload.tool_name),
-                    payload.tool_name,
-                    payload.call_id,
-                    payload.step_id
-                );
-            }
-            (
-                TalosEventType::MessageToolCallProgressDelta,
-                TalosEventPayload::MessageToolCallProgressDelta(payload),
-            ) => {
-                eprintln!(
-                    "TOOL_CALL_PROGRESS tool={} internal={} call_id={} kind={:?} step={} message={}",
-                    display_tool_name(&payload.tool_name),
-                    payload.tool_name,
-                    payload.call_id,
-                    payload.progress_kind,
-                    payload.step_id,
-                    payload.message
-                );
-            }
-            (
-                TalosEventType::MessageToolCallCompleted,
-                TalosEventPayload::MessageToolCallCompleted(payload),
-            ) => {
-                eprintln!(
-                    "TOOL_CALL_COMPLETED call_id={} tool={} internal={} is_error={}",
-                    payload.call_id,
-                    display_tool_name(&payload.tool),
-                    payload.tool,
-                    payload.is_error
-                );
-            }
-            (TalosEventType::MessageError, TalosEventPayload::MessageError(payload)) => {
-                eprintln!("MESSAGE_ERROR {}", payload.error);
-            }
-            (TalosEventType::MessageStarted, TalosEventPayload::MessageStarted(_))
-            | (TalosEventType::MessageCompleted, TalosEventPayload::MessageCompleted(_)) => {}
-            _ => {}
+        if render_event(
+            &event.event_type,
+            &event.payload,
+            &mut output_text,
+            &mut output_stream,
+        )? {
+            break;
         }
     }
 
@@ -635,21 +519,134 @@ async fn send_and_render_message(
     Ok(output_text)
 }
 
-fn extract_output_text(response: &TalosMessageResponse) -> String {
-    let texts: Vec<String> = response
-        .output
-        .iter()
-        .filter_map(|item| match item {
-            TalosOutputItem::OutputText { text } => Some(text.clone()),
-            _ => None,
-        })
-        .collect();
-
-    if texts.is_empty() {
-        return serde_json::to_string(&response.output).unwrap_or_default();
+fn render_event(
+    event_type: &TalosEventType,
+    payload: &TalosEventPayload,
+    output_text: &mut String,
+    output_stream: &mut std::io::Stdout,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    match (event_type, payload) {
+        (
+            TalosEventType::MessageReasoningDelta,
+            TalosEventPayload::MessageReasoningDelta(payload),
+        ) => {
+            if !payload.delta.trim().is_empty() {
+                eprintln!(
+                    "THINKING[{}:{}][iter={}][{}] {}",
+                    format_thinking_source(payload.source),
+                    format_thinking_stage(payload.stage),
+                    payload.iteration,
+                    payload.step_id,
+                    payload.delta
+                );
+            }
+        }
+        (
+            TalosEventType::MessageExecutionSummary,
+            TalosEventPayload::MessageExecutionSummary(payload),
+        ) => {
+            if !payload.text.trim().is_empty() {
+                eprintln!(
+                    "SUMMARY[iter={}][{}] {}",
+                    payload.iteration, payload.step_id, payload.text
+                );
+            }
+        }
+        (TalosEventType::MessageOutputDelta, TalosEventPayload::MessageOutputDelta(payload)) => {
+            output_text.push_str(&payload.delta);
+            write!(output_stream, "{}", payload.delta)?;
+            output_stream.flush()?;
+        }
+        (
+            TalosEventType::MessageToolCallStarted,
+            TalosEventPayload::MessageToolCallStarted(payload),
+        ) => {
+            eprintln!(
+                "TOOL_CALL_STARTED name={} internal={} call_id={} step={}",
+                display_tool_name(&payload.name),
+                payload.name,
+                payload.call_id,
+                payload.step_id
+            );
+        }
+        (
+            TalosEventType::MessageToolCallArgsDelta,
+            TalosEventPayload::MessageToolCallArgsDelta(payload),
+        ) => {
+            eprintln!(
+                "TOOL_CALL_ARGS_DELTA tool={} internal={} call_id={} step={} delta={}",
+                payload
+                    .tool_name
+                    .as_deref()
+                    .map(display_tool_name)
+                    .unwrap_or("unknown"),
+                payload.tool_name.as_deref().unwrap_or("unknown"),
+                payload.call_id.as_deref().unwrap_or("pending"),
+                payload.step_id,
+                payload.delta
+            );
+        }
+        (
+            TalosEventType::MessageToolCallQueued,
+            TalosEventPayload::MessageToolCallQueued(payload),
+        ) => {
+            eprintln!(
+                "TOOL_CALL_QUEUED tool={} internal={} call_id={} step={}",
+                display_tool_name(&payload.tool_name),
+                payload.tool_name,
+                payload.call_id,
+                payload.step_id
+            );
+        }
+        (
+            TalosEventType::MessageToolCallExecuting,
+            TalosEventPayload::MessageToolCallExecuting(payload),
+        ) => {
+            eprintln!(
+                "TOOL_CALL_EXECUTING tool={} internal={} call_id={} step={}",
+                display_tool_name(&payload.tool_name),
+                payload.tool_name,
+                payload.call_id,
+                payload.step_id
+            );
+        }
+        (
+            TalosEventType::MessageToolCallProgressDelta,
+            TalosEventPayload::MessageToolCallProgressDelta(payload),
+        ) => {
+            eprintln!(
+                "TOOL_CALL_PROGRESS tool={} internal={} call_id={} kind={:?} step={} message={}",
+                display_tool_name(&payload.tool_name),
+                payload.tool_name,
+                payload.call_id,
+                payload.progress_kind,
+                payload.step_id,
+                payload.message
+            );
+        }
+        (
+            TalosEventType::MessageToolCallCompleted,
+            TalosEventPayload::MessageToolCallCompleted(payload),
+        ) => {
+            eprintln!(
+                "TOOL_CALL_COMPLETED call_id={} tool={} internal={} is_error={}",
+                payload.call_id,
+                display_tool_name(&payload.tool),
+                payload.tool,
+                payload.is_error
+            );
+        }
+        (TalosEventType::MessageError, TalosEventPayload::MessageError(payload)) => {
+            eprintln!("MESSAGE_ERROR {}", payload.error);
+            return Ok(true);
+        }
+        (TalosEventType::MessageCompleted, TalosEventPayload::MessageCompleted(_)) => {
+            return Ok(true);
+        }
+        (TalosEventType::MessageStarted, TalosEventPayload::MessageStarted(_)) => {}
+        _ => {}
     }
-
-    texts.join("\n")
+    Ok(false)
 }
 
 fn display_tool_name(tool_name: &str) -> &str {

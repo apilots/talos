@@ -57,7 +57,6 @@ import os
 
 payload = {
     "input": [{"type": "text", "text": os.environ["INPUT_TEXT"]}],
-    "stream": False,
     "workspace_id": None,
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -99,10 +98,7 @@ echo "CASE skill_create_session PASS session_id=${session_id}"
 
 discover_input="You must call tool 'ToolSearch' exactly once with query Skill. After the tool call, respond with exactly SKILL_DISCOVERED"
 discover_payload="$(build_payload "${discover_input}")"
-discover_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${discover_payload}")"
+discover_json="$(send_message_response "${session_id}" "${discover_payload}" "discover")"
 log_case_json "tool_skill_discovery" "${discover_payload}" "${discover_json}"
 
 discover_output="$(extract_output_text "${discover_json}")"
@@ -128,15 +124,17 @@ content_items = result.get("content") or []
 assert content_items, "missing content payload"
 content = content_items[0].get("value") or {}
 matches = content.get("matches") or []
-assert any(match.get("public_name") == "Skill" for match in matches), matches
+assert any(
+    match.get("public_name") == "Skill"
+    and match.get("available") is True
+    and match.get("deferred") is True
+    for match in matches
+), matches
 PY
 
 skill_input="You must call tool 'Skill' exactly once with query write. After the tool call, respond with exactly SKILL_TOOL_OK"
 skill_payload="$(build_payload "${skill_input}")"
-skill_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${skill_payload}")"
+skill_json="$(send_message_response "${session_id}" "${skill_payload}" "skill")"
 log_case_json "tool_skill" "${skill_payload}" "${skill_json}"
 
 skill_output="$(extract_output_text "${skill_json}")"

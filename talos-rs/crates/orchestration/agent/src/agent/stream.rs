@@ -171,6 +171,18 @@ impl AgentImpl {
                     step_id,
                 },
             )),
+            (
+                KernelStreamEventType::DynamicToolRequest,
+                KernelStreamEventData::DynamicToolRequest(data),
+            ) => Some(OrchestratorEvent::MessageToolCallPendingDynamicResult(
+                crate::service::OrchestratorMessageToolCallPendingDynamicResultEvent {
+                    request_id: request_id.to_string(),
+                    call_id: data.call_id,
+                    tool_name: data.tool_name,
+                    arguments: data.arguments,
+                    step_id,
+                },
+            )),
             _ => None,
         };
         if mapped.is_some() {

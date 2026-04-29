@@ -433,7 +433,7 @@ async fn test_status_command_displays_cache_usage_metrics() {
 }
 
 #[tokio::test]
-async fn test_send_message_stream_updates_assistant_block() {
+async fn test_send_message_events_updates_assistant_block() {
     let mut app = create_remote_app();
     app.initialize_remote().await;
     assert!(app.send_user_message("hello".to_string()).await.unwrap());

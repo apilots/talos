@@ -75,7 +75,6 @@ import os
 
 payload = {
     "input": [{"type": "text", "text": os.environ["INPUT_TEXT"]}],
-    "stream": False,
     "workspace_id": None,
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -117,10 +116,7 @@ echo "CASE read_create_session PASS session_id=${session_id}"
 
 read_input="You must call tool 'Read' exactly once with path notes/read_target.txt. After the tool call, respond with exactly READ_OK:${READ_MARKER}"
 read_payload="$(build_payload "${read_input}")"
-read_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${read_payload}")"
+read_json="$(send_message_response "${session_id}" "${read_payload}" "read")"
 log_case_json "tool_read" "${read_payload}" "${read_json}"
 
 read_output="$(extract_output_text "${read_json}")"

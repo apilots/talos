@@ -53,6 +53,7 @@ pub enum OrchestratorEvent {
     MessageToolCallProgressDelta(OrchestratorMessageToolCallProgressDeltaEvent),
     MessageToolCallCompleted(OrchestratorMessageToolCallCompletedEvent),
     MessageToolCallPendingApproval(OrchestratorMessageToolCallPendingApprovalEvent),
+    MessageToolCallPendingDynamicResult(OrchestratorMessageToolCallPendingDynamicResultEvent),
     MessageCompleted(OrchestratorMessageCompletedEvent),
     MessageError(OrchestratorMessageErrorEvent),
 }
@@ -77,6 +78,15 @@ pub struct OrchestratorMessageToolCallPendingApprovalEvent {
     pub call_id: String,
     pub tool_name: String,
     pub prompt: String,
+    pub arguments: serde_json::Value,
+    pub step_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrchestratorMessageToolCallPendingDynamicResultEvent {
+    pub request_id: String,
+    pub call_id: String,
+    pub tool_name: String,
     pub arguments: serde_json::Value,
     pub step_id: String,
 }

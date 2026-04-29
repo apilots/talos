@@ -159,6 +159,12 @@ mod tests {
     use talos_error::{TalosError, TalosResult};
     use talos_gateway::{Gateway, GatewayRequest, GatewayResponse};
     use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
+    use talos_session_store::{
+        ActiveTurnRecord, ActiveTurnStore, ActiveTurnUpdate, IdempotencyReservation,
+        IdempotencyStatus, MessageCommandAck, MessageIdempotencyStore, NewSessionEvent,
+        SessionEventId, SessionEventRecord, SessionEventRetentionConfig, SessionEventService,
+        SessionEventStore,
+    };
     use talos_types::talos::{TalosContext, TalosEvent, TalosMessageResponse};
     use talos_types::{
         ModelCompatConfig, ModelCostConfig, ModelInfo, ProjectPatch, ProjectRecord, SessionPatch,
@@ -170,6 +176,8 @@ mod tests {
     struct NoopGateway;
     struct NoopSessionService;
     struct NoopLlmProvider;
+    #[derive(Default)]
+    struct NoopEventStore;
 
     fn test_auth() -> axum::extract::Extension<RequestIdentity> {
         axum::extract::Extension(RequestIdentity::mock_admin("workspace-doc-test"))
@@ -222,6 +230,8 @@ mod tests {
         let state = Arc::new(HttpApiState::new(
             Arc::new(NoopGateway),
             Arc::new(NoopSessionService),
+            test_event_service(),
+            Arc::new(NoopEventStore),
             config,
             Arc::new(NoopLlmProvider),
             auth_service,
@@ -231,6 +241,141 @@ mod tests {
             vec![test_model_info()],
         ));
         (state, workspace_dir)
+    }
+
+    fn test_event_service() -> Arc<SessionEventService> {
+        let store = Arc::new(NoopEventStore);
+        let event_store: Arc<dyn SessionEventStore> = store.clone();
+        let active_turn_store: Arc<dyn ActiveTurnStore> = store;
+        Arc::new(SessionEventService::new(
+            event_store,
+            active_turn_store,
+            SessionEventRetentionConfig::default(),
+        ))
+    }
+
+    #[async_trait::async_trait]
+    impl SessionEventStore for NoopEventStore {
+        async fn append_event(&self, event: NewSessionEvent) -> TalosResult<SessionEventRecord> {
+            Ok(SessionEventRecord {
+                event_seq: 1,
+                event_id: SessionEventId::from_seq(1),
+                session_id: event.session_id,
+                turn_id: event.turn_id,
+                message_id: event.message_id,
+                sequence: event.sequence,
+                event_type: event.event_type,
+                payload: event.payload,
+                created_at: event.created_at,
+            })
+        }
+
+        async fn list_events_after(
+            &self,
+            _session_id: &str,
+            _after_event_id: Option<&SessionEventId>,
+            _limit: usize,
+        ) -> TalosResult<Vec<SessionEventRecord>> {
+            Ok(Vec::new())
+        }
+
+        async fn latest_event_id(&self, _session_id: &str) -> TalosResult<Option<SessionEventId>> {
+            Ok(None)
+        }
+
+        async fn oldest_event_id(&self, _session_id: &str) -> TalosResult<Option<SessionEventId>> {
+            Ok(None)
+        }
+
+        async fn delete_completed_events_before(
+            &self,
+            _before_timestamp_ms: i64,
+            _limit: usize,
+        ) -> TalosResult<u64> {
+            Ok(0)
+        }
+
+        async fn delete_overflow_events_per_session(
+            &self,
+            _max_events_per_session: usize,
+            _limit: usize,
+        ) -> TalosResult<u64> {
+            Ok(0)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ActiveTurnStore for NoopEventStore {
+        async fn upsert_active_turn(&self, _update: ActiveTurnUpdate) -> TalosResult<()> {
+            Ok(())
+        }
+
+        async fn get_active_turn(
+            &self,
+            _session_id: &str,
+        ) -> TalosResult<Option<ActiveTurnRecord>> {
+            Ok(None)
+        }
+
+        async fn clear_active_turn(&self, _session_id: &str) -> TalosResult<()> {
+            Ok(())
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl MessageIdempotencyStore for NoopEventStore {
+        async fn get(
+            &self,
+            _session_id: &str,
+            _idempotency_key: &str,
+        ) -> TalosResult<Option<talos_session_store::IdempotencyRecord>> {
+            Ok(None)
+        }
+
+        async fn reserve(
+            &self,
+            session_id: &str,
+            idempotency_key: &str,
+            request_hash: &str,
+            turn_id: &str,
+            now_ms: i64,
+            expires_at_ms: Option<i64>,
+        ) -> TalosResult<IdempotencyReservation> {
+            Ok(IdempotencyReservation::Reserved(
+                talos_session_store::IdempotencyRecord {
+                    session_id: session_id.to_string(),
+                    idempotency_key: idempotency_key.to_string(),
+                    request_hash: request_hash.to_string(),
+                    turn_id: turn_id.to_string(),
+                    message_id: None,
+                    status: IdempotencyStatus::Pending,
+                    ack: None,
+                    created_at: now_ms,
+                    updated_at: now_ms,
+                    expires_at: expires_at_ms,
+                },
+            ))
+        }
+
+        async fn complete(
+            &self,
+            _session_id: &str,
+            _idempotency_key: &str,
+            _status: IdempotencyStatus,
+            _message_id: Option<&str>,
+            _ack: &MessageCommandAck,
+            _now_ms: i64,
+        ) -> TalosResult<()> {
+            Ok(())
+        }
+
+        async fn mark_stale_pending_failed(
+            &self,
+            _older_than_ms: i64,
+            _limit: usize,
+        ) -> TalosResult<u64> {
+            Ok(0)
+        }
     }
 
     #[async_trait::async_trait]

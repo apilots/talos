@@ -9,6 +9,7 @@ import {
   createSession,
   deleteProject,
   deleteSession,
+  getActiveTurn,
   getSession,
   getSessionTurns,
   listModels,
@@ -28,6 +29,8 @@ export const chatKeys = {
   sessions: (connectionKey: string) => [...chatKeys.all, connectionKey, "sessions"] as const,
   session: (connectionKey: string, sessionId: string) =>
     [...chatKeys.all, connectionKey, "session", sessionId] as const,
+  activeTurn: (connectionKey: string, sessionId: string) =>
+    [...chatKeys.all, connectionKey, "active-turn", sessionId] as const,
   turns: (connectionKey: string, sessionId: string) =>
     [...chatKeys.all, connectionKey, "turns", sessionId] as const,
 };
@@ -108,6 +111,20 @@ export function useSessionTurnsQuery(sessionId: string) {
     queryKey: chatKeys.turns(connectionKey, sessionId),
     queryFn: () => getSessionTurns(sessionId),
     enabled: Boolean(sessionId),
+  });
+}
+
+export function useActiveTurnQuery(sessionId: string) {
+  const connectionKey = useConnectionKey();
+  return useQuery({
+    queryKey: chatKeys.activeTurn(connectionKey, sessionId),
+    queryFn: () => getActiveTurn(sessionId),
+    enabled: Boolean(sessionId),
+    refetchInterval: (query) =>
+      query.state.data?.status === "running" ||
+      query.state.data?.status === "waiting_user_action"
+        ? 4_000
+        : false,
   });
 }
 

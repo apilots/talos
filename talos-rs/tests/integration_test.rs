@@ -34,7 +34,6 @@ struct MessageInputItem {
 #[derive(Serialize, Deserialize, Debug)]
 struct MessageRequest {
     input: Vec<MessageInputItem>,
-    stream: bool,
     workspace_id: Option<String>,
 }
 
@@ -107,7 +106,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             item_type: "input_text".to_string(),
             text: "hello from integration test".to_string(),
         }],
-        stream: false,
         workspace_id: None,
     };
 

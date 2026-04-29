@@ -40,7 +40,9 @@ pub type TalosTimezone = chrono_tz::Tz;
 pub use domains::agent::{
     AgentConfig, ExecutionMode, PlanReActPolicy, PlannerMode, PlannerSelection,
 };
-pub use domains::kernel::{AgentKernelCompactionConfig, AgentKernelConfig};
+pub use domains::kernel::{
+    AgentKernelCompactionConfig, AgentKernelConfig, AgentKernelSessionEventsConfig,
+};
 pub use domains::memory::AgentKernelMemoryConfig;
 pub use domains::network::{
     ChannelConfig, ChannelsConfig, DmPolicy, DmScope, GatewayAuthCacheConfig, GatewayConfig,

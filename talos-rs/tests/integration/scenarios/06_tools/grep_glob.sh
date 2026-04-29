@@ -84,7 +84,6 @@ import os
 
 payload = {
     "input": [{"type": "text", "text": os.environ["INPUT_TEXT"]}],
-    "stream": False,
     "workspace_id": None,
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -126,10 +125,7 @@ echo "CASE tool_glob_create_session PASS session_id=${glob_session_id}"
 
 glob_input="You must call tool 'Glob' exactly once with pattern docs/*.md. After the tool call, respond with exactly GLOB_OK:${GLOB_FILE}"
 glob_payload="$(build_payload "${glob_input}")"
-glob_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${glob_session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${glob_payload}")"
+glob_json="$(send_message_response "${glob_session_id}" "${glob_payload}" "glob")"
 log_case_json "tool_glob" "${glob_payload}" "${glob_json}"
 glob_output="$(extract_output_text "${glob_json}")"
 if [[ -z "${glob_output}" || "${glob_output}" == Error:* ]]; then
@@ -162,10 +158,7 @@ echo "CASE tool_grep_create_session PASS session_id=${grep_session_id}"
 
 grep_input="You must call tool 'Grep' exactly once with pattern ${GREP_MARKER} and path src. After the tool call, respond with exactly GREP_OK:${GREP_FILE}"
 grep_payload="$(build_payload "${grep_input}")"
-grep_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${grep_session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${grep_payload}")"
+grep_json="$(send_message_response "${grep_session_id}" "${grep_payload}" "grep")"
 log_case_json "tool_grep" "${grep_payload}" "${grep_json}"
 grep_output="$(extract_output_text "${grep_json}")"
 if [[ -z "${grep_output}" || "${grep_output}" == Error:* ]]; then

@@ -77,7 +77,6 @@ import os
 
 payload = {
     "input": [{"type": "text", "text": os.environ["INPUT_TEXT"]}],
-    "stream": False,
     "workspace_id": None,
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -119,10 +118,7 @@ echo "CASE edit_create_session PASS session_id=${session_id}"
 
 edit_input="You must first call Read on notes/edit_target.txt, then call Edit exactly once on notes/edit_target.txt replacing ${OLD_MARKER} with ${NEW_MARKER}. After the tool call, respond with exactly EDIT_OK:${NEW_MARKER}"
 edit_payload="$(build_payload "${edit_input}")"
-edit_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${edit_payload}")"
+edit_json="$(send_message_response "${session_id}" "${edit_payload}" "edit")"
 log_case_json "tool_edit" "${edit_payload}" "${edit_json}"
 
 edit_output="$(extract_output_text "${edit_json}")"

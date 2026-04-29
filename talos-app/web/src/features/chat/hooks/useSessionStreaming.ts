@@ -11,7 +11,8 @@ export function useSessionStreaming(sessionId: string, serverMessageCount?: numb
   const setSessionStatus = useAppStore((state) => state.setSessionStatus);
   const resetStream = useAppStore((state) => state.resetStream);
   const appendStreamUserInput = useAppStore((state) => state.appendStreamUserInput);
-  const { streamMessage, cancelStream, hasActiveConnection } = useSessionMessageStream(sessionId);
+  const { eventMessage, cancelStream, reconnectMessage, retryMessage, hasActiveConnection } =
+    useSessionMessageStream(sessionId);
   const { invalidateSessionQueries } = useSessionQueryInvalidation(sessionId);
 
   useEffect(() => {
@@ -30,6 +31,7 @@ export function useSessionStreaming(sessionId: string, serverMessageCount?: numb
       cancelStream();
     },
     onSuccess: async () => {
+      useAppStore.getState().setPendingUserAction(sessionId, undefined);
       useAppStore.getState().setPendingApproval(sessionId, undefined);
       useAppStore.getState().setSessionStatus(sessionId, undefined);
       useAppStore.getState().setStreamError(sessionId, undefined);
@@ -65,21 +67,28 @@ export function useSessionStreaming(sessionId: string, serverMessageCount?: numb
       if (appendUserInput && text.trim().length > 0) {
         appendStreamUserInput(sessionId, text);
       }
+      const clientMessageId = createClientMessageId();
       useAppStore.getState().setStreamError(sessionId, undefined);
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: true,
         connectionState: "awaiting",
         expectedMessageCount:
           typeof serverMessageCount === "number" ? serverMessageCount + 1 : undefined,
+        activeInputText: appendUserInput ? text : undefined,
+        activeClientMessageId: appendUserInput ? clientMessageId : undefined,
       });
       setSessionStatus(sessionId, "running");
-      await streamMessage(text);
+      await eventMessage(text);
     },
     onSuccess: async () => {
       await invalidateSessionQueries();
       const currentStream = useAppStore.getState().streams[sessionId];
       if (currentStream?.pendingApproval) {
         setSessionStatus(sessionId, "waiting_approval");
+        return;
+      }
+      if (currentStream?.pendingUserAction) {
+        setSessionStatus(sessionId, "running");
         return;
       }
       resetStream(sessionId);
@@ -114,12 +123,67 @@ export function useSessionStreaming(sessionId: string, serverMessageCount?: numb
     },
   });
 
+  const retryMutation = useMutation({
+    mutationFn: async () => {
+      const currentStream = useAppStore.getState().streams[sessionId];
+      const text = currentStream?.activeInputText?.trim();
+      const retryOfMessageId = currentStream?.activeMessageId;
+      const clientMessageId = currentStream?.activeClientMessageId ?? createClientMessageId();
+      if (!text || !retryOfMessageId) {
+        throw new Error("No retryable message attempt.");
+      }
+
+      resetStream(sessionId);
+      appendStreamUserInput(sessionId, text);
+      useAppStore.getState().setStreamError(sessionId, undefined);
+      useAppStore.getState().setStreamMeta(sessionId, {
+        isStreaming: true,
+        connectionState: "awaiting",
+        expectedMessageCount:
+          typeof serverMessageCount === "number" ? serverMessageCount + 1 : undefined,
+        activeInputText: text,
+        activeClientMessageId: clientMessageId,
+      });
+      setSessionStatus(sessionId, "running");
+      await retryMessage({ clientMessageId, retryOfMessageId, text });
+    },
+    onSuccess: async () => {
+      await invalidateSessionQueries();
+      const currentStream = useAppStore.getState().streams[sessionId];
+      if (currentStream?.pendingApproval) {
+        setSessionStatus(sessionId, "waiting_approval");
+        return;
+      }
+      if (currentStream?.pendingUserAction) {
+        setSessionStatus(sessionId, "running");
+        return;
+      }
+      resetStream(sessionId);
+      setSessionStatus(sessionId, undefined);
+    },
+    onError: async (error) => {
+      useAppStore.getState().setStreamError(
+        sessionId,
+        error instanceof Error ? error.message : "Failed to retry response.",
+      );
+      useAppStore.getState().setStreamMeta(sessionId, {
+        isStreaming: false,
+        connectionState: "idle",
+      });
+      setSessionStatus(sessionId, "error");
+      await invalidateSessionQueries();
+    },
+  });
+
   return {
     hasActiveConnection,
+    reconnectMessage,
     sendMutation,
     stopMutation,
     streamState,
     stopResponse: () => stopMutation.mutateAsync(),
+    retryResponse: () => retryMutation.mutateAsync(),
+    canRetryResponse: Boolean(streamState?.activeInputText && streamState.activeMessageId),
     sendText: (text: string) => {
       const content = text.trim();
       if (!content) {
@@ -130,6 +194,16 @@ export function useSessionStreaming(sessionId: string, serverMessageCount?: numb
     continueAfterApproval: (text: string) =>
       sendMutation.mutateAsync({ text, appendUserInput: false }),
     isStreaming: streamState?.isStreaming ?? false,
-    isCancelling: stopMutation.isPending || streamState?.connectionState === "cancelling",
+    isCancelling:
+      stopMutation.isPending ||
+      retryMutation.isPending ||
+      streamState?.connectionState === "cancelling",
   };
+}
+
+function createClientMessageId() {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return `client_${globalThis.crypto.randomUUID()}`;
+  }
+  return `client_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }

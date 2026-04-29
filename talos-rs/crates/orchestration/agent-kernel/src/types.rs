@@ -227,6 +227,7 @@ pub enum KernelStreamEventType {
     ToolResult,
     PromptWarning,
     ConfirmationRequest,
+    DynamicToolRequest,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -260,6 +261,7 @@ pub enum KernelStreamEventData {
     ToolResult(ToolResultStreamData),
     PromptWarning(PromptWarningEventData),
     ConfirmationRequest(ConfirmationRequestStreamData),
+    DynamicToolRequest(DynamicToolRequestStreamData),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -273,6 +275,13 @@ pub struct ConfirmationRequestStreamData {
     pub call_id: String,
     pub tool_name: String,
     pub prompt: String,
+    pub arguments: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DynamicToolRequestStreamData {
+    pub call_id: String,
+    pub tool_name: String,
     pub arguments: Value,
 }
 

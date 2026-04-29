@@ -40,7 +40,6 @@ payload = {
             "text": os.environ["INPUT_TEXT"]
         }
     ],
-    "stream": False,
     "workspace_id": None,
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -104,10 +103,7 @@ echo "CASE messages_english_create_session PASS session_id=${en_session_id}"
 
 english_input="Please respond in English with one short sentence containing 'english-ok'."
 english_payload="$(build_payload "${english_input}")"
-english_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${en_session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${english_payload}")"
+english_json="$(send_message_response "${en_session_id}" "${english_payload}" "english")"
 log_case_json "messages_english" "${english_payload}" "${english_json}"
 english_output="$(extract_output_text "${english_json}")"
 english_stop="$(json_get "${english_json}" "stop_reason")"
@@ -136,10 +132,7 @@ echo "CASE messages_chinese_create_session PASS session_id=${zh_session_id}"
 
 chinese_input="请用中文回复一句话，并包含“中文通过”四个字。"
 chinese_payload="$(build_payload "${chinese_input}")"
-chinese_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${zh_session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${chinese_payload}")"
+chinese_json="$(send_message_response "${zh_session_id}" "${chinese_payload}" "chinese")"
 log_case_json "messages_chinese" "${chinese_payload}" "${chinese_json}"
 chinese_output="$(extract_output_text "${chinese_json}")"
 chinese_stop="$(json_get "${chinese_json}" "stop_reason")"

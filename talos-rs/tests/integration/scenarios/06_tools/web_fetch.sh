@@ -57,7 +57,6 @@ import os
 
 payload = {
     "input": [{"type": "text", "text": os.environ["INPUT_TEXT"]}],
-    "stream": False,
     "workspace_id": None,
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -99,10 +98,7 @@ echo "CASE web_fetch_create_session PASS session_id=${session_id}"
 
 fetch_input="You must call tool 'WebFetch' exactly once with url https://example.com and max_chars 1500. After the tool call, respond with exactly WEB_FETCH_OK:Example Domain"
 fetch_payload="$(build_payload "${fetch_input}")"
-fetch_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${fetch_payload}")"
+fetch_json="$(send_message_response "${session_id}" "${fetch_payload}" "fetch")"
 log_case_json "tool_web_fetch" "${fetch_payload}" "${fetch_json}"
 
 fetch_output="$(extract_output_text "${fetch_json}")"

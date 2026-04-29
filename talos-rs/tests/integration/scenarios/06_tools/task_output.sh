@@ -59,7 +59,6 @@ import os
 
 payload = {
     "input": [{"type": "text", "text": os.environ["INPUT_TEXT"]}],
-    "stream": False,
     "workspace_id": None,
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -101,10 +100,7 @@ echo "CASE task_output_create_session PASS session_id=${session_id}"
 
 bash_input="You must call tool 'Bash' exactly once with command python3 -c \"import time; print('${TASK_MARKER}', flush=True); time.sleep(20)\" and run_in_background true and timeout 0. After the tool call, respond with exactly TASK_STARTED"
 bash_payload="$(build_payload "${bash_input}")"
-bash_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${bash_payload}")"
+bash_json="$(send_message_response "${session_id}" "${bash_payload}" "bash")"
 log_case_json "tool_task_output_bash" "${bash_payload}" "${bash_json}"
 
 bash_output="$(extract_output_text "${bash_json}")"
@@ -133,10 +129,7 @@ PY
 
 task_input="You must call tool 'TaskOutput' exactly once with task_id ${task_id} and offset 1200. After the tool call, respond with exactly TASK_OUTPUT_OK:${TASK_MARKER}"
 task_payload="$(build_payload "${task_input}")"
-task_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${task_payload}")"
+task_json="$(send_message_response "${session_id}" "${task_payload}" "task")"
 log_case_json "tool_task_output" "${task_payload}" "${task_json}"
 
 task_output="$(extract_output_text "${task_json}")"

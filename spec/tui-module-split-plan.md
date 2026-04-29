@@ -191,7 +191,7 @@ pub trait GatewayClient: Send + Sync {
     async fn list_models(&self) -> TalosResult<Vec<ModelInfo>>;
     async fn list_sessions(&self) -> TalosResult<Vec<TalosSession>>;
     async fn create_session(&self, params: SessionCreateParams) -> TalosResult<TalosSession>;
-    async fn send_message_stream(&self, ...) -> TalosResult<mpsc::Receiver<TalosEvent>>;
+    async fn send_message_events(&self, ...) -> TalosResult<mpsc::Receiver<TalosEvent>>;
     // ...
 }
 impl GatewayClient for TalosClient { ... }

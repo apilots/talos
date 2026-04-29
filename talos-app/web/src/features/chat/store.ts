@@ -39,6 +39,10 @@ export interface ChatSlice {
     status: "done" | "error",
     timingMs?: number | null,
   ) => void;
+  setPendingUserAction: (
+    sessionId: string,
+    pendingUserAction?: StreamSessionState["pendingUserAction"],
+  ) => void;
   setPendingApproval: (sessionId: string, approval?: PendingApproval) => void;
   setStreamError: (sessionId: string, error?: string) => void;
   setStreamMeta: (
@@ -46,7 +50,15 @@ export interface ChatSlice {
     meta: Partial<
       Pick<
         StreamSessionState,
-        "isStreaming" | "activeMessageId" | "lastSequence" | "connectionState" | "expectedMessageCount"
+        | "isStreaming"
+        | "activeMessageId"
+        | "lastSequence"
+        | "connectionState"
+        | "expectedMessageCount"
+        | "reconnectAttempt"
+        | "showReconnectControls"
+        | "activeInputText"
+        | "activeClientMessageId"
       >
     >,
   ) => void;
@@ -239,6 +251,16 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
           streams: {
             ...state.streams,
             [sessionId]: { ...stream, blocks },
+          },
+        };
+      }),
+    setPendingUserAction: (sessionId, pendingUserAction) =>
+      set((state) => {
+        const stream = ensureStreamState(state, sessionId);
+        return {
+          streams: {
+            ...state.streams,
+            [sessionId]: { ...stream, pendingUserAction },
           },
         };
       }),

@@ -57,7 +57,6 @@ import os
 
 payload = {
     "input": [{"type": "text", "text": os.environ["INPUT_TEXT"]}],
-    "stream": False,
     "workspace_id": None,
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -99,10 +98,7 @@ echo "CASE agent_create_session PASS session_id=${session_id}"
 
 agent_input="You must call tool 'Agent' exactly once with description child echo task, prompt Reply with AGENT_CHILD_OK, subagent_type review, and run_in_background true. After the tool call, briefly report the resulting status."
 agent_payload="$(build_payload "${agent_input}")"
-agent_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${agent_payload}")"
+agent_json="$(send_message_response "${session_id}" "${agent_payload}" "agent")"
 log_case_json "tool_agent" "${agent_payload}" "${agent_json}"
 
 agent_output="$(extract_output_text "${agent_json}")"

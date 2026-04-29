@@ -20,13 +20,11 @@ fn test_talos_roundtrip() {
         input: vec![talos::TalosInputItem::Text {
             text: "hello".to_string(),
         }],
-        stream: Some(false),
         workspace_id: Some("workspace-1".to_string()),
     };
 
     let encoded = serde_json::to_string(&req).unwrap();
     let decoded: talos::TalosMessageRequest = serde_json::from_str(&encoded).unwrap();
-    assert!(decoded.stream.is_some());
     assert_eq!(decoded.workspace_id.as_deref(), Some("workspace-1"));
     assert!(matches!(
         decoded.input.first(),

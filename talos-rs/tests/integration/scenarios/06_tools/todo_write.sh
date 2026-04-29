@@ -59,7 +59,6 @@ import os
 
 payload = {
     "input": [{"type": "text", "text": os.environ["INPUT_TEXT"]}],
-    "stream": False,
     "workspace_id": None,
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -101,10 +100,7 @@ echo "CASE todo_write_create_session PASS session_id=${session_id}"
 
 todo_input="You must call tool 'TodoWrite' exactly once with a todo item id ${TODO_ID}, content placeholder test todo only, status in_progress. After the tool call, respond with exactly TODO_WRITE_OK:${TODO_ID}"
 todo_payload="$(build_payload "${todo_input}")"
-todo_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${todo_payload}")"
+todo_json="$(send_message_response "${session_id}" "${todo_payload}" "todo")"
 log_case_json "tool_todo_write" "${todo_payload}" "${todo_json}"
 
 todo_output="$(extract_output_text "${todo_json}")"

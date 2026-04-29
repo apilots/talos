@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { applyStreamEvent } from "@/features/chat";
+import { applyActiveTurnSnapshot, applyStreamEvent } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
 import {
   createDefaultProjects,
@@ -120,6 +120,149 @@ describe("chat stream integration helpers", () => {
     });
     expect(stream?.connectionState).toBe("idle");
     expect(useAppStore.getState().transientStatuses["sess-1"]).toBe("waiting_approval");
+  });
+
+  it("applies dynamic tool pending events into the transient stream store", () => {
+    applyStreamEvent("sess-1", {
+      event_type: "message_tool_call_pending_dynamic_result",
+      message_id: "msg-1",
+      session_id: "sess-1",
+      sequence: 3,
+      payload: {
+        type: "message_tool_call_pending_dynamic_result",
+        call_id: "call-1",
+        tool_name: "ExternalTool",
+        arguments: { query: "status" },
+        step_id: "step-1",
+      },
+    });
+
+    const stream = useAppStore.getState().streams["sess-1"];
+    expect(stream.pendingUserAction).toMatchObject({
+      type: "dynamic_tool_result",
+      call_id: "call-1",
+      tool_name: "ExternalTool",
+    });
+    expect(stream.blocks).toContainEqual(
+      expect.objectContaining({
+        kind: "tool",
+        callId: "call-1",
+        toolName: "ExternalTool",
+        status: "running",
+      }),
+    );
+    expect(useAppStore.getState().transientStatuses["sess-1"]).toBe("running");
+  });
+
+  it("hydrates pending approval from an active turn snapshot", () => {
+    applyActiveTurnSnapshot("sess-1", {
+      session_id: "sess-1",
+      turn_id: "turn-1",
+      message_id: "msg-1",
+      status: "waiting_user_action",
+      last_event_id: "ev_00000000000000000004",
+      pending_user_action: {
+        type: "tool_approval",
+        call_id: "call-1",
+        tool_name: "Bash",
+        prompt: "Approve command?",
+        arguments: { cmd: "date" },
+      },
+      updated_at: 123,
+    });
+
+    const stream = useAppStore.getState().streams["sess-1"];
+    expect(stream.pendingApproval).toMatchObject({
+      callId: "call-1",
+      toolName: "Bash",
+    });
+    expect(stream.pendingUserAction).toMatchObject({
+      type: "tool_approval",
+      call_id: "call-1",
+    });
+    expect(stream.connectionState).toBe("detached");
+    expect(useAppStore.getState().transientStatuses["sess-1"]).toBe("waiting_approval");
+  });
+
+  it("hydrates running active turn snapshots for reconnect replay", () => {
+    applyActiveTurnSnapshot("sess-1", {
+      session_id: "sess-1",
+      turn_id: "turn-1",
+      message_id: "msg-1",
+      status: "running",
+      last_event_id: "ev_00000000000000000004",
+      pending_user_action: null,
+      updated_at: 123,
+    });
+
+    const stream = useAppStore.getState().streams["sess-1"];
+    expect(stream.activeMessageId).toBe("msg-1");
+    expect(stream.isStreaming).toBe(true);
+    expect(stream.connectionState).toBe("detached");
+    expect(stream.reconnectAttempt).toBe(0);
+    expect(stream.showReconnectControls).toBe(false);
+    expect(useAppStore.getState().transientStatuses["sess-1"]).toBe("running");
+  });
+
+  it("clears stale per-message sequence when a running snapshot points to a new message", () => {
+    useAppStore.getState().setStreamMeta("sess-1", {
+      activeMessageId: "msg-old",
+      lastSequence: 918,
+      isStreaming: false,
+      connectionState: "idle",
+    });
+
+    applyActiveTurnSnapshot("sess-1", {
+      session_id: "sess-1",
+      turn_id: "turn-2",
+      message_id: "msg-new",
+      status: "running",
+      last_event_id: "ev_00000000000000001000",
+      pending_user_action: null,
+      updated_at: 124,
+    });
+
+    applyStreamEvent("sess-1", {
+      event_type: "message_started",
+      message_id: "msg-new",
+      session_id: "sess-1",
+      sequence: 0,
+      payload: {
+        type: "message_started",
+      },
+    });
+
+    const stream = useAppStore.getState().streams["sess-1"];
+    expect(stream.activeMessageId).toBe("msg-new");
+    expect(stream.lastSequence).toBe(0);
+    expect(stream.connectionState).toBe("streaming");
+    expect(useAppStore.getState().transientStatuses["sess-1"]).toBe("running");
+  });
+
+  it("clears stale local stream state when active turn is completed", () => {
+    useAppStore.getState().setStreamMeta("sess-1", {
+      activeMessageId: "msg-1",
+      isStreaming: true,
+      connectionState: "detached",
+    });
+    useAppStore.getState().setSessionStatus("sess-1", "running");
+
+    applyActiveTurnSnapshot("sess-1", {
+      session_id: "sess-1",
+      turn_id: "turn-1",
+      message_id: "msg-1",
+      status: "completed",
+      last_event_id: "ev_00000000000000000004",
+      pending_user_action: null,
+      updated_at: 123,
+    });
+
+    const stream = useAppStore.getState().streams["sess-1"];
+    expect(stream.isStreaming).toBe(false);
+    expect(stream.connectionState).toBe("idle");
+    expect(stream.blocks).toHaveLength(0);
+    expect(stream.showReconnectControls).toBeUndefined();
+    expect(useAppStore.getState().transientStatuses["sess-1"]).toBeUndefined();
   });
 
   it("clears the transient running state after message completion", () => {

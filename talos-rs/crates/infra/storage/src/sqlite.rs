@@ -413,6 +413,66 @@ impl Storage for SqliteStorage {
         .await?;
         debug!("User tokens table created/verified");
 
+        let create_session_events = r#"
+            CREATE TABLE IF NOT EXISTS session_events (
+                event_seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                turn_id TEXT,
+                message_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            )
+        "#;
+
+        self.execute(create_session_events, &[]).await?;
+        self.execute(
+            "CREATE INDEX IF NOT EXISTS idx_session_events_session_seq ON session_events(session_id, event_seq)",
+            &[],
+        )
+        .await?;
+        self.execute(
+            "CREATE INDEX IF NOT EXISTS idx_session_events_turn ON session_events(session_id, turn_id)",
+            &[],
+        )
+        .await?;
+        debug!("Session events table created/verified");
+
+        let create_active_turns = r#"
+            CREATE TABLE IF NOT EXISTS active_turns (
+                session_id TEXT PRIMARY KEY,
+                turn_id TEXT NOT NULL,
+                message_id TEXT,
+                status TEXT NOT NULL,
+                last_event_seq INTEGER,
+                pending_user_action_json TEXT,
+                updated_at INTEGER NOT NULL
+            )
+        "#;
+
+        self.execute(create_active_turns, &[]).await?;
+        debug!("Active turns table created/verified");
+
+        let create_message_idempotency_keys = r#"
+            CREATE TABLE IF NOT EXISTS message_idempotency_keys (
+                session_id TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                request_hash TEXT NOT NULL,
+                turn_id TEXT NOT NULL,
+                message_id TEXT,
+                status TEXT NOT NULL,
+                ack_json TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                expires_at INTEGER,
+                PRIMARY KEY (session_id, idempotency_key)
+            )
+        "#;
+
+        self.execute(create_message_idempotency_keys, &[]).await?;
+        debug!("Message idempotency table created/verified");
+
         info!("Database schema initialization complete");
         Ok(())
     }

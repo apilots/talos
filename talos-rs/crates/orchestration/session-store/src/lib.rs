@@ -12,6 +12,22 @@ use talos_types::{
     SessionRecord, DEFAULT_SESSION_TITLE,
 };
 
+pub mod active_turn;
+pub mod event_service;
+pub mod events;
+pub mod idempotency;
+
+pub use active_turn::{
+    ActiveTurnRecord, ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate,
+    PendingDynamicToolResult, PendingToolApproval, PendingUserAction,
+};
+pub use event_service::{SessionEventRetentionConfig, SessionEventService};
+pub use events::{NewSessionEvent, SessionEventId, SessionEventRecord, SessionEventStore};
+pub use idempotency::{
+    IdempotencyRecord, IdempotencyReservation, IdempotencyStatus, MessageCommandAck,
+    MessageIdempotencyStore,
+};
+
 #[async_trait]
 pub trait SessionStore: Send + Sync {
     async fn create_session(
@@ -769,6 +785,15 @@ impl SessionStore for DatabaseSessionStore {
     }
 
     async fn delete_session_record(&self, session_id: &str) -> TalosResult<SessionPatchAck> {
+        self.storage
+            .delete("session_events", "session_id = ?", &[session_id])
+            .await?;
+        self.storage
+            .delete("active_turns", "session_id = ?", &[session_id])
+            .await?;
+        self.storage
+            .delete("message_idempotency_keys", "session_id = ?", &[session_id])
+            .await?;
         let affected = self
             .storage
             .delete("sessions", "session_key = ?", &[session_id])

@@ -19,6 +19,7 @@ export function useSessionApproval(
         tool_name: pendingApproval.toolName,
         approved,
       });
+      useAppStore.getState().setPendingUserAction(sessionId, undefined);
       useAppStore.getState().setPendingApproval(sessionId, undefined);
       useAppStore.getState().setSessionStatus(sessionId, "running");
       const continuation = approved

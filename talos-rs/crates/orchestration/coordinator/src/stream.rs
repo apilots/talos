@@ -7,9 +7,9 @@ use talos_types::talos::{
     TalosMessageErrorEvent, TalosMessageExecutionSummaryEvent, TalosMessageOutputDeltaEvent,
     TalosMessageReasoningDeltaEvent, TalosMessageStartedEvent, TalosMessageToolCallArgsDeltaEvent,
     TalosMessageToolCallCompletedEvent, TalosMessageToolCallExecutingEvent,
-    TalosMessageToolCallPendingApprovalEvent, TalosMessageToolCallProgressDeltaEvent,
-    TalosMessageToolCallQueuedEvent, TalosMessageToolCallStartedEvent, TalosToolProgressKind,
-    TalosToolStreamKey,
+    TalosMessageToolCallPendingApprovalEvent, TalosMessageToolCallPendingDynamicResultEvent,
+    TalosMessageToolCallProgressDeltaEvent, TalosMessageToolCallQueuedEvent,
+    TalosMessageToolCallStartedEvent, TalosToolProgressKind, TalosToolStreamKey,
 };
 use talos_types::TalosSession;
 
@@ -185,6 +185,18 @@ pub(super) fn map_orchestrator_event(
                     call_id: payload.call_id,
                     tool_name: payload.tool_name,
                     prompt: payload.prompt,
+                    arguments: payload.arguments,
+                    step_id: payload.step_id,
+                },
+            ),
+        ),
+        OrchestratorEvent::MessageToolCallPendingDynamicResult(payload) => (
+            TalosEventType::MessageToolCallPendingDynamicResult,
+            TalosEventPayload::MessageToolCallPendingDynamicResult(
+                TalosMessageToolCallPendingDynamicResultEvent {
+                    request_id: payload.request_id,
+                    call_id: payload.call_id,
+                    tool_name: payload.tool_name,
                     arguments: payload.arguments,
                     step_id: payload.step_id,
                 },

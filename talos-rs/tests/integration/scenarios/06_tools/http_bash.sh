@@ -40,7 +40,6 @@ payload = {
             "text": os.environ["INPUT_TEXT"]
         }
     ],
-    "stream": False,
     "workspace_id": None,
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -104,10 +103,7 @@ echo "CASE messages_tool_exec_create_session PASS session_id=${tool_session_id}"
 
 tool_input="You must call tool 'Bash' exactly once with command ls, then return the raw stdout inside <tool_output></tool_output>."
 tool_payload="$(build_payload "${tool_input}")"
-tool_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${tool_session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${tool_payload}")"
+tool_json="$(send_message_response "${tool_session_id}" "${tool_payload}" "tool")"
 log_case_json "messages_tool_exec" "${tool_payload}" "${tool_json}"
 tool_output="$(extract_output_text "${tool_json}")"
 tool_stop="$(json_get "${tool_json}" "stop_reason")"
@@ -164,16 +160,12 @@ payload = {
             "text": "You must call Bash tool with command ls, then summarize in one short sentence.",
         }
     ],
-    "stream": True,
 }
 print(json.dumps(payload, ensure_ascii=False))
 PY
 )"
 stream_tool_log="$(scenario_report_path tool_stream_events.log)"
-curl -sS -N -X POST "${GATEWAY_URL}/v1/sessions/${stream_tool_session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${stream_tool_payload}" > "${stream_tool_log}"
+send_message_sse_log "${stream_tool_session_id}" "${stream_tool_payload}" "${stream_tool_log}"
 log_case_json "messages_tool_exec_stream" "${stream_tool_payload}" "$(cat "${stream_tool_log}")"
 
 stream_started_count="$(grep -c '^event: message.started' "${stream_tool_log}" || true)"

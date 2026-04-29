@@ -1,5 +1,6 @@
 export type {
   TalosContentItem,
+  TalosPendingUserAction,
   TalosMessageResponse,
   TalosOutputItem,
   TalosSession,

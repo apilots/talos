@@ -63,13 +63,9 @@ PY
 
 msg_payload='{
   "input": [{"type":"text","text":"please answer with one short sentence"}],
-  "stream": false,
   "workspace_id": null
 }'
-msg_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${msg_payload}")"
+msg_json="$(send_message_response "${session_id}" "${msg_payload}" "msg")"
 log_case_json "messages_non_stream" "${msg_payload}" "${msg_json}"
 output_text="$(extract_output_text "${msg_json}")"
 message_id="$(json_get "${msg_json}" "message_id")"
@@ -95,13 +91,9 @@ echo "CASE messages_session_usage_after_non_stream PASS total_tokens=${session_u
 sse_log="$(scenario_report_path sse_events.log)"
 sse_payload='{
   "input": [{"type":"text","text":"please answer with one short sentence"}],
-  "stream": true,
   "workspace_id": null
 }'
-curl -sS -N -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${sse_payload}" > "${sse_log}"
+send_message_sse_log "${session_id}" "${sse_payload}" "${sse_log}"
 log_case_json "messages_sse_stream" "${sse_payload}" "$(cat "${sse_log}")"
 
 started_count="$(grep -c '^event: message.started' "${sse_log}" || true)"
@@ -123,7 +115,7 @@ with open(path, "r", encoding="utf-8") as handle:
         if event.get("event_type") != "message_completed":
             continue
         usage = (
-            event.get("data", {})
+            event.get("payload", {})
             .get("usage", {})
             .get("total_tokens", 0)
         )
@@ -139,16 +131,35 @@ echo "DETAIL messages_sse_events_begin"
 head -n 40 "${sse_log}"
 echo "DETAIL messages_sse_events_end"
 
-first_request="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
+gone_session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -H "Idempotency-Key: scenario-idem-1" \
-  -d "${msg_payload}")"
-second_request="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
-  -H "Content-Type: application/json" \
+  -d "${create_payload}")"
+gone_session_id="$(session_id_from_json "${gone_session_json}")"
+if [[ -z "${gone_session_id}" ]]; then
+  echo "CASE messages_events_cursor_gone_create_session FAIL response=${gone_session_json}"
+  exit 1
+fi
+gone_msg_json="$(send_message_response "${gone_session_id}" "${msg_payload}" "cursor_gone_msg")"
+gone_msg_id="$(json_get "${gone_msg_json}" "message_id")"
+if [[ -z "${gone_msg_id}" ]]; then
+  echo "CASE messages_events_cursor_gone_seed FAIL response=${gone_msg_json}"
+  exit 1
+fi
+gone_body="$(scenario_report_path cursor_gone_response.json)"
+gone_status="$(curl -sS -o "${gone_body}" -w "%{http_code}" \
+  -H "Accept: text/event-stream" \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -H "Idempotency-Key: scenario-idem-1" \
-  -d "${msg_payload}")"
+  "${GATEWAY_URL}/v1/sessions/${gone_session_id}/events?after_event_id=ev_00000000000000000001")"
+log_case_json "messages_events_cursor_gone" "{\"session_id\":\"${gone_session_id}\",\"after_event_id\":\"ev_00000000000000000001\"}" "$(cat "${gone_body}")"
+if [[ "${gone_status}" != "410" ]]; then
+  echo "CASE messages_events_cursor_gone FAIL status=${gone_status} body=$(cat "${gone_body}")"
+  exit 1
+fi
+echo "CASE messages_events_cursor_gone PASS status=${gone_status}"
+
+first_request="$(send_message_response "${session_id}" "${msg_payload}" "messages_idempotency_first" "scenario-idem-1")"
+second_request="$(send_message_response "${session_id}" "${msg_payload}" "messages_idempotency_second" "scenario-idem-1")"
 log_case_json "messages_idempotency_first" "${msg_payload}" "${first_request}"
 log_case_json "messages_idempotency_second" "${msg_payload}" "${second_request}"
 id1="$(json_get "${first_request}" "message_id")"

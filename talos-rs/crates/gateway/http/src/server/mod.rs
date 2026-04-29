@@ -2,6 +2,7 @@ mod access;
 mod admin_users;
 mod auth;
 mod errors;
+mod events;
 mod file_support;
 mod lifecycle;
 mod memory_files;
@@ -28,13 +29,15 @@ use self::admin_users::{
     list_admin_users_handler, patch_admin_user_handler, put_admin_llm_handler,
 };
 use self::auth::{auth_middleware, lifecycle_gate_middleware};
+use self::events::{get_active_turn_handler, subscribe_session_events_handler};
 pub use self::lifecycle::{ServerLifecycle, ServerLifecycleState};
 use self::memory_files::{
     get_memory_file_handler, list_memory_files_handler, put_memory_file_handler,
     search_memory_files_handler,
 };
 use self::messages::{
-    session_message_handler, submit_dynamic_tool_result_handler, submit_tool_approval_handler,
+    retry_message_attempt_handler, session_message_handler, submit_dynamic_tool_result_handler,
+    submit_tool_approval_handler,
 };
 use self::misc::{health_handler, list_models_handler, shutdown_signal};
 use self::projects::{
@@ -60,12 +63,15 @@ use talos_config::LlmConfigService;
 use talos_error::TalosResult;
 use talos_gateway::Gateway;
 use talos_llm_provider::LlmProvider;
+use talos_session_store::{MessageIdempotencyStore, SessionEventService};
 use talos_types::{ModelInfo, SessionService, TalosConfig};
 
 /// HTTP Server for the Talos Gateway.
 pub struct HttpServer {
     gateway: Arc<dyn Gateway>,
     session_service: Arc<dyn SessionService>,
+    event_service: Arc<SessionEventService>,
+    idempotency_store: Arc<dyn MessageIdempotencyStore>,
     auth_service: Arc<dyn AuthService>,
     user_service: Arc<dyn UserService>,
     base_config: TalosConfig,
@@ -84,6 +90,8 @@ impl HttpServer {
     pub fn new(
         gateway: Arc<dyn Gateway>,
         session_service: Arc<dyn SessionService>,
+        event_service: Arc<SessionEventService>,
+        idempotency_store: Arc<dyn MessageIdempotencyStore>,
         auth_service: Arc<dyn AuthService>,
         user_service: Arc<dyn UserService>,
         base_config: TalosConfig,
@@ -97,6 +105,8 @@ impl HttpServer {
         Self {
             gateway,
             session_service,
+            event_service,
+            idempotency_store,
             auth_service,
             user_service,
             base_config,
@@ -142,10 +152,19 @@ impl HttpServer {
 
     pub async fn run_with_shutdown(&self, shutdown: CancellationToken) -> TalosResult<()> {
         info!("Starting HTTP server on {}:{}", self.host, self.port);
+        let gc_shutdown = shutdown.clone();
+        let event_service_for_gc = self.event_service.clone();
+        let gc_task = tokio::spawn(async move {
+            event_service_for_gc
+                .run_event_log_gc_loop(gc_shutdown)
+                .await;
+        });
 
         let state = Arc::new(HttpApiState::new_with_lifecycle(
             self.gateway.clone(),
             self.session_service.clone(),
+            self.event_service.clone(),
+            self.idempotency_store.clone(),
             self.base_config.clone(),
             self.llm_provider.clone(),
             self.auth_service.clone(),
@@ -229,6 +248,14 @@ impl HttpServer {
                 get(get_session_turns_handler),
             )
             .route(
+                "/v1/sessions/:session_id/events",
+                get(subscribe_session_events_handler),
+            )
+            .route(
+                "/v1/sessions/:session_id/active-turn",
+                get(get_active_turn_handler),
+            )
+            .route(
                 "/v1/sessions/:session_id/close",
                 post(close_session_handler),
             )
@@ -247,6 +274,10 @@ impl HttpServer {
             .route(
                 "/v1/sessions/:session_id/messages",
                 post(session_message_handler),
+            )
+            .route(
+                "/v1/sessions/:session_id/message-attempts",
+                post(retry_message_attempt_handler),
             )
             .route(
                 "/v1/sessions/:session_id/tool-approvals",
@@ -273,7 +304,7 @@ impl HttpServer {
 
         info!("HTTP server listening on {}:{}", self.host, self.port);
 
-        axum::serve(listener, app)
+        let serve_result = axum::serve(listener, app)
             .with_graceful_shutdown(async move {
                 shutdown.cancelled().await;
             })
@@ -281,9 +312,10 @@ impl HttpServer {
             .map_err(|e| {
                 error!("Server error: {}", e);
                 talos_error::TalosError::NetworkError(e.to_string())
-            })?;
+            });
 
-        Ok(())
+        gc_task.abort();
+        serve_result
     }
 
     fn listen_addr(&self) -> String {

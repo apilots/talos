@@ -49,9 +49,11 @@ export function ChatSessionPage() {
     isStreaming,
     isCancelling,
     pendingApproval,
+    canRetryResponse,
+    retryResponse,
     retryStream,
+    showReconnectControls,
     stopResponse,
-    streamConnectionState,
     streamError,
   } = useChatSession(sessionId, session?.state.message_count);
   const updateModel = useUpdateSessionModelMutation(sessionId);
@@ -222,33 +224,40 @@ export function ChatSessionPage() {
               <div className="text-sm text-danger">{streamError}</div>
             </Panel>
           ) : null}
-          {streamConnectionState === "detached" || streamConnectionState === "reconnecting" ? (
-            <Panel className="rounded-[1.5rem] border-brand/20 bg-brand/5 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="text-xs uppercase tracking-[0.16em] text-brand">
-                    {streamConnectionState === "reconnecting" ? t("chat:reconnecting") : t("chat:connectionLost")}
-                  </div>
-                  <div className="mt-2 text-base font-medium text-ink">
-                    {streamConnectionState === "reconnecting"
-                      ? t("chat:refreshingSessionHistory")
-                      : t("chat:liveResponseInterrupted")}
-                  </div>
-                  <p className="mt-2 max-w-2xl text-sm text-muted">
-                    {streamConnectionState === "reconnecting"
-                      ? t("chat:refreshingDetail")
-                      : t("chat:interruptedDetail")}
-                  </p>
+          {showReconnectControls ? (
+            <Panel className="rounded-xl border-border/70 bg-surface/70 px-3 py-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0 text-sm text-muted">
+                  <span className="font-medium text-ink">{t("chat:liveResponseInterrupted")}</span>
+                  <span className="ml-2">{t("chat:interruptedDetail")}</span>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex shrink-0 items-center gap-2">
                   <Button
-                    disabled={streamConnectionState === "reconnecting" || isCancelling}
+                    className="px-2.5 py-1.5 text-xs"
+                    disabled={isCancelling}
                     onClick={() => void retryStream()}
                     variant="secondary"
                   >
-                    {t("common:retryNow")}
+                    {t("common:refreshNow")}
                   </Button>
-                  <Button disabled={isCancelling} onClick={() => void stopResponse()} variant="danger">{t("common:stopResponse")}</Button>
+                  {canRetryResponse ? (
+                    <Button
+                      className="px-2.5 py-1.5 text-xs"
+                      disabled={isCancelling}
+                      onClick={() => void retryResponse()}
+                      variant="secondary"
+                    >
+                      {t("common:retryResponse")}
+                    </Button>
+                  ) : null}
+                  <Button
+                    className="px-2.5 py-1.5 text-xs"
+                    disabled={isCancelling}
+                    onClick={() => void stopResponse()}
+                    variant="ghost"
+                  >
+                    {t("common:stopResponse")}
+                  </Button>
                 </div>
               </div>
             </Panel>

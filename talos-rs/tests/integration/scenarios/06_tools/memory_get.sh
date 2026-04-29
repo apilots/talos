@@ -98,7 +98,6 @@ import os
 
 payload = {
     "input": [{"type": "text", "text": os.environ["INPUT_TEXT"]}],
-    "stream": False,
     "workspace_id": None,
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -158,10 +157,7 @@ echo "CASE memory_get_create_session PASS session_id=${session_id}"
 
 memory_get_input="You must call tool 'MemoryGet' exactly once with path ${MEMORY_FILE_PATH}. After the tool call, respond with exactly MEMORY_GET_OK:${MEMORY_MARKER}"
 memory_get_payload="$(build_payload "${memory_get_input}")"
-memory_get_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "${memory_get_payload}")"
+memory_get_json="$(send_message_response "${session_id}" "${memory_get_payload}" "memory_get")"
 log_case_json "tool_memory_get" "${memory_get_payload}" "${memory_get_json}"
 
 memory_get_output="$(extract_output_text "${memory_get_json}")"

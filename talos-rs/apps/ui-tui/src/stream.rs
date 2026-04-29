@@ -559,7 +559,6 @@ impl TuiApp {
             input: vec![TalosInputItem::Text {
                 text: user_message.clone(),
             }],
-            stream: Some(true),
             workspace_id: None,
         };
 
@@ -589,7 +588,7 @@ impl TuiApp {
         self.push_right_event(format!("message dispatched to session {}", session_id));
 
         let handle = tokio::spawn(async move {
-            let result = client.send_message_stream(&session_id, &request).await;
+            let result = client.send_message_events(&session_id, &request).await;
             if tx.send(result).await.is_err() {
                 error!(
                     session_id = %session_id,

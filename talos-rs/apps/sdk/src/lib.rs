@@ -28,6 +28,79 @@ pub use talos_types::{
     WorkspaceDocKind, WorkspaceDocSummary,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TalosMessageCommandStatus {
+    Pending,
+    Accepted,
+    Failed,
+    FailedNoFirstEvent,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TalosMessageAck {
+    pub request_id: String,
+    pub message_id: Option<String>,
+    pub session_id: String,
+    pub turn_id: String,
+    pub status: TalosMessageCommandStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TalosSessionEventRecord {
+    pub event_seq: i64,
+    pub event_id: String,
+    pub session_id: String,
+    pub turn_id: Option<String>,
+    pub message_id: String,
+    pub sequence: u64,
+    pub event_type: TalosEventType,
+    pub payload: TalosEventPayload,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TalosActiveTurnStatus {
+    Running,
+    WaitingUserAction,
+    Cancelling,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TalosActiveTurn {
+    pub session_id: String,
+    pub turn_id: Option<String>,
+    pub message_id: Option<String>,
+    pub status: TalosActiveTurnStatus,
+    pub last_event_id: Option<String>,
+    pub pending_user_action: Option<TalosPendingUserAction>,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TalosPendingUserAction {
+    ToolApproval(TalosPendingToolApproval),
+    DynamicToolResult(TalosPendingDynamicToolResult),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TalosPendingToolApproval {
+    pub call_id: String,
+    pub tool_name: String,
+    pub prompt: String,
+    pub arguments: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TalosPendingDynamicToolResult {
+    pub call_id: String,
+    pub tool_name: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct ClientConfig {
     pub gateway_url: String,
@@ -690,39 +763,59 @@ impl TalosClient {
         &self,
         session_id: &str,
         request: &TalosMessageRequest,
-    ) -> TalosResult<TalosMessageResponse> {
+    ) -> TalosResult<TalosMessageAck> {
+        let idempotency_key = format!("msg_{}", uuid::Uuid::new_v4().simple());
+        self.send_message_with_idempotency_key(session_id, request, &idempotency_key)
+            .await
+    }
+
+    pub async fn send_message_with_idempotency_key(
+        &self,
+        session_id: &str,
+        request: &TalosMessageRequest,
+        idempotency_key: &str,
+    ) -> TalosResult<TalosMessageAck> {
         let url = format!(
             "{}/v1/sessions/{}/messages",
             self.config.gateway_url, session_id
         );
         let response = self
-            .authorized(self.http_client.post(&url).json(request))
+            .authorized(
+                self.http_client
+                    .post(&url)
+                    .header("idempotency-key", idempotency_key)
+                    .json(request),
+            )
             .send()
             .await
             .map_err(|e| Self::request_error("POST", &url, e))?;
         Self::decode_json(response, "POST", &url).await
     }
 
-    pub async fn send_message_stream(
+    pub async fn subscribe_session_events(
         &self,
         session_id: &str,
-        request: &TalosMessageRequest,
-    ) -> TalosResult<mpsc::Receiver<TalosEvent>> {
-        let mut stream_request = request.clone();
-        stream_request.stream = Some(true);
-
-        let url = format!(
-            "{}/v1/sessions/{}/messages",
+        after_event_id: Option<&str>,
+    ) -> TalosResult<mpsc::Receiver<TalosSessionEventRecord>> {
+        let mut url = format!(
+            "{}/v1/sessions/{}/events",
             self.config.gateway_url, session_id
         );
+        if let Some(after_event_id) = after_event_id {
+            url.push_str("?after_event_id=");
+            url.push_str(after_event_id);
+        }
         let response = self
-            .authorized(self.http_client.post(&url).json(&stream_request))
+            .authorized(
+                self.http_client
+                    .get(&url)
+                    .header("accept", "text/event-stream"),
+            )
             .send()
             .await
-            .map_err(|e| Self::request_error("POST", &url, e))?;
-
+            .map_err(|e| Self::request_error("GET", &url, e))?;
         if !response.status().is_success() {
-            return Err(Self::http_error(response, "POST", &url).await);
+            return Err(Self::http_error(response, "GET", &url).await);
         }
 
         let (tx, rx) = mpsc::channel(256);
@@ -744,7 +837,8 @@ impl TalosClient {
                             continue;
                         }
 
-                        let Ok(event) = serde_json::from_str::<TalosEvent>(payload) else {
+                        let Ok(event) = serde_json::from_str::<TalosSessionEventRecord>(payload)
+                        else {
                             continue;
                         };
 
@@ -757,6 +851,59 @@ impl TalosClient {
         });
 
         Ok(rx)
+    }
+
+    pub async fn send_message_events(
+        &self,
+        session_id: &str,
+        request: &TalosMessageRequest,
+    ) -> TalosResult<mpsc::Receiver<TalosEvent>> {
+        let ack = self.send_message(session_id, request).await?;
+        let message_id = ack.message_id.clone().ok_or_else(|| {
+            TalosError::ClientError(format!(
+                "message ack did not include message_id: {}",
+                ack.turn_id
+            ))
+        })?;
+        let mut records = self.subscribe_session_events(session_id, None).await?;
+        let (tx, rx) = mpsc::channel(256);
+
+        tokio::spawn(async move {
+            while let Some(record) = records.recv().await {
+                if record.message_id != message_id {
+                    continue;
+                }
+                let event = TalosEvent {
+                    event_type: record.event_type,
+                    message_id: record.message_id,
+                    session_id: record.session_id,
+                    sequence: record.sequence,
+                    payload: record.payload,
+                };
+                let is_terminal = matches!(
+                    event.event_type,
+                    TalosEventType::MessageCompleted | TalosEventType::MessageError
+                );
+                if tx.send(event).await.is_err() || is_terminal {
+                    return;
+                }
+            }
+        });
+
+        Ok(rx)
+    }
+
+    pub async fn get_active_turn(&self, session_id: &str) -> TalosResult<TalosActiveTurn> {
+        let url = format!(
+            "{}/v1/sessions/{}/active-turn",
+            self.config.gateway_url, session_id
+        );
+        let response = self
+            .authorized(self.http_client.get(&url))
+            .send()
+            .await
+            .map_err(|e| Self::request_error("GET", &url, e))?;
+        Self::decode_json(response, "GET", &url).await
     }
 
     fn authorized(&self, builder: RequestBuilder) -> RequestBuilder {

@@ -20,6 +20,10 @@ export function getEffectiveSessionStatus(
     return "waiting_approval";
   }
 
+  if (streamState?.pendingUserAction) {
+    return "running";
+  }
+
   if (streamState?.error || transientStatus === "error") {
     return "error";
   }

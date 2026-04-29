@@ -9,6 +9,7 @@ export function useSessionQueryInvalidation(sessionId: string) {
   async function invalidateSessionQueries() {
     await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
     await queryClient.invalidateQueries({ queryKey: chatKeys.session(connectionKey, sessionId) });
+    await queryClient.invalidateQueries({ queryKey: chatKeys.activeTurn(connectionKey, sessionId) });
     await queryClient.invalidateQueries({ queryKey: chatKeys.turns(connectionKey, sessionId) });
   }
 

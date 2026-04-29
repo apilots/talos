@@ -14,8 +14,8 @@ All scenarios are real server/client flows and do not use mock gateway handlers.
 - Verifies: `/v1/sessions` create/get/list, `/v1/sessions/{id}` patch
 
 3. `scenarios/03_messages_http_sse.sh`
-- Scope: non-stream + SSE + idempotency behavior
-- Verifies: `/v1/sessions/{id}/messages` (sync + stream), `Idempotency-Key`
+- Scope: async ack + session event SSE + idempotency behavior
+- Verifies: `/v1/sessions/{id}/messages`, `/v1/sessions/{id}/events`, `Idempotency-Key`
 
 4. `scenarios/05_cli/`
 - Scope: CLI-driven interactive scenarios

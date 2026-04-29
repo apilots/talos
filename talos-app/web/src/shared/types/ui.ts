@@ -1,4 +1,4 @@
-import type { TalosToolProgressKind } from "./protocol";
+import type { TalosPendingUserAction, TalosToolProgressKind } from "./protocol";
 
 export type RuntimeMode = "cloud" | "local";
 export type ApprovalMode = "needs_approval" | "skip";
@@ -96,7 +96,12 @@ export interface StreamSessionState {
   lastSequence?: number;
   activeMessageId?: string;
   expectedMessageCount?: number;
+  reconnectAttempt?: number;
+  showReconnectControls?: boolean;
+  activeInputText?: string;
+  activeClientMessageId?: string;
   blocks: ChatRenderBlock[];
+  pendingUserAction?: TalosPendingUserAction;
   pendingApproval?: PendingApproval;
   error?: string;
 }

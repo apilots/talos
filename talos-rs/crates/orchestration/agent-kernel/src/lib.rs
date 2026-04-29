@@ -74,17 +74,17 @@ pub use tool_execution::{
 };
 pub use traits::{Agent, BaseKernelAgent, Planner, Plugin, Runner};
 pub use types::{
-    AgentRunResult, ConfirmationRequestStreamData, ContextStateBags, ExecutionPath,
-    ExecutionSummaryStreamData, FinalResponseEventData, FlowKind, FlowProfile, InvocationContext,
-    InvocationExecutionState, InvocationLimits, IterationEventData, KernelEvent, KernelEventData,
-    KernelEventLabel, KernelEventType, KernelExecutionKind, KernelExecutionSettings,
-    KernelOutputDeltaSource, KernelStreamEvent, KernelStreamEventData, KernelStreamEventType,
-    KernelThinkingSource, KernelThinkingStage, OutputDeltaStreamData, PlannerKind,
-    PromptWarningEventData, RunRequest, RunResponse, StopReason, TaskCompletedEventData, TaskKind,
-    TaskResult, TaskStatus, ThinkingDeltaStreamData, ThinkingMode, ToolArgsDeltaStreamData,
-    ToolCallStartStreamData, ToolExecutingStreamData, ToolExecutionMode,
-    ToolProgressDeltaStreamData, ToolProgressKind, ToolQueuedStreamData, ToolResultStreamData,
-    ToolStreamKey, TransferRequestedEventData, TurnPhase, UserInputEventData,
+    AgentRunResult, ConfirmationRequestStreamData, ContextStateBags, DynamicToolRequestStreamData,
+    ExecutionPath, ExecutionSummaryStreamData, FinalResponseEventData, FlowKind, FlowProfile,
+    InvocationContext, InvocationExecutionState, InvocationLimits, IterationEventData, KernelEvent,
+    KernelEventData, KernelEventLabel, KernelEventType, KernelExecutionKind,
+    KernelExecutionSettings, KernelOutputDeltaSource, KernelStreamEvent, KernelStreamEventData,
+    KernelStreamEventType, KernelThinkingSource, KernelThinkingStage, OutputDeltaStreamData,
+    PlannerKind, PromptWarningEventData, RunRequest, RunResponse, StopReason,
+    TaskCompletedEventData, TaskKind, TaskResult, TaskStatus, ThinkingDeltaStreamData,
+    ThinkingMode, ToolArgsDeltaStreamData, ToolCallStartStreamData, ToolExecutingStreamData,
+    ToolExecutionMode, ToolProgressDeltaStreamData, ToolProgressKind, ToolQueuedStreamData,
+    ToolResultStreamData, ToolStreamKey, TransferRequestedEventData, TurnPhase, UserInputEventData,
 };
 pub use warnings::{
     KernelWarning, PromptBootstrapDropReason, PromptBootstrapFileDroppedWarning,
