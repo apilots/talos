@@ -1,10 +1,27 @@
 use super::*;
 use serde_json::{Map, Value};
 
-const FORCED_FINALIZATION_INSTRUCTION: &str = "Tool investigation must stop now. Do not call any more tools. Based only on the verified observations and tool results already present in the conversation, provide the best final answer for the user. If the evidence is incomplete, say so briefly and summarize what is known.";
-const SALVAGE_FINALIZATION_INSTRUCTION: &str = "Your previous attempt did not produce a usable final answer. Do not call any tools. Using only the verified observations, tool results, and explicit failures already in the conversation, produce a concise final answer. If the tools failed or evidence is incomplete, explain that clearly and give the best next step.";
+const FORCED_FINALIZATION_INSTRUCTION: &str = r#"Tool investigation must stop now.
+
+You are in the final-answer phase. No more information can be requested. Produce the best user-visible final answer using only verified observations, tool results, and explicit failures already present in the conversation.
+
+Response contract:
+- Do not call tools, request tools, describe a planned tool call, or emit any tool-call syntax.
+- Do not output JSON/function-call/XML/tool tags/placeholders.
+- Put the complete answer in the assistant response body, not only in private reasoning or thinking.
+- Start directly with the answer; do not say you will analyze, inspect, continue, or call tools.
+- If evidence is incomplete, state the limitation briefly and still summarize what is known."#;
+const SALVAGE_FINALIZATION_INSTRUCTION: &str = r#"The previous finalization attempt did not produce a usable user-visible final answer.
+
+Produce a concise final answer now using only verified observations, tool results, and explicit failures already in the conversation.
+
+Response contract:
+- Do not call tools or emit tool-call syntax of any form.
+- Do not place the answer only in private reasoning/thinking; write it in the assistant response body.
+- Do not answer with a planning sentence such as "I will analyze..." or "I will continue...".
+- If tool evidence is incomplete, say what is incomplete and give the best next step."#;
 const FALLBACK_SALVAGE_RESPONSE: &str = "I could not produce a full final answer after tool execution. Based on the available tool results, at least one required step failed or returned insufficient evidence. Review the tool errors and continue with a narrower follow-up step.";
-const LOW_GAIN_READ_ONLY_NUDGE: &str = "You are repeating a similar read-only investigation. Unless the next step materially narrows scope, stop searching and either read the most relevant file or answer with the verified evidence already collected.";
+const LOW_GAIN_READ_ONLY_NUDGE: &str = "You are repeating a similar read-only investigation. Prefer answering now with verified evidence already collected. If one more read is essential, read only the single most relevant file; otherwise produce the final answer in the assistant response body.";
 
 pub(crate) fn is_read_only_tool_name(tool_name: &str) -> bool {
     matches!(
@@ -85,7 +102,7 @@ pub(crate) async fn run_forced_finalization_step(
     mut messages: Vec<ChatMessage>,
     model: String,
     llm_provider: Arc<dyn LlmProvider>,
-    native_thinking: Option<NativeThinkingConfig>,
+    _native_thinking: Option<NativeThinkingConfig>,
     cause: ForcedFinalizationCause,
 ) -> TalosResult<GeneralTurnStepResult> {
     let cause_note = match cause {
@@ -99,7 +116,7 @@ pub(crate) async fn run_forced_finalization_step(
             "Reason: the model returned an empty final response after using tools."
         }
     };
-    messages.push(ChatMessage::system(format!(
+    messages.push(ChatMessage::user(format!(
         "{}\n{}",
         FORCED_FINALIZATION_INSTRUCTION, cause_note
     )));
@@ -108,10 +125,11 @@ pub(crate) async fn run_forced_finalization_step(
         GeneralTurnStepRequest {
             round: 0,
             model: model.clone(),
+            max_tokens: None,
             messages: messages.clone(),
             tool_definitions: Vec::new(),
             parallel_tool_calls: false,
-            native_thinking: native_thinking.clone(),
+            native_thinking: None,
             stream_tx: None,
             streaming_tool_execution: None,
         },
@@ -123,7 +141,7 @@ pub(crate) async fn run_forced_finalization_step(
         return Ok(step);
     }
 
-    run_salvage_finalization_step(messages, step, model, llm_provider, native_thinking).await
+    run_salvage_finalization_step(messages, step, model, llm_provider).await
 }
 
 async fn run_salvage_finalization_step(
@@ -131,9 +149,8 @@ async fn run_salvage_finalization_step(
     prior_step: GeneralTurnStepResult,
     model: String,
     llm_provider: Arc<dyn LlmProvider>,
-    native_thinking: Option<NativeThinkingConfig>,
 ) -> TalosResult<GeneralTurnStepResult> {
-    messages.push(ChatMessage::system(SALVAGE_FINALIZATION_INSTRUCTION));
+    messages.push(ChatMessage::user(SALVAGE_FINALIZATION_INSTRUCTION));
     if !prior_step.text.trim().is_empty() {
         messages.push(ChatMessage::assistant(prior_step.text.clone()));
     }
@@ -142,10 +159,11 @@ async fn run_salvage_finalization_step(
         GeneralTurnStepRequest {
             round: 0,
             model,
+            max_tokens: None,
             messages,
             tool_definitions: Vec::new(),
             parallel_tool_calls: false,
-            native_thinking,
+            native_thinking: None,
             stream_tx: None,
             streaming_tool_execution: None,
         },
@@ -217,5 +235,111 @@ fn canonicalize_value(value: &Value) -> Value {
             Value::Object(normalized)
         }
         _ => value.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use talos_llm_provider::{ChatResponse, ChatStream, NativeThinkingEffort, Role, Usage};
+
+    #[test]
+    fn forced_finalization_prompt_requires_visible_answer_without_tools() {
+        assert!(FORCED_FINALIZATION_INSTRUCTION.contains("final-answer phase"));
+        assert!(FORCED_FINALIZATION_INSTRUCTION.contains("assistant response body"));
+        assert!(FORCED_FINALIZATION_INSTRUCTION.contains("Do not call tools"));
+        assert!(FORCED_FINALIZATION_INSTRUCTION.contains("tool-call syntax"));
+        assert!(FORCED_FINALIZATION_INSTRUCTION.contains("Start directly with the answer"));
+    }
+
+    #[test]
+    fn salvage_finalization_prompt_rejects_planning_only_answers() {
+        assert!(SALVAGE_FINALIZATION_INSTRUCTION.contains("user-visible final answer"));
+        assert!(SALVAGE_FINALIZATION_INSTRUCTION.contains("assistant response body"));
+        assert!(SALVAGE_FINALIZATION_INSTRUCTION.contains("Do not call tools"));
+        assert!(SALVAGE_FINALIZATION_INSTRUCTION.contains("planning sentence"));
+    }
+
+    #[test]
+    fn read_only_nudge_prefers_answering_with_existing_evidence() {
+        assert!(LOW_GAIN_READ_ONLY_NUDGE.contains("verified evidence"));
+        assert!(LOW_GAIN_READ_ONLY_NUDGE.contains("single most relevant file"));
+        assert!(LOW_GAIN_READ_ONLY_NUDGE.contains("assistant response body"));
+    }
+
+    struct FinalizationNativeThinkingProvider {
+        calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl LlmProvider for FinalizationNativeThinkingProvider {
+        fn name(&self) -> &str {
+            "finalization-native-thinking-provider"
+        }
+
+        async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+            self.chat_with_tools(request).await
+        }
+
+        async fn chat_with_tools(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            assert!(
+                request.native_thinking.is_none(),
+                "final-answer phase must use the visible response channel"
+            );
+            assert!(
+                request.tools.as_ref().map_or(true, Vec::is_empty),
+                "final-answer phase must not include tool definitions"
+            );
+            assert!(
+                matches!(
+                    request.messages.last().map(|message| message.role),
+                    Some(Role::User)
+                ),
+                "final-answer phase instruction must remain the latest user turn"
+            );
+            Ok(ChatResponse {
+                content: "Visible final answer from existing evidence.".to_string(),
+                reasoning: Vec::new(),
+                model: request.model,
+                usage: Usage::default(),
+                finish_reason: Some("stop".to_string()),
+                tool_calls: None,
+            })
+        }
+
+        async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
+            let (_tx, rx) = mpsc::channel::<TalosResult<talos_llm_provider::ChatChunk>>(1);
+            Ok(ChatStream::new(rx))
+        }
+
+        fn default_model(&self) -> &str {
+            "finalization-native-thinking-provider"
+        }
+    }
+
+    #[tokio::test]
+    async fn forced_finalization_disables_native_thinking_for_visible_answer_phase() {
+        let provider = Arc::new(FinalizationNativeThinkingProvider {
+            calls: AtomicUsize::new(0),
+        });
+
+        let result = run_forced_finalization_step(
+            vec![ChatMessage::user("Analyze the project.")],
+            "mock-model".to_string(),
+            provider.clone(),
+            Some(NativeThinkingConfig {
+                effort: NativeThinkingEffort::High,
+                budget_tokens: Some(1024),
+            }),
+            ForcedFinalizationCause::ToolRoundBudget,
+        )
+        .await
+        .expect("forced finalization should succeed");
+
+        assert_eq!(result.text, "Visible final answer from existing evidence.");
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
     }
 }

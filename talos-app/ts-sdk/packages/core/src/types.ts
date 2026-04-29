@@ -2,6 +2,7 @@ export type TalosConnectionMode = "embedded" | "remote";
 
 export type StopReason =
   | "end_turn"
+  | "model_output_limit"
   | "tool_round_limit"
   | "transfer_unresolved"
   | "before_model_callback_stopped"
@@ -419,7 +420,6 @@ export interface ModelInfo {
   name: string;
   provider: string;
   context_window?: number;
-  max_tokens?: number;
   reasoning?: boolean;
   input?: string[];
   cost?: Record<string, unknown>;
@@ -617,7 +617,6 @@ export interface ProviderModelConfig {
   id: string;
   name: string;
   context_window: number;
-  max_tokens: number;
   reasoning: boolean;
   input: ModelInputKind[];
   cost: ModelCostConfig;

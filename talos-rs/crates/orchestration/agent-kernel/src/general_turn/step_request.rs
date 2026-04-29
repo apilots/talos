@@ -8,6 +8,7 @@ pub fn build_general_turn_step_request(
     GeneralTurnStepRequest {
         round: state.round,
         model: prepared.selected_model.clone(),
+        max_tokens: prepared.max_output_tokens,
         messages: state.messages.clone(),
         tool_definitions: prepared.tool_definitions.clone(),
         parallel_tool_calls,

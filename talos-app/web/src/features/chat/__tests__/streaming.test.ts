@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { applyActiveTurnSnapshot, applyStreamEvent } from "@/features/chat";
+import { shouldFinalizeDetachedStream } from "@/features/chat/hooks/useSessionReconnect";
 import { useAppStore } from "@/shared/store/app-store";
 import {
   createDefaultProjects,
@@ -301,6 +302,29 @@ describe("chat stream integration helpers", () => {
     const state = useAppStore.getState();
     expect(getEffectiveSessionStatus(state.transientStatuses["sess-1"], state.streams["sess-1"])).toBe("running");
     expect(state.streams["sess-1"]?.connectionState).toBe("detached");
+  });
+
+  it("only finalizes by server message count after stream detaches", () => {
+    const liveStream = {
+      isStreaming: true,
+      connectionState: "streaming" as const,
+      expectedMessageCount: 3,
+      blocks: [{ id: "user-live", kind: "user" as const, text: "hello", live: true }],
+    };
+
+    expect(shouldFinalizeDetachedStream(liveStream, 3)).toBe(false);
+    expect(
+      shouldFinalizeDetachedStream(
+        { ...liveStream, connectionState: "detached" },
+        3,
+      ),
+    ).toBe(true);
+    expect(
+      shouldFinalizeDetachedStream(
+        { ...liveStream, connectionState: "reconnecting" },
+        3,
+      ),
+    ).toBe(true);
   });
 
   it("keeps an explicit unbound project option for web sessions", () => {

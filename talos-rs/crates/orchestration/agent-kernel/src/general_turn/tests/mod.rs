@@ -40,6 +40,8 @@ struct StreamingToolExecutionProvider {
     path: String,
 }
 
+struct LengthFinishProvider;
+
 #[derive(Default)]
 struct EmptyFinalAfterToolsProvider {
     round: AtomicUsize,
@@ -109,7 +111,13 @@ impl LlmProvider for NoopLlmProvider {
     }
 
     async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
-        let (_tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(1);
+        let (tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(1);
+        tx.send(Ok(ChatChunk {
+            delta: "ok".to_string(),
+            finish_reason: Some("stop".to_string()),
+        }))
+        .await
+        .expect("noop stream chunk should send");
         Ok(ChatStream::new(rx))
     }
 
@@ -220,6 +228,39 @@ impl LlmProvider for ExecLoopProvider {
 
     fn default_model(&self) -> &str {
         "exec-loop"
+    }
+}
+
+#[async_trait]
+impl LlmProvider for LengthFinishProvider {
+    fn name(&self) -> &str {
+        "length-finish"
+    }
+
+    async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
+        Ok(ChatResponse {
+            content: "partial answer".to_string(),
+            reasoning: Vec::new(),
+            model: "length-finish".to_string(),
+            usage: Usage {
+                prompt_tokens: 1,
+                completion_tokens: 4,
+                total_tokens: 5,
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
+            },
+            finish_reason: Some("length".to_string()),
+            tool_calls: None,
+        })
+    }
+
+    async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
+        let (_tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(1);
+        Ok(ChatStream::new(rx))
+    }
+
+    fn default_model(&self) -> &str {
+        "length-finish"
     }
 }
 
@@ -594,7 +635,6 @@ fn build_ctx_with_stream(
             name: "m1".to_string(),
             provider: "p1".to_string(),
             context_window: 0,
-            max_tokens: 0,
             reasoning: false,
             input: Vec::new(),
             cost: Default::default(),

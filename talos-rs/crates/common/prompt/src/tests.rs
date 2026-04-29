@@ -286,14 +286,9 @@ async fn test_prompt_builder_keeps_history_without_legacy_budget_caps() {
 }
 
 #[test]
-fn test_prompt_window_usage_caps_model_default_reserved_output_tokens() {
-    let window_usage = PromptWindowUsage::resolve(
-        &PromptBuildConfig::default().prompt,
-        32_768,
-        81_920,
-        1_024,
-        2_048,
-    );
+fn test_prompt_window_usage_derives_default_reserved_output_tokens() {
+    let window_usage =
+        PromptWindowUsage::resolve(&PromptBuildConfig::default().prompt, 32_768, 1_024, 2_048);
 
     assert!(window_usage.window_resolved);
     assert_eq!(window_usage.context_window, 32_768);
@@ -303,27 +298,22 @@ fn test_prompt_window_usage_caps_model_default_reserved_output_tokens() {
 }
 
 #[test]
-fn test_prompt_window_usage_preserves_smaller_model_max_output_tokens() {
-    let window_usage = PromptWindowUsage::resolve(
-        &PromptBuildConfig::default().prompt,
-        16_384,
-        256,
-        1_024,
-        2_048,
-    );
+fn test_prompt_window_usage_clamps_derived_reserved_output_tokens() {
+    let window_usage =
+        PromptWindowUsage::resolve(&PromptBuildConfig::default().prompt, 16_384, 1_024, 2_048);
 
-    assert_eq!(window_usage.reserved_output_tokens, 256);
+    assert_eq!(window_usage.reserved_output_tokens, 2_048);
     assert_eq!(window_usage.compaction_buffer_tokens, 4_096);
-    assert_eq!(window_usage.effective_prompt_budget, 12_032);
+    assert_eq!(window_usage.effective_prompt_budget, 10_240);
 }
 
 #[test]
-fn test_prompt_window_usage_keeps_model_default_when_context_window_is_unresolved() {
+fn test_prompt_window_usage_has_no_default_reserved_output_when_context_window_is_unresolved() {
     let window_usage =
-        PromptWindowUsage::resolve(&PromptBuildConfig::default().prompt, 0, 8_192, 1_024, 2_048);
+        PromptWindowUsage::resolve(&PromptBuildConfig::default().prompt, 0, 1_024, 2_048);
 
     assert!(!window_usage.window_resolved);
-    assert_eq!(window_usage.reserved_output_tokens, 8_192);
+    assert_eq!(window_usage.reserved_output_tokens, 0);
     assert_eq!(window_usage.compaction_buffer_tokens, 4_096);
     assert_eq!(window_usage.effective_prompt_budget, 0);
     assert!(window_usage.within_effective_budget);
@@ -334,7 +324,7 @@ fn test_prompt_window_usage_clamps_fixed_policy_and_ratio_branches_independently
     let mut fixed_config = PromptBuildConfig::default();
     fixed_config.prompt.window.reserved_output_tokens =
         talos_config::ReservedOutputPolicy::Fixed { tokens: 512 };
-    let fixed_usage = PromptWindowUsage::resolve(&fixed_config.prompt, 4_096, 8_192, 256, 256);
+    let fixed_usage = PromptWindowUsage::resolve(&fixed_config.prompt, 4_096, 256, 256);
     assert_eq!(fixed_usage.reserved_output_tokens, 512);
     assert_eq!(fixed_usage.compaction_buffer_tokens, 1_024);
     assert_eq!(fixed_usage.effective_prompt_budget, 2_560);
@@ -344,7 +334,7 @@ fn test_prompt_window_usage_clamps_fixed_policy_and_ratio_branches_independently
         numerator: 1,
         denominator: 4,
     };
-    let ratio_usage = PromptWindowUsage::resolve(&ratio_config.prompt, 8_192, 8_192, 256, 256);
+    let ratio_usage = PromptWindowUsage::resolve(&ratio_config.prompt, 8_192, 256, 256);
     assert_eq!(ratio_usage.reserved_output_tokens, 2_048);
     assert_eq!(ratio_usage.compaction_buffer_tokens, 2_048);
     assert_eq!(ratio_usage.effective_prompt_budget, 4_096);
@@ -366,7 +356,6 @@ async fn test_prompt_builder_drops_expanded_tool_catalog_before_higher_priority_
             name: "baseline".to_string(),
             provider: "test".to_string(),
             context_window: 16_384,
-            max_tokens: 256,
             reasoning: false,
             input: Vec::new(),
             cost: Default::default(),
@@ -403,7 +392,6 @@ async fn test_prompt_builder_drops_expanded_tool_catalog_before_higher_priority_
             name: "tight-window".to_string(),
             provider: "test".to_string(),
             context_window: (effective_budget + 256 + 128) as u32,
-            max_tokens: 256,
             reasoning: false,
             input: Vec::new(),
             cost: Default::default(),

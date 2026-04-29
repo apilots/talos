@@ -3,6 +3,7 @@ use super::*;
 pub(crate) fn to_api_stop_reason(reason: StopReason) -> TalosApiStopReason {
     match reason {
         StopReason::EndTurn => TalosApiStopReason::EndTurn,
+        StopReason::ModelOutputLimit => TalosApiStopReason::ModelOutputLimit,
         StopReason::ToolRoundLimit => TalosApiStopReason::ToolRoundLimit,
         StopReason::TransferUnresolved => TalosApiStopReason::TransferUnresolved,
         StopReason::BeforeModelCallbackStopped => TalosApiStopReason::BeforeModelCallbackStopped,

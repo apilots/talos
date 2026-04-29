@@ -41,7 +41,8 @@ pub use domains::agent::{
     AgentConfig, ExecutionMode, PlanReActPolicy, PlannerMode, PlannerSelection,
 };
 pub use domains::kernel::{
-    AgentKernelCompactionConfig, AgentKernelConfig, AgentKernelSessionEventsConfig,
+    AgentKernelCompactionConfig, AgentKernelConfig, AgentKernelOutputConfig,
+    AgentKernelSessionEventsConfig,
 };
 pub use domains::memory::AgentKernelMemoryConfig;
 pub use domains::network::{

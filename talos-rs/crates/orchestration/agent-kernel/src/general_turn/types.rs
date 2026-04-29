@@ -83,6 +83,7 @@ pub struct PreparedGeneralTurn {
     pub agent_id: String,
     pub project_root: Option<PathBuf>,
     pub selected_model: String,
+    pub max_output_tokens: Option<u32>,
     pub prompt_prefix_messages: Vec<ChatMessage>,
     pub messages: Vec<ChatMessage>,
     pub tool_definitions: Vec<ToolDefinition>,
@@ -120,7 +121,7 @@ impl ModelFinishReason {
         match value {
             Some("stop") | None => Self::Stop,
             Some("tool_calls") => Self::ToolCalls,
-            Some("length") => Self::Length,
+            Some("length") | Some("max_tokens") => Self::Length,
             Some(_) => Self::Other,
         }
     }
@@ -202,6 +203,7 @@ impl GeneralTurnLoopState {
 pub struct GeneralTurnStepRequest {
     pub round: u32,
     pub model: String,
+    pub max_tokens: Option<u32>,
     pub messages: Vec<ChatMessage>,
     pub tool_definitions: Vec<ToolDefinition>,
     pub parallel_tool_calls: bool,
@@ -215,6 +217,10 @@ impl GeneralTurnStepRequest {
         let mut builder = ChatRequest::builder()
             .messages(self.messages)
             .model(self.model);
+
+        if let Some(max_tokens) = self.max_tokens {
+            builder = builder.max_tokens(max_tokens);
+        }
 
         if !self.tool_definitions.is_empty() {
             builder = builder
@@ -237,6 +243,7 @@ pub struct GeneralTurnStepResult {
     pub reasoning: Vec<String>,
     pub tool_calls: Vec<FunctionCall>,
     pub streamed_tool_outputs: Vec<ToolExecutionOutput>,
+    pub model_finish_reason: ModelFinishReason,
     pub output_items: Vec<TalosOutputItem>,
     pub usage: TalosUsage,
     pub saw_output_delta: bool,

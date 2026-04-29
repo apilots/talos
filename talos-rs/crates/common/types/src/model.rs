@@ -25,7 +25,6 @@ pub fn resolve_model_catalog(llm: &LlmConfig) -> Vec<ModelInfo> {
             name: m.display_name().to_string(),
             provider: provider.clone(),
             context_window: m.context_window,
-            max_tokens: m.max_tokens,
             reasoning: m.reasoning,
             input: m.input.clone(),
             cost: m.cost.clone(),
@@ -39,7 +38,6 @@ pub fn resolve_model_catalog(llm: &LlmConfig) -> Vec<ModelInfo> {
             name: llm.model.clone(),
             provider: provider.clone(),
             context_window: 0,
-            max_tokens: 0,
             reasoning: false,
             input: Vec::new(),
             cost: Default::default(),
@@ -60,8 +58,6 @@ pub struct ModelInfo {
     pub provider: String,
     #[serde(default)]
     pub context_window: u32,
-    #[serde(default)]
-    pub max_tokens: u32,
     #[serde(default)]
     pub reasoning: bool,
     #[serde(default)]

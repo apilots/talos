@@ -229,6 +229,12 @@ pub(crate) async fn stream_round(
         }
     }
 
+    if finish_reason.is_none() {
+        return Err(TalosError::InternalError(
+            "LLM stream ended before a terminal provider event".to_string(),
+        ));
+    }
+
     Ok(StreamRound {
         content,
         reasoning,
@@ -300,7 +306,7 @@ pub async fn execute_general_turn_step(
     } else {
         GeneralTurnStepDisposition::ContinueWithTools
     };
-    let _finish_reason = ModelFinishReason::from_provider(
+    let model_finish_reason = ModelFinishReason::from_provider(
         round_response.finish_reason.as_deref(),
         !round_response.tool_calls.is_empty(),
     );
@@ -310,6 +316,7 @@ pub async fn execute_general_turn_step(
         reasoning,
         tool_calls: round_response.tool_calls,
         streamed_tool_outputs: round_response.streamed_tool_outputs,
+        model_finish_reason,
         output_items,
         usage: round_response.usage,
         saw_output_delta: round_response.saw_output_delta,

@@ -153,6 +153,9 @@ agent:
     execution_mode: single
     execution_children: 2
     execution_loop_iters: 3
+    output:
+      max_tokens: 32000
+      upper_limit: 64000
     compaction:
       trigger_ratio_percent: 85
       hard_ratio_percent: 95
@@ -246,7 +249,6 @@ llm:
       - id: qwen-max
         name: qwen-max
         context_window: 32768
-        max_tokens: 8192
         reasoning: false
         input: [text]
         cost:
@@ -258,7 +260,6 @@ llm:
       - id: qwen-plus
         name: qwen-plus
         context_window: 32768
-        max_tokens: 8192
         reasoning: true
         input: [text]
         cost:
@@ -271,7 +272,6 @@ llm:
       - id: qwen-turbo
         name: qwen-turbo
         context_window: 32768
-        max_tokens: 8192
         reasoning: false
         input: [text]
         cost:

@@ -81,7 +81,6 @@ test_model = {
     "id": "test-model-e2e",
     "name": "Test E2E",
     "context_window": 4096,
-    "max_tokens": 1024,
     "reasoning": False,
     "input": ["text"],
     "cost": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0},

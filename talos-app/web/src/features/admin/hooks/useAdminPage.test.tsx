@@ -40,7 +40,7 @@ vi.mock("@/features/chat", () => ({
   listAdminSessions: (query?: { limit?: number; offset?: number }) => listAdminSessionsMock(query),
   useConnectionKey: () => "test-connection",
   useModelsQuery: () => ({
-    data: [{ id: "glm-5", name: "GLM-5", provider: "zhipu", context_window: 128000, max_tokens: 8192 }],
+    data: [{ id: "glm-5", name: "GLM-5", provider: "zhipu", context_window: 128000 }],
   }),
 }));
 

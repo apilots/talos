@@ -408,14 +408,13 @@ impl Default for ProviderConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ProviderModelConfig {
     pub id: String,
     #[serde(default)]
     pub name: String,
     #[serde(default)]
     pub context_window: u32,
-    #[serde(default)]
-    pub max_tokens: u32,
     #[serde(default)]
     pub reasoning: bool,
     #[serde(default)]

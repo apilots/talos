@@ -212,7 +212,6 @@ mod tests {
             name: "Qwen Plus".to_string(),
             provider: "bailian".to_string(),
             context_window: 32_768,
-            max_tokens: 8_192,
             reasoning: true,
             input: vec![talos_types::ModelInputKind::Text],
             cost: ModelCostConfig::default(),

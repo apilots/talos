@@ -816,7 +816,6 @@ fn build_cache_state(
             model.id.as_str(),
             model.provider.as_str(),
             &model.context_window.to_string(),
-            &model.max_tokens.to_string(),
         ])
     });
 
@@ -943,11 +942,6 @@ fn resolve_window_usage(
             .model_info
             .as_ref()
             .map(|model| model.context_window as usize)
-            .unwrap_or_default(),
-        builder
-            .model_info
-            .as_ref()
-            .map(|model| model.max_tokens as usize)
             .unwrap_or_default(),
         static_prefix_tokens,
         dynamic_suffix_tokens,

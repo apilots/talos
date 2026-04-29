@@ -397,6 +397,7 @@ pub enum KernelThinkingStage {
 #[serde(rename_all = "snake_case")]
 pub enum StopReason {
     EndTurn,
+    ModelOutputLimit,
     ToolRoundLimit,
     TransferUnresolved,
     BeforeModelCallbackStopped,
@@ -700,7 +701,6 @@ mod tests {
                 name: "m1".to_string(),
                 provider: "p1".to_string(),
                 context_window: 0,
-                max_tokens: 0,
                 reasoning: false,
                 input: Vec::new(),
                 cost: Default::default(),

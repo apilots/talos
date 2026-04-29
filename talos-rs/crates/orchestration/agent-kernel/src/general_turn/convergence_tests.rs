@@ -93,6 +93,7 @@ async fn test_execute_general_turn_loop_forces_summary_when_budget_is_exhausted(
         agent_id: "a1".to_string(),
         project_root: None,
         selected_model: "mock-model".to_string(),
+        max_output_tokens: None,
         prompt_prefix_messages: Vec::new(),
         messages: vec![ChatMessage::user("Inspect the project structure.")],
         tool_definitions: registry.get_tool_definitions(),

@@ -206,7 +206,6 @@ llm:
             id: "test-model".to_string(),
             name: "Test Model".to_string(),
             context_window: 32768,
-            max_tokens: 4096,
             reasoning: false,
             input: vec![],
             cost: Default::default(),

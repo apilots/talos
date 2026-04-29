@@ -12,7 +12,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
-use talos_error::TalosResult;
+use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
     ChatMessage, ChatRequest, FunctionCall, LlmProvider, NativeThinkingConfig, ToolChoice,
     ToolDefinition, ToolStreamEvent,

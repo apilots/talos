@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     BeforeModelCallback, BuiltInPlanner, ContextStateBags, InvocationExecutionState,
-    InvocationLimits, PlanReActPlanner, ResponseDisposition, TurnPhase,
+    InvocationLimits, ModelFinishReason, PlanReActPlanner, ResponseDisposition, TurnPhase,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -342,7 +342,6 @@ fn build_ctx() -> InvocationContext {
             name: "m1".to_string(),
             provider: "p1".to_string(),
             context_window: 0,
-            max_tokens: 0,
             reasoning: false,
             input: Vec::new(),
             cost: Default::default(),
@@ -403,6 +402,7 @@ fn test_build_flow_step_model_request_preserves_state_messages() {
         agent_id: "a1".to_string(),
         project_root: None,
         selected_model: "m1".to_string(),
+        max_output_tokens: Some(1_024),
         prompt_prefix_messages: vec![talos_llm_provider::ChatMessage::system("prefix")],
         messages: vec![
             talos_llm_provider::ChatMessage::system("prefix"),
@@ -455,6 +455,7 @@ fn test_build_flow_step_model_request_preserves_native_thinking() {
         agent_id: "a1".to_string(),
         project_root: None,
         selected_model: "m1".to_string(),
+        max_output_tokens: None,
         prompt_prefix_messages: Vec::new(),
         messages: Vec::new(),
         tool_definitions: Vec::new(),
@@ -922,6 +923,7 @@ fn test_is_read_only_tool_round_true_for_read_only_calls() {
             FunctionCall::new("2", "WebSearch", json!({"query":"x"})),
         ],
         streamed_tool_outputs: Vec::new(),
+        model_finish_reason: ModelFinishReason::ToolCalls,
         output_items: Vec::new(),
         usage: talos_types::talos::TalosUsage::default(),
         saw_output_delta: false,
@@ -937,6 +939,7 @@ fn test_is_read_only_tool_round_false_for_bash() {
         reasoning: Vec::new(),
         tool_calls: vec![FunctionCall::new("1", "Bash", json!({"command":"ls"}))],
         streamed_tool_outputs: Vec::new(),
+        model_finish_reason: ModelFinishReason::ToolCalls,
         output_items: Vec::new(),
         usage: talos_types::talos::TalosUsage::default(),
         saw_output_delta: false,

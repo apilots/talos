@@ -14,6 +14,7 @@ fn test_build_general_turn_step_request_respects_parallel_flag() {
         agent_id: "a1".to_string(),
         project_root: None,
         selected_model: "model".to_string(),
+        max_output_tokens: Some(2_048),
         prompt_prefix_messages: Vec::new(),
         messages: Vec::new(),
         tool_definitions: Vec::new(),
@@ -36,9 +37,61 @@ fn test_build_general_turn_step_request_respects_parallel_flag() {
 
     let sequential_request = build_general_turn_step_request(&prepared, &state, false);
     assert!(!sequential_request.parallel_tool_calls);
+    assert_eq!(
+        sequential_request.into_chat_request().max_tokens,
+        Some(2_048)
+    );
 
     let parallel_request = build_general_turn_step_request(&prepared, &state, true);
     assert!(parallel_request.parallel_tool_calls);
+}
+
+#[tokio::test]
+async fn test_execute_general_turn_loop_reports_model_output_limit() {
+    let provider = Arc::new(LengthFinishProvider);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+    let memory_store = Arc::new(MemoryStore::new(workspace_dir));
+    let prepared = PreparedGeneralTurn {
+        session_id: "s1".to_string(),
+        invocation_id: "i1".to_string(),
+        agent_id: "a1".to_string(),
+        project_root: None,
+        selected_model: "length-finish".to_string(),
+        max_output_tokens: Some(16),
+        prompt_prefix_messages: Vec::new(),
+        messages: Vec::new(),
+        tool_definitions: Vec::new(),
+        prompt_diagnostics: PromptDiagnostics {
+            mode: PromptMode::Full,
+            included_sections: Vec::new(),
+            dropped_sections: Vec::new(),
+            bootstrap_files: Vec::new(),
+            total_estimated_tokens: 0,
+            static_estimated_tokens: 0,
+            dynamic_estimated_tokens: 0,
+            window_usage: PromptWindowUsage::default(),
+            session_history_compaction: None,
+        },
+        warnings: Vec::new(),
+        prompt_warning_state: None,
+        stream_tx: None,
+    };
+
+    let result = execute_general_turn_loop(
+        prepared,
+        "talos",
+        provider,
+        tool_registry.clone(),
+        memory_store,
+        &AgentKernelConfig::default(),
+    )
+    .await
+    .expect("general turn should complete");
+
+    assert_eq!(result.stop_reason, StopReason::ModelOutputLimit);
+    assert_eq!(result.output_text, "partial answer");
 }
 
 #[tokio::test]
@@ -176,11 +229,14 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
     config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
     config.prompt.bootstrap.enabled = false;
     config.prompt.window.compaction_buffer_tokens = 32;
+    config.prompt.window.reserved_output_tokens =
+        talos_config::ReservedOutputPolicy::Fixed { tokens: 128 };
+    config.output.max_tokens = 1_234;
+    config.output.upper_limit = 2_000;
     config.compaction.recent_messages_keep = 24;
 
     let mut ctx = build_ctx_with_stream(None);
     ctx.selected_model_info.context_window = 2_400;
-    ctx.selected_model_info.max_tokens = 128;
 
     let prepared = prepare_general_turn(
         &mut ctx,
@@ -194,6 +250,8 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
     )
     .await
     .expect("prompt prepare should succeed");
+
+    assert_eq!(prepared.max_output_tokens, Some(1_234));
 
     let compaction_state_value = ctx
         .session
@@ -307,13 +365,14 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_reaches_
     config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
     config.prompt.bootstrap.enabled = false;
     config.prompt.window.compaction_buffer_tokens = 32;
+    config.prompt.window.reserved_output_tokens =
+        talos_config::ReservedOutputPolicy::Fixed { tokens: 128 };
     config.compaction.recent_messages_keep = 8;
     config.compaction.trigger_ratio_percent = 1;
     config.compaction.hard_ratio_percent = 100;
 
     let mut ctx = build_ctx_with_stream(None);
     ctx.selected_model_info.context_window = 6_000;
-    ctx.selected_model_info.max_tokens = 128;
 
     let prepared = prepare_general_turn(
         &mut ctx,
@@ -392,11 +451,12 @@ async fn test_run_general_turn_updates_compaction_state_to_recovery_after_succes
     config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
     config.prompt.bootstrap.enabled = false;
     config.prompt.window.compaction_buffer_tokens = 32;
+    config.prompt.window.reserved_output_tokens =
+        talos_config::ReservedOutputPolicy::Fixed { tokens: 128 };
     config.compaction.recent_messages_keep = 24;
 
     let mut ctx = build_ctx_with_stream(None);
     ctx.selected_model_info.context_window = 2_400;
-    ctx.selected_model_info.max_tokens = 128;
 
     let result = run_general_turn(
         &mut ctx,
@@ -472,11 +532,12 @@ async fn test_prepare_general_turn_drops_sections_only_after_compaction_exhauste
     config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
     config.prompt.bootstrap.enabled = false;
     config.prompt.window.compaction_buffer_tokens = 64;
+    config.prompt.window.reserved_output_tokens =
+        talos_config::ReservedOutputPolicy::Fixed { tokens: 128 };
     config.compaction.recent_messages_keep = 24;
 
     let mut ctx = build_ctx_with_stream(None);
     ctx.selected_model_info.context_window = 900;
-    ctx.selected_model_info.max_tokens = 128;
 
     let prepared = prepare_general_turn(
         &mut ctx,
@@ -559,11 +620,12 @@ async fn test_prepare_general_turn_records_rejected_compaction_when_summary_is_m
     config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
     config.prompt.bootstrap.enabled = false;
     config.prompt.window.compaction_buffer_tokens = 64;
+    config.prompt.window.reserved_output_tokens =
+        talos_config::ReservedOutputPolicy::Fixed { tokens: 128 };
     config.compaction.recent_messages_keep = 24;
 
     let mut ctx = build_ctx_with_stream(None);
     ctx.selected_model_info.context_window = 900;
-    ctx.selected_model_info.max_tokens = 128;
 
     let prepared = prepare_general_turn(
         &mut ctx,
@@ -655,10 +717,11 @@ async fn test_run_general_turn_blocks_session_when_budget_remains_exhausted() {
     config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
     config.prompt.bootstrap.auto_create_missing_files = false;
     config.prompt.window.compaction_buffer_tokens = 8;
+    config.prompt.window.reserved_output_tokens =
+        talos_config::ReservedOutputPolicy::Fixed { tokens: 32 };
 
     let mut ctx = build_ctx_with_stream(None);
     ctx.selected_model_info.context_window = 128;
-    ctx.selected_model_info.max_tokens = 32;
 
     let error = run_general_turn(
         &mut ctx,
@@ -726,11 +789,12 @@ async fn test_prepare_general_turn_uses_compacted_load_policy_during_recovery() 
     config.compaction.recent_messages_max_chars = 2_000;
     config.compaction.compacted_recent_messages_max_chars = 180;
     config.compaction.recent_summaries_keep = 2;
+    config.prompt.window.reserved_output_tokens =
+        talos_config::ReservedOutputPolicy::Fixed { tokens: 512 };
     config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
 
     let mut normal_ctx = build_ctx_with_stream(None);
     normal_ctx.selected_model_info.context_window = 16_384;
-    normal_ctx.selected_model_info.max_tokens = 512;
     let normal_prepared = prepare_general_turn(
         &mut normal_ctx,
         "talos",
@@ -755,7 +819,6 @@ async fn test_prepare_general_turn_uses_compacted_load_policy_during_recovery() 
 
     let mut recovery_ctx = build_ctx_with_stream(None);
     recovery_ctx.selected_model_info.context_window = 16_384;
-    recovery_ctx.selected_model_info.max_tokens = 512;
     recovery_ctx.session.state.insert(
         StateNamespace::Session,
         SESSION_COMPACTION_STATE_KEY.to_string(),

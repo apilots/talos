@@ -100,6 +100,39 @@ pub struct AgentKernelSessionEventsConfig {
     pub idempotency_key_ttl_hours: u32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AgentKernelOutputConfig {
+    #[serde(default = "default_kernel_output_max_tokens")]
+    pub max_tokens: u32,
+
+    #[serde(default = "default_kernel_output_upper_limit")]
+    pub upper_limit: u32,
+}
+
+impl AgentKernelOutputConfig {
+    pub fn effective_max_tokens(&self) -> u32 {
+        self.max_tokens.min(self.upper_limit).max(1)
+    }
+}
+
+fn default_kernel_output_max_tokens() -> u32 {
+    32_000
+}
+
+fn default_kernel_output_upper_limit() -> u32 {
+    64_000
+}
+
+impl Default for AgentKernelOutputConfig {
+    fn default() -> Self {
+        Self {
+            max_tokens: default_kernel_output_max_tokens(),
+            upper_limit: default_kernel_output_upper_limit(),
+        }
+    }
+}
+
 fn default_session_events_retention_hours() -> u32 {
     24
 }
@@ -326,6 +359,10 @@ pub struct AgentKernelConfig {
     #[serde(default)]
     pub prompt: AgentKernelPromptConfig,
 
+    /// LLM response output token policy.
+    #[serde(default)]
+    pub output: AgentKernelOutputConfig,
+
     /// Context compaction policy and model override.
     #[serde(default)]
     pub compaction: AgentKernelCompactionConfig,
@@ -417,6 +454,7 @@ impl Default for AgentKernelConfig {
             execution_children: default_kernel_execution_children(),
             execution_loop_iters: default_kernel_execution_loop_iters(),
             prompt: AgentKernelPromptConfig::default(),
+            output: AgentKernelOutputConfig::default(),
             compaction: AgentKernelCompactionConfig::default(),
             session_events: AgentKernelSessionEventsConfig::default(),
             memory: AgentKernelMemoryConfig::default(),

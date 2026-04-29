@@ -11,8 +11,8 @@ import { useSettingsPage } from "./useSettingsPage";
 vi.mock("@/features/chat", () => ({
   useModelsQuery: () => ({
     data: [
-      { id: "glm-5", name: "GLM-5", provider: "zhipu", context_window: 128000, max_tokens: 8192 },
-      { id: "gpt-4.1", name: "GPT-4.1", provider: "openai", context_window: 128000, max_tokens: 8192 },
+      { id: "glm-5", name: "GLM-5", provider: "zhipu", context_window: 128000 },
+      { id: "gpt-4.1", name: "GPT-4.1", provider: "openai", context_window: 128000 },
     ],
   }),
 }));

@@ -28,6 +28,7 @@ impl fmt::Display for TalosConnectionMode {
 pub enum StopReason {
     #[default]
     EndTurn,
+    ModelOutputLimit,
     ToolRoundLimit,
     TransferUnresolved,
     BeforeModelCallbackStopped,

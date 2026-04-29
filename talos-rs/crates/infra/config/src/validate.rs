@@ -401,6 +401,21 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             ));
         }
     }
+    if config.agent.kernel.output.max_tokens == 0 {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.output.max_tokens must be > 0".to_string(),
+        ));
+    }
+    if config.agent.kernel.output.upper_limit == 0 {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.output.upper_limit must be > 0".to_string(),
+        ));
+    }
+    if config.agent.kernel.output.max_tokens > config.agent.kernel.output.upper_limit {
+        return Err(TalosError::InvalidConfiguration(
+            "agent.kernel.output.max_tokens must be <= agent.kernel.output.upper_limit".to_string(),
+        ));
+    }
     match &config.agent.kernel.prompt.window.reserved_output_tokens {
         crate::ReservedOutputPolicy::UseModelDefault => {}
         crate::ReservedOutputPolicy::Fixed { tokens } => {

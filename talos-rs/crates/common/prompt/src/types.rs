@@ -460,14 +460,12 @@ impl PromptWindowUsage {
     pub fn resolve(
         prompt_config: &AgentKernelPromptConfig,
         context_window: usize,
-        model_max_output_tokens: usize,
         static_prefix_tokens: usize,
         dynamic_suffix_tokens: usize,
     ) -> Self {
         let reserved_output_tokens = resolve_reserved_output_tokens(
             &prompt_config.window.reserved_output_tokens,
             context_window,
-            model_max_output_tokens,
         );
         let compaction_buffer_tokens = resolve_compaction_buffer_tokens(
             prompt_config.window.compaction_buffer_tokens,
@@ -506,15 +504,9 @@ fn resolve_compaction_buffer_tokens(
     configured_buffer_tokens.min(context_window / 4)
 }
 
-fn resolve_reserved_output_tokens(
-    policy: &ReservedOutputPolicy,
-    context_window: usize,
-    model_max_output_tokens: usize,
-) -> usize {
+fn resolve_reserved_output_tokens(policy: &ReservedOutputPolicy, context_window: usize) -> usize {
     match policy {
-        ReservedOutputPolicy::UseModelDefault => {
-            resolve_model_default_reserved_output_tokens(context_window, model_max_output_tokens)
-        }
+        ReservedOutputPolicy::UseModelDefault => derive_reserved_output_tokens(context_window),
         ReservedOutputPolicy::Fixed { tokens } => *tokens,
         ReservedOutputPolicy::Ratio {
             numerator,
@@ -527,22 +519,6 @@ fn resolve_reserved_output_tokens(
             }
         }
     }
-}
-
-fn resolve_model_default_reserved_output_tokens(
-    context_window: usize,
-    model_max_output_tokens: usize,
-) -> usize {
-    if context_window == 0 {
-        return model_max_output_tokens;
-    }
-
-    let derived_budget = derive_reserved_output_tokens(context_window);
-    if model_max_output_tokens == 0 {
-        return derived_budget;
-    }
-
-    model_max_output_tokens.min(derived_budget)
 }
 
 fn derive_reserved_output_tokens(context_window: usize) -> usize {

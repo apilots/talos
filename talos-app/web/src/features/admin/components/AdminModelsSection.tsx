@@ -33,27 +33,26 @@ interface ModelFormState {
   id: string;
   name: string;
   context_window: string;
-  max_tokens: string;
   reasoning: boolean;
   input: ModelInputKind[];
 }
 
 const emptyModelForm: ModelFormState = {
-  id: "", name: "", context_window: "200000", max_tokens: "8096",
+  id: "", name: "", context_window: "200000",
   reasoning: false, input: ["text"],
 };
 
 function modelToForm(m: ProviderModelConfig): ModelFormState {
   return {
     id: m.id, name: m.name,
-    context_window: String(m.context_window), max_tokens: String(m.max_tokens),
+    context_window: String(m.context_window),
     reasoning: m.reasoning, input: m.input,
   };
 }
 
 function formToModel(f: ModelFormState, existing?: ProviderModelConfig): ProviderModelConfig {
   const base: ProviderModelConfig = existing ?? {
-    id: f.id, name: f.name, context_window: 0, max_tokens: 0,
+    id: f.id, name: f.name, context_window: 0,
     reasoning: false, input: ["text"],
     cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
     compat: {},
@@ -62,7 +61,6 @@ function formToModel(f: ModelFormState, existing?: ProviderModelConfig): Provide
     ...base,
     id: f.id.trim(), name: f.name.trim(),
     context_window: parseInt(f.context_window, 10) || 0,
-    max_tokens: parseInt(f.max_tokens, 10) || 0,
     reasoning: f.reasoning,
     input: f.input.length > 0 ? f.input : ["text"],
   };
@@ -119,13 +117,9 @@ function ModelModal({ mode, form, saving, error, onChange, onSave, onClose }: Mo
             <label className="mb-1.5 block text-sm font-medium text-ink">{t("modelsPanel.modelName")}</label>
             <Input value={form.name} onChange={(e) => onChange({ ...form, name: e.target.value })} placeholder="Claude 3.5 Sonnet" />
           </div>
-          <div>
+          <div className="col-span-2">
             <label className="mb-1.5 block text-sm font-medium text-ink">{t("modelsPanel.contextWindow")}</label>
             <Input value={form.context_window} onChange={(e) => onChange({ ...form, context_window: e.target.value })} />
-          </div>
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-ink">{t("modelsPanel.maxTokens")}</label>
-            <Input value={form.max_tokens} onChange={(e) => onChange({ ...form, max_tokens: e.target.value })} />
           </div>
           {/* Caps */}
           <div className="col-span-2">

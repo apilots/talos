@@ -872,6 +872,7 @@ pub async fn prepare_general_turn(
         );
     }
     emit_prompt_warning_events(ctx, &warnings).await;
+    let max_output_tokens = Some(kernel_config.output.effective_max_tokens());
 
     Ok(PreparedGeneralTurn {
         session_id: session_id.clone(),
@@ -879,6 +880,7 @@ pub async fn prepare_general_turn(
         agent_id,
         project_root: ctx.project_root.clone(),
         selected_model,
+        max_output_tokens,
         prompt_prefix_messages: split_prompt_prefix_messages(
             &render_prompt_assembly(&prompt_assembly),
             input,
@@ -977,7 +979,12 @@ pub async fn execute_general_turn_loop(
             state
                 .messages
                 .push(ChatMessage::assistant(step_text.clone()));
-            break (step_text, StopReason::EndTurn);
+            let stop_reason = match step.model_finish_reason {
+                ModelFinishReason::Length => StopReason::ModelOutputLimit,
+                ModelFinishReason::Stop | ModelFinishReason::Other => StopReason::EndTurn,
+                ModelFinishReason::ToolCalls => StopReason::EndTurn,
+            };
+            break (step_text, stop_reason);
         }
 
         let tool_batch = if prepared.stream_tx.is_some() {

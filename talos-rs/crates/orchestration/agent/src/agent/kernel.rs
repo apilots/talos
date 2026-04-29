@@ -201,6 +201,7 @@ impl AgentImpl {
 pub(crate) fn map_stop_reason(stop_reason: StopReason) -> TalosStopReason {
     match stop_reason {
         StopReason::EndTurn => TalosStopReason::EndTurn,
+        StopReason::ModelOutputLimit => TalosStopReason::ModelOutputLimit,
         StopReason::ToolRoundLimit => TalosStopReason::ToolRoundLimit,
         StopReason::TransferUnresolved => TalosStopReason::TransferUnresolved,
         StopReason::BeforeModelCallbackStopped => TalosStopReason::BeforeModelCallbackStopped,

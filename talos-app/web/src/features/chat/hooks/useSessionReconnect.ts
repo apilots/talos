@@ -10,6 +10,25 @@ function reconnectDelayMs(attempt: number) {
   return RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)];
 }
 
+export function shouldFinalizeDetachedStream(
+  streamState: StreamSessionState | undefined,
+  serverMessageCount: number | undefined,
+) {
+  if (
+    !streamState?.isStreaming ||
+    typeof streamState.expectedMessageCount !== "number" ||
+    typeof serverMessageCount !== "number" ||
+    serverMessageCount < streamState.expectedMessageCount
+  ) {
+    return false;
+  }
+
+  return (
+    streamState.connectionState === "detached" ||
+    streamState.connectionState === "reconnecting"
+  );
+}
+
 export function useSessionReconnect({
   hasActiveConnection,
   reconnectMessage,
@@ -62,12 +81,7 @@ export function useSessionReconnect({
   ]);
 
   useEffect(() => {
-    if (
-      !streamState?.isStreaming ||
-      typeof streamState.expectedMessageCount !== "number" ||
-      typeof serverMessageCount !== "number" ||
-      serverMessageCount < streamState.expectedMessageCount
-    ) {
+    if (!shouldFinalizeDetachedStream(streamState, serverMessageCount)) {
       return;
     }
 

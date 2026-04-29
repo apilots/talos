@@ -42,6 +42,9 @@ fn test_kernel_defaults() {
     assert_eq!(config.agent.kernel.execution_mode, ExecutionMode::Single);
     assert_eq!(config.agent.kernel.execution_children, 2);
     assert_eq!(config.agent.kernel.execution_loop_iters, 3);
+    assert_eq!(config.agent.kernel.output.max_tokens, 32_000);
+    assert_eq!(config.agent.kernel.output.upper_limit, 64_000);
+    assert_eq!(config.agent.kernel.output.effective_max_tokens(), 32_000);
     assert_eq!(
         config.agent.kernel.prompt.window.compaction_buffer_tokens,
         4_096
@@ -273,7 +276,6 @@ models:
   - id: qwen-max
     name: qwen-max
     context_window: 32768
-    max_tokens: 8192
     reasoning: false
     input: [text, image]
     cost:
@@ -299,7 +301,7 @@ models:
 }
 
 #[test]
-fn test_provider_models_allow_abnormal_output_metadata_for_prompt_budget_repair() {
+fn test_provider_models_reject_legacy_output_metadata() {
     let yaml = r#"
 enabled: true
 api_key: sk-test
@@ -320,11 +322,7 @@ models:
       thinking_format: qwen
 "#;
 
-    let provider: ProviderConfig =
-        serde_yaml::from_str(yaml).expect("provider config should parse");
-    let model = &provider.models[0];
-    assert_eq!(model.context_window, 32_768);
-    assert_eq!(model.max_tokens, 81_920);
+    assert!(serde_yaml::from_str::<ProviderConfig>(yaml).is_err());
 }
 
 #[test]
