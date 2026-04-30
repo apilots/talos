@@ -1,13 +1,17 @@
 # Desktop App Server 与 talos-application-service 共享层设计方案
 
 **版本**: v0.2  
-**状态**: 已实现并进入 Phase 6 收口  
+**状态**: 已实现并完成 Phase 7 CR 前收敛
+
 **最后更新**: 2026-04-30
 
-> Phase 6 更新：`talos-application-service`、`talos-app-protocol`、`talos app-server`、
+> Phase 7 更新：`talos-application-service`、`talos-app-protocol`、`talos app-server`、
 > Rust/TS app-server SDK、CLI/TUI 本地 app-server 接入、Electron Desktop shell 与协议回归
 > 已落地。本文保留架构决策与最终边界，阶段执行细节以 `spec/plan/p1/PLAN.md` 及各 phase
 > sub plan 的完成记录为准。
+>
+> 归档约定：本文使用“当前实现”描述已落地事实，使用“冻结约束”描述后续必须遵守的边界，使用“deferred”描述 CR 后
+> follow-up，不再把早期方案中的“建议 / 目标形态”当作待实现事项。
 
 ---
 
@@ -175,24 +179,24 @@ UI 层只依赖统一的 `TalosClient` 接口，不感知底层 transport。
 
 ---
 
-## 5. 模块与目录建议
+## 5. 模块与目录
 
 ### 5.1 Rust 模块
 
-建议按“application service 上移共享语义，gateway 下放 transport adapter”的方式调整。这里 `gateway` 在 Talos 语境下泛指 inbound protocol adapter，不限于网络网关；`app-server` 虽然是本地 stdio 子进程，但仍属于协议适配层，与 HTTP server 平级。
+当前实现按“application service 承载共享应用语义，gateway 承载 transport adapter”的方式分层。这里 `gateway` 在 Talos 语境下泛指 inbound protocol adapter，不限于网络网关；`app-server` 虽然是本地 stdio 子进程，但仍属于协议适配层，与 HTTP server 平级。
 
 ```text
 talos-rs/
 ├── crates/
 │   ├── app/
-│   │   ├── talos-server/              # composition root, keep
-│   │   └── application-service/       # talos-application-service
+│   │   └── talos-server/              # composition root
 │   ├── gateway/
 │   │   ├── core/
 │   │   ├── http/
 │   │   ├── app-server/                # talos-app-server, stdio JSON-RPC
 │   │   └── app-protocol/              # talos-app-protocol
 │   └── orchestration/
+│       ├── application-service/       # talos-application-service
 │       ├── agent-kernel/
 │       ├── coordinator/               # agent coordination only
 │       └── session-store/
@@ -207,7 +211,7 @@ talos-rs/
 说明：
 
 1. `talos-server` 保留为 composition root，继续负责组装 storage、session store、event service、auth、router、application-service、coordinator、HTTP server、app-server。
-2. 新增 `crates/app/application-service`，承接多端共享的 session、project、resource access、config、model、memory、workspace docs、event replay 等应用语义。
+2. `talos-application-service` 位于 `crates/orchestration/application-service`，承接多端共享的 session、project、resource access、config、model、memory、workspace docs、event replay 等应用语义。它不放在 `crates/app`，因为 `app` 只保留 composition root / runtime mode owner；application-service 是 HTTP 与 JSON-RPC adapter 共同复用的 orchestration use-case 层。
 3. `talos_coordinator::CoordinatorImpl` 收缩为下层 agent 协调组件，只负责 agent registry、route-to-agent、turn execution、stream mapping、cancel、agent-side feedback bridge。
 4. `gateway/http::ResourceAccessService` 迁入 `talos-application-service`，成为共享 resource access / authorization service；HTTP 只负责把 token/middleware 解析出的 identity 传入应用服务。
 5. `talos-app-server` 放在 `crates/gateway/app-server`，与 `crates/gateway/http` 平级；它只实现 stdio transport、JSON-RPC dispatch、子进程生命周期和 back-pressure/cancellation 策略。
@@ -216,7 +220,7 @@ talos-rs/
 
 ### 5.2 TypeScript 模块
 
-现有 `talos-app/ts-sdk/packages/{core,browser}` 已经存在，不能另起一套平行目录。建议保留 `ts-sdk`，在其下扩展 transport 与共享 UI 边界：
+现有 `talos-app/ts-sdk/packages/{core,browser}` 已经存在，不能另起一套平行目录。当前实现保留 `ts-sdk`，在其下扩展 transport 与共享 UI 边界：
 
 ```text
 talos-app/
@@ -243,9 +247,9 @@ talos-app/
 
 ### 6.1 职责
 
-代码阅读结论：当前共享应用语义已经存在，但分散在 `CoordinatorImpl`、`SessionManager`、`gateway/http::ResourceAccessService`、HTTP handler 和 `talos-server` 组装层中。
+迁移前代码阅读结论：共享应用语义已经存在，但分散在 `CoordinatorImpl`、`SessionManager`、`gateway/http::ResourceAccessService`、HTTP handler 和 `talos-server` 组装层中。
 
-现状：
+迁移前状态：
 
 - `CoordinatorImpl` 实现 `RequestHandler`，承接 message / stream / cancel 主链路
 - `CoordinatorImpl` 实现 `SessionService`，承接 session、project、tool approval、dynamic tool result 等能力
@@ -253,12 +257,12 @@ talos-app/
 - HTTP `ResourceAccessService` 包装 `SessionService`，负责 actor 访问控制和 user/admin 过滤
 - `talos-server` 是 composition root，负责组装 coordinator、gateway、HTTP、auth、event store、llm provider、tool registry
 
-目标形态：
+当前实现：
 
-- 新增 `talos-application-service`，承接多端共享的应用语义
-- `ResourceAccessService` 从 HTTP crate 迁入 application service
-- session/project/config/model/memory/workspace docs/admin resource policy 等从 HTTP/coordinator 中迁入 application service
-- `coordinator` 只保留下层 agent 协调职责
+- `talos-application-service` 位于 `crates/orchestration/application-service`，承接多端共享的应用语义
+- `ResourceAccessService` 已从 HTTP crate 迁入 application service
+- session/project/config/model/memory/workspace docs/admin resource policy 等已从 HTTP/coordinator 中迁入 application service
+- `coordinator` 保留下层 agent 协调、routing、turn execution、stream mapping、cancel 等职责
 
 `talos-application-service` 负责：
 
@@ -286,7 +290,7 @@ talos-app/
 - CLI 参数解析
 - agent 内部规划、prompt 组装、tool execution
 
-### 6.2 现有接口与目标形态
+### 6.2 现有接口与当前边界
 
 ```rust
 pub struct TalosServerRuntime {
@@ -314,7 +318,7 @@ pub struct CoordinatorImpl {
 }
 ```
 
-目标 trait：
+接口轮廓：
 
 ```rust
 pub trait TalosApplicationApi {
@@ -343,7 +347,7 @@ pub trait AgentCoordinator {
 }
 ```
 
-`AgentCoordinator` 向上输出未编号的 `RawAgentEvent`。事件 ID、turn ID、session ID、订阅 fan-out、持久化与 replay 统一由 `talos-application-service` 内的 event service 处理。事件持久化必须先于 fan-out、SSE frame、JSON-RPC notification 发出；这样客户端即使在 `turn.start` 与 `event.subscribe` 之间存在订阅窗口，也能通过 `since_event_id` replay 补齐。`coordinator` 不直接发布可被客户端订阅的最终事件，否则 `event.subscribe`、replay 与多订阅者会出现多套顺序源。
+`AgentCoordinator` 向上输出未编号的 raw agent stream。事件 ID、turn ID、session ID、持久化与 replay 统一由 `talos-application-service` 内的 event service 处理。事件持久化必须先于 SSE frame、JSON-RPC notification 发出；这样客户端即使在 `turn.start` 与 `event.subscribe` 之间存在订阅窗口，也能通过 `since_event_id` replay 补齐。event service 提供 live broadcast bus；HTTP SSE / app-server adapter 负责各自的 subscription task、session 过滤、慢消费者终止和 wire 编码。`coordinator` 不直接发布可被客户端订阅的最终事件，否则 `event.subscribe`、replay 与多订阅者会出现多套顺序源。
 
 `turn.start` 的首批协议轮廓：
 
@@ -385,68 +389,45 @@ HTTP/AppServer
 
 ### 6.3 Command / Query / Event 语义
 
-协议层可以有不同 DTO，但必须映射到统一 application 语义：
+协议层可以有不同 DTO，但必须映射到统一 application service 方法。`Command` / `Query` 只作为文档里的语义分类，不对应必须落地的中间 enum，避免形成“协议 DTO -> command enum -> service params”的重复搬运层。
+
+当前实现中的 application service 对外入口是强类型方法，例如：
 
 ```rust
-pub enum ApplicationCommand {
-    CreateSession(SessionCreateCommand),
-    PatchSession(SessionPatchCommand),
-    DeleteSession(SessionDeleteCommand),
-    StartTurn(TurnStartCommand),
-    InterruptTurn(TurnInterruptCommand),
-    SubmitToolApproval(ToolApprovalSubmitCommand),
-    SubmitDynamicToolResult(DynamicToolResultSubmitCommand),
-    CreateProject(ProjectCreateCommand),
-    PatchProject(ProjectPatchCommand),
-    DeleteProject(ProjectDeleteCommand),
-    WriteConfig(ConfigWriteCommand),
-    ReloadConfig(ConfigReloadCommand),
-    WriteMemoryFile(MemoryFileWriteCommand),
-    WriteWorkspaceDoc(WorkspaceDocWriteCommand),
-}
-
-pub enum ApplicationQuery {
-    GetSession(SessionGetQuery),
-    ListSessions(SessionListQuery),
-    ReadThread(ThreadReadQuery),
-    ListModels(ModelListQuery),
-    ReadConfig(ConfigReadQuery),
-    ListMemoryFiles(MemoryFileListQuery),
-    ReadMemoryFile(MemoryFileReadQuery),
-    SearchMemoryFiles(MemorySearchQuery),
-    ListWorkspaceDocs(WorkspaceDocListQuery),
-    ReadWorkspaceDoc(WorkspaceDocReadQuery),
-    ListProjects(ProjectListQuery),
-    GetProject(ProjectGetQuery),
-    ListSkills(SkillListQuery),
-    ListApps(AppListQuery),
-    ListTools(ToolListQuery),
-    GetCurrentAccount(AccountGetQuery),
-}
-
-pub enum ApplicationEvent {
-    SessionCreated(SessionCreatedEvent),
-    TurnStarted(TurnStartedEvent),
-    AgentMessageDelta(AgentMessageDeltaEvent),
-    ToolCallQueued(ToolCallQueuedEvent),
-    ToolCallStarted(ToolCallStartedEvent),
-    ToolCallProgressDelta(ToolCallProgressDeltaEvent),
-    ToolCallCompleted(ToolCallCompletedEvent),
-    ApprovalRequested(ApprovalRequestedEvent),
-    ConfigWarning(ConfigWarningEvent),
-    TurnCompleted(TurnCompletedEvent),
-    TurnFailed(TurnFailedEvent),
-    SubscriptionTerminated(SubscriptionTerminatedEvent),
-}
+create_session(actor, context, model, conf, project_id, current_directory)
+list_sessions(actor, query)
+get_session(actor, session_id)
+patch_session(actor, session_id, patch)
+delete_session(actor, session_id)
+submit_turn(actor, session_id, request, idempotency_key)
+cancel_active_turn(actor, session_id)
+submit_tool_approval(actor, session_id, call_id, tool_name, approved, reason)
+list_models()
+get_llm(actor)
+list_files(params)
+search_files(params)
+list_docs()
+get_doc(kind)
+put_doc(actor, kind, update)
 ```
 
-约束：
+语义分类：
 
-1. `ApplicationEvent` 必须是强类型 enum。
-2. 事件 payload 不使用任意 metadata JSON。
-3. HTTP SSE 和 JSON-RPC notification 都从 `ApplicationEvent` 映射。
-4. 事件 ID、turn ID、session ID 的生成归 `talos-application-service` 或 event service 管理。
-5. `ApplicationCommand` / `ApplicationQuery` 只作为协议层 dispatch 的内部中介，不能二次穿过 application-service 边界。application-service 对外入口以强类型 trait 方法为准，避免同一参数在 trait、command enum、service 方法之间重复搬运。
+| 分类 | 示例 | 实现约束 |
+|---|---|---|
+| Command | create / patch / delete session or project, start / interrupt turn, submit tool approval, write config / memory / workspace docs | 由协议 adapter 解码后直接调用 application-service 强类型方法 |
+| Query | read / list session or project, model list, config read, memory search, workspace doc read, account get | 由 application-service 或其共享子服务返回强类型结果 |
+| Event | persisted `TalosEventPayload` plus session event record metadata | 由 event service 持久化后通过 HTTP SSE 或 JSON-RPC notification fan-out |
+
+冻结约束：
+
+1. application-service 对外入口以强类型 service 方法为准。
+2. 协议 DTO 不得绕过 application-service 直接调用 coordinator / kernel 私有路径。
+3. 不新增 `ApplicationCommand` / `ApplicationQuery` 作为必经中间层。
+4. `ApplicationEvent` 在 application-service 边界复用强类型 `TalosEventPayload`。
+5. JSON-RPC `ApplicationEvent` 在 app-protocol 边界复用强类型 `TalosEvent`。
+6. 事件 payload 不使用任意 metadata JSON。
+7. 事件 ID、turn ID、session ID 的生成归 session event service / application-service 事件处理链路管理。
 
 ---
 
@@ -542,7 +523,7 @@ client                       talos app-server
 
 初始化前收到非 `initialize` 请求必须返回 `Not initialized`。`initialized` notification 的方向是 client -> server；它表示客户端已完成本地初始化并确认可以接收后续 notification / server request。
 
-初始化参数建议：
+当前初始化参数：
 
 ```rust
 pub struct InitializeParams {
@@ -637,13 +618,12 @@ pub struct EventSubscribeResponse {
 pub struct ApplicationEventEnvelope {
     pub subscription_id: EventSubscriptionId,
     pub event_id: EventId,
-    pub session_id: SessionId,
     pub turn_id: Option<TurnId>,
-    pub event: ApplicationEvent,
+    pub event: TalosEvent,
 }
 ```
 
-Wire 层 `event` 字段使用 `ApplicationEvent` tagged enum。§7.5 表格中的 `ApplicationEventEnvelope<T>` 只是表示该 method 下 `event` variant 必为 `T`；协议生成器应据此收紧 TypeScript 类型和每条 notification schema。
+Wire 层 `event` 字段使用共享强类型 `TalosEvent`。`ApplicationEventEnvelope` 顶层不重复存放 `session_id`；客户端路由字段来自 `envelope.event.session_id`。顶层字段只保留 subscription / replay / turn 相关 envelope metadata。
 
 语义：
 
@@ -652,27 +632,30 @@ Wire 层 `event` 字段使用 `ApplicationEvent` tagged enum。§7.5 表格中�
 3. `high_water_mark_event_id` 表示订阅建立时服务端已持久化的最新事件，可用于客户端判断 replay 是否追平。session 尚未产生任何事件时为 `None`，客户端应将其视为 replay 当前为空。
 4. 订阅 ack 之后，JSON-RPC notification 的 `params` 使用 `ApplicationEventEnvelope`。
 5. app-server 断开时自动释放该进程持有的 subscription；首批不要求跨 app-server 进程保留 subscription id。
-6. 多订阅者 fan-out 由 event service 负责，transport 只能做编码和 back-pressure。
-7. 每个 subscription 必须使用独立 bounded channel。某个订阅者 back-pressure 不得阻塞其他订阅者；慢订阅超过容量上限时，event service 应发送 `subscription.terminated` 终止事件并关闭该 subscription，而不是阻塞全局 fan-out。
+6. event service 负责事件持久化、replay 查询和 live broadcast bus。
+7. transport adapter 负责订阅任务、按 session 过滤 live bus、慢消费者处理、notification 编码和进程级 back-pressure。某个订阅者 lagged / slow consumer 不得阻塞全局 fan-out；app-server JSON-RPC 通过 `subscription.terminated` notification 终止该 subscription。
 
 ### 7.5 Server Notifications
 
-服务端通过 notification 推送 application events。notification method 使用 canonical event id，`params` 使用 `ApplicationEventEnvelope`，其中的 `event` 字段是对应的强类型 payload：
+服务端通过 notification 推送 application events。notification method 使用 `talos-app-protocol::events::canonical_method(TalosEventType)` 的当前冻结值，`params` 使用 `ApplicationEventEnvelope`，其中的 `event` 字段是共享强类型 `TalosEvent`：
 
 | Method | Params | 来源 |
 |---|---|---|
-| `session.created` | `ApplicationEventEnvelope<SessionCreatedEvent>` | `ApplicationEvent::SessionCreated` |
-| `turn.started` | `ApplicationEventEnvelope<TurnStartedEvent>` | `ApplicationEvent::TurnStarted` |
-| `agent.message.delta` | `ApplicationEventEnvelope<AgentMessageDeltaEvent>` | `ApplicationEvent::AgentMessageDelta` |
-| `tool.call.queued` | `ApplicationEventEnvelope<ToolCallQueuedEvent>` | `ApplicationEvent::ToolCallQueued` |
-| `tool.call.started` | `ApplicationEventEnvelope<ToolCallStartedEvent>` | `ApplicationEvent::ToolCallStarted` |
-| `tool.call.progress.delta` | `ApplicationEventEnvelope<ToolCallProgressDeltaEvent>` | `ApplicationEvent::ToolCallProgressDelta` |
-| `tool.call.completed` | `ApplicationEventEnvelope<ToolCallCompletedEvent>` | `ApplicationEvent::ToolCallCompleted` |
-| `approval.requested` | `ApplicationEventEnvelope<ApprovalRequestedEvent>` | `ApplicationEvent::ApprovalRequested` |
-| `turn.completed` | `ApplicationEventEnvelope<TurnCompletedEvent>` | `ApplicationEvent::TurnCompleted` |
-| `turn.failed` | `ApplicationEventEnvelope<TurnFailedEvent>` | `ApplicationEvent::TurnFailed` |
-| `config.warning` | `ApplicationEventEnvelope<ConfigWarningEvent>` | `ApplicationEvent::ConfigWarning` |
-| `subscription.terminated` | `ApplicationEventEnvelope<SubscriptionTerminatedEvent>` | `ApplicationEvent::SubscriptionTerminated` |
+| `message.started` | `ApplicationEventEnvelope` | `TalosEventType::MessageStarted` |
+| `message.reasoning.delta` | `ApplicationEventEnvelope` | `TalosEventType::MessageReasoningDelta` |
+| `message.execution.summary` | `ApplicationEventEnvelope` | `TalosEventType::MessageExecutionSummary` |
+| `message.output.delta` | `ApplicationEventEnvelope` | `TalosEventType::MessageOutputDelta` |
+| `message.tool_call.started` | `ApplicationEventEnvelope` | `TalosEventType::MessageToolCallStarted` |
+| `message.tool_call.args_delta` | `ApplicationEventEnvelope` | `TalosEventType::MessageToolCallArgsDelta` |
+| `message.tool_call.queued` | `ApplicationEventEnvelope` | `TalosEventType::MessageToolCallQueued` |
+| `message.tool_call.executing` | `ApplicationEventEnvelope` | `TalosEventType::MessageToolCallExecuting` |
+| `message.tool_call.progress_delta` | `ApplicationEventEnvelope` | `TalosEventType::MessageToolCallProgressDelta` |
+| `message.tool_call.completed` | `ApplicationEventEnvelope` | `TalosEventType::MessageToolCallCompleted` |
+| `message.tool_call.pending_approval` | `ApplicationEventEnvelope` | `TalosEventType::MessageToolCallPendingApproval` |
+| `message.tool_call.pending_dynamic_result` | `ApplicationEventEnvelope` | `TalosEventType::MessageToolCallPendingDynamicResult` |
+| `message.completed` | `ApplicationEventEnvelope` | `TalosEventType::MessageCompleted` |
+| `message.error` | `ApplicationEventEnvelope` | `TalosEventType::MessageError` |
+| `subscription.terminated` | `SubscriptionTerminatedEnvelope` | subscription lifecycle |
 
 ### 7.6 Server Requests
 
@@ -690,7 +673,7 @@ server request with id
 client response with same id
 ```
 
-首批建议：
+当前已冻结的 server request 协议类型：
 
 | Method | Params | Response |
 |---|---|---|
@@ -773,36 +756,36 @@ HTTP client
 必须：
 
 - 两边映射到同一 application-service 参数
-- 事件语义来自同一 `ApplicationEvent`
+- 事件语义来自同一 `TalosEvent` / `TalosEventPayload`
 - 同一业务错误映射自同一 application error
 - 新能力上线时同时评估 HTTP、JSON-RPC、SDK、CLI、Web UI、Desktop 的覆盖
 
 ### 8.2 SSE 事件映射
 
-事件 canonical id 统一使用点号，例如 `agent.message.delta`。HTTP SSE 的 `event`、JSON-RPC notification 的 `method`、frontend domain event 的 `type` 都使用同一个 canonical id。
+事件 canonical id 统一使用点号，例如 `message.output.delta`。JSON-RPC notification 的 `method` 使用 app-protocol 冻结的 canonical method；HTTP SSE 与前端 reducer 应复用同一套 `TalosEventType` / `TalosEventPayload` 语义，不再维护另一套业务事件名。
 
-`ApplicationEvent` 到 SSE 的映射：
+`TalosEvent` 到 SSE 的映射：
 
 ```text
-ApplicationEvent::AgentMessageDelta
-    -> event: agent.message.delta
-    -> data: ApplicationEventEnvelope<AgentMessageDeltaEvent> JSON
+TalosEventType::MessageOutputDelta
+    -> event: message.output.delta
+    -> data: envelope carrying TalosEvent JSON
 
-ApplicationEvent::TurnCompleted
-    -> event: turn.completed
-    -> data: ApplicationEventEnvelope<TurnCompletedEvent> JSON
+TalosEventType::MessageCompleted
+    -> event: message.completed
+    -> data: envelope carrying TalosEvent JSON
 ```
 
-`ApplicationEvent` 到 JSON-RPC 的映射：
+`TalosEvent` 到 JSON-RPC 的映射：
 
 ```text
-ApplicationEvent::AgentMessageDelta
-    -> method: agent.message.delta
-    -> params: ApplicationEventEnvelope<AgentMessageDeltaEvent> JSON
+TalosEventType::MessageOutputDelta
+    -> method: message.output.delta
+    -> params: ApplicationEventEnvelope JSON
 
-ApplicationEvent::TurnCompleted
-    -> method: turn.completed
-    -> params: ApplicationEventEnvelope<TurnCompletedEvent> JSON
+TalosEventType::MessageCompleted
+    -> method: message.completed
+    -> params: ApplicationEventEnvelope JSON
 ```
 
 这样前端状态机可以基于统一事件类型工作，而不是基于 transport 格式工作。
@@ -900,19 +883,18 @@ Transport 只负责把 wire event 转成统一 frontend domain event：
 
 ```typescript
 export type FrontendTalosEvent =
-  | FrontendEventEnvelope<'session.created', SessionCreatedEvent>
-  | FrontendEventEnvelope<'turn.started', TurnStartedEvent>
-  | FrontendEventEnvelope<'agent.message.delta', AgentMessageDeltaEvent>
-  | FrontendEventEnvelope<'tool.call.started', ToolCallStartedEvent>
-  | FrontendEventEnvelope<'approval.requested', ApprovalRequestedEvent>
-  | FrontendEventEnvelope<'turn.completed', TurnCompletedEvent>
-  | FrontendEventEnvelope<'turn.failed', TurnFailedEvent>;
+  | FrontendEventEnvelope<'message.started', TalosMessageStartedEvent>
+  | FrontendEventEnvelope<'message.output.delta', TalosMessageOutputDeltaEvent>
+  | FrontendEventEnvelope<'message.tool_call.started', TalosMessageToolCallStartedEvent>
+  | FrontendEventEnvelope<'message.tool_call.completed', TalosMessageToolCallCompletedEvent>
+  | FrontendEventEnvelope<'message.completed', TalosMessageCompletedEvent>
+  | FrontendEventEnvelope<'message.error', TalosMessageErrorEvent>;
 
 export interface FrontendEventEnvelope<TType extends string, TPayload> {
   type: TType;
   subscriptionId: EventSubscriptionId;
   eventId: EventId;
-  sessionId: SessionId;
+  sessionId: SessionId; // derived from envelope.event.session_id
   turnId?: TurnId;
   payload: TPayload;
 }
@@ -1033,7 +1015,7 @@ cargo run -p talos-app-protocol --example export_fixtures
 - `talos-rs/crates/gateway/app-protocol/schemas/app-protocol.schema.json`
 - `talos-app/ts-sdk/packages/core/src/generated/app-protocol.ts`
 
-建议：
+当前结构：
 
 ```rust
 pub struct ProtocolVersion {
@@ -1176,7 +1158,7 @@ pnpm --dir talos-app build
 **成功标准**:
 
 - 明确 `talos-server` 继续作为 composition root
-- 新增 `crates/app/application-service`
+- 新增 `crates/orchestration/application-service`
 - `ResourceAccessService` 从 `gateway/http` 迁入 application-service
 - session lifecycle、project、resource access、config/model facade、memory/workspace docs facade 归 application-service
 - `CoordinatorImpl` 只负责 agent registry、routing、turn execution、stream mapping、cancel、agent feedback bridge
@@ -1276,7 +1258,7 @@ pnpm --dir talos-app build
 | coordinator 瘦身范围被低估 | Stage 1 变成长期阻塞 | 以现有测试为保护网，按职责迁移，不同时改变协议语义 |
 | ResourceAccessService 留在 HTTP | app-server 复制权限逻辑 | 迁入 application-service，HTTP/app-server 只提供 actor identity |
 | HTTP 与 JSON-RPC DTO 漂移 | 前端状态机难共享 | 统一 application domain 与事件模型，CI 校验生成类型 |
-| coordinator 输出最终客户端事件 | replay 与多订阅者顺序源分裂 | coordinator 只输出 `RawAgentEvent`，event service 统一编号、持久化、fan-out |
+| coordinator 输出最终客户端事件 | replay 与多订阅者顺序源分裂 | coordinator 只输出 raw agent stream；event service 统一编号、持久化、replay 与 live broadcast bus；adapter 负责订阅过滤和 wire fan-out |
 | app-server stdout 被日志污染 | 协议解析失败 | stdout 专用于 JSONL，日志全部 stderr |
 | Desktop 绕过 app-server | 形成私有业务能力 | Electron main 只做生命周期和系统集成 |
 | stdout back-pressure 失控 | 高频 delta 导致内存膨胀 | bounded channel + 写入失败取消客户端 active turn |
@@ -1322,12 +1304,12 @@ Frontend domain model is shared.
 Transport is replaceable.
 ```
 
-最终目标形态：
+当前目标形态：
 
 ```text
 Web UI       -> HTTP + SSE           -> TalosApplicationService -> Coordinator
 Desktop UI   -> JSON-RPC stdio       -> TalosApplicationService -> Coordinator
-TUI / CLI    -> JSON-RPC or HTTP     -> TalosApplicationService -> Coordinator
+TUI / CLI    -> JSON-RPC stdio       -> TalosApplicationService -> Coordinator
 ```
 
 这样可以同时满足：
