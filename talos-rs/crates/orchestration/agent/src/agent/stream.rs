@@ -65,7 +65,7 @@ impl AgentImpl {
                         request_id: request_id.to_string(),
                         call_id: data.call_id.unwrap_or_else(|| "unknown".to_string()),
                         name: data.tool_name.unwrap_or_else(|| "unknown".to_string()),
-                        arguments: data.arguments,
+                        arguments: data.arguments.into(),
                         item_index: current_index,
                         iteration,
                         step_id,
@@ -135,7 +135,7 @@ impl AgentImpl {
                         tool: data.tool_name,
                         content: if data.content.is_empty() {
                             vec![TalosContentItem::Json {
-                                value: Value::Array(Vec::new()),
+                                value: Value::Array(Vec::new()).into(),
                             }]
                         } else {
                             data.content
@@ -167,7 +167,7 @@ impl AgentImpl {
                     call_id,
                     tool_name,
                     prompt,
-                    arguments,
+                    arguments: arguments.into(),
                     step_id,
                 },
             )),
@@ -179,7 +179,7 @@ impl AgentImpl {
                     request_id: request_id.to_string(),
                     call_id: data.call_id,
                     tool_name: data.tool_name,
-                    arguments: data.arguments,
+                    arguments: data.arguments.into(),
                     step_id,
                 },
             )),

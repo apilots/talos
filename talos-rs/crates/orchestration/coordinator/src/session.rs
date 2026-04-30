@@ -11,9 +11,10 @@ use talos_types::talos::{
     TalosConnectionMode, TalosContext, TalosInputItem, TalosProvider, TalosUsage,
 };
 use talos_types::{
-    OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, ProjectPatch, ProjectRecord,
-    SessionConf, SessionPatch, SessionPatchAck, SessionQuery, SessionRecord, TalosConfig,
-    TalosSession, DEFAULT_SESSION_TITLE,
+    connection_mode_from_context, normalize_current_directory, resolve_effective_project_root,
+    session_title_or_fallback, validate_project_directory, OptionalCurrentDirectoryPatch,
+    OptionalProjectIdPatch, ProjectPatch, ProjectRecord, SessionConf, SessionPatch,
+    SessionPatchAck, SessionQuery, SessionRecord, TalosConfig, TalosSession,
 };
 use tokio::sync::RwLock;
 
@@ -57,41 +58,6 @@ impl SessionTitleGenerator {
         let response = self.llm_provider.chat(request).await?;
         Ok(response.content)
     }
-}
-
-fn validate_title(title: &str) -> Option<String> {
-    let first_line = title.lines().next().unwrap_or_default().trim();
-    let normalized = first_line
-        .trim_matches('"')
-        .trim_matches('\'')
-        .trim_end_matches(['.', '!', '?', ':', ';', '。', '！', '？', '：', '；'])
-        .trim();
-    if normalized.is_empty() || normalized == DEFAULT_SESSION_TITLE {
-        return None;
-    }
-    Some(
-        normalized
-            .chars()
-            .take(48)
-            .collect::<String>()
-            .trim()
-            .to_string(),
-    )
-    .filter(|value| !value.is_empty())
-}
-
-fn deterministic_title(first_user_text: &str) -> String {
-    let compact = first_user_text
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ");
-    validate_title(&compact).unwrap_or_else(|| DEFAULT_SESSION_TITLE.to_string())
-}
-
-fn validate_or_fallback_title(generated: String, first_user_text: &str) -> String {
-    validate_title(&generated).unwrap_or_else(|| deterministic_title(first_user_text))
 }
 
 pub(super) fn extract_first_user_text(input: &[TalosInputItem]) -> Option<String> {
@@ -185,72 +151,23 @@ impl SessionManager {
         candidate.exists().then_some(candidate)
     }
 
-    fn connection_mode_from_context(&self, context: &TalosContext) -> TalosConnectionMode {
-        context
-            .environment
-            .as_ref()
-            .map(|environment| environment.connection_mode)
-            .unwrap_or_default()
-    }
-
-    fn normalize_current_directory(
-        &self,
-        context: &TalosContext,
-        current_directory: Option<PathBuf>,
-    ) -> TalosResult<Option<PathBuf>> {
-        match self.connection_mode_from_context(context) {
-            TalosConnectionMode::Remote => Ok(None),
-            TalosConnectionMode::Embedded => {
-                let Some(path) = current_directory else {
-                    return Ok(None);
-                };
-                if !path.is_absolute() {
-                    return Err(TalosError::ValidationError(format!(
-                        "current directory must be an absolute path: {}",
-                        path.display()
-                    )));
-                }
-                if !path.exists() {
-                    return Err(TalosError::ValidationError(format!(
-                        "current directory does not exist: {}",
-                        path.display()
-                    )));
-                }
-                if !path.is_dir() {
-                    return Err(TalosError::ValidationError(format!(
-                        "current directory is not a directory: {}",
-                        path.display()
-                    )));
-                }
-                Ok(Some(path))
-            }
-        }
-    }
-
     async fn resolve_effective_root(&self, session: &TalosSession) -> TalosResult<Option<PathBuf>> {
-        if let Some(project_id) = session.project_id.as_deref() {
-            let project = self
-                .session_store
-                .get_project(project_id)
-                .await?
-                .ok_or_else(|| TalosError::ResourceNotFound(format!("project {}", project_id)))?;
-            return Ok(Some(project.directory));
-        }
-
-        if matches!(
-            session
-                .context
-                .environment
-                .as_ref()
-                .map(|env| env.connection_mode),
-            Some(TalosConnectionMode::Embedded)
-        ) {
-            if let Some(current_directory) = session.current_directory.clone() {
-                return Ok(Some(current_directory));
-            }
-        }
-
-        Ok(self.workspace_root())
+        let project_directory = if let Some(project_id) = session.project_id.as_deref() {
+            Some(
+                self.session_store
+                    .get_project(project_id)
+                    .await?
+                    .ok_or_else(|| TalosError::ResourceNotFound(format!("project {}", project_id)))?
+                    .directory,
+            )
+        } else {
+            None
+        };
+        Ok(resolve_effective_project_root(
+            session,
+            project_directory,
+            self.workspace_root(),
+        ))
     }
 
     async fn validate_project_id(&self, project_id: &str) -> TalosResult<()> {
@@ -358,12 +275,7 @@ impl SessionManager {
     ) {
         let mut cache = self.session_cache.write().await;
         if let Some(session) = cache.get_mut(session_id) {
-            let now = talos_types::now();
-            session.state.last_activity = now;
-            session.state.message_count = session.state.message_count.saturating_add(message_delta);
-            session.state.usage.accumulate(usage);
-            session.config.agent.model = assistant_model.to_string();
-            session.config.llm.model = assistant_model.to_string();
+            session.apply_turn_progress(assistant_model, message_delta, usage);
         }
     }
 
@@ -381,7 +293,7 @@ impl SessionManager {
         }
         let mut context = context;
         context.project_root = None;
-        let current_directory = self.normalize_current_directory(&context, current_directory)?;
+        let current_directory = normalize_current_directory(&context, current_directory)?;
         let record = self
             .session_store
             .create_session(
@@ -493,12 +405,11 @@ impl SessionManager {
     ) -> TalosResult<SessionPatch> {
         if let Some(OptionalCurrentDirectoryPatch::Set { path }) = patch.current_directory.as_ref()
         {
-            patch.current_directory = self
-                .normalize_current_directory(&context, Some(path.clone()))?
+            patch.current_directory = normalize_current_directory(&context, Some(path.clone()))?
                 .map(|normalized| OptionalCurrentDirectoryPatch::Set { path: normalized });
         }
         if matches!(
-            self.connection_mode_from_context(&context),
+            connection_mode_from_context(&context),
             TalosConnectionMode::Remote
         ) {
             patch.current_directory = None;
@@ -538,7 +449,7 @@ impl SessionManager {
                 .unwrap_or_default(),
             None => String::new(),
         };
-        let title = validate_or_fallback_title(generated, first_user_text);
+        let title = session_title_or_fallback(generated, first_user_text);
         self.update_session_title(session_id, &title).await
     }
 
@@ -566,24 +477,7 @@ impl SessionManager {
         directory: PathBuf,
         user_id: String,
     ) -> TalosResult<ProjectRecord> {
-        if !directory.is_absolute() {
-            return Err(TalosError::ValidationError(format!(
-                "project directory must be absolute: {}",
-                directory.display()
-            )));
-        }
-        if !directory.exists() {
-            return Err(TalosError::ValidationError(format!(
-                "project directory does not exist: {}",
-                directory.display()
-            )));
-        }
-        if !directory.is_dir() {
-            return Err(TalosError::ValidationError(format!(
-                "project directory is not a directory: {}",
-                directory.display()
-            )));
-        }
+        validate_project_directory(&directory)?;
         self.session_store
             .create_project_for_owner(&name, &directory, &user_id)
             .await

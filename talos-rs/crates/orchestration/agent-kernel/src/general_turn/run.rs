@@ -1,0 +1,127 @@
+use super::prepare::{
+    blocked_compaction_error, build_blocked_compaction_state,
+    prompt_budget_still_exhausted_from_diagnostics,
+};
+use super::*;
+use crate::ExecutionBranch;
+
+#[allow(clippy::too_many_arguments)]
+pub async fn run_general_turn(
+    ctx: &mut InvocationContext,
+    agent_name: &str,
+    agent_description: &str,
+    input: &str,
+    llm_provider: Arc<dyn LlmProvider>,
+    tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
+    tool_executor_port: Arc<dyn ToolExecutorPort>,
+    memory_store: Arc<MemoryStore>,
+    kernel_config: &AgentKernelConfig,
+) -> TalosResult<GeneralTurnResult> {
+    let prepared = prepare_general_turn(
+        ctx,
+        agent_name,
+        agent_description,
+        input,
+        llm_provider.clone(),
+        tool_definition_provider,
+        memory_store.clone(),
+        kernel_config,
+    )
+    .await?;
+    let mut prompt_diagnostics = prepared.prompt_diagnostics.clone();
+    let warnings = prepared.warnings.clone();
+    if let Some(prompt_warning_state) = prepared.prompt_warning_state.as_ref() {
+        if let Ok(value) = serde_json::to_value(prompt_warning_state) {
+            stage_session_state_update(
+                ctx,
+                &prepared.session_id,
+                &prepared.invocation_id,
+                ExecutionBranch::ModelThinking,
+                PROMPT_WARNING_STATE_KEY,
+                value,
+            );
+        }
+    }
+    if prompt_budget_still_exhausted_from_diagnostics(&prepared.prompt_diagnostics) {
+        if let Ok(value) = serde_json::to_value(build_blocked_compaction_state()) {
+            stage_session_state_update(
+                ctx,
+                &prepared.session_id,
+                &prepared.invocation_id,
+                ExecutionBranch::ModelThinking,
+                SESSION_COMPACTION_STATE_KEY,
+                value,
+            );
+        }
+        return Err(blocked_compaction_error(&prepared.session_id));
+    }
+    let executed = execute_general_turn_loop(
+        prepared.clone(),
+        agent_name,
+        llm_provider.clone(),
+        tool_executor_port,
+        memory_store.clone(),
+        kernel_config,
+    )
+    .await?;
+    prompt_diagnostics.window_usage.cache_read_input_tokens =
+        executed.usage.cache_read_input_tokens;
+    prompt_diagnostics.window_usage.cache_creation_input_tokens =
+        executed.usage.cache_creation_input_tokens;
+    if let Ok(value) = serde_json::to_value(&prompt_diagnostics) {
+        ctx.set_request_state(LAST_PROMPT_DIAGNOSTICS_STATE_KEY, value);
+    }
+    tracing::debug!(
+        session_id = %prepared.session_id,
+        agent_id = %prepared.agent_id,
+        prompt_context_window_tokens = prompt_diagnostics.window_usage.context_window,
+        prompt_effective_budget_tokens = prompt_diagnostics.window_usage.effective_prompt_budget,
+        prompt_static_prefix_tokens = prompt_diagnostics.window_usage.static_prefix_tokens,
+        prompt_dynamic_suffix_tokens = prompt_diagnostics.window_usage.dynamic_suffix_tokens,
+        prompt_total_tokens = prompt_diagnostics.window_usage.total_tokens,
+        cache_read_input_tokens = prompt_diagnostics.window_usage.cache_read_input_tokens,
+        cache_creation_input_tokens = prompt_diagnostics.window_usage.cache_creation_input_tokens,
+        session_history_compaction = ?prompt_diagnostics.session_history_compaction,
+        "prompt governance metrics"
+    );
+    persist_general_turn_artifacts(
+        &prepared,
+        input,
+        &executed,
+        llm_provider.clone(),
+        memory_store,
+        kernel_config,
+    )
+    .await;
+    if let Ok(value) = serde_json::to_value(next_session_compaction_state(&prompt_diagnostics)) {
+        stage_session_state_update(
+            ctx,
+            &prepared.session_id,
+            &prepared.invocation_id,
+            ExecutionBranch::ModelThinking,
+            SESSION_COMPACTION_STATE_KEY,
+            value,
+        );
+    }
+    if let Some(session_continuity) = build_session_continuity(input, &executed) {
+        if let Ok(value) = serde_json::to_value(session_continuity) {
+            stage_session_state_update(
+                ctx,
+                &prepared.session_id,
+                &prepared.invocation_id,
+                ExecutionBranch::ModelThinking,
+                SESSION_CONTINUITY_STATE_KEY,
+                value,
+            );
+        }
+    }
+
+    Ok(GeneralTurnResult {
+        output_text: executed.output_text,
+        output_items: executed.output_items,
+        stop_reason: executed.stop_reason,
+        usage: executed.usage,
+        prompt_diagnostics,
+        warnings,
+    })
+}

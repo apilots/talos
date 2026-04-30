@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use talos_error::{TalosError, TalosResult};
 use talos_storage::Row;
+use talos_types::talos::TalosJsonValue;
 
 use crate::events::SessionEventId;
 use crate::DatabaseSessionStore;
@@ -40,7 +41,7 @@ pub struct PendingToolApproval {
     pub call_id: String,
     pub tool_name: String,
     pub prompt: String,
-    pub arguments: serde_json::Value,
+    pub arguments: TalosJsonValue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

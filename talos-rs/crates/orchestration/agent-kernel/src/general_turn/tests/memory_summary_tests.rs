@@ -684,7 +684,8 @@ async fn test_flush_session_memory_trims_old_tool_exchanges_before_history() {
                         arguments: serde_json::json!({
                             "path": format!("/tmp/exchange-{idx}.txt"),
                             "marker": format!("exchange-arg-{idx}-{}", "y".repeat(140)),
-                        }),
+                        })
+                        .into(),
                     },
                     TalosOutputItem::ToolResult {
                         call_id: format!("call-{idx}"),

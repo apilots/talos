@@ -26,7 +26,7 @@ impl ResponseProcessor for ToolCallExtractionProcessor {
                     response.branch,
                     call_id.clone(),
                     name.clone(),
-                    arguments.clone(),
+                    arguments.clone().into(),
                 ));
             }
         }
@@ -141,7 +141,7 @@ impl ResponseProcessor for EventProjectionProcessor {
                         serde_json::json!({
                             "content": content.iter().map(|entry| match entry {
                                 TalosContentItem::Text { text } => serde_json::json!({"text": text}),
-                                TalosContentItem::Json { value } => value.clone(),
+                                TalosContentItem::Json { value } => value.clone().into(),
                             }).collect::<Vec<_>>()
                         })
                     });

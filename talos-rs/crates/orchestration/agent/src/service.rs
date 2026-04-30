@@ -4,8 +4,8 @@ use std::time::Duration;
 use talos_agent_kernel::TurnPhase;
 use talos_error::TalosResult;
 use talos_types::talos::{
-    StopReason, TalosInputItem, TalosOutputItem, TalosReasoning, TalosThinkingSource,
-    TalosThinkingStage, TalosUsage,
+    StopReason, TalosInputItem, TalosJsonValue, TalosOutputItem, TalosReasoning,
+    TalosThinkingSource, TalosThinkingStage, TalosUsage,
 };
 use talos_types::TalosSession;
 use tokio::sync::mpsc;
@@ -78,7 +78,7 @@ pub struct OrchestratorMessageToolCallPendingApprovalEvent {
     pub call_id: String,
     pub tool_name: String,
     pub prompt: String,
-    pub arguments: serde_json::Value,
+    pub arguments: TalosJsonValue,
     pub step_id: String,
 }
 
@@ -87,7 +87,7 @@ pub struct OrchestratorMessageToolCallPendingDynamicResultEvent {
     pub request_id: String,
     pub call_id: String,
     pub tool_name: String,
-    pub arguments: serde_json::Value,
+    pub arguments: TalosJsonValue,
     pub step_id: String,
 }
 
@@ -134,7 +134,7 @@ pub struct OrchestratorMessageToolCallStartedEvent {
     pub request_id: String,
     pub call_id: String,
     pub name: String,
-    pub arguments: serde_json::Value,
+    pub arguments: TalosJsonValue,
     pub item_index: u64,
     pub iteration: u64,
     pub step_id: String,

@@ -1,0 +1,655 @@
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::path::PathBuf;
+use std::str::FromStr;
+use ts_rs::TS;
+
+use crate::errors::AppServerErrorBody;
+use crate::version::ProtocolVersion;
+
+pub const DEFERRED_CLIENT_METHODS: &[DeferredClientMethod] = &[
+    DeferredClientMethod {
+        method: "tool.dynamic_result.submit",
+        reason: "dynamic tool result protocol DTO depends on app-server server-request flow",
+    },
+    DeferredClientMethod {
+        method: "admin.session.list",
+        reason: "admin protocol surface is deferred until local actor credentials are implemented",
+    },
+    DeferredClientMethod {
+        method: "admin.project.list",
+        reason: "admin protocol surface is deferred until local actor credentials are implemented",
+    },
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeferredClientMethod {
+    pub method: &'static str,
+    pub reason: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub enum ClientMethod {
+    #[serde(rename = "initialize")]
+    Initialize,
+    #[serde(rename = "session.create")]
+    SessionCreate,
+    #[serde(rename = "session.list")]
+    SessionList,
+    #[serde(rename = "session.read")]
+    SessionRead,
+    #[serde(rename = "session.patch")]
+    SessionPatch,
+    #[serde(rename = "session.delete")]
+    SessionDelete,
+    #[serde(rename = "session.turns")]
+    SessionTurns,
+    #[serde(rename = "project.create")]
+    ProjectCreate,
+    #[serde(rename = "project.list")]
+    ProjectList,
+    #[serde(rename = "project.read")]
+    ProjectRead,
+    #[serde(rename = "project.patch")]
+    ProjectPatch,
+    #[serde(rename = "project.delete")]
+    ProjectDelete,
+    #[serde(rename = "turn.start")]
+    TurnStart,
+    #[serde(rename = "turn.interrupt")]
+    TurnInterrupt,
+    #[serde(rename = "event.subscribe")]
+    EventSubscribe,
+    #[serde(rename = "tool.approval.submit")]
+    ToolApprovalSubmit,
+    #[serde(rename = "model.list")]
+    ModelList,
+    #[serde(rename = "config.read")]
+    ConfigRead,
+    #[serde(rename = "config.value.write")]
+    ConfigValueWrite,
+    #[serde(rename = "config.batch.write")]
+    ConfigBatchWrite,
+    #[serde(rename = "config.reload")]
+    ConfigReload,
+    #[serde(rename = "memory.file.list")]
+    MemoryFileList,
+    #[serde(rename = "memory.file.read")]
+    MemoryFileRead,
+    #[serde(rename = "memory.file.write")]
+    MemoryFileWrite,
+    #[serde(rename = "workspace.doc.list")]
+    WorkspaceDocList,
+    #[serde(rename = "workspace.doc.read")]
+    WorkspaceDocRead,
+    #[serde(rename = "workspace.doc.write")]
+    WorkspaceDocWrite,
+    #[serde(rename = "skill.list")]
+    SkillList,
+    #[serde(rename = "app.list")]
+    AppList,
+    #[serde(rename = "tool.list")]
+    ToolList,
+    #[serde(rename = "account.get")]
+    AccountGet,
+    #[serde(rename = "memory.search")]
+    MemorySearch,
+}
+
+impl ClientMethod {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Initialize => "initialize",
+            Self::SessionCreate => "session.create",
+            Self::SessionList => "session.list",
+            Self::SessionRead => "session.read",
+            Self::SessionPatch => "session.patch",
+            Self::SessionDelete => "session.delete",
+            Self::SessionTurns => "session.turns",
+            Self::ProjectCreate => "project.create",
+            Self::ProjectList => "project.list",
+            Self::ProjectRead => "project.read",
+            Self::ProjectPatch => "project.patch",
+            Self::ProjectDelete => "project.delete",
+            Self::TurnStart => "turn.start",
+            Self::TurnInterrupt => "turn.interrupt",
+            Self::EventSubscribe => "event.subscribe",
+            Self::ToolApprovalSubmit => "tool.approval.submit",
+            Self::ModelList => "model.list",
+            Self::ConfigRead => "config.read",
+            Self::ConfigValueWrite => "config.value.write",
+            Self::ConfigBatchWrite => "config.batch.write",
+            Self::ConfigReload => "config.reload",
+            Self::MemoryFileList => "memory.file.list",
+            Self::MemoryFileRead => "memory.file.read",
+            Self::MemoryFileWrite => "memory.file.write",
+            Self::WorkspaceDocList => "workspace.doc.list",
+            Self::WorkspaceDocRead => "workspace.doc.read",
+            Self::WorkspaceDocWrite => "workspace.doc.write",
+            Self::SkillList => "skill.list",
+            Self::AppList => "app.list",
+            Self::ToolList => "tool.list",
+            Self::AccountGet => "account.get",
+            Self::MemorySearch => "memory.search",
+        }
+    }
+}
+
+impl fmt::Display for ClientMethod {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for ClientMethod {
+    type Err = AppServerErrorBody;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "initialize" => Ok(Self::Initialize),
+            "session.create" => Ok(Self::SessionCreate),
+            "session.list" => Ok(Self::SessionList),
+            "session.read" => Ok(Self::SessionRead),
+            "session.patch" => Ok(Self::SessionPatch),
+            "session.delete" => Ok(Self::SessionDelete),
+            "session.turns" => Ok(Self::SessionTurns),
+            "project.create" => Ok(Self::ProjectCreate),
+            "project.list" => Ok(Self::ProjectList),
+            "project.read" => Ok(Self::ProjectRead),
+            "project.patch" => Ok(Self::ProjectPatch),
+            "project.delete" => Ok(Self::ProjectDelete),
+            "turn.start" => Ok(Self::TurnStart),
+            "turn.interrupt" => Ok(Self::TurnInterrupt),
+            "event.subscribe" => Ok(Self::EventSubscribe),
+            "tool.approval.submit" => Ok(Self::ToolApprovalSubmit),
+            "model.list" => Ok(Self::ModelList),
+            "config.read" => Ok(Self::ConfigRead),
+            "config.value.write" => Ok(Self::ConfigValueWrite),
+            "config.batch.write" => Ok(Self::ConfigBatchWrite),
+            "config.reload" => Ok(Self::ConfigReload),
+            "memory.file.list" => Ok(Self::MemoryFileList),
+            "memory.file.read" => Ok(Self::MemoryFileRead),
+            "memory.file.write" => Ok(Self::MemoryFileWrite),
+            "workspace.doc.list" => Ok(Self::WorkspaceDocList),
+            "workspace.doc.read" => Ok(Self::WorkspaceDocRead),
+            "workspace.doc.write" => Ok(Self::WorkspaceDocWrite),
+            "skill.list" => Ok(Self::SkillList),
+            "app.list" => Ok(Self::AppList),
+            "tool.list" => Ok(Self::ToolList),
+            "account.get" => Ok(Self::AccountGet),
+            "memory.search" => Ok(Self::MemorySearch),
+            _ => Err(AppServerErrorBody::method_not_found(value)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+#[serde(tag = "method", content = "params", rename_all = "snake_case")]
+pub enum ClientRequestParams {
+    #[serde(rename = "initialize")]
+    Initialize(InitializeParams),
+    #[serde(rename = "session.create")]
+    SessionCreate(SessionCreateParams),
+    #[serde(rename = "session.list")]
+    SessionList(SessionListParams),
+    #[serde(rename = "session.read")]
+    SessionRead(SessionReadParams),
+    #[serde(rename = "session.patch")]
+    SessionPatch(SessionPatchParams),
+    #[serde(rename = "session.delete")]
+    SessionDelete(SessionDeleteParams),
+    #[serde(rename = "session.turns")]
+    SessionTurns(SessionTurnsParams),
+    #[serde(rename = "project.create")]
+    ProjectCreate(ProjectCreateParams),
+    #[serde(rename = "project.list")]
+    ProjectList(ProjectListParams),
+    #[serde(rename = "project.read")]
+    ProjectRead(ProjectReadParams),
+    #[serde(rename = "project.patch")]
+    ProjectPatch(ProjectPatchParams),
+    #[serde(rename = "project.delete")]
+    ProjectDelete(ProjectDeleteParams),
+    #[serde(rename = "turn.start")]
+    TurnStart(TurnStartParams),
+    #[serde(rename = "turn.interrupt")]
+    TurnInterrupt(TurnInterruptParams),
+    #[serde(rename = "event.subscribe")]
+    EventSubscribe(EventSubscribeParams),
+    #[serde(rename = "tool.approval.submit")]
+    ToolApprovalSubmit(ToolApprovalSubmitParams),
+    #[serde(rename = "model.list")]
+    ModelList(ModelListParams),
+    #[serde(rename = "config.read")]
+    ConfigRead(ConfigReadParams),
+    #[serde(rename = "config.value.write")]
+    ConfigValueWrite(ConfigValueWriteParams),
+    #[serde(rename = "config.batch.write")]
+    ConfigBatchWrite(ConfigBatchWriteParams),
+    #[serde(rename = "config.reload")]
+    ConfigReload(ConfigReloadParams),
+    #[serde(rename = "memory.file.list")]
+    MemoryFileList(MemoryFileListParams),
+    #[serde(rename = "memory.file.read")]
+    MemoryFileRead(MemoryFileReadParams),
+    #[serde(rename = "memory.file.write")]
+    MemoryFileWrite(MemoryFileWriteParams),
+    #[serde(rename = "workspace.doc.list")]
+    WorkspaceDocList(WorkspaceDocListParams),
+    #[serde(rename = "workspace.doc.read")]
+    WorkspaceDocRead(WorkspaceDocReadParams),
+    #[serde(rename = "workspace.doc.write")]
+    WorkspaceDocWrite(WorkspaceDocWriteParams),
+    #[serde(rename = "skill.list")]
+    SkillList(SkillListParams),
+    #[serde(rename = "app.list")]
+    AppList(AppListParams),
+    #[serde(rename = "tool.list")]
+    ToolList(ToolListParams),
+    #[serde(rename = "account.get")]
+    AccountGet(AccountGetParams),
+    #[serde(rename = "memory.search")]
+    MemorySearch(MemorySearchParams),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct ClientRequest {
+    pub method: ClientMethod,
+    pub params: ClientRequestParams,
+}
+
+impl ClientRequest {
+    pub fn decode(
+        method: &str,
+        params: Option<serde_json::Value>,
+    ) -> Result<Self, AppServerErrorBody> {
+        let method_kind = ClientMethod::from_str(method)?;
+        let params_value = params.unwrap_or(serde_json::Value::Object(Default::default()));
+        let params = match method_kind {
+            ClientMethod::Initialize => ClientRequestParams::Initialize(decode(params_value)?),
+            ClientMethod::SessionCreate => {
+                ClientRequestParams::SessionCreate(decode(params_value)?)
+            }
+            ClientMethod::SessionList => ClientRequestParams::SessionList(decode(params_value)?),
+            ClientMethod::SessionRead => ClientRequestParams::SessionRead(decode(params_value)?),
+            ClientMethod::SessionPatch => ClientRequestParams::SessionPatch(decode(params_value)?),
+            ClientMethod::SessionDelete => {
+                ClientRequestParams::SessionDelete(decode(params_value)?)
+            }
+            ClientMethod::SessionTurns => ClientRequestParams::SessionTurns(decode(params_value)?),
+            ClientMethod::ProjectCreate => {
+                ClientRequestParams::ProjectCreate(decode(params_value)?)
+            }
+            ClientMethod::ProjectList => ClientRequestParams::ProjectList(decode(params_value)?),
+            ClientMethod::ProjectRead => ClientRequestParams::ProjectRead(decode(params_value)?),
+            ClientMethod::ProjectPatch => ClientRequestParams::ProjectPatch(decode(params_value)?),
+            ClientMethod::ProjectDelete => {
+                ClientRequestParams::ProjectDelete(decode(params_value)?)
+            }
+            ClientMethod::TurnStart => ClientRequestParams::TurnStart(decode(params_value)?),
+            ClientMethod::TurnInterrupt => {
+                ClientRequestParams::TurnInterrupt(decode(params_value)?)
+            }
+            ClientMethod::EventSubscribe => {
+                ClientRequestParams::EventSubscribe(decode(params_value)?)
+            }
+            ClientMethod::ToolApprovalSubmit => {
+                ClientRequestParams::ToolApprovalSubmit(decode(params_value)?)
+            }
+            ClientMethod::ModelList => ClientRequestParams::ModelList(decode(params_value)?),
+            ClientMethod::ConfigRead => ClientRequestParams::ConfigRead(decode(params_value)?),
+            ClientMethod::ConfigValueWrite => {
+                ClientRequestParams::ConfigValueWrite(decode(params_value)?)
+            }
+            ClientMethod::ConfigBatchWrite => {
+                ClientRequestParams::ConfigBatchWrite(decode(params_value)?)
+            }
+            ClientMethod::ConfigReload => ClientRequestParams::ConfigReload(decode(params_value)?),
+            ClientMethod::MemoryFileList => {
+                ClientRequestParams::MemoryFileList(decode(params_value)?)
+            }
+            ClientMethod::MemoryFileRead => {
+                ClientRequestParams::MemoryFileRead(decode(params_value)?)
+            }
+            ClientMethod::MemoryFileWrite => {
+                ClientRequestParams::MemoryFileWrite(decode(params_value)?)
+            }
+            ClientMethod::WorkspaceDocList => {
+                ClientRequestParams::WorkspaceDocList(decode(params_value)?)
+            }
+            ClientMethod::WorkspaceDocRead => {
+                ClientRequestParams::WorkspaceDocRead(decode(params_value)?)
+            }
+            ClientMethod::WorkspaceDocWrite => {
+                ClientRequestParams::WorkspaceDocWrite(decode(params_value)?)
+            }
+            ClientMethod::SkillList => ClientRequestParams::SkillList(decode(params_value)?),
+            ClientMethod::AppList => ClientRequestParams::AppList(decode(params_value)?),
+            ClientMethod::ToolList => ClientRequestParams::ToolList(decode(params_value)?),
+            ClientMethod::AccountGet => ClientRequestParams::AccountGet(decode(params_value)?),
+            ClientMethod::MemorySearch => ClientRequestParams::MemorySearch(decode(params_value)?),
+        };
+        Ok(Self {
+            method: method_kind,
+            params,
+        })
+    }
+}
+
+fn decode<T: for<'de> Deserialize<'de>>(value: serde_json::Value) -> Result<T, AppServerErrorBody> {
+    serde_json::from_value(value)
+        .map_err(|error| AppServerErrorBody::invalid_params(error.to_string()))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct InitializeParams {
+    pub client_info: ClientInfo,
+    pub capabilities: ClientCapabilities,
+    pub actor_credentials: ActorCredentials,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct InitializeResponse {
+    pub protocol_version: ProtocolVersion,
+    pub server_info: ServerInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct ClientInfo {
+    pub name: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct ServerInfo {
+    pub name: String,
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct ClientCapabilities {
+    pub protocol_version: ProtocolVersion,
+    pub supports_server_requests: bool,
+    pub supports_event_replay: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct ActorCredentials {
+    pub credential: ActorCredential,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ActorCredential {
+    LocalLaunchToken { token: String },
+    ExistingSessionToken { token: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct SessionCreateParams {
+    pub context: ProtocolTalosContext,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub current_directory: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct SessionListParams {
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub offset: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct SessionReadParams {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct SessionPatchParams {
+    pub session_id: String,
+    #[serde(default)]
+    pub project_id: Option<OptionalStringPatch>,
+    #[serde(default)]
+    pub current_directory: Option<OptionalPathPatch>,
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct SessionDeleteParams {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct SessionTurnsParams {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct ProjectCreateParams {
+    pub name: String,
+    pub directory: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct ProjectListParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct ProjectReadParams {
+    pub project_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct ProjectPatchParams {
+    pub project_id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct ProjectDeleteParams {
+    pub project_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct TurnStartParams {
+    pub session_id: String,
+    pub input: Vec<ProtocolInputItem>,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+    #[serde(default)]
+    pub client_request_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct TurnStartResponse {
+    pub session_id: String,
+    pub turn_id: String,
+    #[ts(type = "number")]
+    pub accepted_at: i64,
+    #[serde(default)]
+    pub started_event_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct TurnInterruptParams {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct EventSubscribeParams {
+    pub session_id: String,
+    #[serde(default)]
+    pub since_event_id: Option<String>,
+    #[serde(default)]
+    pub replay_limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct EventSubscribeResponse {
+    pub subscription_id: String,
+    pub session_id: String,
+    #[serde(default)]
+    pub high_water_mark_event_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct ToolApprovalSubmitParams {
+    pub session_id: String,
+    pub call_id: String,
+    pub tool_name: String,
+    pub approved: bool,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct ModelListParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct ConfigReadParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct ConfigValueWriteParams {
+    pub path: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct ConfigBatchWriteParams {
+    pub entries: Vec<ConfigValueWriteParams>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct ConfigReloadParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct MemoryFileListParams {
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct MemoryFileReadParams {
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct MemoryFileWriteParams {
+    pub path: PathBuf,
+    pub content: String,
+    #[serde(default)]
+    pub expected_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct WorkspaceDocListParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct WorkspaceDocReadParams {
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct WorkspaceDocWriteParams {
+    pub kind: String,
+    pub content: String,
+    #[serde(default)]
+    pub expected_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct SkillListParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct AppListParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct ToolListParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct AccountGetParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct MemorySearchParams {
+    pub query: String,
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum OptionalStringPatch {
+    Set { value: String },
+    Clear,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum OptionalPathPatch {
+    Set { path: PathBuf },
+    Clear,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct ProtocolTalosContext {
+    pub source_type: String,
+    pub provider: String,
+    pub channel_id: String,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+    pub message_id: String,
+    pub trace_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ProtocolInputItem {
+    Text { text: String },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn method_parses_dot_name() {
+        assert_eq!(
+            ClientMethod::from_str("turn.start").unwrap(),
+            ClientMethod::TurnStart
+        );
+    }
+
+    #[test]
+    fn decodes_typed_request_params() {
+        let request = ClientRequest::decode(
+            "session.read",
+            Some(json!({
+                "session_id": "s1"
+            })),
+        )
+        .unwrap();
+        assert!(matches!(
+            request.params,
+            ClientRequestParams::SessionRead(SessionReadParams { .. })
+        ));
+    }
+
+    #[test]
+    fn deferred_methods_are_explicit() {
+        assert!(DEFERRED_CLIENT_METHODS
+            .iter()
+            .any(|entry| entry.method == "tool.dynamic_result.submit"));
+    }
+}

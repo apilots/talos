@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use talos_agent::{AgentImpl, AgentOrchestrator};
+use talos_application_service::TalosApplicationService;
 use talos_auth::{
     AuthCacheConfig, AuthManager, AuthService, DatabaseUserStore, JwtAuth, JwtConfig, UserService,
     UserStore, UserTokenStore,
@@ -26,7 +27,7 @@ use talos_tools::{
     register_collaboration_tools, register_core_local_tools, register_network_tools,
     CollaborationRuntime, ToolRegistry,
 };
-use talos_types::{resolve_model_catalog, RequestHandler, SessionService};
+use talos_types::{resolve_model_catalog, RequestHandler, SessionRuntime};
 use tokio::signal;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -48,6 +49,16 @@ pub struct TalosServerRuntime {
     gateway_url: String,
     shutdown_token: CancellationToken,
     lifecycle: Arc<ServerLifecycle>,
+}
+
+#[derive(Clone)]
+pub struct TalosApplicationRuntime {
+    pub config: Config,
+    pub application_service: Arc<TalosApplicationService>,
+    pub event_service: Arc<SessionEventService>,
+    pub auth_service: Arc<dyn AuthService>,
+    pub request_handler: Arc<dyn RequestHandler>,
+    pub coordinator: Arc<CoordinatorImpl>,
 }
 
 const MEMORY_FLUSH_DRAIN_TIMEOUT: Duration = Duration::from_secs(60);
@@ -210,7 +221,75 @@ pub async fn start_server(
     options: Option<TalosServerOptions>,
 ) -> TalosResult<TalosServerRuntime> {
     let config = apply_runtime_options(config, options.as_ref());
+    let runtime = build_application_runtime(config.clone()).await?;
 
+    let mut http_server = HttpServer::new(
+        runtime.application_service.clone(),
+        runtime.event_service.clone(),
+        runtime.auth_service.clone(),
+        config.clone(),
+        config.gateway.host.clone(),
+        config.gateway.port,
+    );
+
+    let auth_disabled = options
+        .as_ref()
+        .and_then(|value| value.auth_disabled)
+        .unwrap_or(!config.gateway.auth);
+
+    // gateway.auth only controls HTTP auth middleware.
+    // PAT authentication is part of verify_access_token and active whenever auth middleware is enabled.
+    if auth_disabled {
+        http_server = http_server.with_auth_disabled(true);
+    } else if config.gateway.auth {
+        http_server =
+            http_server.with_jwt_secret(config.gateway.jwt_secret.clone().ok_or_else(|| {
+                TalosError::InvalidConfiguration(
+                    "gateway.jwt_secret is required when gateway.auth=true".to_string(),
+                )
+            })?);
+    }
+
+    let enable_channels = options
+        .as_ref()
+        .and_then(|value| value.enable_channels)
+        .unwrap_or(true);
+    let channel_server = if enable_channels {
+        let mut channel_server =
+            ChannelServer::new(Arc::new(config.clone()), runtime.request_handler.clone());
+        channel_server.register(Box::new(TelegramChannel::new()));
+        Some(channel_server)
+    } else {
+        None
+    };
+
+    Ok(TalosServerRuntime {
+        coordinator: runtime.coordinator,
+        gateway_url: format!("http://{}:{}", config.gateway.host, config.gateway.port),
+        shutdown_token: CancellationToken::new(),
+        lifecycle: http_server.lifecycle(),
+        http_server,
+        channel_server,
+    })
+}
+
+pub async fn run_json_rpc_stdio(config: Config) -> TalosResult<()> {
+    let runtime = build_application_runtime(config.clone()).await?;
+    let replay_limit = config.agent.kernel.session_events.replay_batch_size.max(1);
+    let app = Arc::new(talos_app_server::TalosApplicationAdapter::new(
+        runtime.application_service,
+        replay_limit,
+    ));
+    let validator = Arc::new(talos_app_server::AuthServiceCredentialValidator::new(
+        runtime.auth_service,
+        std::env::var("TALOS_LOCAL_LAUNCH_TOKEN").ok(),
+    ));
+    talos_app_server::run_stdio(app, validator, talos_app_server::AppServerConfig::default())
+        .await
+        .map_err(|error| TalosError::InternalError(error.message))
+}
+
+pub async fn build_application_runtime(config: Config) -> TalosResult<TalosApplicationRuntime> {
     let storage_impl = create_storage(&StorageConfig {
         database_type: config.storage.database_type.clone(),
         connection_string: config.storage.connection_string.clone(),
@@ -266,9 +345,10 @@ pub async fn start_server(
     );
     let agent: Arc<dyn AgentOrchestrator> = Arc::new(agent);
 
-    let mut coordinator_builder = CoordinatorImpl::new(router, session_store, config.clone())
-        .with_channel_dm_scope("telegram", config.channels.telegram.dm_scope.to_string())
-        .with_default_workspace_id(config.agent.kernel.default_workspace_id.clone());
+    let mut coordinator_builder =
+        CoordinatorImpl::new(router, session_store.clone(), config.clone())
+            .with_channel_dm_scope("telegram", config.channels.telegram.dm_scope.to_string())
+            .with_default_workspace_id(config.agent.kernel.default_workspace_id.clone());
     coordinator_builder = coordinator_builder.with_session_title_generator(llm_provider.clone());
     let coordinator = Arc::new(coordinator_builder);
 
@@ -283,7 +363,7 @@ pub async fn start_server(
     coordinator.register_agent("default", agent).await?;
 
     let request_handler: Arc<dyn RequestHandler> = coordinator.clone();
-    let session_service: Arc<dyn SessionService> = coordinator.clone();
+    let session_runtime: Arc<dyn SessionRuntime> = coordinator.clone();
     let gateway: Arc<dyn Gateway> = Arc::new(GatewayImpl::new(request_handler.clone()));
     let jwt_auth = Arc::new(JwtAuth::with_config(JwtConfig {
         secret: config
@@ -311,64 +391,28 @@ pub async fn start_server(
     let llm_store = Arc::new(YamlLlmConfigStore::new(config_path));
     let llm_config_service: Arc<dyn LlmConfigService> = Arc::new(LlmConfigManager::new(llm_store));
 
-    let default_model = config.llm.model.clone();
     let model_catalog = resolve_model_catalog(&config.llm);
-    let mut http_server = HttpServer::new(
+    let application_service = Arc::new(TalosApplicationService::new_with_session_store(
         gateway,
-        session_service,
-        event_service,
+        session_runtime,
+        session_store,
+        event_service.clone(),
         idempotency_store,
-        auth_service,
-        user_service,
         config.clone(),
         llm_provider.clone(),
         llm_config_service,
-        config.gateway.host.clone(),
-        config.gateway.port,
-        default_model,
         model_catalog,
-    );
+        auth_service.clone(),
+        user_service,
+    ));
 
-    let auth_disabled = options
-        .as_ref()
-        .and_then(|value| value.auth_disabled)
-        .unwrap_or(!config.gateway.auth);
-
-    // gateway.auth only controls HTTP auth middleware.
-    // PAT authentication is part of verify_access_token and active whenever auth middleware is enabled.
-    if auth_disabled {
-        http_server = http_server.with_auth_disabled(true);
-    } else {
-        if config.gateway.auth {
-            http_server = http_server.with_jwt_secret(
-                config.gateway.jwt_secret.clone().ok_or_else(|| {
-                    TalosError::InvalidConfiguration(
-                        "gateway.jwt_secret is required when gateway.auth=true".to_string(),
-                    )
-                })?,
-            );
-        }
-    }
-
-    let enable_channels = options
-        .as_ref()
-        .and_then(|value| value.enable_channels)
-        .unwrap_or(true);
-    let channel_server = if enable_channels {
-        let mut channel_server = ChannelServer::new(Arc::new(config.clone()), request_handler);
-        channel_server.register(Box::new(TelegramChannel::new()));
-        Some(channel_server)
-    } else {
-        None
-    };
-
-    Ok(TalosServerRuntime {
+    Ok(TalosApplicationRuntime {
+        config,
+        application_service,
+        event_service,
+        auth_service,
+        request_handler,
         coordinator,
-        gateway_url: format!("http://{}:{}", config.gateway.host, config.gateway.port),
-        shutdown_token: CancellationToken::new(),
-        lifecycle: http_server.lifecycle(),
-        http_server,
-        channel_server,
     })
 }
 

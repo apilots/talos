@@ -1,0 +1,3064 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "AccountGetParams": {
+      "type": "object"
+    },
+    "ActorCredential": {
+      "oneOf": [
+        {
+          "properties": {
+            "token": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "local_launch_token"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "token",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "token": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "existing_session_token"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "token",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ActorCredentials": {
+      "properties": {
+        "credential": {
+          "$ref": "#/definitions/ActorCredential"
+        }
+      },
+      "required": [
+        "credential"
+      ],
+      "type": "object"
+    },
+    "AppListParams": {
+      "type": "object"
+    },
+    "AppServerErrorBody": {
+      "properties": {
+        "code": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AppServerErrorData"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "AppServerErrorData": {
+      "oneOf": [
+        {
+          "enum": [
+            "unauthorized",
+            "forbidden"
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "auth"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": [
+            "object",
+            "string"
+          ]
+        },
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "not_found"
+                  ],
+                  "type": "string"
+                },
+                "resource": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "resource"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "expired"
+                  ],
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "reason"
+              ],
+              "type": "object"
+            }
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "resource"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "validation"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "conflict"
+                  ],
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "reason"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "not_initialized"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            }
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "turn"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "tool_name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "tool"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "tool_name",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "config"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "reason",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ApplicationEventEnvelope": {
+      "properties": {
+        "event": {
+          "$ref": "#/definitions/TalosEvent"
+        },
+        "event_id": {
+          "type": "string"
+        },
+        "subscription_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "event",
+        "event_id",
+        "subscription_id"
+      ],
+      "type": "object"
+    },
+    "AuthRefreshParams": {
+      "properties": {
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "type": "object"
+    },
+    "ClientApprovalRequestParams": {
+      "properties": {
+        "prompt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "type": "object"
+    },
+    "ClientCapabilities": {
+      "properties": {
+        "protocol_version": {
+          "$ref": "#/definitions/ProtocolVersion"
+        },
+        "supports_event_replay": {
+          "type": "boolean"
+        },
+        "supports_server_requests": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "supports_event_replay",
+        "supports_server_requests"
+      ],
+      "type": "object"
+    },
+    "ClientInfo": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "title": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ClientMethod": {
+      "enum": [
+        "initialize",
+        "session.create",
+        "session.list",
+        "session.read",
+        "session.patch",
+        "session.delete",
+        "session.turns",
+        "project.create",
+        "project.list",
+        "project.read",
+        "project.patch",
+        "project.delete",
+        "turn.start",
+        "turn.interrupt",
+        "event.subscribe",
+        "tool.approval.submit",
+        "model.list",
+        "config.read",
+        "config.value.write",
+        "config.batch.write",
+        "config.reload",
+        "memory.file.list",
+        "memory.file.read",
+        "memory.file.write",
+        "workspace.doc.list",
+        "workspace.doc.read",
+        "workspace.doc.write",
+        "skill.list",
+        "app.list",
+        "tool.list",
+        "account.get",
+        "memory.search"
+      ],
+      "type": "string"
+    },
+    "ClientRequest": {
+      "properties": {
+        "method": {
+          "$ref": "#/definitions/ClientMethod"
+        },
+        "params": {
+          "$ref": "#/definitions/ClientRequestParams"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    "ClientRequestParams": {
+      "oneOf": [
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "initialize"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/InitializeParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "session.create"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SessionCreateParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "session.list"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SessionListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "session.read"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SessionReadParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "session.patch"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SessionPatchParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "session.delete"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SessionDeleteParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "session.turns"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SessionTurnsParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "project.create"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ProjectCreateParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "project.list"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ProjectListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "project.read"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ProjectReadParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "project.patch"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ProjectPatchParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "project.delete"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ProjectDeleteParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "turn.start"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/TurnStartParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "turn.interrupt"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/TurnInterruptParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "event.subscribe"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/EventSubscribeParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "tool.approval.submit"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ToolApprovalSubmitParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "model.list"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ModelListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "config.read"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ConfigReadParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "config.value.write"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ConfigValueWriteParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "config.batch.write"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ConfigBatchWriteParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "config.reload"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ConfigReloadParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "memory.file.list"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/MemoryFileListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "memory.file.read"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/MemoryFileReadParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "memory.file.write"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/MemoryFileWriteParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "workspace.doc.list"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/WorkspaceDocListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "workspace.doc.read"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/WorkspaceDocReadParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "workspace.doc.write"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/WorkspaceDocWriteParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "skill.list"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SkillListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "app.list"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AppListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "tool.list"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ToolListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "account.get"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AccountGetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "memory.search"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/MemorySearchParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ConfigBatchWriteParams": {
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/definitions/ConfigValueWriteParams"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "type": "object"
+    },
+    "ConfigReadParams": {
+      "type": "object"
+    },
+    "ConfigReloadParams": {
+      "type": "object"
+    },
+    "ConfigValueWriteParams": {
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "value"
+      ],
+      "type": "object"
+    },
+    "EventSubscribeParams": {
+      "properties": {
+        "replay_limit": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "since_event_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "EventSubscribeResponse": {
+      "properties": {
+        "high_water_mark_event_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "subscription_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "subscription_id"
+      ],
+      "type": "object"
+    },
+    "InitializeParams": {
+      "properties": {
+        "actor_credentials": {
+          "$ref": "#/definitions/ActorCredentials"
+        },
+        "capabilities": {
+          "$ref": "#/definitions/ClientCapabilities"
+        },
+        "client_info": {
+          "$ref": "#/definitions/ClientInfo"
+        }
+      },
+      "required": [
+        "actor_credentials",
+        "capabilities",
+        "client_info"
+      ],
+      "type": "object"
+    },
+    "InitializeResponse": {
+      "properties": {
+        "protocol_version": {
+          "$ref": "#/definitions/ProtocolVersion"
+        },
+        "server_info": {
+          "$ref": "#/definitions/ServerInfo"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "server_info"
+      ],
+      "type": "object"
+    },
+    "InitializedNotification": {
+      "properties": {
+        "protocol_version": {
+          "$ref": "#/definitions/ProtocolVersion"
+        }
+      },
+      "required": [
+        "protocol_version"
+      ],
+      "type": "object"
+    },
+    "JsonRpcErrorResponse": {
+      "properties": {
+        "error": {
+          "$ref": "#/definitions/AppServerErrorBody"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RequestId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "jsonrpc": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "error",
+        "jsonrpc"
+      ],
+      "type": "object"
+    },
+    "JsonRpcMessage": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JsonRpcRequest"
+        },
+        {
+          "$ref": "#/definitions/JsonRpcResponse"
+        },
+        {
+          "$ref": "#/definitions/JsonRpcNotification"
+        },
+        {
+          "$ref": "#/definitions/JsonRpcErrorResponse"
+        }
+      ]
+    },
+    "JsonRpcNotification": {
+      "properties": {
+        "jsonrpc": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "default": null
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method"
+      ],
+      "type": "object"
+    },
+    "JsonRpcRequest": {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "jsonrpc",
+        "method"
+      ],
+      "type": "object"
+    },
+    "JsonRpcResponse": {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "jsonrpc": {
+          "type": "string"
+        },
+        "result": true
+      },
+      "required": [
+        "id",
+        "jsonrpc",
+        "result"
+      ],
+      "type": "object"
+    },
+    "MemoryFileListParams": {
+      "properties": {
+        "limit": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "MemoryFileReadParams": {
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "MemoryFileWriteParams": {
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "expected_version": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "content",
+        "path"
+      ],
+      "type": "object"
+    },
+    "MemorySearchParams": {
+      "properties": {
+        "limit": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "query": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "ModelListParams": {
+      "type": "object"
+    },
+    "OptionalPathPatch": {
+      "oneOf": [
+        {
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "set"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "clear"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "OptionalStringPatch": {
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "set"
+              ],
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "clear"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ProjectCreateParams": {
+      "properties": {
+        "directory": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "directory",
+        "name"
+      ],
+      "type": "object"
+    },
+    "ProjectDeleteParams": {
+      "properties": {
+        "project_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id"
+      ],
+      "type": "object"
+    },
+    "ProjectListParams": {
+      "type": "object"
+    },
+    "ProjectPatchParams": {
+      "properties": {
+        "name": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id"
+      ],
+      "type": "object"
+    },
+    "ProjectReadParams": {
+      "properties": {
+        "project_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id"
+      ],
+      "type": "object"
+    },
+    "ProtocolInputItem": {
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ProtocolTalosContext": {
+      "properties": {
+        "channel_id": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "source_type": {
+          "type": "string"
+        },
+        "thread_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trace_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel_id",
+        "message_id",
+        "provider",
+        "source_type",
+        "trace_id"
+      ],
+      "type": "object"
+    },
+    "ProtocolVersion": {
+      "properties": {
+        "major": {
+          "format": "uint16",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "minor": {
+          "format": "uint16",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "major",
+        "minor"
+      ],
+      "type": "object"
+    },
+    "RequestId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "format": "int32",
+          "type": "integer"
+        }
+      ]
+    },
+    "RequestUserInputParams": {
+      "properties": {
+        "prompt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "type": "object"
+    },
+    "ServerInfo": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ServerNotification": {
+      "oneOf": [
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "initialized"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/InitializedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "message.started"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ApplicationEventEnvelope"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "message.reasoning.delta"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ApplicationEventEnvelope"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "message.execution.summary"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ApplicationEventEnvelope"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "message.output.delta"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ApplicationEventEnvelope"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "message.tool_call.started"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ApplicationEventEnvelope"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "message.tool_call.args_delta"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ApplicationEventEnvelope"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "message.tool_call.queued"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ApplicationEventEnvelope"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "message.tool_call.executing"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ApplicationEventEnvelope"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "message.tool_call.progress_delta"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ApplicationEventEnvelope"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "message.tool_call.completed"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ApplicationEventEnvelope"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "message.tool_call.pending_approval"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ApplicationEventEnvelope"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "message.tool_call.pending_dynamic_result"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ApplicationEventEnvelope"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "message.completed"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ApplicationEventEnvelope"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "message.error"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ApplicationEventEnvelope"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "subscription.terminated"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SubscriptionTerminatedEnvelope"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ServerRequest": {
+      "oneOf": [
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "client.user_input.request"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/RequestUserInputParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "client.auth.refresh"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AuthRefreshParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "client.approval.request"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ClientApprovalRequestParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "SessionCreateParams": {
+      "properties": {
+        "context": {
+          "$ref": "#/definitions/ProtocolTalosContext"
+        },
+        "current_directory": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "context"
+      ],
+      "type": "object"
+    },
+    "SessionDeleteParams": {
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "SessionListParams": {
+      "properties": {
+        "limit": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "offset": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "project_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "SessionPatchParams": {
+      "properties": {
+        "current_directory": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/OptionalPathPatch"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "model": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project_id": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/OptionalStringPatch"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "SessionReadParams": {
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "SessionTurnsParams": {
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "SkillListParams": {
+      "type": "object"
+    },
+    "StopReason": {
+      "enum": [
+        "end_turn",
+        "model_output_limit",
+        "tool_round_limit",
+        "transfer_unresolved",
+        "before_model_callback_stopped",
+        "after_model_callback_stopped",
+        "cancelled"
+      ],
+      "type": "string"
+    },
+    "SubscriptionTerminatedEnvelope": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/definitions/SubscriptionTerminatedReason"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "subscription_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message",
+        "reason",
+        "session_id",
+        "subscription_id"
+      ],
+      "type": "object"
+    },
+    "SubscriptionTerminatedReason": {
+      "enum": [
+        "completed",
+        "interrupted",
+        "server_shutdown",
+        "session_deleted",
+        "lagged",
+        "slow_consumer"
+      ],
+      "type": "string"
+    },
+    "TalosContentItem": {
+      "description": "Talos content item for rich output blocks.",
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "json"
+              ],
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/definitions/TalosJsonValue"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TalosEvent": {
+      "description": "Canonical stream event payload.",
+      "properties": {
+        "event_type": {
+          "$ref": "#/definitions/TalosEventType"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/definitions/TalosEventPayload"
+        },
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_type",
+        "message_id",
+        "payload",
+        "sequence",
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "TalosEventPayload": {
+      "oneOf": [
+        {
+          "properties": {
+            "iteration": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "model": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "step_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "message_started"
+              ],
+              "type": "string"
+            },
+            "usage": {
+              "$ref": "#/definitions/TalosUsage"
+            }
+          },
+          "required": [
+            "iteration",
+            "model",
+            "request_id",
+            "step_id",
+            "type",
+            "usage"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "delta": {
+              "type": "string"
+            },
+            "item_index": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "iteration": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/definitions/TalosThinkingSource"
+            },
+            "stage": {
+              "$ref": "#/definitions/TalosThinkingStage"
+            },
+            "step_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "message_reasoning_delta"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "delta",
+            "item_index",
+            "iteration",
+            "request_id",
+            "source",
+            "stage",
+            "step_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "item_index": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "iteration": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "step_id": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "message_execution_summary"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "item_index",
+            "iteration",
+            "request_id",
+            "step_id",
+            "text",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "delta": {
+              "type": "string"
+            },
+            "item_index": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "iteration": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "step_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "message_output_delta"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "delta",
+            "item_index",
+            "iteration",
+            "request_id",
+            "step_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "arguments": {
+              "type": "object"
+            },
+            "call_id": {
+              "type": "string"
+            },
+            "item_index": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "iteration": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "step_id": {
+              "type": "string"
+            },
+            "timing_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "message_tool_call_started"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "arguments",
+            "call_id",
+            "item_index",
+            "iteration",
+            "name",
+            "request_id",
+            "step_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "call_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "delta": {
+              "type": "string"
+            },
+            "item_index": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "iteration": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "step_id": {
+              "type": "string"
+            },
+            "stream_key": {
+              "$ref": "#/definitions/TalosToolStreamKey"
+            },
+            "tool_name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "message_tool_call_args_delta"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "delta",
+            "item_index",
+            "iteration",
+            "request_id",
+            "step_id",
+            "stream_key",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "item_index": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "iteration": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "step_id": {
+              "type": "string"
+            },
+            "stream_key": {
+              "$ref": "#/definitions/TalosToolStreamKey"
+            },
+            "tool_name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "message_tool_call_queued"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "call_id",
+            "item_index",
+            "iteration",
+            "request_id",
+            "step_id",
+            "stream_key",
+            "tool_name",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "item_index": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "iteration": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "step_id": {
+              "type": "string"
+            },
+            "stream_key": {
+              "$ref": "#/definitions/TalosToolStreamKey"
+            },
+            "tool_name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "message_tool_call_executing"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "call_id",
+            "item_index",
+            "iteration",
+            "request_id",
+            "step_id",
+            "stream_key",
+            "tool_name",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "item_index": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "iteration": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            },
+            "progress_kind": {
+              "$ref": "#/definitions/TalosToolProgressKind"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "step_id": {
+              "type": "string"
+            },
+            "stream_key": {
+              "$ref": "#/definitions/TalosToolStreamKey"
+            },
+            "tool_name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "message_tool_call_progress_delta"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "call_id",
+            "item_index",
+            "iteration",
+            "message",
+            "progress_kind",
+            "request_id",
+            "step_id",
+            "stream_key",
+            "tool_name",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "content": {
+              "items": {
+                "$ref": "#/definitions/TalosContentItem"
+              },
+              "type": "array"
+            },
+            "is_error": {
+              "type": "boolean"
+            },
+            "item_index": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "iteration": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "step_id": {
+              "type": "string"
+            },
+            "timing_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "tool": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "message_tool_call_completed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "call_id",
+            "content",
+            "is_error",
+            "item_index",
+            "iteration",
+            "request_id",
+            "step_id",
+            "tool",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "arguments": {
+              "type": "object"
+            },
+            "call_id": {
+              "type": "string"
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "step_id": {
+              "type": "string"
+            },
+            "tool_name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "message_tool_call_pending_approval"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "arguments",
+            "call_id",
+            "prompt",
+            "request_id",
+            "step_id",
+            "tool_name",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "arguments": {
+              "type": "object"
+            },
+            "call_id": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "step_id": {
+              "type": "string"
+            },
+            "tool_name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "message_tool_call_pending_dynamic_result"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "arguments",
+            "call_id",
+            "request_id",
+            "step_id",
+            "tool_name",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "iteration": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "step_id": {
+              "type": "string"
+            },
+            "stop_reason": {
+              "$ref": "#/definitions/StopReason"
+            },
+            "task_count": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "total_output_items": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "message_completed"
+              ],
+              "type": "string"
+            },
+            "usage": {
+              "$ref": "#/definitions/TalosUsage"
+            }
+          },
+          "required": [
+            "iteration",
+            "request_id",
+            "step_id",
+            "stop_reason",
+            "task_count",
+            "total_output_items",
+            "type",
+            "usage"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "error": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "message_error"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "error",
+            "request_id",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TalosEventType": {
+      "description": "Stream event type.",
+      "enum": [
+        "message_started",
+        "message_reasoning_delta",
+        "message_execution_summary",
+        "message_output_delta",
+        "message_tool_call_started",
+        "message_tool_call_args_delta",
+        "message_tool_call_queued",
+        "message_tool_call_executing",
+        "message_tool_call_progress_delta",
+        "message_tool_call_completed",
+        "message_tool_call_pending_approval",
+        "message_tool_call_pending_dynamic_result",
+        "message_completed",
+        "message_error"
+      ],
+      "type": "string"
+    },
+    "TalosJsonValue": {
+      "properties": {
+        "value": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "type": "object"
+    },
+    "TalosThinkingSource": {
+      "enum": [
+        "provider",
+        "framework"
+      ],
+      "type": "string"
+    },
+    "TalosThinkingStage": {
+      "enum": [
+        "model_reasoning",
+        "framework_plan",
+        "framework_act",
+        "framework_observe",
+        "framework_reflect"
+      ],
+      "type": "string"
+    },
+    "TalosToolProgressKind": {
+      "enum": [
+        "status",
+        "stdout",
+        "stderr"
+      ],
+      "type": "string"
+    },
+    "TalosToolStreamKey": {
+      "properties": {
+        "index": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "round": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "index",
+        "round"
+      ],
+      "type": "object"
+    },
+    "TalosUsage": {
+      "description": "Token usage values.",
+      "properties": {
+        "cache_creation_input_tokens": {
+          "default": null,
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cache_read_input_tokens": {
+          "default": null,
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "input_tokens": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "output_tokens": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "total_tokens": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "input_tokens",
+        "output_tokens",
+        "total_tokens"
+      ],
+      "type": "object"
+    },
+    "ToolApprovalSubmitParams": {
+      "properties": {
+        "approved": {
+          "type": "boolean"
+        },
+        "call_id": {
+          "type": "string"
+        },
+        "reason": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "tool_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "approved",
+        "call_id",
+        "session_id",
+        "tool_name"
+      ],
+      "type": "object"
+    },
+    "ToolListParams": {
+      "type": "object"
+    },
+    "TurnInterruptParams": {
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "TurnStartParams": {
+      "properties": {
+        "client_request_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "input": {
+          "items": {
+            "$ref": "#/definitions/ProtocolInputItem"
+          },
+          "type": "array"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "input",
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "TurnStartResponse": {
+      "properties": {
+        "accepted_at": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "started_event_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accepted_at",
+        "session_id",
+        "turn_id"
+      ],
+      "type": "object"
+    },
+    "WorkspaceDocListParams": {
+      "type": "object"
+    },
+    "WorkspaceDocReadParams": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "WorkspaceDocWriteParams": {
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "expected_version": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "content",
+        "kind"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "client_request": {
+      "$ref": "#/definitions/ClientRequest"
+    },
+    "client_request_params": {
+      "$ref": "#/definitions/ClientRequestParams"
+    },
+    "error": {
+      "$ref": "#/definitions/AppServerErrorBody"
+    },
+    "event_envelope": {
+      "$ref": "#/definitions/ApplicationEventEnvelope"
+    },
+    "event_subscribe_response": {
+      "$ref": "#/definitions/EventSubscribeResponse"
+    },
+    "initialize_response": {
+      "$ref": "#/definitions/InitializeResponse"
+    },
+    "jsonrpc_message": {
+      "$ref": "#/definitions/JsonRpcMessage"
+    },
+    "server_notification": {
+      "$ref": "#/definitions/ServerNotification"
+    },
+    "server_request": {
+      "$ref": "#/definitions/ServerRequest"
+    },
+    "turn_start_response": {
+      "$ref": "#/definitions/TurnStartResponse"
+    }
+  },
+  "required": [
+    "client_request",
+    "client_request_params",
+    "error",
+    "event_envelope",
+    "event_subscribe_response",
+    "initialize_response",
+    "jsonrpc_message",
+    "server_notification",
+    "server_request",
+    "turn_start_response"
+  ],
+  "title": "AppProtocolSchemaRoot",
+  "type": "object"
+}

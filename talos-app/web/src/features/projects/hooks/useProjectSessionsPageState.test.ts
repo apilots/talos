@@ -1,4 +1,4 @@
-import type { TalosSession } from "@talos/sdk";
+import type { TalosSession } from "@talos/sdk-browser";
 import { describe, expect, it } from "vitest";
 
 import { filterProjectSessions } from "./useProjectSessionsPageState";

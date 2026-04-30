@@ -297,7 +297,7 @@ pub async fn execute_general_turn_step(
         output_items.push(TalosOutputItem::ToolCall {
             call_id: call.id.clone(),
             name: call.name.clone(),
-            arguments: call.arguments.clone(),
+            arguments: call.arguments.clone().into(),
         });
     }
 
@@ -340,7 +340,7 @@ pub fn apply_general_turn_step(state: &mut GeneralTurnLoopState, step: &GeneralT
         state.tool_call_log.push(ToolCallRecord {
             call_id: call.id.clone(),
             name: call.name.clone(),
-            arguments: call.arguments.clone(),
+            arguments: call.arguments.clone().into(),
         });
     }
 }

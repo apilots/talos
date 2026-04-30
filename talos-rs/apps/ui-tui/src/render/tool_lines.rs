@@ -19,7 +19,7 @@ impl TuiApp {
         let mut lines = vec![];
 
         let arg_summary = if let Some(input) = &block.tool_input {
-            Self::tool_arg_summary(tool_name, input)
+            Self::tool_arg_summary(tool_name, input.as_inner())
         } else {
             String::new()
         };
@@ -237,7 +237,7 @@ impl TuiApp {
         let query = block
             .tool_input
             .as_ref()
-            .and_then(|input| input.get("query"))
+            .and_then(|input| input.as_inner().get("query"))
             .and_then(|value| value.as_str())
             .unwrap_or_default()
             .to_string();
@@ -310,7 +310,7 @@ impl TuiApp {
     }
 
     fn build_bash_render_data(block: &ChatBlock) -> ToolRenderData {
-        let input = block.tool_input.as_ref();
+        let input = block.tool_input.as_ref().map(|value| value.as_inner());
         let dir = input.and_then(|value| {
             value
                 .get("workdir")
@@ -388,7 +388,12 @@ impl TuiApp {
         let path = block
             .tool_input
             .as_ref()
-            .and_then(|input| input.get("file_path").or_else(|| input.get("path")))
+            .and_then(|input| {
+                input
+                    .as_inner()
+                    .get("file_path")
+                    .or_else(|| input.as_inner().get("path"))
+            })
             .and_then(|value| value.as_str())
             .unwrap_or_default()
             .to_string();
@@ -537,7 +542,7 @@ impl TuiApp {
         let detail_lines = block
             .tool_input
             .as_ref()
-            .map(|input| Self::fallback_tool_detail_lines(tool_name, input))
+            .map(|input| Self::fallback_tool_detail_lines(tool_name, input.as_inner()))
             .unwrap_or_default();
         let preview_lines = Self::tool_output_preview_line(parsed.as_ref(), &block.content)
             .into_iter()

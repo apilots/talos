@@ -1,6 +1,5 @@
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -80,17 +79,6 @@ impl TaskStateStore {
             .read()
             .map(|guard| guard.clone())
             .unwrap_or_default()
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct ToolDecisionState {
-    decisions: DashMap<String, Value>,
-}
-
-impl ToolDecisionState {
-    pub fn record(&self, key: impl Into<String>, value: Value) {
-        self.decisions.insert(key.into(), value);
     }
 }
 
@@ -191,7 +179,6 @@ impl ToolPermissionContext {
 pub struct SessionToolState {
     pub read_files: ReadFileStateStore,
     pub tasks: TaskStateStore,
-    pub decisions: ToolDecisionState,
     pub deferred_tools: DeferredToolState,
     pub result_budget: ToolResultBudgetState,
     pub catalog: ToolCatalogState,

@@ -1,254 +1,153 @@
 //! Talos Command Line Interface
 //!
 //! This module provides a command-line interface for interacting with the Talos system
-//! through the client library. It supports native model/session/message operations
-//! via the new gateway API surface.
+//! through the local JSON-RPC app-server client.
 
-use clap::{Args, Parser, Subcommand};
-use serde::{Deserialize, Serialize};
+use clap::Parser;
 use std::io::Write;
 use talos_client::{
-    ClientConfig, SessionCreateParams, TalosClient, TalosContext, TalosEventPayload,
-    TalosEventType, TalosInputItem, TalosMessageRequest, TalosThinkingSource, TalosThinkingStage,
+    AppServerClient, AppServerClientConfig, EventSubscribeParams, ProtocolTalosContext,
+    SessionCreateParams, TalosEventPayload, TalosEventType, TalosInputItem, TalosMessageRequest,
+    TalosThinkingSource, TalosThinkingStage,
 };
-use talos_config::Config;
 
-/// Command-line interface for Talos AI system - Full-featured command set for system access
-#[derive(Parser)]
-#[command(name = "talos")]
-#[command(bin_name = "talos")]
-#[command(version = "1.0")]
-#[command(about = "Talos AI System CLI - Full-stack access to AI assistant capabilities", long_about = None)]
-pub struct Cli {
-    /// Gateway server URL (overrides config file)  
-    #[arg(long)]
-    gateway_url: Option<String>,
+mod types;
 
-    /// Authentication token (overrides config file)
-    #[arg(long)]
-    auth_token: Option<String>,
-
-    /// Commands for the CLI
-    #[command(subcommand)]
-    command: Commands,
-}
-
-/// Major command groups in Talos CLI
-#[derive(Subcommand)]
-enum Commands {
-    /// Chat commands (simple and session-based chatting)
-    #[command(subcommand)]
-    Chat(ChatCommands),
-
-    /// Session management commands
-    #[command(subcommand)]
-    Session(SessionCommands),
-
-    /// Available models
-    Models(ModelsCmd),
-
-    /// System status check
-    Status,
-
-    /// System information
-    Info,
-}
-
-#[derive(Subcommand)]
-enum ChatCommands {
-    /// Simple chat (traditional mode)
-    Simple {
-        /// Message to send
-        message: String,
-        /// Model to use
-        #[arg(short, long)]
-        model: Option<String>,
-        /// User ID
-        #[arg(long)]
-        user: Option<String>,
-        /// Render events as they arrive
-        #[arg(long, default_value_t = false)]
-        stream: bool,
-    },
-
-    /// Chat within a specific session  
-    In {
-        /// Session ID
-        session_id: String,
-        /// Message to send
-        message: String,
-        /// Model override for this request (optional)
-        #[arg(short, long)]
-        model: Option<String>,
-        /// Render events as they arrive
-        #[arg(long, default_value_t = false)]
-        stream: bool,
-    },
-
-    /// Continue chat in recent session
-    Recent {
-        /// Recent session index (0 for latest)
-        #[arg(default_value = "0")]
-        index: usize,
-        /// Message to send
-        message: String,
-        /// Model override
-        #[arg(short, long)]
-        model: Option<String>,
-        /// Render events as they arrive
-        #[arg(long, default_value_t = false)]
-        stream: bool,
-    },
-}
-
-#[derive(Subcommand)]
-enum SessionCommands {
-    /// Create a new session
-    Create {
-        /// Initial model for the session
-        #[arg(short, long)]
-        model: Option<String>,
-        /// Session name
-        #[arg(long)]
-        name: Option<String>,
-    },
-
-    /// List all sessions
-    List {
-        /// Number of recent sessions to show
-        #[arg(long, default_value = "10")]
-        limit: usize,
-        /// User ID filter
-        #[arg(long)]
-        user: Option<String>,
-    },
-
-    /// Get session details
-    Info {
-        /// Session ID to get information for
-        session_id: String,
-    },
-
-    /// Update session model
-    SetModel {
-        /// Session ID to update
-        session_id: String,
-        /// New model
-        model: String,
-    },
-
-    /// Interactive session with session-specific context
-    Interactive {
-        /// Session ID for interactive mode
-        session_id: String,
-        /// Model to use in this interactive session
-        #[arg(short, long)]
-        model: Option<String>,
-        /// Render events as they arrive
-        #[arg(long, default_value_t = false)]
-        stream: bool,
-    },
-
-    /// Submit approval or rejection for a pending tool call
-    ApproveTool {
-        /// Session ID
-        session_id: String,
-        /// Tool call ID (from the pending confirmation)
-        #[arg(long)]
-        call_id: String,
-        /// Tool name
-        #[arg(long)]
-        tool_name: String,
-        /// Whether to approve the tool call
-        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
-        approved: bool,
-        /// Rejection reason (used when --approved=false)
-        #[arg(long)]
-        reason: Option<String>,
-    },
-}
-
-// 4. Models Commands
-#[derive(Args)]
-struct ModelsCmd {
-    /// Output format (table, json, etc)
-    #[arg(long, default_value = "table")]
-    format: String,
-    /// Show verbose information
-    #[arg(long)]
-    verbose: bool,
-}
-
-/// Configuration loaded from file  
-#[derive(Deserialize, Serialize)]
-struct TalosCliConfig {
-    gateway_url: Option<String>,
-    auth_token: Option<String>,
-    default_model: Option<String>,
-    default_agent: Option<String>,
-}
-
-impl TalosCliConfig {
-    fn load_from_file(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        if std::path::Path::new(path).exists() {
-            let content = std::fs::read_to_string(path)?;
-            let config: TalosCliConfig = serde_yaml::from_str(&content)?;
-            Ok(config)
-        } else {
-            Ok(Self {
-                gateway_url: Some("http://localhost:8080".to_string()),
-                auth_token: None,
-                default_model: Some("gpt-3.5-turbo".to_string()),
-                default_agent: Some("default".to_string()),
-            })
-        }
-    }
-}
+use types::{AppServerSmokeCmd, ChatCommands, Cli, Commands, ModelsCmd, SessionCommands};
 
 /// Main function to run the CLI
 pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
+    run_app_server_cli(cli).await
+}
 
-    // Default config path
-    let default_config_path = Config::default_path();
-    let file_config = TalosCliConfig::load_from_file(
-        default_config_path
-            .to_str()
-            .ok_or("talos config path is not valid unicode")?,
-    )?;
+async fn run_app_server_cli(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
+    let app_server_bin = cli
+        .app_server_bin
+        .or_else(|| std::env::var("TALOS_APP_SERVER_BIN").ok())
+        .unwrap_or_else(|| "talos".to_string());
+    let launch_token = cli
+        .launch_token
+        .or_else(|| std::env::var("TALOS_LOCAL_LAUNCH_TOKEN").ok())
+        .unwrap_or_else(|| format!("cli-{}", uuid::Uuid::new_v4().simple()));
+    let mut client = AppServerClient::connect(AppServerClientConfig {
+        app_server_bin,
+        launch_token,
+        client_name: "talos-cli".to_string(),
+        client_version: env!("CARGO_PKG_VERSION").to_string(),
+    })
+    .await?;
 
-    // Override with command-line arguments if provided
-    let gateway_url = cli
-        .gateway_url
-        .or(file_config.gateway_url)
-        .unwrap_or("http://localhost:8080".to_string());
-    let auth_token = cli.auth_token.or(file_config.auth_token);
-
-    // Create client configuration
-    let client_config = ClientConfig {
-        gateway_url,
-        auth_token,
-        timeout: 30,
+    let result = match cli.command {
+        Commands::Chat(cmd) => execute_app_server_chat_command(&mut client, cmd).await,
+        Commands::Session(cmd) => execute_app_server_session_command(&mut client, cmd).await,
+        Commands::Models(cmd) => execute_app_server_models_command(&mut client, cmd).await,
+        Commands::Status => execute_app_server_status_command(&mut client).await,
+        Commands::Info => execute_app_server_info_command().await,
+        Commands::AppServerSmoke(cmd) => {
+            execute_app_server_smoke_with_client(&mut client, cmd).await
+        }
     };
-
-    // Create the client
-    let client = TalosClient::new(client_config)?;
-
-    // Execute the command
-    match cli.command {
-        Commands::Chat(cmd) => execute_chat_command(&client, cmd).await?,
-        Commands::Session(cmd) => execute_session_command(&client, cmd).await?,
-        Commands::Models(cmd) => execute_models_command(&client, cmd).await?,
-        Commands::Status => execute_status_command(&client).await?,
-        Commands::Info => execute_info_command(&client).await?,
-    }
-
+    let shutdown_result = client.shutdown().await;
+    result?;
+    shutdown_result?;
     Ok(())
 }
 
-// Execute chat commands
-async fn execute_chat_command(
-    client: &TalosClient,
+async fn execute_app_server_smoke_with_client(
+    client: &mut AppServerClient,
+    cmd: AppServerSmokeCmd,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match cmd.scenario.as_str() {
+        "smoke" => run_app_server_smoke(client).await?,
+        "turn-smoke" => run_app_server_turn_smoke(client).await?,
+        other => return Err(format!("unsupported app-server smoke scenario: {other}").into()),
+    }
+    println!("App-server scenario passed: {}", cmd.scenario);
+    Ok(())
+}
+
+async fn run_app_server_smoke(
+    client: &mut AppServerClient,
+) -> Result<(), Box<dyn std::error::Error>> {
+    client.list_models().await?;
+    client.config_read().await?;
+    let session = client
+        .create_session(SessionCreateParams {
+            context: default_chat_context("cli-app-server"),
+            model: None,
+            project_id: None,
+            current_directory: current_cli_directory(),
+        })
+        .await?;
+    client
+        .subscribe_events(EventSubscribeParams {
+            session_id: session.context.session_id,
+            since_event_id: None,
+            replay_limit: Some(32),
+        })
+        .await?;
+    Ok(())
+}
+
+async fn run_app_server_turn_smoke(
+    client: &mut AppServerClient,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let session = client
+        .create_session(SessionCreateParams {
+            context: default_chat_context("cli-app-server"),
+            model: None,
+            project_id: None,
+            current_directory: current_cli_directory(),
+        })
+        .await?;
+    let session_id = session.context.session_id;
+    let subscription = client
+        .subscribe_events(EventSubscribeParams {
+            session_id: session_id.clone(),
+            since_event_id: None,
+            replay_limit: Some(32),
+        })
+        .await?;
+    client
+        .start_turn(
+            &session_id,
+            TalosMessageRequest {
+                input: vec![TalosInputItem::Text {
+                    text: "answer with ok".to_string(),
+                }],
+                workspace_id: None,
+            },
+            Some(format!("cli-app-server-{}", uuid::Uuid::new_v4().simple())),
+        )
+        .await?;
+
+    let mut saw_started = false;
+    let mut saw_delta = false;
+    for _ in 0..128 {
+        let event = client.next_event().await?;
+        if event.subscription_id != subscription.subscription_id {
+            continue;
+        }
+        match event.event.event_type {
+            TalosEventType::MessageStarted => saw_started = true,
+            TalosEventType::MessageOutputDelta => saw_delta = true,
+            TalosEventType::MessageCompleted if saw_started && saw_delta => return Ok(()),
+            TalosEventType::MessageError => {
+                let error = match event.event.payload {
+                    TalosEventPayload::MessageError(payload) => payload.error,
+                    _ => "unknown app-server error".to_string(),
+                };
+                return Err(format!("app-server turn failed: {error}").into());
+            }
+            _ => {}
+        }
+    }
+    Err("app-server turn smoke did not receive a complete event flow".into())
+}
+
+async fn execute_app_server_chat_command(
+    client: &mut AppServerClient,
     cmd: ChatCommands,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match cmd {
@@ -258,16 +157,17 @@ async fn execute_chat_command(
             user,
             stream,
         } => {
-            let params = SessionCreateParams {
-                context: Some(default_chat_context(user.as_deref().unwrap_or("cli-user"))),
-                model: model.clone(),
-                conf: None,
-                project_id: None,
-                current_directory: current_cli_directory(),
-            };
-            let session = client.create_session(&params).await?;
+            let session = client
+                .create_session(SessionCreateParams {
+                    context: default_chat_context(user.as_deref().unwrap_or("cli-user")),
+                    model: model.clone(),
+                    project_id: None,
+                    current_directory: current_cli_directory(),
+                })
+                .await?;
             let request = build_message_request(&message, model, stream);
-            send_and_render_message(client, &session.context.session_id, &request, stream).await?;
+            send_and_render_app_server_message(client, &session.context.session_id, request)
+                .await?;
         }
         ChatCommands::In {
             session_id,
@@ -276,7 +176,7 @@ async fn execute_chat_command(
             stream,
         } => {
             let request = build_message_request(&message, model, stream);
-            send_and_render_message(client, &session_id, &request, stream).await?;
+            send_and_render_app_server_message(client, &session_id, request).await?;
         }
         ChatCommands::Recent {
             index,
@@ -285,15 +185,14 @@ async fn execute_chat_command(
             stream,
         } => {
             let session_id = client
-                .list_sessions()
+                .list_sessions(Default::default())
                 .await
                 .ok()
                 .and_then(|sessions| sessions.into_iter().nth(index))
-                .map(|s| s.context.session_id);
-
+                .map(|session| session.context.session_id);
             if let Some(session_id) = session_id {
                 let request = build_message_request(&message, model, stream);
-                send_and_render_message(client, &session_id, &request, stream).await?;
+                send_and_render_app_server_message(client, &session_id, request).await?;
             } else {
                 eprintln!("No recent session found at index {}", index);
             }
@@ -302,28 +201,27 @@ async fn execute_chat_command(
     Ok(())
 }
 
-// Execute session commands
-async fn execute_session_command(
-    client: &TalosClient,
+async fn execute_app_server_session_command(
+    client: &mut AppServerClient,
     cmd: SessionCommands,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match cmd {
         SessionCommands::Create { model, name: _ } => {
-            let params = SessionCreateParams {
-                context: None,
-                model,
-                conf: None,
-                project_id: None,
-                current_directory: current_cli_directory(),
-            };
-            let session = client.create_session(&params).await?;
+            let session = client
+                .create_session(SessionCreateParams {
+                    context: default_chat_context("cli-user"),
+                    model,
+                    project_id: None,
+                    current_directory: current_cli_directory(),
+                })
+                .await?;
             println!(
                 "Session created: {} (model: {})",
                 session.context.session_id, session.config.llm.model
             );
         }
         SessionCommands::List { limit, user: _ } => {
-            let sessions = client.list_sessions().await?;
+            let sessions = client.list_sessions(Default::default()).await?;
             println!("Active Sessions:");
             for (i, session) in sessions.iter().take(limit).enumerate() {
                 println!(
@@ -343,8 +241,7 @@ async fn execute_session_command(
             println!("  Messages: {}", session.state.message_count);
         }
         SessionCommands::SetModel { session_id, model } => {
-            client.update_session_model(&session_id, &model).await?;
-            let session = client.get_session(&session_id).await?;
+            let session = client.update_session_model(&session_id, &model).await?;
             println!("Session model updated:");
             println!("  ID: {}", session.context.session_id);
             println!("  Model: {}", session.config.llm.model);
@@ -356,8 +253,6 @@ async fn execute_session_command(
         } => {
             println!("Entering interactive mode for session: {}", session_id);
             println!("Exit with 'quit' or 'exit'");
-
-            // Simple stdin loop
             loop {
                 use std::io::{self, BufRead};
                 print!("> ");
@@ -366,21 +261,20 @@ async fn execute_session_command(
                 let stdin = io::stdin();
                 let mut line = String::new();
                 stdin.lock().read_line(&mut line).unwrap();
-
                 let input = line.trim();
                 if input == "quit" || input == "exit" {
-                    if let Err(err) = client.close_session(&session_id).await {
+                    if let Err(err) = client.delete_session(&session_id).await {
                         eprintln!("Failed to close session {}: {}", session_id, err);
                     }
                     break;
                 }
-
                 if !input.is_empty() {
                     let request = build_message_request(input, model.clone(), stream);
-                    match send_and_render_message(client, &session_id, &request, stream).await {
-                        Ok(_) => {}
-                        Err(e) => eprintln!("Error: {:?}", e),
-                    };
+                    if let Err(err) =
+                        send_and_render_app_server_message(client, &session_id, request).await
+                    {
+                        eprintln!("Error: {:?}", err);
+                    }
                 }
             }
             println!("Exited interactive mode");
@@ -408,9 +302,8 @@ async fn execute_session_command(
     Ok(())
 }
 
-// Execute models commands
-async fn execute_models_command(
-    client: &TalosClient,
+async fn execute_app_server_models_command(
+    client: &mut AppServerClient,
     cmd: ModelsCmd,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let models = client.list_models().await?;
@@ -425,12 +318,17 @@ async fn execute_models_command(
     Ok(())
 }
 
-// Execute status command
-async fn execute_status_command(client: &TalosClient) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Status: Gateway accessible");
+async fn execute_app_server_status_command(
+    client: &mut AppServerClient,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Status: App-server accessible");
     println!(
         "Active sessions: {}",
-        client.list_sessions().await.unwrap_or_default().len()
+        client
+            .list_sessions(Default::default())
+            .await
+            .unwrap_or_default()
+            .len()
     );
     println!(
         "Available models: {}",
@@ -439,11 +337,10 @@ async fn execute_status_command(client: &TalosClient) -> Result<(), Box<dyn std:
     Ok(())
 }
 
-// Execute info command
-async fn execute_info_command(_client: &TalosClient) -> Result<(), Box<dyn std::error::Error>> {
+async fn execute_app_server_info_command() -> Result<(), Box<dyn std::error::Error>> {
     println!("Talos CLI - AI Assistant System");
     println!("Version: 1.0.0");
-    println!("Gateway: configured via --gateway-url or <talos_home>/conf/talos.yaml");
+    println!("Transport: app-server JSON-RPC stdio");
     Ok(())
 }
 
@@ -460,43 +357,11 @@ fn build_message_request(
     }
 }
 
-async fn send_and_render_message(
-    client: &TalosClient,
+async fn send_and_render_app_server_message(
+    client: &mut AppServerClient,
     session_id: &str,
-    request: &TalosMessageRequest,
-    stream: bool,
+    request: TalosMessageRequest,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    if !stream {
-        let ack = client.send_message(session_id, request).await?;
-        let message_id = ack
-            .message_id
-            .clone()
-            .ok_or_else(|| format!("message ack did not include message_id: {}", ack.turn_id))?;
-        let mut output_text = String::new();
-        let mut output_stream = std::io::stdout();
-        let mut events = client.subscribe_session_events(session_id, None).await?;
-
-        while let Some(record) = events.recv().await {
-            if record.message_id != message_id {
-                continue;
-            }
-            if render_event(
-                &record.event_type,
-                &record.payload,
-                &mut output_text,
-                &mut output_stream,
-            )? {
-                break;
-            }
-        }
-
-        if !output_text.is_empty() && !output_text.ends_with('\n') {
-            println!();
-        }
-
-        return Ok(output_text);
-    }
-
     let mut output_text = String::new();
     let mut output_stream = std::io::stdout();
     let mut events = client.send_message_events(session_id, request).await?;
@@ -660,8 +525,15 @@ fn display_tool_name(tool_name: &str) -> &str {
     }
 }
 
-fn default_chat_context(user_id: &str) -> TalosContext {
-    TalosContext::cli(user_id).with_channel_id("cli")
+fn default_chat_context(user_id: &str) -> ProtocolTalosContext {
+    ProtocolTalosContext {
+        source_type: "cli".to_string(),
+        provider: "cli".to_string(),
+        channel_id: "cli".to_string(),
+        thread_id: None,
+        message_id: format!("msg-{}", uuid::Uuid::new_v4().simple()),
+        trace_id: format!("trace-{}-{user_id}", uuid::Uuid::new_v4().simple()),
+    }
 }
 
 fn current_cli_directory() -> Option<std::path::PathBuf> {

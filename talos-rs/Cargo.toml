@@ -28,14 +28,18 @@ members = [
     "crates/orchestration/session-store",
     "crates/orchestration/router",
     "crates/orchestration/coordinator",
+    "crates/orchestration/application-service",
     # Gateway
     "crates/gateway/core",
     "crates/gateway/http",
+    "crates/gateway/app-protocol",
+    "crates/gateway/app-server",
     # App
     "crates/app/talos-server",
     # Apps
     "apps/sdk",
     "apps/cli",
+    "apps/app-server-test-client",
     "apps/ui-tui",
     # Binary
     "bin/talos",
@@ -58,6 +62,8 @@ async-trait = "0.1"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+schemars = "0.8"
+ts-rs = "10"
 
 # Error handling
 thiserror = "1"
@@ -98,6 +104,8 @@ talos-tools-sandbox = { path = "crates/action/tools-sandbox" }
 talos-memory = { path = "crates/cognition/memory" }
 talos-auth = { path = "crates/infra/auth" }
 talos-gateway = { path = "crates/gateway/core" }
+talos-app-protocol = { path = "crates/gateway/app-protocol" }
+talos-app-server = { path = "crates/gateway/app-server" }
 talos-agent-kernel = { path = "crates/orchestration/agent-kernel" }
 talos-llm-provider = { path = "crates/common/llm/provider" }
 talos-prompt = { path = "crates/common/prompt" }
@@ -110,3 +118,4 @@ talos-storage = { path = "crates/infra/storage" }
 talos-channel = { path = "crates/perception/channels" }
 talos-client = { path = "apps/sdk" }
 talos-server = { path = "crates/app/talos-server" }
+talos-application-service = { path = "crates/orchestration/application-service" }

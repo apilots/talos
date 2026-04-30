@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 talos-config = { path = "../../crates/infra/config" }
+talos-error = { workspace = true }
 talos-server = { workspace = true }
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"

@@ -5,18 +5,18 @@
 fn main() {
     println!("Talos TUI Example");
     println!("=================");
-    println!("The TUI now runs in gateway mode only.");
+    println!("The TUI runs through embedded JSON-RPC stdio.");
     println!();
     println!("To run the TUI:");
-    println!("  # With embedded gateway (requires <talos_home>/conf/talos.yaml):");
+    println!("  # With embedded app-server (requires <talos_home>/conf/talos.yaml):");
     println!("  cargo run -p talos-ui-tui");
     println!();
-    println!("  # With external gateway:");
-    println!("  cargo run -p talos-ui-tui -- --gateway --gateway-url http://127.0.0.1:8080");
+    println!("  # Override embedded app-server binary:");
+    println!("  cargo run -p talos-ui-tui -- --app-server-bin ./target/debug/talos");
     println!();
     println!("Key features:");
     println!("- Welcome header with model/mode/workspace");
     println!("- Slash command support: /help /model /models /status /quit");
-    println!("- Streaming conversation via Gateway SSE");
+    println!("- Streaming conversation via JSON-RPC events");
     println!("- Input prompt with keyboard shortcuts (Ctrl+C, Enter)");
 }

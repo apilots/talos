@@ -98,7 +98,7 @@ async fn test_turn_schema_items_roundtrip() {
             TalosOutputItem::ToolCall {
                 call_id: "call-1".to_string(),
                 name: "Read".to_string(),
-                arguments: serde_json::json!({"path":"/tmp/a.txt"}),
+                arguments: serde_json::json!({"path":"/tmp/a.txt"}).into(),
             },
             TalosOutputItem::ToolResult {
                 call_id: "call-1".to_string(),
@@ -384,7 +384,7 @@ async fn test_prompt_context_still_builds_after_schema_change() {
                 TalosOutputItem::ToolCall {
                     call_id: "call-context".to_string(),
                     name: "Read".to_string(),
-                    arguments: serde_json::json!({"path":"/tmp/example.txt"}),
+                    arguments: serde_json::json!({"path":"/tmp/example.txt"}).into(),
                 },
                 TalosOutputItem::ToolResult {
                     call_id: "call-context".to_string(),

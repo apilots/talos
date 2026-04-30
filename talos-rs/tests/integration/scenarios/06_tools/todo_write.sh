@@ -124,7 +124,7 @@ result = results[0]
 assert result.get("tool_name") == "TodoWrite", result.get("tool_name")
 content = result.get("content") or []
 assert content, "missing content payload"
-value = content[0].get("value") or {}
+value = ((content[0].get("value") or {}).get("value", content[0].get("value") or {}))
 items = value.get("items") or []
 assert items, "missing todo items"
 first = items[0]

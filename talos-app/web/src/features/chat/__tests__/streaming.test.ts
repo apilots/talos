@@ -11,6 +11,38 @@ import {
   UNBOUND_PROJECT_ID,
 } from "@/shared/types/domain";
 
+const usage = {
+  input_tokens: 0,
+  output_tokens: 0,
+  total_tokens: 0,
+  cache_creation_input_tokens: null,
+  cache_read_input_tokens: null,
+};
+
+function startedPayload() {
+  return {
+    type: "message_started" as const,
+    request_id: "req-1",
+    model: "test-model",
+    usage,
+    iteration: 0n,
+    step_id: "step-1",
+  };
+}
+
+function completedPayload() {
+  return {
+    type: "message_completed" as const,
+    request_id: "req-1",
+    stop_reason: "end_turn" as const,
+    usage,
+    total_output_items: 1n,
+    iteration: 0n,
+    step_id: "step-1",
+    task_count: 0,
+  };
+}
+
 describe("chat stream integration helpers", () => {
   beforeEach(() => {
     useAppStore.setState((state) => ({
@@ -72,6 +104,7 @@ describe("chat stream integration helpers", () => {
       sequence: 3,
       payload: {
         type: "message_tool_call_pending_approval",
+        request_id: "req-1",
         call_id: "call-1",
         tool_name: "Bash",
         prompt: "Approve command?",
@@ -96,6 +129,7 @@ describe("chat stream integration helpers", () => {
       sequence: 3,
       payload: {
         type: "message_tool_call_pending_approval",
+        request_id: "req-1",
         call_id: "call-1",
         tool_name: "Agent",
         prompt: "Approve agent task?",
@@ -109,9 +143,7 @@ describe("chat stream integration helpers", () => {
       message_id: "msg-1",
       session_id: "sess-1",
       sequence: 4,
-      payload: {
-        type: "message_completed",
-      },
+      payload: completedPayload(),
     });
 
     const stream = useAppStore.getState().streams["sess-1"];
@@ -131,6 +163,7 @@ describe("chat stream integration helpers", () => {
       sequence: 3,
       payload: {
         type: "message_tool_call_pending_dynamic_result",
+        request_id: "req-1",
         call_id: "call-1",
         tool_name: "ExternalTool",
         arguments: { query: "status" },
@@ -228,9 +261,7 @@ describe("chat stream integration helpers", () => {
       message_id: "msg-new",
       session_id: "sess-1",
       sequence: 0,
-      payload: {
-        type: "message_started",
-      },
+      payload: startedPayload(),
     });
 
     const stream = useAppStore.getState().streams["sess-1"];
@@ -272,9 +303,7 @@ describe("chat stream integration helpers", () => {
       message_id: "msg-1",
       session_id: "sess-1",
       sequence: 1,
-      payload: {
-        type: "message_started",
-      },
+      payload: startedPayload(),
     });
 
     applyStreamEvent("sess-1", {
@@ -282,9 +311,7 @@ describe("chat stream integration helpers", () => {
       message_id: "msg-1",
       session_id: "sess-1",
       sequence: 2,
-      payload: {
-        type: "message_completed",
-      },
+      payload: completedPayload(),
     });
 
     const state = useAppStore.getState();

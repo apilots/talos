@@ -18,7 +18,7 @@ pub(super) async fn register_handler(
     Json(request): Json<RegisterRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let response = state
-        .auth_service
+        .account
         .register(request)
         .await
         .map_err(map_auth_error)?;
@@ -29,11 +29,7 @@ pub(super) async fn login_handler(
     State(state): State<Arc<HttpApiState>>,
     Json(request): Json<LoginRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let response = state
-        .auth_service
-        .login(request)
-        .await
-        .map_err(map_auth_error)?;
+    let response = state.account.login(request).await.map_err(map_auth_error)?;
     Ok(Json(json!(response)))
 }
 
@@ -42,7 +38,7 @@ pub(super) async fn logout_handler(
     actor: axum::extract::Extension<RequestIdentity>,
 ) -> Result<Json<Value>, ApiError> {
     state
-        .auth_service
+        .account
         .logout(&actor.0)
         .await
         .map_err(map_auth_error)?;
@@ -54,8 +50,8 @@ pub(super) async fn current_user_handler(
     actor: axum::extract::Extension<RequestIdentity>,
 ) -> Result<Json<Value>, ApiError> {
     let user = state
-        .user_service
-        .get_current_user(&actor.0)
+        .account
+        .current_user(&actor.0)
         .await
         .map_err(map_auth_error)?;
     Ok(Json(json!(user)))
@@ -67,7 +63,7 @@ pub(super) async fn patch_current_user_handler(
     Json(request): Json<UpdateCurrentUserRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let user = state
-        .user_service
+        .account
         .patch_current_user(&actor.0, request)
         .await
         .map_err(map_auth_error)?;
@@ -79,7 +75,7 @@ pub(super) async fn list_user_tokens_handler(
     actor: axum::extract::Extension<RequestIdentity>,
 ) -> Result<Json<Value>, ApiError> {
     let tokens = state
-        .auth_service
+        .account
         .list_tokens(&actor.0)
         .await
         .map_err(map_auth_error)?;
@@ -92,7 +88,7 @@ pub(super) async fn create_user_token_handler(
     Json(request): Json<CreateUserTokenRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let token = state
-        .auth_service
+        .account
         .create_token(&actor.0, &request.name)
         .await
         .map_err(map_auth_error)?;
@@ -105,7 +101,7 @@ pub(super) async fn delete_user_token_handler(
     Path(token_id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     state
-        .auth_service
+        .account
         .revoke_token(&actor.0, &token_id)
         .await
         .map_err(map_auth_error)?;
@@ -117,7 +113,7 @@ pub(super) async fn list_admin_users_handler(
     actor: axum::extract::Extension<RequestIdentity>,
 ) -> Result<Json<Value>, ApiError> {
     let users = state
-        .user_service
+        .account
         .list_users(&actor.0)
         .await
         .map_err(map_auth_error)?;
@@ -130,7 +126,7 @@ pub(super) async fn create_admin_user_handler(
     Json(request): Json<AdminCreateUserRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let user = state
-        .user_service
+        .account
         .create_user(&actor.0, request)
         .await
         .map_err(map_auth_error)?;
@@ -144,7 +140,7 @@ pub(super) async fn patch_admin_user_handler(
     Json(request): Json<AdminPatchUserRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let user = state
-        .user_service
+        .account
         .patch_user(&actor.0, &user_id, request)
         .await
         .map_err(map_auth_error)?;
@@ -157,7 +153,7 @@ pub(super) async fn delete_admin_user_handler(
     Path(user_id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     state
-        .user_service
+        .account
         .delete_user(&actor.0, &user_id)
         .await
         .map_err(map_auth_error)?;

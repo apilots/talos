@@ -1,11 +1,7 @@
-import type { TalosActiveTurn, TalosEvent, TalosEventPayload } from "@talos/sdk";
+import type { TalosActiveTurn, TalosEvent } from "@talos/sdk-core";
 
 import { useAppStore } from "@/shared/store/app-store";
 import { outputContentToText } from "@/shared/types/domain";
-
-function resolvePayloadType(payload: TalosEvent["payload"]): TalosEventPayload["type"] {
-  return payload.type;
-}
 
 export function applyStreamEvent(sessionId: string, event: TalosEvent) {
   const state = useAppStore.getState();
@@ -29,8 +25,7 @@ export function applyStreamEvent(sessionId: string, event: TalosEvent) {
     showReconnectControls: false,
   });
 
-  const payloadType = resolvePayloadType(event.payload);
-  switch (payloadType) {
+  switch (event.payload.type) {
     case "message_started":
       state.setSessionStatus(sessionId, "running");
       return;

@@ -183,12 +183,13 @@ build_binaries() {
   if [[ "${TALOS_BINARIES_READY:-}" == "1" ]] \
     && [[ -x "${ROOT_DIR}/target/debug/talos" ]] \
     && [[ -x "${ROOT_DIR}/target/debug/talos-client" ]] \
+    && [[ -x "${ROOT_DIR}/target/debug/talos-app-server-test-client" ]] \
     && [[ -x "${ROOT_DIR}/target/debug/talos-ui-tui" ]]; then
     return 0
   fi
 
   mkdir -p "${REPORT_ROOT}"
-  (cd "${ROOT_DIR}" && cargo build -p talos -p talos-cli -p talos-ui-tui >/dev/null)
+  (cd "${ROOT_DIR}" && cargo build -p talos -p talos-cli -p talos-app-server-test-client -p talos-ui-tui >/dev/null)
   export TALOS_BINARIES_READY=1
 }
 

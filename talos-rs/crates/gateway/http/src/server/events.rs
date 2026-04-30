@@ -12,11 +12,12 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 use tracing::error;
 
+use talos_app_protocol::events::canonical_method;
 use talos_auth::RequestIdentity;
-use talos_session_store::{ActiveTurnRecord, ActiveTurnStatus, SessionEventId};
+use talos_session_store::{ActiveTurnRecord, SessionEventId};
 
+use super::access::shared_actor;
 use super::errors::ApiError;
-use super::misc::talos_event_name;
 use super::state::HttpApiState;
 
 #[derive(Debug, Deserialize)]
@@ -33,8 +34,8 @@ pub(super) async fn subscribe_session_events_handler(
     Query(query): Query<SessionEventsQuery>,
 ) -> Result<Response, ApiError> {
     let _session = state
-        .access_service
-        .get_session(&actor.0, &session_id)
+        .app
+        .get_session(&shared_actor(&actor.0), &session_id)
         .await
         .map_err(|err| {
             ApiError::new(StatusCode::NOT_FOUND, "session_not_found", err.to_string())
@@ -53,41 +54,21 @@ pub(super) async fn subscribe_session_events_handler(
         )
         .max(1);
 
-    let mut live_rx = state.event_service.subscribe_live_events();
+    let mut live_rx = state.events.subscribe_live_events().map_err(|err| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "event_subscribe_failed",
+            err.to_string(),
+        )
+    })?;
     let replay = state
-        .event_service
-        .list_events_after(&session_id, after_event_id.as_ref(), limit)
+        .events
+        .replay_after(&session_id, after_event_id.as_ref(), limit)
         .await
-        .map_err(|err| {
-            ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "event_replay_failed",
-                err.to_string(),
-            )
-        })?;
-    let oldest_event_id = if after_event_id.is_some() {
-        state
-            .event_service
-            .oldest_event_id(&session_id)
-            .await
-            .map_err(|err| {
-                ApiError::new(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "event_replay_failed",
-                    err.to_string(),
-                )
-            })?
-    } else {
-        None
-    };
-    reject_expired_cursor(
-        after_event_id.as_ref(),
-        replay.first(),
-        oldest_event_id.as_ref(),
-    )?;
+        .map_err(map_event_replay_error)?;
     let has_live_turn = state
-        .event_service
-        .get_active_turn(&session_id)
+        .events
+        .has_live_turn(&session_id)
         .await
         .map_err(|err| {
             ApiError::new(
@@ -95,30 +76,12 @@ pub(super) async fn subscribe_session_events_handler(
                 "active_turn_failed",
                 err.to_string(),
             )
-        })?
-        .is_some_and(|record| {
-            matches!(
-                record.status,
-                ActiveTurnStatus::Running
-                    | ActiveTurnStatus::WaitingUserAction
-                    | ActiveTurnStatus::Cancelling
-            )
-        });
-
-    let last_replay_seq = replay
-        .last()
-        .map(|event| event.event_seq)
-        .unwrap_or_else(|| {
-            after_event_id
-                .as_ref()
-                .and_then(|event_id| event_id.event_seq().ok())
-                .unwrap_or_default()
-        });
+        })?;
 
     let (tx, rx) = mpsc::channel(256);
     tokio::spawn(async move {
-        let mut last_sent_seq = last_replay_seq;
-        for record in replay {
+        let mut last_sent_seq = replay.last_replay_seq;
+        for record in replay.events {
             last_sent_seq = record.event_seq;
             if tx.send(record).await.is_err() {
                 return;
@@ -153,7 +116,7 @@ pub(super) async fn subscribe_session_events_handler(
     });
 
     let stream = ReceiverStream::new(rx).map(|record| {
-        let event_name = talos_event_name(&record.event_type);
+        let event_name = canonical_method(&record.event_type);
         let data = match serde_json::to_string(&record) {
             Ok(data) => data,
             Err(err) => {
@@ -213,37 +176,20 @@ fn parse_cursor(
     }
 }
 
-fn reject_expired_cursor(
-    after_event_id: Option<&SessionEventId>,
-    first_replay_event: Option<&talos_session_store::SessionEventRecord>,
-    oldest_event_id: Option<&SessionEventId>,
-) -> Result<(), ApiError> {
-    let Some(after_event_id) = after_event_id else {
-        return Ok(());
-    };
-    let after_seq = after_event_id
-        .event_seq()
-        .map_err(|err| ApiError::new(StatusCode::BAD_REQUEST, "invalid_cursor", err.to_string()))?;
-    if let Some(oldest_event_id) = oldest_event_id {
-        let oldest_seq = oldest_event_id.event_seq().map_err(|err| {
-            ApiError::new(StatusCode::BAD_REQUEST, "invalid_cursor", err.to_string())
-        })?;
-        if oldest_seq > after_seq + 1 {
-            return Err(expired_cursor_error());
+fn map_event_replay_error(error: talos_error::TalosError) -> ApiError {
+    match error {
+        talos_error::TalosError::ResourceExpired(message) => {
+            ApiError::new(StatusCode::GONE, "event_cursor_expired", message)
         }
+        talos_error::TalosError::ValidationError(message) => {
+            ApiError::new(StatusCode::BAD_REQUEST, "invalid_cursor", message)
+        }
+        other => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "event_replay_failed",
+            other.to_string(),
+        ),
     }
-    if first_replay_event.is_some_and(|event| event.event_seq > after_seq + 1) {
-        return Err(expired_cursor_error());
-    }
-    Ok(())
-}
-
-fn expired_cursor_error() -> ApiError {
-    ApiError::new(
-        StatusCode::GONE,
-        "event_cursor_expired",
-        "event cursor is older than retained session events",
-    )
 }
 
 pub(super) async fn get_active_turn_handler(
@@ -252,15 +198,15 @@ pub(super) async fn get_active_turn_handler(
     Path(session_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let _session = state
-        .access_service
-        .get_session(&actor.0, &session_id)
+        .app
+        .get_session(&shared_actor(&actor.0), &session_id)
         .await
         .map_err(|err| {
             ApiError::new(StatusCode::NOT_FOUND, "session_not_found", err.to_string())
         })?;
 
     let active_turn = state
-        .event_service
+        .events
         .get_active_turn(&session_id)
         .await
         .map_err(|err| {
@@ -303,10 +249,6 @@ fn render_active_turn(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::response::IntoResponse;
-    use talos_types::talos::{
-        TalosEventPayload, TalosEventType, TalosMessageStartedEvent, TalosUsage,
-    };
 
     #[test]
     fn parse_cursor_prefers_query_over_last_event_id() {
@@ -318,47 +260,5 @@ mod tests {
             .unwrap();
 
         assert_eq!(cursor.as_str(), "ev_00000000000000000002");
-    }
-
-    #[test]
-    fn reject_expired_cursor_returns_gone_on_replay_gap() {
-        let first_replay_event = talos_session_store::SessionEventRecord {
-            event_seq: 5,
-            event_id: SessionEventId::from_seq(5),
-            session_id: "s1".to_string(),
-            turn_id: Some("turn-1".to_string()),
-            message_id: "msg-1".to_string(),
-            sequence: 0,
-            event_type: TalosEventType::MessageStarted,
-            payload: TalosEventPayload::MessageStarted(TalosMessageStartedEvent {
-                request_id: "req-1".to_string(),
-                model: "qwen-plus".to_string(),
-                usage: TalosUsage::default(),
-                iteration: 0,
-                step_id: "start".to_string(),
-            }),
-            created_at: 1,
-        };
-
-        let err = reject_expired_cursor(
-            Some(&SessionEventId::from_seq(1)),
-            Some(&first_replay_event),
-            Some(&SessionEventId::from_seq(5)),
-        )
-        .expect_err("cursor gap should be rejected");
-
-        assert_eq!(err.into_response().status(), StatusCode::GONE);
-    }
-
-    #[test]
-    fn reject_expired_cursor_returns_gone_on_empty_replay_gap() {
-        let err = reject_expired_cursor(
-            Some(&SessionEventId::from_seq(1)),
-            None,
-            Some(&SessionEventId::from_seq(5)),
-        )
-        .expect_err("cursor older than oldest retained event should be rejected");
-
-        assert_eq!(err.into_response().status(), StatusCode::GONE);
     }
 }

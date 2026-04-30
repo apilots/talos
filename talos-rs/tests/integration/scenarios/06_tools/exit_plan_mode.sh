@@ -152,7 +152,7 @@ result = results[0]
 assert result.get("tool_name") == "ExitPlanMode", result.get("tool_name")
 content_items = result.get("content") or []
 assert content_items, "missing content payload"
-content = content_items[0].get("value") or {}
+content = ((content_items[0].get("value") or {}).get("value", content_items[0].get("value") or {}))
 assert content.get("mode") == "default", content
 assert content.get("summary") == "Planning finished", content
 PY

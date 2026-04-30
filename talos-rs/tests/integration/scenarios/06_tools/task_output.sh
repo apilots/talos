@@ -120,7 +120,7 @@ import os
 data = json.loads(os.environ["BASH_JSON"])
 results = [item for item in data.get("output", []) if item.get("type") == "tool_result"]
 bash_result = next(item for item in results if item.get("tool_name") == "Bash")
-bash_content = (bash_result.get("content") or [{}])[0].get("value") or {}
+bash_content = (((bash_result.get("content") or [{}])[0].get("value") or {}).get("value", (bash_result.get("content") or [{}])[0].get("value") or {}))
 assert bash_content.get("status") == "running", bash_content
 assert bash_content.get("session_id") is not None, bash_content
 print(bash_content["session_id"])
@@ -150,7 +150,7 @@ data = json.loads(os.environ["TASK_OUTPUT_JSON"])
 results = [item for item in data.get("output", []) if item.get("type") == "tool_result"]
 assert results, results
 task_result = next(item for item in results if item.get("tool_name") == "TaskOutput")
-task_content = (task_result.get("content") or [{}])[0].get("value") or {}
+task_content = (((task_result.get("content") or [{}])[0].get("value") or {}).get("value", (task_result.get("content") or [{}])[0].get("value") or {}))
 assert task_content.get("status") in {"running", "exited"}, task_content
 assert os.environ["TASK_MARKER"] in (task_content.get("output") or ""), task_content
 PY

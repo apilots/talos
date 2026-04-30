@@ -120,6 +120,7 @@ else
   append_lines_to_array < <(collect_group_cases "06_tools")
   append_lines_to_array < <(collect_group_cases "07_memory")
   append_lines_to_array < <(collect_group_cases "08_tui")
+  append_lines_to_array < <(collect_group_cases "09_app_server")
 fi
 
 pass_count=0

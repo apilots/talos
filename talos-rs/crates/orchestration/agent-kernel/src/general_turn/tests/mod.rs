@@ -17,10 +17,14 @@ use talos_tools::{register_core_local_tools, ToolRegistry};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-mod loop_tests;
+mod compaction_loop_tests;
+mod final_response_tests;
 mod memory_summary_tests;
 mod parsing_tests;
+mod prompt_warning_tests;
+mod step_request_tests;
 mod stream_tests;
+mod tool_loop_tests;
 
 struct NoopLlmProvider;
 

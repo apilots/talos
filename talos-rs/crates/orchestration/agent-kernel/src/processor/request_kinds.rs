@@ -154,7 +154,7 @@ impl RequestProcessor for RequestConfirmationRequestProcessor {
                     request.replay_tool_invocations.push(ReplayToolInvocation {
                         call_id: confirmation.call_id.clone(),
                         tool_name: confirmation.tool_name.clone(),
-                        arguments: confirmation.arguments.clone(),
+                        arguments: confirmation.arguments.clone().into(),
                     });
                 } else {
                     let reason = approval.reason.as_deref().unwrap_or("no reason given");
@@ -223,7 +223,7 @@ impl RequestProcessor for DynamicToolReplayRequestProcessor {
                 request.replay_tool_invocations.push(ReplayToolInvocation {
                     call_id: payload.call_id.clone(),
                     tool_name: payload.tool_name.clone(),
-                    arguments: dynamic_request.arguments.clone(),
+                    arguments: dynamic_request.arguments.clone().into(),
                 });
                 request.replay_dynamic_tool_results.insert(
                     payload.call_id.clone(),
@@ -248,7 +248,7 @@ impl RequestProcessor for DynamicToolReplayRequestProcessor {
                             request.replay_tool_invocations.push(ReplayToolInvocation {
                                 call_id: dynamic_request.call_id.clone(),
                                 tool_name: dynamic_request.tool_name.clone(),
-                                arguments: dynamic_request.arguments.clone(),
+                                arguments: dynamic_request.arguments.clone().into(),
                             });
                             request.replay_dynamic_tool_results.insert(
                                 dynamic_request.call_id.clone(),

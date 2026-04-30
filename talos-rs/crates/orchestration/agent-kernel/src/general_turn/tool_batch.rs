@@ -1,4 +1,5 @@
 use super::*;
+use crate::execution::ReplayDynamicToolResult;
 use crate::ToolExecutionOutput;
 use talos_tools::ToolResultEnvelope;
 
@@ -242,7 +243,7 @@ pub(crate) async fn emit_tool_result_stream_event(
             call_id: output.call_id.clone(),
             tool_name: output.tool_name.clone(),
             content: vec![TalosContentItem::Json {
-                value: reduced.payload,
+                value: reduced.payload.into(),
             }],
             is_error: reduced.is_error,
             semantic_events: reduced.semantic_events,
@@ -273,7 +274,7 @@ pub(crate) fn collect_general_turn_tool_batch(
             call_id: output.call_id.clone(),
             tool_name: output.tool_name.clone(),
             content: vec![TalosContentItem::Json {
-                value: reduced.payload.clone(),
+                value: reduced.payload.clone().into(),
             }],
             is_error: reduced.is_error,
         });
@@ -347,7 +348,7 @@ pub async fn execute_general_turn_tool_batch(
     user_id: &str,
     tool_calls: &[FunctionCall],
     pre_approved_call_ids: std::collections::HashSet<String>,
-    replay_dynamic_tool_results: std::collections::HashMap<String, Value>,
+    replay_dynamic_tool_results: std::collections::HashMap<String, ReplayDynamicToolResult>,
     stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
 ) -> TalosResult<GeneralTurnToolBatch> {
     let execution_context = ToolExecutionContext {
@@ -364,7 +365,7 @@ pub async fn execute_general_turn_tool_batch(
         .map(|call| ToolExecutionInput {
             call_id: call.id.clone(),
             tool_name: call.name.clone(),
-            arguments: call.arguments.clone(),
+            arguments: call.arguments.clone().into(),
         })
         .collect::<Vec<_>>();
     let outputs = tool_executor

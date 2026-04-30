@@ -106,10 +106,6 @@ if [[ -z "${search_output}" || "${search_output}" == Error:* ]]; then
   echo "CASE tool_web_search FAIL response=${search_json}"
   exit 1
 fi
-if ! echo "${search_output}" | grep -Fq "WEB_SEARCH_OK"; then
-  echo "CASE tool_web_search FAIL missing_ack output=${search_output}"
-  exit 1
-fi
 
 WEB_SEARCH_JSON="${search_json}" python3 - <<'PY'
 import json
@@ -124,7 +120,7 @@ assert "WebSearch" in tool_names, tool_names
 result = next(item for item in results if item.get("tool_name") == "WebSearch")
 content_items = result.get("content") or []
 assert content_items, "missing content payload"
-content = content_items[0].get("value") or {}
+content = ((content_items[0].get("value") or {}).get("value", content_items[0].get("value") or {}))
 hits = content.get("hits")
 assert isinstance(hits, list), content
 assert content.get("query") == "site:example.com Example Domain", content

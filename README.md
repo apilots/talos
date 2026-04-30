@@ -23,11 +23,16 @@ Talos提供了多种用户交互界面：
 - 使用`cargo run -p talos-ui-tui`运行
 - 丰富的键盘导航支持
 - 支持多面板视图（聊天、历史、工具、设置）
+- 默认以内嵌 `talos app-server` 子进程运行，不占用本地端口
 
 ### API接口
-- REST API支持
-- WebSocket实时通信
+- HTTP API + SSE 支持
+- 本地 JSON-RPC over stdio app-server 支持，供 CLI/TUI/Desktop 使用
 - 适用于与其他应用集成
+
+### 桌面端
+- Electron Desktop shell 已接入本地 app-server
+- 复用 `talos-app/web` 的前端领域模型和主要 UI
 
 ### 其他语言实现计划
 - 图形用户界面 (GUI) - 计划中
@@ -53,7 +58,7 @@ Talos提供了多种用户交互界面：
 - **Go**：微服务部署，云原生
 - **TypeScript**：前端/Web 集成
 
-不同语言可以混合部署，通过 **gRPC** 或 **消息队列** 通信。
+不同语言可以混合部署；当前 Rust 服务端暴露 HTTP/SSE 与本地 JSON-RPC app-server 两类入口。
 
 ---
 
@@ -68,7 +73,7 @@ talos/
 │   └── examples/
 ├── talos-py/          # Python 实现（计划中）
 ├── talos-go/          # Go 实现（计划中）
-├── talos-js/          # TypeScript 实现（计划中）
+├── talos-app/         # TypeScript Web / Desktop / SDK workspace
 ├── docs/              # 通用文档
 ├── specs/             # 接口规范（语言无关）
 └── README.md
@@ -99,12 +104,15 @@ cargo run --example basic
 
 ### TUI使用示例
 ```bash
-# 启动TUI界面
+# 启动 TUI 界面（默认内嵌 app-server）
 cd talos/talos-rs
 cargo run -p talos-ui-tui
 
 # 使用网关模式连接到远程服务器
 cargo run -p talos-ui-tui -- --gateway
+
+# 运行 CLI 的本地 app-server 模式
+cargo run -p talos -- --transport app-server models
 ```
 
 ---

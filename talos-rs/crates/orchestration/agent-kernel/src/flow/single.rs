@@ -354,7 +354,7 @@ impl BaseLlmFlow for SingleFlow {
                         talos_llm_provider::FunctionCall::new(
                             r.call_id.clone(),
                             r.tool_name.clone(),
-                            r.arguments.clone(),
+                            r.arguments.clone().into(),
                         )
                     })
                     .collect();
@@ -372,19 +372,7 @@ impl BaseLlmFlow for SingleFlow {
                     &self.agent_name,
                     &replay_calls,
                     pre_approved_call_ids,
-                    step_model_request
-                        .replay_dynamic_tool_results
-                        .iter()
-                        .map(|(call_id, result)| {
-                            (
-                                call_id.clone(),
-                                serde_json::json!({
-                                    "output": result.output,
-                                    "success": result.success,
-                                }),
-                            )
-                        })
-                        .collect(),
+                    step_model_request.replay_dynamic_tool_results.clone(),
                     prepared.stream_tx.as_ref(),
                 )
                 .await?;
@@ -684,7 +672,7 @@ impl BaseLlmFlow for SingleFlow {
                             tool_name: confirmation.tool_name.clone(),
                             call_id: confirmation.call_id.clone(),
                             prompt: confirmation.prompt.clone(),
-                            arguments: confirmation.arguments.clone(),
+                            arguments: confirmation.arguments.clone().into(),
                         },
                     },
                     false,
@@ -702,7 +690,7 @@ impl BaseLlmFlow for SingleFlow {
                                 tool_name: confirmation.tool_name.clone(),
                                 call_id: confirmation.call_id.clone(),
                                 prompt: confirmation.prompt.clone(),
-                                arguments: confirmation.arguments.clone(),
+                                arguments: confirmation.arguments.clone().into(),
                             },
                         },
                     ),
@@ -718,7 +706,7 @@ impl BaseLlmFlow for SingleFlow {
                         payload: DynamicToolRequestPayload {
                             tool_name: dynamic_request.tool_name.clone(),
                             call_id: dynamic_request.call_id.clone(),
-                            arguments: dynamic_request.arguments.clone(),
+                            arguments: dynamic_request.arguments.clone().into(),
                         },
                     },
                     false,
@@ -735,7 +723,7 @@ impl BaseLlmFlow for SingleFlow {
                             payload: crate::session::SessionDynamicToolRequestPayload {
                                 tool_name: dynamic_request.tool_name.clone(),
                                 call_id: dynamic_request.call_id.clone(),
-                                arguments: dynamic_request.arguments.clone(),
+                                arguments: dynamic_request.arguments.clone().into(),
                             },
                         },
                     ),
@@ -759,7 +747,7 @@ impl BaseLlmFlow for SingleFlow {
                                         call_id: confirmation.call_id.clone(),
                                         tool_name: confirmation.tool_name.clone(),
                                         prompt: confirmation.prompt.clone(),
-                                        arguments: confirmation.arguments.clone(),
+                                        arguments: confirmation.arguments.clone().into(),
                                     },
                                 ),
                             ))
@@ -773,7 +761,7 @@ impl BaseLlmFlow for SingleFlow {
                                     crate::DynamicToolRequestStreamData {
                                         call_id: dynamic_request.call_id.clone(),
                                         tool_name: dynamic_request.tool_name.clone(),
-                                        arguments: dynamic_request.arguments.clone(),
+                                        arguments: dynamic_request.arguments.clone().into(),
                                     },
                                 ),
                             ))

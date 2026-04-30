@@ -1,0 +1,28 @@
+import type { IpcRendererEvent } from "electron";
+import { contextBridge, ipcRenderer } from "electron";
+
+import type { TalosDesktopBridge, TalosRuntimeState } from "./ipc";
+import { TALOS_IPC } from "./ipc";
+import type { AppProtocol } from "@talos/sdk-core";
+
+const bridge: TalosDesktopBridge = {
+  connect: () => ipcRenderer.invoke(TALOS_IPC.connect) as Promise<AppProtocol.InitializeResponse>,
+  invoke: <T>(method: AppProtocol.ClientMethod, params: unknown) =>
+    ipcRenderer.invoke(TALOS_IPC.invoke, method, params) as Promise<T>,
+  onEvent: (handler) => {
+    const listener = (_event: IpcRendererEvent, envelope: AppProtocol.ApplicationEventEnvelope) => {
+      handler(envelope);
+    };
+    ipcRenderer.on(TALOS_IPC.event, listener);
+    return () => ipcRenderer.off(TALOS_IPC.event, listener);
+  },
+  onRuntimeState: (handler) => {
+    const listener = (_event: IpcRendererEvent, state: TalosRuntimeState) => {
+      handler(state);
+    };
+    ipcRenderer.on(TALOS_IPC.runtimeState, listener);
+    return () => ipcRenderer.off(TALOS_IPC.runtimeState, listener);
+  },
+};
+
+contextBridge.exposeInMainWorld("talos", bridge);

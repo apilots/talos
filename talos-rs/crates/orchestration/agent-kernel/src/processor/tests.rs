@@ -185,7 +185,7 @@ async fn test_tool_call_extraction_emits_tool_call_events() {
         output_items: vec![TalosOutputItem::ToolCall {
             call_id: "call-1".to_string(),
             name: "read".to_string(),
-            arguments: json!({"path": "README.md"}),
+            arguments: json!({"path": "README.md"}).into(),
         }],
         branch: ExecutionBranch::ReactiveLoop,
         actions: EventActions::default(),
@@ -535,7 +535,7 @@ fn make_confirmation_event(
                 call_id: call_id.to_string(),
                 tool_name: tool_name.to_string(),
                 prompt: "Need approval.".to_string(),
-                arguments: json!({"cmd": "echo hi"}),
+                arguments: json!({"cmd": "echo hi"}).into(),
             },
         },
         actions: crate::EventActions::default(),

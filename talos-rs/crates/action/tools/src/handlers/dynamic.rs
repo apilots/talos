@@ -96,27 +96,15 @@ impl ToolHandler for DynamicToolHandler {
     }
 }
 
-#[derive(Debug, serde::Deserialize)]
-struct StoredDynamicToolResult {
-    output: String,
-    success: bool,
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct StoredDynamicToolResult {
+    pub output: String,
+    pub success: bool,
 }
 
 fn load_dynamic_tool_result(
     context: &crate::ToolContext,
     call_id: &str,
 ) -> TalosResult<Option<StoredDynamicToolResult>> {
-    let Some(value) = context.get_state(dynamic_tool_state_key(call_id).as_str()) else {
-        return Ok(None);
-    };
-    let result = serde_json::from_value(value).map_err(|err| {
-        TalosError::ToolError(format!(
-            "invalid stored dynamic tool result for {call_id}: {err}"
-        ))
-    })?;
-    Ok(Some(result))
-}
-
-pub fn dynamic_tool_state_key(call_id: &str) -> String {
-    format!("dynamic_tool_result::{call_id}")
+    Ok(context.get_dynamic_tool_result(call_id))
 }

@@ -432,17 +432,17 @@ impl TuiApp {
         };
         let session_id = self.session_id.clone();
         let context = self.build_session_context();
+        let current_directory = Some(self.startup_directory.clone());
         self.spawn_remote_command_task(format!("model switch started: {}", requested), async move {
             let result = if let Some(session_id) = session_id {
                 client.update_session_model(&session_id, &requested).await
             } else {
                 client
                     .create_session(&SessionCreateParams {
-                        context: Some(context),
+                        context,
                         model: Some(requested.clone()),
-                        conf: None,
                         project_id: None,
-                        current_directory: None,
+                        current_directory,
                     })
                     .await
             };
@@ -569,6 +569,7 @@ impl TuiApp {
         let session_id = self.session_id.clone();
         let requested = model.clone();
         let context = self.build_session_context();
+        let current_directory = Some(self.startup_directory.clone());
         let _ = self.spawn_remote_command_task(
             format!("model picker switching to: {}", model),
             async move {
@@ -577,11 +578,10 @@ impl TuiApp {
                 } else {
                     client
                         .create_session(&SessionCreateParams {
-                            context: Some(context),
+                            context,
                             model: Some(requested.clone()),
-                            conf: None,
                             project_id: None,
-                            current_directory: None,
+                            current_directory,
                         })
                         .await
                 };
@@ -680,11 +680,10 @@ impl TuiApp {
             Some(self.current_model.clone())
         };
         let params = SessionCreateParams {
-            context: Some(context),
+            context,
             model,
-            conf: None,
             project_id: None,
-            current_directory: None,
+            current_directory: Some(self.startup_directory.clone()),
         };
 
         let created = client.create_session(&params).await?;
@@ -709,6 +708,7 @@ impl TuiApp {
             Some(self.current_model.clone())
         };
         let context = self.build_session_context();
+        let current_directory = Some(self.startup_directory.clone());
         let (tx, rx) = mpsc::channel(1);
         self.pending_session_connect = Some(rx);
         self.connection_status = "connecting".to_string();
@@ -717,11 +717,10 @@ impl TuiApp {
         let handle = tokio::spawn(async move {
             let result = client
                 .create_session(&SessionCreateParams {
-                    context: Some(context),
+                    context,
                     model,
-                    conf: None,
                     project_id: None,
-                    current_directory: None,
+                    current_directory,
                 })
                 .await
                 .map(|created| created.context.session_id);

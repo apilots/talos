@@ -13,13 +13,17 @@ mod render;
 pub mod run;
 mod selection;
 mod stream;
+mod stream_events;
+mod stream_lifecycle;
+mod stream_text;
+mod stream_updates;
 mod transcript;
 mod types;
 mod utils;
 
 pub use auth::{clear_auth_session, read_auth_session, write_auth_session, AuthSession};
 pub use client::GatewayClient;
-pub use run::run_tui_app_with_client;
+pub use run::run_tui_app_with_gateway_client;
 use types::*;
 
 use chrono::{Datelike, Local, TimeZone};
@@ -175,6 +179,3 @@ mod test_support;
 
 #[cfg(test)]
 pub(crate) mod tests;
-
-#[cfg(test)]
-mod e2e_tests;

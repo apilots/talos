@@ -1,6 +1,5 @@
 use ratatui::text::Line;
-use serde_json;
-use talos_client::{ModelInfo, TalosMessageResponse, TalosSession};
+use talos_client::{ModelInfo, TalosJsonValue, TalosMessageResponse, TalosSession};
 use talos_error::TalosResult;
 
 // ── Suggestions ──────────────────────────────────────────────────────────────
@@ -139,7 +138,7 @@ pub(crate) struct ChatBlock {
     #[allow(dead_code)]
     pub(crate) tool_call_id: Option<String>,
     pub(crate) tool_name: Option<String>,
-    pub(crate) tool_input: Option<serde_json::Value>,
+    pub(crate) tool_input: Option<TalosJsonValue>,
     pub(crate) tool_status: Option<ToolCallStatus>,
     pub(crate) tool_progress: Vec<String>,
     pub(crate) tool_iteration: Option<u64>,
@@ -170,11 +169,12 @@ impl ChatBlock {
     pub(crate) fn new_tool_call(
         call_id: String,
         tool_name: String,
-        tool_input: serde_json::Value,
+        tool_input: impl Into<TalosJsonValue>,
         iteration: u64,
         item_index: u64,
         timing_ms: Option<u64>,
     ) -> Self {
+        let tool_input = tool_input.into();
         Self {
             role: ChatRole::Tool,
             content: String::new(),
@@ -278,7 +278,7 @@ pub(crate) struct PendingApprovalState {
     pub(crate) tool_name: String,
     pub(crate) prompt: String,
     #[allow(dead_code)]
-    pub(crate) arguments: serde_json::Value,
+    pub(crate) arguments: TalosJsonValue,
 }
 
 // ── Remote command update ────────────────────────────────────────────────────

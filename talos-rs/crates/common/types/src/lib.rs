@@ -10,6 +10,7 @@ pub mod gateway;
 pub mod ids;
 pub mod model;
 pub mod runtime;
+pub mod schema;
 pub mod session;
 pub mod talos;
 

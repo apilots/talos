@@ -122,7 +122,7 @@ result = results[0]
 assert result.get("tool_name") == "ToolSearch", result.get("tool_name")
 content_items = result.get("content") or []
 assert content_items, "missing content payload"
-content = content_items[0].get("value") or {}
+content = ((content_items[0].get("value") or {}).get("value", content_items[0].get("value") or {}))
 matches = content.get("matches") or []
 assert any(
     match.get("public_name") == "Skill"
@@ -158,7 +158,7 @@ result = results[0]
 assert result.get("tool_name") == "Skill", result.get("tool_name")
 content_items = result.get("content") or []
 assert content_items, "missing content payload"
-content = content_items[0].get("value") or {}
+content = ((content_items[0].get("value") or {}).get("value", content_items[0].get("value") or {}))
 skills = content.get("skills")
 assert isinstance(skills, list), content
 for item in skills:

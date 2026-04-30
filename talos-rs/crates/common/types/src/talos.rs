@@ -1,6 +1,8 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::PathBuf;
+use ts_rs::TS;
 use uuid::Uuid;
 
 /// Talos gateway protocol types shared by server and client components.
@@ -23,7 +25,7 @@ impl fmt::Display for TalosConnectionMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum StopReason {
     #[default]
@@ -34,6 +36,51 @@ pub enum StopReason {
     BeforeModelCallbackStopped,
     AfterModelCallbackStopped,
     Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct TalosJsonValue {
+    #[schemars(schema_with = "crate::schema::json_value_schema")]
+    #[ts(type = "unknown")]
+    value: serde_json::Value,
+}
+
+impl TalosJsonValue {
+    pub fn new(value: serde_json::Value) -> Self {
+        Self { value }
+    }
+
+    pub fn into_inner(self) -> serde_json::Value {
+        self.value
+    }
+
+    pub fn as_inner(&self) -> &serde_json::Value {
+        &self.value
+    }
+}
+
+impl Default for TalosJsonValue {
+    fn default() -> Self {
+        Self::new(serde_json::Value::Null)
+    }
+}
+
+impl From<serde_json::Value> for TalosJsonValue {
+    fn from(value: serde_json::Value) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<TalosJsonValue> for serde_json::Value {
+    fn from(value: TalosJsonValue) -> Self {
+        value.into_inner()
+    }
+}
+
+impl std::fmt::Display for TalosJsonValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.value)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -271,11 +318,11 @@ pub enum TalosInputItem {
 }
 
 /// Talos content item for rich output blocks.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TalosContentItem {
     Text { text: String },
-    Json { value: serde_json::Value },
+    Json { value: TalosJsonValue },
 }
 
 /// Talos message output item.
@@ -297,7 +344,7 @@ pub enum TalosOutputItem {
     ToolCall {
         call_id: String,
         name: String,
-        arguments: serde_json::Value,
+        arguments: TalosJsonValue,
     },
     ToolResult {
         call_id: String,
@@ -322,14 +369,14 @@ pub struct TalosMessageRequest {
 }
 
 /// Token usage values.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 pub struct TalosUsage {
     pub input_tokens: u32,
     pub output_tokens: u32,
     pub total_tokens: u32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub cache_creation_input_tokens: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub cache_read_input_tokens: Option<u32>,
 }
 
@@ -371,7 +418,7 @@ pub struct TalosMessageResponse {
 }
 
 /// Stream event type.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum TalosEventType {
     MessageStarted,
@@ -390,14 +437,14 @@ pub enum TalosEventType {
     MessageError,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum TalosThinkingSource {
     Provider,
     Framework,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum TalosThinkingStage {
     ModelReasoning,
@@ -407,7 +454,7 @@ pub enum TalosThinkingStage {
     FrameworkReflect,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 pub struct TalosMessageStartedEvent {
     pub request_id: String,
     pub model: String,
@@ -416,7 +463,7 @@ pub struct TalosMessageStartedEvent {
     pub step_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 pub struct TalosMessageReasoningDeltaEvent {
     pub request_id: String,
     pub delta: String,
@@ -427,7 +474,7 @@ pub struct TalosMessageReasoningDeltaEvent {
     pub step_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 pub struct TalosMessageExecutionSummaryEvent {
     pub request_id: String,
     pub text: String,
@@ -436,7 +483,7 @@ pub struct TalosMessageExecutionSummaryEvent {
     pub step_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 pub struct TalosMessageOutputDeltaEvent {
     pub request_id: String,
     pub delta: String,
@@ -445,25 +492,27 @@ pub struct TalosMessageOutputDeltaEvent {
     pub step_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 pub struct TalosMessageToolCallStartedEvent {
     pub request_id: String,
     pub call_id: String,
     pub name: String,
-    pub arguments: serde_json::Value,
+    #[schemars(schema_with = "crate::schema::json_value_schema")]
+    #[ts(type = "unknown")]
+    pub arguments: TalosJsonValue,
     pub item_index: u64,
     pub iteration: u64,
     pub step_id: String,
     pub timing_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 pub struct TalosToolStreamKey {
     pub round: u32,
     pub index: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum TalosToolProgressKind {
     Status,
@@ -471,7 +520,7 @@ pub enum TalosToolProgressKind {
     Stderr,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 pub struct TalosMessageToolCallArgsDeltaEvent {
     pub request_id: String,
     pub stream_key: TalosToolStreamKey,
@@ -483,7 +532,7 @@ pub struct TalosMessageToolCallArgsDeltaEvent {
     pub step_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 pub struct TalosMessageToolCallQueuedEvent {
     pub request_id: String,
     pub stream_key: TalosToolStreamKey,
@@ -494,7 +543,7 @@ pub struct TalosMessageToolCallQueuedEvent {
     pub step_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 pub struct TalosMessageToolCallExecutingEvent {
     pub request_id: String,
     pub stream_key: TalosToolStreamKey,
@@ -505,7 +554,7 @@ pub struct TalosMessageToolCallExecutingEvent {
     pub step_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 pub struct TalosMessageToolCallProgressDeltaEvent {
     pub request_id: String,
     pub stream_key: TalosToolStreamKey,
@@ -518,7 +567,7 @@ pub struct TalosMessageToolCallProgressDeltaEvent {
     pub step_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 pub struct TalosMessageToolCallCompletedEvent {
     pub request_id: String,
     pub call_id: String,
@@ -531,26 +580,30 @@ pub struct TalosMessageToolCallCompletedEvent {
     pub timing_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 pub struct TalosMessageToolCallPendingApprovalEvent {
     pub request_id: String,
     pub call_id: String,
     pub tool_name: String,
     pub prompt: String,
-    pub arguments: serde_json::Value,
+    #[schemars(schema_with = "crate::schema::json_value_schema")]
+    #[ts(type = "unknown")]
+    pub arguments: TalosJsonValue,
     pub step_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 pub struct TalosMessageToolCallPendingDynamicResultEvent {
     pub request_id: String,
     pub call_id: String,
     pub tool_name: String,
-    pub arguments: serde_json::Value,
+    #[schemars(schema_with = "crate::schema::json_value_schema")]
+    #[ts(type = "unknown")]
+    pub arguments: TalosJsonValue,
     pub step_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 pub struct TalosMessageCompletedEvent {
     pub request_id: String,
     pub stop_reason: StopReason,
@@ -561,13 +614,13 @@ pub struct TalosMessageCompletedEvent {
     pub task_count: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 pub struct TalosMessageErrorEvent {
     pub request_id: String,
     pub error: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TalosEventPayload {
     MessageStarted(TalosMessageStartedEvent),
@@ -587,7 +640,7 @@ pub enum TalosEventPayload {
 }
 
 /// Canonical stream event payload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 pub struct TalosEvent {
     pub event_type: TalosEventType,
     pub message_id: String,

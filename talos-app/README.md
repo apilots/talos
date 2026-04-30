@@ -7,10 +7,12 @@ Talos Web 前端应用，基于 React 19 + Vite + pnpm monorepo。
 ```
 talos-app/
 ├── web/          # 主 Web 应用（React + Vite）
-├── ts-sdk/       # TypeScript SDK（供 web 和外部使用）
+├── desktop/      # Electron 桌面端，复用 Web UI 与本地 app-server
+├── ts-sdk/       # TypeScript SDK（供 web、desktop 和外部使用）
 │   └── packages/
-│       ├── core/     # 核心 HTTP 客户端 (TalosClient)
-│       └── browser/  # 浏览器适配器
+│       ├── core/        # 共享类型、协议生成物与 app-server client 内核
+│       ├── browser/     # HTTP/SSE 浏览器适配器
+│       └── app-server/  # JSON-RPC stdio 与 Electron IPC 适配器
 ├── scripts/      # 构建辅助脚本
 └── pnpm-workspace.yaml
 ```
@@ -61,6 +63,35 @@ pnpm dev
 | Auth Token | （可选，开发模式可留空）    |
 
 配置保存在浏览器 `localStorage`（key: `talos-web-ui`）。
+
+## Desktop / 本地 app-server
+
+Desktop 通过 Electron main process 启动 `talos app-server` 子进程，使用
+JSON-RPC over stdio JSONL 通信，不占用本地端口。Renderer 只能通过 preload
+暴露的 typed IPC bridge 使用 `@talos/sdk-app-server/desktop`，不直接访问 Node
+或文件系统能力。
+
+```bash
+cd talos-app
+pnpm desktop:dev
+pnpm --filter talos-desktop test
+pnpm desktop:build
+pnpm desktop:check
+```
+
+常用本地 app-server SDK 验证：
+
+```bash
+cd talos-rs
+source .env
+cargo build -p talos
+
+cd ../talos-app
+TALOS_APP_SERVER_BIN=../talos-rs/target/debug/talos \
+TALOS_APP_SERVER_CWD=../talos-rs \
+TALOS_LOCAL_LAUNCH_TOKEN=local-token \
+pnpm --filter @talos/sdk-app-server test:integration
+```
 
 ## 预览构建产物
 

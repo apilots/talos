@@ -1,0 +1,21 @@
+[package]
+name = "talos-app-server"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+talos-app-protocol = { workspace = true }
+talos-application-service = { workspace = true }
+talos-auth = { workspace = true }
+talos-error = { workspace = true }
+talos-session-store = { path = "../../orchestration/session-store" }
+talos-types = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

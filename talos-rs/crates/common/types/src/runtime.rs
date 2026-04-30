@@ -54,7 +54,7 @@ pub mod tools {
     pub struct ToolCall {
         pub id: String,
         pub name: String,
-        pub arguments: serde_json::Value,
+        pub arguments: talos::TalosJsonValue,
     }
 
     /// Result of a tool execution.

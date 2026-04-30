@@ -1,4 +1,4 @@
-import type { TalosSession } from "@talos/sdk";
+import type { TalosSession } from "@talos/sdk-browser";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 

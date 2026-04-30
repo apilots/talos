@@ -6,7 +6,7 @@ import { useConnectionKey } from "@/features/chat";
 import type {
   ExpectedFileVersion,
   MemoryFileDetail,
-} from "@talos/sdk";
+} from "@talos/sdk-browser";
 
 function isNotFoundError(error: unknown) {
   return error instanceof Error && error.message.includes("status 404");

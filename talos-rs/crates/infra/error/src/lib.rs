@@ -33,6 +33,33 @@ pub enum TalosError {
     #[error("Resource not found: {0}")]
     ResourceNotFound(String),
 
+    #[error("Resource expired: {0}")]
+    ResourceExpired(String),
+
+    #[error("Conflict: {0}")]
+    Conflict(String),
+
+    #[error("Unsupported model: {0}")]
+    UnsupportedModel(String),
+
+    #[error("Idempotency conflict: {0}")]
+    IdempotencyConflict(String),
+
+    #[error("Idempotency error: {0}")]
+    IdempotencyError(String),
+
+    #[error("Retry active turn running: {0}")]
+    RetryActiveTurnRunning(String),
+
+    #[error("Retry source completed: {0}")]
+    RetrySourceCompleted(String),
+
+    #[error("Retry source mismatch: {0}")]
+    RetrySourceMismatch(String),
+
+    #[error("Timeout: {0}")]
+    Timeout(String),
+
     #[error("Storage error: {0}")]
     StorageError(String),
 

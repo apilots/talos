@@ -5,21 +5,17 @@ use async_trait::async_trait;
 pub(crate) use crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
-pub(crate) use dotenv::dotenv;
 pub(crate) use ratatui::style::{Color, Modifier};
 pub(crate) use serde_json::json;
 pub(crate) use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
 pub(crate) use talos_client::{
-    ClientConfig, SessionCreateParams, StopReason, TalosClient, TalosContentItem,
-    TalosEventPayload, TalosInputItem, TalosMessageCompletedEvent, TalosMessageOutputDeltaEvent,
-    TalosMessageReasoningDeltaEvent, TalosMessageRequest, TalosMessageResponse,
-    TalosMessageStartedEvent, TalosOutputItem, TalosThinkingSource, TalosThinkingStage,
+    SessionCreateParams, StopReason, TalosContentItem, TalosEventPayload, TalosInputItem,
+    TalosMessageCompletedEvent, TalosMessageOutputDeltaEvent, TalosMessageReasoningDeltaEvent,
+    TalosMessageRequest, TalosMessageResponse, TalosMessageStartedEvent, TalosOutputItem,
+    TalosThinkingSource, TalosThinkingStage,
 };
-pub(crate) use talos_config::Config;
 use talos_error::TalosError;
-pub(crate) use talos_server::{start_server, TalosServerOptions};
 pub(crate) use talos_types::talos::TalosEventType;
 
 #[derive(Default)]
@@ -243,12 +239,6 @@ impl GatewayClient for MockGatewayClient {
                 state.current_project_root = Some(current_directory.clone());
             } else if params.project_id.is_some() {
                 state.current_project_root = state.default_project_root.clone();
-            } else if let Some(context) = &params.context {
-                state.current_project_root = context
-                    .environment
-                    .as_ref()
-                    .map(|environment| environment.directory.clone())
-                    .or_else(|| state.default_project_root.clone());
             } else if state.current_project_root.is_none() {
                 state.current_project_root = state.default_project_root.clone();
             }
@@ -617,41 +607,6 @@ pub(crate) fn create_remote_app_with_stream_failures(failures: u8) -> TuiApp {
 pub(crate) fn create_remote_app_with_close_delay(delay_ms: u64) -> TuiApp {
     let client: Arc<dyn GatewayClient> = Arc::new(MockGatewayClient::with_close_delay(delay_ms));
     TuiApp::new_with_gateway_client(client, TalosConnectionMode::Remote)
-}
-
-pub(crate) fn real_llm_env_available() -> bool {
-    [
-        "BAILIAN_API_KEY",
-        "BAILIAN_CODINGPLAN_API_KEY",
-        "OPENAI_API_KEY",
-        "ANTHROPIC_API_KEY",
-    ]
-    .iter()
-    .any(|key| {
-        std::env::var(key)
-            .map(|value| !value.trim().is_empty())
-            .unwrap_or(false)
-    })
-}
-
-pub(crate) fn unique_test_dir(name: &str) -> PathBuf {
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time should be after epoch")
-        .as_millis();
-    let dir = std::env::temp_dir().join(format!("talos-ui-tui-{name}-{timestamp}"));
-    std::fs::create_dir_all(&dir).expect("test directory should be created");
-    dir
-}
-
-pub(crate) async fn find_free_port() -> u16 {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("port probe should bind");
-    listener
-        .local_addr()
-        .expect("local addr should exist")
-        .port()
 }
 
 pub(crate) fn set_test_model_info(app: &mut TuiApp, model_id: &str, context_window: u32) {

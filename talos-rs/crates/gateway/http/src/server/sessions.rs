@@ -13,8 +13,8 @@ use talos_types::{
     OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, SessionConf, SessionPatch, SessionQuery,
 };
 
+use super::access::shared_actor;
 use super::errors::ApiError;
-use super::misc::validate_model_supported;
 use super::state::HttpApiState;
 
 #[derive(Debug, Deserialize)]
@@ -44,21 +44,10 @@ pub(super) async fn create_session_handler(
     actor: axum::extract::Extension<RequestIdentity>,
     Json(request): Json<CreateSessionRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    if request.context.project_root.is_some() {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "invalid_request",
-            "context.project_root is not supported",
-        ));
-    }
-    if let Some(model) = request.model.as_deref() {
-        validate_model_supported(&state, &model)?;
-    }
-
     let session = state
-        .access_service
+        .app
         .create_session(
-            &actor.0,
+            &shared_actor(&actor.0),
             request.context,
             request.model,
             request.conf,
@@ -66,13 +55,7 @@ pub(super) async fn create_session_handler(
             request.current_directory,
         )
         .await
-        .map_err(|e| {
-            ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "internal_error",
-                e.to_string(),
-            )
-        })?;
+        .map_err(map_create_session_error)?;
 
     Ok(Json(json!(session)))
 }
@@ -83,8 +66,8 @@ pub(super) async fn list_sessions_handler(
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<Value>, ApiError> {
     let sessions = state
-        .access_service
-        .list_sessions(&actor.0, query)
+        .app
+        .list_sessions(&shared_actor(&actor.0), query)
         .await
         .map_err(|e| {
             ApiError::new(
@@ -104,8 +87,8 @@ pub(super) async fn get_session_handler(
     Path(session_id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     let session = state
-        .access_service
-        .get_session(&actor.0, &session_id)
+        .app
+        .get_session(&shared_actor(&actor.0), &session_id)
         .await
         .map_err(|e| map_session_error(e, "session not found"))?;
 
@@ -118,8 +101,8 @@ pub(super) async fn get_session_turns_handler(
     Path(session_id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     let turns = state
-        .access_service
-        .get_session_turns(&actor.0, &session_id)
+        .app
+        .get_session_turns(&shared_actor(&actor.0), &session_id)
         .await
         .map_err(|e| map_session_error(e, "session not found"))?;
     Ok(Json(json!({ "data": turns })))
@@ -136,25 +119,11 @@ pub(super) async fn patch_session_handler(
         project_id: request.project_id,
         current_directory: request.current_directory,
     };
-    if let Some(model) = patch
-        .agent_model()
-        .map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, "invalid_request", e.to_string()))?
-    {
-        validate_model_supported(&state, &model)?;
-    }
-    let ack = state
-        .access_service
-        .patch_session(&actor.0, &session_id, patch)
+    let _ack = state
+        .app
+        .patch_session(&shared_actor(&actor.0), &session_id, patch)
         .await
-        .map_err(|e| map_session_error(e, "session not found"))?;
-
-    if !ack.success {
-        return Err(ApiError::new(
-            StatusCode::NOT_FOUND,
-            "invalid_request",
-            "session not found",
-        ));
-    }
+        .map_err(|e| map_patch_session_error(e, "session not found"))?;
 
     Ok(Json(json!({ "success": true })))
 }
@@ -165,8 +134,8 @@ pub(super) async fn close_session_handler(
     Path(session_id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     state
-        .access_service
-        .close_session(&actor.0, &session_id)
+        .app
+        .close_session(&shared_actor(&actor.0), &session_id)
         .await
         .map_err(|err| match err {
             talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
@@ -189,8 +158,8 @@ pub(super) async fn delete_session_handler(
     Path(session_id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     let ack = state
-        .access_service
-        .delete_session(&actor.0, &session_id)
+        .app
+        .delete_session(&shared_actor(&actor.0), &session_id)
         .await
         .map_err(|err| match err {
             talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
@@ -216,8 +185,8 @@ pub(super) async fn compact_session_handler(
     Path(session_id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     let session = state
-        .access_service
-        .compact_session(&actor.0, &session_id)
+        .app
+        .compact_session(&shared_actor(&actor.0), &session_id)
         .await
         .map_err(|err| match err {
             talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
@@ -243,8 +212,8 @@ pub(super) async fn clear_session_handler(
     Path(session_id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     let session = state
-        .access_service
-        .clear_session(&actor.0, &session_id)
+        .app
+        .clear_session(&shared_actor(&actor.0), &session_id)
         .await
         .map_err(|err| match err {
             talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
@@ -270,8 +239,8 @@ pub(super) async fn cancel_active_turn_handler(
     Path(session_id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     state
-        .access_service
-        .cancel_active_turn(&actor.0, &session_id)
+        .app
+        .cancel_active_turn(&shared_actor(&actor.0), &session_id)
         .await
         .map_err(|err| match err {
             talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
@@ -293,6 +262,41 @@ fn map_session_error(error: talos_error::TalosError, not_found_message: &str) ->
     match error {
         talos_error::TalosError::ResourceNotFound(_) => {
             ApiError::new(StatusCode::NOT_FOUND, "invalid_request", not_found_message)
+        }
+        talos_error::TalosError::ValidationError(message) => {
+            ApiError::new(StatusCode::CONFLICT, "invalid_request", message)
+        }
+        other => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            other.to_string(),
+        ),
+    }
+}
+
+fn map_create_session_error(error: talos_error::TalosError) -> ApiError {
+    match error {
+        talos_error::TalosError::UnsupportedModel(message) => {
+            ApiError::new(StatusCode::BAD_REQUEST, "invalid_request", message)
+        }
+        talos_error::TalosError::ValidationError(message) => {
+            ApiError::new(StatusCode::BAD_REQUEST, "invalid_request", message)
+        }
+        other => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            other.to_string(),
+        ),
+    }
+}
+
+fn map_patch_session_error(error: talos_error::TalosError, not_found_message: &str) -> ApiError {
+    match error {
+        talos_error::TalosError::ResourceNotFound(_) => {
+            ApiError::new(StatusCode::NOT_FOUND, "invalid_request", not_found_message)
+        }
+        talos_error::TalosError::UnsupportedModel(message) => {
+            ApiError::new(StatusCode::BAD_REQUEST, "invalid_request", message)
         }
         talos_error::TalosError::ValidationError(message) => {
             ApiError::new(StatusCode::CONFLICT, "invalid_request", message)

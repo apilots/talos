@@ -5,4 +5,4 @@ export type {
   TalosOutputItem,
   TalosSession,
   TalosToolProgressKind,
-} from "@talos/sdk";
+} from "@talos/sdk-browser";

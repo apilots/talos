@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 use talos_auth::RequestIdentity;
 use talos_types::ProjectPatch;
 
+use super::access::shared_actor;
 use super::errors::ApiError;
 use super::state::HttpApiState;
 
@@ -20,11 +21,10 @@ pub(super) struct CreateProjectRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct PatchProjectRequest {
     #[serde(default)]
     name: Option<String>,
-    #[serde(default)]
-    directory: Option<PathBuf>,
 }
 
 pub(super) async fn list_projects_handler(
@@ -32,8 +32,8 @@ pub(super) async fn list_projects_handler(
     actor: axum::extract::Extension<RequestIdentity>,
 ) -> Result<Json<Value>, ApiError> {
     let projects = state
-        .access_service
-        .list_projects(&actor.0)
+        .app
+        .list_projects(&shared_actor(&actor.0))
         .await
         .map_err(map_project_error)?;
     Ok(Json(json!({ "data": projects })))
@@ -45,8 +45,8 @@ pub(super) async fn get_project_handler(
     Path(project_id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     let project = state
-        .access_service
-        .get_project(&actor.0, &project_id)
+        .app
+        .get_project(&shared_actor(&actor.0), &project_id)
         .await
         .map_err(map_project_error)?;
     Ok(Json(json!(project)))
@@ -58,8 +58,8 @@ pub(super) async fn create_project_handler(
     Json(request): Json<CreateProjectRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let project = state
-        .access_service
-        .create_project(&actor.0, request.name, request.directory)
+        .app
+        .create_project(&shared_actor(&actor.0), request.name, request.directory)
         .await
         .map_err(map_project_error)?;
     Ok(Json(json!(project)))
@@ -71,17 +71,13 @@ pub(super) async fn patch_project_handler(
     Path(project_id): Path<String>,
     Json(request): Json<PatchProjectRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    if request.directory.is_some() {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "invalid_request",
-            "project directory is immutable",
-        ));
-    }
-
     let project = state
-        .access_service
-        .patch_project(&actor.0, &project_id, ProjectPatch { name: request.name })
+        .app
+        .patch_project(
+            &shared_actor(&actor.0),
+            &project_id,
+            ProjectPatch { name: request.name },
+        )
         .await
         .map_err(map_project_error)?;
 
@@ -94,8 +90,8 @@ pub(super) async fn delete_project_handler(
     Path(project_id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     state
-        .access_service
-        .delete_project(&actor.0, &project_id)
+        .app
+        .delete_project(&shared_actor(&actor.0), &project_id)
         .await
         .map_err(map_project_delete_error)?;
     Ok(Json(json!({ "success": true })))

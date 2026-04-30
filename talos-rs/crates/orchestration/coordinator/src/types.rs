@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use talos_types::talos::TalosJsonValue;
 
 /// Response from coordinator after handling a message
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -8,7 +9,7 @@ pub struct CoordinatorResponse {
     pub result: String,
 
     /// Optional data payload
-    pub data: Option<HashMap<String, serde_json::Value>>,
+    pub data: Option<HashMap<String, TalosJsonValue>>,
 
     /// Status indicating success or failure
     pub status: CoordinatorStatus,

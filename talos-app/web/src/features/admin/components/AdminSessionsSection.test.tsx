@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import type { TalosSession } from "@talos/sdk";
+import type { TalosSession } from "@talos/sdk-browser";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps, PropsWithChildren } from "react";

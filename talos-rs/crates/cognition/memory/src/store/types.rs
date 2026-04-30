@@ -1,8 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use talos_llm_provider::ChatMessage;
-use talos_types::talos::{StopReason, TalosOutputItem, TalosUsage};
+use talos_types::talos::{StopReason, TalosJsonValue, TalosOutputItem, TalosUsage};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -32,7 +31,7 @@ pub struct ToolCallRecord {
     pub call_id: String,
     pub name: String,
     #[serde(default)]
-    pub arguments: Value,
+    pub arguments: TalosJsonValue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,7 +40,7 @@ pub struct ToolResultRecord {
     pub call_id: String,
     pub tool: String,
     #[serde(default)]
-    pub payload: Value,
+    pub payload: TalosJsonValue,
     #[serde(default)]
     pub is_error: bool,
     #[serde(default)]
@@ -108,7 +107,7 @@ pub struct SessionTranscriptStateDelta {
     pub namespace: SessionTranscriptStateNamespace,
     pub key: String,
     #[serde(default)]
-    pub value: Value,
+    pub value: TalosJsonValue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -197,7 +196,7 @@ pub struct SessionTranscriptConfirmationPayload {
     pub tool_name: String,
     pub call_id: String,
     pub prompt: String,
-    pub arguments: serde_json::Value,
+    pub arguments: TalosJsonValue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -212,7 +211,7 @@ pub struct SessionTranscriptApprovalResponsePayload {
 pub struct SessionTranscriptDynamicToolRequestPayload {
     pub call_id: String,
     pub tool_name: String,
-    pub arguments: serde_json::Value,
+    pub arguments: TalosJsonValue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

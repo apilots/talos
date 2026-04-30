@@ -1,0 +1,13 @@
+[package]
+name = "talos-app-protocol"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+talos-error = { workspace = true }
+talos-types = { workspace = true }
+schemars = { workspace = true, features = ["derive"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+ts-rs = { workspace = true }

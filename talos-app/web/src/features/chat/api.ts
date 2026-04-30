@@ -1,4 +1,4 @@
-import { TalosHttpError } from "@talos/sdk";
+import { TalosHttpError } from "@talos/sdk-browser";
 import type {
   ModelInfo,
   ProjectRecord as ApiProjectRecord,
@@ -11,7 +11,7 @@ import type {
   TalosMessageResponse,
   TalosSession,
   ToolApprovalRequest,
-} from "@talos/sdk";
+} from "@talos/sdk-browser";
 
 import { getTalosClient } from "@/shared/api/client";
 import { approvalModeToPolicy, isUnboundProject } from "@/shared/types/domain";

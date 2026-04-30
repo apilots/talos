@@ -1,4 +1,5 @@
 use crate::CoordinatorImpl;
+use crate::RawAgentEvent;
 use std::sync::Arc;
 use talos_agent::{AgentOrchestrator, OrchestratorEvent};
 use talos_error::TalosResult;
@@ -51,9 +52,7 @@ impl CoordinatorImpl {
     }
 }
 
-pub(super) fn map_orchestrator_event(
-    event: OrchestratorEvent,
-) -> (TalosEventType, TalosEventPayload) {
+pub(super) fn map_orchestrator_event(event: RawAgentEvent) -> (TalosEventType, TalosEventPayload) {
     match event {
         OrchestratorEvent::MessageStarted(payload) => (
             TalosEventType::MessageStarted,

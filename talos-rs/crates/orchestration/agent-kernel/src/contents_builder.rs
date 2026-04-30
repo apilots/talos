@@ -493,7 +493,7 @@ mod tests {
                             tool_name: "rm".to_string(),
                             call_id: "call_1".to_string(),
                             prompt: "confirm".to_string(),
-                            arguments: serde_json::json!({}),
+                            arguments: serde_json::json!({}).into(),
                         },
                     },
                     actions: crate::EventActions::default(),

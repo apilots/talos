@@ -1,14 +1,14 @@
-use talos_client::{TalosContentItem, TalosOutputItem};
+use talos_client::{TalosContentItem, TalosJsonValue, TalosOutputItem};
 
 use crate::types::{ChatBlock, ChatRole, ToolCallStatus};
 use crate::TuiApp;
 
 impl TuiApp {
     fn should_replace_tool_input(
-        existing: Option<&serde_json::Value>,
-        incoming: &serde_json::Value,
+        existing: Option<&TalosJsonValue>,
+        incoming: &TalosJsonValue,
     ) -> bool {
-        let incoming_has_detail = match incoming {
+        let incoming_has_detail = match incoming.as_inner() {
             serde_json::Value::Null => false,
             serde_json::Value::Object(map) => !map.is_empty(),
             serde_json::Value::Array(items) => !items.is_empty(),
@@ -110,11 +110,12 @@ impl TuiApp {
         &mut self,
         call_id: String,
         tool_name: String,
-        tool_input: serde_json::Value,
+        tool_input: impl Into<TalosJsonValue>,
         iteration: u64,
         item_index: u64,
         timing_ms: Option<u64>,
     ) -> usize {
+        let tool_input = tool_input.into();
         if let Some(idx) = self.resolve_tool_call_block_idx(&call_id) {
             if let Some(block) = self.chat_blocks.get_mut(idx) {
                 block.tool_name = Some(tool_name);

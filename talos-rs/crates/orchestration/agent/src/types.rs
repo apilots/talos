@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use talos_llm_provider::FunctionCall;
-use talos_types::talos::{TalosOutputItem, TalosReasoning};
+use talos_types::talos::{TalosJsonValue, TalosOutputItem, TalosReasoning};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentResponse {
@@ -17,5 +17,5 @@ pub type ToolCall = FunctionCall;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentStream {
     pub event_type: String,
-    pub data: serde_json::Value,
+    pub data: TalosJsonValue,
 }

@@ -1,16 +1,15 @@
 use dashmap::DashMap;
-use serde_json::Value;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 use talos_memory::MemoryStore;
 
 use crate::collaboration::CollaborationRuntime;
+use crate::handlers::dynamic::StoredDynamicToolResult;
 use crate::state::{
     get_session_tool_state, CatalogToolEntry, ContentReplacementState, DeferredToolState,
     PermissionMode, ReadFileStateStore, SessionToolState, TaskStateEntry, TaskStateStore,
-    ToolCatalogState, ToolDecisionState, ToolPermissionContext, ToolResultBudgetState,
+    ToolCatalogState, ToolPermissionContext, ToolResultBudgetState,
 };
 
 /// Execution context passed to tools.
@@ -18,7 +17,8 @@ use crate::state::{
 pub struct ToolContext {
     session_id: String,
     user_id: String,
-    state: Arc<DashMap<String, Value>>,
+    project_root: Option<PathBuf>,
+    dynamic_tool_results: Arc<DashMap<String, StoredDynamicToolResult>>,
     kernel_config: Option<Arc<AgentKernelConfig>>,
     pre_approved: bool,
     collaboration_runtime: Option<Arc<CollaborationRuntime>>,
@@ -27,8 +27,6 @@ pub struct ToolContext {
 }
 
 impl ToolContext {
-    const PROJECT_ROOT_STATE_KEY: &'static str = "__project_root";
-
     pub fn new(session_id: impl Into<String>, user_id: impl Into<String>) -> Self {
         Self::new_with_kernel_config(session_id, user_id, None)
     }
@@ -42,7 +40,8 @@ impl ToolContext {
         Self {
             session_id: session_id.clone(),
             user_id: user_id.into(),
-            state: Arc::new(DashMap::new()),
+            project_root: None,
+            dynamic_tool_results: Arc::new(DashMap::new()),
             kernel_config,
             pre_approved: false,
             collaboration_runtime: None,
@@ -70,11 +69,8 @@ impl ToolContext {
         self
     }
 
-    pub fn with_project_root(self, project_root: impl Into<PathBuf>) -> Self {
-        self.set_state(
-            Self::PROJECT_ROOT_STATE_KEY,
-            Value::String(project_root.into().display().to_string()),
-        );
+    pub fn with_project_root(mut self, project_root: impl Into<PathBuf>) -> Self {
+        self.project_root = Some(project_root.into());
         self
     }
 
@@ -95,18 +91,6 @@ impl ToolContext {
         &self.user_id
     }
 
-    pub fn get_state(&self, key: &str) -> Option<Value> {
-        self.state.get(key).map(|v| v.value().clone())
-    }
-
-    pub fn set_state(&self, key: impl Into<String>, value: Value) {
-        self.state.insert(key.into(), value);
-    }
-
-    pub fn remove_state(&self, key: &str) -> Option<Value> {
-        self.state.remove(key).map(|(_, v)| v)
-    }
-
     pub fn kernel_config(&self) -> Option<&AgentKernelConfig> {
         self.kernel_config.as_deref()
     }
@@ -120,15 +104,21 @@ impl ToolContext {
     }
 
     pub fn project_root(&self) -> Option<PathBuf> {
-        self.get_state(Self::PROJECT_ROOT_STATE_KEY)
-            .and_then(|value| value.as_str().map(PathBuf::from))
+        self.project_root.clone()
     }
 
-    pub fn state_snapshot(&self) -> HashMap<String, Value> {
-        self.state
-            .iter()
-            .map(|entry| (entry.key().clone(), entry.value().clone()))
-            .collect()
+    pub fn set_dynamic_tool_result(
+        &self,
+        call_id: impl Into<String>,
+        result: StoredDynamicToolResult,
+    ) {
+        self.dynamic_tool_results.insert(call_id.into(), result);
+    }
+
+    pub fn get_dynamic_tool_result(&self, call_id: &str) -> Option<StoredDynamicToolResult> {
+        self.dynamic_tool_results
+            .get(call_id)
+            .map(|result| result.value().clone())
     }
 
     pub fn read_file_state(&self) -> &ReadFileStateStore {
@@ -137,10 +127,6 @@ impl ToolContext {
 
     pub fn task_state_store(&self) -> &TaskStateStore {
         &self.session_state.tasks
-    }
-
-    pub fn decision_state(&self) -> &ToolDecisionState {
-        &self.session_state.decisions
     }
 
     pub fn deferred_tool_state(&self) -> &DeferredToolState {
@@ -187,15 +173,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_context_state_management() {
+    fn test_context_typed_runtime_state() {
         let context = ToolContext::new("session-1", "user-1");
 
-        context.set_state("cursor", serde_json::json!(10));
-        assert_eq!(context.get_state("cursor"), Some(serde_json::json!(10)));
+        context.set_dynamic_tool_result(
+            "call-1",
+            StoredDynamicToolResult {
+                output: "ok".to_string(),
+                success: true,
+            },
+        );
 
-        let removed = context.remove_state("cursor");
-        assert_eq!(removed, Some(serde_json::json!(10)));
-        assert_eq!(context.get_state("cursor"), None);
+        let result = context
+            .get_dynamic_tool_result("call-1")
+            .expect("missing dynamic result");
+        assert_eq!(result.output, "ok");
+        assert!(result.success);
     }
 
     #[test]

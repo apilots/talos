@@ -1,3 +1,4 @@
+use crate::execution::ReplayDynamicToolResult;
 use crate::ToolExecutionMode;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -20,7 +21,7 @@ pub struct ToolExecutionContext {
     pub kernel_config: Arc<AgentKernelConfig>,
     pub memory_store: Arc<MemoryStore>,
     pub pre_approved_call_ids: HashSet<String>,
-    pub dynamic_tool_results: HashMap<String, Value>,
+    pub dynamic_tool_results: HashMap<String, ReplayDynamicToolResult>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,9 +75,12 @@ fn build_tool_context(
     };
     let ctx = ctx.with_memory_store(execution_context.memory_store.clone());
     if let Some(result) = execution_context.dynamic_tool_results.get(call_id) {
-        ctx.set_state(
-            talos_tools::handlers::dynamic::dynamic_tool_state_key(call_id),
-            result.clone(),
+        ctx.set_dynamic_tool_result(
+            call_id.to_string(),
+            talos_tools::handlers::dynamic::StoredDynamicToolResult {
+                output: result.output.clone(),
+                success: result.success,
+            },
         );
     }
     if pre_approved {

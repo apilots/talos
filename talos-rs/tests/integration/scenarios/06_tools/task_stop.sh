@@ -121,11 +121,11 @@ assert len(results) >= 2, results
 bash_result = next(item for item in results if item.get("tool_name") == "Bash")
 task_result = next(item for item in results if item.get("tool_name") == "TaskStop")
 
-bash_content = (bash_result.get("content") or [{}])[0].get("value") or {}
+bash_content = (((bash_result.get("content") or [{}])[0].get("value") or {}).get("value", (bash_result.get("content") or [{}])[0].get("value") or {}))
 assert bash_content.get("session_id") is not None, bash_content
 assert bash_content.get("status") in {"running", "exited"}, bash_content
 
-task_content = (task_result.get("content") or [{}])[0].get("value") or {}
+task_content = (((task_result.get("content") or [{}])[0].get("value") or {}).get("value", (task_result.get("content") or [{}])[0].get("value") or {}))
 assert task_content.get("stopped") is True, task_content
 assert task_content.get("task_id") is not None, task_content
 PY

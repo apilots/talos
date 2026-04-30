@@ -1,4 +1,4 @@
-import type { LlmConfig } from "@talos/sdk";
+import type { LlmConfig } from "@talos/sdk-browser";
 import { getTalosClient } from "@/shared/api/client";
 
 export async function getAdminLlmConfig(): Promise<LlmConfig> {

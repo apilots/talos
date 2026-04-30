@@ -6,7 +6,7 @@ import type {
   RegisterRequest,
   UpdateCurrentUserRequest,
   UserDto,
-} from "@talos/sdk";
+} from "@talos/sdk-browser";
 
 import { getTalosClient } from "@/shared/api/client";
 import { getConnectionSettings } from "@/shared/store/app-store";

@@ -833,7 +833,7 @@ async fn test_tool_using_stream_keeps_assistant_output_interleaved() {
                 request_id: "req-test".to_string(),
                 call_id: "call-buffer".to_string(),
                 name: "read".to_string(),
-                arguments: serde_json::json!({"path":"/tmp/example.txt"}),
+                arguments: serde_json::json!({"path":"/tmp/example.txt"}).into(),
                 item_index: 0,
                 iteration: 1,
                 step_id: "step-1".to_string(),

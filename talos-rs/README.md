@@ -29,6 +29,8 @@ Talos is an AI Agent Framework designed to serve as the software brain for AI as
 
 ### Gateway Layer
 - **HTTP Server**: Session-first REST API (`/v1/sessions` + `/v1/sessions/{id}/messages`)
+- **App Server**: Local JSON-RPC over stdio JSONL for CLI, TUI, and Desktop
+- **Application Service**: Shared service layer used by HTTP and app-server adapters
 - **Authentication Middleware**: Bearer token validation
 
 ### Perception Layer
@@ -84,12 +86,29 @@ cargo run -p talos
 
 The server will start on `http://0.0.0.0:8080` by default.
 
+Start the local app-server protocol adapter:
+```bash
+TALOS_LOCAL_LAUNCH_TOKEN=local-token cargo run -p talos -- app-server
+```
+
+`talos app-server` speaks JSON-RPC over stdin/stdout JSONL. It does not open a
+port; stdout is reserved for protocol messages and logs go to stderr.
+
+Run CLI through the embedded app-server path:
+```bash
+cargo run -p talos-client -- models
+cargo run -p talos-client -- chat simple "hello" --stream
+```
+
 ### Running the TUI
 
 Start the Terminal User Interface:
 ```bash
 cargo run -p talos-ui-tui
 ```
+
+The TUI starts an embedded `talos app-server` child process and communicates
+over JSON-RPC stdio without opening a local port.
 
 ### API Usage
 
@@ -172,8 +191,9 @@ Talos follows an eight-layer architecture with clear separation of concerns:
 - `crates/perception/` - Channel integrations
 - `crates/cognition/` - Memory-related services
 - `crates/action/` - Tools, policy, sandbox execution
-- `crates/orchestration/` - Agent coordination, kernel, sessions, routing
-- `crates/gateway/` - HTTP gateway interfaces
+- `crates/orchestration/` - Agent coordination, kernel, sessions, routing, and application services
+- `crates/gateway/` - HTTP gateway, app-server JSON-RPC adapter, and protocol types
+- `crates/orchestration/application-service/` - Shared application services used by protocol adapters
 - `bin/talos/` - Main binary executable
 
 ## ⚙️ Configuration Options

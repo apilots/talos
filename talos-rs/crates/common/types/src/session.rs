@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use talos_config::ToolApprovalPolicy;
+use talos_error::TalosError;
 
 /// Session record stored by the gateway.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +28,42 @@ pub struct SessionRecord {
 }
 
 pub const DEFAULT_SESSION_TITLE: &str = "Untitled Session";
+
+pub fn normalize_session_title(title: &str) -> Option<String> {
+    let first_line = title.lines().next().unwrap_or_default().trim();
+    let normalized = first_line
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim_end_matches(['.', '!', '?', ':', ';', '。', '！', '？', '：', '；'])
+        .trim();
+    if normalized.is_empty() || normalized == DEFAULT_SESSION_TITLE {
+        return None;
+    }
+    Some(
+        normalized
+            .chars()
+            .take(48)
+            .collect::<String>()
+            .trim()
+            .to_string(),
+    )
+    .filter(|value| !value.is_empty())
+}
+
+pub fn deterministic_session_title(first_user_text: &str) -> String {
+    let compact = first_user_text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    normalize_session_title(&compact).unwrap_or_else(|| DEFAULT_SESSION_TITLE.to_string())
+}
+
+pub fn session_title_or_fallback(generated: String, first_user_text: &str) -> String {
+    normalize_session_title(&generated)
+        .unwrap_or_else(|| deterministic_session_title(first_user_text))
+}
 
 impl SessionRecord {
     pub fn from_session(session: &TalosSession, base_model: &str) -> Self {
@@ -251,6 +288,19 @@ impl TalosSession {
         let normalized = self.title.trim();
         !normalized.is_empty() && normalized != DEFAULT_SESSION_TITLE
     }
+
+    pub fn apply_turn_progress(
+        &mut self,
+        assistant_model: &str,
+        message_delta: u64,
+        usage: &talos::TalosUsage,
+    ) {
+        self.state.last_activity = crate::now();
+        self.state.message_count = self.state.message_count.saturating_add(message_delta);
+        self.state.usage.accumulate(usage);
+        self.config.agent.model = assistant_model.to_string();
+        self.config.llm.model = assistant_model.to_string();
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -336,8 +386,138 @@ pub struct SessionPatchAck {
     pub success: bool,
 }
 
+pub fn connection_mode_from_context(context: &talos::TalosContext) -> talos::TalosConnectionMode {
+    context
+        .environment
+        .as_ref()
+        .map(|environment| environment.connection_mode)
+        .unwrap_or_default()
+}
+
+pub fn normalize_current_directory(
+    context: &talos::TalosContext,
+    current_directory: Option<PathBuf>,
+) -> crate::TalosResult<Option<PathBuf>> {
+    match connection_mode_from_context(context) {
+        talos::TalosConnectionMode::Remote => Ok(None),
+        talos::TalosConnectionMode::Embedded => {
+            let Some(path) = current_directory else {
+                return Ok(None);
+            };
+            validate_project_directory_with_label(&path, "current directory")?;
+            Ok(Some(path))
+        }
+    }
+}
+
+pub fn validate_project_directory(directory: &std::path::Path) -> crate::TalosResult<()> {
+    validate_project_directory_with_label(directory, "project directory")
+}
+
+pub fn resolve_effective_project_root(
+    session: &TalosSession,
+    project_directory: Option<PathBuf>,
+    workspace_root: Option<PathBuf>,
+) -> Option<PathBuf> {
+    if let Some(directory) = project_directory {
+        return Some(directory);
+    }
+
+    if matches!(
+        session
+            .context
+            .environment
+            .as_ref()
+            .map(|environment| environment.connection_mode),
+        Some(talos::TalosConnectionMode::Embedded)
+    ) {
+        if let Some(current_directory) = session.current_directory.clone() {
+            return Some(current_directory);
+        }
+    }
+
+    workspace_root
+}
+
+fn validate_project_directory_with_label(
+    directory: &std::path::Path,
+    label: &str,
+) -> crate::TalosResult<()> {
+    if !directory.is_absolute() {
+        return Err(TalosError::ValidationError(format!(
+            "{} must be an absolute path: {}",
+            label,
+            directory.display()
+        )));
+    }
+    if !directory.exists() {
+        return Err(TalosError::ValidationError(format!(
+            "{} does not exist: {}",
+            label,
+            directory.display()
+        )));
+    }
+    if !directory.is_dir() {
+        return Err(TalosError::ValidationError(format!(
+            "{} is not a directory: {}",
+            label,
+            directory.display()
+        )));
+    }
+    Ok(())
+}
+
+#[async_trait]
+pub trait SessionRuntime: Send + Sync {
+    async fn resolve_target_agent(
+        &self,
+        _context: &talos::TalosContext,
+    ) -> crate::TalosResult<String> {
+        Ok("default".to_string())
+    }
+
+    async fn invalidate_cached_session(&self, _session_id: &str) -> crate::TalosResult<()> {
+        Ok(())
+    }
+
+    async fn compact_session(&self, session_id: &str) -> crate::TalosResult<TalosSession>;
+
+    async fn clear_session(&self, session_id: &str) -> crate::TalosResult<TalosSession>;
+
+    async fn close_session(&self, session_id: &str) -> crate::TalosResult<()>;
+
+    async fn delete_session(&self, session_id: &str) -> crate::TalosResult<SessionPatchAck>;
+
+    async fn cancel_active_turn(&self, session_id: &str) -> crate::TalosResult<()>;
+
+    async fn submit_tool_approval(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        approved: bool,
+        reason: Option<String>,
+    ) -> crate::TalosResult<()>;
+
+    async fn submit_dynamic_tool_result(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        output: String,
+        success: bool,
+    ) -> crate::TalosResult<()>;
+}
+
 #[async_trait]
 pub trait SessionService: Send + Sync {
+    async fn resolve_target_agent(
+        &self,
+        _context: &talos::TalosContext,
+    ) -> crate::TalosResult<String> {
+        Ok("default".to_string())
+    }
+
     async fn create_session(
         &self,
         context: talos::TalosContext,
@@ -352,6 +532,10 @@ pub trait SessionService: Send + Sync {
     async fn count_sessions(&self, query: SessionQuery) -> crate::TalosResult<usize>;
 
     async fn get_session(&self, session_id: &str) -> crate::TalosResult<Option<TalosSession>>;
+
+    async fn invalidate_cached_session(&self, _session_id: &str) -> crate::TalosResult<()> {
+        Ok(())
+    }
 
     async fn patch_session(
         &self,

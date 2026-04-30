@@ -20,7 +20,7 @@ use talos_types::gateway::{GatewayRequest, GatewayResponse};
 use talos_types::talos::{TalosContext, TalosEvent, TalosUsage};
 use talos_types::{
     ProjectPatch, ProjectRecord, RequestHandler, SessionConf, SessionPatch, SessionPatchAck,
-    SessionQuery, SessionService, TalosConfig, TalosSession,
+    SessionQuery, SessionRuntime, SessionService, TalosConfig, TalosSession,
 };
 use tokio::sync::{mpsc, RwLock};
 use tracing::{info, warn};
@@ -287,7 +287,73 @@ impl RequestHandler for CoordinatorImpl {
 }
 
 #[async_trait]
+impl SessionRuntime for CoordinatorImpl {
+    async fn resolve_target_agent(&self, context: &TalosContext) -> TalosResult<String> {
+        SessionService::resolve_target_agent(self, context).await
+    }
+
+    async fn invalidate_cached_session(&self, session_id: &str) -> TalosResult<()> {
+        SessionService::invalidate_cached_session(self, session_id).await
+    }
+
+    async fn compact_session(&self, session_id: &str) -> TalosResult<TalosSession> {
+        SessionService::compact_session(self, session_id).await
+    }
+
+    async fn clear_session(&self, session_id: &str) -> TalosResult<TalosSession> {
+        SessionService::clear_session(self, session_id).await
+    }
+
+    async fn close_session(&self, session_id: &str) -> TalosResult<()> {
+        SessionService::close_session(self, session_id).await
+    }
+
+    async fn delete_session(&self, session_id: &str) -> TalosResult<SessionPatchAck> {
+        SessionService::delete_session(self, session_id).await
+    }
+
+    async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()> {
+        SessionService::cancel_active_turn(self, session_id).await
+    }
+
+    async fn submit_tool_approval(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        approved: bool,
+        reason: Option<String>,
+    ) -> TalosResult<()> {
+        SessionService::submit_tool_approval(self, session_id, call_id, tool_name, approved, reason)
+            .await
+    }
+
+    async fn submit_dynamic_tool_result(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        output: String,
+        success: bool,
+    ) -> TalosResult<()> {
+        SessionService::submit_dynamic_tool_result(
+            self, session_id, call_id, tool_name, output, success,
+        )
+        .await
+    }
+}
+
+#[async_trait]
 impl SessionService for CoordinatorImpl {
+    async fn resolve_target_agent(&self, context: &TalosContext) -> TalosResult<String> {
+        let channel = Self::route_channel(context);
+        Ok(self
+            .router
+            .route(&channel, &context.user_id)
+            .await?
+            .unwrap_or_else(|| "default".to_string()))
+    }
+
     async fn create_session(
         &self,
         context: TalosContext,
@@ -296,12 +362,7 @@ impl SessionService for CoordinatorImpl {
         project_id: Option<String>,
         current_directory: std::option::Option<std::path::PathBuf>,
     ) -> TalosResult<TalosSession> {
-        let channel = Self::route_channel(&context);
-        let target_agent = self
-            .router
-            .route(&channel, &context.user_id)
-            .await?
-            .unwrap_or_else(|| "default".to_string());
+        let target_agent = SessionService::resolve_target_agent(self, &context).await?;
 
         let record = self
             .sessions
@@ -327,6 +388,11 @@ impl SessionService for CoordinatorImpl {
 
     async fn get_session(&self, session_id: &str) -> TalosResult<Option<TalosSession>> {
         self.sessions.get_session(session_id).await
+    }
+
+    async fn invalidate_cached_session(&self, session_id: &str) -> TalosResult<()> {
+        self.sessions.invalidate_cached_session(session_id).await;
+        Ok(())
     }
 
     async fn patch_session(

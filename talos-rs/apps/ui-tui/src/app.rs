@@ -8,8 +8,8 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
-use talos_client::{TalosClient, TalosContext, TalosSession};
-use talos_types::talos::{TalosConnectionMode, TalosSessionEnvironment, TalosUsage};
+use talos_client::{ProtocolTalosContext, TalosSession};
+use talos_types::talos::{TalosConnectionMode, TalosUsage};
 
 use crate::client::GatewayClient;
 use crate::render;
@@ -123,11 +123,6 @@ impl TuiApp {
         app
     }
 
-    pub fn new_with_client(client: Arc<TalosClient>, connection_mode: TalosConnectionMode) -> Self {
-        let gateway_client: Arc<dyn GatewayClient> = client;
-        Self::build(Some(gateway_client), connection_mode)
-    }
-
     pub fn new_with_gateway_client(
         gateway_client: Arc<dyn GatewayClient>,
         connection_mode: TalosConnectionMode,
@@ -135,19 +130,16 @@ impl TuiApp {
         Self::build(Some(gateway_client), connection_mode)
     }
 
-    pub(crate) fn session_environment(&self) -> TalosSessionEnvironment {
-        TalosSessionEnvironment {
-            directory: self.startup_directory.clone(),
-            connection_mode: self.connection_mode,
+    pub(crate) fn build_session_context(&self) -> ProtocolTalosContext {
+        let user_id = env::var("USER").unwrap_or_else(|_| "local-user".to_string());
+        ProtocolTalosContext {
+            source_type: "cli".to_string(),
+            provider: "cli".to_string(),
+            channel_id: "terminal".to_string(),
+            thread_id: Some(user_id),
+            message_id: format!("msg-{}", uuid::Uuid::new_v4().simple()),
+            trace_id: format!("trace-{}", uuid::Uuid::new_v4().simple()),
         }
-    }
-
-    pub(crate) fn build_session_context(&self) -> TalosContext {
-        let context =
-            TalosContext::cli(env::var("USER").unwrap_or_else(|_| "local-user".to_string()))
-                .with_channel_id("terminal")
-                .with_environment(self.session_environment());
-        context
     }
 
     pub async fn initialize_remote(&mut self) {
@@ -361,32 +353,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn embedded_session_context_uses_environment_directory_only() {
+    fn embedded_session_context_uses_terminal_channel() {
         let app = TuiApp::build(None, TalosConnectionMode::Embedded);
         let context = app.build_session_context();
 
-        assert_eq!(context.project_root, None);
-        assert_eq!(
-            context
-                .environment
-                .as_ref()
-                .map(|env| env.directory.as_path()),
-            Some(app.startup_directory.as_path())
-        );
+        assert_eq!(context.source_type, "cli");
+        assert_eq!(context.provider, "cli");
+        assert_eq!(context.channel_id, "terminal");
     }
 
     #[test]
-    fn remote_session_context_keeps_environment_directory_without_project_root() {
+    fn remote_session_context_uses_terminal_channel() {
         let app = TuiApp::build(None, TalosConnectionMode::Remote);
         let context = app.build_session_context();
 
-        assert_eq!(context.project_root, None);
-        assert_eq!(
-            context
-                .environment
-                .as_ref()
-                .map(|env| env.directory.as_path()),
-            Some(app.startup_directory.as_path())
-        );
+        assert_eq!(context.source_type, "cli");
+        assert_eq!(context.provider, "cli");
+        assert_eq!(context.channel_id, "terminal");
     }
 }

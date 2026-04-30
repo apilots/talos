@@ -17,13 +17,18 @@ All scenarios are real server/client flows and do not use mock gateway handlers.
 - Scope: async ack + session event SSE + idempotency behavior
 - Verifies: `/v1/sessions/{id}/messages`, `/v1/sessions/{id}/events`, `Idempotency-Key`
 
-4. `scenarios/05_cli/`
+4. `scenarios/04_auth.sh`
+- Scope: authentication and token-protected API paths
+- Verifies: auth enabled/disabled handling and bearer token flow
+
+5. `scenarios/05_cli/`
 - Scope: CLI-driven interactive scenarios
 - Files:
+  - `app_server_e2e.sh`
   - `full_flow.sh`
   - `bilingual_chat.sh`
 
-5. `scenarios/06_tools/`
+6. `scenarios/06_tools/`
 - Scope: tool-effect validation scenarios
 - Files:
   - `http_bash.sh`
@@ -47,26 +52,59 @@ All scenarios are real server/client flows and do not use mock gateway handlers.
   - `task_output.sh`
   - `task_stop.sh`
 
-6. `scenarios/07_memory/`
+7. `scenarios/07_memory/`
 - Scope: memory flush and workspace docs
 - Files:
   - `session_close_flushes_memory.sh`
   - `workspace_docs_api.sh`
 
-7. `scenarios/08_tui/`
+8. `scenarios/08_admin_llm.sh`
+- Scope: admin LLM config API
+- Verifies: admin model/config read-write path
+
+9. `scenarios/08_tui/`
 - Scope: embedded TUI lifecycle validation
 - Files:
   - `embedded_quit_flushes_memory.sh`
+
+10. `scenarios/09_app_server/`
+- Scope: JSON-RPC app-server protocol and resource parity
+- Files:
+  - `protocol_e2e.sh`
 
 ## Runner
 
 Use:
 
 ```bash
+source .env
 tests/integration/run_e2e.sh
 tests/integration/run_e2e.sh --group 06_tools
 tests/integration/run_e2e.sh --case 05_cli/full_flow
+tests/integration/run_e2e.sh --case 05_cli/app_server_e2e
+tests/integration/run_e2e.sh --case 09_app_server/protocol_e2e
 ```
+
+`protocol_e2e.sh` starts `talos app-server` through the Rust app-server
+client and verifies initialize, model/config/session/event flows, replay,
+multi-subscriber ordering, active-turn conflict handling, memory files,
+workspace docs, project CRUD, and protocol error mapping.
+
+Protocol fixtures are generated from Rust with:
+
+```bash
+cargo run -p talos-app-protocol --example export_fixtures
+```
+
+The command refreshes both the JSON Schema fixture and the generated TypeScript
+protocol file used by `@talos/sdk-core`.
+
+Useful environment variables for app-server scenarios:
+
+- `TALOS_APP_SERVER_BIN`: binary invoked as `talos app-server`
+- `TALOS_LOCAL_LAUNCH_TOKEN`: local initialize token
+- `TALOS_APP_SERVER_TEST_MODEL`: model override for turn smoke scenarios
+- `TALOS_APP_SERVER_SCENARIO_TIMEOUT_SECS`: per-scenario timeout override
 
 The runner generates:
 - `tests/integration/reports/e2e_report_<timestamp>.md`

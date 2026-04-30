@@ -15,19 +15,26 @@ fi
 echo "CASE cli_stream_real_llm_precheck PASS key_detected=true"
 
 build_binaries
-start_server
-trap stop_server EXIT
+prepare_talos_home
+
+export TALOS_APP_SERVER_BIN="${ROOT_DIR}/target/debug/talos"
+export TALOS_LOCAL_LAUNCH_TOKEN="${TALOS_LOCAL_LAUNCH_TOKEN:-talos-cli-bash-token}"
 
 cli="${ROOT_DIR}/target/debug/talos-client"
-models_json="$(curl -sS -H "Authorization: Bearer ${AUTH_TOKEN}" "${GATEWAY_URL}/v1/models")"
-primary_model="$(python3 -c 'import json,sys; data=json.load(sys.stdin); arr=data.get("data",[]); print((arr[0].get("id") if arr else ""))' <<< "${models_json}")"
+
+run_cli() {
+  "${cli}" "$@" 2>&1 | sed '/^Command executed successfully$/d'
+}
+
+models_json="$(run_cli models --format json)"
+primary_model="$(python3 -c 'import json,sys; arr=json.load(sys.stdin); print((arr[0].get("id") if arr else ""))' <<< "${models_json}")"
 if [[ -z "${primary_model}" ]]; then
   echo "CASE cli_stream_select_model FAIL models=${models_json}"
   exit 1
 fi
 echo "CASE cli_stream_select_model PASS model=${primary_model}"
 
-create_output="$("${cli}" --gateway-url "${GATEWAY_URL}" --auth-token "${AUTH_TOKEN}" session create --model "${primary_model}")"
+create_output="$(run_cli session create --model "${primary_model}")"
 session_id="$(echo "${create_output}" | sed -n 's/^Session created: \([^ ]*\).*/\1/p')"
 if [[ -z "${session_id}" ]]; then
   echo "CASE cli_stream_session_create FAIL output=${create_output}"
@@ -39,12 +46,12 @@ stream_stdout="$(scenario_report_path cli_stream_stdout.log)"
 stream_stderr="$(scenario_report_path cli_stream_stderr.log)"
 stream_input="You must call Bash tool exactly once with command ls and return raw output inside <tool_output></tool_output>."
 
-"${cli}" --gateway-url "${GATEWAY_URL}" --auth-token "${AUTH_TOKEN}" \
-  chat in "${session_id}" "${stream_input}" --stream \
+run_cli chat in "${session_id}" "${stream_input}" --stream \
   >"${stream_stdout}" 2>"${stream_stderr}"
 
 stdout_text="$(cat "${stream_stdout}")"
 stderr_text="$(cat "${stream_stderr}")"
+events_text="${stdout_text}"$'\n'"${stderr_text}"
 response_json="$(STDOUT_TEXT="${stdout_text}" STDERR_TEXT="${stderr_text}" python3 - <<'PY'
 import json
 import os
@@ -60,25 +67,25 @@ if [[ -z "${stdout_text}" ]]; then
   echo "CASE cli_chat_stream_tool_exec FAIL empty_stdout"
   exit 1
 fi
-if ! echo "${stderr_text}" | grep -Eq "THINKING\\[|SUMMARY\\["; then
-  echo "CASE cli_chat_stream_tool_exec FAIL missing_thinking_or_summary_event stderr=${stderr_text}"
+if ! echo "${events_text}" | grep -Eq "THINKING\\[|SUMMARY\\["; then
+  echo "CASE cli_chat_stream_tool_exec FAIL missing_thinking_or_summary_event events=${events_text}"
   exit 1
 fi
-if ! echo "${stderr_text}" | grep -q "TOOL_CALL_STARTED name=Bash internal=Bash"; then
-  echo "CASE cli_chat_stream_tool_exec FAIL missing_tool_started stderr=${stderr_text}"
+if ! echo "${events_text}" | grep -q "TOOL_CALL_STARTED name=Bash internal=Bash"; then
+  echo "CASE cli_chat_stream_tool_exec FAIL missing_tool_started events=${events_text}"
   exit 1
 fi
-if ! echo "${stderr_text}" | grep -q "TOOL_CALL_COMPLETED"; then
-  echo "CASE cli_chat_stream_tool_exec FAIL missing_tool_completed stderr=${stderr_text}"
+if ! echo "${events_text}" | grep -q "TOOL_CALL_COMPLETED"; then
+  echo "CASE cli_chat_stream_tool_exec FAIL missing_tool_completed events=${events_text}"
   exit 1
 fi
-exec_call_ids="$(STDERR_TEXT="${stderr_text}" python3 - <<'PY'
+exec_call_ids="$(EVENTS_TEXT="${events_text}" python3 - <<'PY'
 import os
 import re
 
-stderr = os.environ.get("STDERR_TEXT", "")
-started = re.search(r"TOOL_CALL_STARTED name=Bash internal=Bash call_id=([^ ]*)", stderr)
-completed = re.search(r"TOOL_CALL_COMPLETED call_id=([^ ]+) tool=Bash internal=Bash", stderr)
+events = os.environ.get("EVENTS_TEXT", "")
+started = re.search(r"TOOL_CALL_STARTED name=Bash internal=Bash call_id=([^ ]*)", events)
+completed = re.search(r"TOOL_CALL_COMPLETED call_id=([^ ]+) tool=Bash internal=Bash", events)
 print(f"{started.group(1) if started else ''}\t{completed.group(1) if completed else ''}")
 PY
 )"

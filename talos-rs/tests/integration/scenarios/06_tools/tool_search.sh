@@ -122,7 +122,7 @@ result = results[0]
 assert result.get("tool_name") == "ToolSearch", result.get("tool_name")
 content_items = result.get("content") or []
 assert content_items, "missing content payload"
-content = content_items[0].get("value") or {}
+content = ((content_items[0].get("value") or {}).get("value", content_items[0].get("value") or {}))
 matches = content.get("matches") or []
 assert matches, "missing matches"
 assert any(item.get("public_name") == "WebSearch" for item in matches), matches

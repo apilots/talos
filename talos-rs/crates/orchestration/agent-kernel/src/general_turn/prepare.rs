@@ -414,13 +414,13 @@ fn load_session_state_value<T: DeserializeOwned>(ctx: &InvocationContext, key: &
         .and_then(|value| serde_json::from_value(value.clone()).ok())
 }
 
-fn blocked_compaction_error(session_id: &str) -> talos_error::TalosError {
+pub(crate) fn blocked_compaction_error(session_id: &str) -> talos_error::TalosError {
     talos_error::TalosError::ValidationError(format!(
         "session `{session_id}` is blocked because prompt budget remains exhausted after compaction; reset_session or create a new session to continue"
     ))
 }
 
-fn build_blocked_compaction_state() -> SessionCompactionState {
+pub(crate) fn build_blocked_compaction_state() -> SessionCompactionState {
     SessionCompactionState::blocked_prompt_budget_exhausted()
 }
 
@@ -446,11 +446,13 @@ fn prompt_budget_still_exhausted(prompt_assembly: &talos_prompt::PromptAssembly)
     prompt_budget_still_exhausted_from_diagnostics(&prompt_assembly.diagnostics)
 }
 
-fn prompt_budget_still_exhausted_from_diagnostics(diagnostics: &PromptDiagnostics) -> bool {
+pub(crate) fn prompt_budget_still_exhausted_from_diagnostics(
+    diagnostics: &PromptDiagnostics,
+) -> bool {
     diagnostics.window_usage.window_resolved && !diagnostics.window_usage.within_effective_budget
 }
 
-fn prompt_warning_key(warning: &KernelWarning) -> Option<String> {
+pub(crate) fn prompt_warning_key(warning: &KernelWarning) -> Option<String> {
     match warning {
         KernelWarning::PromptBootstrapFileMissing(payload) => {
             Some(format!("missing:{:?}:{}", payload.file_kind, payload.path))
@@ -605,7 +607,12 @@ pub(crate) fn build_session_continuity(
         }
 
         for key in ["file_path", "dir_path", "path"] {
-            if let Some(path) = call.arguments.get(key).and_then(|value| value.as_str()) {
+            if let Some(path) = call
+                .arguments
+                .as_inner()
+                .get(key)
+                .and_then(|value| value.as_str())
+            {
                 if !verified_paths
                     .iter()
                     .any(|evidence: &talos_prompt::VerifiedPathEvidence| evidence.path == path)
@@ -622,6 +629,7 @@ pub(crate) fn build_session_continuity(
         if matches!(call.name.as_str(), "Grep" | "grep") {
             if let Some(pattern) = call
                 .arguments
+                .as_inner()
                 .get("pattern")
                 .and_then(|value| value.as_str())
             {
@@ -894,454 +902,4 @@ pub async fn prepare_general_turn(
         prompt_warning_state,
         stream_tx,
     })
-}
-
-pub async fn execute_general_turn_loop(
-    prepared: PreparedGeneralTurn,
-    agent_name: &str,
-    llm_provider: Arc<dyn LlmProvider>,
-    tool_executor_port: Arc<dyn ToolExecutorPort>,
-    memory_store: Arc<MemoryStore>,
-    kernel_config: &AgentKernelConfig,
-) -> TalosResult<ExecutedTurnArtifacts> {
-    let max_tool_rounds = kernel_config.max_tool_rounds.max(1);
-    let mut state = GeneralTurnLoopState::new(&prepared);
-    let execution_settings =
-        crate::KernelExecutionSettings::try_from(kernel_config).unwrap_or_default();
-    let tool_executor = crate::ToolExecutorFactory::build(execution_settings.tool_execution_mode);
-    let kernel_config = Arc::new(kernel_config.clone());
-    let mut tool_loop_guard = ToolLoopGuardState::default();
-
-    let (final_text, stop_reason) = loop {
-        let mut step_request = build_general_turn_step_request(
-            &prepared,
-            &state,
-            execution_settings.tool_execution_mode == crate::ToolExecutionMode::Parallel,
-        );
-        if prepared.stream_tx.is_some() {
-            step_request.streaming_tool_execution = Some(StreamingToolExecutionConfig {
-                execution_mode: execution_settings.tool_execution_mode,
-                execution_context: ToolExecutionContext {
-                    session_id: prepared.session_id.clone(),
-                    user_id: agent_name.to_string(),
-                    project_root: prepared.project_root.clone(),
-                    kernel_config: kernel_config.clone(),
-                    memory_store: memory_store.clone(),
-                    pre_approved_call_ids: std::collections::HashSet::new(),
-                    dynamic_tool_results: std::collections::HashMap::new(),
-                },
-                tool_registry: tool_executor_port.clone(),
-            });
-        }
-        let step = execute_general_turn_step(step_request, llm_provider.clone()).await?;
-        let step_text = step.text.clone();
-        let step_disposition = step.disposition;
-        if let Some(cause) = should_force_finalization_for_step(&mut tool_loop_guard, &step) {
-            let mut messages = prepared.messages.clone();
-            messages.extend(state.messages.clone());
-            let forced_step = run_forced_finalization_step(
-                messages,
-                prepared.selected_model.clone(),
-                llm_provider.clone(),
-                None,
-                cause.clone(),
-            )
-            .await?;
-            apply_general_turn_step(&mut state, &forced_step);
-            break (
-                forced_step.text.clone(),
-                stop_reason_for_forced_finalization(cause),
-            );
-        }
-        apply_general_turn_step(&mut state, &step);
-
-        if should_force_finalization_for_empty_response(state.tool_call_count, &step) {
-            let mut messages = prepared.messages.clone();
-            messages.extend(state.messages.clone());
-            let forced_step = run_forced_finalization_step(
-                messages,
-                prepared.selected_model.clone(),
-                llm_provider.clone(),
-                None,
-                ForcedFinalizationCause::EmptyFinalResponseAfterTools,
-            )
-            .await?;
-            apply_general_turn_step(&mut state, &forced_step);
-            break (
-                forced_step.text.clone(),
-                stop_reason_for_forced_finalization(
-                    ForcedFinalizationCause::EmptyFinalResponseAfterTools,
-                ),
-            );
-        }
-
-        if matches!(step_disposition, GeneralTurnStepDisposition::FinalResponse) {
-            state
-                .messages
-                .push(ChatMessage::assistant(step_text.clone()));
-            let stop_reason = match step.model_finish_reason {
-                ModelFinishReason::Length => StopReason::ModelOutputLimit,
-                ModelFinishReason::Stop | ModelFinishReason::Other => StopReason::EndTurn,
-                ModelFinishReason::ToolCalls => StopReason::EndTurn,
-            };
-            break (step_text, stop_reason);
-        }
-
-        let tool_batch = if prepared.stream_tx.is_some() {
-            super::tool_batch::collect_general_turn_tool_batch(step.streamed_tool_outputs.clone())
-        } else {
-            execute_general_turn_tool_batch(
-                &prepared,
-                tool_executor.clone(),
-                tool_executor_port.clone(),
-                memory_store.clone(),
-                kernel_config.clone(),
-                agent_name,
-                &step.tool_calls,
-                std::collections::HashSet::new(),
-                std::collections::HashMap::new(),
-                prepared.stream_tx.as_ref(),
-            )
-            .await?
-        };
-        apply_general_turn_tool_batch(&mut state, &tool_batch, kernel_config.as_ref());
-        if should_inject_read_only_nudge(&tool_loop_guard) {
-            state.messages.push(build_read_only_nudge_message());
-        }
-
-        if !tool_batch.pending_confirmations.is_empty()
-            || !tool_batch.pending_dynamic_requests.is_empty()
-        {
-            break (
-                if !tool_batch.pending_confirmations.is_empty() {
-                    "Tool confirmation pending.".to_string()
-                } else {
-                    "Dynamic tool response pending.".to_string()
-                },
-                StopReason::EndTurn,
-            );
-        }
-
-        if state.round >= max_tool_rounds {
-            let mut messages = prepared.messages.clone();
-            messages.extend(state.messages.clone());
-            let forced_step = run_forced_finalization_step(
-                messages,
-                prepared.selected_model.clone(),
-                llm_provider.clone(),
-                None,
-                ForcedFinalizationCause::ToolRoundBudget,
-            )
-            .await?;
-            apply_general_turn_step(&mut state, &forced_step);
-            break (
-                forced_step.text.clone(),
-                stop_reason_for_forced_finalization(ForcedFinalizationCause::ToolRoundBudget),
-            );
-        }
-    };
-
-    let executed = finalize_general_turn_artifacts(state, final_text, stop_reason);
-    emit_general_turn_finalization_stream(&prepared, &executed).await;
-    Ok(executed)
-}
-
-#[allow(clippy::too_many_arguments)]
-pub async fn persist_general_turn_artifacts(
-    prepared: &PreparedGeneralTurn,
-    input: &str,
-    executed: &ExecutedTurnArtifacts,
-    llm_provider: Arc<dyn LlmProvider>,
-    memory_store: Arc<MemoryStore>,
-    kernel_config: &AgentKernelConfig,
-) {
-    let seq = match memory_store.next_turn_seq(&prepared.session_id).await {
-        Ok(seq) => seq,
-        Err(err) => {
-            warn!(
-                session_id = %prepared.session_id,
-                error = %err,
-                "failed to allocate next turn seq"
-            );
-            return;
-        }
-    };
-    let turn_id = Uuid::new_v4().to_string();
-    let now = Utc::now();
-    let mut items = Vec::with_capacity(executed.output_items.len().saturating_add(1));
-    items.push(TalosOutputItem::UserInput {
-        text: input.to_string(),
-    });
-    items.extend(executed.output_items.clone());
-    let talos_turn = TalosTurn {
-        turn_id: turn_id.clone(),
-        session_id: prepared.session_id.to_string(),
-        seq,
-        timestamp: now,
-        items,
-        usage: executed.usage.clone(),
-        stop_reason: to_api_stop_reason(executed.stop_reason),
-    };
-    if let Err(err) = memory_store.append_turn(&talos_turn).await {
-        warn!(
-            session_id = %prepared.session_id,
-            error = %err,
-            "failed to append memory store turn"
-        );
-    }
-
-    if let Err(err) = compact_workspace_context_if_needed(
-        &prepared.session_id,
-        &prepared.selected_model,
-        llm_provider.clone(),
-        memory_store.as_ref(),
-        kernel_config,
-    )
-    .await
-    {
-        warn!(
-            session_id = %prepared.session_id,
-            error = %err,
-            "failed to compact workspace memory context"
-        );
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub async fn run_general_turn(
-    ctx: &mut InvocationContext,
-    agent_name: &str,
-    agent_description: &str,
-    input: &str,
-    llm_provider: Arc<dyn LlmProvider>,
-    tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
-    tool_executor_port: Arc<dyn ToolExecutorPort>,
-    memory_store: Arc<MemoryStore>,
-    kernel_config: &AgentKernelConfig,
-) -> TalosResult<GeneralTurnResult> {
-    let prepared = prepare_general_turn(
-        ctx,
-        agent_name,
-        agent_description,
-        input,
-        llm_provider.clone(),
-        tool_definition_provider,
-        memory_store.clone(),
-        kernel_config,
-    )
-    .await?;
-    let mut prompt_diagnostics = prepared.prompt_diagnostics.clone();
-    let warnings = prepared.warnings.clone();
-    if let Some(prompt_warning_state) = prepared.prompt_warning_state.as_ref() {
-        if let Ok(value) = serde_json::to_value(prompt_warning_state) {
-            stage_session_state_update(
-                ctx,
-                &prepared.session_id,
-                &prepared.invocation_id,
-                ExecutionBranch::ModelThinking,
-                PROMPT_WARNING_STATE_KEY,
-                value,
-            );
-        }
-    }
-    if prompt_budget_still_exhausted_from_diagnostics(&prepared.prompt_diagnostics) {
-        if let Ok(value) = serde_json::to_value(build_blocked_compaction_state()) {
-            stage_session_state_update(
-                ctx,
-                &prepared.session_id,
-                &prepared.invocation_id,
-                ExecutionBranch::ModelThinking,
-                SESSION_COMPACTION_STATE_KEY,
-                value,
-            );
-        }
-        return Err(blocked_compaction_error(&prepared.session_id));
-    }
-    let executed = execute_general_turn_loop(
-        prepared.clone(),
-        agent_name,
-        llm_provider.clone(),
-        tool_executor_port,
-        memory_store.clone(),
-        kernel_config,
-    )
-    .await?;
-    prompt_diagnostics.window_usage.cache_read_input_tokens =
-        executed.usage.cache_read_input_tokens;
-    prompt_diagnostics.window_usage.cache_creation_input_tokens =
-        executed.usage.cache_creation_input_tokens;
-    if let Ok(value) = serde_json::to_value(&prompt_diagnostics) {
-        ctx.set_request_state(LAST_PROMPT_DIAGNOSTICS_STATE_KEY, value);
-    }
-    tracing::debug!(
-        session_id = %prepared.session_id,
-        agent_id = %prepared.agent_id,
-        prompt_context_window_tokens = prompt_diagnostics.window_usage.context_window,
-        prompt_effective_budget_tokens = prompt_diagnostics.window_usage.effective_prompt_budget,
-        prompt_static_prefix_tokens = prompt_diagnostics.window_usage.static_prefix_tokens,
-        prompt_dynamic_suffix_tokens = prompt_diagnostics.window_usage.dynamic_suffix_tokens,
-        prompt_total_tokens = prompt_diagnostics.window_usage.total_tokens,
-        cache_read_input_tokens = prompt_diagnostics.window_usage.cache_read_input_tokens,
-        cache_creation_input_tokens = prompt_diagnostics.window_usage.cache_creation_input_tokens,
-        session_history_compaction = ?prompt_diagnostics.session_history_compaction,
-        "prompt governance metrics"
-    );
-    persist_general_turn_artifacts(
-        &prepared,
-        input,
-        &executed,
-        llm_provider.clone(),
-        memory_store,
-        kernel_config,
-    )
-    .await;
-    if let Ok(value) = serde_json::to_value(next_session_compaction_state(&prompt_diagnostics)) {
-        stage_session_state_update(
-            ctx,
-            &prepared.session_id,
-            &prepared.invocation_id,
-            ExecutionBranch::ModelThinking,
-            SESSION_COMPACTION_STATE_KEY,
-            value,
-        );
-    }
-    if let Some(session_continuity) = build_session_continuity(input, &executed) {
-        if let Ok(value) = serde_json::to_value(session_continuity) {
-            stage_session_state_update(
-                ctx,
-                &prepared.session_id,
-                &prepared.invocation_id,
-                ExecutionBranch::ModelThinking,
-                SESSION_CONTINUITY_STATE_KEY,
-                value,
-            );
-        }
-    }
-
-    Ok(GeneralTurnResult {
-        output_text: executed.output_text,
-        output_items: executed.output_items,
-        stop_reason: executed.stop_reason,
-        usage: executed.usage,
-        prompt_diagnostics,
-        warnings,
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{KernelWarning, PromptDynamicSectionDroppedWarning};
-    use serde_json::json;
-
-    fn build_executed_turn_artifacts(
-        tool_call_log: Vec<ToolCallRecord>,
-        tool_result_log: Vec<ToolResultLog>,
-    ) -> ExecutedTurnArtifacts {
-        ExecutedTurnArtifacts {
-            output_text: "ok".to_string(),
-            output_items: Vec::new(),
-            stop_reason: StopReason::EndTurn,
-            usage: TalosUsage::default(),
-            reasoning_log: Vec::new(),
-            tool_call_log,
-            tool_result_log,
-            saw_output_delta: false,
-        }
-    }
-
-    #[test]
-    fn test_build_session_continuity_records_recent_goal_failure_and_retry_guidance() {
-        let executed = build_executed_turn_artifacts(
-            vec![ToolCallRecord {
-                call_id: "call-1".to_string(),
-                name: "Bash".to_string(),
-                arguments: json!({"path": "/tmp/project/src/lib.rs"}),
-            }],
-            vec![ToolResultLog {
-                call_id: "call-1".to_string(),
-                tool: "Bash".to_string(),
-                payload: json!({"error": "permission denied"}),
-                envelope: json!({}),
-                is_error: true,
-                truncated: false,
-                size_bytes: 0,
-                semantic_events: Vec::new(),
-                next_turn_failure: None,
-            }],
-        );
-
-        let continuity =
-            build_session_continuity("Inspect the failing file update flow.", &executed)
-                .expect("continuity should be built");
-
-        assert_eq!(
-            continuity.recent_goal,
-            "Inspect the failing file update flow."
-        );
-        assert_eq!(
-            continuity.last_failure.as_deref(),
-            Some("Bash returned an error")
-        );
-        assert_eq!(
-            continuity.suggested_next_step.as_deref(),
-            Some("adjust the failing path, command, or tool arguments before retrying")
-        );
-        assert_eq!(
-            continuity.pending_tasks,
-            vec!["fix the failing tool step and retry".to_string()]
-        );
-    }
-
-    #[test]
-    fn test_build_session_continuity_prefers_verified_evidence_guidance_without_failure() {
-        let executed = build_executed_turn_artifacts(
-            vec![ToolCallRecord {
-                call_id: "call-1".to_string(),
-                name: "Read".to_string(),
-                arguments: json!({"path": "/tmp/project/Cargo.toml"}),
-            }],
-            vec![ToolResultLog {
-                call_id: "call-1".to_string(),
-                tool: "Read".to_string(),
-                payload: json!({"content": "[package]"}),
-                envelope: json!({}),
-                is_error: false,
-                truncated: false,
-                size_bytes: 0,
-                semantic_events: Vec::new(),
-                next_turn_failure: None,
-            }],
-        );
-
-        let continuity = build_session_continuity("Summarize the package setup.", &executed)
-            .expect("continuity should be built");
-
-        assert_eq!(continuity.recent_goal, "Summarize the package setup.");
-        assert_eq!(continuity.last_failure, None);
-        assert_eq!(
-            continuity.suggested_next_step.as_deref(),
-            Some("answer from the verified evidence without re-reading the same paths")
-        );
-        assert_eq!(
-            continuity.pending_tasks,
-            vec!["complete the answer from the verified evidence".to_string()]
-        );
-    }
-
-    #[test]
-    fn test_prompt_warning_key_includes_dynamic_dropped_sections() {
-        let warning =
-            KernelWarning::PromptDynamicSectionDropped(PromptDynamicSectionDroppedWarning {
-                sections: vec![
-                    PromptSectionKind::ExpandedToolCatalog,
-                    PromptSectionKind::RecentMessages,
-                ],
-            });
-
-        assert_eq!(
-            prompt_warning_key(&warning).as_deref(),
-            Some("dynamic_dropped:ExpandedToolCatalog,RecentMessages")
-        );
-    }
 }

@@ -153,6 +153,63 @@ fn test_talos_session_from_record_applies_tool_approval_override() {
 }
 
 #[test]
+fn test_talos_session_apply_turn_progress_updates_state_and_model() {
+    let record = SessionRecord {
+        id: "session-progress".to_string(),
+        title: "Untitled Session".to_string(),
+        user_id: "user-1".to_string(),
+        context: talos::TalosContext {
+            source_type: talos::TalosSourceType::Http,
+            provider: talos::TalosProvider::Http,
+            user_id: "user-1".to_string(),
+            message_id: "message-1".to_string(),
+            trace_id: "trace-1".to_string(),
+            channel_id: Some("default".to_string()),
+            thread_id: None,
+            project_root: None,
+            environment: None,
+        },
+        model: "qwen-max".to_string(),
+        created_at: 100,
+        last_activity: 200,
+        message_count: 3,
+        usage: talos::TalosUsage {
+            input_tokens: 1,
+            output_tokens: 2,
+            total_tokens: 3,
+            cache_creation_input_tokens: None,
+            cache_read_input_tokens: None,
+        },
+        conf: SessionConf::default(),
+        project_id: None,
+        current_directory: None,
+    };
+    let mut session = TalosSession::from_record(&record, &TalosConfig::default(), None)
+        .expect("talos session restore should succeed");
+
+    session.apply_turn_progress(
+        "qwen-plus",
+        2,
+        &talos::TalosUsage {
+            input_tokens: 4,
+            output_tokens: 5,
+            total_tokens: 9,
+            cache_creation_input_tokens: Some(7),
+            cache_read_input_tokens: None,
+        },
+    );
+
+    assert_eq!(session.state.message_count, 5);
+    assert!(session.state.last_activity >= 200);
+    assert_eq!(session.state.usage.input_tokens, 5);
+    assert_eq!(session.state.usage.output_tokens, 7);
+    assert_eq!(session.state.usage.total_tokens, 12);
+    assert_eq!(session.state.usage.cache_creation_input_tokens, Some(7));
+    assert_eq!(session.config.agent.model, "qwen-plus");
+    assert_eq!(session.config.llm.model, "qwen-plus");
+}
+
+#[test]
 fn test_session_override_policy_rejects_unknown_keys() {
     let conf = SessionConf {
         agent: Some(SessionAgentConf {
@@ -173,6 +230,23 @@ fn test_session_override_policy_builds_model_conf() {
         .expect("conf extraction should succeed");
 
     assert_eq!(model.as_deref(), Some("gpt-4o"));
+}
+
+#[test]
+fn test_session_title_policy_normalizes_generated_title() {
+    let title = session_title_or_fallback(
+        "\"Plan Application Service Migration.\"".to_string(),
+        "fallback text",
+    );
+
+    assert_eq!(title, "Plan Application Service Migration");
+}
+
+#[test]
+fn test_session_title_policy_falls_back_to_first_user_text() {
+    let title = session_title_or_fallback("Untitled Session".to_string(), "  migrate phase one\n");
+
+    assert_eq!(title, "migrate phase one");
 }
 
 #[test]
@@ -264,6 +338,91 @@ fn test_project_record_roundtrip_with_session_count() {
     let decoded: ProjectRecord = serde_json::from_str(&encoded).unwrap();
 
     assert_eq!(decoded, record);
+}
+
+#[test]
+fn test_resolve_effective_project_root_prefers_project_directory() {
+    let session = TalosSession::from_record(
+        &SessionRecord {
+            id: "session-root".to_string(),
+            title: DEFAULT_SESSION_TITLE.to_string(),
+            user_id: "user-1".to_string(),
+            context: talos::TalosContext {
+                source_type: talos::TalosSourceType::Http,
+                provider: talos::TalosProvider::Http,
+                user_id: "user-1".to_string(),
+                message_id: "message-1".to_string(),
+                trace_id: "trace-1".to_string(),
+                channel_id: Some("default".to_string()),
+                thread_id: None,
+                project_root: None,
+                environment: None,
+            },
+            model: "qwen-max".to_string(),
+            created_at: 100,
+            last_activity: 200,
+            message_count: 0,
+            usage: talos::TalosUsage::default(),
+            conf: SessionConf::default(),
+            project_id: Some("project-1".to_string()),
+            current_directory: Some(std::path::PathBuf::from("/current")),
+        },
+        &TalosConfig::default(),
+        None,
+    )
+    .expect("session should restore");
+
+    let root = resolve_effective_project_root(
+        &session,
+        Some(std::path::PathBuf::from("/project")),
+        Some(std::path::PathBuf::from("/workspace")),
+    );
+
+    assert_eq!(root.as_deref(), Some(std::path::Path::new("/project")));
+}
+
+#[test]
+fn test_resolve_effective_project_root_uses_embedded_current_directory() {
+    let session = TalosSession::from_record(
+        &SessionRecord {
+            id: "session-root".to_string(),
+            title: DEFAULT_SESSION_TITLE.to_string(),
+            user_id: "user-1".to_string(),
+            context: talos::TalosContext {
+                source_type: talos::TalosSourceType::Http,
+                provider: talos::TalosProvider::Http,
+                user_id: "user-1".to_string(),
+                message_id: "message-1".to_string(),
+                trace_id: "trace-1".to_string(),
+                channel_id: Some("default".to_string()),
+                thread_id: None,
+                project_root: None,
+                environment: Some(talos::TalosSessionEnvironment {
+                    directory: std::path::PathBuf::from("/current"),
+                    connection_mode: talos::TalosConnectionMode::Embedded,
+                }),
+            },
+            model: "qwen-max".to_string(),
+            created_at: 100,
+            last_activity: 200,
+            message_count: 0,
+            usage: talos::TalosUsage::default(),
+            conf: SessionConf::default(),
+            project_id: None,
+            current_directory: Some(std::path::PathBuf::from("/current")),
+        },
+        &TalosConfig::default(),
+        None,
+    )
+    .expect("session should restore");
+
+    let root = resolve_effective_project_root(
+        &session,
+        None,
+        Some(std::path::PathBuf::from("/workspace")),
+    );
+
+    assert_eq!(root.as_deref(), Some(std::path::Path::new("/current")));
 }
 
 #[test]

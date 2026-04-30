@@ -3,7 +3,6 @@ mod admin_users;
 mod auth;
 mod errors;
 mod events;
-mod file_support;
 mod lifecycle;
 mod memory_files;
 mod messages;
@@ -58,65 +57,48 @@ use self::user_profile::{
 use self::workspace_docs::{
     get_workspace_doc_handler, list_workspace_docs_handler, put_workspace_doc_handler,
 };
-use talos_auth::{AuthService, UserService};
-use talos_config::LlmConfigService;
+use talos_application_service::TalosApplicationService;
+use talos_auth::AuthService;
 use talos_error::TalosResult;
-use talos_gateway::Gateway;
-use talos_llm_provider::LlmProvider;
-use talos_session_store::{MessageIdempotencyStore, SessionEventService};
-use talos_types::{ModelInfo, SessionService, TalosConfig};
+use talos_session_store::SessionEventService;
+use talos_types::TalosConfig;
 
 /// HTTP Server for the Talos Gateway.
 pub struct HttpServer {
-    gateway: Arc<dyn Gateway>,
-    session_service: Arc<dyn SessionService>,
+    application_service: Arc<TalosApplicationService>,
+    #[cfg(test)]
     event_service: Arc<SessionEventService>,
-    idempotency_store: Arc<dyn MessageIdempotencyStore>,
     auth_service: Arc<dyn AuthService>,
-    user_service: Arc<dyn UserService>,
     base_config: TalosConfig,
-    llm_provider: Arc<dyn LlmProvider>,
-    llm_config_service: Arc<dyn LlmConfigService>,
     host: String,
     port: u16,
     jwt_secret: String,
     auth_disabled: bool,
-    models: Vec<ModelInfo>,
     lifecycle: Arc<ServerLifecycle>,
 }
 
 impl HttpServer {
     /// Create a new HTTP server instance.
     pub fn new(
-        gateway: Arc<dyn Gateway>,
-        session_service: Arc<dyn SessionService>,
+        application_service: Arc<TalosApplicationService>,
         event_service: Arc<SessionEventService>,
-        idempotency_store: Arc<dyn MessageIdempotencyStore>,
         auth_service: Arc<dyn AuthService>,
-        user_service: Arc<dyn UserService>,
         base_config: TalosConfig,
-        llm_provider: Arc<dyn LlmProvider>,
-        llm_config_service: Arc<dyn LlmConfigService>,
         host: impl Into<String>,
         port: u16,
-        _default_model: impl Into<String>,
-        models: Vec<ModelInfo>,
     ) -> Self {
+        #[cfg(not(test))]
+        let _ = event_service;
         Self {
-            gateway,
-            session_service,
+            application_service,
+            #[cfg(test)]
             event_service,
-            idempotency_store,
             auth_service,
-            user_service,
             base_config,
-            llm_provider,
-            llm_config_service,
             host: host.into(),
             port,
             jwt_secret: String::new(),
             auth_disabled: false,
-            models,
             lifecycle: Arc::new(ServerLifecycle::new()),
         }
     }
@@ -153,26 +135,18 @@ impl HttpServer {
     pub async fn run_with_shutdown(&self, shutdown: CancellationToken) -> TalosResult<()> {
         info!("Starting HTTP server on {}:{}", self.host, self.port);
         let gc_shutdown = shutdown.clone();
-        let event_service_for_gc = self.event_service.clone();
+        let app_events_for_gc = self.application_service.events.clone();
         let gc_task = tokio::spawn(async move {
-            event_service_for_gc
-                .run_event_log_gc_loop(gc_shutdown)
-                .await;
+            app_events_for_gc.run_event_log_gc_loop(gc_shutdown).await;
         });
 
-        let state = Arc::new(HttpApiState::new_with_lifecycle(
-            self.gateway.clone(),
-            self.session_service.clone(),
+        let state = Arc::new(HttpApiState::from_application_service(
+            self.application_service.clone(),
+            #[cfg(test)]
             self.event_service.clone(),
-            self.idempotency_store.clone(),
             self.base_config.clone(),
-            self.llm_provider.clone(),
             self.auth_service.clone(),
-            self.user_service.clone(),
-            self.jwt_secret.clone(),
             self.auth_disabled,
-            self.models.clone(),
-            self.llm_config_service.clone(),
             self.lifecycle.clone(),
         ));
 

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import type { WorkspaceDocDetail, WorkspaceDocKind } from "@talos/sdk";
+import type { WorkspaceDocDetail, WorkspaceDocKind } from "@talos/sdk-browser";
 
 import { useConnectionKey } from "@/features/chat";
 import { getTalosClient } from "@/shared/api/client";

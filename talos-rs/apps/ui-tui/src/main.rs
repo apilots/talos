@@ -1,107 +1,31 @@
 use std::sync::Arc;
 
 use dotenv::dotenv;
-use talos_client::{ClientConfig, TalosClient};
-use talos_config::Config;
-use talos_error::TalosResult;
-use talos_server::{init_logging, start_server, TalosServerOptions};
+use talos_client::{AppServerClient, AppServerClientConfig};
 use talos_types::talos::TalosConnectionMode;
-use talos_ui_tui::run_tui_app_with_client;
-use tracing::error;
-
-const DEFAULT_GATEWAY_URL: &str = "http://127.0.0.1:8080";
-const DEFAULT_GATEWAY_TOKEN: &str = "talos-local-test-token";
+use talos_ui_tui::run_tui_app_with_gateway_client;
+use tokio::sync::Mutex;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
 
     let args: Vec<String> = std::env::args().collect();
-    let use_external_gateway = has_flag(&args, "--gateway") || has_flag(&args, "-g");
-
-    if use_external_gateway {
-        let gateway_url = option_arg(&args, "--gateway-url")
-            .or_else(|| std::env::var("TALOS_GATEWAY_URL").ok())
-            .unwrap_or_else(|| DEFAULT_GATEWAY_URL.to_string());
-        let auth_token = option_arg(&args, "--auth-token")
-            .or_else(|| std::env::var("GATEWAY_TOKEN").ok())
-            .or_else(|| Some(DEFAULT_GATEWAY_TOKEN.to_string()));
-
-        eprintln!("Connecting to external gateway: {}", gateway_url);
-
-        let config = ClientConfig {
-            gateway_url,
-            auth_token,
-            timeout: 30,
-        };
-        let client = Arc::new(TalosClient::new(config)?);
-        run_tui_app_with_client(client, TalosConnectionMode::Remote).await?;
-    } else {
-        run_embedded().await?;
-    }
-
-    Ok(())
-}
-
-async fn run_embedded() -> Result<(), Box<dyn std::error::Error>> {
-    let config = Config::load().expect(
-        "failed to load Talos config from <talos_home>/conf/talos.yaml — run `talos init` or use --gateway to connect to an external gateway",
-    );
-    config.validate_runtime().expect("invalid runtime config");
-
-    let options = TalosServerOptions {
-        host: Some("127.0.0.1".to_string()),
-        port: Some(find_free_port().await?),
-        logging_stdout: Some(false),
-        auth_disabled: Some(true),
-        enable_channels: Some(false),
-    };
-
-    let _log_guard = init_logging(&config, Some(&options)).expect("failed to initialize logging");
-    let server = start_server(config, Some(options))
-        .await
-        .expect("failed to start embedded server runtime");
-    let handle = server.handle();
-    let gateway_url = server.gateway_url().to_string();
-    let server_task = tokio::spawn(async move { server.run().await });
-
-    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-
-    let client_config = ClientConfig {
-        gateway_url,
-        auth_token: None,
-        timeout: 30,
-    };
-    let client = Arc::new(TalosClient::new(client_config)?);
-    let tui_result = run_tui_app_with_client(client, TalosConnectionMode::Embedded).await;
-
-    if let Err(err) = handle.shutdown().await {
-        error!("embedded gateway shutdown failed: {}", err);
-    }
-    match server_task.await {
-        Ok(Ok(())) => {}
-        Ok(Err(err)) => error!("embedded gateway error: {}", err),
-        Err(err) => error!("embedded gateway task join failed: {}", err),
-    }
-
-    tui_result?;
-
-    Ok(())
-}
-
-async fn find_free_port() -> TalosResult<u16> {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .map_err(|err| talos_error::TalosError::NetworkError(err.to_string()))?;
-    let port = listener
-        .local_addr()
-        .map_err(|err| talos_error::TalosError::NetworkError(err.to_string()))?
-        .port();
-    Ok(port)
-}
-
-fn has_flag(args: &[String], flag: &str) -> bool {
-    args.iter().any(|arg| arg == flag)
+    let app_server_bin = option_arg(&args, "--app-server-bin")
+        .or_else(|| std::env::var("TALOS_APP_SERVER_BIN").ok())
+        .unwrap_or_else(|| "talos".to_string());
+    let launch_token = option_arg(&args, "--launch-token")
+        .or_else(|| std::env::var("TALOS_LOCAL_LAUNCH_TOKEN").ok())
+        .unwrap_or_else(|| format!("tui-{}", uuid::Uuid::new_v4().simple()));
+    let client = AppServerClient::connect(AppServerClientConfig {
+        app_server_bin,
+        launch_token,
+        client_name: "talos-ui-tui".to_string(),
+        client_version: env!("CARGO_PKG_VERSION").to_string(),
+    })
+    .await?;
+    let gateway_client: Arc<dyn talos_ui_tui::GatewayClient> = Arc::new(Mutex::new(client));
+    run_tui_app_with_gateway_client(gateway_client, TalosConnectionMode::Embedded).await
 }
 
 fn option_arg(args: &[String], key: &str) -> Option<String> {

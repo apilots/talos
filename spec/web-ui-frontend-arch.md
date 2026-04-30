@@ -1,8 +1,12 @@
 # Talos Web UI 前端工程规范
 
 **版本**: v1.0
-**状态**: 草案
-**最后更新**: 2026-04-16
+**状态**: 已按 Web/Desktop 共享 runtime 更新
+**最后更新**: 2026-04-30
+
+> Phase 6 更新：Web 继续通过 `@talos/sdk-browser` 使用 HTTP/SSE；Desktop renderer
+> 复用同一 Web UI 领域模型和主要组件，通过 runtime factory 注入
+> `@talos/sdk-app-server/desktop` typed bridge，不直接访问 transport 或 Node/Electron API。
 
 > 本文档约定 Talos Web UI 的前端工程结构、分层规则、复用标准和质量门禁。
 > 所有实现人员在动手编码前必须阅读，Code Review 以此为基准。
@@ -326,6 +330,11 @@ export class ApiError extends Error {
 ```
 
 ### 5.2 SSE 客户端封装
+
+> Phase 6 约束：本节早期 `EventSource` 示例仅保留为历史设计说明。当前实现禁止
+> Web UI 直接 `new EventSource`；HTTP/SSE 统一走 `@talos/sdk-browser` 的
+> fetch-based stream adapter，Desktop 则通过 `@talos/sdk-app-server/desktop`
+> 的 typed bridge 注入同一 client 能力。实际接入方式见 §13。
 
 两种 SSE 连接（全局事件流 + 单会话 token 流）统一封装，不允许在组件里直接 `new EventSource`。
 
@@ -859,7 +868,7 @@ test('no_permission 状态展示权限提示和 Settings 跳转按钮', () => {
 ## 13. TypeScript SDK 依赖关系
 
 Web UI 的 `shared/api` 和 `shared/sse` 层**不自行实现** HTTP 客户端和 SSE 原语，
-而是依赖 `@talos/sdk`（位于 `talos-app/ts-sdk/packages/browser/`）。
+而是依赖 `@talos/sdk-browser`（位于 `talos-app/ts-sdk/packages/browser/`）。
 
 SDK 的完整设计见 [`spec/ts-sdk-design.md`](./ts-sdk-design.md)。
 
@@ -867,7 +876,7 @@ SDK 的完整设计见 [`spec/ts-sdk-design.md`](./ts-sdk-design.md)。
 
 | 原因 | 说明 |
 |------|------|
-| **避免重复** | Electron Desktop（Phase 2）也需要同一套 HTTP + SSE 逻辑 |
+| **避免重复** | Electron Desktop（Phase 2）复用同一套 UI API 注入点，本地 transport 由 `@talos/sdk-app-server` 提供 |
 | **类型单源** | 协议类型只在 `@talos/sdk-core` 定义一次，Web UI 通过 re-export 获取 |
 | **测试隔离** | SDK 层用 Mock adapter 独立测试；Web UI 的 hook 测试只 mock SDK 接口，不 mock fetch |
 
@@ -875,10 +884,10 @@ SDK 的完整设计见 [`spec/ts-sdk-design.md`](./ts-sdk-design.md)。
 
 ```typescript
 // shared/api/client.ts
-import { createBrowserClient, TalosClient } from '@talos/sdk';
+import { createBrowserTalosClient, TalosClient } from '@talos/sdk-browser';
 import { getToken } from '@/shared/auth';
 
-export const talosClient: TalosClient = createBrowserClient(
+export const talosClient: TalosClient = createBrowserTalosClient(
   import.meta.env.VITE_API_BASE_URL,
   () => getToken(),
 );
@@ -888,7 +897,7 @@ export const talosClient: TalosClient = createBrowserClient(
 // shared/sse/session-stream.ts — 只做 React hook 封装，不含 EventSource 原语
 // 重连责任归属：适配器不自动重连；本 hook 在 onError 时携带最新 after_seq 显式重建连接
 import { useEffect, useRef } from 'react';
-import type { TranscriptEvent } from '@talos/sdk';
+import type { TranscriptEvent } from '@talos/sdk-browser';
 import { talosClient } from '@/shared/api/client';
 import { useAppStore } from '@/shared/store';
 
@@ -938,7 +947,7 @@ export function useSessionStream(sessionId: string | null) {
 
 | 类型来源 | 正确做法 |
 |----------|---------|
-| 协议类型（Session, TranscriptEvent 等）| 从 `@talos/sdk` 导入，**禁止**在 `shared/types/` 重复定义 |
+| 协议类型（Session, TranscriptEvent 等）| 从 `@talos/sdk-browser` 或 `@talos/sdk-core` 导入，**禁止**在 `shared/types/` 重复定义 |
 | UI 专用类型（组件 Props 等）| 在对应 feature 或 widget 内部定义 |
 | 跨 feature 共享 UI 类型 | 放 `shared/types/ui.ts`，与协议类型文件分离 |
 

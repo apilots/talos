@@ -1,0 +1,28 @@
+{
+  "name": "@talos/sdk-app-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./stdio": "./src/stdio.ts",
+    "./desktop": "./src/desktop.ts",
+    "./desktop-main": "./src/desktop-main.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run --passWithNoTests",
+    "test:integration": "TALOS_TS_APP_SERVER_INTEGRATION=1 vitest run src/stdio.integration.test.ts"
+  },
+  "dependencies": {
+    "@talos/sdk-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "eslint": "^9.25.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.2"
+  }
+}

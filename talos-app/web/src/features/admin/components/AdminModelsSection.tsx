@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { LlmConfig, ModelInputKind, ProviderConfig, ProviderModelConfig } from "@talos/sdk";
+import type { LlmConfig, ModelInputKind, ProviderConfig, ProviderModelConfig } from "@talos/sdk-browser";
 import { useTranslation } from "react-i18next";
 import { Brain, File, Image, Mic, Pencil, Plus, Trash2, Type, Video, X } from "lucide-react";
 

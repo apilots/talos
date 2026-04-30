@@ -20,6 +20,7 @@ use talos_memory::{
     SessionTranscriptHeader, SessionTranscriptMapper, SessionTranscriptRecord,
     SessionTranscriptStateDelta, SessionTranscriptStateNamespace, SessionTranscriptTransferPayload,
 };
+use talos_types::talos::TalosJsonValue;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -91,12 +92,12 @@ pub struct SessionAuthPayload {
     pub prompt: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionConfirmationPayload {
     pub tool_name: String,
     pub call_id: String,
     pub prompt: String,
-    pub arguments: serde_json::Value,
+    pub arguments: TalosJsonValue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -111,7 +112,7 @@ pub struct SessionApprovalResponsePayload {
 pub struct SessionDynamicToolRequestPayload {
     pub call_id: String,
     pub tool_name: String,
-    pub arguments: serde_json::Value,
+    pub arguments: TalosJsonValue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -197,7 +198,7 @@ impl SessionEvent {
                     vec![FunctionCall::new(
                         call_id.clone(),
                         name.clone(),
-                        arguments.clone(),
+                        arguments.clone().into(),
                     )],
                 ),
             },
@@ -220,7 +221,7 @@ impl SessionEvent {
                     tool_name: payload.tool_name.clone(),
                     call_id: payload.call_id.clone(),
                     prompt: payload.prompt.clone(),
-                    arguments: payload.arguments.clone(),
+                    arguments: payload.arguments.clone().into(),
                 },
             },
             EventPayload::ApprovalResponse { payload } => SessionEventPayload::ApprovalResponse {
@@ -236,7 +237,7 @@ impl SessionEvent {
                     payload: SessionDynamicToolRequestPayload {
                         call_id: payload.call_id.clone(),
                         tool_name: payload.tool_name.clone(),
-                        arguments: payload.arguments.clone(),
+                        arguments: payload.arguments.clone().into(),
                     },
                 }
             }
@@ -475,7 +476,7 @@ impl KernelSessionTranscriptMapper {
                         StateNamespace::Workspace => SessionTranscriptStateNamespace::Workspace,
                     },
                     key: delta.key.clone(),
-                    value: delta.value.clone(),
+                    value: delta.value.clone().into(),
                 })
                 .collect(),
             end_turn: actions.end_turn,
@@ -506,7 +507,7 @@ impl KernelSessionTranscriptMapper {
                         SessionTranscriptStateNamespace::Workspace => StateNamespace::Workspace,
                     },
                     key: delta.key,
-                    value: delta.value,
+                    value: delta.value.into(),
                 })
                 .collect(),
             end_turn: actions.end_turn,
@@ -551,7 +552,7 @@ impl KernelSessionTranscriptMapper {
                         tool_name: payload.tool_name.clone(),
                         call_id: payload.call_id.clone(),
                         prompt: payload.prompt.clone(),
-                        arguments: payload.arguments.clone(),
+                        arguments: payload.arguments.clone().into(),
                     },
                 }
             }
@@ -570,7 +571,7 @@ impl KernelSessionTranscriptMapper {
                     payload: SessionTranscriptDynamicToolRequestPayload {
                         call_id: payload.call_id.clone(),
                         tool_name: payload.tool_name.clone(),
-                        arguments: payload.arguments.clone(),
+                        arguments: payload.arguments.clone().into(),
                     },
                 }
             }

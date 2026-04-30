@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { AdminCreateUserRequest, AdminPatchUserRequest, UserDto, UserRole } from "@talos/sdk";
+import type { AdminCreateUserRequest, AdminPatchUserRequest, UserDto, UserRole } from "@talos/sdk-browser";
 import { useTranslation } from "react-i18next";
 import { PencilLine, Trash2, X } from "lucide-react";
 

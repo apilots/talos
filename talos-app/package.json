@@ -8,6 +8,9 @@
   },
   "scripts": {
     "dev": "pnpm --filter talos-web dev",
+    "desktop:dev": "pnpm --filter talos-desktop dev",
+    "desktop:build": "pnpm --filter talos-desktop build",
+    "desktop:check": "pnpm --filter talos-desktop check",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",

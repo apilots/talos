@@ -122,7 +122,7 @@ result = results[0]
 assert result.get("tool_name") == "WebFetch", result.get("tool_name")
 content_items = result.get("content") or []
 assert content_items, "missing content payload"
-content = content_items[0].get("value") or {}
+content = ((content_items[0].get("value") or {}).get("value", content_items[0].get("value") or {}))
 assert content.get("title") == "Example Domain", content
 assert "example.com" in (content.get("final_url") or ""), content
 assert content.get("content"), content

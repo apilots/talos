@@ -57,8 +57,13 @@ Use the same language as the conversation transcript for all field values."#;
 mod convergence_tests;
 mod finalize;
 mod guard;
+mod loop_run;
 mod memory_summary;
+mod persist;
 mod prepare;
+#[cfg(test)]
+mod prepare_tests;
+mod run;
 mod step_execute;
 mod step_request;
 #[cfg(test)]
@@ -73,22 +78,22 @@ pub(crate) use guard::{
     should_force_finalization_for_empty_response, should_force_finalization_for_step,
     should_inject_read_only_nudge, stop_reason_for_forced_finalization,
 };
+pub use loop_run::execute_general_turn_loop;
 pub(crate) use memory_summary::compact_workspace_context_if_needed;
 pub use memory_summary::{
     flush_session_memory, flush_session_memory_with_report, MemoryFlushPolicy,
     MemoryFlushUsageReport,
 };
+pub use persist::persist_general_turn_artifacts;
+pub use prepare::prepare_general_turn;
 pub(crate) use prepare::{
     build_session_continuity, next_session_compaction_state, stage_session_state_update,
-};
-pub use prepare::{
-    execute_general_turn_loop, persist_general_turn_artifacts, prepare_general_turn,
-    run_general_turn,
 };
 pub(crate) use prepare::{
     LAST_PROMPT_DIAGNOSTICS_STATE_KEY, PROMPT_WARNING_STATE_KEY, SESSION_COMPACTION_STATE_KEY,
     SESSION_CONTINUITY_STATE_KEY,
 };
+pub use run::run_general_turn;
 pub(crate) use step_execute::emit_stream_event;
 #[cfg(test)]
 pub(crate) use step_execute::stream_round;

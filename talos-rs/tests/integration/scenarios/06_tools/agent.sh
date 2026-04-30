@@ -118,7 +118,7 @@ result = results[0]
 assert result.get("tool_name") == "Agent", result.get("tool_name")
 content_items = result.get("content") or []
 assert content_items, "missing content payload"
-content = content_items[0].get("value") or {}
+content = ((content_items[0].get("value") or {}).get("value", content_items[0].get("value") or {}))
 envelope = content.get("envelope") or {}
 pending = envelope.get("pending") or {}
 if envelope.get("status") == "pending":

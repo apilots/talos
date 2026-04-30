@@ -33,8 +33,7 @@ pub use spec::{
 pub use state::{
     get_session_tool_state, CatalogToolEntry, ContentReplacementState, DeferredToolState,
     PermissionMode, ReadFileStateEntry, ReadFileStateStore, SessionToolState, TaskStateEntry,
-    TaskStateStore, ToolCatalogState, ToolDecisionState, ToolPermissionContext,
-    ToolResultBudgetState,
+    TaskStateStore, ToolCatalogState, ToolPermissionContext, ToolResultBudgetState,
 };
 
 // Built-in tools

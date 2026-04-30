@@ -8,9 +8,8 @@ description = "Talos client library for connecting to the gateway"
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-reqwest = { version = "0.11", features = ["json", "stream"] }
-futures-util = "0.3"
 uuid = { workspace = true }
+talos-app-protocol = { workspace = true }
 talos-types = { path = "../../crates/common/types" }
 talos-auth = { workspace = true }
 talos-error = { path = "../../crates/infra/error" }

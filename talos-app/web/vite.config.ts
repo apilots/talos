@@ -36,7 +36,7 @@ export default defineConfig({
             return "app-vendor";
           }
 
-          if (id.includes("@talos/sdk")) {
+          if (id.includes("@talos/sdk-browser")) {
             return "sdk-vendor";
           }
 
