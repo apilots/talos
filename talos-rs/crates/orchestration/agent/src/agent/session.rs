@@ -181,12 +181,15 @@ impl AgentImpl {
         approved: bool,
         reason: Option<String>,
     ) -> TalosResult<()> {
+        let branch = self
+            .resolve_tool_approval_branch(session_id, call_id, tool_name)
+            .await?;
         let record = SessionTranscriptRecord {
             header: SessionTranscriptHeader {
                 id: Uuid::new_v4().to_string(),
                 session_id: session_id.to_string(),
                 invocation_id: Uuid::new_v4().to_string(),
-                branch: SessionTranscriptBranch::ReactiveLoop,
+                branch,
                 timestamp: Utc::now(),
             },
             author: SessionTranscriptAuthor::System,
@@ -203,6 +206,71 @@ impl AgentImpl {
             partial: false,
         };
         self.memory_store.append_transcript_record(&record).await
+    }
+
+    async fn resolve_tool_approval_branch(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+    ) -> TalosResult<SessionTranscriptBranch> {
+        let branches = [
+            SessionTranscriptBranch::DirectAnswer,
+            SessionTranscriptBranch::ReactiveLoop,
+            SessionTranscriptBranch::ModelThinking,
+        ];
+        let mut latest_confirmation = None;
+        let mut latest_approval_timestamp = None;
+
+        for branch in branches {
+            let records = self
+                .memory_store
+                .load_transcript_records(session_id, None, branch.clone())
+                .await?;
+            for record in records {
+                match record.payload {
+                    SessionTranscriptPayload::Confirmation { payload }
+                        if payload.call_id == call_id =>
+                    {
+                        if payload.tool_name != tool_name {
+                            return Err(TalosError::ValidationError(format!(
+                                "tool approval `{call_id}` expected tool `{}`, got `{tool_name}`",
+                                payload.tool_name
+                            )));
+                        }
+                        if latest_confirmation
+                            .as_ref()
+                            .is_none_or(|(_, timestamp)| record.header.timestamp > *timestamp)
+                        {
+                            latest_confirmation =
+                                Some((record.header.branch, record.header.timestamp));
+                        }
+                    }
+                    SessionTranscriptPayload::ApprovalResponse { payload }
+                        if payload.call_id == call_id =>
+                    {
+                        if latest_approval_timestamp
+                            .is_none_or(|timestamp| record.header.timestamp > timestamp)
+                        {
+                            latest_approval_timestamp = Some(record.header.timestamp);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        let Some((branch, confirmation_timestamp)) = latest_confirmation else {
+            return Err(TalosError::ValidationError(format!(
+                "tool approval `{call_id}` has no pending confirmation"
+            )));
+        };
+        if latest_approval_timestamp.is_some_and(|timestamp| timestamp > confirmation_timestamp) {
+            return Err(TalosError::ValidationError(format!(
+                "tool approval `{call_id}` has already been resolved"
+            )));
+        }
+        Ok(branch)
     }
 
     pub(crate) async fn submit_dynamic_tool_result(

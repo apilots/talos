@@ -3,10 +3,10 @@ use std::process::Stdio;
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 use talos_client::{
-    canonical_method, AppServerClient, AppServerClientConfig, ApplicationEventEnvelope,
-    EventSubscribeParams, ExpectedFileVersion, ProjectPatch, ProtocolTalosContext,
-    SessionCreateParams, TalosError, TalosEventType, TalosInputItem, TalosMessageRequest,
-    WorkspaceDocKind,
+    canonical_method, AdminSessionListParams, AppServerClient, AppServerClientConfig,
+    ApplicationEventEnvelope, EventSubscribeParams, ExpectedFileVersion, ProjectPatch,
+    ProtocolTalosContext, SessionCreateParams, TalosError, TalosEventPayload, TalosEventType,
+    TalosInputItem, TalosMessageRequest, WorkspaceDocKind,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
@@ -37,6 +37,7 @@ async fn main() -> Result<()> {
         Scenario::TurnSmoke => turn_smoke(&mut client).await?,
         Scenario::ActiveTurnConflict => active_turn_conflict(&mut client).await?,
         Scenario::ResourceMatrix => resource_matrix(&mut client).await?,
+        Scenario::ApprovalResume => approval_resume(&mut client).await?,
     }
     client.shutdown().await?;
     Ok(())
@@ -51,6 +52,7 @@ enum Scenario {
     TurnSmoke,
     ActiveTurnConflict,
     ResourceMatrix,
+    ApprovalResume,
 }
 
 impl Scenario {
@@ -63,6 +65,7 @@ impl Scenario {
             "turn-smoke" => Ok(Self::TurnSmoke),
             "active-turn-conflict" => Ok(Self::ActiveTurnConflict),
             "resource-matrix" => Ok(Self::ResourceMatrix),
+            "approval-resume" => Ok(Self::ApprovalResume),
             other => Err(anyhow!("unsupported scenario: {other}")),
         }
     }
@@ -166,6 +169,66 @@ async fn active_turn_conflict(client: &mut AppServerClient) -> Result<()> {
     }
 }
 
+async fn approval_resume(client: &mut AppServerClient) -> Result<()> {
+    eprintln!("app-server-test-client: approval-resume session.create");
+    let session_id = create_session(client).await?;
+    eprintln!("app-server-test-client: approval-resume event.subscribe");
+    let subscription = subscribe_events_with_limit(client, &session_id, 128).await?;
+    eprintln!("app-server-test-client: approval-resume turn.start pending approval");
+    client
+        .start_turn(
+            &session_id,
+            message_request(
+                "Call the Bash tool exactly once with command `echo APPROVAL_RESUME_OK`, \
+                 timeout 10, and dangerously_disable_sandbox true. Do not answer directly \
+                 before calling the tool.",
+            ),
+            Some(format!(
+                "app-server-approval-pending-{}",
+                uuid::Uuid::new_v4().simple()
+            )),
+        )
+        .await?;
+    let pending =
+        collect_pending_approval_and_terminal(client, &subscription.subscription_id).await?;
+    if pending.session_id != session_id {
+        return Err(anyhow!("pending approval session_id mismatch"));
+    }
+    if pending.turn_id.is_none() {
+        return Err(anyhow!("pending approval missing turn_id"));
+    }
+
+    eprintln!("app-server-test-client: approval-resume resubscribe");
+    let live_resume_subscription = subscribe_events_with_limit(client, &session_id, 128).await?;
+
+    eprintln!("app-server-test-client: approval-resume submit approval");
+    client
+        .submit_tool_approval(
+            &session_id,
+            &pending.call_id,
+            &pending.tool_name,
+            true,
+            Some("approved by protocol regression".to_string()),
+        )
+        .await?;
+
+    eprintln!("app-server-test-client: approval-resume replay subscription");
+    let resumed_subscription =
+        subscribe_events_since(client, &session_id, pending.event_id.clone(), 512).await?;
+
+    eprintln!("app-server-test-client: approval-resume collect resumed events");
+    let resumed_events = collect_approval_resume_events(
+        client,
+        &[
+            live_resume_subscription.subscription_id.as_str(),
+            resumed_subscription.subscription_id.as_str(),
+        ],
+        pending.sequence,
+    )
+    .await?;
+    assert_approval_resume_completed(&pending, &resumed_events)
+}
+
 async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     eprintln!("app-server-test-client: resource-matrix config/model list");
     client.list_models().await?;
@@ -252,6 +315,15 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     {
         return Err(anyhow!("project.list did not include created project"));
     }
+    let admin_projects = client.list_admin_projects().await?;
+    if !admin_projects
+        .iter()
+        .any(|candidate| candidate.project_id == project.project_id)
+    {
+        return Err(anyhow!(
+            "admin.project.list did not include created project"
+        ));
+    }
     let patched_name = format!("{project_name} patched");
     let patched_project = client
         .patch_project(
@@ -272,6 +344,28 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
 
     eprintln!("app-server-test-client: resource-matrix session error mapping");
     let session_id = create_session(client).await?;
+    let admin_sessions = client
+        .list_admin_sessions(AdminSessionListParams {
+            user_id: None,
+            channel_id: None,
+            provider: None,
+            project_id: None,
+            limit: Some(20),
+            offset: Some(0),
+        })
+        .await?;
+    if !admin_sessions
+        .data
+        .iter()
+        .any(|candidate| candidate.context.session_id == session_id)
+    {
+        return Err(anyhow!(
+            "admin.session.list did not include created session"
+        ));
+    }
+    if admin_sessions.pagination.limit != 20 {
+        return Err(anyhow!("admin.session.list returned unexpected page limit"));
+    }
     let _turns = client.get_session_turns(&session_id).await?;
     expect_not_found(
         client.get_session("missing-session").await,
@@ -286,6 +380,18 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
             .submit_tool_approval("missing-session", "call-1", "Bash", false, None)
             .await,
         "missing tool approval session should map to not found",
+    )?;
+    expect_not_found(
+        client
+            .submit_dynamic_tool_result(
+                "missing-session",
+                "call-1",
+                "DynamicTool",
+                "result".to_string(),
+                true,
+            )
+            .await,
+        "missing dynamic tool result session should map to not found",
     )?;
 
     Ok(())
@@ -317,10 +423,28 @@ async fn subscribe_events_with_limit(
     session_id: &str,
     replay_limit: usize,
 ) -> Result<talos_client::EventSubscribeResponse> {
+    subscribe_events_with_cursor(client, session_id, None, replay_limit).await
+}
+
+async fn subscribe_events_since(
+    client: &mut AppServerClient,
+    session_id: &str,
+    since_event_id: String,
+    replay_limit: usize,
+) -> Result<talos_client::EventSubscribeResponse> {
+    subscribe_events_with_cursor(client, session_id, Some(since_event_id), replay_limit).await
+}
+
+async fn subscribe_events_with_cursor(
+    client: &mut AppServerClient,
+    session_id: &str,
+    since_event_id: Option<String>,
+    replay_limit: usize,
+) -> Result<talos_client::EventSubscribeResponse> {
     Ok(client
         .subscribe_events(EventSubscribeParams {
             session_id: session_id.to_string(),
-            since_event_id: None,
+            since_event_id,
             replay_limit: Some(replay_limit),
         })
         .await?)
@@ -352,7 +476,7 @@ async fn collect_until_terminal(
 ) -> Result<Vec<ApplicationEventEnvelope>> {
     let mut events = Vec::new();
     for _ in 0..128 {
-        let event = client.next_event().await?;
+        let event = next_event_with_timeout(client).await?;
         if event.subscription_id == subscription_id {
             let terminal = is_terminal_event(&event);
             events.push(event);
@@ -370,8 +494,8 @@ async fn collect_events(
     expected_count: usize,
 ) -> Result<Vec<ApplicationEventEnvelope>> {
     let mut events = Vec::new();
-    for _ in 0..256 {
-        let event = client.next_event().await?;
+    for _ in 0..64 {
+        let event = next_event_with_timeout(client).await?;
         if event.subscription_id == subscription_id {
             events.push(event);
             if events.len() >= expected_count {
@@ -383,6 +507,140 @@ async fn collect_events(
         "timed out waiting for {expected_count} events on {subscription_id}; got {}",
         events.len()
     ))
+}
+
+struct PendingApprovalRecord {
+    session_id: String,
+    turn_id: Option<String>,
+    event_id: String,
+    call_id: String,
+    tool_name: String,
+    sequence: u64,
+}
+
+async fn collect_pending_approval_and_terminal(
+    client: &mut AppServerClient,
+    subscription_id: &str,
+) -> Result<PendingApprovalRecord> {
+    let mut pending = None;
+    for _ in 0..1024 {
+        let event = next_event_with_timeout(client).await?;
+        if event.subscription_id != subscription_id {
+            continue;
+        }
+        if let TalosEventPayload::MessageToolCallPendingApproval(payload) = &event.event.payload {
+            pending = Some(PendingApprovalRecord {
+                session_id: event.event.session_id.clone(),
+                turn_id: event.turn_id.clone(),
+                event_id: event.event_id.clone(),
+                call_id: payload.call_id.clone(),
+                tool_name: payload.tool_name.clone(),
+                sequence: parse_event_sequence(&event.event_id)?,
+            });
+            continue;
+        }
+        if pending.is_some() && event.event.event_type == TalosEventType::MessageCompleted {
+            return Ok(pending.expect("pending checked"));
+        }
+        if event.event.event_type == TalosEventType::MessageError {
+            return Err(anyhow!("turn failed before pending approval event"));
+        }
+    }
+    Err(anyhow!(
+        "timed out waiting for pending approval terminal event"
+    ))
+}
+
+async fn collect_approval_resume_events(
+    client: &mut AppServerClient,
+    subscription_ids: &[&str],
+    after_sequence: u64,
+) -> Result<Vec<ApplicationEventEnvelope>> {
+    let mut events = Vec::new();
+    let mut saw_tool_completed = false;
+    for _ in 0..1024 {
+        let event = next_event_with_timeout(client).await?;
+        if !subscription_ids.contains(&event.subscription_id.as_str())
+            || parse_event_sequence(&event.event_id)? <= after_sequence
+        {
+            continue;
+        }
+        match event.event.event_type {
+            TalosEventType::MessageToolCallCompleted => saw_tool_completed = true,
+            TalosEventType::MessageCompleted if saw_tool_completed => {
+                events.push(event);
+                return Ok(events);
+            }
+            TalosEventType::MessageError => {
+                events.push(event);
+                return Ok(events);
+            }
+            _ => {}
+        }
+        events.push(event);
+    }
+    Err(anyhow!(
+        "timed out waiting for approval resume completion; events={:?}",
+        events.iter().map(event_projection).collect::<Vec<_>>()
+    ))
+}
+
+async fn next_event_with_timeout(client: &mut AppServerClient) -> Result<ApplicationEventEnvelope> {
+    tokio::time::timeout(std::time::Duration::from_secs(30), client.next_event())
+        .await
+        .map_err(|_| anyhow!("timed out waiting for app-server event"))?
+        .map_err(Into::into)
+}
+
+fn assert_approval_resume_completed(
+    pending: &PendingApprovalRecord,
+    events: &[ApplicationEventEnvelope],
+) -> Result<()> {
+    let mut saw_tool_completed = false;
+    let mut saw_completed = false;
+    let mut completed_call_ids = Vec::new();
+    for event in events {
+        if event.event.session_id != pending.session_id {
+            return Err(anyhow!("resumed event session_id mismatch"));
+        }
+        if parse_event_sequence(&event.event_id)? <= pending.sequence {
+            return Err(anyhow!("resumed event sequence did not advance"));
+        }
+        match &event.event.payload {
+            TalosEventPayload::MessageToolCallCompleted(payload) => {
+                completed_call_ids.push(payload.call_id.clone());
+                if payload.call_id == pending.call_id {
+                    saw_tool_completed = true;
+                }
+            }
+            TalosEventPayload::MessageCompleted(_) => {
+                saw_completed = true;
+            }
+            TalosEventPayload::MessageError(payload) => {
+                return Err(anyhow!("resumed turn failed: {}", payload.error));
+            }
+            _ => {}
+        }
+    }
+    if !saw_tool_completed {
+        return Err(anyhow!(
+            "resumed turn missing approved tool completion; pending_call_id={} completed_call_ids={:?}",
+            pending.call_id,
+            completed_call_ids
+        ));
+    }
+    if !saw_completed {
+        return Err(anyhow!("resumed turn missing message.completed"));
+    }
+    Ok(())
+}
+
+fn parse_event_sequence(event_id: &str) -> Result<u64> {
+    event_id
+        .strip_prefix("ev_")
+        .ok_or_else(|| anyhow!("invalid event id prefix: {event_id}"))?
+        .parse::<u64>()
+        .with_context(|| format!("invalid event id sequence: {event_id}"))
 }
 
 async fn collect_two_subscriptions_until_terminal(

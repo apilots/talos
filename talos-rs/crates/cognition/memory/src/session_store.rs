@@ -8,9 +8,10 @@ use crate::path_policy;
 use crate::store::{
     MemoryStore, SessionPromptContext, SessionPromptContextConfig, SessionToolExchangeContext,
     SessionToolExchangeOutcome, SessionToolResultContext, SessionTranscriptBranch,
-    SessionTranscriptRecord, SummaryRecord, TalosMessage, TalosTurn,
+    SessionTranscriptPayload, SessionTranscriptRecord, SummaryRecord, TalosMessage, TalosTurn,
 };
 use crate::{RecordHeader, TalosMessageRole};
+use talos_llm_provider::Role;
 use talos_types::talos::{TalosContentItem, TalosOutputItem};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -177,6 +178,23 @@ pub(crate) async fn load_transcript_records(
     Ok(records)
 }
 
+async fn load_all_transcript_records(
+    store: &MemoryStore,
+    session_id: &str,
+) -> TalosResult<Vec<SessionTranscriptRecord>> {
+    let mut records = load_session_artifacts(store, session_id)
+        .await?
+        .into_iter()
+        .filter_map(|entry| match entry {
+            SessionArtifactRecord::Transcript { record } => Some(record),
+            SessionArtifactRecord::Turn { .. } | SessionArtifactRecord::Summary { .. } => None,
+        })
+        .collect::<Vec<_>>();
+
+    records.sort_by(|a, b| a.header.timestamp.cmp(&b.header.timestamp));
+    Ok(records)
+}
+
 fn dedupe_keep_latest(messages: Vec<TalosMessage>) -> Vec<TalosMessage> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut out = Vec::new();
@@ -244,6 +262,37 @@ fn recent_messages_from_turn(turn: &TalosTurn) -> Vec<TalosMessage> {
         .collect()
 }
 
+fn transcript_message_role(role: Role) -> Option<TalosMessageRole> {
+    match role {
+        Role::System => Some(TalosMessageRole::System),
+        Role::User => Some(TalosMessageRole::User),
+        Role::Assistant => Some(TalosMessageRole::Assistant),
+        Role::Tool => None,
+    }
+}
+
+fn recent_message_from_transcript(record: &SessionTranscriptRecord) -> Option<TalosMessage> {
+    let SessionTranscriptPayload::Message { message } = &record.payload else {
+        return None;
+    };
+    let role = transcript_message_role(message.role)?;
+    let text = message.content.trim();
+    if text.is_empty() {
+        return None;
+    }
+
+    Some(TalosMessage {
+        header: RecordHeader {
+            id: record.header.id.clone(),
+            session_id: record.header.session_id.clone(),
+            turn_id: Some(record.header.invocation_id.clone()),
+            timestamp: record.header.timestamp,
+        },
+        role,
+        text: text.to_string(),
+    })
+}
+
 fn recent_tool_results_from_turn(
     turn: &TalosTurn,
     max_chars: usize,
@@ -287,6 +336,39 @@ fn recent_tool_results_from_turn(
             | TalosOutputItem::ToolCall { .. } => None,
         })
         .collect()
+}
+
+fn recent_tool_result_from_transcript(
+    record: &SessionTranscriptRecord,
+    max_chars: usize,
+) -> Option<SessionToolResultContext> {
+    let SessionTranscriptPayload::Message { message } = &record.payload else {
+        return None;
+    };
+    if message.role != Role::Tool {
+        return None;
+    }
+    let text = message.content.trim();
+    if text.is_empty() {
+        return None;
+    }
+
+    Some(SessionToolResultContext {
+        header: RecordHeader {
+            id: record.header.id.clone(),
+            session_id: record.header.session_id.clone(),
+            turn_id: Some(record.header.invocation_id.clone()),
+            timestamp: record.header.timestamp,
+        },
+        tool_name: message.name.clone().unwrap_or_else(|| "Tool".to_string()),
+        content: if max_chars > 0 {
+            truncate_chars(text, max_chars)
+        } else {
+            text.to_string()
+        },
+        is_error: false,
+        truncated: max_chars > 0 && text.chars().count() > max_chars,
+    })
 }
 
 fn recent_tool_exchanges_from_turn(
@@ -508,6 +590,13 @@ pub(crate) async fn build_session_prompt_context(
                 .into_iter()
                 .flat_map(|turn| recent_messages_from_turn(&turn))
                 .collect::<Vec<_>>();
+            if from_disk.is_empty() {
+                from_disk = load_all_transcript_records(store, session_id)
+                    .await?
+                    .iter()
+                    .filter_map(recent_message_from_transcript)
+                    .collect::<Vec<_>>();
+            }
             if from_disk.len() > target_recent_messages.saturating_mul(3) {
                 let start = from_disk
                     .len()
@@ -532,6 +621,15 @@ pub(crate) async fn build_session_prompt_context(
             .into_iter()
             .flat_map(|turn| recent_tool_results_from_turn(&turn, config.tool_output_max_chars))
             .collect::<Vec<_>>();
+        if tool_results.is_empty() {
+            tool_results = load_all_transcript_records(store, session_id)
+                .await?
+                .iter()
+                .filter_map(|record| {
+                    recent_tool_result_from_transcript(record, config.tool_output_max_chars)
+                })
+                .collect::<Vec<_>>();
+        }
         if tool_results.len() > config.recent_tool_results_limit {
             let start = tool_results
                 .len()

@@ -1,5 +1,6 @@
 use chrono::Utc;
 use talos_error::TalosError;
+use talos_llm_provider::ChatMessage;
 use tempfile::TempDir;
 use tokio::fs;
 
@@ -74,6 +75,61 @@ async fn test_turn_roundtrip_and_context_dedup() {
         .await
         .expect("context should build");
     assert_eq!(context.recent_messages.len(), 2);
+}
+
+#[tokio::test]
+async fn test_prompt_context_falls_back_to_transcript_records() {
+    let (_guard, store) = new_temp_store();
+    let session_id = "transcript-only-session";
+    let invocation_id = "inv-transcript-only";
+
+    for (index, message) in [
+        ChatMessage::user("remember transcript-only close flush"),
+        ChatMessage::assistant("noted for session close"),
+        ChatMessage::tool("call-1", "MemorySearch", "{\"results\":[]}"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        store
+            .append_transcript_record(&SessionTranscriptRecord {
+                header: SessionTranscriptHeader {
+                    id: format!("record-{index}"),
+                    session_id: session_id.to_string(),
+                    invocation_id: invocation_id.to_string(),
+                    branch: SessionTranscriptBranch::ModelThinking,
+                    timestamp: Utc::now(),
+                },
+                author: SessionTranscriptAuthor::Agent,
+                kind: SessionTranscriptEventKind::AgentMessage,
+                payload: SessionTranscriptPayload::Message { message },
+                actions: SessionTranscriptActions::default(),
+                partial: false,
+            })
+            .await
+            .expect("transcript record should append");
+    }
+
+    let context = store
+        .build_session_prompt_context(
+            session_id,
+            &SessionPromptContextConfig {
+                recent_messages_limit: 8,
+                recent_tool_results_limit: 8,
+                tool_output_max_chars: 1024,
+                recent_tool_exchanges_limit: 0,
+                tool_exchange_max_chars: 0,
+                include_summary: false,
+                summary_recent_count: 0,
+                summary_max_chars: 0,
+            },
+        )
+        .await
+        .expect("context should build from transcript records");
+
+    assert_eq!(context.recent_messages.len(), 2);
+    assert_eq!(context.recent_tool_results.len(), 1);
+    assert_eq!(context.recent_tool_results[0].tool_name, "MemorySearch");
 }
 
 #[tokio::test]

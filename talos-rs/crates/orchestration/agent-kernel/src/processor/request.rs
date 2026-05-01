@@ -38,6 +38,17 @@ pub(crate) fn latest_branch_event<'a>(
         .find(|event| event.branch == branch && predicate(event))
 }
 
+pub(crate) fn latest_event<'a>(
+    ctx: &'a InvocationContext,
+    predicate: impl Fn(&'a SessionEvent) -> bool,
+) -> Option<&'a SessionEvent> {
+    ctx.session
+        .events
+        .iter()
+        .rev()
+        .find(|event| predicate(event))
+}
+
 #[derive(Default)]
 pub struct RequestProcessorPipeline {
     processors: Vec<Arc<dyn RequestProcessor>>,

@@ -12,8 +12,9 @@ pub use talos_app_protocol::events::{
     canonical_method, ApplicationEvent, ApplicationEventEnvelope,
 };
 pub use talos_app_protocol::requests::{
-    EventSubscribeParams, EventSubscribeResponse, ProtocolTalosContext, SessionCreateParams,
-    TurnStartResponse,
+    AdminProjectListParams, AdminSessionListParams, AdminSessionPagination, EventSubscribeParams,
+    EventSubscribeResponse, ProtocolTalosContext, SessionCreateParams,
+    ToolDynamicResultSubmitParams, TurnStartResponse,
 };
 pub use talos_auth::{AuthResponse, LoginRequest, RegisterRequest, UserRole};
 pub use talos_error::{TalosError, TalosResult};

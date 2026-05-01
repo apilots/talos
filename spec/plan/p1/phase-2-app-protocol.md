@@ -174,7 +174,7 @@
 ## 5. 完成记录
 
 **变更摘要**:  
-已完成 `talos-app-protocol` crate，建立 JSON-RPC 2.0 基础类型、client request params、server notification、server request、application event envelope、强类型 error data、protocol version、schema/TS 生成函数与 fixture 漂移测试。Rust 作为协议真源，JSON Schema fixture 提交在 protocol crate 内，TypeScript 生成物接入现有 `@talos/sdk-core` 并以 `AppProtocol` namespace re-export。Phase 6 已将协议版本推进到 `0.2`，freeze `project.create/list/read/patch/delete` 与 `session.turns`，并通过 `cargo run -p talos-app-protocol --example export_fixtures` 刷新 schema 与 TS generated fixture。当前暂不 freeze 的 `tool.dynamic_result.submit`、`admin.session.list`、`admin.project.list` 仍写入 `DEFERRED_CLIENT_METHODS`。
+已完成 `talos-app-protocol` crate，建立 JSON-RPC 2.0 基础类型、client request params、server notification、server request、application event envelope、强类型 error data、protocol version、schema/TS 生成函数与 fixture 漂移测试。Rust 作为协议真源，JSON Schema fixture 提交在 protocol crate 内，TypeScript 生成物接入现有 `@talos/sdk-core` 并以 `AppProtocol` namespace re-export。Phase 6 已将协议版本推进到 `0.2`，freeze `project.create/list/read/patch/delete` 与 `session.turns`，并通过 `cargo run -p talos-app-protocol --example export_fixtures` 刷新 schema 与 TS generated fixture。当前暂不 freeze 的 `tool.dynamic_result.submit`、`admin.session.list`、`admin.project.list` 仍写入 `DEFERRED_CLIENT_METHODS`，由 [../p2/phase-1-freeze-deferred-protocol-methods.md](../p2/phase-1-freeze-deferred-protocol-methods.md) 承接。
 
 **关键文件**:  
 - `talos-rs/crates/gateway/app-protocol`
@@ -192,7 +192,7 @@
 - `admin.session.list`、`admin.project.list`：等待本地 admin actor credentials 与权限产品边界稳定后 freeze。
 
 **未覆盖风险**:  
-Phase 7 已将 protocol event 收敛为复用共享 `TalosEvent` / `TalosEventPayload`，不再保留 app protocol 私有窄 DTO。当前剩余风险集中在 `DEFERRED_CLIENT_METHODS` 中明确登记的后续 protocol freeze 项。
+Phase 7 已将 protocol event 收敛为复用共享 `TalosEvent` / `TalosEventPayload`，不再保留 app protocol 私有窄 DTO。当前剩余风险集中在 `DEFERRED_CLIENT_METHODS` 中明确登记的 protocol freeze 项，由 P2 Phase 1 承接。
 
 **后续移交**:  
 Phase 3/6/7 已直接复用本 crate 的 `ClientRequest::decode`、`JsonRpcMessage`、`AppServerErrorBody` 和 generated event notification method；后续新增协议能力继续以 app-protocol Rust 类型为真源，不得在 app-server 内重复定义协议 DTO。

@@ -8,7 +8,7 @@ use crate::{
         SessionCompactionState, ToolLoopGuardState, LAST_PROMPT_DIAGNOSTICS_STATE_KEY,
         PROMPT_WARNING_STATE_KEY, SESSION_COMPACTION_STATE_KEY, SESSION_CONTINUITY_STATE_KEY,
     },
-    StreamingToolExecutionConfig, ToolExecutionContext,
+    StreamingToolExecutionConfig, ToolExecutionContext, ToolResultStreamData,
 };
 
 pub struct SingleFlow {
@@ -376,6 +376,61 @@ impl BaseLlmFlow for SingleFlow {
                     prepared.stream_tx.as_ref(),
                 )
                 .await?;
+                let mut replay_response = LlmResponseEnvelope {
+                    output_text: String::new(),
+                    output_items: replay_batch.output_items.clone(),
+                    branch: request.branch,
+                    actions: crate::EventActions::default(),
+                    allow_final_projection: true,
+                };
+                let replay_output = self
+                    .response_pipeline
+                    .run(ctx, &mut replay_response)
+                    .await?;
+                events.extend(replay_output.events);
+                self.observe_tool_callbacks(ctx, &replay_response.output_items)
+                    .await?;
+                if let Some(tx) = prepared.stream_tx.as_ref() {
+                    for output_item in &replay_batch.output_items {
+                        if let TalosOutputItem::ToolResult {
+                            call_id,
+                            tool_name,
+                            content,
+                            is_error,
+                        } = output_item
+                        {
+                            let _ = tx
+                                .send(KernelStreamEvent::new(
+                                    KernelStreamEventType::ToolResult,
+                                    KernelStreamEventData::ToolResult(ToolResultStreamData {
+                                        call_id: call_id.clone(),
+                                        tool_name: tool_name.clone(),
+                                        content: content.clone(),
+                                        is_error: *is_error,
+                                        semantic_events: Vec::new(),
+                                        envelope: None,
+                                        next_turn_failure: None,
+                                    }),
+                                ))
+                                .await;
+                        }
+                    }
+                }
+                for tool_message in &replay_batch.tool_messages {
+                    stage_session_event(
+                        ctx,
+                        SessionEvent::new(
+                            prepared.session_id.clone(),
+                            prepared.invocation_id.clone(),
+                            request.branch,
+                            EventAuthor::Tool,
+                            SessionEventKind::ToolResult,
+                            SessionEventPayload::Message {
+                                message: tool_message.clone(),
+                            },
+                        ),
+                    );
+                }
                 // Inject synthetic assistant message with tool calls followed by results so the
                 // LLM sees a coherent conversation on the next step.
                 state
@@ -385,6 +440,9 @@ impl BaseLlmFlow for SingleFlow {
                         replay_calls,
                     ));
                 apply_general_turn_tool_batch(&mut state, &replay_batch, &self.kernel_config);
+                step_model_request.messages = state.messages.clone();
+                final_text = "Tool execution completed.".to_string();
+                break StopReason::EndTurn;
             }
 
             let plugin_manager = ctx.plugin_manager.clone();

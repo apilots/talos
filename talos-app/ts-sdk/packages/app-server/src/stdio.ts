@@ -110,6 +110,14 @@ export class JsonRpcStdioTransport implements AppServerTransport {
     });
   }
 
+  terminate(signal: NodeJS.Signals = "SIGTERM"): boolean {
+    const child = this.child;
+    if (!child) {
+      return false;
+    }
+    return child.kill(signal);
+  }
+
   request<T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T> {
     this.start();
     const child = this.requireChild();

@@ -203,6 +203,36 @@ impl TurnService {
         Ok(ack)
     }
 
+    pub async fn submit_tool_approval(
+        &self,
+        session: TalosSession,
+        call_id: &str,
+        tool_name: &str,
+        approved: bool,
+        reason: Option<String>,
+    ) -> TalosResult<()> {
+        let session_id = session.context.session_id.clone();
+        self.gateway
+            .submit_tool_approval(&session_id, call_id, tool_name, approved, reason)
+            .await?;
+        self.resume_after_user_action(session).await
+    }
+
+    pub async fn submit_dynamic_tool_result(
+        &self,
+        session: TalosSession,
+        call_id: &str,
+        tool_name: &str,
+        output: String,
+        success: bool,
+    ) -> TalosResult<()> {
+        let session_id = session.context.session_id.clone();
+        self.gateway
+            .submit_dynamic_tool_result(&session_id, call_id, tool_name, output, success)
+            .await?;
+        self.resume_after_user_action(session).await
+    }
+
     pub async fn submit_retry(
         &self,
         session: TalosSession,
@@ -281,6 +311,77 @@ impl TurnService {
             )),
             ActiveTurnStatus::Completed | ActiveTurnStatus::Failed => Ok(()),
         }
+    }
+
+    async fn resume_after_user_action(&self, session: TalosSession) -> TalosResult<()> {
+        let session_id = session.context.session_id.clone();
+        let request_id = format!("req_{}", Uuid::new_v4().simple());
+        let turn_id = format!("turn_{}", Uuid::new_v4().simple());
+        let context = TalosContext {
+            source_type: session.context.source_type.clone(),
+            provider: session.context.provider.clone(),
+            user_id: session.context.user_id.clone(),
+            message_id: session.context.message_id.clone(),
+            trace_id: session.context.trace_id.clone(),
+            channel_id: session.context.channel_id.clone(),
+            thread_id: session.context.thread_id.clone(),
+            project_root: session.context.project_root.clone(),
+            environment: session.context.environment.clone(),
+        };
+        let gateway_request = GatewayRequest {
+            session_id: session_id.clone(),
+            workspace_id: None,
+            input: Vec::new(),
+            context,
+        };
+        let mut stream_rx = self
+            .gateway
+            .handle_request_stream(gateway_request)
+            .await
+            .map_err(|err| TalosError::GatewayError(err.to_string()))?;
+        let first_event_timeout = Duration::from_millis(
+            self.base_config
+                .agent
+                .kernel
+                .session_events
+                .first_event_timeout_ms
+                .max(1),
+        );
+        let first_event = match tokio::time::timeout(first_event_timeout, stream_rx.recv()).await {
+            Ok(Some(event)) => event,
+            Ok(None) => {
+                let _ = self
+                    .fail_without_first_event(
+                        &session_id,
+                        &turn_id,
+                        &request_id,
+                        None,
+                        stream_rx,
+                        "message stream closed before first event",
+                    )
+                    .await?;
+                return Ok(());
+            }
+            Err(_) => {
+                let _ = self
+                    .fail_without_first_event(
+                        &session_id,
+                        &turn_id,
+                        &request_id,
+                        None,
+                        stream_rx,
+                        "timed out waiting for first message event",
+                    )
+                    .await?;
+                return Ok(());
+            }
+        };
+        self.event_service
+            .record_talos_event(Some(turn_id.clone()), first_event)
+            .await
+            .map_err(|err| TalosError::StorageError(format!("event record failed: {err}")))?;
+        spawn_event_forwarder(self.event_service.clone(), Some(turn_id), stream_rx);
+        Ok(())
     }
 
     async fn fail_without_first_event(

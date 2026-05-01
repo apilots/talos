@@ -600,6 +600,29 @@ async fn test_confirmation_processor_injects_replay_when_approved() {
 }
 
 #[tokio::test]
+async fn test_confirmation_processor_replays_approval_across_branches() {
+    let mut ctx = mock_ctx();
+    let confirmation = make_confirmation_event("call-cross", "Bash", -100);
+    let mut approval = make_approval_event("call-cross", "Bash", true, 0);
+    approval.branch = ExecutionBranch::ReactiveLoop;
+    ctx.session.events = vec![confirmation, approval];
+    let mut request = LlmRequestEnvelope {
+        branch: ExecutionBranch::DirectAnswer,
+        ..LlmRequestEnvelope::default()
+    };
+
+    RequestConfirmationRequestProcessor
+        .run(&mut ctx, &mut request)
+        .await
+        .unwrap();
+
+    assert_eq!(request.replay_tool_invocations.len(), 1);
+    assert_eq!(request.replay_tool_invocations[0].call_id, "call-cross");
+    assert_eq!(request.replay_tool_invocations[0].tool_name, "Bash");
+    assert!(request.prompt_prefix_messages.is_empty());
+}
+
+#[tokio::test]
 async fn test_confirmation_processor_still_blocks_when_no_response() {
     let mut ctx = mock_ctx();
     ctx.session.events = vec![make_confirmation_event("call-2", "Bash", -100)];

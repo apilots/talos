@@ -77,6 +77,10 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::EventSubscribeParams>());
     output.push_str(&export::<crate::requests::EventSubscribeResponse>());
     output.push_str(&export::<crate::requests::ToolApprovalSubmitParams>());
+    output.push_str(&export::<crate::requests::ToolDynamicResultSubmitParams>());
+    output.push_str(&export::<crate::requests::AdminSessionListParams>());
+    output.push_str(&export::<crate::requests::AdminSessionPagination>());
+    output.push_str(&export::<crate::requests::AdminProjectListParams>());
     output.push_str(&export::<crate::requests::ModelListParams>());
     output.push_str(&export::<crate::requests::ConfigReadParams>());
     output.push_str(&export::<crate::requests::ConfigValueWriteParams>());

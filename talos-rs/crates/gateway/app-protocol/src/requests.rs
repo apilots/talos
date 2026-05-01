@@ -8,20 +8,7 @@ use ts_rs::TS;
 use crate::errors::AppServerErrorBody;
 use crate::version::ProtocolVersion;
 
-pub const DEFERRED_CLIENT_METHODS: &[DeferredClientMethod] = &[
-    DeferredClientMethod {
-        method: "tool.dynamic_result.submit",
-        reason: "dynamic tool result protocol DTO depends on app-server server-request flow",
-    },
-    DeferredClientMethod {
-        method: "admin.session.list",
-        reason: "admin protocol surface is deferred until local actor credentials are implemented",
-    },
-    DeferredClientMethod {
-        method: "admin.project.list",
-        reason: "admin protocol surface is deferred until local actor credentials are implemented",
-    },
-];
+pub const DEFERRED_CLIENT_METHODS: &[DeferredClientMethod] = &[];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeferredClientMethod {
@@ -63,6 +50,12 @@ pub enum ClientMethod {
     EventSubscribe,
     #[serde(rename = "tool.approval.submit")]
     ToolApprovalSubmit,
+    #[serde(rename = "tool.dynamic_result.submit")]
+    ToolDynamicResultSubmit,
+    #[serde(rename = "admin.session.list")]
+    AdminSessionList,
+    #[serde(rename = "admin.project.list")]
+    AdminProjectList,
     #[serde(rename = "model.list")]
     ModelList,
     #[serde(rename = "config.read")]
@@ -116,6 +109,9 @@ impl ClientMethod {
             Self::TurnInterrupt => "turn.interrupt",
             Self::EventSubscribe => "event.subscribe",
             Self::ToolApprovalSubmit => "tool.approval.submit",
+            Self::ToolDynamicResultSubmit => "tool.dynamic_result.submit",
+            Self::AdminSessionList => "admin.session.list",
+            Self::AdminProjectList => "admin.project.list",
             Self::ModelList => "model.list",
             Self::ConfigRead => "config.read",
             Self::ConfigValueWrite => "config.value.write",
@@ -163,6 +159,9 @@ impl FromStr for ClientMethod {
             "turn.interrupt" => Ok(Self::TurnInterrupt),
             "event.subscribe" => Ok(Self::EventSubscribe),
             "tool.approval.submit" => Ok(Self::ToolApprovalSubmit),
+            "tool.dynamic_result.submit" => Ok(Self::ToolDynamicResultSubmit),
+            "admin.session.list" => Ok(Self::AdminSessionList),
+            "admin.project.list" => Ok(Self::AdminProjectList),
             "model.list" => Ok(Self::ModelList),
             "config.read" => Ok(Self::ConfigRead),
             "config.value.write" => Ok(Self::ConfigValueWrite),
@@ -219,6 +218,12 @@ pub enum ClientRequestParams {
     EventSubscribe(EventSubscribeParams),
     #[serde(rename = "tool.approval.submit")]
     ToolApprovalSubmit(ToolApprovalSubmitParams),
+    #[serde(rename = "tool.dynamic_result.submit")]
+    ToolDynamicResultSubmit(ToolDynamicResultSubmitParams),
+    #[serde(rename = "admin.session.list")]
+    AdminSessionList(AdminSessionListParams),
+    #[serde(rename = "admin.project.list")]
+    AdminProjectList(AdminProjectListParams),
     #[serde(rename = "model.list")]
     ModelList(ModelListParams),
     #[serde(rename = "config.read")]
@@ -296,6 +301,15 @@ impl ClientRequest {
             }
             ClientMethod::ToolApprovalSubmit => {
                 ClientRequestParams::ToolApprovalSubmit(decode(params_value)?)
+            }
+            ClientMethod::ToolDynamicResultSubmit => {
+                ClientRequestParams::ToolDynamicResultSubmit(decode(params_value)?)
+            }
+            ClientMethod::AdminSessionList => {
+                ClientRequestParams::AdminSessionList(decode(params_value)?)
+            }
+            ClientMethod::AdminProjectList => {
+                ClientRequestParams::AdminProjectList(decode(params_value)?)
             }
             ClientMethod::ModelList => ClientRequestParams::ModelList(decode(params_value)?),
             ClientMethod::ConfigRead => ClientRequestParams::ConfigRead(decode(params_value)?),
@@ -513,6 +527,52 @@ pub struct ToolApprovalSubmitParams {
     pub reason: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct ToolDynamicResultSubmitParams {
+    pub session_id: String,
+    pub call_id: String,
+    pub tool_name: String,
+    pub output: String,
+    pub success: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct AdminSessionListParams {
+    #[serde(default)]
+    pub user_id: Option<String>,
+    #[serde(default)]
+    pub channel_id: Option<String>,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub offset: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct AdminSessionPagination {
+    pub total: usize,
+    pub limit: usize,
+    pub offset: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminSessionListResponse {
+    pub data: Vec<talos_types::TalosSession>,
+    pub pagination: AdminSessionPagination,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct AdminProjectListParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminProjectListResponse {
+    pub data: Vec<talos_types::ProjectRecord>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
 pub struct ModelListParams {}
 
@@ -647,9 +707,19 @@ mod tests {
     }
 
     #[test]
-    fn deferred_methods_are_explicit() {
-        assert!(DEFERRED_CLIENT_METHODS
-            .iter()
-            .any(|entry| entry.method == "tool.dynamic_result.submit"));
+    fn deferred_methods_are_empty_after_p2_freeze() {
+        assert!(DEFERRED_CLIENT_METHODS.is_empty());
+        assert_eq!(
+            ClientMethod::from_str("tool.dynamic_result.submit").unwrap(),
+            ClientMethod::ToolDynamicResultSubmit
+        );
+        assert_eq!(
+            ClientMethod::from_str("admin.session.list").unwrap(),
+            ClientMethod::AdminSessionList
+        );
+        assert_eq!(
+            ClientMethod::from_str("admin.project.list").unwrap(),
+            ClientMethod::AdminProjectList
+        );
     }
 }

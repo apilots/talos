@@ -43,4 +43,4 @@ pub use response_processors::{
     ToolCallExtractionProcessor,
 };
 
-pub(crate) use request::latest_branch_event;
+pub(crate) use request::{latest_branch_event, latest_event};

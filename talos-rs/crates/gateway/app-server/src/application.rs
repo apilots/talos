@@ -3,14 +3,16 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use talos_app_protocol::errors::AppServerErrorBody;
 use talos_app_protocol::requests::{
-    ClientRequest, ClientRequestParams, ConfigReadParams, EventSubscribeParams,
-    MemoryFileReadParams, MemoryFileWriteParams, OptionalPathPatch, OptionalStringPatch,
-    ProjectCreateParams, ProjectPatchParams, ProtocolInputItem, ProtocolTalosContext,
-    SessionCreateParams, SessionListParams, SessionPatchParams, TurnStartParams, TurnStartResponse,
+    AdminProjectListResponse, AdminSessionListParams, AdminSessionListResponse,
+    AdminSessionPagination, ClientRequest, ClientRequestParams, ConfigReadParams,
+    EventSubscribeParams, MemoryFileReadParams, MemoryFileWriteParams, OptionalPathPatch,
+    OptionalStringPatch, ProjectCreateParams, ProjectPatchParams, ProtocolInputItem,
+    ProtocolTalosContext, SessionCreateParams, SessionListParams, SessionPatchParams,
+    TurnStartParams, TurnStartResponse,
 };
 use talos_application_service::{
-    Actor, ApplicationEventStream, EventReplay, MemoryDate, MemoryListParams, MemorySearchParams,
-    TalosApplicationService, WorkspaceDocService,
+    Actor, AdminSessionPage, ApplicationEventStream, EventReplay, MemoryDate, MemoryListParams,
+    MemorySearchParams, TalosApplicationService, WorkspaceDocService,
 };
 use talos_error::TalosError;
 use talos_session_store::SessionEventId;
@@ -149,6 +151,31 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .await
                     .map_err(AppServerErrorBody::from_talos_error)?;
                 to_value(json!({ "success": true }))
+            }
+            ClientRequestParams::ToolDynamicResultSubmit(params) => {
+                self.app
+                    .submit_dynamic_tool_result(
+                        actor,
+                        &params.session_id,
+                        &params.call_id,
+                        &params.tool_name,
+                        params.output,
+                        params.success,
+                    )
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(json!({ "success": true }))
+            }
+            ClientRequestParams::AdminSessionList(params) => {
+                to_value(self.list_admin_sessions(actor, params).await?)
+            }
+            ClientRequestParams::AdminProjectList(_) => {
+                let projects = self
+                    .app
+                    .list_admin_projects(actor)
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(AdminProjectListResponse { data: projects })
             }
             ClientRequestParams::ModelList(_) => {
                 let models = self.app.config.list_models().await;
@@ -363,6 +390,39 @@ impl TalosApplicationAdapter {
             )
             .await
             .map_err(AppServerErrorBody::from_talos_error)
+    }
+
+    async fn list_admin_sessions(
+        &self,
+        actor: &Actor,
+        params: AdminSessionListParams,
+    ) -> ProtocolResult<AdminSessionListResponse> {
+        let page = AdminSessionPage::from_query(SessionQuery {
+            user_id: params.user_id,
+            channel_id: params.channel_id,
+            provider: params.provider,
+            project_id: params.project_id,
+            limit: params.limit,
+            offset: params.offset,
+        });
+        let sessions = self
+            .app
+            .list_admin_sessions(actor, page.query)
+            .await
+            .map_err(AppServerErrorBody::from_talos_error)?;
+        let total = self
+            .app
+            .count_admin_sessions(actor, page.count_query)
+            .await
+            .map_err(AppServerErrorBody::from_talos_error)?;
+        Ok(AdminSessionListResponse {
+            data: sessions,
+            pagination: AdminSessionPagination {
+                total,
+                limit: page.limit,
+                offset: page.offset,
+            },
+        })
     }
 
     async fn start_turn(

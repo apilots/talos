@@ -8,15 +8,16 @@ use serde_json::Value;
 use talos_app_protocol::events::ApplicationEventEnvelope;
 use talos_app_protocol::jsonrpc::{JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, RequestId};
 use talos_app_protocol::requests::{
-    ActorCredential, ActorCredentials, ClientCapabilities, ClientInfo, ConfigReadParams,
-    EventSubscribeParams, EventSubscribeResponse, InitializeParams, InitializeResponse,
-    MemoryFileListParams as ProtocolMemoryFileListParams, MemoryFileReadParams,
+    ActorCredential, ActorCredentials, AdminProjectListParams, AdminProjectListResponse,
+    AdminSessionListParams, AdminSessionListResponse, ClientCapabilities, ClientInfo,
+    ConfigReadParams, EventSubscribeParams, EventSubscribeResponse, InitializeParams,
+    InitializeResponse, MemoryFileListParams as ProtocolMemoryFileListParams, MemoryFileReadParams,
     MemoryFileWriteParams, ModelListParams, ProjectCreateParams, ProjectDeleteParams,
     ProjectListParams, ProjectPatchParams, ProjectReadParams, ProtocolInputItem,
     SessionCreateParams, SessionDeleteParams, SessionListParams, SessionPatchParams,
-    SessionReadParams, SessionTurnsParams, ToolApprovalSubmitParams, TurnInterruptParams,
-    TurnStartParams, TurnStartResponse, WorkspaceDocListParams, WorkspaceDocReadParams,
-    WorkspaceDocWriteParams,
+    SessionReadParams, SessionTurnsParams, ToolApprovalSubmitParams, ToolDynamicResultSubmitParams,
+    TurnInterruptParams, TurnStartParams, TurnStartResponse, WorkspaceDocListParams,
+    WorkspaceDocReadParams, WorkspaceDocWriteParams,
 };
 use talos_app_protocol::version::ProtocolVersion;
 use talos_error::{TalosError, TalosResult};
@@ -261,6 +262,13 @@ impl AppServerClient {
             .map(|response| response.data)
     }
 
+    pub async fn list_admin_sessions(
+        &mut self,
+        params: AdminSessionListParams,
+    ) -> TalosResult<AdminSessionListResponse> {
+        self.request_typed("admin.session.list", params).await
+    }
+
     pub async fn get_session(&mut self, session_id: &str) -> TalosResult<TalosSession> {
         self.request_typed(
             "session.read",
@@ -301,6 +309,15 @@ impl AppServerClient {
         self.request_typed::<_, ListResponse<ProjectRecord>>("project.list", ProjectListParams {})
             .await
             .map(|response| response.data)
+    }
+
+    pub async fn list_admin_projects(&mut self) -> TalosResult<Vec<ProjectRecord>> {
+        self.request_typed::<_, AdminProjectListResponse>(
+            "admin.project.list",
+            AdminProjectListParams {},
+        )
+        .await
+        .map(|response| response.data)
     }
 
     pub async fn get_project(&mut self, project_id: &str) -> TalosResult<ProjectRecord> {
@@ -435,6 +452,29 @@ impl AppServerClient {
                     tool_name: tool_name.to_string(),
                     approved,
                     reason,
+                },
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn submit_dynamic_tool_result(
+        &mut self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        output: String,
+        success: bool,
+    ) -> TalosResult<()> {
+        let _: Value = self
+            .request_typed(
+                "tool.dynamic_result.submit",
+                ToolDynamicResultSubmitParams {
+                    session_id: session_id.to_string(),
+                    call_id: call_id.to_string(),
+                    tool_name: tool_name.to_string(),
+                    output,
+                    success,
                 },
             )
             .await?;

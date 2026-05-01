@@ -89,7 +89,7 @@ Phase 6 是唯一执行全量 e2e 的阶段。前面阶段只跑本阶段新增�
 
 **完成标准**:
 
-- 残余风险都有 owner 或后续 issue。back-pressure、actor credentials、replay、parity 风险均在 full-e2e、app-server contract 与现有单测链路中得到当前覆盖；其余剩余风险见后续移交部分并保留 owner。
+- 残余风险都有 owner 或 P2 承接计划。back-pressure、actor credentials、replay、parity 风险均在 full-e2e、app-server contract 与现有单测链路中得到当前覆盖；其余剩余风险见后续移交部分并保留 owner。
 
 ---
 
@@ -170,14 +170,14 @@ Phase 6 执行 [PLAN.md §5](PLAN.md#5-全局质量门禁) 的全量门禁。本
 
 **遗留临时路径（Phase 6 待删）**:  
 - 无仍需 Phase 6 删除的临时路径。`AppServerClient::send_message_events` 已完成后台 reader + subscription 分发模型改造，支持增量事件渲染。
-- `DEFERRED_CLIENT_METHODS` 仍保留 `tool.dynamic_result.submit`、`admin.session.list`、`admin.project.list`，属于后续 protocol freeze 项，不再作为 Phase 6 临时路径清理项。
+- `DEFERRED_CLIENT_METHODS` 仍保留 `tool.dynamic_result.submit`、`admin.session.list`、`admin.project.list`，属于 P2 protocol freeze 项，不再作为 Phase 6 临时路径清理项。
 - 源码行数超限项已拆分：`session-store/src/lib.rs`、`tools/src/registry.rs`、`agent-kernel/src/general_turn/prepare.rs`、`prompt/src/tests.rs`、`ui-tui/src/tests/session_tool_tests.rs`、`agent-kernel/src/general_turn/tests/loop_tests.rs`、`ui-tui/src/stream.rs`。
 
 **未覆盖风险**:  
-- 真实 pending approval 到 resumed turn 的 agent runtime 状态推进仍需补强回归。
-- Desktop app-server crash recovery 目前有 controller 单测，仍需产品级 smoke 复核。
+- 真实 pending approval 到 resumed turn 的 agent runtime 状态推进由 [../p2/phase-2-pending-approval-resume-regression.md](../p2/phase-2-pending-approval-resume-regression.md) 承接。
+- Desktop app-server crash recovery 产品级 smoke 由 [../p2/phase-3-desktop-crash-recovery-smoke.md](../p2/phase-3-desktop-crash-recovery-smoke.md) 承接。
 
 **后续移交**:  
 - owner: `orchestration/runtime`：确认 back-pressure、subscription terminate 与 resumed turn edge 的长期监控告警与回归用例归档到 `talos-coordinator`。
-- owner: `gateway/app-server`：验证 app-server credential 边界与 tool approval 续接逻辑，待处理事项见后续 issue。
+- owner: `gateway/app-server`：验证 app-server credential 边界与 tool approval 续接逻辑，待处理事项见 P2。
 - owner: `desktop`：补充 app-server 本地生命周期 crash recovery 与重连体验测试，聚焦 `talos-desktop` controller/sandbox 场景。

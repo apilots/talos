@@ -55,6 +55,60 @@
       ],
       "type": "object"
     },
+    "AdminProjectListParams": {
+      "type": "object"
+    },
+    "AdminSessionListParams": {
+      "properties": {
+        "channel_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "offset": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "project_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "user_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "AppListParams": {
       "type": "object"
     },
@@ -379,6 +433,9 @@
         "turn.interrupt",
         "event.subscribe",
         "tool.approval.submit",
+        "tool.dynamic_result.submit",
+        "admin.session.list",
+        "admin.project.list",
         "model.list",
         "config.read",
         "config.value.write",
@@ -695,6 +752,60 @@
             },
             "params": {
               "$ref": "#/definitions/ToolApprovalSubmitParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "tool.dynamic_result.submit"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ToolDynamicResultSubmitParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "admin.session.list"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AdminSessionListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "admin.project.list"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AdminProjectListParams"
             }
           },
           "required": [
@@ -2901,6 +3012,33 @@
         "approved",
         "call_id",
         "session_id",
+        "tool_name"
+      ],
+      "type": "object"
+    },
+    "ToolDynamicResultSubmitParams": {
+      "properties": {
+        "call_id": {
+          "type": "string"
+        },
+        "output": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "tool_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "call_id",
+        "output",
+        "session_id",
+        "success",
         "tool_name"
       ],
       "type": "object"

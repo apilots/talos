@@ -53,6 +53,32 @@ impl Gateway for GatewayImpl {
         self.handler.cancel_active_turn(session_id).await
     }
 
+    async fn submit_tool_approval(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        approved: bool,
+        reason: Option<String>,
+    ) -> TalosResult<()> {
+        self.handler
+            .submit_tool_approval(session_id, call_id, tool_name, approved, reason)
+            .await
+    }
+
+    async fn submit_dynamic_tool_result(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        output: String,
+        success: bool,
+    ) -> TalosResult<()> {
+        self.handler
+            .submit_dynamic_tool_result(session_id, call_id, tool_name, output, success)
+            .await
+    }
+
     async fn start(&self) -> TalosResult<()> {
         info!("Starting gateway...");
         Ok(())

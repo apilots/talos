@@ -61,6 +61,7 @@ async fn execute_app_server_smoke_with_client(
     match cmd.scenario.as_str() {
         "smoke" => run_app_server_smoke(client).await?,
         "turn-smoke" => run_app_server_turn_smoke(client).await?,
+        "approval-resume" => run_app_server_approval_resume(client).await?,
         other => return Err(format!("unsupported app-server smoke scenario: {other}").into()),
     }
     println!("App-server scenario passed: {}", cmd.scenario);
@@ -144,6 +145,126 @@ async fn run_app_server_turn_smoke(
         }
     }
     Err("app-server turn smoke did not receive a complete event flow".into())
+}
+
+async fn run_app_server_approval_resume(
+    client: &mut AppServerClient,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let session = client
+        .create_session(SessionCreateParams {
+            context: default_chat_context("cli-app-server-approval"),
+            model: None,
+            project_id: None,
+            current_directory: current_cli_directory(),
+        })
+        .await?;
+    let session_id = session.context.session_id;
+    let subscription = client
+        .subscribe_events(EventSubscribeParams {
+            session_id: session_id.clone(),
+            since_event_id: None,
+            replay_limit: Some(128),
+        })
+        .await?;
+
+    client
+        .start_turn(
+            &session_id,
+            TalosMessageRequest {
+                input: vec![TalosInputItem::Text {
+                    text: "Call the Bash tool exactly once with command `echo APPROVAL_RESUME_OK`, timeout 10, and dangerously_disable_sandbox true. Do not answer directly before calling the tool.".to_string(),
+                }],
+                workspace_id: None,
+            },
+            Some(format!(
+                "cli-app-server-approval-pending-{}",
+                uuid::Uuid::new_v4().simple()
+            )),
+        )
+        .await?;
+
+    let mut pending_call_id = None;
+    let mut pending_tool_name = None;
+    let mut pending_event_id = None;
+    let mut pending_sequence = None;
+    for _ in 0..1024 {
+        let event = client.next_event().await?;
+        if event.subscription_id != subscription.subscription_id {
+            continue;
+        }
+        match event.event.payload {
+            TalosEventPayload::MessageToolCallPendingApproval(payload) => {
+                pending_call_id = Some(payload.call_id);
+                pending_tool_name = Some(payload.tool_name);
+                pending_event_id = Some(event.event_id.clone());
+                pending_sequence = Some(parse_app_server_event_sequence(&event.event_id)?);
+            }
+            TalosEventPayload::MessageCompleted(_) if pending_call_id.is_some() => {
+                break;
+            }
+            TalosEventPayload::MessageError(payload) => {
+                return Err(format!("app-server approval setup failed: {}", payload.error).into());
+            }
+            _ => {}
+        }
+    }
+
+    let call_id = pending_call_id.ok_or("missing pending approval call_id")?;
+    let tool_name = pending_tool_name.ok_or("missing pending approval tool_name")?;
+    let event_id = pending_event_id.ok_or("missing pending approval event_id")?;
+    let after_sequence = pending_sequence.ok_or("missing pending approval sequence")?;
+    let _live_resume_subscription = client
+        .subscribe_events(EventSubscribeParams {
+            session_id: session_id.clone(),
+            since_event_id: None,
+            replay_limit: Some(128),
+        })
+        .await?;
+    client
+        .submit_tool_approval(
+            &session_id,
+            &call_id,
+            &tool_name,
+            true,
+            Some("approved by cli regression".to_string()),
+        )
+        .await?;
+    let resumed_subscription = client
+        .subscribe_events(EventSubscribeParams {
+            session_id: session_id.clone(),
+            since_event_id: Some(event_id),
+            replay_limit: Some(512),
+        })
+        .await?;
+
+    let mut saw_tool_completed = false;
+    for _ in 0..1024 {
+        let event = client.next_event().await?;
+        if event.subscription_id != resumed_subscription.subscription_id
+            || parse_app_server_event_sequence(&event.event_id)? <= after_sequence
+        {
+            continue;
+        }
+        match event.event.payload {
+            TalosEventPayload::MessageToolCallCompleted(payload) if payload.call_id == call_id => {
+                saw_tool_completed = true;
+            }
+            TalosEventPayload::MessageCompleted(_) if saw_tool_completed => return Ok(()),
+            TalosEventPayload::MessageError(payload) => {
+                return Err(format!("app-server approval resume failed: {}", payload.error).into());
+            }
+            _ => {}
+        }
+    }
+
+    Err("app-server approval resume did not complete approved tool call".into())
+}
+
+fn parse_app_server_event_sequence(event_id: &str) -> Result<u64, Box<dyn std::error::Error>> {
+    Ok(event_id
+        .strip_prefix("ev_")
+        .ok_or_else(|| format!("invalid event id prefix: {event_id}"))?
+        .parse::<u64>()?)
 }
 
 async fn execute_app_server_chat_command(

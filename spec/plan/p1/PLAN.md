@@ -145,4 +145,4 @@ pnpm --dir talos-app --filter @talos/sdk-app-server test:integration
 
 Phase 6 收口后仍 deferred 的协议方法必须在完成记录中写明 method、原因与 owner，不允许只以“后续处理”笼统描述。
 
-CR 合并后的非阻塞后续事项记录在 [cr-follow-up-issues.md](cr-follow-up-issues.md)。
+CR 合并后的非阻塞后续事项已升级为 P2 独立迭代，见 [../p2/PLAN.md](../p2/PLAN.md)。

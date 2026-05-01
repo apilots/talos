@@ -1,8 +1,13 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 import type { AppProtocol } from "@talos/sdk-core";
+import { createElectronAppServerClient } from "@talos/sdk-app-server/desktop";
 
 import type { AppServerBridge } from "./app-server-controller";
 import { DesktopAppServerController } from "./app-server-controller";
+import type { TalosRuntimeState } from "./ipc";
 
 class FakeBridge implements AppServerBridge {
   connected = false;
@@ -14,7 +19,7 @@ class FakeBridge implements AppServerBridge {
   connect(): Promise<AppProtocol.InitializeResponse> {
     this.connected = true;
     return Promise.resolve({
-      protocol_version: { major: 0, minor: 2 },
+      protocol_version: { major: 0, minor: 3 },
       server_info: { name: "fake", version: "0.1.0" },
     });
   }
@@ -128,4 +133,154 @@ describe("DesktopAppServerController", () => {
     ]);
     vi.useRealTimers();
   });
+
+  it("recovers the renderer app-server stream after a child process exit", async () => {
+    vi.useFakeTimers();
+    const bridges: FakeBridge[] = [];
+    const lifecycle: TalosRuntimeState[] = [];
+    const rendererHandlers = new Set<(envelope: AppProtocol.ApplicationEventEnvelope) => void>();
+    const rendererEvents: AppProtocol.ApplicationEventEnvelope[] = [];
+    const controller = new DesktopAppServerController({
+      launchToken: "token",
+      restartDelayMs: 10,
+      bridgeFactory: () => {
+        const bridge = new FakeBridge();
+        bridges.push(bridge);
+        return bridge;
+      },
+      onEvent: (envelope) => {
+        rendererEvents.push(envelope);
+        for (const handler of rendererHandlers) {
+          handler(envelope);
+        }
+      },
+      onRuntimeState: (state) => lifecycle.push(state),
+    });
+    const rendererClient = createElectronAppServerClient({
+      invoke: (method, params) => controller.invoke(method, params),
+      onEvent: (handler) => {
+        rendererHandlers.add(handler);
+        return () => {
+          rendererHandlers.delete(handler);
+        };
+      },
+    });
+    const sdkEvents: AppProtocol.ApplicationEventEnvelope[] = [];
+    const unsubscribe = rendererClient.onEvent((envelope) => sdkEvents.push(envelope));
+
+    try {
+      await controller.connect();
+      await rendererClient.subscribeEvents({
+        session_id: "session-1",
+        since_event_id: null,
+        replay_limit: 50,
+      });
+
+      bridges[0]?.emitEvent(createEventEnvelope("sub-1", "event-7", "session-1", "message_started"));
+      bridges[0]?.emitExit();
+
+      await vi.advanceTimersByTimeAsync(10);
+      bridges[1]?.emitEvent(
+        createEventEnvelope("sub-2", "event-8", "session-1", "message_completed"),
+      );
+
+      expect(lifecycle.map((state) => state.kind)).toEqual([
+        "starting",
+        "ready",
+        "restarting",
+        "starting",
+        "ready",
+      ]);
+      expect(bridges).toHaveLength(2);
+      expect(bridges[1]?.requests).toEqual([
+        {
+          method: "event.subscribe",
+          params: {
+            session_id: "session-1",
+            since_event_id: "event-7",
+            replay_limit: 50,
+          },
+        },
+      ]);
+      expect(sdkEvents.map((event) => event.event_id)).toEqual(["event-7", "event-8"]);
+      expect(rendererEvents.map((event) => event.event_id)).toEqual(["event-7", "event-8"]);
+    } finally {
+      unsubscribe();
+      await controller.close();
+      writeDesktopSmokeArtifact({
+        lifecycle,
+        bridgeRequests: bridges.map((bridge) => bridge.requests),
+        rendererEventIds: rendererEvents.map((event) => event.event_id),
+        sdkEventIds: sdkEvents.map((event) => event.event_id),
+      });
+      vi.useRealTimers();
+    }
+  });
 });
+
+function createEventEnvelope(
+  subscriptionId: string,
+  eventId: string,
+  sessionId: string,
+  eventType: "message_started" | "message_completed",
+): AppProtocol.ApplicationEventEnvelope {
+  return {
+    subscription_id: subscriptionId,
+    event_id: eventId,
+    turn_id: null,
+    event: {
+      event_type: eventType,
+      message_id: "message-1",
+      session_id: sessionId,
+      sequence: 0n,
+      payload:
+        eventType === "message_started"
+          ? {
+              type: "message_started",
+              request_id: "request-1",
+              model: "test-model",
+              usage: {
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+                cache_creation_input_tokens: null,
+                cache_read_input_tokens: null,
+              },
+              iteration: 0n,
+              step_id: "step-1",
+            }
+          : {
+              type: "message_completed",
+              request_id: "request-1",
+              stop_reason: "end_turn",
+              usage: {
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+                cache_creation_input_tokens: null,
+                cache_read_input_tokens: null,
+              },
+              total_output_items: 1n,
+              iteration: 0n,
+              step_id: "step-1",
+              task_count: 0,
+            },
+    },
+  };
+}
+
+interface DesktopSmokeArtifact {
+  lifecycle: TalosRuntimeState[];
+  bridgeRequests: Array<Array<{ method: AppProtocol.ClientMethod; params: unknown }>>;
+  rendererEventIds: string[];
+  sdkEventIds: string[];
+}
+
+function writeDesktopSmokeArtifact(artifact: DesktopSmokeArtifact): void {
+  const outputDir = path.resolve(process.cwd(), "../../test-results/desktop");
+  mkdirSync(outputDir, { recursive: true });
+  writeFileSync(
+    path.join(outputDir, "app-server-crash-recovery-smoke.json"),
+    `${JSON.stringify(artifact, null, 2)}\n`,
+  );
+}

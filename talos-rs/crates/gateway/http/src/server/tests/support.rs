@@ -192,6 +192,28 @@ impl Gateway for MockGateway {
     async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
         Ok(())
     }
+
+    async fn submit_tool_approval(
+        &self,
+        _session_id: &str,
+        _call_id: &str,
+        _tool_name: &str,
+        _approved: bool,
+        _reason: Option<String>,
+    ) -> TalosResult<()> {
+        Ok(())
+    }
+
+    async fn submit_dynamic_tool_result(
+        &self,
+        _session_id: &str,
+        _call_id: &str,
+        _tool_name: &str,
+        _output: String,
+        _success: bool,
+    ) -> TalosResult<()> {
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -220,6 +242,28 @@ impl Gateway for SilentGateway {
     }
 
     async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
+        Ok(())
+    }
+
+    async fn submit_tool_approval(
+        &self,
+        _session_id: &str,
+        _call_id: &str,
+        _tool_name: &str,
+        _approved: bool,
+        _reason: Option<String>,
+    ) -> TalosResult<()> {
+        Ok(())
+    }
+
+    async fn submit_dynamic_tool_result(
+        &self,
+        _session_id: &str,
+        _call_id: &str,
+        _tool_name: &str,
+        _output: String,
+        _success: bool,
+    ) -> TalosResult<()> {
         Ok(())
     }
 }

@@ -26,6 +26,11 @@ interface ListResponse<T> {
   data: T[];
 }
 
+export interface AdminSessionListResponse {
+  data: TalosSession[];
+  pagination: AppProtocol.AdminSessionPagination;
+}
+
 export class AppServerClient {
   constructor(protected readonly transport: AppServerTransport) {}
 
@@ -53,6 +58,12 @@ export class AppServerClient {
       .then((response) => response.data);
   }
 
+  listAdminSessions(
+    params: AppProtocol.AdminSessionListParams,
+  ): Promise<AdminSessionListResponse> {
+    return this.transport.request("admin.session.list", params);
+  }
+
   getSession(sessionId: string): Promise<TalosSession> {
     return this.transport.request("session.read", { session_id: sessionId });
   }
@@ -74,6 +85,12 @@ export class AppServerClient {
   listProjects(): Promise<ProjectRecord[]> {
     return this.transport
       .request<ListResponse<ProjectRecord>>("project.list", {})
+      .then((response) => response.data);
+  }
+
+  listAdminProjects(): Promise<ProjectRecord[]> {
+    return this.transport
+      .request<ListResponse<ProjectRecord>>("admin.project.list", {})
       .then((response) => response.data);
   }
 
@@ -112,6 +129,10 @@ export class AppServerClient {
 
   submitToolApproval(params: AppProtocol.ToolApprovalSubmitParams): Promise<unknown> {
     return this.transport.request("tool.approval.submit", params);
+  }
+
+  submitDynamicToolResult(params: AppProtocol.ToolDynamicResultSubmitParams): Promise<unknown> {
+    return this.transport.request("tool.dynamic_result.submit", params);
   }
 
   listMemoryFiles(limit?: number): Promise<MemoryFileSummary[]> {

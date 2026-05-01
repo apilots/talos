@@ -255,8 +255,9 @@ impl TalosApplicationService {
         approved: bool,
         reason: Option<String>,
     ) -> ApplicationResult<()> {
-        self.access
-            .submit_tool_approval(actor, session_id, call_id, tool_name, approved, reason)
+        let session = self.access.get_session(actor, session_id).await?;
+        self.turns
+            .submit_tool_approval(session, call_id, tool_name, approved, reason)
             .await
     }
 
@@ -269,8 +270,9 @@ impl TalosApplicationService {
         output: String,
         success: bool,
     ) -> ApplicationResult<()> {
-        self.access
-            .submit_dynamic_tool_result(actor, session_id, call_id, tool_name, output, success)
+        let session = self.access.get_session(actor, session_id).await?;
+        self.turns
+            .submit_dynamic_tool_result(session, call_id, tool_name, output, success)
             .await
     }
 
