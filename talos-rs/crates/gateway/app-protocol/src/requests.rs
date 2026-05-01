@@ -30,6 +30,8 @@ pub enum ClientMethod {
     SessionPatch,
     #[serde(rename = "session.delete")]
     SessionDelete,
+    #[serde(rename = "session.close")]
+    SessionClose,
     #[serde(rename = "session.turns")]
     SessionTurns,
     #[serde(rename = "project.create")]
@@ -99,6 +101,7 @@ impl ClientMethod {
             Self::SessionRead => "session.read",
             Self::SessionPatch => "session.patch",
             Self::SessionDelete => "session.delete",
+            Self::SessionClose => "session.close",
             Self::SessionTurns => "session.turns",
             Self::ProjectCreate => "project.create",
             Self::ProjectList => "project.list",
@@ -149,6 +152,7 @@ impl FromStr for ClientMethod {
             "session.read" => Ok(Self::SessionRead),
             "session.patch" => Ok(Self::SessionPatch),
             "session.delete" => Ok(Self::SessionDelete),
+            "session.close" => Ok(Self::SessionClose),
             "session.turns" => Ok(Self::SessionTurns),
             "project.create" => Ok(Self::ProjectCreate),
             "project.list" => Ok(Self::ProjectList),
@@ -198,6 +202,8 @@ pub enum ClientRequestParams {
     SessionPatch(SessionPatchParams),
     #[serde(rename = "session.delete")]
     SessionDelete(SessionDeleteParams),
+    #[serde(rename = "session.close")]
+    SessionClose(SessionCloseParams),
     #[serde(rename = "session.turns")]
     SessionTurns(SessionTurnsParams),
     #[serde(rename = "project.create")]
@@ -281,6 +287,9 @@ impl ClientRequest {
             ClientMethod::SessionPatch => ClientRequestParams::SessionPatch(decode(params_value)?),
             ClientMethod::SessionDelete => {
                 ClientRequestParams::SessionDelete(decode(params_value)?)
+            }
+            ClientMethod::SessionClose => {
+                ClientRequestParams::SessionClose(decode(params_value)?)
             }
             ClientMethod::SessionTurns => ClientRequestParams::SessionTurns(decode(params_value)?),
             ClientMethod::ProjectCreate => {
@@ -441,6 +450,11 @@ pub struct SessionPatchParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct SessionDeleteParams {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct SessionCloseParams {
     pub session_id: String,
 }
 
@@ -712,6 +726,10 @@ mod tests {
         assert_eq!(
             ClientMethod::from_str("tool.dynamic_result.submit").unwrap(),
             ClientMethod::ToolDynamicResultSubmit
+        );
+        assert_eq!(
+            ClientMethod::from_str("session.close").unwrap(),
+            ClientMethod::SessionClose
         );
         assert_eq!(
             ClientMethod::from_str("admin.session.list").unwrap(),

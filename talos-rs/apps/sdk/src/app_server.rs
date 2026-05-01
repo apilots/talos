@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -13,6 +14,7 @@ use talos_app_protocol::requests::{
     ConfigReadParams, EventSubscribeParams, EventSubscribeResponse, InitializeParams,
     InitializeResponse, MemoryFileListParams as ProtocolMemoryFileListParams, MemoryFileReadParams,
     MemoryFileWriteParams, ModelListParams, ProjectCreateParams, ProjectDeleteParams,
+    SessionCloseParams,
     ProjectListParams, ProjectPatchParams, ProjectReadParams, ProtocolInputItem,
     SessionCreateParams, SessionDeleteParams, SessionListParams, SessionPatchParams,
     SessionReadParams, SessionTurnsParams, ToolApprovalSubmitParams, ToolDynamicResultSubmitParams,
@@ -78,6 +80,8 @@ struct SubscriptionStream {
 struct ListResponse<T> {
     data: Vec<T>,
 }
+
+const APP_SERVER_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 impl AppServerClient {
     pub async fn connect(config: AppServerClientConfig) -> TalosResult<Self> {
@@ -284,6 +288,18 @@ impl AppServerClient {
             .request_typed(
                 "session.delete",
                 SessionDeleteParams {
+                    session_id: session_id.to_string(),
+                },
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn close_session(&mut self, session_id: &str) -> TalosResult<()> {
+        let _: Value = self
+            .request_typed(
+                "session.close",
+                SessionCloseParams {
                     session_id: session_id.to_string(),
                 },
             )
@@ -574,9 +590,9 @@ impl AppServerClient {
         };
 
         for (sender, talos_event) in outbound {
-            sender.send(talos_event).await.map_err(|_| {
-                TalosError::ClientError("app-server event receiver closed".to_string())
-            })?;
+            if sender.try_send(talos_event).is_err() {
+                return Ok(());
+            }
         }
         Ok(())
     }
@@ -625,7 +641,17 @@ impl AppServerClient {
             self.pending_responses.lock().await.remove(&id);
             return Err(error);
         }
-        rx.await.map_err(|_| {
+        let response = match tokio::time::timeout(APP_SERVER_REQUEST_TIMEOUT, rx).await {
+            Ok(response) => response,
+            Err(_) => {
+                self.pending_responses.lock().await.remove(&id);
+                return Err(TalosError::ClientError(
+                    "app-server request timeout".to_string(),
+                ));
+            }
+        };
+
+        response.map_err(|_| {
             TalosError::ClientError(format!(
                 "app-server response channel closed for request {id}"
             ))
@@ -708,8 +734,12 @@ fn spawn_stdout_reader(
                         continue;
                     };
                     dispatch_application_event(&subscription_senders, event.clone()).await;
-                    if events_tx.send(event).await.is_err() {
-                        return;
+                    match events_tx.try_send(event) {
+                        Ok(()) => {}
+                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {}
+                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                            return;
+                        }
                     }
                 }
                 JsonRpcMessage::Request(_) => {}
@@ -759,7 +789,9 @@ async fn dispatch_application_event(
         }
     }
     if let Some((sender, talos_event)) = outbound {
-        let _ = sender.send(talos_event).await;
+        if sender.try_send(talos_event).is_err() {
+            should_remove = true;
+        }
     }
     if should_remove {
         subscription_senders.lock().await.remove(&subscription_id);

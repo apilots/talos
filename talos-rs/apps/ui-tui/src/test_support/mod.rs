@@ -335,6 +335,14 @@ impl GatewayClient for MockGatewayClient {
         Ok(())
     }
 
+    async fn delete_session(&self, _session_id: &str) -> TalosResult<()> {
+        let delay = self.state.lock().unwrap().close_session_delay_ms;
+        if delay > 0 {
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+        }
+        Ok(())
+    }
+
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()> {
         self.state
             .lock()

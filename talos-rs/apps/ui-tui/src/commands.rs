@@ -549,7 +549,7 @@ impl TuiApp {
         }
         let sid_log = session_id.clone();
         tokio::spawn(async move {
-            let _ = client.close_session(&session_id).await;
+            let _ = client.delete_session(&session_id).await;
         });
         self.push_right_event(format!("deleted session: {}", sid_log));
     }

@@ -423,6 +423,7 @@
         "session.read",
         "session.patch",
         "session.delete",
+        "session.close",
         "session.turns",
         "project.create",
         "project.list",
@@ -572,6 +573,24 @@
             },
             "params": {
               "$ref": "#/definitions/SessionDeleteParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "session.close"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SessionCloseParams"
             }
           },
           "required": [
@@ -1992,6 +2011,17 @@
           "type": "object"
         }
       ]
+    },
+    "SessionCloseParams": {
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
     },
     "SessionCreateParams": {
       "properties": {

@@ -7,8 +7,8 @@ use talos_app_protocol::requests::{
     AdminSessionPagination, ClientRequest, ClientRequestParams, ConfigReadParams,
     EventSubscribeParams, MemoryFileReadParams, MemoryFileWriteParams, OptionalPathPatch,
     OptionalStringPatch, ProjectCreateParams, ProjectPatchParams, ProtocolInputItem,
-    ProtocolTalosContext, SessionCreateParams, SessionListParams, SessionPatchParams,
-    TurnStartParams, TurnStartResponse,
+    ProtocolTalosContext, SessionCreateParams, SessionListParams, SessionPatchParams, TurnStartParams,
+    TurnStartResponse,
 };
 use talos_application_service::{
     Actor, AdminSessionPage, ApplicationEventStream, EventReplay, MemoryDate, MemoryListParams,
@@ -92,6 +92,13 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .await
                     .map_err(AppServerErrorBody::from_talos_error)?;
                 to_value(json!({ "success": ack.success }))
+            }
+            ClientRequestParams::SessionClose(params) => {
+                self.app
+                    .close_session(actor, &params.session_id)
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(json!({ "success": true }))
             }
             ClientRequestParams::SessionTurns(params) => {
                 let turns = self

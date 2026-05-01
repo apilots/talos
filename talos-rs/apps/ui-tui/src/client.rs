@@ -14,6 +14,7 @@ pub trait GatewayClient: Send + Sync {
     async fn create_session(&self, params: &SessionCreateParams) -> TalosResult<TalosSession>;
     async fn get_session(&self, session_id: &str) -> TalosResult<TalosSession>;
     async fn close_session(&self, session_id: &str) -> TalosResult<()>;
+    async fn delete_session(&self, session_id: &str) -> TalosResult<()>;
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()>;
     async fn update_session_model(
         &self,
@@ -57,6 +58,10 @@ impl GatewayClient for Mutex<AppServerClient> {
     }
 
     async fn close_session(&self, session_id: &str) -> TalosResult<()> {
+        self.lock().await.close_session(session_id).await
+    }
+
+    async fn delete_session(&self, session_id: &str) -> TalosResult<()> {
         self.lock().await.delete_session(session_id).await
     }
 
