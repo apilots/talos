@@ -31,6 +31,7 @@ AGENTS.md
 *.db
 node_modules/
 dist/
+talos-app/desktop/resources/app-server/
 
 # ci
 *reports
@@ -39,10 +40,10 @@ test-results/
 .talos/
 output/
 .playwright-mcp/
+.tmp/
 
 # sisyphus
 .sisyphus
-docs
 IMPLEMENTATION_PLAN.md
 
 # node

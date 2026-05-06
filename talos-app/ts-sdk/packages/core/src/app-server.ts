@@ -3,11 +3,17 @@ import type {
   MemoryFileDetail,
   MemoryFileSummary,
   MemorySearchResult,
+  LlmConfig,
   ModelInfo,
   ProjectPatch,
   ProjectRecord,
+  AdminCreateUserRequest,
+  AdminPatchUserRequest,
+  TalosActiveTurn,
+  TalosMessageAck,
   TalosMessageResponse,
   TalosSession,
+  UserDto,
   WorkspaceDocDetail,
   WorkspaceDocKind,
   WorkspaceDocSummary,
@@ -17,9 +23,17 @@ export type AppServerEventHandler = (
   envelope: AppProtocol.ApplicationEventEnvelope,
 ) => void;
 
+export type AppServerSubscriptionTerminatedHandler = (
+  envelope: AppProtocol.SubscriptionTerminatedEnvelope,
+) => void;
+
+export type AppServerErrorHandler = (error: Error) => void;
+
 export interface AppServerTransport {
   request<T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T>;
   onEvent(handler: AppServerEventHandler): () => void;
+  onSubscriptionTerminated?(handler: AppServerSubscriptionTerminatedHandler): () => void;
+  onError?(handler: AppServerErrorHandler): () => void;
 }
 
 interface ListResponse<T> {
@@ -38,14 +52,64 @@ export class AppServerClient {
     return this.transport.onEvent(handler);
   }
 
+  onSubscriptionTerminated(handler: AppServerSubscriptionTerminatedHandler): () => void {
+    return this.transport.onSubscriptionTerminated?.(handler) ?? (() => undefined);
+  }
+
+  onError(handler: AppServerErrorHandler): () => void {
+    return this.transport.onError?.(handler) ?? (() => undefined);
+  }
+
   listModels(): Promise<ModelInfo[]> {
     return this.transport
       .request<ListResponse<ModelInfo>>("model.list", {})
       .then((response) => response.data);
   }
 
-  configRead(): Promise<unknown> {
+  configRead(): Promise<LlmConfig> {
     return this.transport.request("config.read", {});
+  }
+
+  configWriteValue(path: string, value: string): Promise<LlmConfig> {
+    return this.transport.request("config.value.write", { path, value });
+  }
+
+  getLlmConfig(): Promise<LlmConfig> {
+    return this.configRead();
+  }
+
+  updateLlmConfig(config: LlmConfig): Promise<LlmConfig> {
+    return this.configWriteValue("llm", JSON.stringify(config));
+  }
+
+  configWriteBatch(entries: AppProtocol.ConfigValueWriteParams[]): Promise<unknown> {
+    return this.transport.request("config.batch.write", { entries });
+  }
+
+  configReload(): Promise<unknown> {
+    return this.transport.request("config.reload", {});
+  }
+
+  getAccount(): Promise<unknown> {
+    return this.transport.request("account.get", {});
+  }
+
+  listSkills(): Promise<unknown[]> {
+    return this.transport
+      .request<ListResponse<unknown>>("skill.list", {})
+      .then((response) => response.data);
+  }
+
+  listApps(): Promise<unknown[]> {
+    return this.transport
+      .request<ListResponse<unknown>>("app.list", {})
+      .then((response) => response.data);
+  }
+
+  listTools(): Promise<unknown[]> {
+    return this.transport
+      .request<ListResponse<unknown>>("tool.list", {})
+      .then((response) => response.data);
   }
 
   createSession(params: AppProtocol.SessionCreateParams): Promise<TalosSession> {
@@ -76,6 +140,22 @@ export class AppServerClient {
     return this.transport.request("session.delete", { session_id: sessionId });
   }
 
+  closeSession(sessionId: string): Promise<unknown> {
+    return this.transport.request("session.close", { session_id: sessionId });
+  }
+
+  compactSession(sessionId: string): Promise<TalosSession> {
+    return this.transport.request("session.compact", { session_id: sessionId });
+  }
+
+  clearSession(sessionId: string): Promise<TalosSession> {
+    return this.transport.request("session.clear", { session_id: sessionId });
+  }
+
+  getActiveTurn(sessionId: string): Promise<TalosActiveTurn> {
+    return this.transport.request("session.active_turn", { session_id: sessionId });
+  }
+
   getSessionTurns(sessionId: string): Promise<TalosMessageResponse[]> {
     return this.transport
       .request<ListResponse<TalosMessageResponse>>("session.turns", { session_id: sessionId })
@@ -92,6 +172,27 @@ export class AppServerClient {
     return this.transport
       .request<ListResponse<ProjectRecord>>("admin.project.list", {})
       .then((response) => response.data);
+  }
+
+  listAdminUsers(): Promise<UserDto[]> {
+    return this.transport
+      .request<ListResponse<UserDto>>("admin.user.list", {})
+      .then((response) => response.data);
+  }
+
+  createAdminUser(request: AdminCreateUserRequest): Promise<UserDto> {
+    return this.transport.request("admin.user.create", request);
+  }
+
+  patchAdminUser(userId: string, request: AdminPatchUserRequest): Promise<UserDto> {
+    return this.transport.request("admin.user.patch", {
+      user_id: userId,
+      ...request,
+    });
+  }
+
+  deleteAdminUser(userId: string): Promise<unknown> {
+    return this.transport.request("admin.user.delete", { user_id: userId });
   }
 
   getProject(projectId: string): Promise<ProjectRecord> {
@@ -113,8 +214,12 @@ export class AppServerClient {
     return this.transport.request("project.delete", { project_id: projectId });
   }
 
-  startTurn(params: AppProtocol.TurnStartParams): Promise<AppProtocol.TurnStartResponse> {
+  startTurn(params: AppProtocol.TurnStartParams): Promise<TalosMessageAck> {
     return this.transport.request("turn.start", params);
+  }
+
+  retryTurn(params: AppProtocol.TurnRetryParams): Promise<TalosMessageAck> {
+    return this.transport.request("turn.retry", params);
   }
 
   interruptTurn(sessionId: string): Promise<unknown> {
@@ -125,6 +230,12 @@ export class AppServerClient {
     params: AppProtocol.EventSubscribeParams,
   ): Promise<AppProtocol.EventSubscribeResponse> {
     return this.transport.request("event.subscribe", params);
+  }
+
+  unsubscribeEvents(
+    subscriptionId: string,
+  ): Promise<AppProtocol.EventUnsubscribeResponse> {
+    return this.transport.request("event.unsubscribe", { subscription_id: subscriptionId });
   }
 
   submitToolApproval(params: AppProtocol.ToolApprovalSubmitParams): Promise<unknown> {

@@ -72,7 +72,8 @@ async fn test_recent_tool_history_renders_as_single_xml_region() {
                     TalosOutputItem::ToolCall {
                         call_id: format!("call-{idx}"),
                         name: "Read".to_string(),
-                        arguments: serde_json::json!({"path": format!("/tmp/tool-{idx}.txt")}),
+                        arguments: serde_json::json!({"path": format!("/tmp/tool-{idx}.txt")})
+                            .into(),
                     },
                     TalosOutputItem::ToolResult {
                         call_id: format!("call-{idx}"),
@@ -130,7 +131,7 @@ async fn test_recent_tool_history_can_be_disabled() {
                 TalosOutputItem::ToolCall {
                     call_id: "call-disable".to_string(),
                     name: "Read".to_string(),
-                    arguments: serde_json::json!({"path": "/tmp/disabled.txt"}),
+                    arguments: serde_json::json!({"path": "/tmp/disabled.txt"}).into(),
                 },
                 TalosOutputItem::ToolResult {
                     call_id: "call-disable".to_string(),
@@ -316,7 +317,8 @@ async fn test_recent_tool_sections_respect_total_char_budget() {
                         arguments: serde_json::json!({
                             "path": format!("/tmp/tool-budget-{idx}.txt"),
                             "marker": format!("history-{idx}-{}", "y".repeat(30)),
-                        }),
+                        })
+                        .into(),
                     },
                     TalosOutputItem::ToolResult {
                         call_id: format!("call-{idx}"),

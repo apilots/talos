@@ -12,35 +12,49 @@ export interface AppServerBridge {
   close(): Promise<void>;
   invoke<T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T>;
   onEvent(handler: (envelope: AppProtocol.ApplicationEventEnvelope) => void): () => void;
+  onSubscriptionTerminated(handler: (envelope: AppProtocol.SubscriptionTerminatedEnvelope) => void): () => void;
+  onError(handler: (error: Error) => void): () => void;
   onExit(handler: (status: { code: number | null; signal: NodeJS.Signals | null }) => void): () => void;
   onStderr(handler: (chunk: string) => void): () => void;
+  onServerRequest(
+    handler: (request: AppProtocol.JsonRpcRequest) => Promise<unknown> | unknown,
+  ): () => void;
 }
 
 export interface DesktopAppServerControllerOptions extends AppServerClientOptions {
   bridgeFactory?: (options: AppServerClientOptions) => AppServerBridge;
   onEvent?: (envelope: AppProtocol.ApplicationEventEnvelope) => void;
+  onSubscriptionTerminated?: (envelope: AppProtocol.SubscriptionTerminatedEnvelope) => void;
   onRuntimeState?: (state: TalosRuntimeState) => void;
+  onServerRequest?: (request: AppProtocol.JsonRpcRequest) => Promise<unknown> | unknown;
   restartDelayMs?: number;
 }
 
 interface SubscriptionReplayState {
   sessionId: string;
+  subscriptionId: string;
   replayLimit: number | null;
   lastEventId: string | null;
 }
 
 export class DesktopAppServerController {
   private bridge?: AppServerBridge;
+  private initializeResponse?: AppProtocol.InitializeResponse;
   private reconnecting?: Promise<void>;
   private closed = false;
   private readonly subscriptions = new Map<string, SubscriptionReplayState>();
+  private readonly sessionsBySubscriptionId = new Map<string, string>();
 
   constructor(private readonly options: DesktopAppServerControllerOptions) {}
 
   async connect(): Promise<AppProtocol.InitializeResponse> {
+    if (this.initializeResponse) {
+      return this.initializeResponse;
+    }
     this.closed = false;
     this.emitRuntimeState("starting", null);
     const response = await this.ensureBridge().connect();
+    this.initializeResponse = response;
     this.emitRuntimeState("ready", null);
     return response;
   }
@@ -54,6 +68,9 @@ export class DesktopAppServerController {
     if (method === "event.subscribe") {
       this.recordSubscription(params as AppProtocol.EventSubscribeParams, result as AppProtocol.EventSubscribeResponse);
     }
+    if (method === "event.unsubscribe") {
+      this.forgetSubscription((params as AppProtocol.EventUnsubscribeParams).subscription_id);
+    }
     return result;
   }
 
@@ -61,7 +78,9 @@ export class DesktopAppServerController {
     this.closed = true;
     const bridge = this.bridge;
     this.bridge = undefined;
+    this.initializeResponse = undefined;
     this.subscriptions.clear();
+    this.sessionsBySubscriptionId.clear();
     await bridge?.close();
     this.emitRuntimeState("stopped", null);
   }
@@ -73,12 +92,15 @@ export class DesktopAppServerController {
 
     const bridge = this.createBridge();
     bridge.onEvent((envelope) => this.handleEvent(envelope));
+    bridge.onSubscriptionTerminated((envelope) => this.handleSubscriptionTerminated(envelope));
+    bridge.onError((error) => this.handleError(error));
     bridge.onExit((status) => this.handleExit(status));
     bridge.onStderr((chunk) => {
       if (chunk.trim()) {
         this.emitRuntimeState("ready", chunk.trim());
       }
     });
+    bridge.onServerRequest((request) => this.handleServerRequest(request));
     this.bridge = bridge;
     return bridge;
   }
@@ -99,8 +121,25 @@ export class DesktopAppServerController {
     this.options.onEvent?.(envelope);
   }
 
+  private handleSubscriptionTerminated(envelope: AppProtocol.SubscriptionTerminatedEnvelope): void {
+    this.forgetSubscription(envelope.subscription_id);
+    this.options.onSubscriptionTerminated?.(envelope);
+  }
+
+  private handleError(error: Error): void {
+    this.emitRuntimeState("error", error.message);
+  }
+
+  private handleServerRequest(request: AppProtocol.JsonRpcRequest): Promise<unknown> | unknown {
+    if (!this.options.onServerRequest) {
+      throw new Error(`Unsupported desktop server request: ${request.method}`);
+    }
+    return this.options.onServerRequest(request);
+  }
+
   private handleExit(status: { code: number | null; signal: NodeJS.Signals | null }): void {
     this.bridge = undefined;
+    this.initializeResponse = undefined;
     if (this.closed) {
       return;
     }
@@ -136,8 +175,11 @@ export class DesktopAppServerController {
       );
       this.subscriptions.set(subscription.sessionId, {
         ...subscription,
+        subscriptionId: response.subscription_id,
         lastEventId: response.high_water_mark_event_id ?? subscription.lastEventId,
       });
+      this.sessionsBySubscriptionId.delete(subscription.subscriptionId);
+      this.sessionsBySubscriptionId.set(response.subscription_id, subscription.sessionId);
     }
   }
 
@@ -145,11 +187,26 @@ export class DesktopAppServerController {
     params: AppProtocol.EventSubscribeParams,
     response: AppProtocol.EventSubscribeResponse,
   ): void {
+    const previous = this.subscriptions.get(params.session_id);
+    if (previous) {
+      this.sessionsBySubscriptionId.delete(previous.subscriptionId);
+    }
     this.subscriptions.set(params.session_id, {
       sessionId: response.session_id,
+      subscriptionId: response.subscription_id,
       replayLimit: params.replay_limit,
       lastEventId: response.high_water_mark_event_id ?? params.since_event_id,
     });
+    this.sessionsBySubscriptionId.set(response.subscription_id, params.session_id);
+  }
+
+  private forgetSubscription(subscriptionId: string): void {
+    const sessionId = this.sessionsBySubscriptionId.get(subscriptionId);
+    if (!sessionId) {
+      return;
+    }
+    this.sessionsBySubscriptionId.delete(subscriptionId);
+    this.subscriptions.delete(sessionId);
   }
 
   private emitRuntimeState(kind: TalosRuntimeState["kind"], message: string | null): void {

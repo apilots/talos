@@ -247,6 +247,13 @@ export function mapTurnsToBlocks(turns: TalosMessageResponse[]) {
 
       blocks.push(...mapOutputItemToBlocks(item, blockIndex));
     });
+    if (turn.stop_reason === "cancelled") {
+      blocks.push({
+        id: `history-cancelled-${turn.message_id || turn.request_id || turnIndex}`,
+        kind: "system",
+        text: "Response cancelled.",
+      });
+    }
   });
 
   return blocks;

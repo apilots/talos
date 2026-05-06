@@ -13,6 +13,7 @@ mod state;
 mod user_profile;
 mod workspace_docs;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::middleware::{self};
@@ -20,6 +21,7 @@ use axum::routing::{get, post};
 use axum::Router;
 use tokio_util::sync::CancellationToken;
 use tower_http::cors::CorsLayer;
+use tower_http::services::{ServeDir, ServeFile};
 use tracing::{error, info};
 
 use self::admin_users::{
@@ -74,6 +76,7 @@ pub struct HttpServer {
     port: u16,
     jwt_secret: String,
     auth_disabled: bool,
+    webui_dir: Option<PathBuf>,
     lifecycle: Arc<ServerLifecycle>,
 }
 
@@ -99,6 +102,7 @@ impl HttpServer {
             port,
             jwt_secret: String::new(),
             auth_disabled: false,
+            webui_dir: None,
             lifecycle: Arc::new(ServerLifecycle::new()),
         }
     }
@@ -112,6 +116,12 @@ impl HttpServer {
     /// Disable auth checks for local mock mode.
     pub fn with_auth_disabled(mut self, disabled: bool) -> Self {
         self.auth_disabled = disabled;
+        self
+    }
+
+    /// Serve the compiled WebUI from the HTTP server root.
+    pub fn with_webui_dir(mut self, webui_dir: impl Into<PathBuf>) -> Self {
+        self.webui_dir = Some(webui_dir.into());
         self
     }
 
@@ -150,7 +160,7 @@ impl HttpServer {
             self.lifecycle.clone(),
         ));
 
-        let app = Router::new()
+        let mut app = Router::new()
             .route("/health", get(health_handler))
             .route("/v1/auth/register", post(register_handler))
             .route("/v1/auth/login", post(login_handler))
@@ -268,6 +278,12 @@ impl HttpServer {
             ))
             .layer(middleware::from_fn_with_state(state, auth_middleware))
             .layer(CorsLayer::permissive());
+
+        if let Some(webui_dir) = self.webui_dir.as_ref() {
+            app = app.fallback_service(
+                ServeDir::new(webui_dir).fallback(ServeFile::new(webui_dir.join("index.html"))),
+            );
+        }
 
         let listener = tokio::net::TcpListener::bind(self.listen_addr())
             .await

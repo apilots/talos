@@ -20,9 +20,9 @@ export type ToolErrorData = { tool_name: string, reason: string, };
 
 export type ConfigErrorData = { path: string, reason: string, };
 
-export type ClientMethod = "initialize" | "session.create" | "session.list" | "session.read" | "session.patch" | "session.delete" | "session.close" | "session.turns" | "project.create" | "project.list" | "project.read" | "project.patch" | "project.delete" | "turn.start" | "turn.interrupt" | "event.subscribe" | "tool.approval.submit" | "tool.dynamic_result.submit" | "admin.session.list" | "admin.project.list" | "model.list" | "config.read" | "config.value.write" | "config.batch.write" | "config.reload" | "memory.file.list" | "memory.file.read" | "memory.file.write" | "workspace.doc.list" | "workspace.doc.read" | "workspace.doc.write" | "skill.list" | "app.list" | "tool.list" | "account.get" | "memory.search";
+export type ClientMethod = "initialize" | "session.create" | "session.list" | "session.read" | "session.patch" | "session.delete" | "session.close" | "session.compact" | "session.clear" | "session.active_turn" | "session.turns" | "project.create" | "project.list" | "project.read" | "project.patch" | "project.delete" | "turn.start" | "turn.interrupt" | "turn.retry" | "event.subscribe" | "event.unsubscribe" | "tool.approval.submit" | "tool.dynamic_result.submit" | "admin.session.list" | "admin.project.list" | "admin.user.list" | "admin.user.create" | "admin.user.patch" | "admin.user.delete" | "model.list" | "config.read" | "config.value.write" | "config.batch.write" | "config.reload" | "memory.file.list" | "memory.file.read" | "memory.file.write" | "workspace.doc.list" | "workspace.doc.read" | "workspace.doc.write" | "skill.list" | "app.list" | "tool.list" | "account.get" | "memory.search";
 
-export type ClientRequestParams = { "method": "initialize", "params": InitializeParams } | { "method": "session.create", "params": SessionCreateParams } | { "method": "session.list", "params": SessionListParams } | { "method": "session.read", "params": SessionReadParams } | { "method": "session.patch", "params": SessionPatchParams } | { "method": "session.delete", "params": SessionDeleteParams } | { "method": "session.close", "params": SessionCloseParams } | { "method": "session.turns", "params": SessionTurnsParams } | { "method": "project.create", "params": ProjectCreateParams } | { "method": "project.list", "params": ProjectListParams } | { "method": "project.read", "params": ProjectReadParams } | { "method": "project.patch", "params": ProjectPatchParams } | { "method": "project.delete", "params": ProjectDeleteParams } | { "method": "turn.start", "params": TurnStartParams } | { "method": "turn.interrupt", "params": TurnInterruptParams } | { "method": "event.subscribe", "params": EventSubscribeParams } | { "method": "tool.approval.submit", "params": ToolApprovalSubmitParams } | { "method": "tool.dynamic_result.submit", "params": ToolDynamicResultSubmitParams } | { "method": "admin.session.list", "params": AdminSessionListParams } | { "method": "admin.project.list", "params": AdminProjectListParams } | { "method": "model.list", "params": ModelListParams } | { "method": "config.read", "params": ConfigReadParams } | { "method": "config.value.write", "params": ConfigValueWriteParams } | { "method": "config.batch.write", "params": ConfigBatchWriteParams } | { "method": "config.reload", "params": ConfigReloadParams } | { "method": "memory.file.list", "params": MemoryFileListParams } | { "method": "memory.file.read", "params": MemoryFileReadParams } | { "method": "memory.file.write", "params": MemoryFileWriteParams } | { "method": "workspace.doc.list", "params": WorkspaceDocListParams } | { "method": "workspace.doc.read", "params": WorkspaceDocReadParams } | { "method": "workspace.doc.write", "params": WorkspaceDocWriteParams } | { "method": "skill.list", "params": SkillListParams } | { "method": "app.list", "params": AppListParams } | { "method": "tool.list", "params": ToolListParams } | { "method": "account.get", "params": AccountGetParams } | { "method": "memory.search", "params": MemorySearchParams };
+export type ClientRequestParams = { "method": "initialize", "params": InitializeParams } | { "method": "session.create", "params": SessionCreateParams } | { "method": "session.list", "params": SessionListParams } | { "method": "session.read", "params": SessionReadParams } | { "method": "session.patch", "params": SessionPatchParams } | { "method": "session.delete", "params": SessionDeleteParams } | { "method": "session.close", "params": SessionCloseParams } | { "method": "session.compact", "params": SessionCompactParams } | { "method": "session.clear", "params": SessionClearParams } | { "method": "session.active_turn", "params": SessionActiveTurnParams } | { "method": "session.turns", "params": SessionTurnsParams } | { "method": "project.create", "params": ProjectCreateParams } | { "method": "project.list", "params": ProjectListParams } | { "method": "project.read", "params": ProjectReadParams } | { "method": "project.patch", "params": ProjectPatchParams } | { "method": "project.delete", "params": ProjectDeleteParams } | { "method": "turn.start", "params": TurnStartParams } | { "method": "turn.interrupt", "params": TurnInterruptParams } | { "method": "turn.retry", "params": TurnRetryParams } | { "method": "event.subscribe", "params": EventSubscribeParams } | { "method": "event.unsubscribe", "params": EventUnsubscribeParams } | { "method": "tool.approval.submit", "params": ToolApprovalSubmitParams } | { "method": "tool.dynamic_result.submit", "params": ToolDynamicResultSubmitParams } | { "method": "admin.session.list", "params": AdminSessionListParams } | { "method": "admin.project.list", "params": AdminProjectListParams } | { "method": "admin.user.list", "params": AdminUserListParams } | { "method": "admin.user.create", "params": AdminUserCreateParams } | { "method": "admin.user.patch", "params": AdminUserPatchParams } | { "method": "admin.user.delete", "params": AdminUserDeleteParams } | { "method": "model.list", "params": ModelListParams } | { "method": "config.read", "params": ConfigReadParams } | { "method": "config.value.write", "params": ConfigValueWriteParams } | { "method": "config.batch.write", "params": ConfigBatchWriteParams } | { "method": "config.reload", "params": ConfigReloadParams } | { "method": "memory.file.list", "params": MemoryFileListParams } | { "method": "memory.file.read", "params": MemoryFileReadParams } | { "method": "memory.file.write", "params": MemoryFileWriteParams } | { "method": "workspace.doc.list", "params": WorkspaceDocListParams } | { "method": "workspace.doc.read", "params": WorkspaceDocReadParams } | { "method": "workspace.doc.write", "params": WorkspaceDocWriteParams } | { "method": "skill.list", "params": SkillListParams } | { "method": "app.list", "params": AppListParams } | { "method": "tool.list", "params": ToolListParams } | { "method": "account.get", "params": AccountGetParams } | { "method": "memory.search", "params": MemorySearchParams };
 
 export type ClientRequest = { method: ClientMethod, params: ClientRequestParams, };
 
@@ -32,7 +32,7 @@ export type InitializeResponse = { protocol_version: ProtocolVersion, server_inf
 
 export type ClientInfo = { name: string, title: string | null, version: string, };
 
-export type ServerInfo = { name: string, version: string, };
+export type ServerInfo = { name: string, version: string, auth_enabled: boolean, };
 
 export type ClientCapabilities = { protocol_version: ProtocolVersion, supports_server_requests: boolean, supports_event_replay: boolean, };
 
@@ -50,6 +50,14 @@ export type SessionPatchParams = { session_id: string, project_id: OptionalStrin
 
 export type SessionDeleteParams = { session_id: string, };
 
+export type SessionCloseParams = { session_id: string, };
+
+export type SessionCompactParams = { session_id: string, };
+
+export type SessionClearParams = { session_id: string, };
+
+export type SessionActiveTurnParams = { session_id: string, };
+
 export type SessionTurnsParams = { session_id: string, };
 
 export type ProjectCreateParams = { name: string, directory: string, };
@@ -64,13 +72,21 @@ export type ProjectDeleteParams = { project_id: string, };
 
 export type TurnStartParams = { session_id: string, input: Array<ProtocolInputItem>, workspace_id: string | null, client_request_id: string | null, };
 
-export type TurnStartResponse = { session_id: string, turn_id: string, accepted_at: number, started_event_id: string | null, };
+export type MessageCommandStatus = "pending" | "accepted" | "failed" | "failed_no_first_event";
+
+export type TurnStartResponse = { request_id: string, message_id: string | null, session_id: string, turn_id: string, status: MessageCommandStatus, };
 
 export type TurnInterruptParams = { session_id: string, };
+
+export type TurnRetryParams = { session_id: string, input: Array<ProtocolInputItem>, workspace_id: string | null, client_message_id: string, retry_of_message_id: string, };
 
 export type EventSubscribeParams = { session_id: string, since_event_id: string | null, replay_limit: number | null, };
 
 export type EventSubscribeResponse = { subscription_id: string, session_id: string, high_water_mark_event_id: string | null, };
+
+export type EventUnsubscribeParams = { subscription_id: string, };
+
+export type EventUnsubscribeResponse = { subscription_id: string, unsubscribed: boolean, };
 
 export type ToolApprovalSubmitParams = { session_id: string, call_id: string, tool_name: string, approved: boolean, reason: string | null, };
 
@@ -81,6 +97,16 @@ export type AdminSessionListParams = { user_id: string | null, channel_id: strin
 export type AdminSessionPagination = { total: number, limit: number, offset: number, };
 
 export type AdminProjectListParams = Record<string, never>;
+
+export type AdminUserRole = "user" | "admin";
+
+export type AdminUserListParams = Record<string, never>;
+
+export type AdminUserCreateParams = { username: string, password: string, email: string | null, role: AdminUserRole, disabled: boolean | null, };
+
+export type AdminUserPatchParams = { user_id: string, username: string | null, email: string | null, password: string | null, role: AdminUserRole | null, disabled: boolean | null, };
+
+export type AdminUserDeleteParams = { user_id: string, };
 
 export type ModelListParams = Record<string, never>;
 

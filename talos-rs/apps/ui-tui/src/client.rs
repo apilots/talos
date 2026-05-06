@@ -37,6 +37,8 @@ pub trait GatewayClient: Send + Sync {
         reason: Option<String>,
     ) -> TalosResult<()>;
     async fn get_session_turns(&self, session_id: &str) -> TalosResult<Vec<TalosMessageResponse>>;
+    /// Shut down the remote gateway process. After this call, the client must not be reused.
+    async fn shutdown(&self) -> TalosResult<()>;
 }
 
 #[async_trait]
@@ -119,5 +121,9 @@ impl GatewayClient for Mutex<AppServerClient> {
 
     async fn get_session_turns(&self, _session_id: &str) -> TalosResult<Vec<TalosMessageResponse>> {
         self.lock().await.get_session_turns(_session_id).await
+    }
+
+    async fn shutdown(&self) -> TalosResult<()> {
+        self.lock().await.shutdown().await
     }
 }

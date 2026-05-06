@@ -14,13 +14,14 @@ class FakeBridge implements AppServerBridge {
   closed = false;
   readonly requests: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
   private eventHandler?: (envelope: AppProtocol.ApplicationEventEnvelope) => void;
+  private subscriptionTerminatedHandler?: (envelope: AppProtocol.SubscriptionTerminatedEnvelope) => void;
   private exitHandler?: (status: { code: number | null; signal: NodeJS.Signals | null }) => void;
 
   connect(): Promise<AppProtocol.InitializeResponse> {
     this.connected = true;
     return Promise.resolve({
       protocol_version: { major: 0, minor: 3 },
-      server_info: { name: "fake", version: "0.1.0" },
+      server_info: { name: "fake", version: "0.1.0", auth_enabled: false },
     });
   }
 
@@ -49,6 +50,17 @@ class FakeBridge implements AppServerBridge {
     };
   }
 
+  onSubscriptionTerminated(handler: (envelope: AppProtocol.SubscriptionTerminatedEnvelope) => void): () => void {
+    this.subscriptionTerminatedHandler = handler;
+    return () => {
+      this.subscriptionTerminatedHandler = undefined;
+    };
+  }
+
+  onError(): () => void {
+    return () => undefined;
+  }
+
   onExit(handler: (status: { code: number | null; signal: NodeJS.Signals | null }) => void): () => void {
     this.exitHandler = handler;
     return () => {
@@ -60,12 +72,20 @@ class FakeBridge implements AppServerBridge {
     return () => undefined;
   }
 
+  onServerRequest(): () => void {
+    return () => undefined;
+  }
+
   emitEvent(envelope: AppProtocol.ApplicationEventEnvelope): void {
     this.eventHandler?.(envelope);
   }
 
   emitExit(): void {
     this.exitHandler?.({ code: 1, signal: null });
+  }
+
+  emitSubscriptionTerminated(envelope: AppProtocol.SubscriptionTerminatedEnvelope): void {
+    this.subscriptionTerminatedHandler?.(envelope);
   }
 }
 
@@ -134,6 +154,37 @@ describe("DesktopAppServerController", () => {
     vi.useRealTimers();
   });
 
+  it("does not replay renderer subscriptions after they are unsubscribed", async () => {
+    vi.useFakeTimers();
+    const bridges: FakeBridge[] = [];
+    const controller = new DesktopAppServerController({
+      launchToken: "token",
+      restartDelayMs: 10,
+      bridgeFactory: () => {
+        const bridge = new FakeBridge();
+        bridges.push(bridge);
+        return bridge;
+      },
+    });
+
+    await controller.connect();
+    const response = await controller.invoke<AppProtocol.EventSubscribeResponse>("event.subscribe", {
+      session_id: "session-1",
+      since_event_id: null,
+      replay_limit: 50,
+    } satisfies AppProtocol.EventSubscribeParams);
+    await controller.invoke("event.unsubscribe", {
+      subscription_id: response.subscription_id,
+    } satisfies AppProtocol.EventUnsubscribeParams);
+
+    bridges[0]?.emitExit();
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(bridges).toHaveLength(2);
+    expect(bridges[1]?.requests).toEqual([]);
+    vi.useRealTimers();
+  });
+
   it("recovers the renderer app-server stream after a child process exit", async () => {
     vi.useFakeTimers();
     const bridges: FakeBridge[] = [];
@@ -164,6 +215,7 @@ describe("DesktopAppServerController", () => {
           rendererHandlers.delete(handler);
         };
       },
+      onSubscriptionTerminated: () => () => undefined,
     });
     const sdkEvents: AppProtocol.ApplicationEventEnvelope[] = [];
     const unsubscribe = rendererClient.onEvent((envelope) => sdkEvents.push(envelope));

@@ -133,6 +133,106 @@ async fn test_prompt_context_falls_back_to_transcript_records() {
 }
 
 #[tokio::test]
+async fn test_session_turns_project_cancelled_transcript_user_input() {
+    let (_guard, store) = new_temp_store();
+    let session_id = "cancelled-transcript-session";
+    let invocation_id = "inv-cancelled";
+
+    store
+        .append_transcript_record(&SessionTranscriptRecord {
+            header: SessionTranscriptHeader {
+                id: "cancelled-user-record".to_string(),
+                session_id: session_id.to_string(),
+                invocation_id: invocation_id.to_string(),
+                branch: SessionTranscriptBranch::ModelThinking,
+                timestamp: Utc::now(),
+            },
+            author: SessionTranscriptAuthor::User,
+            kind: SessionTranscriptEventKind::UserMessage,
+            payload: SessionTranscriptPayload::Message {
+                message: ChatMessage::user("keep this cancelled input visible"),
+            },
+            actions: SessionTranscriptActions::default(),
+            partial: false,
+        })
+        .await
+        .expect("transcript record should append");
+
+    let turns = store
+        .load_session_turns(session_id)
+        .await
+        .expect("turns should load");
+
+    assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0].turn_id, invocation_id);
+    assert_eq!(turns[0].stop_reason, StopReason::Cancelled);
+    assert!(matches!(
+        turns[0].items.first(),
+        Some(TalosOutputItem::UserInput { text }) if text == "keep this cancelled input visible"
+    ));
+}
+
+#[tokio::test]
+async fn test_session_turns_do_not_duplicate_completed_transcripts() {
+    let (_guard, store) = new_temp_store();
+    let session_id = "completed-transcript-session";
+    let invocation_id = "inv-completed";
+    let timestamp = Utc::now();
+
+    store
+        .append_transcript_record(&SessionTranscriptRecord {
+            header: SessionTranscriptHeader {
+                id: "completed-user-record".to_string(),
+                session_id: session_id.to_string(),
+                invocation_id: invocation_id.to_string(),
+                branch: SessionTranscriptBranch::ModelThinking,
+                timestamp,
+            },
+            author: SessionTranscriptAuthor::User,
+            kind: SessionTranscriptEventKind::UserMessage,
+            payload: SessionTranscriptPayload::Message {
+                message: ChatMessage::user("completed input"),
+            },
+            actions: SessionTranscriptActions::default(),
+            partial: false,
+        })
+        .await
+        .expect("transcript record should append");
+
+    store
+        .append_turn(&TalosTurn {
+            turn_id: "canonical-turn".to_string(),
+            session_id: session_id.to_string(),
+            seq: store
+                .next_turn_seq(session_id)
+                .await
+                .expect("seq should load"),
+            timestamp: timestamp + chrono::Duration::seconds(1),
+            items: vec![
+                TalosOutputItem::UserInput {
+                    text: "completed input".to_string(),
+                },
+                TalosOutputItem::OutputText {
+                    text: "completed output".to_string(),
+                },
+            ],
+            usage: TalosUsage::default(),
+            stop_reason: StopReason::EndTurn,
+        })
+        .await
+        .expect("turn should append");
+
+    let turns = store
+        .load_session_turns(session_id)
+        .await
+        .expect("turns should load");
+
+    assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0].turn_id, "canonical-turn");
+    assert_eq!(turns[0].stop_reason, StopReason::EndTurn);
+}
+
+#[tokio::test]
 async fn test_turn_schema_items_roundtrip() {
     let (_guard, store) = new_temp_store();
     let session_id = "roundtrip-items";

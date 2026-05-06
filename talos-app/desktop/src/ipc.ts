@@ -5,6 +5,7 @@ export const TALOS_IPC = {
   event: "talos:event",
   invoke: "talos:invoke",
   runtimeState: "talos:runtime-state",
+  subscriptionTerminated: "talos:subscription-terminated",
 } as const;
 
 export type TalosRuntimeStateKind = "starting" | "ready" | "restarting" | "stopped" | "error";
@@ -18,5 +19,6 @@ export interface TalosDesktopBridge {
   connect(): Promise<AppProtocol.InitializeResponse>;
   invoke<T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T>;
   onEvent(handler: (envelope: AppProtocol.ApplicationEventEnvelope) => void): () => void;
+  onSubscriptionTerminated(handler: (envelope: AppProtocol.SubscriptionTerminatedEnvelope) => void): () => void;
   onRuntimeState(handler: (state: TalosRuntimeState) => void): () => void;
 }

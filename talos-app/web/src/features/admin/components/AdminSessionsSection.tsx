@@ -124,55 +124,58 @@ export function AdminSessionsSection({
           {t("sessionsPanel.actionErrorPrefix", { message: actionError })}
         </div>
       ) : null}
-      <div className="space-y-3">
-        <div className="grid grid-cols-[110px_minmax(0,1fr)_150px_132px_156px] gap-4 px-4 text-xs uppercase tracking-[0.16em] text-muted">
-          <div>{t("sessionsPanel.status")}</div>
-          <div>{t("sessionsPanel.session")}</div>
-          <div>{t("sessionsPanel.owner")}</div>
-          <div>{t("sessionsPanel.updated")}</div>
-          <div className="text-right">{t("sessionsPanel.actions")}</div>
-        </div>
-        {visibleSessionRows.map((row) => (
-          <div
-            className="grid grid-cols-[110px_minmax(0,1fr)_150px_132px_156px] items-center gap-4 rounded-[1.2rem] border border-border/80 bg-background/45 px-4 py-4"
-            key={row.session.context.session_id}
-          >
-            <Badge tone={sessionTone(row.status)}>{sessionLabel(row.status)}</Badge>
-            <div className="min-w-0">
-              <div className="truncate text-sm font-medium text-ink">{row.label}</div>
-              <div className="mt-1 truncate text-xs text-muted">{row.session.context.session_id}</div>
-            </div>
-            <div className="min-w-0 text-sm text-muted">{row.ownerLabel}</div>
-            <div className="text-sm text-muted">{formatRelativeTime(row.session.state.last_activity)}</div>
-            <div className="flex justify-end">
-              <div className="inline-flex items-center gap-2 text-sm">
-                <button
-                  className="inline-flex items-center gap-1.5 rounded-full px-1 py-1 text-muted transition hover:text-ink"
-                  onClick={() => navigate(`/sessions/${row.session.context.session_id}`)}
-                  type="button"
-                >
-                  <ArrowUpRight size={14} />
-                  {t("sessionsPanel.view")}
-                </button>
-                <div className="h-4 w-px bg-border/70" />
-                <button
-                  className="inline-flex items-center gap-1.5 rounded-full px-1 py-1 text-danger transition hover:text-danger/80 disabled:cursor-not-allowed disabled:text-muted"
-                  disabled={deleteMutation.isPending}
-                  onClick={() => void handleDeleteSession(row.session.context.session_id, row.label)}
-                  type="button"
-                >
-                  <Trash2 size={14} />
-                  {t("sessionsPanel.delete")}
-                </button>
+      <div className="overflow-x-auto">
+        <div className="min-w-[620px] space-y-3">
+          <div className="grid grid-cols-[96px_minmax(0,1fr)_112px_100px_88px] gap-3 px-4 text-xs uppercase tracking-[0.14em] text-muted">
+            <div data-smoke="admin-sessions-status-header">{t("sessionsPanel.status")}</div>
+            <div data-smoke="admin-sessions-session-header">{t("sessionsPanel.session")}</div>
+            <div data-smoke="admin-sessions-owner-header">{t("sessionsPanel.owner")}</div>
+            <div data-smoke="admin-sessions-updated-header">{t("sessionsPanel.updated")}</div>
+            <div className="text-right" data-smoke="admin-sessions-actions-header">{t("sessionsPanel.actions")}</div>
+          </div>
+          {visibleSessionRows.map((row) => (
+            <div
+              className="grid grid-cols-[96px_minmax(0,1fr)_112px_100px_88px] items-center gap-3 rounded-[1.2rem] border border-border/80 bg-background/45 px-4 py-4"
+              key={row.session.context.session_id}
+            >
+              <Badge tone={sessionTone(row.status)}>{sessionLabel(row.status)}</Badge>
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium text-ink">{row.label}</div>
+                <div className="mt-1 truncate text-xs text-muted">{row.session.context.session_id}</div>
+              </div>
+              <div className="min-w-0 truncate text-sm text-muted">{row.ownerLabel}</div>
+              <div className="whitespace-nowrap text-sm text-muted">{formatRelativeTime(row.session.state.last_activity)}</div>
+              <div className="flex justify-end">
+                <div className="inline-flex items-center gap-1.5">
+                  <button
+                    aria-label={t("sessionsPanel.view")}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted transition hover:bg-muted/10 hover:text-ink"
+                    onClick={() => navigate(`/sessions/${row.session.context.session_id}`)}
+                    title={t("sessionsPanel.view")}
+                    type="button"
+                  >
+                    <ArrowUpRight size={14} />
+                  </button>
+                  <button
+                    aria-label={t("sessionsPanel.delete")}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-full text-danger transition hover:bg-danger/10 hover:text-danger/80 disabled:cursor-not-allowed disabled:text-muted"
+                    disabled={deleteMutation.isPending}
+                    onClick={() => void handleDeleteSession(row.session.context.session_id, row.label)}
+                    title={t("sessionsPanel.delete")}
+                    type="button"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        ))}
-        {visibleSessionRows.length === 0 ? (
-          <div className="rounded-[1.2rem] border border-dashed border-border/80 px-4 py-8 text-sm text-muted">
-            {t("sessionsPanel.empty")}
-          </div>
-        ) : null}
+          ))}
+          {visibleSessionRows.length === 0 ? (
+            <div className="rounded-[1.2rem] border border-dashed border-border/80 px-4 py-8 text-sm text-muted">
+              {t("sessionsPanel.empty")}
+            </div>
+          ) : null}
+        </div>
       </div>
       {sessionPagination.total > 0 ? (
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border/70 pt-4">

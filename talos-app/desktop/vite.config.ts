@@ -15,10 +15,9 @@ export default defineConfig({
     lib: {
       entry: {
         main: path.resolve(dirname, "src/main.ts"),
-        preload: path.resolve(dirname, "src/preload.ts"),
       },
       formats: ["es"],
-      fileName: (_format, entryName) => `${entryName}.js`,
+      fileName: () => "main.js",
     },
     rollupOptions: {
       external: ["electron", ...nodeBuiltins],

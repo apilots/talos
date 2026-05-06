@@ -32,6 +32,12 @@ pub enum ClientMethod {
     SessionDelete,
     #[serde(rename = "session.close")]
     SessionClose,
+    #[serde(rename = "session.compact")]
+    SessionCompact,
+    #[serde(rename = "session.clear")]
+    SessionClear,
+    #[serde(rename = "session.active_turn")]
+    SessionActiveTurn,
     #[serde(rename = "session.turns")]
     SessionTurns,
     #[serde(rename = "project.create")]
@@ -48,8 +54,12 @@ pub enum ClientMethod {
     TurnStart,
     #[serde(rename = "turn.interrupt")]
     TurnInterrupt,
+    #[serde(rename = "turn.retry")]
+    TurnRetry,
     #[serde(rename = "event.subscribe")]
     EventSubscribe,
+    #[serde(rename = "event.unsubscribe")]
+    EventUnsubscribe,
     #[serde(rename = "tool.approval.submit")]
     ToolApprovalSubmit,
     #[serde(rename = "tool.dynamic_result.submit")]
@@ -58,6 +68,14 @@ pub enum ClientMethod {
     AdminSessionList,
     #[serde(rename = "admin.project.list")]
     AdminProjectList,
+    #[serde(rename = "admin.user.list")]
+    AdminUserList,
+    #[serde(rename = "admin.user.create")]
+    AdminUserCreate,
+    #[serde(rename = "admin.user.patch")]
+    AdminUserPatch,
+    #[serde(rename = "admin.user.delete")]
+    AdminUserDelete,
     #[serde(rename = "model.list")]
     ModelList,
     #[serde(rename = "config.read")]
@@ -102,6 +120,9 @@ impl ClientMethod {
             Self::SessionPatch => "session.patch",
             Self::SessionDelete => "session.delete",
             Self::SessionClose => "session.close",
+            Self::SessionCompact => "session.compact",
+            Self::SessionClear => "session.clear",
+            Self::SessionActiveTurn => "session.active_turn",
             Self::SessionTurns => "session.turns",
             Self::ProjectCreate => "project.create",
             Self::ProjectList => "project.list",
@@ -110,11 +131,17 @@ impl ClientMethod {
             Self::ProjectDelete => "project.delete",
             Self::TurnStart => "turn.start",
             Self::TurnInterrupt => "turn.interrupt",
+            Self::TurnRetry => "turn.retry",
             Self::EventSubscribe => "event.subscribe",
+            Self::EventUnsubscribe => "event.unsubscribe",
             Self::ToolApprovalSubmit => "tool.approval.submit",
             Self::ToolDynamicResultSubmit => "tool.dynamic_result.submit",
             Self::AdminSessionList => "admin.session.list",
             Self::AdminProjectList => "admin.project.list",
+            Self::AdminUserList => "admin.user.list",
+            Self::AdminUserCreate => "admin.user.create",
+            Self::AdminUserPatch => "admin.user.patch",
+            Self::AdminUserDelete => "admin.user.delete",
             Self::ModelList => "model.list",
             Self::ConfigRead => "config.read",
             Self::ConfigValueWrite => "config.value.write",
@@ -153,6 +180,9 @@ impl FromStr for ClientMethod {
             "session.patch" => Ok(Self::SessionPatch),
             "session.delete" => Ok(Self::SessionDelete),
             "session.close" => Ok(Self::SessionClose),
+            "session.compact" => Ok(Self::SessionCompact),
+            "session.clear" => Ok(Self::SessionClear),
+            "session.active_turn" => Ok(Self::SessionActiveTurn),
             "session.turns" => Ok(Self::SessionTurns),
             "project.create" => Ok(Self::ProjectCreate),
             "project.list" => Ok(Self::ProjectList),
@@ -161,11 +191,17 @@ impl FromStr for ClientMethod {
             "project.delete" => Ok(Self::ProjectDelete),
             "turn.start" => Ok(Self::TurnStart),
             "turn.interrupt" => Ok(Self::TurnInterrupt),
+            "turn.retry" => Ok(Self::TurnRetry),
             "event.subscribe" => Ok(Self::EventSubscribe),
+            "event.unsubscribe" => Ok(Self::EventUnsubscribe),
             "tool.approval.submit" => Ok(Self::ToolApprovalSubmit),
             "tool.dynamic_result.submit" => Ok(Self::ToolDynamicResultSubmit),
             "admin.session.list" => Ok(Self::AdminSessionList),
             "admin.project.list" => Ok(Self::AdminProjectList),
+            "admin.user.list" => Ok(Self::AdminUserList),
+            "admin.user.create" => Ok(Self::AdminUserCreate),
+            "admin.user.patch" => Ok(Self::AdminUserPatch),
+            "admin.user.delete" => Ok(Self::AdminUserDelete),
             "model.list" => Ok(Self::ModelList),
             "config.read" => Ok(Self::ConfigRead),
             "config.value.write" => Ok(Self::ConfigValueWrite),
@@ -204,6 +240,12 @@ pub enum ClientRequestParams {
     SessionDelete(SessionDeleteParams),
     #[serde(rename = "session.close")]
     SessionClose(SessionCloseParams),
+    #[serde(rename = "session.compact")]
+    SessionCompact(SessionCompactParams),
+    #[serde(rename = "session.clear")]
+    SessionClear(SessionClearParams),
+    #[serde(rename = "session.active_turn")]
+    SessionActiveTurn(SessionActiveTurnParams),
     #[serde(rename = "session.turns")]
     SessionTurns(SessionTurnsParams),
     #[serde(rename = "project.create")]
@@ -220,8 +262,12 @@ pub enum ClientRequestParams {
     TurnStart(TurnStartParams),
     #[serde(rename = "turn.interrupt")]
     TurnInterrupt(TurnInterruptParams),
+    #[serde(rename = "turn.retry")]
+    TurnRetry(TurnRetryParams),
     #[serde(rename = "event.subscribe")]
     EventSubscribe(EventSubscribeParams),
+    #[serde(rename = "event.unsubscribe")]
+    EventUnsubscribe(EventUnsubscribeParams),
     #[serde(rename = "tool.approval.submit")]
     ToolApprovalSubmit(ToolApprovalSubmitParams),
     #[serde(rename = "tool.dynamic_result.submit")]
@@ -230,6 +276,14 @@ pub enum ClientRequestParams {
     AdminSessionList(AdminSessionListParams),
     #[serde(rename = "admin.project.list")]
     AdminProjectList(AdminProjectListParams),
+    #[serde(rename = "admin.user.list")]
+    AdminUserList(AdminUserListParams),
+    #[serde(rename = "admin.user.create")]
+    AdminUserCreate(AdminUserCreateParams),
+    #[serde(rename = "admin.user.patch")]
+    AdminUserPatch(AdminUserPatchParams),
+    #[serde(rename = "admin.user.delete")]
+    AdminUserDelete(AdminUserDeleteParams),
     #[serde(rename = "model.list")]
     ModelList(ModelListParams),
     #[serde(rename = "config.read")]
@@ -288,8 +342,13 @@ impl ClientRequest {
             ClientMethod::SessionDelete => {
                 ClientRequestParams::SessionDelete(decode(params_value)?)
             }
-            ClientMethod::SessionClose => {
-                ClientRequestParams::SessionClose(decode(params_value)?)
+            ClientMethod::SessionClose => ClientRequestParams::SessionClose(decode(params_value)?),
+            ClientMethod::SessionCompact => {
+                ClientRequestParams::SessionCompact(decode(params_value)?)
+            }
+            ClientMethod::SessionClear => ClientRequestParams::SessionClear(decode(params_value)?),
+            ClientMethod::SessionActiveTurn => {
+                ClientRequestParams::SessionActiveTurn(decode(params_value)?)
             }
             ClientMethod::SessionTurns => ClientRequestParams::SessionTurns(decode(params_value)?),
             ClientMethod::ProjectCreate => {
@@ -305,8 +364,12 @@ impl ClientRequest {
             ClientMethod::TurnInterrupt => {
                 ClientRequestParams::TurnInterrupt(decode(params_value)?)
             }
+            ClientMethod::TurnRetry => ClientRequestParams::TurnRetry(decode(params_value)?),
             ClientMethod::EventSubscribe => {
                 ClientRequestParams::EventSubscribe(decode(params_value)?)
+            }
+            ClientMethod::EventUnsubscribe => {
+                ClientRequestParams::EventUnsubscribe(decode(params_value)?)
             }
             ClientMethod::ToolApprovalSubmit => {
                 ClientRequestParams::ToolApprovalSubmit(decode(params_value)?)
@@ -319,6 +382,18 @@ impl ClientRequest {
             }
             ClientMethod::AdminProjectList => {
                 ClientRequestParams::AdminProjectList(decode(params_value)?)
+            }
+            ClientMethod::AdminUserList => {
+                ClientRequestParams::AdminUserList(decode(params_value)?)
+            }
+            ClientMethod::AdminUserCreate => {
+                ClientRequestParams::AdminUserCreate(decode(params_value)?)
+            }
+            ClientMethod::AdminUserPatch => {
+                ClientRequestParams::AdminUserPatch(decode(params_value)?)
+            }
+            ClientMethod::AdminUserDelete => {
+                ClientRequestParams::AdminUserDelete(decode(params_value)?)
             }
             ClientMethod::ModelList => ClientRequestParams::ModelList(decode(params_value)?),
             ClientMethod::ConfigRead => ClientRequestParams::ConfigRead(decode(params_value)?),
@@ -390,6 +465,7 @@ pub struct ClientInfo {
 pub struct ServerInfo {
     pub name: String,
     pub version: String,
+    pub auth_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
@@ -459,6 +535,21 @@ pub struct SessionCloseParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct SessionCompactParams {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct SessionClearParams {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct SessionActiveTurnParams {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct SessionTurnsParams {
     pub session_id: String,
 }
@@ -499,19 +590,38 @@ pub struct TurnStartParams {
     pub client_request_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageCommandStatus {
+    Pending,
+    Accepted,
+    Failed,
+    FailedNoFirstEvent,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct TurnStartResponse {
+    pub request_id: String,
+    #[serde(default)]
+    pub message_id: Option<String>,
     pub session_id: String,
     pub turn_id: String,
-    #[ts(type = "number")]
-    pub accepted_at: i64,
-    #[serde(default)]
-    pub started_event_id: Option<String>,
+    pub status: MessageCommandStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct TurnInterruptParams {
     pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct TurnRetryParams {
+    pub session_id: String,
+    pub input: Vec<ProtocolInputItem>,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+    pub client_message_id: String,
+    pub retry_of_message_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
@@ -529,6 +639,17 @@ pub struct EventSubscribeResponse {
     pub session_id: String,
     #[serde(default)]
     pub high_water_mark_event_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct EventUnsubscribeParams {
+    pub subscription_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct EventUnsubscribeResponse {
+    pub subscription_id: String,
+    pub unsubscribed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
@@ -585,6 +706,47 @@ pub struct AdminProjectListParams {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdminProjectListResponse {
     pub data: Vec<talos_types::ProjectRecord>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AdminUserRole {
+    User,
+    Admin,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct AdminUserListParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct AdminUserCreateParams {
+    pub username: String,
+    pub password: String,
+    #[serde(default)]
+    pub email: Option<String>,
+    pub role: AdminUserRole,
+    #[serde(default)]
+    pub disabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct AdminUserPatchParams {
+    pub user_id: String,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub password: Option<String>,
+    #[serde(default)]
+    pub role: Option<AdminUserRole>,
+    #[serde(default)]
+    pub disabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct AdminUserDeleteParams {
+    pub user_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
@@ -724,6 +886,10 @@ mod tests {
     fn deferred_methods_are_empty_after_p2_freeze() {
         assert!(DEFERRED_CLIENT_METHODS.is_empty());
         assert_eq!(
+            ClientMethod::from_str("event.unsubscribe").unwrap(),
+            ClientMethod::EventUnsubscribe
+        );
+        assert_eq!(
             ClientMethod::from_str("tool.dynamic_result.submit").unwrap(),
             ClientMethod::ToolDynamicResultSubmit
         );
@@ -738,6 +904,10 @@ mod tests {
         assert_eq!(
             ClientMethod::from_str("admin.project.list").unwrap(),
             ClientMethod::AdminProjectList
+        );
+        assert_eq!(
+            ClientMethod::from_str("admin.user.list").unwrap(),
+            ClientMethod::AdminUserList
         );
     }
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ElectronAppServerClient,
+  getDesktopServerInfo,
   type DesktopRendererBridge,
   type DesktopTalosInvoke,
   type DesktopTalosMethod,
@@ -20,6 +21,7 @@ describe("ElectronAppServerClient", () => {
     const bridge: DesktopRendererBridge = {
       invoke,
       onEvent: () => () => undefined,
+      onSubscriptionTerminated: () => () => undefined,
     };
     const client = new ElectronAppServerClient(bridge);
 
@@ -42,6 +44,7 @@ describe("ElectronAppServerClient", () => {
           subscribed = false;
         };
       },
+      onSubscriptionTerminated: () => () => undefined,
     };
     const client = new ElectronAppServerClient(bridge);
 
@@ -49,5 +52,29 @@ describe("ElectronAppServerClient", () => {
     expect(subscribed).toBe(true);
     unsubscribe();
     expect(subscribed).toBe(false);
+  });
+
+  it("reads initialize server info through the desktop bridge", async () => {
+    const bridge: DesktopRendererBridge = {
+      connect: async () => ({
+        protocol_version: { major: 0, minor: 3 },
+        server_info: {
+          name: "talos-app-server",
+          version: "0.1.0",
+          auth_enabled: false,
+        },
+      }),
+      invoke: async function <T>(): Promise<T> {
+        return undefined as T;
+      },
+      onEvent: () => () => undefined,
+      onSubscriptionTerminated: () => () => undefined,
+    };
+
+    await expect(getDesktopServerInfo(bridge)).resolves.toMatchObject({
+      name: "talos-app-server",
+      version: "0.1.0",
+      auth_enabled: false,
+    });
   });
 });

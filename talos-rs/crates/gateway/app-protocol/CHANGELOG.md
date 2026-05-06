@@ -2,6 +2,7 @@
 
 ## 0.3
 
+- Add app-server parity methods for `session.compact`, `session.clear`, `session.active_turn`, and `turn.retry`.
 - Freeze `tool.dynamic_result.submit`, `admin.session.list`, and `admin.project.list`; `DEFERRED_CLIENT_METHODS` is empty after P2 protocol completion.
 - Refresh JSON Schema and generated TypeScript fixtures from Rust protocol types.
 - Extend app-server protocol resource matrix coverage for admin list and dynamic tool result error mapping.

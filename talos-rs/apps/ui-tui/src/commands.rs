@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use talos_client::SessionCreateParams;
@@ -5,6 +6,7 @@ use talos_error::{TalosError, TalosResult};
 use tokio::sync::mpsc;
 use tracing::error;
 
+use crate::client::GatewayClient;
 use crate::types::{AppState, ChatRole, QueuedMessage, RemoteCommandUpdate};
 use crate::utils::summarize_for_queue;
 use crate::{TuiApp, MAX_QUEUE_LEN, SESSION_CLOSE_TIMEOUT};
@@ -600,31 +602,28 @@ impl TuiApp {
                 "missing gateway client in remote mode".to_string(),
             ));
         };
-        let session_id = self
-            .session_id
-            .clone()
-            .unwrap_or_else(|| "none".to_string());
+        let session_id = self.session_id.clone();
+        let closing_session_id = session_id.clone().unwrap_or_else(|| "none".to_string());
         let (tx, rx) = mpsc::channel(1);
         self.pending_close_update = Some(rx);
         self.close_in_progress = true;
         self.close_started_at = Some(Instant::now());
         self.close_timeout_reported = false;
-        self.closing_session_id = Some(session_id.clone());
+        self.closing_session_id = Some(closing_session_id.clone());
         self.connection_status = "closing".to_string();
         self.show_status_hint(
             "Closing session. Memory flush continues in background.",
             Duration::from_secs(2),
         );
-        self.push_right_event(format!("session close started: {}", session_id));
+        self.push_right_event(format!("session close started: {}", closing_session_id));
 
         let handle = tokio::spawn(async move {
-            let result = client
-                .close_session(&session_id)
-                .await
-                .map(|_| session_id.clone());
+            let result =
+                close_remote_session_and_shutdown(client, session_id, closing_session_id.clone())
+                    .await;
             if tx.send(result).await.is_err() {
                 error!(
-                    session_id = %session_id,
+                    session_id = %closing_session_id,
                     "failed to deliver close session result to TUI task"
                 );
             }
@@ -735,5 +734,29 @@ impl TuiApp {
         self.close_started_at
             .map(|started_at| started_at.elapsed() >= SESSION_CLOSE_TIMEOUT)
             .unwrap_or(false)
+    }
+}
+
+async fn close_remote_session_and_shutdown(
+    client: Arc<dyn GatewayClient>,
+    session_id: Option<String>,
+    fallback_session_id: String,
+) -> TalosResult<String> {
+    let close_result = if let Some(session_id) = session_id.as_deref() {
+        client
+            .close_session(session_id)
+            .await
+            .map(|_| session_id.to_string())
+    } else {
+        Ok(fallback_session_id)
+    };
+    let shutdown_result = client.shutdown().await;
+    match (close_result, shutdown_result) {
+        (Ok(session_id), Ok(())) => Ok(session_id),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Err(close_error), Err(shutdown_error)) => Err(TalosError::ClientError(format!(
+            "close session failed: {close_error}; shutdown failed: {shutdown_error}"
+        ))),
     }
 }

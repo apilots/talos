@@ -17,6 +17,7 @@ class RecordingTransport implements AppServerTransport {
       method === "memory.search" ||
       method === "project.list" ||
       method === "admin.project.list" ||
+      method === "admin.user.list" ||
       method === "session.turns"
     ) {
       return Promise.resolve({ data: [] } as T);
@@ -26,6 +27,9 @@ class RecordingTransport implements AppServerTransport {
         data: [],
         pagination: { total: 0, limit: 20, offset: 0 },
       } as T);
+    }
+    if (method === "config.read" || method === "config.value.write") {
+      return Promise.resolve(testLlmConfig as T);
     }
     return Promise.resolve({} as T);
   }
@@ -50,6 +54,19 @@ describe("AppServerClient", () => {
     });
     await client.listProjects();
     await client.listAdminProjects();
+    await client.listAdminUsers();
+    await client.createAdminUser({
+      username: "alice",
+      password: "secret",
+      role: "admin",
+    });
+    await client.patchAdminUser("user-1", {
+      role: "user",
+      disabled: false,
+    });
+    await client.deleteAdminUser("user-1");
+    await client.getLlmConfig();
+    await client.updateLlmConfig(testLlmConfig);
     await client.listAdminSessions({ limit: 20, offset: 0, user_id: null, channel_id: null, provider: null, project_id: null });
     await client.createProject("Talos", "/tmp/talos");
     await client.patchProject("project-1", { name: "Talos Core" });
@@ -61,6 +78,7 @@ describe("AppServerClient", () => {
       output: "done",
       success: true,
     });
+    await client.unsubscribeEvents("sub-1");
     await client.searchMemory("stable fact", 3);
 
     expect(transport.requests).toEqual([
@@ -76,6 +94,32 @@ describe("AppServerClient", () => {
       },
       { method: "project.list", params: {} },
       { method: "admin.project.list", params: {} },
+      { method: "admin.user.list", params: {} },
+      {
+        method: "admin.user.create",
+        params: {
+          username: "alice",
+          password: "secret",
+          role: "admin",
+        },
+      },
+      {
+        method: "admin.user.patch",
+        params: {
+          user_id: "user-1",
+          role: "user",
+          disabled: false,
+        },
+      },
+      { method: "admin.user.delete", params: { user_id: "user-1" } },
+      { method: "config.read", params: {} },
+      {
+        method: "config.value.write",
+        params: {
+          path: "llm",
+          value: JSON.stringify(testLlmConfig),
+        },
+      },
       {
         method: "admin.session.list",
         params: {
@@ -100,7 +144,24 @@ describe("AppServerClient", () => {
           success: true,
         },
       },
+      { method: "event.unsubscribe", params: { subscription_id: "sub-1" } },
       { method: "memory.search", params: { query: "stable fact", limit: 3 } },
     ]);
   });
 });
+
+const emptyProvider = {
+  api_key: null,
+  base_url: null,
+  enabled: false,
+  models: [],
+};
+
+const testLlmConfig = {
+  provider: "anthropic",
+  model: "MiniMax-M2.5",
+  anthropic: emptyProvider,
+  openai: emptyProvider,
+  bailian: emptyProvider,
+  ollama: emptyProvider,
+};

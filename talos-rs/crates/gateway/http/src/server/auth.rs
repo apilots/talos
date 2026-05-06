@@ -37,7 +37,7 @@ pub(super) async fn auth_middleware(
     next: Next,
 ) -> Result<Response, StatusCode> {
     let path = req.uri().path().to_string();
-    if is_public_route(path.as_str()) {
+    if is_public_route(path.as_str()) || is_webui_route(path.as_str()) {
         return Ok(next.run(req).await);
     }
 
@@ -66,4 +66,8 @@ pub(super) async fn auth_middleware(
 
 fn is_public_route(path: &str) -> bool {
     matches!(path, "/health" | "/v1/auth/register" | "/v1/auth/login")
+}
+
+fn is_webui_route(path: &str) -> bool {
+    !path.starts_with("/v1/")
 }

@@ -33,6 +33,25 @@ fn test_talos_roundtrip() {
 }
 
 #[test]
+fn test_desktop_source_type_roundtrip() {
+    assert_eq!(talos::TalosSourceType::Desktop.as_str(), "desktop");
+    assert!(matches!(
+        talos::TalosSourceType::parse("desktop"),
+        talos::TalosSourceType::Desktop
+    ));
+
+    let context = talos::TalosContext::desktop("user-1");
+    assert_eq!(context.source_type, talos::TalosSourceType::Desktop);
+    assert_eq!(context.provider, talos::TalosProvider::Sdk);
+
+    let encoded = serde_json::to_string(&context).expect("context should encode");
+    assert!(encoded.contains("\"source_type\":\"desktop\""));
+    let decoded: talos::TalosContext =
+        serde_json::from_str(&encoded).expect("context should decode");
+    assert_eq!(decoded.source_type, talos::TalosSourceType::Desktop);
+}
+
+#[test]
 fn test_session_context_and_state_from_record() {
     let record = SessionRecord {
         id: "session-1".to_string(),

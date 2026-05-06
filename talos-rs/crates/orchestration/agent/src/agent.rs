@@ -569,6 +569,10 @@ impl AgentOrchestrator for AgentImpl {
         Ok(())
     }
 
+    async fn drain_active_turns(&self, timeout: Duration) -> TalosResult<()> {
+        AgentImpl::drain_active_turns(self, timeout).await
+    }
+
     async fn submit_tool_approval(
         &self,
         session_id: &str,

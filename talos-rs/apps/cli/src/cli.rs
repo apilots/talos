@@ -10,6 +10,7 @@ use talos_client::{
     SessionCreateParams, TalosEventPayload, TalosEventType, TalosInputItem, TalosMessageRequest,
     TalosThinkingSource, TalosThinkingStage,
 };
+use tracing::{debug, error};
 
 mod types;
 
@@ -315,7 +316,7 @@ async fn execute_app_server_chat_command(
                 let request = build_message_request(&message, model, stream);
                 send_and_render_app_server_message(client, &session_id, request).await?;
             } else {
-                eprintln!("No recent session found at index {}", index);
+                debug!("No recent session found at index {}", index);
             }
         }
     }
@@ -385,7 +386,7 @@ async fn execute_app_server_session_command(
                 let input = line.trim();
                 if input == "quit" || input == "exit" {
                     if let Err(err) = client.delete_session(&session_id).await {
-                        eprintln!("Failed to close session {}: {}", session_id, err);
+                        debug!("Failed to close session {}: {}", session_id, err);
                     }
                     break;
                 }
@@ -394,7 +395,7 @@ async fn execute_app_server_session_command(
                     if let Err(err) =
                         send_and_render_app_server_message(client, &session_id, request).await
                     {
-                        eprintln!("Error: {:?}", err);
+                        debug!("Error: {:?}", err);
                     }
                 }
             }
@@ -623,7 +624,7 @@ fn render_event(
             );
         }
         (TalosEventType::MessageError, TalosEventPayload::MessageError(payload)) => {
-            eprintln!("MESSAGE_ERROR {}", payload.error);
+            error!("MESSAGE_ERROR {}", payload.error);
             return Ok(true);
         }
         (TalosEventType::MessageCompleted, TalosEventPayload::MessageCompleted(_)) => {

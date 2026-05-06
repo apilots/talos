@@ -72,37 +72,37 @@ impl Scenario {
 }
 
 async fn smoke(client: &mut AppServerClient) -> Result<()> {
-    eprintln!("app-server-test-client: model.list");
+    eprintln!("model.list");
     client.list_models().await?;
-    eprintln!("app-server-test-client: session.create");
+    eprintln!("session.create");
     let session_id = create_session(client).await?;
-    eprintln!("app-server-test-client: config.read");
+    eprintln!("config.read");
     client.config_read().await?;
-    eprintln!("app-server-test-client: memory.file.list");
+    eprintln!("memory.file.list");
     client.list_memory_files().await?;
-    eprintln!("app-server-test-client: workspace.doc.list");
+    eprintln!("workspace.doc.list");
     client.list_workspace_docs().await?;
-    eprintln!("app-server-test-client: event.subscribe");
+    eprintln!("event.subscribe");
     subscribe_events(client, &session_id).await?;
     Ok(())
 }
 
 async fn replay(client: &mut AppServerClient) -> Result<()> {
-    eprintln!("app-server-test-client: replay session.create");
+    eprintln!("replay session.create");
     let session_id = session_id_from_env().unwrap_or(create_session(client).await?);
-    eprintln!("app-server-test-client: replay event.subscribe");
+    eprintln!("replay event.subscribe");
     let live = subscribe_events(client, &session_id).await?;
-    eprintln!("app-server-test-client: replay turn.start");
+    eprintln!("replay turn.start");
     start_turn(client, &session_id).await?;
-    eprintln!("app-server-test-client: replay collect live events");
+    eprintln!("replay collect live events");
     let live_events = collect_until_terminal(client, &live.subscription_id).await?;
     let first_event_id = live_events
         .first()
         .map(|event| event.event_id.clone())
         .ok_or_else(|| anyhow!("expected live events before replay"))?;
-    eprintln!("app-server-test-client: replay event.subscribe replay");
+    eprintln!("replay event.subscribe replay");
     let replay = subscribe_events_with_limit(client, &session_id, live_events.len() + 8).await?;
-    eprintln!("app-server-test-client: replay collect replay events");
+    eprintln!("replay collect replay events");
     let replay_events = collect_events(client, &replay.subscription_id, live_events.len()).await?;
     if replay_events.len() != live_events.len() {
         return Err(anyhow!(
@@ -118,15 +118,15 @@ async fn replay(client: &mut AppServerClient) -> Result<()> {
 }
 
 async fn multi_subscriber(client: &mut AppServerClient) -> Result<()> {
-    eprintln!("app-server-test-client: multi-subscriber session.create");
+    eprintln!("multi-subscriber session.create");
     let session_id = session_id_from_env().unwrap_or(create_session(client).await?);
-    eprintln!("app-server-test-client: multi-subscriber first subscribe");
+    eprintln!("multi-subscriber first subscribe");
     let first = subscribe_events(client, &session_id).await?;
-    eprintln!("app-server-test-client: multi-subscriber second subscribe");
+    eprintln!("multi-subscriber second subscribe");
     let second = subscribe_events(client, &session_id).await?;
-    eprintln!("app-server-test-client: multi-subscriber turn.start");
+    eprintln!("multi-subscriber turn.start");
     start_turn(client, &session_id).await?;
-    eprintln!("app-server-test-client: multi-subscriber collect events");
+    eprintln!("multi-subscriber collect events");
     let (first_events, second_events) = collect_two_subscriptions_until_terminal(
         client,
         &first.subscription_id,
@@ -137,23 +137,23 @@ async fn multi_subscriber(client: &mut AppServerClient) -> Result<()> {
 }
 
 async fn turn_smoke(client: &mut AppServerClient) -> Result<()> {
-    eprintln!("app-server-test-client: turn-smoke session.create");
+    eprintln!("turn-smoke session.create");
     let session_id = create_session(client).await?;
-    eprintln!("app-server-test-client: turn-smoke event.subscribe");
+    eprintln!("turn-smoke event.subscribe");
     let subscription = subscribe_events(client, &session_id).await?;
-    eprintln!("app-server-test-client: turn-smoke turn.start");
+    eprintln!("turn-smoke turn.start");
     start_turn(client, &session_id).await?;
-    eprintln!("app-server-test-client: turn-smoke collect events");
+    eprintln!("turn-smoke collect events");
     let events = collect_until_terminal(client, &subscription.subscription_id).await?;
     ensure_turn_event_flow(&events)
 }
 
 async fn active_turn_conflict(client: &mut AppServerClient) -> Result<()> {
-    eprintln!("app-server-test-client: active-turn-conflict session.create");
+    eprintln!("active-turn-conflict session.create");
     let session_id = create_session(client).await?;
-    eprintln!("app-server-test-client: active-turn-conflict first turn.start");
+    eprintln!("active-turn-conflict first turn.start");
     start_turn(client, &session_id).await?;
-    eprintln!("app-server-test-client: active-turn-conflict second turn.start");
+    eprintln!("active-turn-conflict second turn.start");
     let err = client
         .start_turn(
             &session_id,
@@ -170,11 +170,11 @@ async fn active_turn_conflict(client: &mut AppServerClient) -> Result<()> {
 }
 
 async fn approval_resume(client: &mut AppServerClient) -> Result<()> {
-    eprintln!("app-server-test-client: approval-resume session.create");
+    eprintln!("approval-resume session.create");
     let session_id = create_session(client).await?;
-    eprintln!("app-server-test-client: approval-resume event.subscribe");
+    eprintln!("approval-resume event.subscribe");
     let subscription = subscribe_events_with_limit(client, &session_id, 128).await?;
-    eprintln!("app-server-test-client: approval-resume turn.start pending approval");
+    eprintln!("approval-resume turn.start pending approval");
     client
         .start_turn(
             &session_id,
@@ -198,10 +198,10 @@ async fn approval_resume(client: &mut AppServerClient) -> Result<()> {
         return Err(anyhow!("pending approval missing turn_id"));
     }
 
-    eprintln!("app-server-test-client: approval-resume resubscribe");
+    eprintln!("approval-resume resubscribe");
     let live_resume_subscription = subscribe_events_with_limit(client, &session_id, 128).await?;
 
-    eprintln!("app-server-test-client: approval-resume submit approval");
+    eprintln!("approval-resume submit approval");
     client
         .submit_tool_approval(
             &session_id,
@@ -212,11 +212,11 @@ async fn approval_resume(client: &mut AppServerClient) -> Result<()> {
         )
         .await?;
 
-    eprintln!("app-server-test-client: approval-resume replay subscription");
+    eprintln!("approval-resume replay subscription");
     let resumed_subscription =
         subscribe_events_since(client, &session_id, pending.event_id.clone(), 512).await?;
 
-    eprintln!("app-server-test-client: approval-resume collect resumed events");
+    eprintln!("approval-resume collect resumed events");
     let resumed_events = collect_approval_resume_events(
         client,
         &[
@@ -230,11 +230,11 @@ async fn approval_resume(client: &mut AppServerClient) -> Result<()> {
 }
 
 async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
-    eprintln!("app-server-test-client: resource-matrix config/model list");
+    eprintln!("resource-matrix config/model list");
     client.list_models().await?;
     client.config_read().await?;
 
-    eprintln!("app-server-test-client: resource-matrix memory roundtrip");
+    eprintln!("resource-matrix memory roundtrip");
     let memory_path = "2099-12-31.md";
     let memory_content =
         "## [00:00] App Server\nsession: sdk\n\n**Facts:**\n- app-server resource parity\n";
@@ -276,7 +276,7 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     )?;
     client.list_memory_files().await?;
 
-    eprintln!("app-server-test-client: resource-matrix workspace doc read/conflict");
+    eprintln!("resource-matrix workspace doc read/conflict");
     let read_workspace = client.read_workspace_doc(WorkspaceDocKind::Memory).await?;
     if !read_workspace.exists {
         return Err(anyhow!("expected bootstrap workspace memory doc to exist"));
@@ -293,7 +293,7 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     )?;
     client.list_workspace_docs().await?;
 
-    eprintln!("app-server-test-client: resource-matrix project roundtrip");
+    eprintln!("resource-matrix project roundtrip");
     let project_dir = std::env::temp_dir().join(format!(
         "talos-app-server-{}",
         uuid::Uuid::new_v4().simple()
@@ -342,7 +342,7 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
         "deleted project should map to not found",
     )?;
 
-    eprintln!("app-server-test-client: resource-matrix session error mapping");
+    eprintln!("resource-matrix session error mapping");
     let session_id = create_session(client).await?;
     let admin_sessions = client
         .list_admin_sessions(AdminSessionListParams {

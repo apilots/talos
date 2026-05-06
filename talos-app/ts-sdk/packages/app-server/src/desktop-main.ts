@@ -1,9 +1,14 @@
 import type { AppProtocol } from "@talos/sdk-core";
 
-import type { AppServerEventHandler } from "@talos/sdk-core";
+import type {
+  AppServerErrorHandler,
+  AppServerEventHandler,
+  AppServerSubscriptionTerminatedHandler,
+} from "@talos/sdk-core";
 import {
   StdioAppServerClient,
   type AppServerClientOptions,
+  type AppServerRequestHandler,
 } from "./stdio";
 
 export type { AppServerClientOptions } from "./stdio";
@@ -27,6 +32,14 @@ export class DesktopMainAppServerBridge {
     return this.client.onEvent(handler);
   }
 
+  onSubscriptionTerminated(handler: AppServerSubscriptionTerminatedHandler): () => void {
+    return this.client.onSubscriptionTerminated(handler);
+  }
+
+  onError(handler: AppServerErrorHandler): () => void {
+    return this.client.onError(handler);
+  }
+
   onExit(
     handler: (status: { code: number | null; signal: NodeJS.Signals | null }) => void,
   ): () => void {
@@ -35,6 +48,10 @@ export class DesktopMainAppServerBridge {
 
   onStderr(handler: (chunk: string) => void): () => void {
     return this.client.transport.onStderr(handler);
+  }
+
+  onServerRequest(handler: AppServerRequestHandler): () => void {
+    return this.client.transport.onServerRequest(handler);
   }
 }
 

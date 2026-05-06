@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+PROFILE="${PROFILE:-dev}"
+PRODUCT_DIR="${PRODUCT_DIR:-${REPO_ROOT}/dist/products/${PROFILE}}"
+
+require_file() {
+  local pattern="$1"
+  if ! compgen -G "${pattern}" >/dev/null; then
+    echo "Missing required artifact: ${pattern}" >&2
+    exit 1
+  fi
+}
+
+require_file "${PRODUCT_DIR}/server/talos-server-*.tar.gz"
+require_file "${PRODUCT_DIR}/tui/talos-ui-tui"
+require_file "${PRODUCT_DIR}/desktop-mac/Talos-*.dmg"
+require_file "${PRODUCT_DIR}/desktop-linux/Talos-*.tar.gz"
+require_file "${PRODUCT_DIR}/desktop-linux/SHA256SUMS"
+
+verify_macos_app_server() {
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    echo "Skipping macOS DMG app-server inspection on non-Darwin host."
+    return
+  fi
+
+  local dmg_path
+  dmg_path="$(find "${PRODUCT_DIR}/desktop-mac" -maxdepth 1 -name "Talos-*.dmg" | head -n 1)"
+  local mount_dir
+  mount_dir="$(mktemp -d "${TMPDIR:-/tmp}/talos-dmg.XXXXXX")"
+  hdiutil attach -nobrowse -readonly -mountpoint "${mount_dir}" "${dmg_path}" >/dev/null
+  trap 'hdiutil detach "${mount_dir}" >/dev/null 2>&1 || true; rm -rf "${mount_dir}"' RETURN
+
+  local app_server="${mount_dir}/Talos.app/Contents/Resources/app-server/talos"
+  if [[ ! -x "${app_server}" ]]; then
+    echo "Missing packaged macOS app-server binary: ${app_server}" >&2
+    exit 1
+  fi
+
+  hdiutil detach "${mount_dir}" >/dev/null
+  rm -rf "${mount_dir}"
+  trap - RETURN
+}
+
+verify_linux_app_server() {
+  local archive_path
+  archive_path="$(find "${PRODUCT_DIR}/desktop-linux" -maxdepth 1 -name "Talos-*.tar.gz" | head -n 1)"
+  if ! tar -tzf "${archive_path}" | grep -Eq '(^|/)resources/app-server/talos$'; then
+    echo "Missing packaged Linux app-server binary in ${archive_path}" >&2
+    exit 1
+  fi
+}
+
+(
+  cd "${PRODUCT_DIR}/desktop-linux"
+  shasum -a 256 -c SHA256SUMS
+)
+
+verify_macos_app_server
+verify_linux_app_server
+
+if [[ "${TALOS_VERIFY_MAC_SIGNATURE:-0}" == "1" ]]; then
+  dmg_path="$(find "${PRODUCT_DIR}/desktop-mac" -maxdepth 1 -name "Talos-*.dmg" | head -n 1)"
+  spctl -a -t open --context context:primary-signature -v "${dmg_path}"
+  xcrun stapler validate "${dmg_path}"
+fi
+
+echo "Release artifacts verified: ${PRODUCT_DIR}"

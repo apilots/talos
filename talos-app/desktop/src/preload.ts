@@ -16,6 +16,13 @@ const bridge: TalosDesktopBridge = {
     ipcRenderer.on(TALOS_IPC.event, listener);
     return () => ipcRenderer.off(TALOS_IPC.event, listener);
   },
+  onSubscriptionTerminated: (handler) => {
+    const listener = (_event: IpcRendererEvent, envelope: AppProtocol.SubscriptionTerminatedEnvelope) => {
+      handler(envelope);
+    };
+    ipcRenderer.on(TALOS_IPC.subscriptionTerminated, listener);
+    return () => ipcRenderer.off(TALOS_IPC.subscriptionTerminated, listener);
+  },
   onRuntimeState: (handler) => {
     const listener = (_event: IpcRendererEvent, state: TalosRuntimeState) => {
       handler(state);

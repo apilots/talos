@@ -5,6 +5,7 @@ import type { SettingsPageState } from "../hooks/useSettingsPage";
 import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
 import { Panel } from "@/shared/ui/Panel";
+import { isDesktopRuntime } from "@/shared/api/desktop-client";
 import { FieldBlock, SectionHeader, ToggleRow } from "./SectionPrimitives";
 
 export type SettingsServerConnectionProps = Pick<
@@ -38,6 +39,7 @@ export function SettingsServerConnectionPanel({
   terminalApproval,
 }: SettingsServerConnectionProps) {
   const { t } = useTranslation(["settings", "common"]);
+  const desktopRuntime = isDesktopRuntime();
 
   return (
     <Panel className="rounded-[var(--radius-panel)] border-border/75 bg-card/88 p-6">
@@ -46,6 +48,15 @@ export function SettingsServerConnectionPanel({
         subtitle={t("settings:serverDetail")}
         title={t("settings:serverTitle")}
       />
+      {desktopRuntime ? (
+        <div className="mt-5 rounded-[var(--radius-control)] border border-border/70 bg-background/55 p-4 text-sm">
+          <div className="font-medium text-ink">Desktop local runtime</div>
+          <div className="mt-1 text-muted">
+            Connected through the local app-server bridge as ordinary user{" "}
+            <span className="font-medium text-ink">{connection.userId}</span>. Admin features are not available in desktop mode.
+          </div>
+        </div>
+      ) : null}
       <form
         className="mt-6 space-y-5"
         onSubmit={(event) => {

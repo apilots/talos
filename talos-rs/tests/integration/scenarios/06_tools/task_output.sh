@@ -98,7 +98,7 @@ if [[ -z "${session_id}" ]]; then
 fi
 echo "CASE task_output_create_session PASS session_id=${session_id}"
 
-bash_input="You must call tool 'Bash' exactly once with command python3 -c \"import time; print('${TASK_MARKER}', flush=True); time.sleep(20)\" and run_in_background true and timeout 0. After the tool call, respond with exactly TASK_STARTED"
+bash_input="You must call tool 'Bash' exactly once with command python3 -c \"import time; print('x' * 1300 + '${TASK_MARKER}', flush=True); time.sleep(20)\" and run_in_background true and timeout 0. After the tool call, respond with exactly TASK_STARTED"
 bash_payload="$(build_payload "${bash_input}")"
 bash_json="$(send_message_response "${session_id}" "${bash_payload}" "bash")"
 log_case_json "tool_task_output_bash" "${bash_payload}" "${bash_json}"

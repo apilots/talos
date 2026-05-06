@@ -1,5 +1,5 @@
 import { type ReactNode, lazy, Suspense } from "react";
-import { Navigate, createBrowserRouter } from "react-router-dom";
+import { Navigate, createBrowserRouter, createHashRouter } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { AppLayout } from "@/app/layouts/AppLayout";
@@ -76,7 +76,10 @@ function withSuspense(element: ReactNode) {
   return <Suspense fallback={<LoadingFallback />}>{element}</Suspense>;
 }
 
-export const router = createBrowserRouter([
+const isDesktopBuild = import.meta.env.VITE_TALOS_DESKTOP === "1";
+const createRouter = isDesktopBuild ? createHashRouter : createBrowserRouter;
+
+export const router = createRouter([
   {
     path: "/auth/login",
     element: withSuspense(<AuthPage />),

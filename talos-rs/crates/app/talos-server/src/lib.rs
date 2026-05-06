@@ -1,7 +1,9 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use talos_agent::{AgentImpl, AgentOrchestrator};
+use talos_app_server::BackgroundTaskDrain;
 use talos_application_service::TalosApplicationService;
 use talos_auth::{
     AuthCacheConfig, AuthManager, AuthService, DatabaseUserStore, JwtAuth, JwtConfig, UserService,
@@ -31,7 +33,7 @@ use talos_types::{resolve_model_catalog, RequestHandler, SessionRuntime};
 use tokio::signal;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 #[derive(Debug, Clone, Default)]
 pub struct TalosServerOptions {
@@ -40,6 +42,7 @@ pub struct TalosServerOptions {
     pub logging_stdout: Option<bool>,
     pub auth_disabled: Option<bool>,
     pub enable_channels: Option<bool>,
+    pub webui_dir: Option<PathBuf>,
 }
 
 pub struct TalosServerRuntime {
@@ -59,10 +62,23 @@ pub struct TalosApplicationRuntime {
     pub auth_service: Arc<dyn AuthService>,
     pub request_handler: Arc<dyn RequestHandler>,
     pub coordinator: Arc<CoordinatorImpl>,
+    pub tool_registry: Arc<ToolRegistry>,
 }
 
 const MEMORY_FLUSH_DRAIN_TIMEOUT: Duration = Duration::from_secs(60);
 const SERVER_SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(180);
+
+/// Bridges `CoordinatorImpl` to the `BackgroundTaskDrain` trait used by the app-server.
+struct CoordinatorDrain {
+    coordinator: Arc<CoordinatorImpl>,
+}
+
+#[async_trait::async_trait]
+impl BackgroundTaskDrain for CoordinatorDrain {
+    async fn drain(&self, timeout: Duration) -> TalosResult<()> {
+        self.coordinator.drain_background_tasks(timeout).await
+    }
+}
 
 #[derive(Clone)]
 pub struct TalosServerHandle {
@@ -188,18 +204,16 @@ async fn perform_shutdown(coordinator: &Arc<CoordinatorImpl>, lifecycle: &Arc<Se
     lifecycle.store(ServerLifecycleState::Draining);
 
     let pending_flushes = coordinator.pending_memory_flushes().await;
-    if pending_flushes > 0 {
-        tracing::info!(
-            pending_flushes,
-            timeout_secs = MEMORY_FLUSH_DRAIN_TIMEOUT.as_secs(),
-            "draining pending memory flush tasks before shutdown"
-        );
-        if let Err(err) = coordinator
-            .drain_background_tasks(MEMORY_FLUSH_DRAIN_TIMEOUT)
-            .await
-        {
-            warn!(error = %err, "memory flush drain failed on shutdown");
-        }
+    info!(
+        pending_flushes,
+        timeout_secs = MEMORY_FLUSH_DRAIN_TIMEOUT.as_secs(),
+        "draining background tasks before shutdown"
+    );
+    if let Err(err) = coordinator
+        .drain_background_tasks(MEMORY_FLUSH_DRAIN_TIMEOUT)
+        .await
+    {
+        warn!(error = %err, "background task drain failed on shutdown");
     }
 
     lifecycle.store(ServerLifecycleState::Stopped);
@@ -250,6 +264,10 @@ pub async fn start_server(
             })?);
     }
 
+    if let Some(webui_dir) = options.as_ref().and_then(|value| value.webui_dir.clone()) {
+        http_server = http_server.with_webui_dir(webui_dir);
+    }
+
     let enable_channels = options
         .as_ref()
         .and_then(|value| value.enable_channels)
@@ -276,17 +294,35 @@ pub async fn start_server(
 pub async fn run_json_rpc_stdio(config: Config) -> TalosResult<()> {
     let runtime = build_application_runtime(config.clone()).await?;
     let replay_limit = config.agent.kernel.session_events.replay_batch_size.max(1);
-    let app = Arc::new(talos_app_server::TalosApplicationAdapter::new(
-        runtime.application_service,
-        replay_limit,
-    ));
-    let validator = Arc::new(talos_app_server::AuthServiceCredentialValidator::new(
-        runtime.auth_service,
-        std::env::var("TALOS_LOCAL_LAUNCH_TOKEN").ok(),
-    ));
-    talos_app_server::run_stdio(app, validator, talos_app_server::AppServerConfig::default())
-        .await
-        .map_err(|error| TalosError::InternalError(error.message))
+    let app = Arc::new(
+        talos_app_server::TalosApplicationAdapter::new(runtime.application_service, replay_limit)
+            .with_drain_provider(Box::new(CoordinatorDrain {
+                coordinator: runtime.coordinator,
+            }))
+            .with_tool_registry(runtime.tool_registry),
+    );
+    let local_launch_access = if config.gateway.auth {
+        talos_app_server::LocalLaunchAccess::Regular
+    } else {
+        talos_app_server::LocalLaunchAccess::Full
+    };
+    let validator = Arc::new(
+        talos_app_server::AuthServiceCredentialValidator::new(
+            runtime.auth_service,
+            std::env::var("TALOS_LOCAL_LAUNCH_TOKEN").ok(),
+        )
+        .with_local_launch_access(local_launch_access),
+    );
+    talos_app_server::run_stdio(
+        app,
+        validator,
+        talos_app_server::AppServerConfig {
+            auth_enabled: config.gateway.auth,
+            ..talos_app_server::AppServerConfig::default()
+        },
+    )
+    .await
+    .map_err(|error| TalosError::InternalError(error.message))
 }
 
 pub async fn build_application_runtime(config: Config) -> TalosResult<TalosApplicationRuntime> {
@@ -413,6 +449,7 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
         auth_service,
         request_handler,
         coordinator,
+        tool_registry,
     })
 }
 

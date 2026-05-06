@@ -39,12 +39,24 @@ class RecordingBridge implements AppServerBridge {
     return this.inner.onEvent(handler);
   }
 
+  onSubscriptionTerminated(handler: (envelope: AppProtocol.SubscriptionTerminatedEnvelope) => void): () => void {
+    return this.inner.onSubscriptionTerminated(handler);
+  }
+
+  onError(handler: (error: Error) => void): () => void {
+    return this.inner.onError(handler);
+  }
+
   onExit(handler: (status: { code: number | null; signal: NodeJS.Signals | null }) => void): () => void {
     return this.inner.onExit(handler);
   }
 
   onStderr(handler: (chunk: string) => void): () => void {
     return this.inner.onStderr(handler);
+  }
+
+  onServerRequest(handler: (request: AppProtocol.JsonRpcRequest) => Promise<unknown> | unknown): () => void {
+    return this.inner.onServerRequest(handler);
   }
 }
 
@@ -96,6 +108,7 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
           rendererHandlers.delete(handler);
         };
       },
+      onSubscriptionTerminated: () => () => undefined,
     });
     const sdkEvents: AppProtocol.ApplicationEventEnvelope[] = [];
     const unsubscribe = rendererClient.onEvent((envelope) => sdkEvents.push(envelope));

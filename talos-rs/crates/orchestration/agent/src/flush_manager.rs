@@ -39,6 +39,7 @@ impl MemoryFlushManager {
         let task_session_id = session_id_owned.clone();
         let task_handle = tokio::spawn(async move {
             let started_at = Instant::now();
+            info!(session_id = %task_session_id, "memory flush started");
             let result = future.await;
             match result {
                 Ok(()) => {
@@ -85,11 +86,21 @@ impl MemoryFlushManager {
 
     pub async fn drain(&self, timeout: Duration) -> TalosResult<()> {
         let deadline = Instant::now() + timeout;
+        let started_at = Instant::now();
+        info!(
+            pending_count = self.pending_count(),
+            timeout_ms = timeout.as_millis() as u64,
+            "memory flush drain started"
+        );
 
         loop {
             let pending = {
                 let mut tasks = self.tasks.lock().await;
                 if tasks.is_empty() {
+                    info!(
+                        elapsed_ms = started_at.elapsed().as_millis() as u64,
+                        "memory flush drain completed"
+                    );
                     return Ok(());
                 }
                 tasks.drain().collect::<Vec<_>>()
@@ -124,6 +135,7 @@ impl MemoryFlushManager {
                 // so the task-side cleanup no longer sees the entry and cannot
                 // decrement the tracked count on this path.
                 Self::mark_task_completed(self.pending_count.as_ref());
+                info!(session_id = %session_id, "memory flush drain joined task");
             }
         }
     }

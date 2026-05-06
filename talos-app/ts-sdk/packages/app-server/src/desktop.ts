@@ -3,6 +3,7 @@ import type { AppProtocol } from "@talos/sdk-core";
 import {
   AppServerClient,
   type AppServerEventHandler,
+  type AppServerSubscriptionTerminatedHandler,
   type AppServerTransport,
 } from "@talos/sdk-core";
 
@@ -14,10 +15,22 @@ export interface DesktopTalosInvoke {
 
 export interface DesktopTalosEventSource {
   onEvent(handler: AppServerEventHandler): () => void;
+  onSubscriptionTerminated(handler: AppServerSubscriptionTerminatedHandler): () => void;
 }
 
 export interface DesktopRendererBridge extends DesktopTalosEventSource {
+  connect?(): Promise<AppProtocol.InitializeResponse>;
   invoke: DesktopTalosInvoke;
+}
+
+export async function getDesktopServerInfo(
+  bridge: DesktopRendererBridge,
+): Promise<AppProtocol.ServerInfo> {
+  if (!bridge.connect) {
+    throw new Error("Desktop runtime connect bridge is not available.");
+  }
+  const response = await bridge.connect();
+  return response.server_info;
 }
 
 class DesktopRendererTransport implements AppServerTransport {
@@ -29,6 +42,10 @@ class DesktopRendererTransport implements AppServerTransport {
 
   onEvent(handler: AppServerEventHandler): () => void {
     return this.bridge.onEvent(handler);
+  }
+
+  onSubscriptionTerminated(handler: AppServerSubscriptionTerminatedHandler): () => void {
+    return this.bridge.onSubscriptionTerminated(handler);
   }
 }
 

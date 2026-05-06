@@ -12,6 +12,7 @@ talos-application-service = { workspace = true }
 talos-auth = { workspace = true }
 talos-error = { workspace = true }
 talos-session-store = { path = "../../orchestration/session-store" }
+talos-tools = { workspace = true }
 talos-types = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

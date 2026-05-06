@@ -6,7 +6,9 @@ import type { AppProtocol } from "@talos/sdk-core";
 
 import {
   AppServerClient,
+  type AppServerErrorHandler,
   type AppServerEventHandler,
+  type AppServerSubscriptionTerminatedHandler,
   type AppServerTransport,
 } from "@talos/sdk-core";
 
@@ -26,6 +28,10 @@ export interface AppServerClientOptions extends JsonRpcStdioTransportOptions {
 export type AppServerNotificationHandler = (
   notification: AppProtocol.JsonRpcNotification,
 ) => void;
+
+export type AppServerRequestHandler = (
+  request: AppProtocol.JsonRpcRequest,
+) => Promise<unknown> | unknown;
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
@@ -50,6 +56,7 @@ export class JsonRpcStdioTransport implements AppServerTransport {
   private nextId = 1;
   private readonly pending = new Map<AppProtocol.RequestId, PendingRequest>();
   private readonly events = new EventEmitter();
+  private serverRequestHandler?: AppServerRequestHandler;
 
   constructor(private readonly options: JsonRpcStdioTransportOptions = {}) {}
 
@@ -69,7 +76,7 @@ export class JsonRpcStdioTransport implements AppServerTransport {
     });
     child.once("error", (error) => {
       this.rejectPending(error);
-      this.events.emit("error", error);
+      this.events.emit("transportError", error);
     });
     child.once("exit", (code, signal) => {
       this.child = undefined;
@@ -164,9 +171,28 @@ export class JsonRpcStdioTransport implements AppServerTransport {
     return () => this.events.off("event", handler);
   }
 
+  onSubscriptionTerminated(handler: AppServerSubscriptionTerminatedHandler): () => void {
+    this.events.on("subscriptionTerminated", handler);
+    return () => this.events.off("subscriptionTerminated", handler);
+  }
+
+  onError(handler: AppServerErrorHandler): () => void {
+    this.events.on("transportError", handler);
+    return () => this.events.off("transportError", handler);
+  }
+
   onStderr(handler: (chunk: string) => void): () => void {
     this.events.on("stderr", handler);
     return () => this.events.off("stderr", handler);
+  }
+
+  onServerRequest(handler: AppServerRequestHandler): () => void {
+    this.serverRequestHandler = handler;
+    return () => {
+      if (this.serverRequestHandler === handler) {
+        this.serverRequestHandler = undefined;
+      }
+    };
   }
 
   onExit(
@@ -186,7 +212,7 @@ export class JsonRpcStdioTransport implements AppServerTransport {
     try {
       message = JSON.parse(trimmed) as AppProtocol.JsonRpcMessage;
     } catch (error) {
-      this.events.emit("error", error instanceof Error ? error : new Error("Invalid JSON-RPC line."));
+      this.events.emit("transportError", error instanceof Error ? error : new Error("Invalid JSON-RPC line."));
       return;
     }
 
@@ -213,12 +239,39 @@ export class JsonRpcStdioTransport implements AppServerTransport {
       if (isApplicationEventEnvelope(message.params)) {
         this.events.emit("event", message.params);
       }
+      if (isSubscriptionTerminatedEnvelope(message.params)) {
+        this.events.emit("subscriptionTerminated", message.params);
+      }
       return;
     }
 
     if ("method" in message && "id" in message) {
-      this.writeError(message.id, -32601, `unsupported server request: ${message.method}`);
+      void this.handleServerRequest(message);
     }
+  }
+
+  private async handleServerRequest(request: AppProtocol.JsonRpcRequest): Promise<void> {
+    const handler = this.serverRequestHandler;
+    if (!handler) {
+      this.writeError(request.id, -32601, `unsupported server request: ${request.method}`);
+      return;
+    }
+
+    try {
+      const result = await handler(request);
+      this.writeResult(request.id, result ?? null);
+    } catch (error) {
+      this.writeError(request.id, -32000, errorMessage(error));
+    }
+  }
+
+  private writeResult(id: AppProtocol.RequestId, result: unknown): void {
+    const response: AppProtocol.JsonRpcResponse = {
+      jsonrpc: "2.0",
+      id,
+      result,
+    };
+    this.requireChild().stdin.write(`${JSON.stringify(response)}\n`);
   }
 
   private writeError(id: AppProtocol.RequestId, code: number, message: string): void {
@@ -275,7 +328,7 @@ export class StdioAppServerClient extends AppServerClient {
       },
       capabilities: {
         protocol_version: { major: 0, minor: 2 },
-        supports_server_requests: false,
+        supports_server_requests: true,
         supports_event_replay: true,
       },
       actor_credentials: {
@@ -309,4 +362,21 @@ function isApplicationEventEnvelope(value: unknown): value is AppProtocol.Applic
     typeof candidate.event === "object" &&
     candidate.event !== null
   );
+}
+
+function isSubscriptionTerminatedEnvelope(value: unknown): value is AppProtocol.SubscriptionTerminatedEnvelope {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<AppProtocol.SubscriptionTerminatedEnvelope>;
+  return (
+    typeof candidate.subscription_id === "string" &&
+    typeof candidate.session_id === "string" &&
+    typeof candidate.reason === "string" &&
+    typeof candidate.message === "string"
+  );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

@@ -109,6 +109,110 @@
       },
       "type": "object"
     },
+    "AdminUserCreateParams": {
+      "properties": {
+        "disabled": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "email": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "password": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/definitions/AdminUserRole"
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "password",
+        "role",
+        "username"
+      ],
+      "type": "object"
+    },
+    "AdminUserDeleteParams": {
+      "properties": {
+        "user_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "user_id"
+      ],
+      "type": "object"
+    },
+    "AdminUserListParams": {
+      "type": "object"
+    },
+    "AdminUserPatchParams": {
+      "properties": {
+        "disabled": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "email": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "password": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AdminUserRole"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "user_id": {
+          "type": "string"
+        },
+        "username": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "user_id"
+      ],
+      "type": "object"
+    },
+    "AdminUserRole": {
+      "enum": [
+        "user",
+        "admin"
+      ],
+      "type": "string"
+    },
     "AppListParams": {
       "type": "object"
     },
@@ -424,6 +528,9 @@
         "session.patch",
         "session.delete",
         "session.close",
+        "session.compact",
+        "session.clear",
+        "session.active_turn",
         "session.turns",
         "project.create",
         "project.list",
@@ -432,11 +539,17 @@
         "project.delete",
         "turn.start",
         "turn.interrupt",
+        "turn.retry",
         "event.subscribe",
+        "event.unsubscribe",
         "tool.approval.submit",
         "tool.dynamic_result.submit",
         "admin.session.list",
         "admin.project.list",
+        "admin.user.list",
+        "admin.user.create",
+        "admin.user.patch",
+        "admin.user.delete",
         "model.list",
         "config.read",
         "config.value.write",
@@ -603,6 +716,60 @@
           "properties": {
             "method": {
               "enum": [
+                "session.compact"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SessionCompactParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "session.clear"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SessionClearParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "session.active_turn"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SessionActiveTurnParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "session.turns"
               ],
               "type": "string"
@@ -747,12 +914,48 @@
           "properties": {
             "method": {
               "enum": [
+                "turn.retry"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/TurnRetryParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "event.subscribe"
               ],
               "type": "string"
             },
             "params": {
               "$ref": "#/definitions/EventSubscribeParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "event.unsubscribe"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/EventUnsubscribeParams"
             }
           },
           "required": [
@@ -825,6 +1028,78 @@
             },
             "params": {
               "$ref": "#/definitions/AdminProjectListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "admin.user.list"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AdminUserListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "admin.user.create"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AdminUserCreateParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "admin.user.patch"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AdminUserPatchParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "admin.user.delete"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AdminUserDeleteParams"
             }
           },
           "required": [
@@ -1207,6 +1482,32 @@
       ],
       "type": "object"
     },
+    "EventUnsubscribeParams": {
+      "properties": {
+        "subscription_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subscription_id"
+      ],
+      "type": "object"
+    },
+    "EventUnsubscribeResponse": {
+      "properties": {
+        "subscription_id": {
+          "type": "string"
+        },
+        "unsubscribed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "subscription_id",
+        "unsubscribed"
+      ],
+      "type": "object"
+    },
     "InitializeParams": {
       "properties": {
         "actor_credentials": {
@@ -1416,6 +1717,15 @@
         "query"
       ],
       "type": "object"
+    },
+    "MessageCommandStatus": {
+      "enum": [
+        "pending",
+        "accepted",
+        "failed",
+        "failed_no_first_event"
+      ],
+      "type": "string"
     },
     "ModelListParams": {
       "type": "object"
@@ -1649,6 +1959,9 @@
     },
     "ServerInfo": {
       "properties": {
+        "auth_enabled": {
+          "type": "boolean"
+        },
         "name": {
           "type": "string"
         },
@@ -1657,6 +1970,7 @@
         }
       },
       "required": [
+        "auth_enabled",
         "name",
         "version"
       ],
@@ -2012,7 +2326,40 @@
         }
       ]
     },
+    "SessionActiveTurnParams": {
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "SessionClearParams": {
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
     "SessionCloseParams": {
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "SessionCompactParams": {
       "properties": {
         "session_id": {
           "type": "string"
@@ -3087,6 +3434,39 @@
       ],
       "type": "object"
     },
+    "TurnRetryParams": {
+      "properties": {
+        "client_message_id": {
+          "type": "string"
+        },
+        "input": {
+          "items": {
+            "$ref": "#/definitions/ProtocolInputItem"
+          },
+          "type": "array"
+        },
+        "retry_of_message_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "client_message_id",
+        "input",
+        "retry_of_message_id",
+        "session_id"
+      ],
+      "type": "object"
+    },
     "TurnStartParams": {
       "properties": {
         "client_request_id": {
@@ -3121,27 +3501,30 @@
     },
     "TurnStartResponse": {
       "properties": {
-        "accepted_at": {
-          "format": "int64",
-          "type": "integer"
-        },
-        "session_id": {
-          "type": "string"
-        },
-        "started_event_id": {
+        "message_id": {
           "default": null,
           "type": [
             "string",
             "null"
           ]
         },
+        "request_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/MessageCommandStatus"
+        },
         "turn_id": {
           "type": "string"
         }
       },
       "required": [
-        "accepted_at",
+        "request_id",
         "session_id",
+        "status",
         "turn_id"
       ],
       "type": "object"
@@ -3199,6 +3582,9 @@
     "event_subscribe_response": {
       "$ref": "#/definitions/EventSubscribeResponse"
     },
+    "event_unsubscribe_response": {
+      "$ref": "#/definitions/EventUnsubscribeResponse"
+    },
     "initialize_response": {
       "$ref": "#/definitions/InitializeResponse"
     },
@@ -3221,6 +3607,7 @@
     "error",
     "event_envelope",
     "event_subscribe_response",
+    "event_unsubscribe_response",
     "initialize_response",
     "jsonrpc_message",
     "server_notification",

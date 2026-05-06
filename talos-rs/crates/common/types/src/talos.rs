@@ -95,6 +95,7 @@ pub struct TalosSessionEnvironment {
 #[serde(rename_all = "snake_case")]
 pub enum TalosSourceType {
     Http,
+    Desktop,
     Im,
     Cli,
     Ws,
@@ -111,6 +112,7 @@ impl TalosSourceType {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Http => "http",
+            Self::Desktop => "desktop",
             Self::Im => "im",
             Self::Cli => "cli",
             Self::Ws => "ws",
@@ -121,6 +123,7 @@ impl TalosSourceType {
     pub fn parse(value: &str) -> Self {
         match value {
             "http" => Self::Http,
+            "desktop" => Self::Desktop,
             "im" => Self::Im,
             "cli" => Self::Cli,
             "ws" => Self::Ws,
@@ -248,6 +251,10 @@ impl TalosContext {
 
     pub fn sdk(user_id: impl Into<String>) -> Self {
         Self::generated(TalosSourceType::Http, TalosProvider::Sdk, user_id)
+    }
+
+    pub fn desktop(user_id: impl Into<String>) -> Self {
+        Self::generated(TalosSourceType::Desktop, TalosProvider::Sdk, user_id)
     }
 
     pub fn cli(user_id: impl Into<String>) -> Self {

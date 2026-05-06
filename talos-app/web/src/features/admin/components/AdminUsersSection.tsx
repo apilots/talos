@@ -204,13 +204,13 @@ export function AdminUsersSection() {
 
   return (
     <>
-      <Panel className="rounded-[1.4rem] border-border/80 bg-card/82 p-5">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <div>
+      <Panel className="admin-users-panel rounded-[1.4rem] border-border/80 bg-card/82 p-5">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
             <div className="text-sm font-medium text-ink">{t("usersPanel.title")}</div>
             <div className="mt-1 text-sm text-muted">{t("usersPanel.detail")}</div>
           </div>
-          <Button onClick={openCreateModal} type="button" variant="secondary">
+          <Button className="shrink-0 self-start sm:self-auto" onClick={openCreateModal} type="button" variant="secondary">
             {t("usersPanel.create")}
           </Button>
         </div>
@@ -227,49 +227,71 @@ export function AdminUsersSection() {
           <div className="py-8 text-sm text-danger">{parseErrorMessage(usersQuery.error)}</div>
         ) : (
           <div className="space-y-3">
-            <div className="grid grid-cols-[minmax(0,1.1fr)_minmax(0,1.35fr)_120px_120px_160px] gap-4 px-4 text-xs uppercase tracking-[0.16em] text-muted">
-              <div>{t("usersPanel.username")}</div>
-              <div>{t("usersPanel.email")}</div>
-              <div>{t("usersPanel.role")}</div>
-              <div>{t("usersPanel.status")}</div>
-              <div className="text-right">{t("usersPanel.actions")}</div>
+            <div className="admin-users-column-header px-4 text-xs uppercase tracking-[0.16em] text-muted">
+              <div data-smoke="admin-users-username-header">{t("usersPanel.username")}</div>
+              <div data-smoke="admin-users-email-header">{t("usersPanel.email")}</div>
+              <div data-smoke="admin-users-role-header">{t("usersPanel.role")}</div>
+              <div data-smoke="admin-users-status-header">{t("usersPanel.status")}</div>
+              <div className="text-right" data-smoke="admin-users-actions-header">
+                {t("usersPanel.actions")}
+              </div>
             </div>
             {usersQuery.data && usersQuery.data.length > 0 ? (
               usersQuery.data.map((user) => {
                 const deletingThisUser = deleteMutation.isPending && deleteMutation.variables === user.user_id;
                 return (
                   <div
-                    className="grid grid-cols-[minmax(0,1.1fr)_minmax(0,1.35fr)_120px_120px_160px] items-center gap-4 rounded-[1.2rem] border border-border/80 bg-background/45 px-4 py-4"
+                    className="admin-users-row rounded-[1.2rem] border border-border/80 bg-background/45 px-4 py-4"
                     key={user.user_id}
+                    data-smoke="admin-users-row"
                   >
-                    <div className="min-w-0">
+                    <div className="min-w-0" data-smoke="admin-users-username-cell">
                       <div className="truncate font-medium text-ink">{user.username}</div>
                     </div>
-                    <div className="min-w-0 text-sm text-muted">{user.email ?? "—"}</div>
-                    <div className="text-sm text-muted">
-                      {user.role === "admin" ? t("usersPanel.roles.admin") : t("usersPanel.roles.member")}
+                    <div className="min-w-0 text-sm text-muted" data-smoke="admin-users-email-cell">
+                      <div className="admin-users-field-label">
+                        {t("usersPanel.email")}
+                      </div>
+                      <div className="truncate">{user.email ?? "—"}</div>
                     </div>
-                    <div className="text-sm text-muted">
-                      {user.disabled ? t("usersPanel.disabled") : t("usersPanel.active")}
+                    <div className="min-w-0 text-sm text-muted" data-smoke="admin-users-role-cell">
+                      <div className="admin-users-field-label">
+                        {t("usersPanel.role")}
+                      </div>
+                      <div className="truncate">
+                        {user.role === "admin" ? t("usersPanel.roles.admin") : t("usersPanel.roles.member")}
+                      </div>
                     </div>
-                    <div className="flex justify-end">
-                      <div className="inline-flex items-center gap-1 rounded-[999px] border border-border/75 bg-surface/70 p-1">
+                    <div className="min-w-0 text-sm text-muted" data-smoke="admin-users-status-cell">
+                      <div className="admin-users-field-label">
+                        {t("usersPanel.status")}
+                      </div>
+                      <div className="truncate">{user.disabled ? t("usersPanel.disabled") : t("usersPanel.active")}</div>
+                    </div>
+                    <div className="admin-users-actions-cell flex justify-start" data-smoke="admin-users-actions-cell">
+                      <div className="inline-flex max-w-full items-center gap-1 rounded-[999px] border border-border/75 bg-surface/70 p-1">
                         <button
                           className="inline-flex h-9 items-center gap-1.5 rounded-[999px] px-3 text-sm text-muted transition hover:bg-background hover:text-ink"
+                          aria-label={t("usersPanel.edit")}
                           onClick={() => openEditModal(user)}
+                          title={t("usersPanel.edit")}
                           type="button"
                         >
                           <PencilLine size={15} />
-                          {t("usersPanel.edit")}
+                          <span className="hidden sm:inline">{t("usersPanel.edit")}</span>
                         </button>
                         <button
                           className="inline-flex h-9 items-center gap-1.5 rounded-[999px] px-3 text-sm text-danger transition hover:bg-danger/10"
+                          aria-label={deletingThisUser ? t("usersPanel.deleting") : t("usersPanel.delete")}
                           disabled={deletingThisUser}
                           onClick={() => void handleDelete(user)}
+                          title={deletingThisUser ? t("usersPanel.deleting") : t("usersPanel.delete")}
                           type="button"
                         >
                           <Trash2 size={15} />
-                          {deletingThisUser ? t("usersPanel.deleting") : t("usersPanel.delete")}
+                          <span className="hidden sm:inline">
+                            {deletingThisUser ? t("usersPanel.deleting") : t("usersPanel.delete")}
+                          </span>
                         </button>
                       </div>
                     </div>

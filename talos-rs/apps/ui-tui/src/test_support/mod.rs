@@ -33,6 +33,8 @@ pub(crate) struct MockGatewayState {
     pub(crate) create_session_delay_ms: u64,
     pub(crate) stream_failures_remaining: u8,
     pub(crate) close_session_delay_ms: u64,
+    pub(crate) close_session_failures_remaining: u8,
+    pub(crate) shutdown_calls: usize,
     pub(crate) cancelled_sessions: Vec<String>,
     pub(crate) session_usage: talos_types::talos::TalosUsage,
     pub(crate) compact_calls: usize,
@@ -159,6 +161,8 @@ impl MockGatewayClient {
                 create_session_delay_ms: 0,
                 stream_failures_remaining: 0,
                 close_session_delay_ms: 0,
+                close_session_failures_remaining: 0,
+                shutdown_calls: 0,
                 cancelled_sessions: Vec::new(),
                 session_usage: talos_types::talos::TalosUsage::default(),
                 compact_calls: 0,
@@ -205,6 +209,16 @@ impl MockGatewayClient {
     pub(crate) fn with_close_delay(close_session_delay_ms: u64) -> Self {
         let client = Self::new();
         client.state.lock().unwrap().close_session_delay_ms = close_session_delay_ms;
+        client
+    }
+
+    pub(crate) fn with_close_failures(close_session_failures_remaining: u8) -> Self {
+        let client = Self::new();
+        client
+            .state
+            .lock()
+            .unwrap()
+            .close_session_failures_remaining = close_session_failures_remaining;
         client
     }
 }
@@ -328,9 +342,23 @@ impl GatewayClient for MockGatewayClient {
     }
 
     async fn close_session(&self, _session_id: &str) -> TalosResult<()> {
-        let delay = self.state.lock().unwrap().close_session_delay_ms;
+        let (delay, should_fail) = {
+            let mut state = self.state.lock().unwrap();
+            let should_fail = if state.close_session_failures_remaining > 0 {
+                state.close_session_failures_remaining -= 1;
+                true
+            } else {
+                false
+            };
+            (state.close_session_delay_ms, should_fail)
+        };
         if delay > 0 {
             tokio::time::sleep(Duration::from_millis(delay)).await;
+        }
+        if should_fail {
+            return Err(TalosError::ClientError(
+                "mock close session failure".to_string(),
+            ));
         }
         Ok(())
     }
@@ -571,6 +599,12 @@ impl GatewayClient for MockGatewayClient {
 
     async fn get_session_turns(&self, _session_id: &str) -> TalosResult<Vec<TalosMessageResponse>> {
         Ok(vec![])
+    }
+
+    async fn shutdown(&self) -> TalosResult<()> {
+        let mut state = self.state.lock().unwrap();
+        state.shutdown_calls = state.shutdown_calls.saturating_add(1);
+        Ok(())
     }
 }
 

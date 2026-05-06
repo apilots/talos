@@ -1,5 +1,5 @@
 use super::*;
-use chrono::{Local, Utc};
+use chrono::Utc;
 use serde_json::json;
 use std::future::pending;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -440,7 +440,7 @@ async fn test_close_session_flushes_workspace_memory() {
     let file_path = _guard
         .path()
         .join("memory")
-        .join(format!("{}.md", Local::now().format("%Y-%m-%d")));
+        .join(format!("{}.md", Utc::now().format("%Y-%m-%d")));
     let mut content = None;
     for _ in 0..20 {
         match tokio::fs::read_to_string(&file_path).await {
@@ -496,7 +496,7 @@ async fn test_submit_dynamic_tool_result_rejects_replay() {
             payload: talos_memory::SessionTranscriptDynamicToolRequestPayload {
                 call_id: "call-1".to_string(),
                 tool_name: "skill_greet".to_string(),
-                arguments: json!({ "name": "Talos" }),
+                arguments: json!({ "name": "Talos" }).into(),
             },
         },
         actions: talos_memory::SessionTranscriptActions::default(),
@@ -551,7 +551,7 @@ async fn test_submit_dynamic_tool_result_rejects_timeout() {
             payload: talos_memory::SessionTranscriptDynamicToolRequestPayload {
                 call_id: "call-timeout".to_string(),
                 tool_name: "skill_greet".to_string(),
-                arguments: json!({}),
+                arguments: json!({}).into(),
             },
         },
         actions: talos_memory::SessionTranscriptActions::default(),

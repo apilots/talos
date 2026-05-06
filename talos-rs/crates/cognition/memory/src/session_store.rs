@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use talos_error::{TalosError, TalosResult};
 use tokio::fs::{self, OpenOptions};
@@ -12,7 +12,7 @@ use crate::store::{
 };
 use crate::{RecordHeader, TalosMessageRole};
 use talos_llm_provider::Role;
-use talos_types::talos::{TalosContentItem, TalosOutputItem};
+use talos_types::talos::{StopReason, TalosContentItem, TalosOutputItem, TalosUsage};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -135,19 +135,132 @@ pub(crate) async fn load_turns(
     store: &MemoryStore,
     session_id: &str,
 ) -> TalosResult<Vec<TalosTurn>> {
-    let mut turns = load_session_artifacts(store, session_id)
-        .await?
-        .into_iter()
+    let artifacts = load_session_artifacts(store, session_id).await?;
+    let mut turns = artifacts
+        .iter()
         .filter_map(|record| match record {
-            SessionArtifactRecord::Turn { turn } => Some(turn),
+            SessionArtifactRecord::Turn { turn } => Some(turn.clone()),
             SessionArtifactRecord::Transcript { .. } | SessionArtifactRecord::Summary { .. } => {
                 None
             }
         })
         .collect::<Vec<_>>();
 
+    turns.extend(synthesize_cancelled_turns_from_transcripts(
+        session_id, &artifacts, &turns,
+    ));
+
     turns.sort_by(|a, b| a.seq.cmp(&b.seq).then(a.timestamp.cmp(&b.timestamp)));
     Ok(turns)
+}
+
+#[derive(Debug, Clone)]
+struct InterruptedTranscriptGroup {
+    invocation_id: String,
+    timestamp: chrono::DateTime<chrono::Utc>,
+    user_text: Option<String>,
+    has_agent_response: bool,
+}
+
+fn synthesize_cancelled_turns_from_transcripts(
+    session_id: &str,
+    artifacts: &[SessionArtifactRecord],
+    canonical_turns: &[TalosTurn],
+) -> Vec<TalosTurn> {
+    let canonical_turn_ids = canonical_turns
+        .iter()
+        .map(|turn| turn.turn_id.as_str())
+        .collect::<HashSet<_>>();
+    let canonical_user_inputs = canonical_turns
+        .iter()
+        .flat_map(|turn| {
+            turn.items.iter().filter_map(move |item| match item {
+                TalosOutputItem::UserInput { text } => Some((text.as_str(), turn.timestamp)),
+                TalosOutputItem::Reasoning { .. }
+                | TalosOutputItem::ExecutionSummary { .. }
+                | TalosOutputItem::OutputText { .. }
+                | TalosOutputItem::ToolCall { .. }
+                | TalosOutputItem::ToolResult { .. } => None,
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut groups: HashMap<String, InterruptedTranscriptGroup> = HashMap::new();
+
+    for artifact in artifacts {
+        let SessionArtifactRecord::Transcript { record } = artifact else {
+            continue;
+        };
+        if canonical_turn_ids.contains(record.header.invocation_id.as_str()) {
+            continue;
+        }
+        let group = groups
+            .entry(record.header.invocation_id.clone())
+            .or_insert_with(|| InterruptedTranscriptGroup {
+                invocation_id: record.header.invocation_id.clone(),
+                timestamp: record.header.timestamp,
+                user_text: None,
+                has_agent_response: false,
+            });
+        if record.header.timestamp < group.timestamp {
+            group.timestamp = record.header.timestamp;
+        }
+
+        let SessionTranscriptPayload::Message { message } = &record.payload else {
+            continue;
+        };
+        let text = message.content.trim();
+        if text.is_empty() {
+            continue;
+        }
+        match message.role {
+            Role::User if group.user_text.is_none() => {
+                group.user_text = Some(text.to_string());
+                group.timestamp = record.header.timestamp;
+            }
+            Role::Assistant => {
+                group.has_agent_response = true;
+            }
+            Role::System | Role::Tool | Role::User => {}
+        }
+    }
+
+    let next_seq = canonical_turns
+        .iter()
+        .map(|turn| turn.seq)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
+    let mut groups = groups
+        .into_values()
+        .filter(|group| group.user_text.is_some() && !group.has_agent_response)
+        .collect::<Vec<_>>();
+    groups.sort_by_key(|group| group.timestamp);
+
+    groups
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, group)| {
+            let user_text = group.user_text?;
+            let represented_by_canonical_turn =
+                canonical_user_inputs
+                    .iter()
+                    .any(|(canonical_text, turn_timestamp)| {
+                        *canonical_text == user_text && *turn_timestamp >= group.timestamp
+                    });
+            if represented_by_canonical_turn {
+                return None;
+            }
+            Some(TalosTurn {
+                turn_id: group.invocation_id,
+                session_id: session_id.to_string(),
+                seq: next_seq.saturating_add(index as u64),
+                timestamp: group.timestamp,
+                items: vec![TalosOutputItem::UserInput { text: user_text }],
+                usage: TalosUsage::default(),
+                stop_reason: StopReason::Cancelled,
+            })
+        })
+        .collect()
 }
 
 pub(crate) async fn load_transcript_records(

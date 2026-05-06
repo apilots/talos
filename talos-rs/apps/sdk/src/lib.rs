@@ -6,17 +6,23 @@
 pub mod app_server;
 mod app_server_events;
 mod common;
+mod message;
 
 pub use app_server::{AppServerClient, AppServerClientConfig};
+pub use message::{MessageCommandAck, MessageCommandStatus};
 pub use talos_app_protocol::events::{
     canonical_method, ApplicationEvent, ApplicationEventEnvelope,
 };
 pub use talos_app_protocol::requests::{
     AdminProjectListParams, AdminSessionListParams, AdminSessionPagination, EventSubscribeParams,
     EventSubscribeResponse, ProtocolTalosContext, SessionCreateParams,
-    ToolDynamicResultSubmitParams, TurnStartResponse,
+    ToolDynamicResultSubmitParams,
 };
-pub use talos_auth::{AuthResponse, LoginRequest, RegisterRequest, UserRole};
+pub use talos_auth::{
+    AdminCreateUserRequest, AdminPatchUserRequest, AuthResponse, LoginRequest, RegisterRequest,
+    UserDto, UserRole,
+};
+pub use talos_config::LlmConfig;
 pub use talos_error::{TalosError, TalosResult};
 pub use talos_types::talos::{
     StopReason, TalosContentItem, TalosContext, TalosEvent, TalosEventPayload, TalosEventType,

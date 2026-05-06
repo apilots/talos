@@ -4,18 +4,23 @@ use serde_json::{json, Value};
 use talos_app_protocol::errors::AppServerErrorBody;
 use talos_app_protocol::requests::{
     AdminProjectListResponse, AdminSessionListParams, AdminSessionListResponse,
-    AdminSessionPagination, ClientRequest, ClientRequestParams, ConfigReadParams,
-    EventSubscribeParams, MemoryFileReadParams, MemoryFileWriteParams, OptionalPathPatch,
+    AdminSessionPagination, AdminUserRole, ClientRequest, ClientRequestParams,
+    ConfigBatchWriteParams, ConfigReadParams, ConfigValueWriteParams, EventSubscribeParams,
+    MemoryFileReadParams, MemoryFileWriteParams, MessageCommandStatus, OptionalPathPatch,
     OptionalStringPatch, ProjectCreateParams, ProjectPatchParams, ProtocolInputItem,
-    ProtocolTalosContext, SessionCreateParams, SessionListParams, SessionPatchParams, TurnStartParams,
-    TurnStartResponse,
+    ProtocolTalosContext, SessionCreateParams, SessionListParams, SessionPatchParams,
+    TurnStartParams, TurnStartResponse,
 };
 use talos_application_service::{
     Actor, AdminSessionPage, ApplicationEventStream, EventReplay, MemoryDate, MemoryListParams,
-    MemorySearchParams, TalosApplicationService, WorkspaceDocService,
+    MemorySearchParams, TalosApplicationService, TurnRetryRequest, WorkspaceDocService,
+};
+use talos_auth::{
+    AdminCreateUserRequest, AdminPatchUserRequest, AuthScope, RequestIdentity, UserRole,
 };
 use talos_error::TalosError;
-use talos_session_store::SessionEventId;
+use talos_session_store::{ActiveTurnRecord, IdempotencyStatus, SessionEventId};
+use talos_tools::ToolRegistry;
 use talos_types::talos::{
     TalosContext, TalosInputItem, TalosMessageRequest, TalosProvider, TalosSourceType,
 };
@@ -23,6 +28,28 @@ use talos_types::{
     DocUpdateRequest, ExpectedFileVersion, OptionalCurrentDirectoryPatch, OptionalProjectIdPatch,
     ProjectPatch, SessionConf, SessionConfigOverridePolicy, SessionPatch, SessionQuery,
 };
+
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use talos_error::TalosResult;
+
+/// Abstraction for draining background tasks (e.g. memory flush) during shutdown.
+#[async_trait::async_trait]
+pub trait BackgroundTaskDrain: Send + Sync {
+    async fn drain(&self, timeout: Duration) -> TalosResult<()>;
+}
+
+/// Blanket impl for closure-based drain providers.
+#[async_trait::async_trait]
+impl<F, Fut> BackgroundTaskDrain for F
+where
+    F: Fn(Duration) -> Fut + Send + Sync,
+    Fut: std::future::Future<Output = TalosResult<()>> + Send,
+{
+    async fn drain(&self, timeout: Duration) -> TalosResult<()> {
+        self(timeout).await
+    }
+}
 
 pub type ProtocolResult<T> = Result<T, AppServerErrorBody>;
 
@@ -37,6 +64,8 @@ pub trait AppServerApplication: Send + Sync {
     ) -> ProtocolResult<SubscriptionSource>;
 
     async fn cancel_active_turn(&self, actor: &Actor, session_id: &str) -> ProtocolResult<()>;
+
+    async fn drain_background_tasks(&self, timeout: Duration) -> TalosResult<()>;
 }
 
 pub struct SubscriptionSource {
@@ -51,6 +80,8 @@ pub struct SubscriptionSource {
 pub struct TalosApplicationAdapter {
     app: std::sync::Arc<TalosApplicationService>,
     replay_limit: usize,
+    drain_provider: Arc<Option<Box<dyn BackgroundTaskDrain>>>,
+    tool_registry: Option<Arc<ToolRegistry>>,
 }
 
 impl TalosApplicationAdapter {
@@ -58,7 +89,19 @@ impl TalosApplicationAdapter {
         Self {
             app,
             replay_limit: replay_limit.max(1),
+            drain_provider: Arc::new(None),
+            tool_registry: None,
         }
+    }
+
+    pub fn with_drain_provider(mut self, drain: Box<dyn BackgroundTaskDrain>) -> Self {
+        self.drain_provider = Arc::new(Some(drain));
+        self
+    }
+
+    pub fn with_tool_registry(mut self, registry: Arc<ToolRegistry>) -> Self {
+        self.tool_registry = Some(registry);
+        self
     }
 }
 
@@ -99,6 +142,31 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .await
                     .map_err(AppServerErrorBody::from_talos_error)?;
                 to_value(json!({ "success": true }))
+            }
+            ClientRequestParams::SessionCompact(params) => to_value(
+                self.app
+                    .compact_session(actor, &params.session_id)
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
+            ClientRequestParams::SessionClear(params) => to_value(
+                self.app
+                    .clear_session(actor, &params.session_id)
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
+            ClientRequestParams::SessionActiveTurn(params) => {
+                self.app
+                    .get_session(actor, &params.session_id)
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                let active_turn = self
+                    .app
+                    .events
+                    .get_active_turn(&params.session_id)
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(render_active_turn(&params.session_id, active_turn))
             }
             ClientRequestParams::SessionTurns(params) => {
                 let turns = self
@@ -142,8 +210,28 @@ impl AppServerApplication for TalosApplicationAdapter {
                 self.cancel_active_turn(actor, &params.session_id).await?;
                 to_value(json!({ "success": true }))
             }
+            ClientRequestParams::TurnRetry(params) => {
+                let ack = self
+                    .app
+                    .submit_retry(
+                        actor,
+                        &params.session_id,
+                        TurnRetryRequest {
+                            input: params.input.into_iter().map(map_input_item).collect(),
+                            workspace_id: params.workspace_id,
+                            client_message_id: params.client_message_id,
+                            retry_of_message_id: params.retry_of_message_id,
+                        },
+                    )
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(ack)
+            }
             ClientRequestParams::EventSubscribe(_) => Err(AppServerErrorBody::invalid_request(
                 "event.subscribe is handled by the app-server runtime",
+            )),
+            ClientRequestParams::EventUnsubscribe(_) => Err(AppServerErrorBody::invalid_request(
+                "event.unsubscribe is handled by the app-server runtime",
             )),
             ClientRequestParams::ToolApprovalSubmit(params) => {
                 self.app
@@ -184,6 +272,60 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .map_err(AppServerErrorBody::from_talos_error)?;
                 to_value(AdminProjectListResponse { data: projects })
             }
+            ClientRequestParams::AdminUserList(_) => {
+                let users = self
+                    .app
+                    .account
+                    .list_users(&request_identity(actor))
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(json!({ "data": users }))
+            }
+            ClientRequestParams::AdminUserCreate(params) => {
+                let user = self
+                    .app
+                    .account
+                    .create_user(
+                        &request_identity(actor),
+                        AdminCreateUserRequest {
+                            username: params.username,
+                            password: params.password,
+                            email: params.email,
+                            role: map_user_role(params.role),
+                            disabled: params.disabled,
+                        },
+                    )
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(user)
+            }
+            ClientRequestParams::AdminUserPatch(params) => {
+                let user = self
+                    .app
+                    .account
+                    .patch_user(
+                        &request_identity(actor),
+                        &params.user_id,
+                        AdminPatchUserRequest {
+                            username: params.username,
+                            email: params.email,
+                            password: params.password,
+                            role: params.role.map(map_user_role),
+                            disabled: params.disabled,
+                        },
+                    )
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(user)
+            }
+            ClientRequestParams::AdminUserDelete(params) => {
+                self.app
+                    .account
+                    .delete_user(&request_identity(actor), &params.user_id)
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(json!({ "success": true }))
+            }
             ClientRequestParams::ModelList(_) => {
                 let models = self.app.config.list_models().await;
                 to_value(json!({ "data": models }))
@@ -194,7 +336,7 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .config
                     .get_llm(actor)
                     .map_err(AppServerErrorBody::from_talos_error)?;
-                to_value(json!({ "llm": llm }))
+                to_value(llm)
             }
             ClientRequestParams::MemoryFileList(params) => {
                 let files = self
@@ -254,14 +396,26 @@ impl AppServerApplication for TalosApplicationAdapter {
                         .map_err(AppServerErrorBody::from_talos_error)?,
                 )
             }
-            ClientRequestParams::ConfigValueWrite(_)
-            | ClientRequestParams::ConfigBatchWrite(_)
-            | ClientRequestParams::ConfigReload(_)
-            | ClientRequestParams::SkillList(_)
-            | ClientRequestParams::AppList(_)
-            | ClientRequestParams::ToolList(_)
-            | ClientRequestParams::AccountGet(_)
-            | ClientRequestParams::MemorySearch(_) => self.dispatch_secondary(actor, request).await,
+            ClientRequestParams::ConfigValueWrite(params) => {
+                to_value(self.write_config_value(actor, params).await?)
+            }
+            ClientRequestParams::ConfigBatchWrite(params) => {
+                to_value(self.write_config_batch(actor, params).await?)
+            }
+            ClientRequestParams::ConfigReload(_) => to_value(json!({ "success": true })),
+            ClientRequestParams::SkillList(_) => to_value(json!({ "data": self.list_skills() })),
+            ClientRequestParams::AppList(_) => to_value(json!({ "data": self.list_apps() })),
+            ClientRequestParams::ToolList(_) => to_value(json!({ "data": self.list_tools() })),
+            ClientRequestParams::AccountGet(_) => to_value(json!({
+                "user_id": actor.user_id,
+                "username": actor.user_id,
+                "email": null,
+                "role": if actor.has_full_access() { "admin" } else { "user" },
+                "disabled": false,
+                "created_at": 0,
+                "updated_at": 0
+            })),
+            ClientRequestParams::MemorySearch(_) => self.dispatch_secondary(actor, request).await,
         }
     }
 
@@ -313,6 +467,14 @@ impl AppServerApplication for TalosApplicationAdapter {
             .cancel_active_turn(actor, session_id)
             .await
             .map_err(AppServerErrorBody::from_talos_error)
+    }
+
+    async fn drain_background_tasks(&self, timeout: Duration) -> TalosResult<()> {
+        if let Some(drain) = self.drain_provider.as_deref() {
+            drain.drain(timeout).await
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -451,10 +613,11 @@ impl TalosApplicationAdapter {
             .await
             .map_err(AppServerErrorBody::from_talos_error)?;
         Ok(TurnStartResponse {
+            request_id: ack.request_id,
+            message_id: ack.message_id,
             session_id: ack.session_id,
             turn_id: ack.turn_id,
-            accepted_at: chrono_now_ms(),
-            started_event_id: None,
+            status: map_message_command_status(ack.status),
         })
     }
 
@@ -490,6 +653,102 @@ impl TalosApplicationAdapter {
             .map_err(AppServerErrorBody::from_talos_error)
     }
 
+    async fn write_config_value(
+        &self,
+        actor: &Actor,
+        params: ConfigValueWriteParams,
+    ) -> ProtocolResult<Value> {
+        if params.path != "llm" {
+            return Err(AppServerErrorBody::invalid_params(format!(
+                "unsupported config path: {}",
+                params.path
+            )));
+        }
+        let llm = serde_json::from_str(&params.value)
+            .map_err(|error| AppServerErrorBody::invalid_params(error.to_string()))?;
+        let updated = self
+            .app
+            .config
+            .update_llm(actor, llm)
+            .map_err(AppServerErrorBody::from_talos_error)?;
+        to_value(updated)
+    }
+
+    async fn write_config_batch(
+        &self,
+        actor: &Actor,
+        params: ConfigBatchWriteParams,
+    ) -> ProtocolResult<Value> {
+        let mut last = None;
+        for entry in params.entries {
+            last = Some(self.write_config_value(actor, entry).await?);
+        }
+        Ok(last.unwrap_or_else(|| json!({ "success": true })))
+    }
+
+    fn list_tools(&self) -> Vec<Value> {
+        let Some(registry) = self.tool_registry.as_ref() else {
+            return Vec::new();
+        };
+        registry
+            .tool_catalog()
+            .specs()
+            .iter()
+            .map(|spec| {
+                json!({
+                    "name": spec.definition.name,
+                    "description": spec.definition.description,
+                    "parameters_schema": spec.definition.parameters,
+                    "internal_name": spec.internal_name,
+                    "aliases": spec.aliases,
+                    "user_facing_name": spec.user_facing_name,
+                    "source": spec.source,
+                    "payload_kind": spec.payload_kind,
+                    "visibility": spec.visibility,
+                    "parallelism": spec.parallelism,
+                    "mutating": spec.mutating,
+                    "behavior_flags": spec.behavior_flags,
+                    "result_policy": spec.result_policy,
+                })
+            })
+            .collect()
+    }
+
+    fn list_skills(&self) -> Vec<Value> {
+        self.list_tools()
+            .into_iter()
+            .filter(|tool| tool.get("source").and_then(Value::as_str) == Some("Skill"))
+            .map(|tool| {
+                json!({
+                    "id": tool.get("internal_name").cloned().unwrap_or_else(|| json!("skill")),
+                    "name": tool.get("name").cloned().unwrap_or_else(|| json!("Skill")),
+                    "description": tool.get("description").cloned().unwrap_or_else(|| json!("")),
+                    "source": "tool_registry",
+                    "tool": tool,
+                })
+            })
+            .collect()
+    }
+
+    fn list_apps(&self) -> Vec<Value> {
+        vec![
+            json!({
+                "id": "webui",
+                "name": "Talos WebUI",
+                "description": "Browser shell backed by the HTTP gateway.",
+                "runtime": "web",
+                "available": true,
+            }),
+            json!({
+                "id": "desktop",
+                "name": "Talos Desktop",
+                "description": "Electron shell backed by the stdio app-server bridge.",
+                "runtime": "desktop",
+                "available": true,
+            }),
+        ]
+    }
+
     async fn dispatch_secondary(
         &self,
         _actor: &Actor,
@@ -520,6 +779,7 @@ impl TalosApplicationAdapter {
 fn map_context(context: ProtocolTalosContext) -> ProtocolResult<TalosContext> {
     let source_type = match context.source_type.as_str() {
         "http" => TalosSourceType::Http,
+        "desktop" => TalosSourceType::Desktop,
         "im" => TalosSourceType::Im,
         "cli" => TalosSourceType::Cli,
         "ws" => TalosSourceType::Ws,
@@ -556,6 +816,36 @@ fn map_context(context: ProtocolTalosContext) -> ProtocolResult<TalosContext> {
     })
 }
 
+fn render_active_turn(session_id: &str, active_turn: Option<ActiveTurnRecord>) -> Value {
+    match active_turn {
+        Some(record) => json!({
+            "session_id": record.session_id,
+            "turn_id": record.turn_id,
+            "message_id": record.message_id,
+            "status": record.status,
+            "last_event_id": record.last_event_id.map(|value| value.to_string()),
+            "pending_user_action": record.pending_user_action,
+            "updated_at": record.updated_at,
+        }),
+        None => json!({
+            "session_id": session_id,
+            "turn_id": null,
+            "message_id": null,
+            "status": "completed",
+            "last_event_id": null,
+            "pending_user_action": null,
+            "updated_at": current_time_millis(),
+        }),
+    }
+}
+
+fn current_time_millis() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 fn map_input_item(item: ProtocolInputItem) -> TalosInputItem {
     match item {
         ProtocolInputItem::Text { text } => TalosInputItem::Text { text },
@@ -573,6 +863,36 @@ fn map_directory_patch(patch: OptionalPathPatch) -> OptionalCurrentDirectoryPatc
     match patch {
         OptionalPathPatch::Set { path } => OptionalCurrentDirectoryPatch::Set { path },
         OptionalPathPatch::Clear => OptionalCurrentDirectoryPatch::Clear,
+    }
+}
+
+fn map_user_role(role: AdminUserRole) -> UserRole {
+    match role {
+        AdminUserRole::User => UserRole::User,
+        AdminUserRole::Admin => UserRole::Admin,
+    }
+}
+
+fn map_message_command_status(status: IdempotencyStatus) -> MessageCommandStatus {
+    match status {
+        IdempotencyStatus::Pending => MessageCommandStatus::Pending,
+        IdempotencyStatus::Accepted => MessageCommandStatus::Accepted,
+        IdempotencyStatus::Failed => MessageCommandStatus::Failed,
+        IdempotencyStatus::FailedNoFirstEvent => MessageCommandStatus::FailedNoFirstEvent,
+    }
+}
+
+fn request_identity(actor: &Actor) -> RequestIdentity {
+    RequestIdentity {
+        user_id: actor.user_id.clone(),
+        username: Some(actor.user_id.clone()),
+        role: if actor.has_full_access() {
+            UserRole::Admin
+        } else {
+            UserRole::User
+        },
+        scopes: Vec::<AuthScope>::new(),
+        auth_disabled: false,
     }
 }
 
@@ -607,11 +927,4 @@ fn expected_version(value: Option<String>) -> ExpectedFileVersion {
         Some(version_token) => ExpectedFileVersion::Match { version_token },
         None => ExpectedFileVersion::MustNotExist,
     }
-}
-
-fn chrono_now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_millis().min(i64::MAX as u128) as i64)
-        .unwrap_or_default()
 }

@@ -237,6 +237,10 @@ impl AgentOrchestrator for MockAgent {
         Ok(())
     }
 
+    async fn drain_active_turns(&self, _timeout: Duration) -> TalosResult<()> {
+        Ok(())
+    }
+
     async fn submit_tool_approval(
         &self,
         _session_id: &str,

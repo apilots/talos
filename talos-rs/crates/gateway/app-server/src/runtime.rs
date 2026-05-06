@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use talos_app_protocol::errors::{AppServerErrorBody, ALREADY_INITIALIZED};
@@ -10,8 +10,8 @@ use talos_app_protocol::jsonrpc::{
     JsonRpcResponse, RequestId,
 };
 use talos_app_protocol::requests::{
-    ClientMethod, ClientRequest, ClientRequestParams, EventSubscribeResponse, InitializeResponse,
-    ServerInfo,
+    ClientMethod, ClientRequest, ClientRequestParams, EventSubscribeResponse,
+    EventUnsubscribeResponse, InitializeResponse, ServerInfo,
 };
 use talos_app_protocol::version::ProtocolVersion;
 use talos_application_service::Actor;
@@ -29,6 +29,7 @@ pub struct AppServerConfig {
     pub subscription_capacity: usize,
     pub server_name: String,
     pub server_version: String,
+    pub auth_enabled: bool,
 }
 
 impl Default for AppServerConfig {
@@ -38,6 +39,7 @@ impl Default for AppServerConfig {
             subscription_capacity: 256,
             server_name: "talos-app-server".to_string(),
             server_version: env!("CARGO_PKG_VERSION").to_string(),
+            auth_enabled: false,
         }
     }
 }
@@ -123,11 +125,29 @@ where
         }
     }
 
-    cancel_owned_turns(app, state.actor.as_ref(), &state.owned_turn_sessions).await;
-    for task in state.subscription_tasks {
-        task.abort();
+    cancel_owned_turns(
+        app.clone(),
+        state.actor.as_ref(),
+        &state.owned_turn_sessions,
+    )
+    .await;
+
+    const DRAIN_BACKGROUND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+    if let Err(err) = app.drain_background_tasks(DRAIN_BACKGROUND_TIMEOUT).await {
+        tracing::warn!(error = ?err, "drain_background_tasks failed during shutdown");
     }
+
+    // Keep subscriptions alive while background drains run so final turn events can still be
+    // forwarded. After the drain boundary, abort them explicitly; idle subscriptions block on
+    // live_events.recv() and would otherwise keep stdio shutdown from completing.
+    for (_, task) in state.subscription_tasks {
+        task.abort();
+        let _ = task.await;
+    }
+
     drop(outgoing_tx);
+
     if !writer_finished {
         match writer_task.await {
             Ok(Ok(())) => {}
@@ -143,7 +163,7 @@ struct RuntimeState {
     actor: Option<Actor>,
     initialized_notification_seen: bool,
     owned_turn_sessions: HashSet<String>,
-    subscription_tasks: Vec<tokio::task::JoinHandle<()>>,
+    subscription_tasks: HashMap<String, tokio::task::JoinHandle<()>>,
 }
 
 async fn handle_line(
@@ -222,6 +242,7 @@ async fn handle_request(
                         server_info: ServerInfo {
                             name: config.server_name.clone(),
                             version: config.server_version.clone(),
+                            auth_enabled: config.auth_enabled,
                         },
                     })
                     .map_err(|error| AppServerErrorBody::invalid_request(error.to_string()));
@@ -255,16 +276,39 @@ async fn handle_request(
                     )
                     .await?;
                     let task = spawn_subscription(
-                        subscription_id,
+                        subscription_id.clone(),
                         source,
                         outgoing_tx,
                         config.subscription_capacity,
                     );
-                    state.subscription_tasks.push(task);
+                    state.subscription_tasks.insert(subscription_id, task);
                     Ok(())
                 }
                 Err(error) => send_error(outgoing_tx, id, error).await,
             }
+        }
+        ClientRequestParams::EventUnsubscribe(params) => {
+            if !state.initialized_notification_seen {
+                return send_error(outgoing_tx, id, AppServerErrorBody::not_initialized()).await;
+            }
+            let unsubscribed =
+                if let Some(task) = state.subscription_tasks.remove(&params.subscription_id) {
+                    task.abort();
+                    let _ = task.await;
+                    true
+                } else {
+                    false
+                };
+            send_result(
+                outgoing_tx,
+                id,
+                serde_json::to_value(EventUnsubscribeResponse {
+                    subscription_id: params.subscription_id,
+                    unsubscribed,
+                })
+                .map_err(|error| AppServerErrorBody::invalid_request(error.to_string())),
+            )
+            .await
         }
         params => {
             let actor = state.actor.as_ref().expect("actor checked before dispatch");
@@ -475,8 +519,10 @@ mod tests {
     use serde_json::json;
     use talos_app_protocol::errors::{NOT_INITIALIZED, PARSE_ERROR, UNAUTHORIZED};
     use talos_app_protocol::requests::{ActorCredentials, EventSubscribeParams};
-    use talos_application_service::Actor;
+    use talos_application_service::{Actor, EventReplay};
+    use talos_session_store::SessionEventRecord;
     use tokio::io::{duplex, split, AsyncReadExt, AsyncWriteExt};
+    use tokio::sync::broadcast;
 
     use super::*;
     use crate::application::SubscriptionSource;
@@ -486,6 +532,8 @@ mod tests {
     struct MockApp {
         dispatched: Mutex<Vec<String>>,
         cancelled: Mutex<Vec<String>>,
+        drained: Mutex<usize>,
+        live_tx: Mutex<Option<broadcast::Sender<SessionEventRecord>>>,
     }
 
     #[async_trait]
@@ -501,10 +549,11 @@ mod tests {
                 .push(request.method.as_str().to_string());
             Ok(match request.params {
                 ClientRequestParams::TurnStart(params) => json!({
+                    "request_id": "req-1",
+                    "message_id": "msg-1",
                     "session_id": params.session_id,
                     "turn_id": "turn-1",
-                    "accepted_at": 1,
-                    "started_event_id": null,
+                    "status": "accepted",
                 }),
                 _ => json!({ "ok": true }),
             })
@@ -513,9 +562,22 @@ mod tests {
         async fn subscribe_session_events(
             &self,
             _actor: &Actor,
-            _params: EventSubscribeParams,
+            params: EventSubscribeParams,
         ) -> ProtocolResult<SubscriptionSource> {
-            Err(AppServerErrorBody::method_not_found("event.subscribe"))
+            let live_tx = self.live_tx.lock().expect("live tx lock").as_ref().cloned();
+            match live_tx {
+                Some(live_tx) => Ok(SubscriptionSource {
+                    session_id: params.session_id,
+                    high_water_mark_event_id: None,
+                    replay: EventReplay {
+                        events: Vec::new(),
+                        last_replay_seq: 0,
+                    },
+                    live_events: live_tx.subscribe(),
+                    has_live_turn: false,
+                }),
+                None => Err(AppServerErrorBody::method_not_found("event.subscribe")),
+            }
         }
 
         async fn cancel_active_turn(&self, _actor: &Actor, session_id: &str) -> ProtocolResult<()> {
@@ -523,6 +585,14 @@ mod tests {
                 .lock()
                 .expect("cancel lock")
                 .push(session_id.to_string());
+            Ok(())
+        }
+
+        async fn drain_background_tasks(
+            &self,
+            _timeout: std::time::Duration,
+        ) -> talos_error::TalosResult<()> {
+            *self.drained.lock().expect("drain lock") += 1;
             Ok(())
         }
     }
@@ -583,6 +653,32 @@ mod tests {
             app.dispatched.lock().expect("dispatch lock").as_slice(),
             &["session.read"]
         );
+    }
+
+    #[tokio::test]
+    async fn idle_subscription_does_not_block_shutdown_after_background_drain() {
+        let app = Arc::new(MockApp::default());
+        let (live_tx, _live_rx) = broadcast::channel(16);
+        *app.live_tx.lock().expect("live tx lock") = Some(live_tx);
+
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            run_with_app(
+                format!(
+                    "{}{}{}",
+                    initialize_request("secret"),
+                    initialized_notification(),
+                    event_subscribe_request()
+                ),
+                app.clone(),
+            ),
+        )
+        .await
+        .expect("run_jsonl should not hang on idle subscription");
+        let messages = parse_output(&output);
+
+        assert_eq!(messages[1]["result"]["session_id"], "s1");
+        assert_eq!(*app.drained.lock().expect("drain lock"), 1);
     }
 
     async fn run_with_input(input: String) -> String {
@@ -662,6 +758,32 @@ mod tests {
                 "id": 2,
                 "method": "session.read",
                 "params": { "session_id": "s1" }
+            })
+        )
+    }
+
+    fn initialized_notification() -> String {
+        format!(
+            "{}\n",
+            json!({
+                "jsonrpc": "2.0",
+                "method": "initialized"
+            })
+        )
+    }
+
+    fn event_subscribe_request() -> String {
+        format!(
+            "{}\n",
+            json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "event.subscribe",
+                "params": {
+                    "session_id": "s1",
+                    "since_event_id": null,
+                    "replay_limit": 1
+                }
             })
         )
     }

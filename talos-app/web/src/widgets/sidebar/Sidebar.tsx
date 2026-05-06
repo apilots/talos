@@ -7,6 +7,7 @@ import { formatRelativeTime } from "@/shared/lib/time";
 import { cn } from "@/shared/lib/cn";
 import { Badge } from "@/shared/ui/Badge";
 import type { SessionUiStatus, ThreadFilter } from "@/shared/types/ui";
+import { isDesktopRuntime } from "@/shared/api/desktop-client";
 
 type AuthConnectionState = {
   authStatus: "unknown" | "loading" | "authenticated" | "unauthenticated" | "open";
@@ -76,6 +77,9 @@ export function Sidebar({
   const roleLabel =
     connection.authStatus === "open" ? "Open" : connection.authRole === "admin" ? "Admin" : "Pro";
   const avatarLabel = connection.authUsername.trim().charAt(0).toUpperCase() || "U";
+  const desktopRuntime = isDesktopRuntime();
+  const shellLabel = desktopRuntime ? "DESKTOP" : t("sidebar:webConsole");
+  const canShowAdmin = connection.authStatus === "open" || connection.authRole === "admin";
 
   useEffect(() => {
     if (!accountMenuOpen) {
@@ -111,7 +115,7 @@ export function Sidebar({
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="font-display text-[21px] font-semibold tracking-[-0.04em] text-ink">Talos</div>
-            <div className="mt-1 text-[10px] uppercase tracking-[0.22em] text-muted">{t("sidebar:webConsole")}</div>
+            <div className="mt-1 text-[10px] uppercase tracking-[0.22em] text-muted">{shellLabel}</div>
           </div>
           <div className="flex size-10 items-center justify-center rounded-[var(--radius-control)] border border-brand/25 bg-brand/10 text-brand">
             ⬡
@@ -206,7 +210,7 @@ export function Sidebar({
         <NavItem icon={<FileText size={16} />} label={t("sidebar:workspaceDocs")} to="/workspace-docs" />
         <NavItem icon={<HardDriveUpload size={16} />} label={t("sidebar:files")} to="/files" />
         <NavItem icon={<Settings2 size={16} />} label={t("sidebar:settings")} to="/settings" />
-        {connection.authStatus === "open" || connection.authRole === "admin" ? (
+        {canShowAdmin ? (
           <NavItem icon={<Shield size={16} />} label={t("sidebar:admin")} to="/admin" />
         ) : null}
       </nav>

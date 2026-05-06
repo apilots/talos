@@ -1,5 +1,6 @@
 import { createBrowserTalosClient } from "@talos/sdk-browser";
 
+import { createDesktopTalosClient, getDesktopBridge } from "./desktop-client";
 import { getConnectionSettings } from "@/shared/store/app-store";
 
 export type TalosWebClient = ReturnType<typeof createBrowserTalosClient>;
@@ -8,6 +9,11 @@ export type TalosClientFactory = () => TalosWebClient;
 let clientFactory: TalosClientFactory | undefined;
 
 function createDefaultBrowserClient() {
+  const desktopBridge = getDesktopBridge();
+  if (desktopBridge) {
+    return createDesktopTalosClient(desktopBridge);
+  }
+
   const { serverUrl, authToken } = getConnectionSettings();
   return createBrowserTalosClient({
     baseUrl: serverUrl,

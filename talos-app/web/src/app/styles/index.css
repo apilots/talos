@@ -100,6 +100,49 @@ select {
 }
 
 @layer components {
+  .admin-users-panel {
+    container-type: inline-size;
+  }
+
+  .admin-users-column-header {
+    display: none;
+  }
+
+  .admin-users-row {
+    display: grid;
+    gap: 1rem;
+  }
+
+  .admin-users-field-label {
+    margin-bottom: 0.25rem;
+    font-size: 0.68rem;
+    line-height: 1rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: rgb(var(--color-muted) / 0.75);
+  }
+
+  @container (min-width: 760px) {
+    .admin-users-column-header {
+      display: grid;
+      grid-template-columns: minmax(110px, 1.1fr) minmax(170px, 1.35fr) 96px 96px 148px;
+      gap: 1rem;
+    }
+
+    .admin-users-row {
+      grid-template-columns: minmax(110px, 1.1fr) minmax(170px, 1.35fr) 96px 96px 148px;
+      align-items: center;
+    }
+
+    .admin-users-field-label {
+      display: none;
+    }
+
+    .admin-users-actions-cell {
+      justify-content: flex-end;
+    }
+  }
+
   .markdown-body {
     --tw-prose-body: rgb(var(--color-ink) / 0.92);
     --tw-prose-headings: rgb(var(--color-ink));

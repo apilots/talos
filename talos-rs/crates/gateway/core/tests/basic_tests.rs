@@ -96,6 +96,7 @@ mod basic_tests {
                 trace_id: "trace-1".to_string(),
                 channel_id: Some("test_channel".to_string()),
                 thread_id: None,
+                project_root: None,
                 environment: None,
             },
         };
@@ -123,6 +124,7 @@ mod basic_tests {
                 trace_id: "trace-1".to_string(),
                 channel_id: Some("test_channel".to_string()),
                 thread_id: None,
+                project_root: None,
                 environment: None,
             },
         };

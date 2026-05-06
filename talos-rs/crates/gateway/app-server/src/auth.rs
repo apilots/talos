@@ -42,7 +42,7 @@ impl ActorCredentialValidator for EnvLaunchTokenValidator {
     async fn validate(&self, credentials: &ActorCredentials) -> ProtocolResult<Actor> {
         match &credentials.credential {
             ActorCredential::LocalLaunchToken { token } if token == &self.token => {
-                Ok(Actor::full(self.user_id.clone()))
+                Ok(Actor::regular(self.user_id.clone()))
             }
             ActorCredential::LocalLaunchToken { .. } => {
                 Err(unauthorized("invalid local launch token"))
@@ -58,6 +58,13 @@ impl ActorCredentialValidator for EnvLaunchTokenValidator {
 pub struct AuthServiceCredentialValidator {
     auth_service: Arc<dyn AuthService>,
     local_launch_token: Option<String>,
+    local_launch_access: LocalLaunchAccess,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalLaunchAccess {
+    Regular,
+    Full,
 }
 
 impl AuthServiceCredentialValidator {
@@ -65,6 +72,19 @@ impl AuthServiceCredentialValidator {
         Self {
             auth_service,
             local_launch_token,
+            local_launch_access: LocalLaunchAccess::Regular,
+        }
+    }
+
+    pub fn with_local_launch_access(mut self, access: LocalLaunchAccess) -> Self {
+        self.local_launch_access = access;
+        self
+    }
+
+    fn local_launch_actor(&self) -> Actor {
+        match self.local_launch_access {
+            LocalLaunchAccess::Regular => Actor::regular("local-desktop"),
+            LocalLaunchAccess::Full => Actor::full("local-desktop"),
         }
     }
 }
@@ -81,7 +101,7 @@ impl ActorCredentialValidator for AuthServiceCredentialValidator {
                 if token != expected {
                     return Err(unauthorized("invalid local launch token"));
                 }
-                Ok(Actor::full("local-desktop"))
+                Ok(self.local_launch_actor())
             }
             ActorCredential::ExistingSessionToken { token } => {
                 let identity =

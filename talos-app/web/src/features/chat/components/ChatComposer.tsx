@@ -201,6 +201,7 @@ export function ChatComposer({
             ? "bg-muted/20 text-muted/60"
             : "bg-ink text-background hover:bg-ink/85",
       )}
+      data-smoke="chat-composer-send"
       disabled={disabled || (!isBusy && draft.trim().length === 0)}
       onClick={() => {
         if (isBusy) {
@@ -261,6 +262,7 @@ export function ChatComposer({
               "resize-none border-0 bg-transparent px-5 text-[14px] leading-[1.6] focus:border-0",
               compact ? "min-h-10 pt-3" : "min-h-12 pt-4",
             )}
+            data-smoke="chat-composer-input"
             disabled={disabled}
             onChange={(event) => onDraftChange(event.target.value)}
             onKeyDown={(event) => {

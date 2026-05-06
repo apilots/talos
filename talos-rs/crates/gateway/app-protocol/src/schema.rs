@@ -8,8 +8,8 @@ use crate::events::ApplicationEventEnvelope;
 use crate::jsonrpc::JsonRpcMessage;
 use crate::notifications::ServerNotification;
 use crate::requests::{
-    ClientRequest, ClientRequestParams, EventSubscribeResponse, InitializeResponse,
-    TurnStartResponse,
+    ClientRequest, ClientRequestParams, EventSubscribeResponse, EventUnsubscribeResponse,
+    InitializeResponse, TurnStartResponse,
 };
 use crate::server_requests::ServerRequest;
 
@@ -29,6 +29,7 @@ pub struct AppProtocolSchemaRoot {
     pub initialize_response: InitializeResponse,
     pub turn_start_response: TurnStartResponse,
     pub event_subscribe_response: EventSubscribeResponse,
+    pub event_unsubscribe_response: EventUnsubscribeResponse,
 }
 
 pub fn generate_json_schema() -> String {
@@ -65,6 +66,10 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::SessionReadParams>());
     output.push_str(&export::<crate::requests::SessionPatchParams>());
     output.push_str(&export::<crate::requests::SessionDeleteParams>());
+    output.push_str(&export::<crate::requests::SessionCloseParams>());
+    output.push_str(&export::<crate::requests::SessionCompactParams>());
+    output.push_str(&export::<crate::requests::SessionClearParams>());
+    output.push_str(&export::<crate::requests::SessionActiveTurnParams>());
     output.push_str(&export::<crate::requests::SessionTurnsParams>());
     output.push_str(&export::<crate::requests::ProjectCreateParams>());
     output.push_str(&export::<crate::requests::ProjectListParams>());
@@ -72,15 +77,24 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::ProjectPatchParams>());
     output.push_str(&export::<crate::requests::ProjectDeleteParams>());
     output.push_str(&export::<crate::requests::TurnStartParams>());
+    output.push_str(&export::<crate::requests::MessageCommandStatus>());
     output.push_str(&export::<crate::requests::TurnStartResponse>());
     output.push_str(&export::<crate::requests::TurnInterruptParams>());
+    output.push_str(&export::<crate::requests::TurnRetryParams>());
     output.push_str(&export::<crate::requests::EventSubscribeParams>());
     output.push_str(&export::<crate::requests::EventSubscribeResponse>());
+    output.push_str(&export::<crate::requests::EventUnsubscribeParams>());
+    output.push_str(&export::<crate::requests::EventUnsubscribeResponse>());
     output.push_str(&export::<crate::requests::ToolApprovalSubmitParams>());
     output.push_str(&export::<crate::requests::ToolDynamicResultSubmitParams>());
     output.push_str(&export::<crate::requests::AdminSessionListParams>());
     output.push_str(&export::<crate::requests::AdminSessionPagination>());
     output.push_str(&export::<crate::requests::AdminProjectListParams>());
+    output.push_str(&export::<crate::requests::AdminUserRole>());
+    output.push_str(&export::<crate::requests::AdminUserListParams>());
+    output.push_str(&export::<crate::requests::AdminUserCreateParams>());
+    output.push_str(&export::<crate::requests::AdminUserPatchParams>());
+    output.push_str(&export::<crate::requests::AdminUserDeleteParams>());
     output.push_str(&export::<crate::requests::ModelListParams>());
     output.push_str(&export::<crate::requests::ConfigReadParams>());
     output.push_str(&export::<crate::requests::ConfigValueWriteParams>());

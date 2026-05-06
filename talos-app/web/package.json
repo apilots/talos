@@ -13,6 +13,7 @@
     "check": "pnpm lint && pnpm test && pnpm build"
   },
   "dependencies": {
+    "@talos/sdk-app-server": "workspace:*",
     "@talos/sdk-browser": "workspace:*",
     "@talos/sdk-core": "workspace:*",
     "@tanstack/react-query": "^5.76.1",

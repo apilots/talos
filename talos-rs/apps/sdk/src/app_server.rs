@@ -4,24 +4,26 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde::de::DeserializeOwned;
+use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use talos_app_protocol::events::ApplicationEventEnvelope;
 use talos_app_protocol::jsonrpc::{JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, RequestId};
 use talos_app_protocol::requests::{
     ActorCredential, ActorCredentials, AdminProjectListParams, AdminProjectListResponse,
     AdminSessionListParams, AdminSessionListResponse, ClientCapabilities, ClientInfo,
-    ConfigReadParams, EventSubscribeParams, EventSubscribeResponse, InitializeParams,
-    InitializeResponse, MemoryFileListParams as ProtocolMemoryFileListParams, MemoryFileReadParams,
-    MemoryFileWriteParams, ModelListParams, ProjectCreateParams, ProjectDeleteParams,
-    SessionCloseParams,
-    ProjectListParams, ProjectPatchParams, ProjectReadParams, ProtocolInputItem,
-    SessionCreateParams, SessionDeleteParams, SessionListParams, SessionPatchParams,
-    SessionReadParams, SessionTurnsParams, ToolApprovalSubmitParams, ToolDynamicResultSubmitParams,
-    TurnInterruptParams, TurnStartParams, TurnStartResponse, WorkspaceDocListParams,
-    WorkspaceDocReadParams, WorkspaceDocWriteParams,
+    ConfigReadParams, ConfigValueWriteParams, EventSubscribeParams, EventSubscribeResponse,
+    InitializeParams, InitializeResponse, MemoryFileListParams as ProtocolMemoryFileListParams,
+    MemoryFileReadParams, MemoryFileWriteParams,
+    MessageCommandStatus as ProtocolMessageCommandStatus, ModelListParams, ProjectCreateParams,
+    ProjectDeleteParams, ProjectListParams, ProjectPatchParams, ProjectReadParams,
+    ProtocolInputItem, SessionCloseParams, SessionCreateParams, SessionDeleteParams,
+    SessionListParams, SessionPatchParams, SessionReadParams, SessionTurnsParams,
+    ToolApprovalSubmitParams, ToolDynamicResultSubmitParams, TurnInterruptParams, TurnStartParams,
+    TurnStartResponse, WorkspaceDocListParams, WorkspaceDocReadParams, WorkspaceDocWriteParams,
 };
 use talos_app_protocol::version::ProtocolVersion;
+use talos_auth::{AdminCreateUserRequest, AdminPatchUserRequest, UserDto};
+use talos_config::LlmConfig;
 use talos_error::{TalosError, TalosResult};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
@@ -31,8 +33,9 @@ use crate::app_server_events::{is_terminal_application_event, map_application_ev
 use crate::common::{expected_file_version_token, workspace_doc_kind_token};
 use crate::ExpectedFileVersion;
 use crate::{
-    MemoryFileDetail, MemoryFileSummary, ProjectPatch, ProjectRecord, TalosEvent,
-    TalosMessageResponse, WorkspaceDocDetail, WorkspaceDocKind, WorkspaceDocSummary,
+    MemoryFileDetail, MemoryFileSummary, MessageCommandAck, MessageCommandStatus, ProjectPatch,
+    ProjectRecord, TalosEvent, TalosMessageResponse, WorkspaceDocDetail, WorkspaceDocKind,
+    WorkspaceDocSummary,
 };
 use crate::{ModelInfo, TalosInputItem, TalosMessageRequest, TalosSession};
 
@@ -62,8 +65,8 @@ impl AppServerClientConfig {
 }
 
 pub struct AppServerClient {
-    child: Child,
-    stdin: ChildStdin,
+    child: Option<Child>,
+    stdin: Option<ChildStdin>,
     next_id: i32,
     pending_responses: Arc<Mutex<HashMap<i32, oneshot::Sender<TalosResult<Value>>>>>,
     subscription_senders: Arc<Mutex<HashMap<String, SubscriptionStream>>>,
@@ -79,6 +82,24 @@ struct SubscriptionStream {
 #[derive(Debug, Clone, serde::Deserialize)]
 struct ListResponse<T> {
     data: Vec<T>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct EmptyParams {}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminUserPatchRequest {
+    user_id: String,
+    username: Option<String>,
+    email: Option<String>,
+    password: Option<String>,
+    role: Option<talos_auth::UserRole>,
+    disabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AdminUserDeleteRequest {
+    user_id: String,
 }
 
 const APP_SERVER_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -123,8 +144,8 @@ impl AppServerClient {
             events_tx,
         );
         Ok(Self {
-            child,
-            stdin,
+            child: Some(child),
+            stdin: Some(stdin),
             next_id: 1,
             pending_responses,
             subscription_senders,
@@ -172,6 +193,23 @@ impl AppServerClient {
 
     pub async fn config_read(&mut self) -> TalosResult<Value> {
         self.request_typed("config.read", ConfigReadParams {}).await
+    }
+
+    pub async fn get_llm_config(&mut self) -> TalosResult<LlmConfig> {
+        self.request_typed("config.read", ConfigReadParams {}).await
+    }
+
+    pub async fn update_llm_config(&mut self, config: LlmConfig) -> TalosResult<LlmConfig> {
+        let value = serde_json::to_string(&config)
+            .map_err(|error| TalosError::SerializationError(error.to_string()))?;
+        self.request_typed(
+            "config.value.write",
+            ConfigValueWriteParams {
+                path: "llm".to_string(),
+                value,
+            },
+        )
+        .await
     }
 
     pub async fn list_memory_files(&mut self) -> TalosResult<Vec<MemoryFileSummary>> {
@@ -271,6 +309,50 @@ impl AppServerClient {
         params: AdminSessionListParams,
     ) -> TalosResult<AdminSessionListResponse> {
         self.request_typed("admin.session.list", params).await
+    }
+
+    pub async fn list_admin_users(&mut self) -> TalosResult<Vec<UserDto>> {
+        self.request_typed::<_, ListResponse<UserDto>>("admin.user.list", EmptyParams {})
+            .await
+            .map(|response| response.data)
+    }
+
+    pub async fn create_admin_user(
+        &mut self,
+        request: AdminCreateUserRequest,
+    ) -> TalosResult<UserDto> {
+        self.request_typed("admin.user.create", request).await
+    }
+
+    pub async fn patch_admin_user(
+        &mut self,
+        user_id: &str,
+        request: AdminPatchUserRequest,
+    ) -> TalosResult<UserDto> {
+        self.request_typed(
+            "admin.user.patch",
+            AdminUserPatchRequest {
+                user_id: user_id.to_string(),
+                username: request.username,
+                email: request.email,
+                password: request.password,
+                role: request.role,
+                disabled: request.disabled,
+            },
+        )
+        .await
+    }
+
+    pub async fn delete_admin_user(&mut self, user_id: &str) -> TalosResult<()> {
+        let _: Value = self
+            .request_typed(
+                "admin.user.delete",
+                AdminUserDeleteRequest {
+                    user_id: user_id.to_string(),
+                },
+            )
+            .await?;
+        Ok(())
     }
 
     pub async fn get_session(&mut self, session_id: &str) -> TalosResult<TalosSession> {
@@ -426,17 +508,19 @@ impl AppServerClient {
         session_id: &str,
         request: TalosMessageRequest,
         client_request_id: Option<String>,
-    ) -> TalosResult<TurnStartResponse> {
-        self.request_typed(
-            "turn.start",
-            TurnStartParams {
-                session_id: session_id.to_string(),
-                input: map_input(request.input)?,
-                workspace_id: request.workspace_id,
-                client_request_id,
-            },
-        )
-        .await
+    ) -> TalosResult<MessageCommandAck> {
+        let response: TurnStartResponse = self
+            .request_typed(
+                "turn.start",
+                TurnStartParams {
+                    session_id: session_id.to_string(),
+                    input: map_input(request.input)?,
+                    workspace_id: request.workspace_id,
+                    client_request_id,
+                },
+            )
+            .await?;
+        Ok(map_turn_start_response(response))
     }
 
     pub async fn interrupt_turn(&mut self, session_id: &str) -> TalosResult<()> {
@@ -597,23 +681,30 @@ impl AppServerClient {
         Ok(())
     }
 
-    pub async fn shutdown(mut self) -> TalosResult<()> {
-        self.stdin
-            .shutdown()
-            .await
-            .map_err(|error| TalosError::ClientError(error.to_string()))?;
-        drop(self.stdin);
-        let status = self
-            .child
-            .wait()
-            .await
-            .map_err(|error| TalosError::ClientError(error.to_string()))?;
-        if status.success() {
-            Ok(())
+    pub async fn shutdown(&mut self) -> TalosResult<()> {
+        let stdin = self.stdin.take();
+        let child = self.child.take();
+
+        if let Some(mut stdin) = stdin {
+            stdin
+                .shutdown()
+                .await
+                .map_err(|error| TalosError::ClientError(error.to_string()))?;
+        }
+        if let Some(mut child) = child {
+            let status = child
+                .wait()
+                .await
+                .map_err(|error| TalosError::ClientError(error.to_string()))?;
+            if status.success() {
+                Ok(())
+            } else {
+                Err(TalosError::ClientError(format!(
+                    "app-server exited with {status}"
+                )))
+            }
         } else {
-            Err(TalosError::ClientError(format!(
-                "app-server exited with {status}"
-            )))
+            Ok(())
         }
     }
 
@@ -667,15 +758,19 @@ impl AppServerClient {
     async fn write_json<T: serde::Serialize>(&mut self, value: &T) -> TalosResult<()> {
         let line = serde_json::to_string(value)
             .map_err(|error| TalosError::SerializationError(error.to_string()))?;
-        self.stdin
+        let stdin = self
+            .stdin
+            .as_mut()
+            .ok_or_else(|| TalosError::ClientError("app-server client is shut down".to_string()))?;
+        stdin
             .write_all(line.as_bytes())
             .await
             .map_err(|error| TalosError::ClientError(error.to_string()))?;
-        self.stdin
+        stdin
             .write_all(b"\n")
             .await
             .map_err(|error| TalosError::ClientError(error.to_string()))?;
-        self.stdin
+        stdin
             .flush()
             .await
             .map_err(|error| TalosError::ClientError(error.to_string()))
@@ -810,6 +905,27 @@ fn map_input(input: Vec<TalosInputItem>) -> TalosResult<Vec<ProtocolInputItem>> 
         .collect()
 }
 
+fn map_turn_start_response(response: TurnStartResponse) -> MessageCommandAck {
+    MessageCommandAck {
+        request_id: response.request_id,
+        message_id: response.message_id,
+        session_id: response.session_id,
+        turn_id: response.turn_id,
+        status: map_message_command_status(response.status),
+    }
+}
+
+fn map_message_command_status(status: ProtocolMessageCommandStatus) -> MessageCommandStatus {
+    match status {
+        ProtocolMessageCommandStatus::Pending => MessageCommandStatus::Pending,
+        ProtocolMessageCommandStatus::Accepted => MessageCommandStatus::Accepted,
+        ProtocolMessageCommandStatus::Failed => MessageCommandStatus::Failed,
+        ProtocolMessageCommandStatus::FailedNoFirstEvent => {
+            MessageCommandStatus::FailedNoFirstEvent
+        }
+    }
+}
+
 fn decode_event_notification(
     notification: JsonRpcNotification,
 ) -> TalosResult<Option<ApplicationEventEnvelope>> {
@@ -852,5 +968,20 @@ mod tests {
         }]);
 
         assert!(matches!(result, Err(TalosError::ValidationError(_))));
+    }
+
+    #[test]
+    fn maps_turn_start_response_to_message_ack() {
+        let ack = map_turn_start_response(TurnStartResponse {
+            request_id: "req-1".to_string(),
+            message_id: Some("msg-1".to_string()),
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            status: ProtocolMessageCommandStatus::Accepted,
+        });
+
+        assert_eq!(ack.request_id, "req-1");
+        assert_eq!(ack.message_id.as_deref(), Some("msg-1"));
+        assert_eq!(ack.status, MessageCommandStatus::Accepted);
     }
 }

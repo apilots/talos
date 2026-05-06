@@ -10,6 +10,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 uuid = { workspace = true }
 talos-app-protocol = { workspace = true }
+talos-config = { workspace = true }
 talos-types = { path = "../../crates/common/types" }
 talos-auth = { workspace = true }
 talos-error = { path = "../../crates/infra/error" }

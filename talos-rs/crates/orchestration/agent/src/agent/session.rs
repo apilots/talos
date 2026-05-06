@@ -106,6 +106,42 @@ impl AgentImpl {
         self.active_turns.contains_key(session_id)
     }
 
+    pub(crate) async fn drain_active_turns(&self, timeout: Duration) -> TalosResult<()> {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if self.active_turns.is_empty() {
+                return Ok(());
+            }
+            if std::time::Instant::now() >= deadline {
+                let remaining: Vec<_> = self
+                    .active_turns
+                    .iter()
+                    .map(|entry| entry.key().clone())
+                    .collect();
+                // Force-abort any remaining running turns
+                for session_id in &remaining {
+                    if let Some(handle) = self.active_turns.get(session_id) {
+                        if let ActiveTurnHandle::Running { execution_task } = handle.value() {
+                            execution_task.abort();
+                        }
+                    }
+                }
+                // Give aborted tasks a moment to observe cancellation
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                // Clear forcibly-aborted entries
+                for session_id in &remaining {
+                    self.clear_active_turn(session_id);
+                }
+                return Err(TalosError::InternalError(format!(
+                    "drain_active_turns timed out with {} sessions still active: {:?}",
+                    remaining.len(),
+                    remaining
+                )));
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
     pub(crate) async fn validate_dynamic_tool_submission(
         &self,
         session_id: &str,

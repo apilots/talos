@@ -17,6 +17,30 @@ async fn test_closing_state_blocks_new_messages() {
         .unwrap_or(false));
 }
 
+#[tokio::test]
+async fn test_close_failure_still_shuts_down_remote_client() {
+    let client = std::sync::Arc::new(MockGatewayClient::with_close_failures(1));
+    let state = client.state.clone();
+    let mut app = TuiApp::new_with_gateway_client(client, TalosConnectionMode::Remote);
+    app.initialize_remote().await;
+
+    app.close_remote_session_command().unwrap();
+    for _ in 0..20 {
+        app.on_tick().await;
+        tokio::task::yield_now().await;
+        if !app.close_in_progress {
+            break;
+        }
+    }
+
+    assert_eq!(state.lock().unwrap().shutdown_calls, 1);
+    assert!(!app.close_in_progress);
+    assert!(app
+        .right_panel_events
+        .iter()
+        .any(|line| line.contains("session close failed")));
+}
+
 // ── Phase 3: tool call inline cards ──────────────────────────────────
 
 #[test]

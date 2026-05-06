@@ -96,6 +96,25 @@ describe("chat stream integration helpers", () => {
     });
   });
 
+  it("maps cancelled history turns into visible status context", () => {
+    const blocks = mapTurnsToBlocks([
+      {
+        request_id: "req-1",
+        message_id: "msg-1",
+        session_id: "sess-1",
+        model: "gpt-4.1",
+        reasoning: [],
+        stop_reason: "cancelled",
+        usage,
+        output: [{ type: "user_input", text: "stop after this input" }],
+      },
+    ]);
+
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]).toMatchObject({ kind: "user", text: "stop after this input" });
+    expect(blocks[1]).toMatchObject({ kind: "system", text: "Response cancelled." });
+  });
+
   it("applies approval events into the transient stream store", () => {
     applyStreamEvent("sess-1", {
       event_type: "message_tool_call_pending_approval",

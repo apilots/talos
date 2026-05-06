@@ -7,6 +7,7 @@ const defaultProjectRoot =
   process.env.VITE_DEFAULT_PROJECT_ROOT ?? path.join(os.homedir(), ".talos", "workspace-talos");
 
 export default defineConfig({
+  base: process.env.TALOS_WEB_BASE ?? "/",
   define: {
     __TALOS_DEFAULT_PROJECT_ROOT__: JSON.stringify(defaultProjectRoot),
   },
