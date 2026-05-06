@@ -10,6 +10,7 @@ import {
   getApprovalModeLabel,
   resolveProjectRecord,
   getSessionApprovalMode,
+  hasRealSessionTitle,
   UNBOUND_PROJECT_ID,
 } from "@/shared/types/domain";
 
@@ -84,5 +85,11 @@ describe("domain helpers", () => {
 
     expect(resolveProjectRecord(projects, "missing-project")?.id).toBe(UNBOUND_PROJECT_ID);
     expect(resolveProjectRecord(projects, "project-1")?.id).toBe("project-1");
+  });
+
+  it("detects generated session titles separately from the default title", () => {
+    expect(hasRealSessionTitle("Untitled Session")).toBe(false);
+    expect(hasRealSessionTitle("  ")).toBe(false);
+    expect(hasRealSessionTitle("Plan Talos Desktop Smoke")).toBe(true);
   });
 });

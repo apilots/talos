@@ -90,6 +90,12 @@ export interface PendingApproval {
   arguments: unknown;
 }
 
+export interface PendingInput {
+  text: string;
+  clientMessageId?: string;
+  serverMessageId?: string;
+}
+
 export interface StreamSessionState {
   isStreaming: boolean;
   connectionState?: StreamConnectionState;
@@ -101,6 +107,7 @@ export interface StreamSessionState {
   activeInputText?: string;
   activeClientMessageId?: string;
   blocks: ChatRenderBlock[];
+  pendingInput?: PendingInput;
   pendingUserAction?: TalosPendingUserAction;
   pendingApproval?: PendingApproval;
   error?: string;

@@ -6,14 +6,19 @@ import { useSessionMessageStream } from "./useSessionMessageStream";
 import { useSessionQueryInvalidation } from "./useSessionQueryInvalidation";
 import { useAppStore } from "@/shared/store/app-store";
 
-export function useSessionStreaming(sessionId: string, serverMessageCount?: number) {
+export function useSessionStreaming(
+  sessionId: string,
+  serverMessageCount?: number,
+  sessionTitle?: string,
+) {
   const streamState = useAppStore((state) => state.streams[sessionId]);
   const setSessionStatus = useAppStore((state) => state.setSessionStatus);
   const resetStream = useAppStore((state) => state.resetStream);
-  const appendStreamUserInput = useAppStore((state) => state.appendStreamUserInput);
+  const setPendingInput = useAppStore((state) => state.setPendingInput);
   const { eventMessage, cancelStream, reconnectMessage, retryMessage, hasActiveConnection } =
     useSessionMessageStream(sessionId);
-  const { invalidateSessionQueries } = useSessionQueryInvalidation(sessionId);
+  const { invalidateSessionQueries, refreshSessionTitleAfterTurn } =
+    useSessionQueryInvalidation(sessionId);
 
   useEffect(() => {
     return () => {
@@ -63,11 +68,11 @@ export function useSessionStreaming(sessionId: string, serverMessageCount?: numb
       text: string;
       appendUserInput?: boolean;
     }) => {
+      const clientMessageId = createClientMessageId();
       resetStream(sessionId);
       if (appendUserInput && text.trim().length > 0) {
-        appendStreamUserInput(sessionId, text);
+        setPendingInput(sessionId, { text, clientMessageId });
       }
-      const clientMessageId = createClientMessageId();
       useAppStore.getState().setStreamError(sessionId, undefined);
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: true,
@@ -91,8 +96,12 @@ export function useSessionStreaming(sessionId: string, serverMessageCount?: numb
         setSessionStatus(sessionId, "running");
         return;
       }
-      resetStream(sessionId);
+      useAppStore.getState().resetLiveResponse(sessionId);
       setSessionStatus(sessionId, undefined);
+      void refreshSessionTitleAfterTurn({
+        serverMessageCount,
+        title: sessionTitle,
+      });
     },
     onError: async (error) => {
       const currentStream = useAppStore.getState().streams[sessionId];
@@ -134,7 +143,7 @@ export function useSessionStreaming(sessionId: string, serverMessageCount?: numb
       }
 
       resetStream(sessionId);
-      appendStreamUserInput(sessionId, text);
+      setPendingInput(sessionId, { text, clientMessageId });
       useAppStore.getState().setStreamError(sessionId, undefined);
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: true,
@@ -158,8 +167,12 @@ export function useSessionStreaming(sessionId: string, serverMessageCount?: numb
         setSessionStatus(sessionId, "running");
         return;
       }
-      resetStream(sessionId);
+      useAppStore.getState().resetLiveResponse(sessionId);
       setSessionStatus(sessionId, undefined);
+      void refreshSessionTitleAfterTurn({
+        serverMessageCount,
+        title: sessionTitle,
+      });
     },
     onError: async (error) => {
       useAppStore.getState().setStreamError(

@@ -13,7 +13,14 @@ export function applyStreamEvent(sessionId: string, event: TalosEvent) {
   }
 
   if (stream?.activeMessageId && !isSameMessage) {
-    state.resetStream(sessionId);
+    state.resetLiveResponse(sessionId);
+  }
+
+  if (stream?.pendingInput && stream.pendingInput.serverMessageId !== event.message_id) {
+    state.setPendingInput(sessionId, {
+      ...stream.pendingInput,
+      serverMessageId: event.message_id,
+    });
   }
 
   state.setStreamMeta(sessionId, {
@@ -144,7 +151,7 @@ export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TalosActi
     state.setPendingUserAction(sessionId, undefined);
     state.setPendingApproval(sessionId, undefined);
     state.setSessionStatus(sessionId, undefined);
-    state.resetStream(sessionId);
+    state.resetLiveResponse(sessionId);
     return;
   }
 
@@ -166,7 +173,13 @@ export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TalosActi
     const stream = state.streams[sessionId];
     const messageChanged = stream?.activeMessageId !== activeTurn.message_id;
     if (stream?.activeMessageId && messageChanged) {
-      state.resetStream(sessionId);
+      state.resetLiveResponse(sessionId);
+    }
+    if (stream?.pendingInput && stream.pendingInput.serverMessageId !== activeTurn.message_id) {
+      state.setPendingInput(sessionId, {
+        ...stream.pendingInput,
+        serverMessageId: activeTurn.message_id,
+      });
     }
     state.setStreamMeta(sessionId, {
       activeMessageId: activeTurn.message_id,

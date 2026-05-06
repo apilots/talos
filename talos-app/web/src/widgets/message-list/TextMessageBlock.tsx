@@ -48,19 +48,23 @@ export function TextMessageBlock({
         )}
       >
         <div>
-          <Suspense fallback={<div className="text-sm text-muted">{t("renderingMessage")}</div>}>
-            <MarkdownRenderer
-              className={cn(
-                "markdown-body prose prose-sm max-w-none",
-                "prose-headings:font-display prose-headings:tracking-[-0.035em]",
-                "prose-p:my-3 prose-p:leading-[1.9] prose-ul:my-4 prose-ol:my-4 prose-li:my-1.5 prose-li:leading-[1.85]",
-                "prose-a:no-underline hover:prose-a:opacity-80",
-                isThinking && "prose-p:text-muted prose-headings:text-ink",
-                isSystem && "prose-p:my-0 prose-p:text-muted",
-              )}
-              text={text}
-            />
-          </Suspense>
+          {isUser ? (
+            <div className="whitespace-pre-wrap break-words text-sm leading-[1.7]">{text}</div>
+          ) : (
+            <Suspense fallback={<div className="text-sm text-muted">{t("renderingMessage")}</div>}>
+              <MarkdownRenderer
+                className={cn(
+                  "markdown-body prose prose-sm max-w-none",
+                  "prose-headings:font-display prose-headings:tracking-[-0.035em]",
+                  "prose-p:my-3 prose-p:leading-[1.9] prose-ul:my-4 prose-ol:my-4 prose-li:my-1.5 prose-li:leading-[1.85]",
+                  "prose-a:no-underline hover:prose-a:opacity-80",
+                  isThinking && "prose-p:text-muted prose-headings:text-ink",
+                  isSystem && "prose-p:my-0 prose-p:text-muted",
+                )}
+                text={text}
+              />
+            </Suspense>
+          )}
         </div>
       </div>
       {isUser ? (

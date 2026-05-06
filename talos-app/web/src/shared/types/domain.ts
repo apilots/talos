@@ -11,6 +11,7 @@ import type {
 } from "./ui";
 
 export const UNBOUND_PROJECT_ID = "__unbound_project__";
+export const DEFAULT_SESSION_TITLE = "Untitled Session";
 
 export function getEffectiveSessionStatus(
   transientStatus?: SessionUiStatus,
@@ -66,6 +67,11 @@ export function describeProjectDirectory(directory?: string | null) {
 
 export function getProjectRecordKey(project: ProjectRecord) {
   return project.id;
+}
+
+export function hasRealSessionTitle(title?: string | null) {
+  const normalized = title?.trim() ?? "";
+  return normalized.length > 0 && normalized !== DEFAULT_SESSION_TITLE;
 }
 
 export function resolveProjectRecord(projects: ProjectRecord[], projectId?: string | null) {

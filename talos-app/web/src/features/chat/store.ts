@@ -1,4 +1,10 @@
-import type { ApprovalMode, PendingApproval, SessionUiStatus, StreamSessionState } from "@/shared/types/ui";
+import type {
+  ApprovalMode,
+  PendingApproval,
+  PendingInput,
+  SessionUiStatus,
+  StreamSessionState,
+} from "@/shared/types/ui";
 
 export interface ChatSlice {
   sessionAliases: Record<string, string>;
@@ -10,12 +16,13 @@ export interface ChatSlice {
   setSessionApprovalMode: (sessionId: string, mode: ApprovalMode) => void;
   setSessionStatus: (sessionId: string, status: SessionUiStatus | undefined) => void;
   resetStream: (sessionId: string) => void;
+  resetLiveResponse: (sessionId: string) => void;
   appendStreamText: (
     sessionId: string,
     kind: "assistant" | "thinking" | "system",
     chunk: string,
   ) => void;
-  appendStreamUserInput: (sessionId: string, text: string) => void;
+  setPendingInput: (sessionId: string, input?: PendingInput) => void;
   upsertStreamTool: (
     sessionId: string,
     callId: string,
@@ -119,6 +126,24 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
           [sessionId]: { isStreaming: false, connectionState: "idle", blocks: [] },
         },
       })),
+    resetLiveResponse: (sessionId) =>
+      set((state) => {
+        const stream = ensureStreamState(state, sessionId);
+        return {
+          streams: {
+            ...state.streams,
+            [sessionId]: {
+              ...stream,
+              isStreaming: false,
+              connectionState: "idle",
+              blocks: [],
+              pendingApproval: undefined,
+              pendingUserAction: undefined,
+              error: undefined,
+            },
+          },
+        };
+      }),
     appendStreamText: (sessionId, kind, chunk) =>
       set((state) => {
         const stream = ensureStreamState(state, sessionId);
@@ -147,22 +172,13 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
           },
         };
       }),
-    appendStreamUserInput: (sessionId, text) =>
+    setPendingInput: (sessionId, pendingInput) =>
       set((state) => {
         const stream = ensureStreamState(state, sessionId);
-        const blocks = [
-          ...stream.blocks,
-          {
-            id: `user-${Date.now()}-${stream.blocks.length}`,
-            kind: "user" as const,
-            text,
-            live: true,
-          },
-        ];
         return {
           streams: {
             ...state.streams,
-            [sessionId]: { ...stream, isStreaming: true, blocks },
+            [sessionId]: { ...stream, pendingInput },
           },
         };
       }),

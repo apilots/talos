@@ -8,7 +8,11 @@ import { useActiveTurnQuery, useSessionTurnsQuery } from "./useChatQueries";
 import { applyActiveTurnSnapshot } from "../stream-events";
 import { useAppStore } from "@/shared/store/app-store";
 
-export function useChatSession(sessionId: string, serverMessageCount?: number) {
+export function useChatSession(
+  sessionId: string,
+  serverMessageCount?: number,
+  sessionTitle?: string,
+) {
   const [draft, setDraft] = useState("");
   const activeTurnQuery = useActiveTurnQuery(sessionId);
   const turnsQuery = useSessionTurnsQuery(sessionId);
@@ -26,7 +30,7 @@ export function useChatSession(sessionId: string, serverMessageCount?: number) {
     streamState: liveStreamState,
     canRetryResponse,
   } =
-    useSessionStreaming(sessionId, serverMessageCount);
+    useSessionStreaming(sessionId, serverMessageCount, sessionTitle);
   const { pendingApproval, submitApproval } = useSessionApproval(sessionId, continueAfterApproval);
   const { retryStream } = useSessionReconnect({
     hasActiveConnection,

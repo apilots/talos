@@ -55,7 +55,7 @@ export function ChatSessionPage() {
     showReconnectControls,
     stopResponse,
     streamError,
-  } = useChatSession(sessionId, session?.state.message_count);
+  } = useChatSession(sessionId, session?.state.message_count, session?.title);
   const updateModel = useUpdateSessionModelMutation(sessionId);
   const updateProject = useUpdateSessionProjectMutation(sessionId);
   const updateApprovalMode = useUpdateSessionApprovalModeMutation(sessionId);
