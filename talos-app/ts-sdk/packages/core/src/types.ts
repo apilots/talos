@@ -81,6 +81,25 @@ export interface UserDto {
   updated_at: number;
 }
 
+export interface UserTokenMeta {
+  token_id: string;
+  name: string;
+  prefix: string;
+  created_at: number;
+  last_used_at?: number | null;
+  expires_at?: number | null;
+}
+
+export interface CreateUserTokenResult {
+  token_id: string;
+  raw_token: string;
+  prefix: string;
+}
+
+export interface CreateUserTokenRequest {
+  name: string;
+}
+
 export interface AuthResponse {
   access_token: string;
   token_type: string;

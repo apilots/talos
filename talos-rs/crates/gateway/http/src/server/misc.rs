@@ -2,8 +2,11 @@ use std::sync::Arc;
 
 use axum::extract::State;
 use axum::response::Json;
+use axum::Json as BodyJson;
 use serde_json::{json, Value};
 use tokio::signal;
+
+use talos_config::LlmConfig;
 
 use super::errors::ApiError;
 use super::state::HttpApiState;
@@ -28,6 +31,36 @@ pub(super) async fn list_models_handler(
         .map(|model| json!(model))
         .collect();
     Ok(Json(json!({ "data": data })))
+}
+
+pub(super) async fn get_llm_handler(
+    State(state): State<Arc<HttpApiState>>,
+) -> Result<Json<LlmConfig>, ApiError> {
+    let llm = state.config.get_llm().map_err(map_config_error)?;
+    Ok(Json(llm))
+}
+
+pub(super) async fn put_llm_handler(
+    State(state): State<Arc<HttpApiState>>,
+    BodyJson(llm): BodyJson<LlmConfig>,
+) -> Result<Json<LlmConfig>, ApiError> {
+    let result = state.config.update_llm(llm).map_err(map_config_error)?;
+    Ok(Json(result))
+}
+
+fn map_config_error(error: talos_error::TalosError) -> ApiError {
+    match error {
+        talos_error::TalosError::ValidationError(message) => ApiError::new(
+            axum::http::StatusCode::BAD_REQUEST,
+            "invalid_request",
+            message,
+        ),
+        other => ApiError::new(
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            other.to_string(),
+        ),
+    }
 }
 
 /// Handle shutdown signals.

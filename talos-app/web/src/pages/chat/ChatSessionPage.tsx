@@ -196,7 +196,7 @@ export function ChatSessionPage() {
             actions={
               <>
                 <Button onClick={() => navigate("/files")} variant="secondary">{t("chat:openFiles")}</Button>
-                <Button onClick={() => navigate("/memory")} variant="secondary">{t("chat:openMemory")}</Button>
+                <Button onClick={() => navigate("/settings/agent-workspace")} variant="secondary">{t("chat:openMemory")}</Button>
                 <Button onClick={() => navigate("/settings")} variant="secondary">{t("chat:openSettings")}</Button>
               </>
             }

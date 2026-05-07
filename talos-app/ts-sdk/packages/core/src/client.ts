@@ -9,12 +9,15 @@ import type {
   MemorySearchResult,
   ModelInfo,
   UserDto,
+  UserTokenMeta,
   ProjectPatch,
   ProjectRecord,
   PaginatedResponse,
   RegisterRequest,
   LoginRequest,
   AuthResponse,
+  CreateUserTokenRequest,
+  CreateUserTokenResult,
   UpdateCurrentUserRequest,
   AdminCreateUserRequest,
   AdminPatchUserRequest,
@@ -116,6 +119,23 @@ export class TalosClient {
         body: JSON.stringify(request),
       });
     },
+    tokens: {
+      list: async (): Promise<UserTokenMeta[]> => {
+        const response = await this.http.request<ListResponse<UserTokenMeta>>(this.url("/v1/user/tokens"));
+        return response.data;
+      },
+      create: async (request: CreateUserTokenRequest): Promise<CreateUserTokenResult> => {
+        return this.http.request<CreateUserTokenResult>(this.url("/v1/user/tokens"), {
+          method: "POST",
+          body: JSON.stringify(request),
+        });
+      },
+      delete: async (tokenId: string): Promise<void> => {
+        await this.http.request<void>(this.url(`/v1/user/tokens/${tokenId}`), {
+          method: "DELETE",
+        });
+      },
+    },
   };
 
   admin = {
@@ -160,16 +180,17 @@ export class TalosClient {
         return response.data;
       },
     },
-    llm: {
-      get: (): Promise<LlmConfig> => {
-        return this.http.request<LlmConfig>(this.url("/v1/admin/llm"));
-      },
-      update: (config: LlmConfig): Promise<LlmConfig> => {
-        return this.http.request<LlmConfig>(this.url("/v1/admin/llm"), {
-          method: "PUT",
-          body: JSON.stringify(config),
-        });
-      },
+  };
+
+  llm = {
+    get: (): Promise<LlmConfig> => {
+      return this.http.request<LlmConfig>(this.url("/v1/llm"));
+    },
+    update: (config: LlmConfig): Promise<LlmConfig> => {
+      return this.http.request<LlmConfig>(this.url("/v1/llm"), {
+        method: "PUT",
+        body: JSON.stringify(config),
+      });
     },
   };
 

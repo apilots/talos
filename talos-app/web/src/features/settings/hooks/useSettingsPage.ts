@@ -3,11 +3,31 @@ import { useEffect, useState } from "react";
 import { useModelsQuery } from "@/features/chat";
 import { useConnectionSettings } from "@/features/connection";
 
-export type SettingsTab = "general" | "keys" | "appearance" | "server";
+export type SettingsSection =
+  | "general"
+  | "models"
+  | "agent-workspace"
+  | "permissions"
+  | "account"
+  | "appearance"
+  | "advanced";
+
+export const settingsSections: SettingsSection[] = [
+  "general",
+  "models",
+  "agent-workspace",
+  "permissions",
+  "account",
+  "appearance",
+  "advanced",
+];
+
+export function isSettingsSection(section?: string): section is SettingsSection {
+  return Boolean(section && settingsSections.includes(section as SettingsSection));
+}
 
 export function useSettingsPage() {
   const { connection, setConnection, uiTheme, setUiTheme, locale, setLocale } = useConnectionSettings();
-  const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   const [draft, setDraft] = useState(connection);
   const [desktopNotifications, setDesktopNotifications] = useState(true);
   const [safeFileReads, setSafeFileReads] = useState(true);
@@ -26,8 +46,6 @@ export function useSettingsPage() {
     setUiTheme,
     locale,
     setLocale,
-    activeTab,
-    setActiveTab,
     draft,
     setDraft,
     desktopNotifications,

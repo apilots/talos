@@ -12,6 +12,7 @@ export interface ShellEnvironmentOptions {
   platform: NodeJS.Platform;
   shell?: string;
   configPath?: string;
+  envPath?: string;
   execLoginShell?: (shell: string) => Promise<NodeJS.ProcessEnv>;
 }
 
@@ -22,14 +23,20 @@ export async function resolveAppServerEnvironment(
   if (!shouldLoadLoginShellEnvironment(options)) {
     return baseEnv;
   }
+  const talosEnv = readTalosEnvFile(resolveTalosEnvPath(baseEnv, options.envPath));
+  const configEnv = {
+    ...talosEnv,
+    ...baseEnv,
+  };
 
   const shellEnv = await loadLoginShellEnvironment({
-    baseEnv,
+    baseEnv: configEnv,
     shell: options.shell,
-    placeholderNames: readConfigPlaceholderNames(resolveConfigPath(baseEnv, options.configPath)),
+    placeholderNames: readConfigPlaceholderNames(resolveConfigPath(configEnv, options.configPath)),
     execLoginShell: options.execLoginShell,
   });
   return {
+    ...talosEnv,
     ...shellEnv,
     ...baseEnv,
   };
@@ -78,6 +85,53 @@ function resolveConfigPath(env: NodeJS.ProcessEnv, configPath?: string): string 
   }
   const talosHome = env.TALOS_HOME?.trim() || path.join(os.homedir(), ".talos");
   return path.join(talosHome, "conf", "talos.yaml");
+}
+
+function resolveTalosEnvPath(env: NodeJS.ProcessEnv, envPath?: string): string {
+  if (envPath) {
+    return envPath;
+  }
+  const talosHome = env.TALOS_HOME?.trim() || path.join(os.homedir(), ".talos");
+  return path.join(talosHome, ".env");
+}
+
+export function readTalosEnvFile(envPath: string): NodeJS.ProcessEnv {
+  if (!existsSync(envPath)) {
+    return {};
+  }
+  return parseDotEnv(readFileSync(envPath, "utf8"));
+}
+
+export function parseDotEnv(content: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) {
+      continue;
+    }
+    const normalized = line.startsWith("export ") ? line.slice("export ".length).trim() : line;
+    const index = normalized.indexOf("=");
+    if (index <= 0) {
+      continue;
+    }
+    const key = normalized.slice(0, index).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      continue;
+    }
+    env[key] = unquoteEnvValue(normalized.slice(index + 1).trim());
+  }
+  return env;
+}
+
+function unquoteEnvValue(value: string): string {
+  if (
+    (value.startsWith("\"") && value.endsWith("\"")) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    return value.slice(1, -1);
+  }
+  const commentIndex = value.indexOf(" #");
+  return commentIndex >= 0 ? value.slice(0, commentIndex).trimEnd() : value;
 }
 
 export function readConfigPlaceholderNames(configPath: string): string[] {

@@ -5,8 +5,6 @@ use talos_error::{TalosError, TalosResult};
 use talos_types::{resolve_model_catalog, ModelInfo};
 use tokio::sync::RwLock;
 
-use crate::access::{Actor, ResourceAccessService};
-
 #[derive(Clone)]
 pub struct ConfigService {
     llm_config_service: Arc<dyn LlmConfigService>,
@@ -38,13 +36,11 @@ impl ConfigService {
         Err(TalosError::UnsupportedModel(model.to_string()))
     }
 
-    pub fn get_llm(&self, actor: &Actor) -> TalosResult<LlmConfig> {
-        ResourceAccessService::require_admin(actor)?;
+    pub fn get_llm(&self) -> TalosResult<LlmConfig> {
         self.llm_config_service.get()
     }
 
-    pub fn update_llm(&self, actor: &Actor, llm: LlmConfig) -> TalosResult<LlmConfig> {
-        ResourceAccessService::require_admin(actor)?;
+    pub fn update_llm(&self, llm: LlmConfig) -> TalosResult<LlmConfig> {
         let new_llm = self.llm_config_service.update(llm)?;
         self.reload_models(&new_llm)?;
         self.llm_config_service.get()
@@ -68,8 +64,6 @@ mod tests {
     use talos_config::{InMemoryLlmConfigStore, LlmConfigManager};
     use talos_error::TalosError;
     use talos_types::{ModelCompatConfig, ModelCostConfig, ModelInfo};
-
-    use crate::access::Actor;
 
     use super::ConfigService;
 
@@ -104,13 +98,13 @@ mod tests {
     }
 
     #[test]
-    fn get_llm_rejects_non_admin_actor() {
+    fn get_llm_allows_regular_users() {
         let service = test_service();
 
-        let error = service
-            .get_llm(&Actor::regular("member"))
-            .expect_err("non-admin should be rejected");
+        let llm = service
+            .get_llm()
+            .expect("regular user config read should work");
 
-        assert!(matches!(error, TalosError::AuthError(_)));
+        assert_eq!(llm.provider, "anthropic");
     }
 }

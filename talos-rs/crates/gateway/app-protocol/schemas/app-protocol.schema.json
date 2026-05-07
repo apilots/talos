@@ -456,6 +456,9 @@
       ],
       "type": "object"
     },
+    "AuthLogoutParams": {
+      "type": "object"
+    },
     "AuthRefreshParams": {
       "properties": {
         "reason": {
@@ -565,6 +568,14 @@
         "app.list",
         "tool.list",
         "account.get",
+        "auth.register",
+        "auth.login",
+        "auth.logout",
+        "user.current",
+        "user.update",
+        "user.token.list",
+        "user.token.create",
+        "user.token.delete",
         "memory.search"
       ],
       "type": "string"
@@ -1382,6 +1393,150 @@
           "properties": {
             "method": {
               "enum": [
+                "auth.register"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/RegisterRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "auth.login"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/LoginRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "auth.logout"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AuthLogoutParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "user.current"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/UserCurrentParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "user.update"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/UpdateCurrentUserRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "user.token.list"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/UserTokenListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "user.token.create"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/CreateUserTokenRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "user.token.delete"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/UserTokenDeleteParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "memory.search"
               ],
               "type": "string"
@@ -1430,6 +1585,17 @@
       "required": [
         "path",
         "value"
+      ],
+      "type": "object"
+    },
+    "CreateUserTokenRequest": {
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
       ],
       "type": "object"
     },
@@ -1614,6 +1780,17 @@
     },
     "JsonRpcRequest": {
       "properties": {
+        "actor_credentials": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ActorCredentials"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "id": {
           "$ref": "#/definitions/RequestId"
         },
@@ -1648,6 +1825,21 @@
         "id",
         "jsonrpc",
         "result"
+      ],
+      "type": "object"
+    },
+    "LoginRequest": {
+      "properties": {
+        "password": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "password",
+        "username"
       ],
       "type": "object"
     },
@@ -1932,6 +2124,28 @@
       "required": [
         "major",
         "minor"
+      ],
+      "type": "object"
+    },
+    "RegisterRequest": {
+      "properties": {
+        "email": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "password": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "password",
+        "username"
       ],
       "type": "object"
     },
@@ -3527,6 +3741,42 @@
         "status",
         "turn_id"
       ],
+      "type": "object"
+    },
+    "UpdateCurrentUserRequest": {
+      "properties": {
+        "email": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "username": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "UserCurrentParams": {
+      "type": "object"
+    },
+    "UserTokenDeleteParams": {
+      "properties": {
+        "token_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "token_id"
+      ],
+      "type": "object"
+    },
+    "UserTokenListParams": {
       "type": "object"
     },
     "WorkspaceDocListParams": {

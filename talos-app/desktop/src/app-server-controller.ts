@@ -10,7 +10,11 @@ import type { TalosRuntimeState } from "./ipc";
 export interface AppServerBridge {
   connect(): Promise<AppProtocol.InitializeResponse>;
   close(): Promise<void>;
-  invoke<T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T>;
+  invoke<T>(
+    method: AppProtocol.ClientMethod,
+    params: unknown,
+    options?: { actorCredentials?: AppProtocol.ActorCredentials | null },
+  ): Promise<T>;
   onEvent(handler: (envelope: AppProtocol.ApplicationEventEnvelope) => void): () => void;
   onSubscriptionTerminated(handler: (envelope: AppProtocol.SubscriptionTerminatedEnvelope) => void): () => void;
   onError(handler: (error: Error) => void): () => void;
@@ -59,12 +63,16 @@ export class DesktopAppServerController {
     return response;
   }
 
-  async invoke<T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T> {
+  async invoke<T>(
+    method: AppProtocol.ClientMethod,
+    params: unknown,
+    options?: { actorCredentials?: AppProtocol.ActorCredentials | null },
+  ): Promise<T> {
     if (this.reconnecting) {
       await this.reconnecting;
     }
 
-    const result = await this.ensureBridge().invoke<T>(method, params);
+    const result = await this.ensureBridge().invoke<T>(method, params, options);
     if (method === "event.subscribe") {
       this.recordSubscription(params as AppProtocol.EventSubscribeParams, result as AppProtocol.EventSubscribeResponse);
     }

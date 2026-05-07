@@ -9,9 +9,11 @@ export function registerDesktopIpcHandlers(runtime: DesktopAppServerController):
   ipcMain.handle(TALOS_IPC.connect, () => runtime.connect());
   ipcMain.handle(
     TALOS_IPC.invoke,
-    (_event, method: unknown, params: unknown) => {
-      assertDesktopRendererInvoke(method, params);
-      return runtime.invoke(method, params);
+    (_event, method: unknown, params: unknown, options: unknown) => {
+      const invokeOptions = assertDesktopRendererInvoke(method, params, options);
+      return runtime.invoke(invokeOptions.method, params, {
+        actorCredentials: invokeOptions.actorCredentials,
+      });
     },
   );
 }

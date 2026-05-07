@@ -8,7 +8,7 @@ import { useConnectionSettings } from "@/features/connection";
 import { useAppStore } from "@/shared/store/app-store";
 import { getEffectiveSessionStatus } from "@/shared/types/domain";
 
-export type AdminSection = "dashboard" | "users" | "sessions" | "tools" | "audit" | "models" | "system";
+export type AdminSection = "dashboard" | "users" | "sessions" | "tools" | "audit" | "system";
 
 const adminSessionsPageSize = 20;
 
@@ -18,7 +18,6 @@ export const adminSections: AdminSection[] = [
   "sessions",
   "tools",
   "audit",
-  "models",
   "system",
 ];
 

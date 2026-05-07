@@ -3,6 +3,7 @@ import type { AppProtocol } from "@talos/sdk-core";
 import type {
   AppServerErrorHandler,
   AppServerEventHandler,
+  AppServerRequestOptions,
   AppServerSubscriptionTerminatedHandler,
 } from "@talos/sdk-core";
 import {
@@ -24,8 +25,12 @@ export class DesktopMainAppServerBridge {
     return this.client.close();
   }
 
-  invoke<T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T> {
-    return this.client.transport.request<T>(method, params);
+  invoke<T>(
+    method: AppProtocol.ClientMethod,
+    params: unknown,
+    options?: AppServerRequestOptions,
+  ): Promise<T> {
+    return this.client.transport.request<T>(method, params, options);
   }
 
   onEvent(handler: AppServerEventHandler): () => void {

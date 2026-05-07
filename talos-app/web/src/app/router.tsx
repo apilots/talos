@@ -53,8 +53,7 @@ function RequireAdmin({ children }: { children: ReactNode }) {
     return <AuthLoading />;
   }
   const hasAdminAccess =
-    connection.authStatus === "open" ||
-    (connection.authStatus === "authenticated" && connection.authRole === "admin");
+    connection.authStatus === "authenticated" && connection.authRole === "admin";
   if (!hasAdminAccess) {
     return <Navigate replace to="/" />;
   }
@@ -118,6 +117,10 @@ export const router = createRouter([
       },
       {
         path: "settings",
+        element: withSuspense(<SettingsPage />),
+      },
+      {
+        path: "settings/:section",
         element: withSuspense(<SettingsPage />),
       },
       {

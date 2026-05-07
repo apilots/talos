@@ -12,6 +12,8 @@ const explicitAppServerBin = process.env.TALOS_APP_SERVER_BIN;
 const appServerBin = explicitAppServerBin ?? path.resolve(repoRoot, "talos-rs/target/debug/talos");
 const launchToken = process.env.TALOS_DESKTOP_LAUNCH_TOKEN ?? "desktop-smoke-token";
 const appExecutable = process.env.TALOS_DESKTOP_SMOKE_APP;
+const smokeUsername = process.env.TALOS_DESKTOP_SMOKE_USERNAME ?? "admin";
+const smokePassword = process.env.TALOS_DESKTOP_SMOKE_PASSWORD ?? "admin@123";
 const smokePrompt = `Talos desktop smoke ${timestamp()} - reply exactly ok.`;
 const createdSessionIds = [];
 let cdp;
@@ -56,41 +58,86 @@ try {
   await cdp.call("Page.enable");
   await waitForExpression(cdp, "Boolean(window.talos)", 30_000);
   await waitForExpression(cdp, "document.title === 'Talos'", 30_000);
+  const serverInfo = await evaluate(cdp, "window.talos.connect().then((response) => response.server_info)");
+
+  if (serverInfo?.auth_enabled === true) {
+    await waitForExpression(
+      cdp,
+      "Boolean(document.querySelector('#auth-username')) || Boolean(document.querySelector('[data-smoke=\"chat-composer-input\"]'))",
+      30_000,
+    );
+    const loginVisible = await evaluate(cdp, "Boolean(document.querySelector('#auth-username'))");
+    if (loginVisible) {
+      await setInputValue(cdp, "#auth-username", smokeUsername);
+      await setInputValue(cdp, "#auth-password", smokePassword);
+      await evaluate(cdp, "document.querySelector('form button[type=\"submit\"]')?.click(); undefined");
+    }
+    await waitForExpression(cdp, "Boolean(document.querySelector('[data-smoke=\"chat-composer-input\"]'))", 30_000);
+  }
+
+  await evaluate(
+    cdp,
+    `(() => {
+      const raw = window.localStorage?.getItem("talos-web-ui");
+      const token = raw ? JSON.parse(raw)?.state?.connection?.authToken : "";
+      window.__talosSmokeActorCredentials = token
+        ? { credential: { type: "existing_session_token", token } }
+        : null;
+      window.__talosSmokeInvoke = (method, params) => window.talos.invoke(
+        method,
+        params,
+        window.__talosSmokeActorCredentials
+          ? { actorCredentials: window.__talosSmokeActorCredentials }
+          : undefined
+      );
+      return true;
+    })()`,
+  );
 
   const modelCount = await waitForEvaluate(
     cdp,
-    "window.talos.invoke('model.list', {}).then((r) => r.models?.length ?? r.data?.length ?? 0)",
+    "window.__talosSmokeInvoke('model.list', {}).then((r) => r.models?.length ?? r.data?.length ?? 0)",
     30_000,
   );
   const toolCount = await waitForEvaluate(
     cdp,
-    "window.talos.invoke('tool.list', {}).then((r) => r.tools?.length ?? r.data?.length ?? 0)",
+    "window.__talosSmokeInvoke('tool.list', {}).then((r) => r.tools?.length ?? r.data?.length ?? 0)",
     30_000,
   );
-  const account = await waitForEvaluate(cdp, "window.talos.invoke('account.get', {})", 30_000);
+  const account = await waitForEvaluate(
+    cdp,
+    serverInfo?.auth_enabled === true
+      ? "window.__talosSmokeInvoke('user.current', {})"
+      : "window.__talosSmokeInvoke('account.get', {})",
+    30_000,
+  );
   const skillCount = await waitForEvaluate(
     cdp,
-    "window.talos.invoke('skill.list', {}).then((r) => r.skills?.length ?? r.data?.length ?? 0)",
+    "window.__talosSmokeInvoke('skill.list', {}).then((r) => r.skills?.length ?? r.data?.length ?? 0)",
     30_000,
   );
   const appCount = await waitForEvaluate(
     cdp,
-    "window.talos.invoke('app.list', {}).then((r) => r.apps?.length ?? r.data?.length ?? 0)",
+    "window.__talosSmokeInvoke('app.list', {}).then((r) => r.apps?.length ?? r.data?.length ?? 0)",
     30_000,
   );
   const adminVisible = await evaluate(
     cdp,
     "Array.from(document.querySelectorAll('a')).some((a) => (a.textContent || '').toLowerCase().includes('admin') || (a.getAttribute('href') || '').includes('/admin'))",
   );
-  const serverInfo = await evaluate(cdp, "window.talos.connect().then((response) => response.server_info)");
 
   assert(Number.isInteger(modelCount) && modelCount >= 0, "model.list did not return a model count.");
   assert(toolCount > 0, "tool.list returned no tools.");
   assert(skillCount > 0, "skill.list returned no discoverable skills.");
   assert(appCount > 0, "app.list returned no app shells.");
-  assert(serverInfo?.auth_enabled === false, `desktop server info did not reflect shared config auth=false: ${JSON.stringify(serverInfo)}`);
-  assert(account?.role === "admin", `account.get did not reflect open-mode desktop admin access: ${JSON.stringify(account)}`);
-  assert(adminVisible === true, "Admin navigation should match WebUI visibility when shared auth is open.");
+  assert(typeof serverInfo?.auth_enabled === "boolean", `desktop server info did not include auth state: ${JSON.stringify(serverInfo)}`);
+  if (serverInfo.auth_enabled) {
+    assert(account?.username === smokeUsername, `desktop login did not return the smoke user: ${JSON.stringify(account)}`);
+    assert(adminVisible === (account?.role === "admin"), "Admin navigation should match authenticated user role.");
+  } else {
+    assert(account?.role === "admin", `account.get did not reflect open-mode desktop admin access: ${JSON.stringify(account)}`);
+    assert(adminVisible === false, "Admin navigation should stay hidden in open auth mode.");
+  }
 
   await evaluate(cdp, "location.hash = '#/'; undefined");
   await waitForExpression(cdp, "Boolean(document.querySelector('[data-smoke=\"chat-composer-input\"]'))", 30_000);
@@ -104,7 +151,7 @@ try {
   await waitForExpression(cdp, `(document.body.textContent || '').includes(${JSON.stringify(smokePrompt)})`, 30_000);
   await waitForExpression(
     cdp,
-    `window.talos.invoke("session.turns", { session_id: ${JSON.stringify(createdSessionId)} }).then((response) => {
+    `window.__talosSmokeInvoke("session.turns", { session_id: ${JSON.stringify(createdSessionId)} }).then((response) => {
       const turns = response?.data ?? [];
       return turns.some((turn) => Array.isArray(turn.output) && turn.output.some((item) => item.type === "user_input" && item.text === ${JSON.stringify(smokePrompt)}));
     })`,
@@ -117,8 +164,8 @@ try {
     ["memory", "#/memory"],
     ["workspace-docs", "#/workspace-docs"],
     ["files", "#/files"],
-    ["admin", "#/admin"],
     ["settings", "#/settings"],
+    ["settings-models", "#/settings/models"],
   ];
 
   for (const [name, route] of routes) {
@@ -126,110 +173,39 @@ try {
     await sleep(500);
     await captureScreenshot(cdp, path.join(artifactDir, `${name}.png`));
   }
-  await evaluate(cdp, "location.hash = '#/settings'; undefined");
-  await sleep(500);
-  await evaluate(
-    cdp,
-    `Array.from(document.querySelectorAll("button")).find((button) => /server|服务器/i.test(button.textContent || ""))?.click(); undefined`,
-  );
-  await sleep(300);
-  const settingsText = await evaluate(cdp, "document.body.textContent || ''");
-  assert(settingsText.includes("Desktop local runtime"), "Settings page did not render desktop runtime state.");
+  await evaluate(cdp, "location.hash = '#/settings/advanced'; undefined");
+  await waitForExpression(cdp, "location.hash === '#/settings/advanced'", 30_000);
+  await waitForExpression(cdp, "(document.body.textContent || '').includes('Desktop local runtime')", 30_000);
 
-  await evaluate(cdp, "location.hash = '#/admin'; undefined");
+  await evaluate(cdp, "location.hash = '#/settings/models'; undefined");
+  await waitForExpression(cdp, "location.hash === '#/settings/models'", 30_000);
   await waitForExpression(
     cdp,
     `(() => {
-      const labels = Array.from(document.querySelectorAll("button")).map((button) => button.textContent || "");
-      return labels.some((text) => text.includes("Users") || text.includes("用户"))
-        && labels.some((text) => text.includes("Sessions") || text.includes("会话"))
-        && labels.some((text) => text.includes("Models") || text.includes("模型"));
+      const text = document.body.textContent || "";
+      return !text.includes("Loading configuration") && !text.includes("加载配置中");
     })()`,
     30_000,
   );
-  await clickButtonByText(cdp, ["Users", "用户"]);
-  await waitForExpression(cdp, "Boolean(document.querySelector('[data-smoke=\"admin-users-row\"]'))", 30_000);
-  const usersText = await evaluate(cdp, "document.body.textContent || ''");
-  assert(!usersText.includes("Admin APIs are not available"), "Admin Users should be available in desktop admin mode.");
-  await cdp.call("Emulation.setDeviceMetricsOverride", {
-    width: 760,
-    height: 720,
-    deviceScaleFactor: 1,
-    mobile: false,
-  });
-  await sleep(300);
-  await captureScreenshot(cdp, path.join(artifactDir, "admin-users-narrow.png"));
-  const usersLayout = await evaluate(
+  await waitForExpression(
     cdp,
     `(() => {
-      const row = document.querySelector('[data-smoke="admin-users-row"]');
-      if (!row) return { hasRows: false, overlaps: [] };
-      const cells = Array.from(row.querySelectorAll('[data-smoke$="-cell"]')).map((element) => {
-        const rect = element.getBoundingClientRect();
-        return {
-          key: element.getAttribute("data-smoke"),
-          left: rect.left,
-          right: rect.right,
-          top: rect.top,
-          bottom: rect.bottom,
-        };
-      });
-      const overlaps = [];
-      for (let outer = 0; outer < cells.length; outer += 1) {
-        for (let inner = outer + 1; inner < cells.length; inner += 1) {
-          const a = cells[outer];
-          const b = cells[inner];
-          const horizontal = Math.min(a.right, b.right) - Math.max(a.left, b.left);
-          const vertical = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
-          if (horizontal > 1 && vertical > 1) {
-            overlaps.push([a.key, b.key]);
-          }
-        }
-      }
-      return { hasRows: true, overlaps };
+      const text = document.body.textContent || "";
+      return (text.includes("Models") || text.includes("模型")) &&
+        (text.includes("Active Provider") ||
+          text.includes("当前 Provider") ||
+          ["Anthropic", "OpenAI", "Bailian", "Ollama"].every((label) => text.includes(label)));
     })()`,
-  );
-  assert(
-    usersLayout?.hasRows === true && usersLayout?.overlaps?.length === 0,
-    `Admin Users row cells overlap at narrow width: ${JSON.stringify(usersLayout)}`,
+    30_000,
   );
 
-  await cdp.call("Emulation.setDeviceMetricsOverride", {
-    width: 1280,
-    height: 820,
-    deviceScaleFactor: 1,
-    mobile: false,
-  });
-  await waitForExpression(cdp, "Boolean(document.querySelector('[data-smoke=\"admin-users-row\"]'))", 30_000);
-  await clickButtonByText(cdp, ["Sessions", "会话"]);
-  await waitForExpression(cdp, "Boolean(document.querySelector('[data-smoke=\"admin-sessions-actions-header\"]'))", 30_000);
-  const sessionHeaderLayout = await evaluate(
-    cdp,
-    `(() => {
-      const keys = ["status", "session", "owner", "updated", "actions"];
-      return keys.map((key) => {
-        const element = document.querySelector(\`[data-smoke="admin-sessions-\${key}-header"]\`);
-        if (!element) return null;
-        const rect = element.getBoundingClientRect();
-        return { key, left: rect.left, right: rect.right };
-      });
-    })()`,
-  );
-  assert(
-    Array.isArray(sessionHeaderLayout) && sessionHeaderLayout.every(Boolean),
-    `Admin Sessions headers were not rendered: ${JSON.stringify(sessionHeaderLayout)}`,
-  );
-  for (let index = 1; index < sessionHeaderLayout.length; index += 1) {
-    assert(
-      sessionHeaderLayout[index].left >= sessionHeaderLayout[index - 1].right - 1,
-      `Admin Sessions headers overlap: ${JSON.stringify(sessionHeaderLayout)}`,
-    );
+  await evaluate(cdp, "location.hash = '#/admin'; undefined");
+  if (account?.role === "admin" && serverInfo.auth_enabled) {
+    await waitForExpression(cdp, "location.hash === '#/admin'", 30_000);
+    await captureScreenshot(cdp, path.join(artifactDir, "admin.png"));
+  } else {
+    await waitForExpression(cdp, "location.hash === '#/'", 30_000);
   }
-
-  await clickButtonByText(cdp, ["Models", "模型"]);
-  await waitForExpression(cdp, "!(document.body.textContent || '').includes('Loading configuration')", 30_000);
-  const modelsText = await evaluate(cdp, "document.body.textContent || ''");
-  assert(!modelsText.includes("Loading configuration"), "Admin Models should not remain in loading state.");
 
   const cleanup = await cleanupCreatedSessions(cdp, createdSessionIds);
   assert(
@@ -403,8 +379,9 @@ async function setInputValue(cdp, selector, value) {
     `(() => {
       const element = document.querySelector(${JSON.stringify(selector)});
       if (!element) return false;
-      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
-        ?? Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      const setter = element instanceof HTMLTextAreaElement
+        ? Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
+        : Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
       setter?.call(element, ${JSON.stringify(value)});
       element.dispatchEvent(new Event("input", { bubbles: true }));
       return true;
@@ -436,13 +413,13 @@ async function cleanupCreatedSessions(cdp, sessionIds, options = {}) {
   for (const sessionId of uniqueSessionIds) {
     const result = await evaluate(
       cdp,
-      `(() => window.talos.invoke("session.delete", { session_id: ${JSON.stringify(sessionId)} })
+      `(() => window.__talosSmokeInvoke("session.delete", { session_id: ${JSON.stringify(sessionId)} })
         .then(() => ({ session_id: ${JSON.stringify(sessionId)}, deleted: true }))
         .catch(async (deleteError) => {
           if (${JSON.stringify(Boolean(options.cancelFirst))}) {
-            await window.talos.invoke("turn.interrupt", { session_id: ${JSON.stringify(sessionId)} }).catch(() => undefined);
+            await window.__talosSmokeInvoke("turn.interrupt", { session_id: ${JSON.stringify(sessionId)} }).catch(() => undefined);
             await new Promise((resolve) => setTimeout(resolve, 500));
-            return window.talos.invoke("session.delete", { session_id: ${JSON.stringify(sessionId)} })
+            return window.__talosSmokeInvoke("session.delete", { session_id: ${JSON.stringify(sessionId)} })
               .then(() => ({ session_id: ${JSON.stringify(sessionId)}, deleted: true, cancelled_first: true }))
               .catch((retryError) => ({
                 session_id: ${JSON.stringify(sessionId)},

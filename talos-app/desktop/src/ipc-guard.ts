@@ -23,6 +23,13 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
     isRecord(params) &&
     (params.role === undefined || userRole(params.role)),
   "app.list": emptyParams,
+  "auth.login": (params) => hasString(params, "username") && hasString(params, "password"),
+  "auth.logout": emptyParams,
+  "auth.register": (params) =>
+    hasString(params, "username") &&
+    hasString(params, "password") &&
+    isRecord(params) &&
+    (params.email === undefined || params.email === null || typeof params.email === "string"),
   "config.read": emptyParams,
   "config.value.write": (params) =>
     hasString(params, "path") &&
@@ -68,6 +75,14 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
     hasString(params, "session_id") &&
     hasArray(params, "input") &&
     hasString(params, "client_request_id"),
+  "user.current": emptyParams,
+  "user.token.create": (params) => hasString(params, "name"),
+  "user.token.delete": (params) => hasString(params, "token_id"),
+  "user.token.list": emptyParams,
+  "user.update": (params) =>
+    isRecord(params) &&
+    (params.username === undefined || params.username === null || typeof params.username === "string") &&
+    (params.email === undefined || params.email === null || typeof params.email === "string"),
   "workspace.doc.list": emptyParams,
   "workspace.doc.read": (params) => hasString(params, "kind"),
   "workspace.doc.write": (params) => hasString(params, "kind") && hasString(params, "content"),
@@ -78,7 +93,11 @@ export type DesktopRendererMethod = keyof typeof DESKTOP_RENDERER_METHOD_GUARDS;
 export function assertDesktopRendererInvoke(
   method: unknown,
   params: unknown,
-): asserts method is DesktopRendererMethod {
+  options?: unknown,
+): {
+  method: DesktopRendererMethod;
+  actorCredentials?: AppProtocol.ActorCredentials | null;
+} {
   if (typeof method !== "string" || !isDesktopRendererMethod(method)) {
     throw new Error(`Desktop renderer method is not allowed: ${String(method)}`);
   }
@@ -87,6 +106,10 @@ export function assertDesktopRendererInvoke(
   if (!guard(params)) {
     throw new Error(`Invalid desktop renderer params for method: ${method}`);
   }
+  return {
+    method,
+    actorCredentials: parseActorCredentials(options),
+  };
 }
 
 export function isDesktopRendererMethod(method: string): method is DesktopRendererMethod {
@@ -107,4 +130,30 @@ function hasBoolean(params: unknown, key: string): boolean {
 
 function hasArray(params: unknown, key: string): boolean {
   return isRecord(params) && Array.isArray(params[key]);
+}
+
+function parseActorCredentials(options: unknown): AppProtocol.ActorCredentials | null {
+  if (options === undefined || options === null) {
+    return null;
+  }
+  if (!isRecord(options)) {
+    throw new Error("Invalid desktop renderer invoke options.");
+  }
+  const credentials = options.actorCredentials;
+  if (credentials === undefined || credentials === null) {
+    return null;
+  }
+  if (!isRecord(credentials) || !isRecord(credentials.credential)) {
+    throw new Error("Invalid desktop renderer actor credentials.");
+  }
+  const credential = credentials.credential;
+  if (credential.type !== "existing_session_token" || typeof credential.token !== "string") {
+    throw new Error("Invalid desktop renderer actor credentials.");
+  }
+  return {
+    credential: {
+      type: "existing_session_token",
+      token: credential.token,
+    },
+  };
 }

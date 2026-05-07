@@ -8,12 +8,6 @@ export function SettingsServerSection({
   setDraft,
   models,
   setLocale,
-  setSafeFileReads,
-  setSafeFileWrites,
-  setTerminalApproval,
-  safeFileReads,
-  safeFileWrites,
-  terminalApproval,
 }: Pick<
   SettingsPageState,
   | "connection"
@@ -22,27 +16,15 @@ export function SettingsServerSection({
   | "setDraft"
   | "models"
   | "setLocale"
-  | "setSafeFileReads"
-  | "setSafeFileWrites"
-  | "setTerminalApproval"
-  | "safeFileReads"
-  | "safeFileWrites"
-  | "terminalApproval"
 >) {
   return (
     <SettingsServerConnectionPanel
       connection={connection}
       draft={draft}
       models={models}
-      safeFileReads={safeFileReads}
-      safeFileWrites={safeFileWrites}
       setConnection={setConnection}
       setDraft={setDraft}
       setLocale={setLocale}
-      setSafeFileReads={setSafeFileReads}
-      setSafeFileWrites={setSafeFileWrites}
-      setTerminalApproval={setTerminalApproval}
-      terminalApproval={terminalApproval}
     />
   );
 }

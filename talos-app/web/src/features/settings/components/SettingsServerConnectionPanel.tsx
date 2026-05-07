@@ -6,7 +6,7 @@ import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
 import { Panel } from "@/shared/ui/Panel";
 import { isDesktopRuntime } from "@/shared/api/desktop-client";
-import { FieldBlock, SectionHeader, ToggleRow } from "./SectionPrimitives";
+import { FieldBlock, SectionHeader } from "./SectionPrimitives";
 
 export type SettingsServerConnectionProps = Pick<
   SettingsPageState,
@@ -16,12 +16,6 @@ export type SettingsServerConnectionProps = Pick<
   | "setDraft"
   | "models"
   | "setLocale"
-  | "setSafeFileReads"
-  | "setSafeFileWrites"
-  | "setTerminalApproval"
-  | "safeFileReads"
-  | "safeFileWrites"
-  | "terminalApproval"
 >;
 
 export function SettingsServerConnectionPanel({
@@ -31,12 +25,6 @@ export function SettingsServerConnectionPanel({
   setDraft,
   models,
   setLocale,
-  setSafeFileReads,
-  setSafeFileWrites,
-  setTerminalApproval,
-  safeFileReads,
-  safeFileWrites,
-  terminalApproval,
 }: SettingsServerConnectionProps) {
   const { t } = useTranslation(["settings", "common"]);
   const desktopRuntime = isDesktopRuntime();
@@ -76,37 +64,11 @@ export function SettingsServerConnectionPanel({
         <FieldBlock label={t("settings:fields.authToken")}>
           <Input autoComplete="current-password" readOnly title={t("settings:fields.authManagedByLogin")} type="password" value="" />
         </FieldBlock>
-        <div className="grid gap-4 md:grid-cols-3">
-          <ToggleRow
-            description={t("settings:fields.fileReadsDetail")}
-            label={t("settings:fields.fileReads")}
-            onToggle={() => setSafeFileReads((current) => !current)}
-            value={safeFileReads}
-          />
-          <ToggleRow
-            description={t("settings:fields.fileWritesDetail")}
-            label={t("settings:fields.fileWrites")}
-            onToggle={() => setSafeFileWrites((current) => !current)}
-            value={safeFileWrites}
-          />
-          <ToggleRow
-            description={t("settings:fields.terminalCommandsDetail")}
-            label={t("settings:fields.terminalCommands")}
-            onToggle={() => setTerminalApproval((current) => !current)}
-            value={terminalApproval}
-          />
-        </div>
-        <FieldBlock label={t("settings:detectedWorkspace")}>
-          <Input disabled value={__TALOS_DEFAULT_PROJECT_ROOT__} />
-        </FieldBlock>
         <div className="flex items-center justify-end gap-3">
           <Button
             onClick={() => {
               setDraft(connection);
               setLocale("en");
-              setSafeFileReads(true);
-              setSafeFileWrites(false);
-              setTerminalApproval(true);
             }}
             type="button"
             variant="ghost"

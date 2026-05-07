@@ -1,12 +1,11 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Activity, Bot, Cpu, ListChecks, ShieldCheck, ShieldPlus, Users } from "lucide-react";
+import { Activity, Cpu, ListChecks, ShieldCheck, ShieldPlus, Users } from "lucide-react";
 
 import {
   AdminAuditSection,
   AdminDashboardSection,
-  AdminModelsSection,
-  AdminNavigation,
+    AdminNavigation,
   AdminSessionsSection,
   AdminSystemSection,
   AdminToolsSection,
@@ -37,7 +36,6 @@ export function AdminPage() {
       sessions: t("admin:sessions"),
       tools: t("admin:tools"),
       audit: t("admin:audit"),
-      models: t("admin:models"),
       system: t("admin:system"),
     }),
     [t],
@@ -48,7 +46,6 @@ export function AdminPage() {
     sessions: ListChecks,
     tools: ShieldPlus,
     audit: ShieldCheck,
-    models: Bot,
     system: Cpu,
   };
   return (
@@ -79,7 +76,6 @@ export function AdminPage() {
               ) : null}
               {activeSection === "tools" ? <AdminToolsSection /> : null}
               {activeSection === "audit" ? <AdminAuditSection /> : null}
-              {activeSection === "models" ? <AdminModelsSection /> : null}
               {activeSection === "system" ? <AdminSystemSection connection={connection} /> : null}
             </div>
           </div>

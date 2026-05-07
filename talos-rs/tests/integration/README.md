@@ -59,8 +59,8 @@ All scenarios are real server/client flows and do not use mock gateway handlers.
   - `workspace_docs_api.sh`
 
 8. `scenarios/08_admin_llm.sh`
-- Scope: admin LLM config API
-- Verifies: admin model/config read-write path
+- Scope: user-scoped LLM config API
+- Verifies: model/config read-write path for authenticated users
 
 9. `scenarios/08_tui/`
 - Scope: embedded TUI lifecycle validation

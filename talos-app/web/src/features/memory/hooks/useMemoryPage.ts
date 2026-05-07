@@ -8,6 +8,8 @@ import type {
   MemoryFileDetail,
 } from "@talos/sdk-browser";
 
+const MEMORY_SEARCH_TIMEOUT_MS = 30000;
+
 function isNotFoundError(error: unknown) {
   return error instanceof Error && error.message.includes("status 404");
 }
@@ -73,7 +75,7 @@ export function useMemoryPage() {
         new Promise<never>((_, reject) => {
           window.setTimeout(() => {
             reject(new Error("Memory search timed out. Try a narrower query."));
-          }, 8000);
+          }, MEMORY_SEARCH_TIMEOUT_MS);
         }),
       ]);
     },

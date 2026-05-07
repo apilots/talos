@@ -5,6 +5,7 @@ use std::fmt;
 use ts_rs::TS;
 
 use crate::errors::AppServerErrorBody;
+use crate::requests::ActorCredentials;
 
 pub const JSONRPC_VERSION: &str = "2.0";
 
@@ -21,6 +22,8 @@ pub struct JsonRpcRequest {
     pub id: RequestId,
     pub method: String,
     #[serde(default)]
+    pub actor_credentials: Option<ActorCredentials>,
+    #[serde(default)]
     #[schemars(schema_with = "crate::schema::json_value_schema")]
     #[ts(type = "unknown")]
     pub params: Option<serde_json::Value>,
@@ -36,6 +39,7 @@ impl JsonRpcRequest {
             jsonrpc: JSONRPC_VERSION.to_string(),
             id,
             method: method.into(),
+            actor_credentials: None,
             params,
         }
     }

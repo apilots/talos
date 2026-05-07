@@ -83,14 +83,11 @@ async fn test_list_admin_users_allows_auth_disabled_actor() {
 }
 
 #[tokio::test]
-async fn test_get_admin_llm_allows_auth_disabled_actor() {
+async fn test_get_llm_allows_auth_disabled_actor() {
     let state = test_state(true);
-    let response = get_admin_llm_handler(
-        State(state),
-        axum::extract::Extension(RequestIdentity::auth_disabled()),
-    )
-    .await
-    .expect("auth disabled actor should access admin llm");
+    let response = get_llm_handler(State(state))
+        .await
+        .expect("auth disabled actor should access llm config");
     assert_eq!(response.0.provider, "anthropic");
 }
 

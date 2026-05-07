@@ -1,17 +1,42 @@
-import { useEffect, useMemo } from "react";
+import type { LucideIcon } from "lucide-react";
+import { Bot, Brush, KeyRound, ServerCog, Settings2, ShieldCheck, UserRoundCog } from "lucide-react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { NavLink, Navigate, useParams } from "react-router-dom";
 
 import {
+  SettingsAgentWorkspaceSection,
   SettingsAppearanceSection,
   SettingsGeneralSection,
   SettingsKeysSection,
+  SettingsModelsSection,
+  SettingsPermissionsSection,
   SettingsServerSection,
+  isSettingsSection,
+  type SettingsSection,
   useSettingsPage,
 } from "@/features/settings";
+import { cn } from "@/shared/lib/cn";
 import { Panel } from "@/shared/ui/Panel";
+
+type SettingsNavigationItem = {
+  id: SettingsSection;
+  icon: LucideIcon;
+};
+
+const settingsNavigation: SettingsNavigationItem[] = [
+  { id: "general", icon: Settings2 },
+  { id: "models", icon: Bot },
+  { id: "agent-workspace", icon: UserRoundCog },
+  { id: "permissions", icon: ShieldCheck },
+  { id: "account", icon: KeyRound },
+  { id: "appearance", icon: Brush },
+  { id: "advanced", icon: ServerCog },
+];
 
 export function SettingsPage() {
   const { t } = useTranslation(["settings", "common"]);
+  const params = useParams();
   const {
     connection,
     setConnection,
@@ -19,8 +44,6 @@ export function SettingsPage() {
     setUiTheme,
     locale,
     setLocale,
-    activeTab,
-    setActiveTab,
     draft,
     setDraft,
     desktopNotifications,
@@ -33,78 +56,108 @@ export function SettingsPage() {
     setTerminalApproval,
     models,
   } = useSettingsPage();
-  const tabs = useMemo(
+  const requestedSection = params.section;
+  const activeSection = requestedSection ? requestedSection : "general";
+  const sections = useMemo(
     () =>
-      [
-        { id: "general", label: t("settings:tabs.general") },
-        connection.authStatus === "open" ? null : { id: "keys", label: t("settings:tabs.keys") },
-        { id: "appearance", label: t("settings:tabs.appearance") },
-        { id: "server", label: t("settings:tabs.server") },
-      ].filter(Boolean) as Array<{ id: string; label: string }>,
-    [connection.authStatus, t],
+      settingsNavigation.filter((item) => {
+        if (item.id === "account") {
+          return connection.authStatus !== "open";
+        }
+        return true;
+      }),
+    [connection.authStatus],
   );
 
-  useEffect(() => {
-    if (connection.authStatus === "open" && activeTab === "keys") {
-      setActiveTab("general");
-    }
-  }, [activeTab, connection.authStatus, setActiveTab]);
+  if (requestedSection && !isSettingsSection(requestedSection)) {
+    return <Navigate replace to="/settings" />;
+  }
+
+  if (activeSection === "account" && connection.authStatus === "open") {
+    return <Navigate replace to="/settings" />;
+  }
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-6 px-8 py-8">
-      <Panel className="rounded-[var(--radius-panel)] border-border/75 bg-card/86 p-2">
-        <div className="flex flex-wrap gap-2">
-          {tabs.map((tab) => (
-            <button
-              className={[
-                "rounded-[var(--radius-control)] px-4 py-2.5 text-sm transition",
-                activeTab === tab.id
-                  ? "bg-background/70 text-ink shadow-panel"
-                  : "text-muted hover:bg-background/45 hover:text-ink",
-              ].join(" ")}
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as "general" | "keys" | "appearance" | "server")}
-              type="button"
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </Panel>
+        <div className="mx-auto grid w-full max-w-[1280px] gap-6 px-8 py-8 xl:grid-cols-[260px_minmax(0,1fr)]">
+          <Panel className="h-fit rounded-[var(--radius-panel)] border-border/75 bg-card/86 p-3">
+            <div className="px-2 pb-2 pt-2">
+              <div className="text-[11px] uppercase tracking-[0.22em] text-muted/80">
+                {t("settings:pageLabel")}
+              </div>
+            </div>
+            <nav className="mt-3 space-y-1">
+              {sections.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <NavLink
+                    className={({ isActive }) =>
+                      cn(
+                        "flex items-center gap-3 rounded-[var(--radius-control)] px-3 py-2.5 text-sm text-muted transition hover:bg-background/55 hover:text-ink",
+                        (isActive || (item.id === "general" && activeSection === "general" && !requestedSection))
+                          && "bg-background/75 text-ink shadow-[inset_0_0_0_1px_rgba(224,218,209,0.5)]",
+                      )
+                    }
+                    key={item.id}
+                    to={item.id === "general" ? "/settings" : `/settings/${item.id}`}
+                  >
+                    <Icon size={16} />
+                    <span>{t(`settings:sections.${item.id}`)}</span>
+                  </NavLink>
+                );
+              })}
+            </nav>
+          </Panel>
 
-      {activeTab === "general" ? (
-        <SettingsGeneralSection draft={draft} locale={locale} setDraft={setDraft} setLocale={setLocale} uiTheme={uiTheme} />
-      ) : null}
+          <div className="min-w-0 space-y-5">
+            {activeSection === "general" ? (
+              <SettingsGeneralSection
+                draft={draft}
+                locale={locale}
+                setDraft={setDraft}
+                setLocale={setLocale}
+                uiTheme={uiTheme}
+              />
+            ) : null}
 
-      {activeTab === "keys" && connection.authStatus !== "open" ? <SettingsKeysSection /> : null}
+            {activeSection === "models" ? <SettingsModelsSection /> : null}
 
-      {activeTab === "appearance" ? (
-        <SettingsAppearanceSection
-          desktopNotifications={desktopNotifications}
-          setDesktopNotifications={setDesktopNotifications}
-          setUiTheme={setUiTheme}
-          uiTheme={uiTheme}
-        />
-      ) : null}
+            {activeSection === "agent-workspace" ? <SettingsAgentWorkspaceSection /> : null}
 
-      {activeTab === "server" ? (
-        <SettingsServerSection
-          connection={connection}
-          draft={draft}
-          models={models}
-          safeFileReads={safeFileReads}
-          safeFileWrites={safeFileWrites}
-          setConnection={setConnection}
-          setDraft={setDraft}
-          setLocale={setLocale}
-          setSafeFileReads={setSafeFileReads}
-          setSafeFileWrites={setSafeFileWrites}
-          setTerminalApproval={setTerminalApproval}
-          terminalApproval={terminalApproval}
-        />
-      ) : null}
+            {activeSection === "permissions" ? (
+              <SettingsPermissionsSection
+                safeFileReads={safeFileReads}
+                safeFileWrites={safeFileWrites}
+                setSafeFileReads={setSafeFileReads}
+                setSafeFileWrites={setSafeFileWrites}
+                setTerminalApproval={setTerminalApproval}
+                terminalApproval={terminalApproval}
+              />
+            ) : null}
+
+            {activeSection === "account" && connection.authStatus !== "open" ? <SettingsKeysSection /> : null}
+
+            {activeSection === "appearance" ? (
+              <SettingsAppearanceSection
+                desktopNotifications={desktopNotifications}
+                setDesktopNotifications={setDesktopNotifications}
+                setUiTheme={setUiTheme}
+                uiTheme={uiTheme}
+              />
+            ) : null}
+
+            {activeSection === "advanced" ? (
+              <SettingsServerSection
+                connection={connection}
+                draft={draft}
+                models={models}
+                setConnection={setConnection}
+                setDraft={setDraft}
+                setLocale={setLocale}
+              />
+            ) : null}
+          </div>
         </div>
       </div>
     </div>

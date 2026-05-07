@@ -4,7 +4,7 @@ import type { LlmConfig, ModelInputKind, ProviderConfig, ProviderModelConfig } f
 import { useTranslation } from "react-i18next";
 import { Brain, File, Image, Mic, Pencil, Plus, Trash2, Type, Video, X } from "lucide-react";
 
-import { getAdminLlmConfig, updateAdminLlmConfig } from "@/features/admin/api";
+import { getLlmConfig, updateLlmConfig } from "@/features/settings/api";
 import { useConnectionKey } from "@/features/chat";
 import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
@@ -310,8 +310,8 @@ export function AdminModelsSection() {
   const [draft, setDraft] = useState<LlmConfig | null>(null);
 
   const { data: serverConfig, isLoading, error } = useQuery({
-    queryKey: ["admin-llm-config", connectionKey],
-    queryFn: getAdminLlmConfig,
+    queryKey: ["llm-config", connectionKey],
+    queryFn: getLlmConfig,
   });
 
   // Keep draft in sync with server on initial load (but not on mutation success)
@@ -320,9 +320,9 @@ export function AdminModelsSection() {
   }, [serverConfig, draft]);
 
   const mutation = useMutation({
-    mutationFn: updateAdminLlmConfig,
+    mutationFn: updateLlmConfig,
     onSuccess: (updated) => {
-      queryClient.setQueryData(["admin-llm-config", connectionKey], updated);
+      queryClient.setQueryData(["llm-config", connectionKey], updated);
       setDraft(updated);
     },
   });

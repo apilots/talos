@@ -8,6 +8,7 @@ import {
   AppServerClient,
   type AppServerErrorHandler,
   type AppServerEventHandler,
+  type AppServerRequestOptions,
   type AppServerSubscriptionTerminatedHandler,
   type AppServerTransport,
 } from "@talos/sdk-core";
@@ -17,12 +18,14 @@ export interface JsonRpcStdioTransportOptions {
   args?: string[];
   env?: NodeJS.ProcessEnv;
   cwd?: string;
+  getActorCredentials?: () => AppProtocol.ActorCredentials | null | undefined;
 }
 
 export interface AppServerClientOptions extends JsonRpcStdioTransportOptions {
   launchToken: string;
   clientName?: string;
   clientVersion?: string;
+  getActorCredentials?: () => AppProtocol.ActorCredentials | null | undefined;
 }
 
 export type AppServerNotificationHandler = (
@@ -125,14 +128,20 @@ export class JsonRpcStdioTransport implements AppServerTransport {
     return child.kill(signal);
   }
 
-  request<T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T> {
+  request<T>(
+    method: AppProtocol.ClientMethod,
+    params: unknown,
+    options?: AppServerRequestOptions,
+  ): Promise<T> {
     this.start();
     const child = this.requireChild();
     const id = this.nextId++;
+    const actorCredentials = options?.actorCredentials ?? this.options.getActorCredentials?.();
     const message: AppProtocol.JsonRpcRequest = {
       jsonrpc: "2.0",
       id,
       method,
+      actor_credentials: actorCredentials ?? null,
       params,
     };
 
@@ -310,6 +319,7 @@ export class StdioAppServerClient extends AppServerClient {
       command: options.command,
       args: options.args ?? ["app-server"],
       cwd: options.cwd,
+      getActorCredentials: options.getActorCredentials,
       env: {
         ...(options.env ?? {}),
         TALOS_LOCAL_LAUNCH_TOKEN: options.launchToken,
@@ -345,6 +355,7 @@ export class StdioAppServerClient extends AppServerClient {
   close(): Promise<void> {
     return this.transport.close();
   }
+
 }
 
 export function createStdioAppServerClient(options: AppServerClientOptions) {

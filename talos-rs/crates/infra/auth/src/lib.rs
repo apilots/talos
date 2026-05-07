@@ -13,9 +13,11 @@ pub use store::{
     UserStore, UserTokenStore,
 };
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum UserRole {
     #[default]
@@ -186,7 +188,7 @@ pub struct UserPatch {
     pub disabled: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct UserDto {
     pub user_id: String,
     pub username: String,
@@ -197,7 +199,7 @@ pub struct UserDto {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct UserTokenMeta {
     pub token_id: String,
     pub name: String,
@@ -207,14 +209,14 @@ pub struct UserTokenMeta {
     pub expires_at: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct CreateUserTokenResult {
     pub token_id: String,
     pub raw_token: String,
     pub prefix: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct CreateUserTokenRequest {
     pub name: String,
 }
@@ -233,7 +235,7 @@ impl From<UserRecord> for UserDto {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct Capabilities {
     pub is_admin: bool,
     pub role: UserRole,
@@ -254,7 +256,7 @@ impl Capabilities {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct AuthResponse {
     pub access_token: String,
     pub token_type: String,
@@ -263,7 +265,7 @@ pub struct AuthResponse {
     pub capabilities: Capabilities,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct RegisterRequest {
     pub username: String,
     pub password: String,
@@ -271,13 +273,13 @@ pub struct RegisterRequest {
     pub email: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct LoginRequest {
     pub username: String,
     pub password: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct UpdateCurrentUserRequest {
     #[serde(default)]
     pub username: Option<String>,
@@ -285,7 +287,7 @@ pub struct UpdateCurrentUserRequest {
     pub email: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct AdminCreateUserRequest {
     pub username: String,
     pub password: String,
@@ -296,7 +298,7 @@ pub struct AdminCreateUserRequest {
     pub disabled: Option<bool>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct AdminPatchUserRequest {
     #[serde(default)]
     pub username: Option<String>,

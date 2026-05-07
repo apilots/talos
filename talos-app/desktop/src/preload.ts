@@ -7,8 +7,11 @@ import type { AppProtocol } from "@talos/sdk-core";
 
 const bridge: TalosDesktopBridge = {
   connect: () => ipcRenderer.invoke(TALOS_IPC.connect) as Promise<AppProtocol.InitializeResponse>,
-  invoke: <T>(method: AppProtocol.ClientMethod, params: unknown) =>
-    ipcRenderer.invoke(TALOS_IPC.invoke, method, params) as Promise<T>,
+  invoke: <T>(
+    method: AppProtocol.ClientMethod,
+    params: unknown,
+    options?: { actorCredentials?: AppProtocol.ActorCredentials | null },
+  ) => ipcRenderer.invoke(TALOS_IPC.invoke, method, params, options) as Promise<T>,
   onEvent: (handler) => {
     const listener = (_event: IpcRendererEvent, envelope: AppProtocol.ApplicationEventEnvelope) => {
       handler(envelope);

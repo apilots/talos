@@ -11,7 +11,7 @@ let clientFactory: TalosClientFactory | undefined;
 function createDefaultBrowserClient() {
   const desktopBridge = getDesktopBridge();
   if (desktopBridge) {
-    return createDesktopTalosClient(desktopBridge);
+    return createDesktopTalosClient(desktopBridge, () => getConnectionSettings().authToken || undefined);
   }
 
   const { serverUrl, authToken } = getConnectionSettings();

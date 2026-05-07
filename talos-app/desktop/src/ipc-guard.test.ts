@@ -28,6 +28,46 @@ describe("desktop IPC guard", () => {
     })).not.toThrow();
   });
 
+  it("allows shared auth and user methods with real session credentials", () => {
+    const result = assertDesktopRendererInvoke(
+      "user.current",
+      {},
+      {
+        actorCredentials: {
+          credential: {
+            type: "existing_session_token",
+            token: "token-1",
+          },
+        },
+      },
+    );
+
+    expect(isDesktopRendererMethod("auth.login")).toBe(true);
+    expect(isDesktopRendererMethod("user.token.create")).toBe(true);
+    expect(result.actorCredentials?.credential.type).toBe("existing_session_token");
+    expect(() => assertDesktopRendererInvoke("auth.login", {
+      username: "admin",
+      password: "admin@123",
+    })).not.toThrow();
+  });
+
+  it("rejects renderer attempts to pass local launch credentials", () => {
+    expect(() =>
+      assertDesktopRendererInvoke(
+        "user.current",
+        {},
+        {
+          actorCredentials: {
+            credential: {
+              type: "local_launch_token",
+              token: "secret",
+            },
+          },
+        },
+      ),
+    ).toThrow("Invalid desktop renderer actor credentials.");
+  });
+
   it("rejects initialize and unsupported config writes from renderer", () => {
     expect(isDesktopRendererMethod("initialize")).toBe(false);
     expect(() => assertDesktopRendererInvoke("config.value.write", {

@@ -3,11 +3,14 @@ import type {
   AdminCreateUserRequest,
   AdminPatchUserRequest,
   AppProtocol,
+  CreateUserTokenRequest,
   DocUpdateRequest,
   LlmConfig,
+  LoginRequest,
   MemoryFileListParams,
   MemorySearchParams,
   PaginatedResponse,
+  RegisterRequest,
   SessionQuery,
   SessionUpdate,
   TalosEvent,
@@ -17,7 +20,7 @@ import type {
   TalosSession,
   TalosSessionEventRecord,
   ToolApprovalRequest,
-  UserDto,
+  UpdateCurrentUserRequest,
   WorkspaceDocKind,
 } from "@talos/sdk-core";
 
@@ -38,8 +41,13 @@ export function isDesktopRuntime(): boolean {
   return getDesktopBridge() !== undefined;
 }
 
-export function createDesktopTalosClient(bridge: DesktopRendererBridge): TalosWebClient {
-  const client = createElectronAppServerClient(bridge);
+export function createDesktopTalosClient(
+  bridge: DesktopRendererBridge,
+  getToken: () => string | null | undefined = () => undefined,
+): TalosWebClient {
+  const client = createElectronAppServerClient(bridge, {
+    getActorCredentials: () => actorCredentialsFromToken(getToken()),
+  });
 
   const messages = {
     send: async (sessionId: string, request: TalosMessageRequest): Promise<TalosMessageAck> => {
@@ -121,14 +129,17 @@ export function createDesktopTalosClient(bridge: DesktopRendererBridge): TalosWe
 
   return {
     auth: {
-      register: unsupportedAuth,
-      login: unsupportedAuth,
-      logout: async () => undefined,
+      register: (request: RegisterRequest) => client.authRegister(request),
+      login: (request: LoginRequest) => client.authLogin(request),
+      logout: () => client.authLogout().then(() => undefined),
     },
     user: {
-      current: () => client.getAccount() as Promise<UserDto>,
-      update: async () => {
-        throw new Error("User profile updates are not available in desktop app-server mode yet.");
+      current: () => client.getCurrentUser(),
+      update: (request: UpdateCurrentUserRequest) => client.updateCurrentUser(request),
+      tokens: {
+        list: () => client.listUserTokens(),
+        create: (request: CreateUserTokenRequest) => client.createUserToken(request),
+        delete: (tokenId: string) => client.deleteUserToken(tokenId).then(() => undefined),
       },
     },
     admin: {
@@ -154,10 +165,10 @@ export function createDesktopTalosClient(bridge: DesktopRendererBridge): TalosWe
       projects: {
         list: () => client.listAdminProjects(),
       },
-      llm: {
-        get: () => client.getLlmConfig(),
-        update: (config: LlmConfig) => client.updateLlmConfig(config),
-      },
+    },
+    llm: {
+      get: () => client.getLlmConfig(),
+      update: (config: LlmConfig) => client.updateLlmConfig(config),
     },
     models: {
       list: () => client.listModels(),
@@ -460,6 +471,15 @@ function createClientRequestId(): string {
   return `desktop_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 
-async function unsupportedAuth(): Promise<never> {
-  throw new Error("HTTP authentication is not used in desktop app-server mode.");
+function actorCredentialsFromToken(token: string | null | undefined): AppProtocol.ActorCredentials | null {
+  const trimmed = token?.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return {
+    credential: {
+      type: "existing_session_token",
+      token: trimmed,
+    },
+  };
 }

@@ -46,17 +46,17 @@ user_payload='{"username":"user-llm","password":"password123","email":"user-llm@
 request_json POST "${GATEWAY_URL}/v1/auth/register" "${user_payload}"
 user_token="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["access_token"])' <<< "${HTTP_BODY}")"
 
-# CASE: non-admin cannot access admin/llm
-request_json GET "${GATEWAY_URL}/v1/admin/llm" "" "${user_token}"
-log_case_json "admin_llm_requires_admin_get" "{}" "${HTTP_BODY}"
-if [[ "${HTTP_STATUS}" != "403" ]]; then
-  echo "CASE admin_llm_requires_admin_get FAIL expected=403 actual=${HTTP_STATUS}"
+# CASE: regular user can access user-scoped llm config
+request_json GET "${GATEWAY_URL}/v1/llm" "" "${user_token}"
+log_case_json "user_get_llm_config" "{}" "${HTTP_BODY}"
+if [[ "${HTTP_STATUS}" != "200" ]]; then
+  echo "CASE user_get_llm_config FAIL expected=200 actual=${HTTP_STATUS} body=${HTTP_BODY}"
   exit 1
 fi
-echo "CASE admin_llm_requires_admin_get PASS status=${HTTP_STATUS}"
+echo "CASE user_get_llm_config PASS status=${HTTP_STATUS}"
 
-# CASE: admin can GET /v1/admin/llm
-request_json GET "${GATEWAY_URL}/v1/admin/llm" "" "${admin_token}"
+# CASE: admin can also GET /v1/llm
+request_json GET "${GATEWAY_URL}/v1/llm" "" "${admin_token}"
 log_case_json "admin_get_llm_config" "{}" "${HTTP_BODY}"
 if [[ "${HTTP_STATUS}" != "200" ]]; then
   echo "CASE admin_get_llm_config FAIL expected=200 actual=${HTTP_STATUS} body=${HTTP_BODY}"
@@ -94,23 +94,23 @@ print(json.dumps(llm))
 PYEOF
 )"
 
-request_json PUT "${GATEWAY_URL}/v1/admin/llm" "${new_llm}" "${admin_token}"
-log_case_json "admin_put_llm_adds_model" "${new_llm}" "${HTTP_BODY}"
+request_json PUT "${GATEWAY_URL}/v1/llm" "${new_llm}" "${user_token}"
+log_case_json "user_put_llm_adds_model" "${new_llm}" "${HTTP_BODY}"
 if [[ "${HTTP_STATUS}" != "200" ]]; then
-  echo "CASE admin_put_llm_adds_model FAIL expected=200 actual=${HTTP_STATUS} body=${HTTP_BODY}"
+  echo "CASE user_put_llm_adds_model FAIL expected=200 actual=${HTTP_STATUS} body=${HTTP_BODY}"
   exit 1
 fi
-echo "CASE admin_put_llm_adds_model PASS"
+echo "CASE user_put_llm_adds_model PASS"
 
 # Verify /v1/models now includes the test model
 request_json GET "${GATEWAY_URL}/v1/models" "" "${admin_token}"
-log_case_json "admin_llm_model_catalog_updated" "{}" "${HTTP_BODY}"
+log_case_json "user_llm_model_catalog_updated" "{}" "${HTTP_BODY}"
 found="$(python3 -c 'import json,sys; data=json.loads(sys.stdin.read()).get("data",[]); print(any(m.get("id")=="test-model-e2e" for m in data))' <<< "${HTTP_BODY}")"
 if [[ "${found}" != "True" ]]; then
-  echo "CASE admin_llm_model_catalog_updated FAIL test-model-e2e not found body=${HTTP_BODY}"
+  echo "CASE user_llm_model_catalog_updated FAIL test-model-e2e not found body=${HTTP_BODY}"
   exit 1
 fi
-echo "CASE admin_llm_model_catalog_updated PASS"
+echo "CASE user_llm_model_catalog_updated PASS"
 
 # CASE: PUT removes the test model
 current_llm="$(NEW_LLM="${new_llm}" python3 - <<'PYEOF'
@@ -123,17 +123,17 @@ print(json.dumps(llm))
 PYEOF
 )"
 
-request_json PUT "${GATEWAY_URL}/v1/admin/llm" "${current_llm}" "${admin_token}"
-log_case_json "admin_put_llm_removes_model" "${current_llm}" "${HTTP_BODY}"
+request_json PUT "${GATEWAY_URL}/v1/llm" "${current_llm}" "${user_token}"
+log_case_json "user_put_llm_removes_model" "${current_llm}" "${HTTP_BODY}"
 if [[ "${HTTP_STATUS}" != "200" ]]; then
-  echo "CASE admin_put_llm_removes_model FAIL expected=200 actual=${HTTP_STATUS} body=${HTTP_BODY}"
+  echo "CASE user_put_llm_removes_model FAIL expected=200 actual=${HTTP_STATUS} body=${HTTP_BODY}"
   exit 1
 fi
 
 request_json GET "${GATEWAY_URL}/v1/models" "" "${admin_token}"
 found="$(python3 -c 'import json,sys; data=json.loads(sys.stdin.read()).get("data",[]); print(any(m.get("id")=="test-model-e2e" for m in data))' <<< "${HTTP_BODY}")"
 if [[ "${found}" != "False" ]]; then
-  echo "CASE admin_put_llm_removes_model FAIL test-model-e2e still present"
+  echo "CASE user_put_llm_removes_model FAIL test-model-e2e still present"
   exit 1
 fi
-echo "CASE admin_put_llm_removes_model PASS"
+echo "CASE user_put_llm_removes_model PASS"

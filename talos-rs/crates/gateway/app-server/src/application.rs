@@ -334,7 +334,7 @@ impl AppServerApplication for TalosApplicationAdapter {
                 let llm = self
                     .app
                     .config
-                    .get_llm(actor)
+                    .get_llm()
                     .map_err(AppServerErrorBody::from_talos_error)?;
                 to_value(llm)
             }
@@ -415,6 +415,76 @@ impl AppServerApplication for TalosApplicationAdapter {
                 "created_at": 0,
                 "updated_at": 0
             })),
+            ClientRequestParams::AuthRegister(params) => {
+                let response = self
+                    .app
+                    .account
+                    .register(params)
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(response)
+            }
+            ClientRequestParams::AuthLogin(params) => {
+                let response = self
+                    .app
+                    .account
+                    .login(params)
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(response)
+            }
+            ClientRequestParams::AuthLogout(_) => {
+                self.app
+                    .account
+                    .logout(&request_identity(actor))
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(json!({ "success": true }))
+            }
+            ClientRequestParams::UserCurrent(_) => {
+                let user = self
+                    .app
+                    .account
+                    .current_user(&request_identity(actor))
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(user)
+            }
+            ClientRequestParams::UserUpdate(params) => {
+                let user = self
+                    .app
+                    .account
+                    .patch_current_user(&request_identity(actor), params)
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(user)
+            }
+            ClientRequestParams::UserTokenList(_) => {
+                let tokens = self
+                    .app
+                    .account
+                    .list_tokens(&request_identity(actor))
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(json!({ "data": tokens }))
+            }
+            ClientRequestParams::UserTokenCreate(params) => {
+                let token = self
+                    .app
+                    .account
+                    .create_token(&request_identity(actor), &params.name)
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(token)
+            }
+            ClientRequestParams::UserTokenDelete(params) => {
+                self.app
+                    .account
+                    .revoke_token(&request_identity(actor), &params.token_id)
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(json!({ "success": true }))
+            }
             ClientRequestParams::MemorySearch(_) => self.dispatch_secondary(actor, request).await,
         }
     }
@@ -655,7 +725,7 @@ impl TalosApplicationAdapter {
 
     async fn write_config_value(
         &self,
-        actor: &Actor,
+        _actor: &Actor,
         params: ConfigValueWriteParams,
     ) -> ProtocolResult<Value> {
         if params.path != "llm" {
@@ -669,7 +739,7 @@ impl TalosApplicationAdapter {
         let updated = self
             .app
             .config
-            .update_llm(actor, llm)
+            .update_llm(llm)
             .map_err(AppServerErrorBody::from_talos_error)?;
         to_value(updated)
     }

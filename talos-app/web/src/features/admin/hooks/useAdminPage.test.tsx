@@ -8,7 +8,7 @@ import type { PropsWithChildren } from "react";
 
 import "@/shared/i18n/setup";
 import { useAppStore } from "@/shared/store/app-store";
-import { useAdminPage } from "./useAdminPage";
+import { adminSections, useAdminPage } from "./useAdminPage";
 
 const listAdminSessionsMock = vi.fn((query?: { limit?: number; offset?: number }) =>
   Promise.resolve({
@@ -107,6 +107,11 @@ describe("useAdminPage", () => {
       expect(result.current.metrics[0]?.value).toBe("42");
       expect(result.current.metrics[1]?.value).toBe("1");
     });
+  });
+
+  it("keeps model configuration out of the admin section list", () => {
+    expect(adminSections).not.toContain("models");
+    expect(adminSections).toContain("system");
   });
 
   it("filters session rows by search query", async () => {

@@ -26,8 +26,8 @@ use tracing::{error, info};
 
 use self::admin_users::{
     create_admin_user_handler, delete_admin_session_handler, delete_admin_user_handler,
-    get_admin_llm_handler, list_admin_projects_handler, list_admin_sessions_handler,
-    list_admin_users_handler, patch_admin_user_handler, put_admin_llm_handler,
+    list_admin_projects_handler, list_admin_sessions_handler, list_admin_users_handler,
+    patch_admin_user_handler,
 };
 use self::auth::{auth_middleware, lifecycle_gate_middleware};
 use self::events::{get_active_turn_handler, subscribe_session_events_handler};
@@ -40,7 +40,9 @@ use self::messages::{
     retry_message_attempt_handler, session_message_handler, submit_dynamic_tool_result_handler,
     submit_tool_approval_handler,
 };
-use self::misc::{health_handler, list_models_handler, shutdown_signal};
+use self::misc::{
+    get_llm_handler, health_handler, list_models_handler, put_llm_handler, shutdown_signal,
+};
 use self::projects::{
     create_project_handler, delete_project_handler, get_project_handler, list_projects_handler,
     patch_project_handler,
@@ -192,10 +194,7 @@ impl HttpServer {
                 axum::routing::delete(delete_admin_session_handler),
             )
             .route("/v1/admin/projects", get(list_admin_projects_handler))
-            .route(
-                "/v1/admin/llm",
-                get(get_admin_llm_handler).put(put_admin_llm_handler),
-            )
+            .route("/v1/llm", get(get_llm_handler).put(put_llm_handler))
             .route(
                 "/v1/sessions",
                 get(list_sessions_handler).post(create_session_handler),

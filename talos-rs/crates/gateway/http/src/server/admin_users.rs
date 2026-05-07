@@ -12,7 +12,6 @@ use serde_json::{json, Value};
 
 use talos_application_service::AdminSessionPage;
 use talos_auth::RequestIdentity;
-use talos_config::LlmConfig;
 use talos_types::SessionQuery;
 
 use super::access::shared_actor;
@@ -69,29 +68,6 @@ pub(super) async fn list_admin_projects_handler(
         .await
         .map_err(map_admin_error)?;
     Ok(Json(json!({ "data": projects })))
-}
-
-pub(super) async fn get_admin_llm_handler(
-    State(state): State<Arc<HttpApiState>>,
-    actor: axum::extract::Extension<RequestIdentity>,
-) -> Result<Json<LlmConfig>, ApiError> {
-    let llm = state
-        .config
-        .get_llm(&shared_actor(&actor.0))
-        .map_err(map_admin_error)?;
-    Ok(Json(llm))
-}
-
-pub(super) async fn put_admin_llm_handler(
-    State(state): State<Arc<HttpApiState>>,
-    actor: axum::extract::Extension<RequestIdentity>,
-    Json(llm): Json<LlmConfig>,
-) -> Result<Json<LlmConfig>, ApiError> {
-    let result = state
-        .config
-        .update_llm(&shared_actor(&actor.0), llm)
-        .map_err(map_admin_error)?;
-    Ok(Json(result))
 }
 
 fn map_admin_error(error: talos_error::TalosError) -> ApiError {

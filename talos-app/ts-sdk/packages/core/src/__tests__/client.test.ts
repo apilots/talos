@@ -17,6 +17,25 @@ describe("TalosClient", () => {
     expect(request).toHaveBeenCalledWith("http://localhost:8080/v1/models");
   });
 
+  it("reads and writes llm config through the user config route", async () => {
+    const request = vi.fn().mockResolvedValue({ provider: "anthropic", model: "claude-sonnet-4" });
+    const http: HttpAdapter = { request };
+    const streamAdapter: StreamAdapter = {
+      stream: vi.fn().mockResolvedValue(undefined),
+    };
+    const client = new TalosClient(http, streamAdapter, "http://localhost:8080/");
+    const config = { provider: "anthropic", model: "claude-sonnet-4" } as never;
+
+    await client.llm.get();
+    await client.llm.update(config);
+
+    expect(request).toHaveBeenNthCalledWith(1, "http://localhost:8080/v1/llm");
+    expect(request).toHaveBeenNthCalledWith(2, "http://localhost:8080/v1/llm", {
+      method: "PUT",
+      body: JSON.stringify(config),
+    });
+  });
+
   it("uses ack plus events for streaming messages", async () => {
     const http: HttpAdapter = {
       request: vi.fn().mockResolvedValue({

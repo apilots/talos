@@ -3,6 +3,7 @@ import type { AppProtocol } from "@talos/sdk-core";
 import {
   AppServerClient,
   type AppServerEventHandler,
+  type AppServerRequestOptions,
   type AppServerSubscriptionTerminatedHandler,
   type AppServerTransport,
 } from "@talos/sdk-core";
@@ -10,7 +11,11 @@ import {
 export type DesktopTalosMethod = AppProtocol.ClientMethod;
 
 export interface DesktopTalosInvoke {
-  <T>(method: DesktopTalosMethod, params: unknown): Promise<T>;
+  <T>(
+    method: DesktopTalosMethod,
+    params: unknown,
+    options?: AppServerRequestOptions,
+  ): Promise<T>;
 }
 
 export interface DesktopTalosEventSource {
@@ -34,10 +39,19 @@ export async function getDesktopServerInfo(
 }
 
 class DesktopRendererTransport implements AppServerTransport {
-  constructor(private readonly bridge: DesktopRendererBridge) {}
+  constructor(
+    private readonly bridge: DesktopRendererBridge,
+    private readonly options: ElectronAppServerClientOptions,
+  ) {}
 
-  request<T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T> {
-    return this.bridge.invoke<T>(method, params);
+  request<T>(
+    method: AppProtocol.ClientMethod,
+    params: unknown,
+    options?: AppServerRequestOptions,
+  ): Promise<T> {
+    return this.bridge.invoke<T>(method, params, {
+      actorCredentials: options?.actorCredentials ?? this.options.getActorCredentials?.() ?? null,
+    });
   }
 
   onEvent(handler: AppServerEventHandler): () => void {
@@ -50,11 +64,18 @@ class DesktopRendererTransport implements AppServerTransport {
 }
 
 export class ElectronAppServerClient extends AppServerClient {
-  constructor(bridge: DesktopRendererBridge) {
-    super(new DesktopRendererTransport(bridge));
+  constructor(bridge: DesktopRendererBridge, options: ElectronAppServerClientOptions = {}) {
+    super(new DesktopRendererTransport(bridge, options));
   }
 }
 
-export function createElectronAppServerClient(bridge: DesktopRendererBridge) {
-  return new ElectronAppServerClient(bridge);
+export interface ElectronAppServerClientOptions {
+  getActorCredentials?: () => AppProtocol.ActorCredentials | null | undefined;
+}
+
+export function createElectronAppServerClient(
+  bridge: DesktopRendererBridge,
+  options: ElectronAppServerClientOptions = {},
+) {
+  return new ElectronAppServerClient(bridge, options);
 }

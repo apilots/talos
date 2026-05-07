@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { FileText, FolderOpen, HardDriveUpload, LogOut, MemoryStick, Plus, Settings2, Shield, SlidersHorizontal, Trash2 } from "lucide-react";
+import { FolderOpen, HardDriveUpload, LogOut, Plus, Settings2, Shield, SlidersHorizontal, Trash2 } from "lucide-react";
 import { Link, NavLink } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -79,7 +79,7 @@ export function Sidebar({
   const avatarLabel = connection.authUsername.trim().charAt(0).toUpperCase() || "U";
   const desktopRuntime = isDesktopRuntime();
   const shellLabel = desktopRuntime ? "DESKTOP" : t("sidebar:webConsole");
-  const canShowAdmin = connection.authStatus === "open" || connection.authRole === "admin";
+  const canShowAdmin = connection.authStatus === "authenticated" && connection.authRole === "admin";
 
   useEffect(() => {
     if (!accountMenuOpen) {
@@ -206,40 +206,42 @@ export function Sidebar({
       </div>
 
       <nav className="mt-5 space-y-1 border-t border-border/80 pt-5">
-        <NavItem icon={<MemoryStick size={16} />} label={t("sidebar:memory")} to="/memory" />
-        <NavItem icon={<FileText size={16} />} label={t("sidebar:workspaceDocs")} to="/workspace-docs" />
         <NavItem icon={<HardDriveUpload size={16} />} label={t("sidebar:files")} to="/files" />
-        <NavItem icon={<Settings2 size={16} />} label={t("sidebar:settings")} to="/settings" />
         {canShowAdmin ? (
           <NavItem icon={<Shield size={16} />} label={t("sidebar:admin")} to="/admin" />
         ) : null}
       </nav>
 
       <div className="relative mt-4 border-t border-border/80 pt-4" ref={accountMenuRef}>
-        {accountMenuOpen && connection.authStatus !== "open" ? (
+        {accountMenuOpen ? (
           <div className="absolute bottom-[calc(100%+0.5rem)] left-0 right-0 z-20 rounded-[1rem] border border-border/80 bg-card p-1.5 shadow-[0_20px_36px_rgba(95,84,64,0.16)]">
-            <button
+            <NavLink
+              className="flex w-full items-center gap-2 rounded-[0.85rem] px-3 py-2 text-sm text-ink transition hover:bg-background/75"
+              onClick={() => setAccountMenuOpen(false)}
+              to="/settings"
+            >
+              <Settings2 size={14} />
+              {t("sidebar:settings")}
+            </NavLink>
+            {connection.authStatus !== "open" ? (
+              <button
               className="flex w-full items-center gap-2 rounded-[0.85rem] px-3 py-2 text-sm text-ink transition hover:bg-background/75"
               onClick={() => {
                 setAccountMenuOpen(false);
                 void onLogout();
               }}
               type="button"
-            >
-              <LogOut size={14} />
-              {t("sidebar:logout")}
-            </button>
+              >
+                <LogOut size={14} />
+                {t("sidebar:logout")}
+              </button>
+            ) : null}
           </div>
         ) : null}
         <button
           aria-expanded={accountMenuOpen}
           className="flex w-full items-center gap-3 rounded-[0.95rem] px-2 py-2 text-left transition hover:bg-card/70"
-          onClick={() => {
-            if (connection.authStatus === "open") {
-              return;
-            }
-            setAccountMenuOpen((open) => !open);
-          }}
+          onClick={() => setAccountMenuOpen((open) => !open)}
           type="button"
         >
           <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-background/85 text-xs font-semibold text-ink">

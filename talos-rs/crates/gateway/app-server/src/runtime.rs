@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use talos_app_protocol::errors::{AppServerErrorBody, ALREADY_INITIALIZED};
+use talos_app_protocol::errors::{AppServerErrorBody, ALREADY_INITIALIZED, UNAUTHORIZED};
 use talos_app_protocol::events::{
     canonical_method, SubscriptionTerminatedEnvelope, SubscriptionTerminatedReason,
 };
@@ -10,7 +10,7 @@ use talos_app_protocol::jsonrpc::{
     JsonRpcResponse, RequestId,
 };
 use talos_app_protocol::requests::{
-    ClientMethod, ClientRequest, ClientRequestParams, EventSubscribeResponse,
+    ActorCredentials, ClientMethod, ClientRequest, ClientRequestParams, EventSubscribeResponse,
     EventUnsubscribeResponse, InitializeResponse, ServerInfo,
 };
 use talos_app_protocol::version::ProtocolVersion;
@@ -209,6 +209,7 @@ async fn handle_request(
     outgoing_tx: mpsc::Sender<OutgoingMessage>,
 ) -> Result<(), ()> {
     let id = request.id.clone();
+    let request_actor_credentials = request.actor_credentials.clone();
     let decoded = ClientRequest::decode(&request.method, request.params)
         .map_err(|error| send_error(outgoing_tx.clone(), id.clone(), error));
     let decoded = match decoded {
@@ -255,8 +256,19 @@ async fn handle_request(
             if !state.initialized_notification_seen {
                 return send_error(outgoing_tx, id, AppServerErrorBody::not_initialized()).await;
             }
-            let actor = state.actor.as_ref().expect("actor checked before dispatch");
-            match app.subscribe_session_events(actor, params).await {
+            let actor = match resolve_request_actor(
+                state,
+                validator.as_ref(),
+                config,
+                decoded.method,
+                request_actor_credentials,
+            )
+            .await
+            {
+                Ok(actor) => actor,
+                Err(error) => return send_error(outgoing_tx, id, error).await,
+            };
+            match app.subscribe_session_events(&actor, params).await {
                 Ok(source) => {
                     let subscription_id = format!("sub_{}", Uuid::new_v4().simple());
                     let response = EventSubscribeResponse {
@@ -291,6 +303,17 @@ async fn handle_request(
             if !state.initialized_notification_seen {
                 return send_error(outgoing_tx, id, AppServerErrorBody::not_initialized()).await;
             }
+            if let Err(error) = resolve_request_actor(
+                state,
+                validator.as_ref(),
+                config,
+                decoded.method,
+                request_actor_credentials,
+            )
+            .await
+            {
+                return send_error(outgoing_tx, id, error).await;
+            }
             let unsubscribed =
                 if let Some(task) = state.subscription_tasks.remove(&params.subscription_id) {
                     task.abort();
@@ -311,12 +334,23 @@ async fn handle_request(
             .await
         }
         params => {
-            let actor = state.actor.as_ref().expect("actor checked before dispatch");
+            let actor = match resolve_request_actor(
+                state,
+                validator.as_ref(),
+                config,
+                decoded.method,
+                request_actor_credentials,
+            )
+            .await
+            {
+                Ok(actor) => actor,
+                Err(error) => return send_error(outgoing_tx, id, error).await,
+            };
             let request = ClientRequest {
                 method: decoded.method,
                 params,
             };
-            match app.dispatch(actor, request).await {
+            match app.dispatch(&actor, request).await {
                 Ok(result) => {
                     if decoded.method == ClientMethod::TurnStart {
                         if let Some(session_id) = result
@@ -333,6 +367,34 @@ async fn handle_request(
             }
         }
     }
+}
+
+async fn resolve_request_actor(
+    state: &RuntimeState,
+    validator: &dyn ActorCredentialValidator,
+    config: &AppServerConfig,
+    method: ClientMethod,
+    request_actor_credentials: Option<ActorCredentials>,
+) -> Result<Actor, AppServerErrorBody> {
+    if !config.auth_enabled || is_public_auth_method(method) {
+        return state
+            .actor
+            .clone()
+            .ok_or_else(AppServerErrorBody::not_initialized);
+    }
+
+    let credentials = request_actor_credentials.ok_or_else(|| {
+        AppServerErrorBody::new(
+            UNAUTHORIZED,
+            "authenticated JSON-RPC request requires actor credentials",
+            None,
+        )
+    })?;
+    validator.validate(&credentials).await
+}
+
+fn is_public_auth_method(method: ClientMethod) -> bool {
+    matches!(method, ClientMethod::AuthLogin | ClientMethod::AuthRegister)
 }
 
 fn spawn_subscription(
@@ -608,6 +670,29 @@ mod tests {
         }
     }
 
+    struct ExistingTokenValidator;
+
+    #[async_trait]
+    impl ActorCredentialValidator for ExistingTokenValidator {
+        async fn validate(&self, credentials: &ActorCredentials) -> ProtocolResult<Actor> {
+            match &credentials.credential {
+                talos_app_protocol::requests::ActorCredential::LocalLaunchToken { token }
+                    if token == "secret" =>
+                {
+                    Ok(Actor::regular("local-desktop"))
+                }
+                talos_app_protocol::requests::ActorCredential::ExistingSessionToken { token }
+                    if token == "user-token" =>
+                {
+                    Ok(Actor::regular("user-1"))
+                }
+                _ => Err(AppServerErrorBody::from_talos_error(
+                    talos_error::TalosError::AuthError("invalid token".to_string()),
+                )),
+            }
+        }
+    }
+
     #[tokio::test]
     async fn request_before_initialize_returns_not_initialized() {
         let output = run_with_input(session_read_request()).await;
@@ -644,6 +729,51 @@ mod tests {
         let output = run_with_app(
             format!("{}{}", initialize_request("secret"), session_read_request()),
             app.clone(),
+        )
+        .await;
+        let messages = parse_output(&output);
+
+        assert!(messages[1]["result"]["ok"].as_bool().unwrap_or(false));
+        assert_eq!(
+            app.dispatched.lock().expect("dispatch lock").as_slice(),
+            &["session.read"]
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_enabled_requires_request_actor_credentials_after_initialize() {
+        let app = Arc::new(MockApp::default());
+        let output = run_with_app_validator_and_config(
+            format!("{}{}", initialize_request("secret"), session_read_request()),
+            app.clone(),
+            Arc::new(ExistingTokenValidator),
+            AppServerConfig {
+                auth_enabled: true,
+                ..AppServerConfig::default()
+            },
+        )
+        .await;
+        let messages = parse_output(&output);
+
+        assert_eq!(messages[1]["error"]["code"], UNAUTHORIZED);
+        assert!(app.dispatched.lock().expect("dispatch lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn auth_enabled_dispatches_with_existing_session_token_credentials() {
+        let app = Arc::new(MockApp::default());
+        let output = run_with_app_validator_and_config(
+            format!(
+                "{}{}",
+                initialize_request("secret"),
+                session_read_request_with_actor_token("user-token")
+            ),
+            app.clone(),
+            Arc::new(ExistingTokenValidator),
+            AppServerConfig {
+                auth_enabled: true,
+                ..AppServerConfig::default()
+            },
         )
         .await;
         let messages = parse_output(&output);
@@ -699,15 +829,18 @@ mod tests {
         app: Arc<MockApp>,
         validator: Arc<dyn ActorCredentialValidator>,
     ) -> String {
+        run_with_app_validator_and_config(input, app, validator, AppServerConfig::default()).await
+    }
+
+    async fn run_with_app_validator_and_config(
+        input: String,
+        app: Arc<MockApp>,
+        validator: Arc<dyn ActorCredentialValidator>,
+        config: AppServerConfig,
+    ) -> String {
         let (mut client, server) = duplex(16 * 1024);
         let (server_read, server_write) = split(server);
-        let server_task = tokio::spawn(run_jsonl(
-            server_read,
-            server_write,
-            app,
-            validator,
-            AppServerConfig::default(),
-        ));
+        let server_task = tokio::spawn(run_jsonl(server_read, server_write, app, validator, config));
         client
             .write_all(input.as_bytes())
             .await
@@ -757,6 +890,24 @@ mod tests {
                 "jsonrpc": "2.0",
                 "id": 2,
                 "method": "session.read",
+                "params": { "session_id": "s1" }
+            })
+        )
+    }
+
+    fn session_read_request_with_actor_token(token: &str) -> String {
+        format!(
+            "{}\n",
+            json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session.read",
+                "actor_credentials": {
+                    "credential": {
+                        "type": "existing_session_token",
+                        "token": token
+                    }
+                },
                 "params": { "session_id": "s1" }
             })
         )

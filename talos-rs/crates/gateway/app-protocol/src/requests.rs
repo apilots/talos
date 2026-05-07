@@ -3,6 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
+use talos_auth::{
+    AuthResponse, CreateUserTokenRequest, CreateUserTokenResult, LoginRequest, RegisterRequest,
+    UpdateCurrentUserRequest, UserDto, UserTokenMeta,
+};
 use ts_rs::TS;
 
 use crate::errors::AppServerErrorBody;
@@ -106,6 +110,22 @@ pub enum ClientMethod {
     ToolList,
     #[serde(rename = "account.get")]
     AccountGet,
+    #[serde(rename = "auth.register")]
+    AuthRegister,
+    #[serde(rename = "auth.login")]
+    AuthLogin,
+    #[serde(rename = "auth.logout")]
+    AuthLogout,
+    #[serde(rename = "user.current")]
+    UserCurrent,
+    #[serde(rename = "user.update")]
+    UserUpdate,
+    #[serde(rename = "user.token.list")]
+    UserTokenList,
+    #[serde(rename = "user.token.create")]
+    UserTokenCreate,
+    #[serde(rename = "user.token.delete")]
+    UserTokenDelete,
     #[serde(rename = "memory.search")]
     MemorySearch,
 }
@@ -157,6 +177,14 @@ impl ClientMethod {
             Self::AppList => "app.list",
             Self::ToolList => "tool.list",
             Self::AccountGet => "account.get",
+            Self::AuthRegister => "auth.register",
+            Self::AuthLogin => "auth.login",
+            Self::AuthLogout => "auth.logout",
+            Self::UserCurrent => "user.current",
+            Self::UserUpdate => "user.update",
+            Self::UserTokenList => "user.token.list",
+            Self::UserTokenCreate => "user.token.create",
+            Self::UserTokenDelete => "user.token.delete",
             Self::MemorySearch => "memory.search",
         }
     }
@@ -217,6 +245,14 @@ impl FromStr for ClientMethod {
             "app.list" => Ok(Self::AppList),
             "tool.list" => Ok(Self::ToolList),
             "account.get" => Ok(Self::AccountGet),
+            "auth.register" => Ok(Self::AuthRegister),
+            "auth.login" => Ok(Self::AuthLogin),
+            "auth.logout" => Ok(Self::AuthLogout),
+            "user.current" => Ok(Self::UserCurrent),
+            "user.update" => Ok(Self::UserUpdate),
+            "user.token.list" => Ok(Self::UserTokenList),
+            "user.token.create" => Ok(Self::UserTokenCreate),
+            "user.token.delete" => Ok(Self::UserTokenDelete),
             "memory.search" => Ok(Self::MemorySearch),
             _ => Err(AppServerErrorBody::method_not_found(value)),
         }
@@ -314,6 +350,22 @@ pub enum ClientRequestParams {
     ToolList(ToolListParams),
     #[serde(rename = "account.get")]
     AccountGet(AccountGetParams),
+    #[serde(rename = "auth.register")]
+    AuthRegister(RegisterRequest),
+    #[serde(rename = "auth.login")]
+    AuthLogin(LoginRequest),
+    #[serde(rename = "auth.logout")]
+    AuthLogout(AuthLogoutParams),
+    #[serde(rename = "user.current")]
+    UserCurrent(UserCurrentParams),
+    #[serde(rename = "user.update")]
+    UserUpdate(UpdateCurrentUserRequest),
+    #[serde(rename = "user.token.list")]
+    UserTokenList(UserTokenListParams),
+    #[serde(rename = "user.token.create")]
+    UserTokenCreate(CreateUserTokenRequest),
+    #[serde(rename = "user.token.delete")]
+    UserTokenDelete(UserTokenDeleteParams),
     #[serde(rename = "memory.search")]
     MemorySearch(MemorySearchParams),
 }
@@ -426,6 +478,22 @@ impl ClientRequest {
             ClientMethod::AppList => ClientRequestParams::AppList(decode(params_value)?),
             ClientMethod::ToolList => ClientRequestParams::ToolList(decode(params_value)?),
             ClientMethod::AccountGet => ClientRequestParams::AccountGet(decode(params_value)?),
+            ClientMethod::AuthRegister => {
+                ClientRequestParams::AuthRegister(decode(params_value)?)
+            }
+            ClientMethod::AuthLogin => ClientRequestParams::AuthLogin(decode(params_value)?),
+            ClientMethod::AuthLogout => ClientRequestParams::AuthLogout(decode(params_value)?),
+            ClientMethod::UserCurrent => ClientRequestParams::UserCurrent(decode(params_value)?),
+            ClientMethod::UserUpdate => ClientRequestParams::UserUpdate(decode(params_value)?),
+            ClientMethod::UserTokenList => {
+                ClientRequestParams::UserTokenList(decode(params_value)?)
+            }
+            ClientMethod::UserTokenCreate => {
+                ClientRequestParams::UserTokenCreate(decode(params_value)?)
+            }
+            ClientMethod::UserTokenDelete => {
+                ClientRequestParams::UserTokenDelete(decode(params_value)?)
+            }
             ClientMethod::MemorySearch => ClientRequestParams::MemorySearch(decode(params_value)?),
         };
         Ok(Self {
@@ -815,6 +883,27 @@ pub struct ToolListParams {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
 pub struct AccountGetParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct AuthLogoutParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct UserCurrentParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct UserTokenListParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct UserTokenDeleteParams {
+    pub token_id: String,
+}
+
+pub type AuthRegisterResponse = AuthResponse;
+pub type AuthLoginResponse = AuthResponse;
+pub type UserCurrentResponse = UserDto;
+pub type UserUpdateResponse = UserDto;
+pub type UserTokenListResponse = Vec<UserTokenMeta>;
+pub type UserTokenCreateResponse = CreateUserTokenResult;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
 pub struct MemorySearchParams {

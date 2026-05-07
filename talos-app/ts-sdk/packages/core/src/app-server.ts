@@ -9,11 +9,18 @@ import type {
   ProjectRecord,
   AdminCreateUserRequest,
   AdminPatchUserRequest,
+  AuthResponse,
+  CreateUserTokenRequest,
+  CreateUserTokenResult,
+  LoginRequest,
+  RegisterRequest,
   TalosActiveTurn,
   TalosMessageAck,
   TalosMessageResponse,
   TalosSession,
+  UpdateCurrentUserRequest,
   UserDto,
+  UserTokenMeta,
   WorkspaceDocDetail,
   WorkspaceDocKind,
   WorkspaceDocSummary,
@@ -29,8 +36,16 @@ export type AppServerSubscriptionTerminatedHandler = (
 
 export type AppServerErrorHandler = (error: Error) => void;
 
+export interface AppServerRequestOptions {
+  actorCredentials?: AppProtocol.ActorCredentials | null;
+}
+
 export interface AppServerTransport {
-  request<T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T>;
+  request<T>(
+    method: AppProtocol.ClientMethod,
+    params: unknown,
+    options?: AppServerRequestOptions,
+  ): Promise<T>;
   onEvent(handler: AppServerEventHandler): () => void;
   onSubscriptionTerminated?(handler: AppServerSubscriptionTerminatedHandler): () => void;
   onError?(handler: AppServerErrorHandler): () => void;
@@ -92,6 +107,40 @@ export class AppServerClient {
 
   getAccount(): Promise<unknown> {
     return this.transport.request("account.get", {});
+  }
+
+  authRegister(request: RegisterRequest): Promise<AuthResponse> {
+    return this.transport.request("auth.register", request);
+  }
+
+  authLogin(request: LoginRequest): Promise<AuthResponse> {
+    return this.transport.request("auth.login", request);
+  }
+
+  authLogout(): Promise<unknown> {
+    return this.transport.request("auth.logout", {});
+  }
+
+  getCurrentUser(): Promise<UserDto> {
+    return this.transport.request("user.current", {});
+  }
+
+  updateCurrentUser(request: UpdateCurrentUserRequest): Promise<UserDto> {
+    return this.transport.request("user.update", request);
+  }
+
+  listUserTokens(): Promise<UserTokenMeta[]> {
+    return this.transport
+      .request<ListResponse<UserTokenMeta>>("user.token.list", {})
+      .then((response) => response.data);
+  }
+
+  createUserToken(request: CreateUserTokenRequest): Promise<CreateUserTokenResult> {
+    return this.transport.request("user.token.create", request);
+  }
+
+  deleteUserToken(tokenId: string): Promise<unknown> {
+    return this.transport.request("user.token.delete", { token_id: tokenId });
   }
 
   listSkills(): Promise<unknown[]> {
