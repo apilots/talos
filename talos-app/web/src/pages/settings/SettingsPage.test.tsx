@@ -89,6 +89,13 @@ describe("SettingsPage", () => {
     expect(screen.getByText("Agent Workspace")).toBeTruthy();
   });
 
+  it("only marks the exact routed settings item as current", () => {
+    renderSettings("/settings/agent-workspace", "authenticated", "admin");
+
+    expect(screen.getByRole("link", { name: "General" }).getAttribute("aria-current")).toBeNull();
+    expect(screen.getByRole("link", { name: "Agent Workspace" }).getAttribute("aria-current")).toBe("page");
+  });
+
   it("hides account settings for open access mode", () => {
     renderSettings("/settings", "open");
 

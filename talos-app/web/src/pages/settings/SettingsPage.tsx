@@ -2,7 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import { Bot, Brush, KeyRound, ServerCog, Settings2, ShieldCheck, UserRoundCog } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { NavLink, Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useParams } from "react-router-dom";
 
 import {
   SettingsAgentWorkspaceSection,
@@ -90,21 +90,20 @@ export function SettingsPage() {
             <nav className="mt-3 space-y-1">
               {sections.map((item) => {
                 const Icon = item.icon;
+                const isCurrent = activeSection === item.id;
                 return (
-                  <NavLink
-                    className={({ isActive }) =>
-                      cn(
-                        "flex items-center gap-3 rounded-[var(--radius-control)] px-3 py-2.5 text-sm text-muted transition hover:bg-background/55 hover:text-ink",
-                        (isActive || (item.id === "general" && activeSection === "general" && !requestedSection))
-                          && "bg-background/75 text-ink shadow-[inset_0_0_0_1px_rgba(224,218,209,0.5)]",
-                      )
-                    }
+                  <Link
+                    aria-current={isCurrent ? "page" : undefined}
+                    className={cn(
+                      "flex items-center gap-3 rounded-[var(--radius-control)] px-3 py-2.5 text-sm text-muted transition hover:bg-background/55 hover:text-ink",
+                      isCurrent && "bg-background/75 text-ink shadow-[inset_0_0_0_1px_rgba(224,218,209,0.5)]",
+                    )}
                     key={item.id}
                     to={item.id === "general" ? "/settings" : `/settings/${item.id}`}
                   >
                     <Icon size={16} />
                     <span>{t(`settings:sections.${item.id}`)}</span>
-                  </NavLink>
+                  </Link>
                 );
               })}
             </nav>
