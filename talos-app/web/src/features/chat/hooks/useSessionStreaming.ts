@@ -74,7 +74,7 @@ export function useSessionStreaming(
       const clientMessageId = createClientMessageId();
       resetStream(sessionId);
       if (appendUserInput && text.trim().length > 0) {
-        setPendingInput(sessionId, { text, clientMessageId });
+        setPendingInput(sessionId, { text, clientMessageId, phase: "local" });
       }
       useAppStore.getState().setStreamError(sessionId, undefined);
       useAppStore.getState().setStreamMeta(sessionId, {
@@ -87,7 +87,9 @@ export function useSessionStreaming(
         awaitingFinalResponse: false,
       });
       setSessionStatus(sessionId, "running");
-      await eventMessage(text);
+      await eventMessage(text, (messageId) => {
+        markPendingInputAccepted(sessionId, clientMessageId, messageId);
+      });
     },
     onSuccess: async () => {
       await invalidateSessionQueries();
@@ -153,7 +155,7 @@ export function useSessionStreaming(
       }
 
       resetStream(sessionId);
-      setPendingInput(sessionId, { text, clientMessageId });
+      setPendingInput(sessionId, { text, clientMessageId, phase: "local" });
       useAppStore.getState().setStreamError(sessionId, undefined);
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: true,
@@ -165,7 +167,14 @@ export function useSessionStreaming(
         awaitingFinalResponse: false,
       });
       setSessionStatus(sessionId, "running");
-      await retryMessage({ clientMessageId, retryOfMessageId, text });
+      await retryMessage({
+        clientMessageId,
+        retryOfMessageId,
+        text,
+        onAcceptedMessageId: (messageId) => {
+          markPendingInputAccepted(sessionId, clientMessageId, messageId);
+        },
+      });
     },
     onSuccess: async () => {
       await invalidateSessionQueries();
@@ -241,4 +250,23 @@ function createClientMessageId() {
     return `client_${globalThis.crypto.randomUUID()}`;
   }
   return `client_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+function markPendingInputAccepted(
+  sessionId: string,
+  clientMessageId: string,
+  serverMessageId: string,
+) {
+  const currentPendingInput = useAppStore.getState().streams[sessionId]?.pendingInput;
+  if (!currentPendingInput || currentPendingInput.clientMessageId !== clientMessageId) {
+    return;
+  }
+  useAppStore.getState().setPendingInput(sessionId, {
+    ...currentPendingInput,
+    serverMessageId,
+    phase: "accepted",
+  });
+  useAppStore.getState().setStreamMeta(sessionId, {
+    activeMessageId: serverMessageId,
+  });
 }

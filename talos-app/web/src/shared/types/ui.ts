@@ -90,10 +90,24 @@ export interface PendingApproval {
   arguments: unknown;
 }
 
+export type PendingInputPhase = "local" | "accepted" | "completed";
+
 export interface PendingInput {
   text: string;
-  clientMessageId?: string;
+  clientMessageId: string;
   serverMessageId?: string;
+  phase: PendingInputPhase;
+}
+
+export interface SessionInputHistoryItem {
+  messageId: string;
+  itemIndex: number;
+  text: string;
+}
+
+export interface SessionInputHistory {
+  committed: SessionInputHistoryItem[];
+  pendingInput?: PendingInput;
 }
 
 export interface StreamSessionState {

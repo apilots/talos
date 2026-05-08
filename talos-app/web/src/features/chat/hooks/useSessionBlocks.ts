@@ -60,7 +60,7 @@ export function buildSessionBlocks({
   const historyBlocks = mapTurnsToBlocks(turns ?? []);
   const historyHasActiveMessage = hasHistoryMessage(turns, streamState?.activeMessageId);
   const historyHasPendingInput = hasHistoryPendingInput(turns, streamState?.pendingInput);
-  const pendingInputBlock = historyHasPendingInput ? undefined : createPendingInputBlock(streamState, turns);
+  const pendingInputBlock = historyHasPendingInput ? undefined : createPendingInputBlock(streamState);
   const liveBlocks = historyHasActiveMessage ? [] : streamState?.blocks ?? [];
   const nextBlocks = [
     ...historyBlocks,
@@ -149,42 +149,16 @@ function hasHistoryPendingInput(
 
 function createPendingInputBlock(
   streamState: StreamSessionState | undefined,
-  turns: ChatApiTurns | undefined,
 ): ChatRenderBlock | undefined {
   const pendingInput = streamState?.pendingInput;
   if (!pendingInput?.text.trim()) {
     return undefined;
   }
 
-  const isActivePendingInput = isStreamTurnActive(streamState);
-  const hasCommittedInput = (turns ?? []).some(
-    (turn) =>
-      !pendingInput.serverMessageId &&
-      !isActivePendingInput &&
-      turn.output.some((item) => item.type === "user_input" && item.text === pendingInput.text),
-  );
-
-  if (hasCommittedInput) {
-    return undefined;
-  }
-
   return {
-    id: `pending-user-${pendingInput.clientMessageId ?? streamState?.activeMessageId ?? "input"}`,
+    id: `pending-user-${pendingInput.clientMessageId}`,
     kind: "user",
     text: pendingInput.text,
     live: true,
   };
-}
-
-function isStreamTurnActive(streamState: StreamSessionState | undefined) {
-  if (streamState?.isStreaming) {
-    return true;
-  }
-  return (
-    streamState?.connectionState === "awaiting" ||
-    streamState?.connectionState === "streaming" ||
-    streamState?.connectionState === "detached" ||
-    streamState?.connectionState === "reconnecting" ||
-    streamState?.connectionState === "cancelling"
-  );
 }

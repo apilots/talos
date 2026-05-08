@@ -20,6 +20,12 @@ export function applyStreamEvent(sessionId: string, event: TalosEvent) {
     state.setPendingInput(sessionId, {
       ...stream.pendingInput,
       serverMessageId: event.message_id,
+      phase: "accepted",
+    });
+  } else if (stream?.pendingInput && stream.pendingInput.phase === "local") {
+    state.setPendingInput(sessionId, {
+      ...stream.pendingInput,
+      phase: "accepted",
     });
   }
 
@@ -126,6 +132,7 @@ export function applyStreamEvent(sessionId: string, event: TalosEvent) {
       state.setStreamMeta(sessionId, { awaitingFinalResponse: true });
       return;
     case "message_completed":
+      markPendingInputCompleted(sessionId, event.message_id);
       state.setSessionStatus(
         sessionId,
         stream?.pendingApproval ? "waiting_approval" : stream?.pendingUserAction ? "running" : undefined,
@@ -151,6 +158,7 @@ export function applyStreamEvent(sessionId: string, event: TalosEvent) {
 export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TalosActiveTurn) {
   if (activeTurn.status === "completed") {
     const state = useAppStore.getState();
+    markPendingInputCompleted(sessionId, activeTurn.message_id ?? undefined);
     state.setPendingUserAction(sessionId, undefined);
     state.setPendingApproval(sessionId, undefined);
     state.setSessionStatus(sessionId, undefined);
@@ -190,6 +198,12 @@ export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TalosActi
       state.setPendingInput(sessionId, {
         ...stream.pendingInput,
         serverMessageId: activeTurn.message_id,
+        phase: "accepted",
+      });
+    } else if (stream?.pendingInput && stream.pendingInput.phase === "local") {
+      state.setPendingInput(sessionId, {
+        ...stream.pendingInput,
+        phase: "accepted",
       });
     }
     state.setStreamMeta(sessionId, {
@@ -244,4 +258,20 @@ export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TalosActi
     "status",
   );
   state.setSessionStatus(sessionId, "running");
+}
+
+function markPendingInputCompleted(sessionId: string, messageId: string | undefined) {
+  const state = useAppStore.getState();
+  const pendingInput = state.streams[sessionId]?.pendingInput;
+  if (!pendingInput) {
+    return;
+  }
+  if (pendingInput.serverMessageId && messageId && pendingInput.serverMessageId !== messageId) {
+    return;
+  }
+  state.setPendingInput(sessionId, {
+    ...pendingInput,
+    serverMessageId: pendingInput.serverMessageId ?? messageId,
+    phase: "completed",
+  });
 }

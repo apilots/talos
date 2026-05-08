@@ -44,6 +44,7 @@ export function ChatSessionPage() {
   const {
     blocks,
     draft,
+    inputHistory,
     setDraft,
     sendMessage,
     sendText,
@@ -287,6 +288,7 @@ export function ChatSessionPage() {
             approvalMode={approvalMode}
             disabled={!session}
             draft={draft}
+            inputHistory={inputHistory}
             isCancelling={isCancelling}
             isStreaming={isStreaming}
             models={(models ?? []).map((model) => ({ id: model.id, name: model.name }))}

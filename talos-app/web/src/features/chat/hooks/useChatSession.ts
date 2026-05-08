@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useSessionApproval } from "./useSessionApproval";
 import { useSessionBlocks } from "./useSessionBlocks";
@@ -7,6 +7,8 @@ import { useSessionStreaming } from "./useSessionStreaming";
 import { useActiveTurnQuery, useSessionTurnsQuery } from "./useChatQueries";
 import { applyActiveTurnSnapshot } from "../stream-events";
 import { useAppStore } from "@/shared/store/app-store";
+import type { ChatApiTurns } from "../api";
+import type { PendingInput, SessionInputHistory, SessionInputHistoryItem } from "@/shared/types/ui";
 
 export function useChatSession(
   sessionId: string,
@@ -17,6 +19,7 @@ export function useChatSession(
   const activeTurnQuery = useActiveTurnQuery(sessionId);
   const turnsQuery = useSessionTurnsQuery(sessionId);
   const streamState = useAppStore((state) => state.streams[sessionId]);
+  const pendingInput = streamState?.pendingInput;
   const pendingInputServerMessageId = streamState?.pendingInput?.serverMessageId;
   const {
     continueAfterApproval,
@@ -45,6 +48,10 @@ export function useChatSession(
     streamState,
     turns: turnsQuery.data,
   });
+  const inputHistory = useMemo(
+    () => buildSessionInputHistory(turnsQuery.data, pendingInput),
+    [pendingInput, turnsQuery.data],
+  );
 
   useEffect(() => {
     if (!activeTurnQuery.data) {
@@ -73,11 +80,7 @@ export function useChatSession(
 
     const historyHasPendingInput =
       Boolean(pendingInputServerMessageId) &&
-      (turnsQuery.data ?? []).some(
-        (turn) =>
-          turn.message_id === pendingInputServerMessageId &&
-          turn.output.some((item) => item.type === "user_input"),
-      );
+      sessionInputHistoryHasMessage(inputHistory, pendingInputServerMessageId);
     const state = useAppStore.getState();
     state.resetLiveResponse(sessionId);
     if (historyHasPendingInput) {
@@ -97,12 +100,15 @@ export function useChatSession(
     streamState?.isStreaming,
     streamState?.pendingApproval,
     streamState?.pendingUserAction,
+    pendingInput,
     pendingInputServerMessageId,
+    inputHistory,
     turnsQuery.data,
   ]);
 
   return {
     blocks,
+    inputHistory,
     draft,
     setDraft,
     sendText,
@@ -127,4 +133,39 @@ export function useChatSession(
     streamError: streamState?.error,
     turnsQuery,
   };
+}
+
+export function buildSessionInputHistory(
+  turns: ChatApiTurns | undefined,
+  pendingInput: PendingInput | undefined,
+): SessionInputHistory {
+  const committed: SessionInputHistoryItem[] = [];
+
+  (turns ?? []).forEach((turn) => {
+    turn.output.forEach((item, itemIndex) => {
+      if (item.type !== "user_input") {
+        return;
+      }
+      committed.push({
+        messageId: turn.message_id,
+        itemIndex,
+        text: item.text,
+      });
+    });
+  });
+
+  return {
+    committed,
+    pendingInput,
+  };
+}
+
+function sessionInputHistoryHasMessage(
+  inputHistory: SessionInputHistory,
+  messageId: string | undefined,
+) {
+  if (!messageId) {
+    return false;
+  }
+  return inputHistory.committed.some((item) => item.messageId === messageId);
 }

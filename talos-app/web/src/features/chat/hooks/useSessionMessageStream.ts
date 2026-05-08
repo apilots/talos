@@ -13,7 +13,7 @@ export function useSessionMessageStream(sessionId: string) {
   }, []);
 
   const eventMessage = useCallback(
-    async (text: string) => {
+    async (text: string, onAcceptedMessageId?: (messageId: string) => void) => {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -24,6 +24,7 @@ export function useSessionMessageStream(sessionId: string) {
           text,
           (event) => applyStreamEvent(sessionId, event),
           controller.signal,
+          onAcceptedMessageId,
         );
       } finally {
         if (abortRef.current === controller) {
@@ -66,10 +67,12 @@ export function useSessionMessageStream(sessionId: string) {
       clientMessageId,
       retryOfMessageId,
       text,
+      onAcceptedMessageId,
     }: {
       clientMessageId: string;
       retryOfMessageId: string;
       text: string;
+      onAcceptedMessageId?: (messageId: string) => void;
     }) => {
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -85,6 +88,7 @@ export function useSessionMessageStream(sessionId: string) {
           },
           (event) => applyStreamEvent(sessionId, event),
           controller.signal,
+          onAcceptedMessageId,
         );
       } finally {
         if (abortRef.current === controller) {

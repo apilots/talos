@@ -198,11 +198,18 @@ export async function sendMessageEvents(
   text: string,
   onEvent: (event: TalosEvent) => void,
   signal?: AbortSignal,
+  onAcceptedMessageId?: (messageId: string) => void,
 ) {
   const request: TalosMessageRequest = {
     input: [{ type: "text", text }],
   };
-  return getTalosClient().messages.sendEvents(sessionId, request, onEvent, signal);
+  const client = getTalosClient();
+  const ack = await client.messages.send(sessionId, request);
+  if (!ack.message_id) {
+    throw new Error(`Message ack did not include message_id: ${ack.turn_id}`);
+  }
+  onAcceptedMessageId?.(ack.message_id);
+  return client.messages.eventsForMessage(sessionId, ack.message_id, onEvent, signal);
 }
 
 export async function retryMessageEvents(
@@ -210,8 +217,15 @@ export async function retryMessageEvents(
   request: TalosMessageRetryRequest,
   onEvent: (event: TalosEvent) => void,
   signal?: AbortSignal,
+  onAcceptedMessageId?: (messageId: string) => void,
 ) {
-  return getTalosClient().messages.retryEvents(sessionId, request, onEvent, signal);
+  const client = getTalosClient();
+  const ack = await client.messages.retry(sessionId, request);
+  if (!ack.message_id) {
+    throw new Error(`Retry ack did not include message_id: ${ack.turn_id}`);
+  }
+  onAcceptedMessageId?.(ack.message_id);
+  return client.messages.eventsForMessage(sessionId, ack.message_id, onEvent, signal);
 }
 
 export async function subscribeSessionEventsForMessage(

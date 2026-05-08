@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Check, ChevronDown, FolderOpen, LoaderCircle, Plus, Search, Square, Zap } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -6,13 +6,20 @@ import { cn } from "@/shared/lib/cn";
 import { Panel } from "@/shared/ui/Panel";
 import { Textarea } from "@/shared/ui/Input";
 import { describeProjectDirectory, isUnboundProject } from "@/shared/types/domain";
-import type { ApprovalMode, ProjectRecord, ReasoningLevel, RuntimeMode } from "@/shared/types/ui";
+import type {
+  ApprovalMode,
+  ProjectRecord,
+  ReasoningLevel,
+  RuntimeMode,
+  SessionInputHistory,
+} from "@/shared/types/ui";
 
 interface ChatComposerProps {
   draft: string;
   onDraftChange: (value: string) => void;
   onSend: () => Promise<void> | void;
   onCancel?: () => void;
+  inputHistory?: SessionInputHistory;
   disabled?: boolean;
   isStreaming?: boolean;
   isCancelling?: boolean;
@@ -130,6 +137,13 @@ function InlineSelect({
   );
 }
 
+const EMPTY_INPUT_HISTORY_ITEMS: InputHistoryNavigationItem[] = [];
+
+interface InputHistoryNavigationItem {
+  key: string;
+  text: string;
+}
+
 // ─── main component ──────────────────────────────────────────────────────────
 
 export function ChatComposer({
@@ -137,6 +151,7 @@ export function ChatComposer({
   onDraftChange,
   onSend,
   onCancel,
+  inputHistory,
   disabled,
   isStreaming,
   isCancelling = false,
@@ -163,6 +178,26 @@ export function ChatComposer({
   const [addingProject, setAddingProject] = useState(false);
   const [newProjectPath, setNewProjectPath] = useState("");
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const historyIndexRef = useRef<number | null>(null);
+  const historyDraftRef = useRef("");
+  const activeInputHistoryItems = useMemo(
+    () => buildInputHistoryNavigationItems(inputHistory),
+    [inputHistory],
+  );
+  const activeInputHistoryKey = useMemo(
+    () => activeInputHistoryItems.map((item) => item.key).join("|"),
+    [activeInputHistoryItems],
+  );
+
+  const resetInputHistoryNavigation = () => {
+    historyIndexRef.current = null;
+    historyDraftRef.current = "";
+  };
+
+  useEffect(() => {
+    historyIndexRef.current = null;
+    historyDraftRef.current = "";
+  }, [activeInputHistoryKey]);
 
   const activeProject = projects.find((p) => p.id === activeProjectId);
   const isProjectBound = activeProject && !isUnboundProject(activeProject.id);
@@ -179,6 +214,85 @@ export function ChatComposer({
   const showInlineProject = showProjectSelector && compact;
   const sendButtonDisabled = isBusy ? false : Boolean(disabled || draft.trim().length === 0);
   const sendButtonLabel = isBusy ? t("common:stopResponse") : t("chat:send");
+
+  const moveCursorToEnd = (textarea: HTMLTextAreaElement, value: string) => {
+    const applySelection = () => textarea.setSelectionRange(value.length, value.length);
+    if (typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(applySelection);
+      return;
+    }
+    applySelection();
+  };
+
+  const setDraftFromHistory = (textarea: HTMLTextAreaElement, value: string) => {
+    onDraftChange(value);
+    moveCursorToEnd(textarea, value);
+  };
+
+  const canUseInputHistory = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (
+      disabled ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.nativeEvent.isComposing ||
+      activeInputHistoryItems.length === 0
+    ) {
+      return false;
+    }
+
+    if (historyIndexRef.current !== null) {
+      return true;
+    }
+
+    const textarea = event.currentTarget;
+    const cursorAtEnd =
+      textarea.selectionStart === textarea.value.length &&
+      textarea.selectionEnd === textarea.value.length;
+    return textarea.value.length === 0 || cursorAtEnd;
+  };
+
+  const handleInputHistoryKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!canUseInputHistory(event)) {
+      return false;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      const nextIndex =
+        historyIndexRef.current === null
+          ? activeInputHistoryItems.length - 1
+          : Math.max(0, historyIndexRef.current - 1);
+      if (historyIndexRef.current === null) {
+        historyDraftRef.current = draft;
+      }
+      historyIndexRef.current = nextIndex;
+      setDraftFromHistory(event.currentTarget, activeInputHistoryItems[nextIndex]?.text ?? "");
+      return true;
+    }
+
+    if (event.key === "ArrowDown" && historyIndexRef.current !== null) {
+      event.preventDefault();
+      const nextIndex = historyIndexRef.current + 1;
+      if (nextIndex >= activeInputHistoryItems.length) {
+        const restoredDraft = historyDraftRef.current;
+        resetInputHistoryNavigation();
+        setDraftFromHistory(event.currentTarget, restoredDraft);
+        return true;
+      }
+
+      historyIndexRef.current = nextIndex;
+      setDraftFromHistory(event.currentTarget, activeInputHistoryItems[nextIndex]?.text ?? "");
+      return true;
+    }
+
+    return false;
+  };
+
+  const handleSend = () => {
+    resetInputHistoryNavigation();
+    return onSend();
+  };
 
   const modelItems: DropdownItem[] = models.map((m, i) => ({
     value: m.id,
@@ -211,7 +325,7 @@ export function ChatComposer({
           onCancel?.();
           return;
         }
-        void onSend();
+        void handleSend();
       }}
       title={sendButtonLabel}
       type="button"
@@ -268,12 +382,17 @@ export function ChatComposer({
             )}
             data-smoke="chat-composer-input"
             disabled={disabled}
-            onChange={(event) => onDraftChange(event.target.value)}
+            onChange={(event) => {
+              resetInputHistoryNavigation();
+              onDraftChange(event.target.value);
+            }}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
-                void onSend();
+                void handleSend();
+                return;
               }
+              handleInputHistoryKeyDown(event);
             }}
             placeholder={t("chat:askTalos")}
             value={draft}
@@ -467,4 +586,38 @@ export function ChatComposer({
       )}
     </div>
   );
+}
+
+function buildInputHistoryNavigationItems(inputHistory: SessionInputHistory | undefined) {
+  if (!inputHistory) {
+    return EMPTY_INPUT_HISTORY_ITEMS;
+  }
+
+  const items = inputHistory.committed.map((item) => ({
+    key: `${item.messageId}:${item.itemIndex}`,
+    text: item.text,
+  }));
+  const pendingInput = inputHistory.pendingInput;
+  const pendingCommitted =
+    Boolean(pendingInput?.serverMessageId) &&
+    inputHistory.committed.some((item) => item.messageId === pendingInput?.serverMessageId);
+
+  if (isNavigablePendingInput(inputHistory) && pendingInput && !pendingCommitted) {
+    items.push({
+      key: [
+        "pending",
+        pendingInput.clientMessageId,
+        pendingInput.serverMessageId ?? "",
+        pendingInput.phase,
+      ].join(":"),
+      text: pendingInput.text,
+    });
+  }
+
+  return items;
+}
+
+function isNavigablePendingInput(inputHistory: SessionInputHistory) {
+  const pendingInput = inputHistory.pendingInput;
+  return pendingInput?.phase === "local" || pendingInput?.phase === "accepted";
 }

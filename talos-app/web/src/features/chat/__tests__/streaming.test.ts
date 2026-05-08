@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { applyActiveTurnSnapshot, applyStreamEvent } from "@/features/chat";
+import { buildSessionInputHistory } from "@/features/chat/hooks/useChatSession";
 import { shouldRefreshSessionTitleAfterTurn } from "@/features/chat/hooks/useSessionQueryInvalidation";
 import { shouldFinalizeDetachedStream } from "@/features/chat/hooks/useSessionReconnect";
 import { buildSessionBlocks } from "@/features/chat/hooks/useSessionBlocks";
@@ -115,6 +116,106 @@ describe("chat stream integration helpers", () => {
     expect(blocks).toHaveLength(2);
     expect(blocks[0]).toMatchObject({ kind: "user", text: "stop after this input" });
     expect(blocks[1]).toMatchObject({ kind: "system", text: "Response cancelled." });
+  });
+
+  it("keeps pending input separate from committed session input history", () => {
+    expect(
+      buildSessionInputHistory(
+        [
+          {
+            request_id: "req-1",
+            message_id: "msg-1",
+            session_id: "sess-1",
+            model: "gpt-4.1",
+            reasoning: [],
+            stop_reason: "end_turn",
+            usage,
+            output: [{ type: "user_input", text: "first input" }],
+          },
+        ],
+        {
+          text: "pending input",
+          clientMessageId: "client-1",
+          serverMessageId: "msg-2",
+          phase: "accepted",
+        },
+      ),
+    ).toEqual({
+      committed: [{ messageId: "msg-1", itemIndex: 0, text: "first input" }],
+      pendingInput: {
+        text: "pending input",
+        clientMessageId: "client-1",
+        serverMessageId: "msg-2",
+        phase: "accepted",
+      },
+    });
+
+    expect(
+      buildSessionInputHistory(
+        [
+          {
+            request_id: "req-2",
+            message_id: "msg-2",
+            session_id: "sess-1",
+            model: "gpt-4.1",
+            reasoning: [],
+            stop_reason: "end_turn",
+            usage,
+            output: [{ type: "user_input", text: "pending input" }],
+          },
+        ],
+        {
+          text: "pending input",
+          clientMessageId: "client-2",
+          serverMessageId: "msg-2",
+          phase: "completed",
+        },
+      ),
+    ).toEqual({
+      committed: [{ messageId: "msg-2", itemIndex: 0, text: "pending input" }],
+      pendingInput: {
+        text: "pending input",
+        clientMessageId: "client-2",
+        serverMessageId: "msg-2",
+        phase: "completed",
+      },
+    });
+  });
+
+  it("keeps duplicate committed inputs when they belong to different messages", () => {
+    expect(
+      buildSessionInputHistory(
+        [
+          {
+            request_id: "req-1",
+            message_id: "msg-1",
+            session_id: "sess-1",
+            model: "gpt-4.1",
+            reasoning: [],
+            stop_reason: "end_turn",
+            usage,
+            output: [{ type: "user_input", text: "same input" }],
+          },
+          {
+            request_id: "req-2",
+            message_id: "msg-2",
+            session_id: "sess-1",
+            model: "gpt-4.1",
+            reasoning: [],
+            stop_reason: "end_turn",
+            usage,
+            output: [{ type: "user_input", text: "same input" }],
+          },
+        ],
+        undefined,
+      ),
+    ).toEqual({
+      committed: [
+        { messageId: "msg-1", itemIndex: 0, text: "same input" },
+        { messageId: "msg-2", itemIndex: 0, text: "same input" },
+      ],
+      pendingInput: undefined,
+    });
   });
 
   it("applies approval events into the transient stream store", () => {
@@ -432,6 +533,7 @@ describe("chat stream integration helpers", () => {
     useAppStore.getState().setPendingInput("sess-1", {
       text: "keep this user question visible",
       clientMessageId: "client-1",
+      phase: "local",
     });
     useAppStore.getState().setStreamMeta("sess-1", {
       activeMessageId: "client-local",
@@ -453,15 +555,50 @@ describe("chat stream integration helpers", () => {
       text: "keep this user question visible",
       clientMessageId: "client-1",
       serverMessageId: "msg-server-1",
+      phase: "accepted",
     });
     expect(stream.blocks).toHaveLength(0);
     expect(stream.activeMessageId).toBe("msg-server-1");
+  });
+
+  it("advances pending input to completed when the server message completes", () => {
+    useAppStore.getState().setPendingInput("sess-1", {
+      text: "complete this input",
+      clientMessageId: "client-complete",
+      phase: "local",
+    });
+
+    applyStreamEvent("sess-1", {
+      event_type: "message_started",
+      message_id: "msg-complete",
+      session_id: "sess-1",
+      sequence: 0,
+      payload: startedPayload(),
+    });
+    expect(useAppStore.getState().streams["sess-1"].pendingInput).toMatchObject({
+      serverMessageId: "msg-complete",
+      phase: "accepted",
+    });
+
+    applyStreamEvent("sess-1", {
+      event_type: "message_completed",
+      message_id: "msg-complete",
+      session_id: "sess-1",
+      sequence: 1,
+      payload: completedPayload(),
+    });
+
+    expect(useAppStore.getState().streams["sess-1"].pendingInput).toMatchObject({
+      serverMessageId: "msg-complete",
+      phase: "completed",
+    });
   });
 
   it("preserves pending user input when active turn snapshots switch message ids", () => {
     useAppStore.getState().setPendingInput("sess-1", {
       text: "active turn should not hide me",
       clientMessageId: "client-2",
+      phase: "local",
     });
     useAppStore.getState().setStreamMeta("sess-1", {
       activeMessageId: "msg-old",
@@ -485,6 +622,7 @@ describe("chat stream integration helpers", () => {
       text: "active turn should not hide me",
       clientMessageId: "client-2",
       serverMessageId: "msg-new",
+      phase: "accepted",
     });
     expect(stream.blocks).toHaveLength(0);
     expect(stream.connectionState).toBe("detached");
@@ -497,6 +635,7 @@ describe("chat stream integration helpers", () => {
       pendingInput: {
         text: "show the question while waiting",
         clientMessageId: "client-3",
+        phase: "accepted" as const,
       },
       blocks: [
         {
@@ -540,6 +679,7 @@ describe("chat stream integration helpers", () => {
           text: "question still waiting for history",
           clientMessageId: "client-7",
           serverMessageId: "msg-1",
+          phase: "completed" as const,
         },
         blocks: [
           {
@@ -581,6 +721,7 @@ describe("chat stream integration helpers", () => {
           text: "history now owns this input",
           clientMessageId: "client-8",
           serverMessageId: "msg-1",
+          phase: "completed" as const,
         },
         blocks: [
           {
@@ -622,6 +763,7 @@ describe("chat stream integration helpers", () => {
       text: "completed turn should keep pending input until history catches up",
       clientMessageId: "client-completed",
       serverMessageId: "msg-1",
+      phase: "accepted",
     });
     useAppStore.getState().setStreamMeta("sess-1", {
       activeMessageId: "msg-1",
@@ -652,6 +794,7 @@ describe("chat stream integration helpers", () => {
     expect(stream.pendingInput).toMatchObject({
       text: "completed turn should keep pending input until history catches up",
       serverMessageId: "msg-1",
+      phase: "completed",
     });
     expect(stream.showReconnectControls).toBeUndefined();
     expect(useAppStore.getState().transientStatuses["sess-1"]).toBeUndefined();
@@ -667,6 +810,7 @@ describe("chat stream integration helpers", () => {
           text: "history caught up",
           clientMessageId: "client-4",
           serverMessageId: "msg-1",
+          phase: "completed" as const,
         },
         blocks: [],
       },
@@ -706,6 +850,7 @@ describe("chat stream integration helpers", () => {
           text: "same text committed through another message id",
           clientMessageId: "client-5",
           serverMessageId: "msg-pending",
+          phase: "completed" as const,
         },
         blocks: [],
       },
@@ -752,6 +897,7 @@ describe("chat stream integration helpers", () => {
         pendingInput: {
           text: "repeat prompt",
           clientMessageId: "client-6",
+          phase: "local" as const,
         },
         blocks: [],
       },
