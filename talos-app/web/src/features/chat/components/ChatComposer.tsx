@@ -177,6 +177,8 @@ export function ChatComposer({
 
   const showCollapsibleProject = showProjectSelector && !compact;
   const showInlineProject = showProjectSelector && compact;
+  const sendButtonDisabled = isBusy ? false : Boolean(disabled || draft.trim().length === 0);
+  const sendButtonLabel = isBusy ? t("common:stopResponse") : t("chat:send");
 
   const modelItems: DropdownItem[] = models.map((m, i) => ({
     value: m.id,
@@ -193,6 +195,7 @@ export function ChatComposer({
 
   const sendButton = (
     <button
+      aria-label={sendButtonLabel}
       className={cn(
         "flex h-8 w-8 shrink-0 items-center justify-center rounded-full outline-none transition focus:outline-none",
         isBusy
@@ -202,7 +205,7 @@ export function ChatComposer({
             : "bg-ink text-background hover:bg-ink/85",
       )}
       data-smoke="chat-composer-send"
-      disabled={disabled || (!isBusy && draft.trim().length === 0)}
+      disabled={sendButtonDisabled}
       onClick={() => {
         if (isBusy) {
           onCancel?.();
@@ -210,6 +213,7 @@ export function ChatComposer({
         }
         void onSend();
       }}
+      title={sendButtonLabel}
       type="button"
     >
       {isCancelling ? (

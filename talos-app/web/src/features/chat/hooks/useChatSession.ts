@@ -17,6 +17,7 @@ export function useChatSession(
   const activeTurnQuery = useActiveTurnQuery(sessionId);
   const turnsQuery = useSessionTurnsQuery(sessionId);
   const streamState = useAppStore((state) => state.streams[sessionId]);
+  const pendingInputServerMessageId = streamState?.pendingInput?.serverMessageId;
   const {
     continueAfterApproval,
     hasActiveConnection,
@@ -51,6 +52,54 @@ export function useChatSession(
     }
     applyActiveTurnSnapshot(sessionId, activeTurnQuery.data);
   }, [activeTurnQuery.data, sessionId]);
+
+  useEffect(() => {
+    const activeMessageId = streamState?.activeMessageId;
+    if (
+      !activeMessageId ||
+      streamState.isStreaming ||
+      streamState.pendingApproval ||
+      streamState.pendingUserAction
+    ) {
+      return;
+    }
+
+    const historyHasActiveMessage = (turnsQuery.data ?? []).some(
+      (turn) => turn.message_id === activeMessageId,
+    );
+    if (!historyHasActiveMessage) {
+      return;
+    }
+
+    const historyHasPendingInput =
+      Boolean(pendingInputServerMessageId) &&
+      (turnsQuery.data ?? []).some(
+        (turn) =>
+          turn.message_id === pendingInputServerMessageId &&
+          turn.output.some((item) => item.type === "user_input"),
+      );
+    const state = useAppStore.getState();
+    state.resetLiveResponse(sessionId);
+    if (historyHasPendingInput) {
+      state.setPendingInput(sessionId, undefined);
+    }
+    state.setStreamMeta(sessionId, {
+      activeMessageId: undefined,
+      activeInputText: undefined,
+      activeClientMessageId: undefined,
+      lastSequence: undefined,
+      expectedMessageCount: undefined,
+      awaitingFinalResponse: false,
+    });
+  }, [
+    sessionId,
+    streamState?.activeMessageId,
+    streamState?.isStreaming,
+    streamState?.pendingApproval,
+    streamState?.pendingUserAction,
+    pendingInputServerMessageId,
+    turnsQuery.data,
+  ]);
 
   return {
     blocks,

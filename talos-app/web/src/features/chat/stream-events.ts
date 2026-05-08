@@ -30,6 +30,7 @@ export function applyStreamEvent(sessionId: string, event: TalosEvent) {
     connectionState: "streaming",
     reconnectAttempt: undefined,
     showReconnectControls: false,
+    awaitingFinalResponse: false,
   });
 
   switch (event.payload.type) {
@@ -122,6 +123,7 @@ export function applyStreamEvent(sessionId: string, event: TalosEvent) {
         event.payload.is_error ? "error" : "done",
         Number(event.payload.timing_ms ?? 0),
       );
+      state.setStreamMeta(sessionId, { awaitingFinalResponse: true });
       return;
     case "message_completed":
       state.setSessionStatus(
@@ -132,6 +134,7 @@ export function applyStreamEvent(sessionId: string, event: TalosEvent) {
         isStreaming: false,
         connectionState: "idle",
         expectedMessageCount: undefined,
+        awaitingFinalResponse: false,
       });
       return;
     case "message_error":
@@ -151,7 +154,15 @@ export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TalosActi
     state.setPendingUserAction(sessionId, undefined);
     state.setPendingApproval(sessionId, undefined);
     state.setSessionStatus(sessionId, undefined);
-    state.resetLiveResponse(sessionId);
+    state.setStreamMeta(sessionId, {
+      activeMessageId: activeTurn.message_id ?? undefined,
+      isStreaming: false,
+      connectionState: "idle",
+      expectedMessageCount: undefined,
+      reconnectAttempt: undefined,
+      showReconnectControls: undefined,
+      awaitingFinalResponse: false,
+    });
     return;
   }
 

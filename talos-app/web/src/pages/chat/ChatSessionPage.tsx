@@ -33,6 +33,8 @@ export function ChatSessionPage() {
   const messageViewportRef = useRef<HTMLDivElement | null>(null);
   const messageContentRef = useRef<HTMLDivElement | null>(null);
   const messageEndRef = useRef<HTMLDivElement | null>(null);
+  const mountedRef = useRef(false);
+  const activeSessionIdRef = useRef(sessionId);
   const stickToBottomRef = useRef(true);
   const locationState = location.state as SessionLocationState | null;
 
@@ -73,6 +75,17 @@ export function ChatSessionPage() {
   const setSessionApprovalMode = useAppStore((state) => state.setSessionApprovalMode);
   const currentModel = session ? getSessionModel(session) : models?.[0]?.id;
 
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    activeSessionIdRef.current = sessionId;
+  }, [sessionId]);
+
   const scrollToBottom = () => {
     const viewport = messageViewportRef.current;
     if (!viewport) {
@@ -103,9 +116,11 @@ export function ChatSessionPage() {
     stickToBottomRef.current = true;
     window.requestAnimationFrame(scrollToBottom);
     void sendText(initialPrompt).finally(() => {
-      navigate(location.pathname, { replace: true, state: null });
+      if (mountedRef.current && activeSessionIdRef.current === sessionId) {
+        navigate(location.pathname, { replace: true, state: null });
+      }
     });
-  }, [location.pathname, locationState?.initialPrompt, navigate, sendText, session]);
+  }, [location.pathname, locationState?.initialPrompt, navigate, sendText, session, sessionId]);
 
   useEffect(() => {
     if (!session) {

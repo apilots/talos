@@ -23,6 +23,8 @@ export function useSessionBlocks({
       turns,
       waitingResponseDetail: t("waitingResponseDetail"),
       waitingResponseTitle: t("waitingResponseTitle"),
+      finalResponseWaitDetail: t("finalResponseWaitDetail"),
+      finalResponseWaitTitle: t("finalResponseWaitTitle"),
       stoppingResponseDetail: t("stoppingResponseDetail"),
       stoppingResponseTitle: t("stoppingResponseTitle"),
     });
@@ -40,6 +42,8 @@ export function buildSessionBlocks({
   turns,
   waitingResponseDetail,
   waitingResponseTitle,
+  finalResponseWaitDetail = "Talos is composing the final response.",
+  finalResponseWaitTitle = "Preparing final response",
   stoppingResponseDetail,
   stoppingResponseTitle,
 }: {
@@ -48,23 +52,20 @@ export function buildSessionBlocks({
   turns?: ChatApiTurns;
   waitingResponseDetail: string;
   waitingResponseTitle: string;
+  finalResponseWaitDetail?: string;
+  finalResponseWaitTitle?: string;
   stoppingResponseDetail: string;
   stoppingResponseTitle: string;
 }) {
   const historyBlocks = mapTurnsToBlocks(turns ?? []);
-  const pendingInputBlock = createPendingInputBlock(streamState, turns);
-  const liveBlocks = streamState?.blocks ?? [];
-  const shouldShowLiveBlocks =
-    Boolean(pendingInputBlock) ||
-    liveBlocks.length > 0 ||
-    (streamState?.isStreaming ?? false) ||
-    Boolean(streamState?.error) ||
-    Boolean(streamState?.pendingUserAction) ||
-    Boolean(streamState?.pendingApproval);
+  const historyHasActiveMessage = hasHistoryMessage(turns, streamState?.activeMessageId);
+  const historyHasPendingInput = hasHistoryPendingInput(turns, streamState?.pendingInput);
+  const pendingInputBlock = historyHasPendingInput ? undefined : createPendingInputBlock(streamState, turns);
+  const liveBlocks = historyHasActiveMessage ? [] : streamState?.blocks ?? [];
   const nextBlocks = [
     ...historyBlocks,
     ...(pendingInputBlock ? [pendingInputBlock] : []),
-    ...(shouldShowLiveBlocks ? liveBlocks : []),
+    ...liveBlocks,
   ];
   const hasLiveResponse = liveBlocks.some(
     (block) =>
@@ -94,6 +95,23 @@ export function buildSessionBlocks({
     });
   }
 
+  if (
+    streamState?.awaitingFinalResponse &&
+    !historyHasActiveMessage &&
+    !streamState.pendingApproval &&
+    !streamState.pendingUserAction &&
+    !streamState.error
+  ) {
+    nextBlocks.push({
+      id: `status-final-response-${sessionId}`,
+      kind: "status",
+      variant: "thinking",
+      title: finalResponseWaitTitle,
+      detail: finalResponseWaitDetail,
+      live: true,
+    });
+  }
+
   if (streamState?.connectionState === "cancelling") {
     nextBlocks.push({
       id: `status-cancelling-${sessionId}`,
@@ -108,6 +126,27 @@ export function buildSessionBlocks({
   return nextBlocks;
 }
 
+function hasHistoryMessage(turns: ChatApiTurns | undefined, messageId: string | undefined) {
+  if (!messageId) {
+    return false;
+  }
+  return (turns ?? []).some((turn) => turn.message_id === messageId);
+}
+
+function hasHistoryPendingInput(
+  turns: ChatApiTurns | undefined,
+  pendingInput: StreamSessionState["pendingInput"],
+) {
+  if (!pendingInput?.serverMessageId) {
+    return false;
+  }
+  return (turns ?? []).some(
+    (turn) =>
+      turn.message_id === pendingInput.serverMessageId &&
+      turn.output.some((item) => item.type === "user_input"),
+  );
+}
+
 function createPendingInputBlock(
   streamState: StreamSessionState | undefined,
   turns: ChatApiTurns | undefined,
@@ -118,20 +157,12 @@ function createPendingInputBlock(
   }
 
   const isActivePendingInput = isStreamTurnActive(streamState);
-  const hasCommittedInput = (turns ?? []).some((turn) => {
-    const hasMatchingInput = turn.output.some(
-      (item) => item.type === "user_input" && item.text === pendingInput.text,
-    );
-    if (!hasMatchingInput) {
-      return false;
-    }
-
-    if (pendingInput.serverMessageId) {
-      return turn.message_id === pendingInput.serverMessageId || !isActivePendingInput;
-    }
-
-    return !isActivePendingInput;
-  });
+  const hasCommittedInput = (turns ?? []).some(
+    (turn) =>
+      !pendingInput.serverMessageId &&
+      !isActivePendingInput &&
+      turn.output.some((item) => item.type === "user_input" && item.text === pendingInput.text),
+  );
 
   if (hasCommittedInput) {
     return undefined;

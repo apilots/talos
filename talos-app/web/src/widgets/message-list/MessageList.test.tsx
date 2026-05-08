@@ -1,12 +1,17 @@
 // @vitest-environment jsdom
 
-import { render, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import "@/shared/i18n/setup";
 import { MessageList } from "@/widgets/message-list/MessageList";
 
 describe("MessageList", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
   it("renders markdown structure for assistant messages", async () => {
     const { container } = render(
       <MessageList
@@ -77,6 +82,72 @@ describe("MessageList", () => {
     await waitFor(() => {
       expect(getByText("Waiting for server response")).not.toBeNull();
       expect(getByText("Talos is still preparing the first reply chunk.")).not.toBeNull();
+    });
+  });
+
+  it("copies the original markdown for text blocks", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    render(
+      <MessageList
+        blocks={[
+          {
+            id: "assistant-live",
+            kind: "assistant",
+            text: "# Partial\n\nFull **markdown** body.",
+            live: true,
+          },
+        ]}
+        emptyDetail=""
+        emptyTitle=""
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy block" }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith("# Partial\n\nFull **markdown** body.");
+    });
+  });
+
+  it("copies tool blocks as markdown with arguments, progress, and output", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    render(
+      <MessageList
+        blocks={[
+          {
+            id: "tool-1",
+            kind: "tool",
+            callId: "call-1",
+            toolName: "Bash",
+            arguments: { cmd: "pnpm test" },
+            status: "done",
+            progress: [{ kind: "stdout", message: "running" }],
+            output: "ok",
+            timingMs: 42,
+          },
+        ]}
+        emptyDetail=""
+        emptyTitle=""
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy block" }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining("### Tool: Bash"));
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining('"cmd": "pnpm test"'));
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining("- **stdout**: running"));
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining("ok"));
     });
   });
 });

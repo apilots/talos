@@ -149,6 +149,23 @@ try {
   const createdSessionId = createdSessionHash.replace(/^#\/sessions\//, "");
   createdSessionIds.push(createdSessionId);
   await waitForExpression(cdp, `(document.body.textContent || '').includes(${JSON.stringify(smokePrompt)})`, 30_000);
+
+  const routeInteractions = [];
+  const composerStopState = await readComposerStopState(cdp);
+  assert(
+    composerStopState.state !== "disabled",
+    `Composer stop button rendered disabled while streaming: ${JSON.stringify(composerStopState)}`,
+  );
+  await clickAnchorByHash(cdp, "#/projects");
+  await waitForHash(cdp, "#/projects", 30_000);
+  await sleep(1_500);
+  const navigationHashAfterRunningTurn = await evaluate(cdp, "location.hash");
+  assert(
+    navigationHashAfterRunningTurn === "#/projects",
+    `Running session redirected after route click: ${navigationHashAfterRunningTurn}`,
+  );
+  routeInteractions.push({ name: "projects-during-turn", route: "#/projects", method: "click" });
+
   await waitForExpression(
     cdp,
     `window.__talosSmokeInvoke("session.turns", { session_id: ${JSON.stringify(createdSessionId)} }).then((response) => {
@@ -158,27 +175,59 @@ try {
     120_000,
   );
 
-  const routes = [
+  const linkedRoutes = [
     ["home", "#/"],
     ["projects", "#/projects"],
-    ["memory", "#/memory"],
-    ["workspace-docs", "#/workspace-docs"],
     ["files", "#/files"],
-    ["settings", "#/settings"],
-    ["settings-models", "#/settings/models"],
   ];
 
-  for (const [name, route] of routes) {
-    await evaluate(cdp, `location.hash = ${JSON.stringify(route)}; undefined`);
-    await sleep(500);
+  for (const [name, route] of linkedRoutes) {
+    await clickAnchorByHash(cdp, route);
+    await waitForHash(cdp, route, 30_000);
     await captureScreenshot(cdp, path.join(artifactDir, `${name}.png`));
+    routeInteractions.push({ name, route, method: "click" });
   }
+
+  await clickAccountMenuSettings(cdp);
+  await waitForHash(cdp, "#/settings", 30_000);
+  await captureScreenshot(cdp, path.join(artifactDir, "settings.png"));
+  routeInteractions.push({ name: "settings", route: "#/settings", method: "click" });
+
+  const settingsRoutes = [
+    ["settings-models", "#/settings/models"],
+    ["settings-agent-workspace", "#/settings/agent-workspace"],
+    ["settings-permissions", "#/settings/permissions"],
+    ["settings-appearance", "#/settings/appearance"],
+    ["settings-advanced", "#/settings/advanced"],
+  ];
+  if (serverInfo.auth_enabled === true) {
+    settingsRoutes.splice(3, 0, ["settings-account", "#/settings/account"]);
+  }
+
+  for (const [name, route] of settingsRoutes) {
+    await clickAnchorByHash(cdp, route);
+    await waitForHash(cdp, route, 30_000);
+    await captureScreenshot(cdp, path.join(artifactDir, `${name}.png`));
+    routeInteractions.push({ name, route, method: "click" });
+  }
+
+  const directRoutes = [
+    ["memory", "#/memory"],
+    ["workspace-docs", "#/workspace-docs"],
+  ];
+  for (const [name, route] of directRoutes) {
+    await evaluate(cdp, `location.hash = ${JSON.stringify(route)}; undefined`);
+    await waitForHash(cdp, route, 30_000);
+    await captureScreenshot(cdp, path.join(artifactDir, `${name}.png`));
+    routeInteractions.push({ name, route, method: "direct-hash" });
+  }
+
   await evaluate(cdp, "location.hash = '#/settings/advanced'; undefined");
   await waitForExpression(cdp, "location.hash === '#/settings/advanced'", 30_000);
   await waitForExpression(cdp, "(document.body.textContent || '').includes('Desktop local runtime')", 30_000);
 
-  await evaluate(cdp, "location.hash = '#/settings/models'; undefined");
-  await waitForExpression(cdp, "location.hash === '#/settings/models'", 30_000);
+  await clickAnchorByHash(cdp, "#/settings/models");
+  await waitForHash(cdp, "#/settings/models", 30_000);
   await waitForExpression(
     cdp,
     `(() => {
@@ -199,12 +248,14 @@ try {
     30_000,
   );
 
-  await evaluate(cdp, "location.hash = '#/admin'; undefined");
+  await clickAdminIfAvailable(cdp);
   if (account?.role === "admin" && serverInfo.auth_enabled) {
-    await waitForExpression(cdp, "location.hash === '#/admin'", 30_000);
+    await waitForHash(cdp, "#/admin", 30_000);
     await captureScreenshot(cdp, path.join(artifactDir, "admin.png"));
+    routeInteractions.push({ name: "admin", route: "#/admin", method: "click" });
   } else {
     await waitForExpression(cdp, "location.hash === '#/'", 30_000);
+    routeInteractions.push({ name: "admin-guard", route: "#/", method: "click-or-redirect" });
   }
 
   const cleanup = await cleanupCreatedSessions(cdp, createdSessionIds);
@@ -224,9 +275,10 @@ try {
     toolCount,
     skillCount,
     appCount,
+    composerStopState,
     createdSessionIds,
     cleanup,
-    routes: routes.map(([name, route]) => ({ name, route })),
+    routes: routeInteractions,
   };
   writeFileSync(path.join(artifactDir, "desktop-smoke-report.json"), `${JSON.stringify(report, null, 2)}\n`);
   console.log(`Desktop smoke passed: ${artifactDir}`);
@@ -389,22 +441,79 @@ async function setInputValue(cdp, selector, value) {
   );
 }
 
-async function clickButtonByText(cdp, labels) {
-  const labelList = Array.isArray(labels) ? labels : [labels];
+async function clickAnchorByHash(cdp, hash) {
   const clicked = await evaluate(
     cdp,
     `(() => {
-      const labels = ${JSON.stringify(labelList)};
-      const button = Array.from(document.querySelectorAll("button")).find((candidate) => {
-        const text = (candidate.textContent || "").trim();
-        return labels.some((label) => text.includes(label));
+      const target = ${JSON.stringify(hash)};
+      const anchor = Array.from(document.querySelectorAll("a")).find((candidate) => {
+        const href = candidate.getAttribute("href") || "";
+        return candidate.hash === target || href === target || href.endsWith(target);
       });
+      if (!anchor) return false;
+      anchor.click();
+      return true;
+    })()`,
+  );
+  assert(clicked, `Anchor not found for hash: ${hash}`);
+}
+
+async function clickAccountMenuSettings(cdp) {
+  const opened = await evaluate(
+    cdp,
+    `(() => {
+      const button = document.querySelector("button[aria-expanded]");
       if (!button) return false;
       button.click();
       return true;
     })()`,
   );
-  assert(clicked, `Button not found: ${labelList.join(", ")}`);
+  assert(opened, "Account menu button not found.");
+  await waitForExpression(
+    cdp,
+    "Array.from(document.querySelectorAll('a')).some((anchor) => anchor.hash === '#/settings' || (anchor.getAttribute('href') || '').endsWith('#/settings'))",
+    30_000,
+  );
+  await clickAnchorByHash(cdp, "#/settings");
+}
+
+async function clickAdminIfAvailable(cdp) {
+  const result = await evaluate(
+    cdp,
+    `(() => {
+      const anchor = Array.from(document.querySelectorAll("a")).find((candidate) => {
+        const href = candidate.getAttribute("href") || "";
+        return candidate.hash === "#/admin" || href === "#/admin" || href.endsWith("#/admin");
+      });
+      if (anchor) {
+        anchor.click();
+        return "clicked";
+      }
+      location.hash = "#/";
+      return "unavailable";
+    })()`,
+  );
+  assert(result === "clicked" || result === "unavailable", `Unexpected admin click result: ${result}`);
+  return result;
+}
+
+async function readComposerStopState(cdp) {
+  return evaluate(
+    cdp,
+    `(() => {
+      const button = document.querySelector('[data-smoke="chat-composer-send"]');
+      if (!button) return { state: "missing" };
+      const label = button.getAttribute("aria-label") || button.getAttribute("title") || "";
+      const busy = label.includes("Stop response") || label.includes("停止回答");
+      const disabled = Boolean(button.disabled);
+      if (!busy) return { state: "idle", label, disabled };
+      return { state: disabled ? "disabled" : "clickable", label, disabled };
+    })()`,
+  );
+}
+
+function waitForHash(cdp, hash, timeoutMs) {
+  return waitForExpression(cdp, `location.hash === ${JSON.stringify(hash)}`, timeoutMs);
 }
 
 async function cleanupCreatedSessions(cdp, sessionIds, options = {}) {

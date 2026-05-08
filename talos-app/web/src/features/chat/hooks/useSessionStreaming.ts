@@ -31,9 +31,10 @@ export function useSessionStreaming(
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: true,
         connectionState: "cancelling",
+        awaitingFinalResponse: false,
       });
-      await cancelActiveTurn(sessionId);
       cancelStream();
+      await cancelActiveTurn(sessionId);
     },
     onSuccess: async () => {
       useAppStore.getState().setPendingUserAction(sessionId, undefined);
@@ -44,6 +45,7 @@ export function useSessionStreaming(
         isStreaming: false,
         connectionState: "idle",
         expectedMessageCount: undefined,
+        awaitingFinalResponse: false,
       });
       await invalidateSessionQueries();
     },
@@ -56,6 +58,7 @@ export function useSessionStreaming(
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: false,
         connectionState: "idle",
+        awaitingFinalResponse: false,
       });
     },
   });
@@ -81,6 +84,7 @@ export function useSessionStreaming(
           typeof serverMessageCount === "number" ? serverMessageCount + 1 : undefined,
         activeInputText: appendUserInput ? text : undefined,
         activeClientMessageId: appendUserInput ? clientMessageId : undefined,
+        awaitingFinalResponse: false,
       });
       setSessionStatus(sessionId, "running");
       await eventMessage(text);
@@ -96,7 +100,12 @@ export function useSessionStreaming(
         setSessionStatus(sessionId, "running");
         return;
       }
-      useAppStore.getState().resetLiveResponse(sessionId);
+      useAppStore.getState().setStreamMeta(sessionId, {
+        isStreaming: false,
+        connectionState: "idle",
+        expectedMessageCount: undefined,
+        awaitingFinalResponse: false,
+      });
       setSessionStatus(sessionId, undefined);
       void refreshSessionTitleAfterTurn({
         serverMessageCount,
@@ -117,6 +126,7 @@ export function useSessionStreaming(
         useAppStore.getState().setStreamMeta(sessionId, {
           isStreaming: true,
           connectionState: "detached",
+          awaitingFinalResponse: false,
         });
         setSessionStatus(sessionId, "running");
         await invalidateSessionQueries();
@@ -152,6 +162,7 @@ export function useSessionStreaming(
           typeof serverMessageCount === "number" ? serverMessageCount + 1 : undefined,
         activeInputText: text,
         activeClientMessageId: clientMessageId,
+        awaitingFinalResponse: false,
       });
       setSessionStatus(sessionId, "running");
       await retryMessage({ clientMessageId, retryOfMessageId, text });
@@ -167,7 +178,12 @@ export function useSessionStreaming(
         setSessionStatus(sessionId, "running");
         return;
       }
-      useAppStore.getState().resetLiveResponse(sessionId);
+      useAppStore.getState().setStreamMeta(sessionId, {
+        isStreaming: false,
+        connectionState: "idle",
+        expectedMessageCount: undefined,
+        awaitingFinalResponse: false,
+      });
       setSessionStatus(sessionId, undefined);
       void refreshSessionTitleAfterTurn({
         serverMessageCount,
@@ -182,6 +198,7 @@ export function useSessionStreaming(
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: false,
         connectionState: "idle",
+        awaitingFinalResponse: false,
       });
       setSessionStatus(sessionId, "error");
       await invalidateSessionQueries();
@@ -194,7 +211,12 @@ export function useSessionStreaming(
     sendMutation,
     stopMutation,
     streamState,
-    stopResponse: () => stopMutation.mutateAsync(),
+    stopResponse: () => {
+      if (stopMutation.isPending) {
+        return Promise.resolve();
+      }
+      return stopMutation.mutateAsync();
+    },
     retryResponse: () => retryMutation.mutateAsync(),
     canRetryResponse: Boolean(streamState?.activeInputText && streamState.activeMessageId),
     sendText: (text: string) => {

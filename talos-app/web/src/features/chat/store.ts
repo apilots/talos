@@ -6,6 +6,8 @@ import type {
   StreamSessionState,
 } from "@/shared/types/ui";
 
+type StreamTextKind = "assistant" | "thinking" | "system";
+
 export interface ChatSlice {
   sessionAliases: Record<string, string>;
   sessionApprovalModes: Record<string, ApprovalMode>;
@@ -19,7 +21,7 @@ export interface ChatSlice {
   resetLiveResponse: (sessionId: string) => void;
   appendStreamText: (
     sessionId: string,
-    kind: "assistant" | "thinking" | "system",
+    kind: StreamTextKind,
     chunk: string,
   ) => void;
   setPendingInput: (sessionId: string, input?: PendingInput) => void;
@@ -66,6 +68,7 @@ export interface ChatSlice {
         | "showReconnectControls"
         | "activeInputText"
         | "activeClientMessageId"
+        | "awaitingFinalResponse"
       >
     >,
   ) => void;
@@ -139,6 +142,7 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
               blocks: [],
               pendingApproval: undefined,
               pendingUserAction: undefined,
+              awaitingFinalResponse: false,
               error: undefined,
             },
           },
@@ -156,7 +160,11 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
             lastBlock.kind === "system") &&
           lastBlock.kind === kind
         ) {
-          lastBlock.text += chunk;
+          blocks[blocks.length - 1] = {
+            ...lastBlock,
+            text: lastBlock.text + chunk,
+            live: true,
+          };
         } else {
           blocks.push({
             id: `${kind}-${Date.now()}-${blocks.length}`,

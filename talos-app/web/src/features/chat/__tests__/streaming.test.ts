@@ -209,6 +209,142 @@ describe("chat stream integration helpers", () => {
     expect(useAppStore.getState().transientStatuses["sess-1"]).toBe("running");
   });
 
+  it("keeps tool lifecycle updates immediate", () => {
+    applyStreamEvent("sess-1", {
+      event_type: "message_tool_call_executing",
+      message_id: "msg-1",
+      session_id: "sess-1",
+      sequence: 1,
+      payload: {
+        type: "message_tool_call_executing",
+        request_id: "req-1",
+        stream_key: { round: 0, index: 0 },
+        call_id: "call-1",
+        tool_name: "Bash",
+        item_index: 0n,
+        iteration: 0n,
+        step_id: "step-1",
+      },
+    });
+    applyStreamEvent("sess-1", {
+      event_type: "message_tool_call_progress_delta",
+      message_id: "msg-1",
+      session_id: "sess-1",
+      sequence: 2,
+      payload: {
+        type: "message_tool_call_progress_delta",
+        request_id: "req-1",
+        stream_key: { round: 0, index: 0 },
+        call_id: "call-1",
+        tool_name: "Bash",
+        progress_kind: "stdout",
+        message: "line 1",
+        item_index: 0n,
+        iteration: 0n,
+        step_id: "step-1",
+      },
+    });
+
+    const stream = useAppStore.getState().streams["sess-1"];
+    expect(stream.blocks[0]).toMatchObject({
+      kind: "tool",
+      callId: "call-1",
+      status: "running",
+      progress: [{ kind: "stdout", message: "line 1" }],
+    });
+  });
+
+  it("shows a waiting status after a tool completes before the final response starts", () => {
+    applyStreamEvent("sess-1", {
+      event_type: "message_tool_call_executing",
+      message_id: "msg-1",
+      session_id: "sess-1",
+      sequence: 1,
+      payload: {
+        type: "message_tool_call_executing",
+        request_id: "req-1",
+        stream_key: { round: 0, index: 0 },
+        call_id: "call-1",
+        tool_name: "Read",
+        item_index: 0n,
+        iteration: 0n,
+        step_id: "step-1",
+      },
+    });
+    applyStreamEvent("sess-1", {
+      event_type: "message_tool_call_completed",
+      message_id: "msg-1",
+      session_id: "sess-1",
+      sequence: 2,
+      payload: {
+        type: "message_tool_call_completed",
+        request_id: "req-1",
+        call_id: "call-1",
+        tool: "Read",
+        content: [{ type: "text", text: "file content" }],
+        is_error: false,
+        item_index: 0n,
+        iteration: 0n,
+        step_id: "step-1",
+        timing_ms: 10n,
+      },
+    });
+
+    const stream = useAppStore.getState().streams["sess-1"];
+    expect(stream.awaitingFinalResponse).toBe(true);
+
+    const blocks = buildSessionBlocks({
+      sessionId: "sess-1",
+      streamState: stream,
+      turns: [],
+      waitingResponseDetail: "Waiting detail",
+      waitingResponseTitle: "Waiting",
+      finalResponseWaitDetail: "Final detail",
+      finalResponseWaitTitle: "Final wait",
+      stoppingResponseDetail: "Stopping detail",
+      stoppingResponseTitle: "Stopping",
+    });
+
+    expect(blocks.at(-1)).toMatchObject({
+      kind: "status",
+      title: "Final wait",
+      detail: "Final detail",
+    });
+  });
+
+  it("removes the final waiting status when assistant output starts", () => {
+    useAppStore.getState().setStreamMeta("sess-1", {
+      activeMessageId: "msg-1",
+      isStreaming: true,
+      connectionState: "streaming",
+      awaitingFinalResponse: true,
+    });
+
+    applyStreamEvent("sess-1", {
+      event_type: "message_output_delta",
+      message_id: "msg-1",
+      session_id: "sess-1",
+      sequence: 3,
+      payload: {
+        type: "message_output_delta",
+        request_id: "req-1",
+        delta: "final answer",
+        item_index: 0n,
+        iteration: 0n,
+        step_id: "step-1",
+      },
+    });
+
+    const stream = useAppStore.getState().streams["sess-1"];
+    expect(stream.awaitingFinalResponse).toBe(false);
+    expect(stream.blocks).toContainEqual(
+      expect.objectContaining({
+        kind: "assistant",
+        text: "final answer",
+      }),
+    );
+  });
+
   it("hydrates pending approval from an active turn snapshot", () => {
     applyActiveTurnSnapshot("sess-1", {
       session_id: "sess-1",
@@ -393,7 +529,95 @@ describe("chat stream integration helpers", () => {
     });
   });
 
-  it("clears stale local stream state when active turn is completed", () => {
+  it("keeps completed live frame visible until canonical history contains the active message", () => {
+    const blocks = buildSessionBlocks({
+      sessionId: "sess-1",
+      streamState: {
+        isStreaming: false,
+        connectionState: "idle",
+        activeMessageId: "msg-1",
+        pendingInput: {
+          text: "question still waiting for history",
+          clientMessageId: "client-7",
+          serverMessageId: "msg-1",
+        },
+        blocks: [
+          {
+            id: "assistant-live-2",
+            kind: "assistant",
+            text: "finished live answer",
+            live: true,
+          },
+        ],
+      },
+      turns: [],
+      waitingResponseDetail: "Waiting detail",
+      waitingResponseTitle: "Waiting",
+      stoppingResponseDetail: "Stopping detail",
+      stoppingResponseTitle: "Stopping",
+    });
+
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]).toMatchObject({
+      kind: "user",
+      text: "question still waiting for history",
+      live: true,
+    });
+    expect(blocks[1]).toMatchObject({
+      kind: "assistant",
+      text: "finished live answer",
+      live: true,
+    });
+  });
+
+  it("drops the completed live frame once canonical history contains the active message", () => {
+    const blocks = buildSessionBlocks({
+      sessionId: "sess-1",
+      streamState: {
+        isStreaming: false,
+        connectionState: "idle",
+        activeMessageId: "msg-1",
+        pendingInput: {
+          text: "history now owns this input",
+          clientMessageId: "client-8",
+          serverMessageId: "msg-1",
+        },
+        blocks: [
+          {
+            id: "assistant-live-3",
+            kind: "assistant",
+            text: "live duplicate",
+            live: true,
+          },
+        ],
+      },
+      turns: [
+        {
+          request_id: "req-1",
+          message_id: "msg-1",
+          session_id: "sess-1",
+          model: "gpt-4.1",
+          reasoning: [],
+          stop_reason: "end_turn",
+          usage,
+          output: [
+            { type: "user_input", text: "history now owns this input" },
+            { type: "output_text", text: "canonical answer" },
+          ],
+        },
+      ],
+      waitingResponseDetail: "Waiting detail",
+      waitingResponseTitle: "Waiting",
+      stoppingResponseDetail: "Stopping detail",
+      stoppingResponseTitle: "Stopping",
+    });
+
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]).toMatchObject({ kind: "user", text: "history now owns this input" });
+    expect(blocks[1]).toMatchObject({ kind: "assistant", text: "canonical answer" });
+  });
+
+  it("keeps local live frame state when active turn is completed", () => {
     useAppStore.getState().setPendingInput("sess-1", {
       text: "completed turn should keep pending input until history catches up",
       clientMessageId: "client-completed",
@@ -405,6 +629,7 @@ describe("chat stream integration helpers", () => {
       connectionState: "detached",
     });
     useAppStore.getState().setSessionStatus("sess-1", "running");
+    useAppStore.getState().appendStreamText("sess-1", "assistant", "live answer");
 
     applyActiveTurnSnapshot("sess-1", {
       session_id: "sess-1",
@@ -419,7 +644,11 @@ describe("chat stream integration helpers", () => {
     const stream = useAppStore.getState().streams["sess-1"];
     expect(stream.isStreaming).toBe(false);
     expect(stream.connectionState).toBe("idle");
-    expect(stream.blocks).toHaveLength(0);
+    expect(stream.blocks).toHaveLength(1);
+    expect(stream.blocks[0]).toMatchObject({
+      kind: "assistant",
+      text: "live answer",
+    });
     expect(stream.pendingInput).toMatchObject({
       text: "completed turn should keep pending input until history catches up",
       serverMessageId: "msg-1",
@@ -467,7 +696,7 @@ describe("chat stream integration helpers", () => {
     expect(blocks[1]).toMatchObject({ kind: "assistant", text: "done" });
   });
 
-  it("hides completed pending input when history has the same user input without a matching message id", () => {
+  it("keeps completed pending input when history only has the same text on another message", () => {
     const blocks = buildSessionBlocks({
       sessionId: "sess-1",
       streamState: {
@@ -501,12 +730,17 @@ describe("chat stream integration helpers", () => {
       stoppingResponseTitle: "Stopping",
     });
 
-    expect(blocks).toHaveLength(2);
+    expect(blocks).toHaveLength(3);
     expect(blocks[0]).toMatchObject({
       kind: "user",
       text: "same text committed through another message id",
     });
     expect(blocks[1]).toMatchObject({ kind: "assistant", text: "done" });
+    expect(blocks[2]).toMatchObject({
+      kind: "user",
+      text: "same text committed through another message id",
+      live: true,
+    });
   });
 
   it("keeps an active pending input visible when only an older history turn has the same text", () => {

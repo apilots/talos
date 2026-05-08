@@ -106,6 +106,7 @@ export interface StreamSessionState {
   showReconnectControls?: boolean;
   activeInputText?: string;
   activeClientMessageId?: string;
+  awaitingFinalResponse?: boolean;
   blocks: ChatRenderBlock[];
   pendingInput?: PendingInput;
   pendingUserAction?: TalosPendingUserAction;
