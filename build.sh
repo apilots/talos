@@ -105,6 +105,12 @@ copy_rust_binary() {
   cp "$(rust_target_dir)/${binary_name}" "${output_dir}/${binary_name}"
 }
 
+copy_conf_resource() {
+  local output_dir="$1"
+  mkdir -p "${output_dir}/conf"
+  cp "${RUST_DIR}/conf/talos.yaml" "${output_dir}/conf/talos.yaml"
+}
+
 cleanup_desktop_package_dir() {
   local package_dir="$1"
   find "${package_dir}" -mindepth 1 -maxdepth 1 -type d \
@@ -144,6 +150,7 @@ build_server() {
   echo "Building Talos server..."
   cargo build --manifest-path "${RUST_DIR}/Cargo.toml" -p talos $(cargo_profile_args)
   copy_rust_binary "talos" "${PRODUCT_DIR}/server"
+  copy_conf_resource "${PRODUCT_DIR}/server"
 }
 
 build_server_webui() {
@@ -163,6 +170,7 @@ build_server_webui() {
     cp -R "${BUILD_ASSET_DIR}/server/." "${staging_dir}/"
   fi
   cp "$(rust_target_dir)/talos" "${staging_dir}/talos"
+  copy_conf_resource "${staging_dir}"
   cp -R "${REPO_ROOT}/talos-app/web/dist/." "${staging_dir}/webui/"
   tar -czf "${archive_path}" -C "${staging_dir}" .
   rm -rf "${PRODUCT_DIR}/.staging"
@@ -172,6 +180,7 @@ build_tui() {
   echo "Building Talos TUI..."
   cargo build --manifest-path "${RUST_DIR}/Cargo.toml" -p talos-ui-tui $(cargo_profile_args)
   copy_rust_binary "talos-ui-tui" "${PRODUCT_DIR}/tui"
+  copy_conf_resource "${PRODUCT_DIR}/tui"
 }
 
 build_webui() {
@@ -190,6 +199,7 @@ build_desktop() {
   rm -rf "${PRODUCT_DIR}/desktop"
   mkdir -p "${PRODUCT_DIR}/desktop"
   cp -R "${REPO_ROOT}/talos-app/desktop/dist/." "${PRODUCT_DIR}/desktop/"
+  copy_conf_resource "${PRODUCT_DIR}/desktop"
   mkdir -p "${PRODUCT_DIR}/desktop/web"
   cp -R "${REPO_ROOT}/talos-app/web/dist/." "${PRODUCT_DIR}/desktop/web/"
 }

@@ -4,8 +4,8 @@ gateway:
   port: 8080
   host: "0.0.0.0"
   token: "talos-local-test-token"
-  jwt_secret: ${JWT_SECRET}
-  auth: true 
+  jwt_secret: ${TALOS_GATEWAY_JWT_SECRET}
+  auth: true
   access_token_ttl_days: 30
   allow_register: true
 
@@ -92,7 +92,7 @@ channels:
     enabled: false
   telegram:
     enabled: false
-    token: ${TELEGRAM_BOT_TOKEN}
+    token: ${TALOS_TELEGRAM_BOT_TOKEN}
     allow_from: []
     dm_policy: "open"
     group_policy: "mention"
@@ -103,30 +103,30 @@ channels:
     accounts:
       - id: "telegram-default"
         enabled: false
-        token: ${TELEGRAM_ACCOUNT_1_TOKEN}
+        token: ${TALOS_TELEGRAM_ACCOUNT_1_TOKEN}
         dm_policy: "open"
         group_policy: "mention"
         allow_from: []
         group_allow_from: []
         mode: "polling"
-        webhook_url: ${TELEGRAM_ACCOUNT_1_WEBHOOK_URL}
+        webhook_url: ${TALOS_TELEGRAM_ACCOUNT_1_WEBHOOK_URL}
         groups:
-          - id: ${TELEGRAM_GROUP_ID}
+          - id: ${TALOS_TELEGRAM_GROUP_ID}
             require_mention: true
             allow_from: []
             topics:
-              - id: ${TELEGRAM_TOPIC_ID}
+              - id: ${TALOS_TELEGRAM_TOPIC_ID}
                 require_mention: false
                 allow_from: []
       - id: "telegram-webhook"
         enabled: false
-        token: ${TELEGRAM_ACCOUNT_2_TOKEN}
+        token: ${TALOS_TELEGRAM_ACCOUNT_2_TOKEN}
         dm_policy: "open"
         group_policy: "mention"
         allow_from: []
         group_allow_from: []
         mode: "webhook"
-        webhook_url: ${TELEGRAM_ACCOUNT_2_WEBHOOK_URL}
+        webhook_url: ${TALOS_TELEGRAM_ACCOUNT_2_WEBHOOK_URL}
         groups: []
   discord:
     enabled: false
@@ -137,7 +137,7 @@ llm:
   provider: "anthropic"
   model: "kimi-k2.5"
   anthropic:
-    api_key: ${BAILIAN_CODINGPLAN_API_KEY}
+    api_key: ${TALOS_LLM_ANTHROPIC_API_KEY}
     base_url: "https://coding.dashscope.aliyuncs.com/apps/anthropic/v1"
     enabled: true
     models:
@@ -166,7 +166,7 @@ llm:
       - id: "qwen3-coder-next"
         name: "Qwen Coder Next"
         context_window: 32768
-        reasoning: false 
+        reasoning: false
         input: ["text"]
         cost:
           input: 0
@@ -177,7 +177,7 @@ llm:
       - id: "qwen3-coder-plus"
         name: "Qwen Coder Plus"
         context_window: 32768
-        reasoning: false 
+        reasoning: false
         input: ["text"]
         cost:
           input: 0
@@ -219,7 +219,7 @@ llm:
           cache_write: 0
         compat: {}
   openai:
-    api_key: ${BAILIAN_CODINGPLAN_API_KEY}
+    api_key: ${TALOS_LLM_OPENAI_API_KEY}
     base_url: "https://coding.dashscope.aliyuncs.com/v1"
     enabled: false
     models:
@@ -248,7 +248,7 @@ llm:
       - id: "qwen3-coder-next"
         name: "Qwen Coder Next"
         context_window: 32768
-        reasoning: false 
+        reasoning: false
         input: ["text"]
         cost:
           input: 0
@@ -259,7 +259,7 @@ llm:
       - id: "qwen3-coder-plus"
         name: "Qwen Coder Plus"
         context_window: 32768
-        reasoning: false 
+        reasoning: false
         input: ["text"]
         cost:
           input: 0
@@ -301,9 +301,9 @@ llm:
           cache_write: 0
         compat: {}
   bailian:
-    api_key: ${BAILIAN_API_KEY}
+    api_key: ${TALOS_LLM_BAILIAN_API_KEY}
     base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    enabled: true
+    enabled: false
     models:
       - id: "qwen-max"
         name: "qwen-max"

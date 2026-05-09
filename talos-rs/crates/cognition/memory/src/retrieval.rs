@@ -294,7 +294,7 @@ async fn select_candidate_files(
     max_results: usize,
 ) -> TalosResult<Vec<String>> {
     let request = ChatRequest::builder()
-        .model(llm.default_model().to_string())
+        .model(llm.default_model())
         .messages(vec![
             ChatMessage::system(
                 "You select relevant memory files for a query. Respond ONLY with a valid JSON array of file paths.",
@@ -319,7 +319,7 @@ async fn select_candidate_sections(
     max_results: usize,
 ) -> TalosResult<Vec<SectionRef>> {
     let request = ChatRequest::builder()
-        .model(llm.default_model().to_string())
+        .model(llm.default_model())
         .messages(vec![
             ChatMessage::system(
                 "You select relevant memory sections for a query. Respond ONLY with a valid JSON array.",
@@ -535,8 +535,8 @@ mod tests {
             unreachable!("stream is not used in tests")
         }
 
-        fn default_model(&self) -> &str {
-            "mock-model"
+        fn default_model(&self) -> String {
+            "mock-model".to_string()
         }
 
         fn native_thinking_support(&self, _model: &str) -> NativeThinkingSupport {

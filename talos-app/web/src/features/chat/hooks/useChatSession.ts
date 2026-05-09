@@ -39,7 +39,6 @@ export function useChatSession(
   const { retryStream } = useSessionReconnect({
     hasActiveConnection,
     reconnectMessage,
-    serverMessageCount,
     sessionId,
     streamState: liveStreamState,
   });
@@ -91,7 +90,6 @@ export function useChatSession(
       activeInputText: undefined,
       activeClientMessageId: undefined,
       lastSequence: undefined,
-      expectedMessageCount: undefined,
       awaitingFinalResponse: false,
     });
   }, [

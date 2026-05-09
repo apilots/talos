@@ -23,11 +23,12 @@ let controller: DesktopAppServerController | undefined;
 
 async function createController(): Promise<DesktopAppServerController> {
   const launchToken = process.env.TALOS_DESKTOP_LAUNCH_TOKEN ?? randomUUID();
-  const env = await resolveAppServerEnvironment({
+  const env = resolveAppServerEnvironment({
     baseEnv: process.env,
-    isPackaged: app.isPackaged,
-    platform: process.platform,
   });
+  if (app.isPackaged && !env.TALOS_RESOURCE_DIR) {
+    env.TALOS_RESOURCE_DIR = process.resourcesPath;
+  }
   return new DesktopAppServerController({
     command: resolveAppServerCommand({
       env,

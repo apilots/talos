@@ -32,6 +32,7 @@ AGENTS.md
 node_modules/
 dist/
 talos-app/desktop/resources/app-server/
+talos-app/desktop/resources/conf/
 
 # ci
 *reports

@@ -11,6 +11,7 @@ async fn test_execute_general_turn_loop_reports_model_output_limit() {
     let memory_store = Arc::new(MemoryStore::new(workspace_dir));
     let prepared = PreparedGeneralTurn {
         session_id: "s1".to_string(),
+        message_id: "msg-1".to_string(),
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
         project_root: None,

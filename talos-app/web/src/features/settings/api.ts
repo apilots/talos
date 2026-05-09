@@ -1,13 +1,13 @@
-import type { CreateUserTokenResult, LlmConfig, UserTokenMeta } from "@talos/sdk-browser";
+import type { CreateUserTokenResult, LlmConfig, LlmConfigRead, UserTokenMeta } from "@talos/sdk-browser";
 import { getTalosClient } from "@/shared/api/client";
 
 export type { CreateUserTokenResult, UserTokenMeta };
 
-export async function getLlmConfig(): Promise<LlmConfig> {
+export async function getLlmConfig(): Promise<LlmConfigRead> {
   return getTalosClient().llm.get();
 }
 
-export async function updateLlmConfig(config: LlmConfig): Promise<LlmConfig> {
+export async function updateLlmConfig(config: LlmConfig): Promise<LlmConfigRead> {
   return getTalosClient().llm.update(config);
 }
 

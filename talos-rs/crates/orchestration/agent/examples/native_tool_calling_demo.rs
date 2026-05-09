@@ -19,8 +19,8 @@ impl LlmProvider for NativeToolMockProvider {
         "native-tool-mock"
     }
 
-    fn default_model(&self) -> &str {
-        "mock-model"
+    fn default_model(&self) -> String {
+        "mock-model".to_string()
     }
 
     async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {

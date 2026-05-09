@@ -1,21 +1,21 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
-use talos_config::resolve_runtime_path;
+use talos_config::{provider_config_for_llm, resolve_runtime_path, LlmConfig};
 use talos_error::{TalosError, TalosResult};
 use talos_session_store::SessionStore;
 use talos_types::talos::{TalosConnectionMode, TalosContext, TalosProvider};
 use talos_types::{
     connection_mode_from_context, normalize_current_directory, resolve_effective_project_root,
     validate_project_directory, OptionalCurrentDirectoryPatch, OptionalProjectIdPatch,
-    ProjectPatch, ProjectRecord, SessionConf, SessionPatch, SessionPatchAck, SessionQuery,
-    SessionRecord, TalosConfig, TalosSession,
+    ProjectPatch, ProjectRecord, SessionConf, SessionConfigOverridePolicy, SessionPatch,
+    SessionPatchAck, SessionQuery, SessionRecord, TalosConfig, TalosSession,
 };
 
 #[derive(Clone)]
 pub struct SessionService {
     session_store: Arc<dyn SessionStore>,
-    base_config: TalosConfig,
+    base_config: Arc<RwLock<TalosConfig>>,
     default_workspace_id: String,
     channel_dm_scopes: std::collections::HashMap<String, String>,
 }
@@ -24,7 +24,7 @@ impl SessionService {
     pub fn new(session_store: Arc<dyn SessionStore>, base_config: TalosConfig) -> Self {
         Self {
             session_store,
-            base_config,
+            base_config: Arc::new(RwLock::new(base_config)),
             default_workspace_id: "default".to_string(),
             channel_dm_scopes: std::collections::HashMap::new(),
         }
@@ -45,8 +45,24 @@ impl SessionService {
         self
     }
 
-    fn base_model(&self) -> &str {
-        self.base_config.llm.model.as_str()
+    fn base_model(&self) -> String {
+        self.base_config_snapshot().llm.model
+    }
+
+    fn base_config_snapshot(&self) -> TalosConfig {
+        self.base_config
+            .read()
+            .expect("session base config read lock")
+            .clone()
+    }
+
+    pub fn update_base_llm(&self, llm: &LlmConfig) {
+        let mut base_config = self
+            .base_config
+            .write()
+            .expect("session base config write lock");
+        base_config.llm = llm.clone();
+        base_config.agent.model = llm.model.clone();
     }
 
     fn resolve_dm_scope(&self, provider: &TalosProvider) -> Option<String> {
@@ -54,7 +70,8 @@ impl SessionService {
     }
 
     fn workspace_root(&self) -> Option<PathBuf> {
-        let workspace_dir = self.base_config.agent.kernel.memory.workspace_dir.trim();
+        let base_config = self.base_config_snapshot();
+        let workspace_dir = base_config.agent.kernel.memory.workspace_dir.trim();
         if workspace_dir.is_empty() {
             return None;
         }
@@ -68,9 +85,39 @@ impl SessionService {
         record: &SessionRecord,
         workspace_id: Option<String>,
     ) -> TalosResult<TalosSession> {
-        let mut session = TalosSession::restore(record, &self.base_config, workspace_id)?;
+        let base_config = self.base_config_snapshot();
+        let record = self.normalize_record_for_base_provider(record, &base_config)?;
+        let mut session = TalosSession::restore(&record, &base_config, workspace_id)?;
         session.context.project_root = None;
         Ok(session)
+    }
+
+    fn normalize_record_for_base_provider(
+        &self,
+        record: &SessionRecord,
+        base_config: &TalosConfig,
+    ) -> TalosResult<SessionRecord> {
+        let explicit_model = SessionConfigOverridePolicy::extract_agent_model(&record.conf)?;
+        let effective_model = explicit_model.as_deref().unwrap_or(record.model.as_str());
+        if self.base_provider_supports_model(base_config, effective_model) {
+            return Ok(record.clone());
+        }
+
+        let mut normalized = record.clone();
+        normalized.model = base_config.llm.model.clone();
+        normalized.conf = clear_session_model_override(&normalized.conf);
+        Ok(normalized)
+    }
+
+    fn base_provider_supports_model(&self, base_config: &TalosConfig, model: &str) -> bool {
+        if model == base_config.llm.model {
+            return true;
+        }
+        let Some(provider) = provider_config_for_llm(&base_config.llm, &base_config.llm.provider)
+        else {
+            return false;
+        };
+        provider.models.is_empty() || provider.models.iter().any(|entry| entry.id == model)
     }
 
     async fn resolve_effective_root(&self, session: &TalosSession) -> TalosResult<Option<PathBuf>> {
@@ -118,12 +165,13 @@ impl SessionService {
         let mut context = context;
         context.project_root = None;
         let current_directory = normalize_current_directory(&context, current_directory)?;
+        let base_model = self.base_model();
         let record = self
             .session_store
             .create_session(
                 &context,
                 target_agent,
-                self.base_model(),
+                &base_model,
                 model.as_deref(),
                 conf,
                 self.resolve_dm_scope(&context.provider),
@@ -249,5 +297,148 @@ impl SessionService {
 
     pub async fn delete_project(&self, project_id: &str) -> TalosResult<()> {
         self.session_store.delete_project(project_id).await
+    }
+}
+
+fn clear_session_model_override(conf: &SessionConf) -> SessionConf {
+    let mut next = conf.clone();
+    if let Some(agent) = next.agent.as_mut() {
+        agent.model = None;
+    }
+    if next
+        .agent
+        .as_ref()
+        .is_some_and(|agent| agent.model.is_none())
+    {
+        next.agent = None;
+    }
+    next
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use talos_session_store::MockSessionStore;
+    use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType};
+
+    use super::SessionService;
+
+    fn provider_model(id: &str) -> talos_config::ProviderModelConfig {
+        talos_config::ProviderModelConfig {
+            id: id.to_string(),
+            name: id.to_string(),
+            context_window: 32_768,
+            reasoning: false,
+            input: Vec::new(),
+            cost: Default::default(),
+            compat: Default::default(),
+        }
+    }
+
+    fn context() -> TalosContext {
+        TalosContext {
+            source_type: TalosSourceType::System,
+            provider: TalosProvider::Http,
+            user_id: "user-1".to_string(),
+            message_id: "message-1".to_string(),
+            trace_id: "trace-1".to_string(),
+            channel_id: None,
+            thread_id: None,
+            project_root: None,
+            environment: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn update_base_llm_changes_new_session_default_model() {
+        let mut base_config = talos_types::TalosConfig::default();
+        base_config.llm.provider = "anthropic".to_string();
+        base_config.llm.model = "old-model".to_string();
+        let service = SessionService::new(Arc::new(MockSessionStore::new()), base_config);
+        let mut llm = talos_config::LlmConfig::default();
+        llm.provider = "openai".to_string();
+        llm.model = "new-model".to_string();
+
+        service.update_base_llm(&llm);
+        let session = service
+            .create_session(context(), "default", None, None, None, None)
+            .await
+            .expect("session should be created");
+
+        assert_eq!(session.config.llm.provider, "openai");
+        assert_eq!(session.config.llm.model, "new-model");
+    }
+
+    #[tokio::test]
+    async fn requested_session_model_wins_when_provider_is_unchanged() {
+        let mut base_config = talos_types::TalosConfig::default();
+        base_config.llm.provider = "anthropic".to_string();
+        base_config.llm.model = "old-default".to_string();
+        base_config.llm.anthropic.models = vec![provider_model("old-default")];
+        let service = SessionService::new(Arc::new(MockSessionStore::new()), base_config);
+        let mut llm = talos_config::LlmConfig::default();
+        llm.provider = "anthropic".to_string();
+        llm.model = "new-default".to_string();
+        llm.anthropic.models = vec![
+            provider_model("new-default"),
+            provider_model("session-model"),
+        ];
+
+        service.update_base_llm(&llm);
+        let session = service
+            .create_session(
+                context(),
+                "default",
+                Some("session-model".to_string()),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("session should be created");
+
+        assert_eq!(session.config.llm.provider, "anthropic");
+        assert_eq!(session.config.llm.model, "session-model");
+    }
+
+    #[tokio::test]
+    async fn provider_switch_resets_existing_session_model_to_new_default() {
+        let mut base_config = talos_types::TalosConfig::default();
+        base_config.llm.provider = "anthropic".to_string();
+        base_config.llm.model = "old-default".to_string();
+        base_config.llm.anthropic.models = vec![
+            provider_model("old-default"),
+            provider_model("session-model"),
+        ];
+        let service = SessionService::new(Arc::new(MockSessionStore::new()), base_config);
+
+        let original = service
+            .create_session(
+                context(),
+                "default",
+                Some("session-model".to_string()),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("session should be created");
+        assert_eq!(original.config.llm.model, "session-model");
+
+        let mut llm = talos_config::LlmConfig::default();
+        llm.provider = "openai".to_string();
+        llm.model = "new-default".to_string();
+        llm.openai.models = vec![provider_model("new-default")];
+        service.update_base_llm(&llm);
+
+        let reloaded = service
+            .get_session(&original.context.session_id)
+            .await
+            .expect("session read should succeed")
+            .expect("session should exist");
+
+        assert_eq!(reloaded.config.llm.provider, "openai");
+        assert_eq!(reloaded.config.llm.model, "new-default");
     }
 }

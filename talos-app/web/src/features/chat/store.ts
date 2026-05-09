@@ -63,7 +63,6 @@ export interface ChatSlice {
         | "activeMessageId"
         | "lastSequence"
         | "connectionState"
-        | "expectedMessageCount"
         | "reconnectAttempt"
         | "showReconnectControls"
         | "activeInputText"

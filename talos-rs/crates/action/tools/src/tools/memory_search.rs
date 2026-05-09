@@ -155,8 +155,8 @@ mod tests {
             unreachable!("stream is not used in tests")
         }
 
-        fn default_model(&self) -> &str {
-            "mock-model"
+        fn default_model(&self) -> String {
+            "mock-model".to_string()
         }
 
         fn native_thinking_support(&self, _model: &str) -> NativeThinkingSupport {

@@ -454,8 +454,8 @@ impl LlmProvider for OpenAIProvider {
         "openai"
     }
 
-    fn default_model(&self) -> &str {
-        "gpt-4o"
+    fn default_model(&self) -> String {
+        "gpt-4o".to_string()
     }
 
     fn native_thinking_support(&self, model: &str) -> NativeThinkingSupport {

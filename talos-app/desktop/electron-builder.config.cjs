@@ -28,6 +28,11 @@ module.exports = {
       to: "app-server",
       filter: ["**/*"],
     },
+    {
+      from: "resources/conf",
+      to: "conf",
+      filter: ["**/*"],
+    },
   ],
   asar: true,
   mac: {

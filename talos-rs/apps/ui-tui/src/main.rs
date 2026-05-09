@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use dotenv::dotenv;
 use talos_client::{AppServerClient, AppServerClientConfig};
 use talos_types::talos::TalosConnectionMode;
 use talos_ui_tui::run_tui_app_with_gateway_client;
@@ -8,8 +7,6 @@ use tokio::sync::Mutex;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    dotenv().ok();
-
     let args: Vec<String> = std::env::args().collect();
     let app_server_bin = option_arg(&args, "--app-server-bin")
         .or_else(|| std::env::var("TALOS_APP_SERVER_BIN").ok())

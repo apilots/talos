@@ -28,6 +28,7 @@ pub async fn persist_general_turn_artifacts(
     items.extend(executed.output_items.clone());
     let talos_turn = TalosTurn {
         turn_id: turn_id.clone(),
+        message_id: prepared.message_id.clone(),
         session_id: prepared.session_id.to_string(),
         seq,
         timestamp: now,

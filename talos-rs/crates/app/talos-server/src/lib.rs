@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use talos_agent::{AgentImpl, AgentOrchestrator};
@@ -18,6 +18,10 @@ use talos_gateway_http::{HttpServer, ServerLifecycle, ServerLifecycleState};
 use talos_llm_anthropic::AnthropicProvider;
 use talos_llm_bailian::BailianProvider;
 use talos_llm_openai::OpenAIProvider;
+use talos_llm_provider::{
+    ChatRequest, ChatResponse, ChatStream, LlmProvider, NativeThinkingSupport, PromptCacheSupport,
+    ToolStream,
+};
 use talos_logging::LogGuard;
 use talos_router::{Binding, MatchRule, Router, RouterImpl};
 use talos_session_store::{
@@ -365,7 +369,9 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
         error!("failed to create default routing: {}", err);
     }
 
-    let llm_provider = create_llm_provider(&config).await?;
+    let initial_llm_provider = create_llm_provider(&config)?;
+    let reloadable_llm_provider = Arc::new(ReloadableLlmProvider::new(initial_llm_provider));
+    let llm_provider: Arc<dyn LlmProvider> = reloadable_llm_provider.clone();
     let tool_registry = Arc::new(ToolRegistry::new());
     register_core_local_tools(tool_registry.as_ref());
     register_network_tools(tool_registry.as_ref());
@@ -428,7 +434,19 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
     let llm_config_service: Arc<dyn LlmConfigService> = Arc::new(LlmConfigManager::new(llm_store));
 
     let model_catalog = resolve_model_catalog(&config.llm);
-    let application_service = Arc::new(TalosApplicationService::new_with_session_store(
+    let provider_reloader = reloadable_llm_provider.clone();
+    let coordinator_reloader = coordinator.clone();
+    let runtime_reload_hook: talos_application_service::RuntimeConfigReloadHook =
+        Arc::new(move |_| {
+            let reloaded_config = Config::load()?;
+            reloaded_config.validate_runtime()?;
+            let reloaded_provider = create_llm_provider(&reloaded_config)?;
+            coordinator_reloader.update_base_llm(&reloaded_config.llm);
+            provider_reloader.reload(reloaded_provider);
+            Ok(())
+        });
+
+    let application_service = Arc::new(TalosApplicationService::new_with_reload_hook(
         gateway,
         session_runtime,
         session_store,
@@ -440,6 +458,7 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
         model_catalog,
         auth_service.clone(),
         user_service,
+        Some(runtime_reload_hook),
     ));
 
     Ok(TalosApplicationRuntime {
@@ -495,9 +514,21 @@ async fn shutdown_signal() {
     }
 }
 
-async fn create_llm_provider(
-    config: &Config,
-) -> TalosResult<Arc<dyn talos_llm_provider::LlmProvider>> {
+fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
+    let readiness = config.model_readiness();
+    if !readiness.ready {
+        warn!(
+            provider = readiness.provider,
+            model = readiness.model,
+            issues = ?readiness.issues,
+            "model provider is not ready; runtime will start in setup-required mode"
+        );
+        return Ok(Arc::new(ModelSetupRequiredProvider {
+            model: config.llm.model.clone(),
+            message: format!("model setup required: {}", readiness.issues.join("; ")),
+        }));
+    }
+
     match config.llm.provider.as_str() {
         "anthropic" if config.llm.anthropic.enabled => {
             let api_key = config.llm.anthropic.api_key.clone().ok_or_else(|| {
@@ -550,14 +581,95 @@ async fn create_llm_provider(
     }
 }
 
+struct ReloadableLlmProvider {
+    current: RwLock<Arc<dyn LlmProvider>>,
+}
+
+impl ReloadableLlmProvider {
+    fn new(provider: Arc<dyn LlmProvider>) -> Self {
+        Self {
+            current: RwLock::new(provider),
+        }
+    }
+
+    fn reload(&self, provider: Arc<dyn LlmProvider>) {
+        *self.current.write().expect("llm provider write lock") = provider;
+    }
+
+    fn current(&self) -> Arc<dyn LlmProvider> {
+        self.current.read().expect("llm provider read lock").clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl LlmProvider for ReloadableLlmProvider {
+    fn name(&self) -> &str {
+        "reloadable"
+    }
+
+    async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+        self.current().chat(request).await
+    }
+
+    async fn stream(&self, request: ChatRequest) -> TalosResult<ChatStream> {
+        self.current().stream(request).await
+    }
+
+    fn default_model(&self) -> String {
+        self.current().default_model()
+    }
+
+    fn native_thinking_support(&self, model: &str) -> NativeThinkingSupport {
+        self.current().native_thinking_support(model)
+    }
+
+    fn prompt_cache_support(&self) -> PromptCacheSupport {
+        self.current().prompt_cache_support()
+    }
+
+    async fn chat_with_tools(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+        self.current().chat_with_tools(request).await
+    }
+
+    async fn stream_with_tools(&self, request: ChatRequest) -> TalosResult<ToolStream> {
+        self.current().stream_with_tools(request).await
+    }
+}
+
+struct ModelSetupRequiredProvider {
+    model: String,
+    message: String,
+}
+
+#[async_trait::async_trait]
+impl LlmProvider for ModelSetupRequiredProvider {
+    fn name(&self) -> &str {
+        "setup-required"
+    }
+
+    async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
+        Err(TalosError::InvalidConfiguration(self.message.clone()))
+    }
+
+    async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
+        Err(TalosError::InvalidConfiguration(self.message.clone()))
+    }
+
+    fn default_model(&self) -> String {
+        self.model.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_runtime_options, TalosServerHandle, TalosServerOptions, SERVER_SHUTDOWN_WAIT_TIMEOUT,
+        apply_runtime_options, build_application_runtime, ReloadableLlmProvider, TalosServerHandle,
+        TalosServerOptions, SERVER_SHUTDOWN_WAIT_TIMEOUT,
     };
     use std::sync::Arc;
     use talos_config::Config;
     use talos_gateway_http::{ServerLifecycle, ServerLifecycleState};
+    use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
     use tokio::time::Duration;
     use tokio_util::sync::CancellationToken;
 
@@ -570,6 +682,7 @@ mod tests {
             logging_stdout: Some(false),
             auth_disabled: None,
             enable_channels: None,
+            webui_dir: None,
         };
 
         let updated = apply_runtime_options(config, Some(&options));
@@ -577,6 +690,78 @@ mod tests {
         assert_eq!(updated.gateway.host, "127.0.0.1");
         assert_eq!(updated.gateway.port, 18080);
         assert!(!updated.logging.stdout);
+    }
+
+    #[tokio::test]
+    async fn application_runtime_builds_when_model_key_is_missing() {
+        let mut config = Config::default();
+        config.gateway.auth = false;
+        config.storage.connection_string = ":memory:".to_string();
+        config.llm.anthropic.api_key = None;
+
+        let runtime = build_application_runtime(config)
+            .await
+            .expect("runtime should start before model setup is complete");
+
+        assert_eq!(runtime.config.llm.provider, "anthropic");
+    }
+
+    #[tokio::test]
+    async fn reloadable_llm_provider_uses_reloaded_provider() {
+        let provider = ReloadableLlmProvider::new(Arc::new(TestLlmProvider {
+            text: "before".to_string(),
+            model: "model-a".to_string(),
+        }));
+
+        let first = provider
+            .chat(ChatRequest::new_user("hello", "model-a"))
+            .await
+            .expect("first provider should respond");
+        provider.reload(Arc::new(TestLlmProvider {
+            text: "after".to_string(),
+            model: "model-b".to_string(),
+        }));
+        let second = provider
+            .chat(ChatRequest::new_user("hello", "model-a"))
+            .await
+            .expect("reloaded provider should respond");
+
+        assert_eq!(first.content, "before");
+        assert_eq!(second.content, "after");
+        assert_eq!(provider.default_model(), "model-b");
+    }
+
+    struct TestLlmProvider {
+        text: String,
+        model: String,
+    }
+
+    #[async_trait::async_trait]
+    impl LlmProvider for TestLlmProvider {
+        fn name(&self) -> &str {
+            "test"
+        }
+
+        async fn chat(&self, request: ChatRequest) -> talos_error::TalosResult<ChatResponse> {
+            Ok(ChatResponse {
+                content: self.text.clone(),
+                reasoning: Vec::new(),
+                model: request.model,
+                usage: Usage::default(),
+                finish_reason: Some("stop".to_string()),
+                tool_calls: None,
+            })
+        }
+
+        async fn stream(&self, _request: ChatRequest) -> talos_error::TalosResult<ChatStream> {
+            Err(talos_error::TalosError::InternalError(
+                "stream is not used in this test".to_string(),
+            ))
+        }
+
+        fn default_model(&self) -> String {
+            self.model.clone()
+        }
     }
 
     #[tokio::test]

@@ -23,8 +23,8 @@ impl LlmProvider for BudgetFinalizationProvider {
         "budget-finalization-provider"
     }
 
-    fn default_model(&self) -> &str {
-        "mock-model"
+    fn default_model(&self) -> String {
+        "mock-model".to_string()
     }
 
     async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
@@ -89,6 +89,7 @@ async fn test_execute_general_turn_loop_forces_summary_when_budget_is_exhausted(
     let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
     let prepared = PreparedGeneralTurn {
         session_id: "s1".to_string(),
+        message_id: "msg-1".to_string(),
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
         project_root: None,

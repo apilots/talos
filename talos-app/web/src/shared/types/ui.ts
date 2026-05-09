@@ -115,7 +115,6 @@ export interface StreamSessionState {
   connectionState?: StreamConnectionState;
   lastSequence?: number;
   activeMessageId?: string;
-  expectedMessageCount?: number;
   reconnectAttempt?: number;
   showReconnectControls?: boolean;
   activeInputText?: string;

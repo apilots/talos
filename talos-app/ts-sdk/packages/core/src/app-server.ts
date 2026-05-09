@@ -4,6 +4,7 @@ import type {
   MemoryFileSummary,
   MemorySearchResult,
   LlmConfig,
+  LlmConfigRead,
   ModelInfo,
   ProjectPatch,
   ProjectRecord,
@@ -81,19 +82,19 @@ export class AppServerClient {
       .then((response) => response.data);
   }
 
-  configRead(): Promise<LlmConfig> {
+  configRead(): Promise<LlmConfigRead> {
     return this.transport.request("config.read", {});
   }
 
-  configWriteValue(path: string, value: string): Promise<LlmConfig> {
+  configWriteValue(path: string, value: string): Promise<LlmConfigRead> {
     return this.transport.request("config.value.write", { path, value });
   }
 
-  getLlmConfig(): Promise<LlmConfig> {
+  getLlmConfig(): Promise<LlmConfigRead> {
     return this.configRead();
   }
 
-  updateLlmConfig(config: LlmConfig): Promise<LlmConfig> {
+  updateLlmConfig(config: LlmConfig): Promise<LlmConfigRead> {
     return this.configWriteValue("llm", JSON.stringify(config));
   }
 

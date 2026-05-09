@@ -93,6 +93,7 @@ async fn test_prompt_builder_keeps_history_without_legacy_budget_caps() {
         memory
             .append_turn(&TalosTurn {
                 turn_id: turn_id.clone(),
+                message_id: "msg-1".to_string(),
                 session_id: "s1".to_string(),
                 seq: memory.next_turn_seq("s1").await.expect("seq should load"),
                 timestamp,

@@ -125,8 +125,8 @@ impl LlmProvider for NoopLlmProvider {
         Ok(ChatStream::new(rx))
     }
 
-    fn default_model(&self) -> &str {
-        "noop"
+    fn default_model(&self) -> String {
+        "noop".to_string()
     }
 }
 
@@ -230,8 +230,8 @@ impl LlmProvider for ExecLoopProvider {
         Ok(ChatStream::new(rx))
     }
 
-    fn default_model(&self) -> &str {
-        "exec-loop"
+    fn default_model(&self) -> String {
+        "exec-loop".to_string()
     }
 }
 
@@ -263,8 +263,8 @@ impl LlmProvider for LengthFinishProvider {
         Ok(ChatStream::new(rx))
     }
 
-    fn default_model(&self) -> &str {
-        "length-finish"
+    fn default_model(&self) -> String {
+        "length-finish".to_string()
     }
 }
 
@@ -306,8 +306,8 @@ impl LlmProvider for ApprovalLoopProvider {
         Ok(ChatStream::new(rx))
     }
 
-    fn default_model(&self) -> &str {
-        "approval-loop"
+    fn default_model(&self) -> String {
+        "approval-loop".to_string()
     }
 }
 
@@ -354,8 +354,8 @@ impl LlmProvider for StreamingToolCallIdProvider {
         Ok(ToolStream::new(rx))
     }
 
-    fn default_model(&self) -> &str {
-        "streaming-tool-call-id"
+    fn default_model(&self) -> String {
+        "streaming-tool-call-id".to_string()
     }
 }
 
@@ -414,8 +414,8 @@ impl LlmProvider for StreamingToolExecutionProvider {
         Ok(ToolStream::new(rx))
     }
 
-    fn default_model(&self) -> &str {
-        "streaming-tool-execution"
+    fn default_model(&self) -> String {
+        "streaming-tool-execution".to_string()
     }
 }
 
@@ -471,8 +471,8 @@ impl LlmProvider for EmptyFinalAfterToolsProvider {
         Ok(ChatStream::new(rx))
     }
 
-    fn default_model(&self) -> &str {
-        "empty-final-after-tools"
+    fn default_model(&self) -> String {
+        "empty-final-after-tools".to_string()
     }
 }
 
@@ -528,8 +528,8 @@ impl LlmProvider for SalvageAfterEmptyFinalProvider {
         Ok(ChatStream::new(rx))
     }
 
-    fn default_model(&self) -> &str {
-        "salvage-after-empty-final"
+    fn default_model(&self) -> String {
+        "salvage-after-empty-final".to_string()
     }
 }
 
@@ -567,8 +567,8 @@ impl LlmProvider for SummaryProvider {
         Ok(ChatStream::new(rx))
     }
 
-    fn default_model(&self) -> &str {
-        "summary-model"
+    fn default_model(&self) -> String {
+        "summary-model".to_string()
     }
 }
 
@@ -619,8 +619,8 @@ impl LlmProvider for RecordingSummaryProvider {
         Ok(ChatStream::new(rx))
     }
 
-    fn default_model(&self) -> &str {
-        "summary-model"
+    fn default_model(&self) -> String {
+        "summary-model".to_string()
     }
 }
 
@@ -629,6 +629,7 @@ fn build_ctx_with_stream(
 ) -> InvocationContext {
     InvocationContext {
         session_id: "s1".to_string(),
+        message_id: "msg-1".to_string(),
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
         workspace_id: "w1".to_string(),
@@ -668,6 +669,7 @@ async fn seed_recent_user_message(memory_store: &MemoryStore) {
     memory_store
         .append_turn(&TalosTurn {
             turn_id: "turn-1".to_string(),
+            message_id: "msg-1".to_string(),
             session_id: "s1".to_string(),
             seq: memory_store
                 .next_turn_seq("s1")

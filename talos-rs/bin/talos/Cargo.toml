@@ -13,4 +13,3 @@ talos-error = { workspace = true }
 talos-server = { workspace = true }
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
-dotenv = "0.15"

@@ -718,6 +718,7 @@ pub async fn prepare_general_turn(
     kernel_config: &AgentKernelConfig,
 ) -> TalosResult<PreparedGeneralTurn> {
     let session_id = ctx.session_id.clone();
+    let message_id = ctx.message_id.clone();
     let invocation_id = ctx.invocation_id.clone();
     let agent_id = ctx.agent_id.clone();
     let selected_model = ctx.selected_model_id().to_string();
@@ -884,6 +885,7 @@ pub async fn prepare_general_turn(
 
     Ok(PreparedGeneralTurn {
         session_id: session_id.clone(),
+        message_id,
         invocation_id,
         agent_id,
         project_root: ctx.project_root.clone(),

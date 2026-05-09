@@ -213,6 +213,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
         let input = Self::extract_text_input(&agent_request.input);
         let invocation_id = format!("inv-{}", Utc::now().timestamp_millis());
         let session_id = agent_request.session.context.session_id.clone();
+        let message_id = agent_request.session.context.message_id.clone();
         let selected_model_info = self.resolve_selected_model_info(&agent_request.session);
         let phase = agent_request.phase.clone();
         let planning_instruction = agent_request.planning_instruction.clone();
@@ -235,6 +236,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
                         kernel_agent,
                         RunRequest {
                             session_id: run_session_id,
+                            message_id,
                             invocation_id,
                             agent_id,
                             workspace_id: agent_request
@@ -309,6 +311,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
             let request_id = format!("req_{}", Uuid::new_v4().simple());
             let invocation_id = format!("inv-{}", Utc::now().timestamp_millis());
             let session_id = agent_request.session.context.session_id.clone();
+            let message_id = agent_request.session.context.message_id.clone();
             let model = if agent_request.session.config.llm.model.is_empty() {
                 this.model.clone()
             } else {
@@ -338,6 +341,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
             let runtime = this.kernel_runtime.clone();
             let kernel_input = RunRequest {
                 session_id: agent_request.session.context.session_id.clone(),
+                message_id,
                 invocation_id,
                 agent_id: this.id.clone(),
                 workspace_id: agent_request

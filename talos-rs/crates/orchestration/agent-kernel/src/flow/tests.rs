@@ -47,8 +47,8 @@ impl LlmProvider for NoopLlmProvider {
         Ok(ToolStream::new(rx))
     }
 
-    fn default_model(&self) -> &str {
-        "noop"
+    fn default_model(&self) -> String {
+        "noop".to_string()
     }
 }
 
@@ -134,8 +134,8 @@ impl LlmProvider for StepEventMockProvider {
         "step-event-mock"
     }
 
-    fn default_model(&self) -> &str {
-        "mock-model"
+    fn default_model(&self) -> String {
+        "mock-model".to_string()
     }
 
     async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
@@ -198,8 +198,8 @@ impl LlmProvider for ApprovalMockProvider {
         "approval-mock"
     }
 
-    fn default_model(&self) -> &str {
-        "mock-model"
+    fn default_model(&self) -> String {
+        "mock-model".to_string()
     }
 
     async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
@@ -246,8 +246,8 @@ impl LlmProvider for StreamingFlowMockProvider {
         "streaming-flow-mock"
     }
 
-    fn default_model(&self) -> &str {
-        "mock-model"
+    fn default_model(&self) -> String {
+        "mock-model".to_string()
     }
 
     async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
@@ -332,6 +332,7 @@ impl LlmProvider for StreamingFlowMockProvider {
 fn build_ctx() -> InvocationContext {
     InvocationContext {
         session_id: "s1".to_string(),
+        message_id: "msg-1".to_string(),
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
         workspace_id: "w1".to_string(),
@@ -398,6 +399,7 @@ fn test_project_events_includes_final_response() {
 fn test_build_flow_step_model_request_preserves_state_messages() {
     let prepared = crate::general_turn::PreparedGeneralTurn {
         session_id: "s1".to_string(),
+        message_id: "msg-1".to_string(),
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
         project_root: None,
@@ -451,6 +453,7 @@ fn test_build_flow_step_model_request_preserves_state_messages() {
 fn test_build_flow_step_model_request_preserves_native_thinking() {
     let prepared = crate::general_turn::PreparedGeneralTurn {
         session_id: "s1".to_string(),
+        message_id: "msg-1".to_string(),
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
         project_root: None,

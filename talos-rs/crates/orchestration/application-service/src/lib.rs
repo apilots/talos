@@ -12,7 +12,7 @@ pub mod workspace_docs;
 pub use access::{Actor, ActorAccess, ResourceAccessService};
 pub use account::AccountService;
 pub use admin::{AdminSessionPage, DEFAULT_ADMIN_SESSION_PAGE_SIZE, MAX_ADMIN_SESSION_PAGE_SIZE};
-pub use config::ConfigService;
+pub use config::{ConfigService, RuntimeConfigReloadHook};
 pub use event::{ApplicationEvent, ApplicationEventStream, EventReplay, EventService};
 pub use file::{
     content_hash, modified_at_ms, read_optional, validate_expected_version, with_file_lock,
@@ -66,6 +66,36 @@ impl TalosApplicationService {
         auth_service: Arc<dyn AuthService>,
         user_service: Arc<dyn UserService>,
     ) -> Self {
+        Self::new_with_reload_hook(
+            gateway,
+            session_runtime,
+            session_store,
+            event_service,
+            idempotency_store,
+            base_config,
+            llm_provider,
+            llm_config_service,
+            models,
+            auth_service,
+            user_service,
+            None,
+        )
+    }
+
+    pub fn new_with_reload_hook(
+        gateway: Arc<dyn Gateway>,
+        session_runtime: Arc<dyn SessionRuntime>,
+        session_store: Arc<dyn SessionStore>,
+        event_service: Arc<SessionEventService>,
+        idempotency_store: Arc<dyn MessageIdempotencyStore>,
+        base_config: TalosConfig,
+        llm_provider: Arc<dyn LlmProvider>,
+        llm_config_service: Arc<dyn LlmConfigService>,
+        models: Vec<ModelInfo>,
+        auth_service: Arc<dyn AuthService>,
+        user_service: Arc<dyn UserService>,
+        reload_hook: Option<RuntimeConfigReloadHook>,
+    ) -> Self {
         let mut session_records = SessionService::new(session_store, base_config.clone());
         session_records = session_records
             .with_default_workspace_id(base_config.agent.kernel.default_workspace_id.clone());
@@ -73,9 +103,20 @@ impl TalosApplicationService {
             "telegram",
             base_config.channels.telegram.dm_scope.to_string(),
         );
+        let session_records = Arc::new(session_records);
+        let reload_hook: Option<RuntimeConfigReloadHook> = {
+            let session_records = session_records.clone();
+            Some(Arc::new(move |llm: &talos_config::LlmConfig| {
+                session_records.update_base_llm(llm);
+                if let Some(hook) = &reload_hook {
+                    hook(llm)?;
+                }
+                Ok(())
+            }))
+        };
         let file_locks = FileLockRegistry::default();
         Self {
-            access: ResourceAccessService::with_records(session_runtime, Arc::new(session_records)),
+            access: ResourceAccessService::with_records(session_runtime, session_records),
             account: AccountService::new(auth_service, user_service),
             turns: TurnService::new(
                 gateway,
@@ -84,7 +125,7 @@ impl TalosApplicationService {
                 base_config.clone(),
             ),
             events: EventService::new(event_service),
-            config: ConfigService::new(llm_config_service, models),
+            config: ConfigService::new_with_reload_hook(llm_config_service, models, reload_hook),
             memory: MemoryService::new(base_config.clone(), llm_provider, file_locks.clone()),
             workspace_docs: WorkspaceDocService::new(base_config, file_locks),
         }
@@ -103,7 +144,7 @@ impl TalosApplicationService {
         auth_service: Arc<dyn AuthService>,
         user_service: Arc<dyn UserService>,
     ) -> Self {
-        Self::new(
+        Self::new_with_reload_hook(
             gateway,
             session_runtime,
             session_store,
@@ -115,6 +156,7 @@ impl TalosApplicationService {
             models,
             auth_service,
             user_service,
+            None,
         )
     }
 
@@ -176,7 +218,7 @@ impl TalosApplicationService {
             .into_iter()
             .map(|turn| TalosMessageResponse {
                 request_id: turn.turn_id.clone(),
-                message_id: turn.turn_id.clone(),
+                message_id: turn.message_id.clone(),
                 session_id: turn.session_id.clone(),
                 model: String::new(),
                 reasoning: Vec::new(),

@@ -26,6 +26,7 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
         memory_store
             .append_turn(&TalosTurn {
                 turn_id: format!("turn-{idx}"),
+            message_id: "msg-1".to_string(),
                 session_id: "s1".to_string(),
                 seq: memory_store
                     .next_turn_seq("s1")
@@ -166,6 +167,7 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_reaches_
         memory_store
             .append_turn(&TalosTurn {
                 turn_id: format!("turn-{idx}"),
+            message_id: "msg-1".to_string(),
                 session_id: "s1".to_string(),
                 seq: memory_store
                     .next_turn_seq("s1")
@@ -251,6 +253,7 @@ async fn test_run_general_turn_updates_compaction_state_to_recovery_after_succes
         memory_store
             .append_turn(&TalosTurn {
                 turn_id: format!("turn-{idx}"),
+            message_id: "msg-1".to_string(),
                 session_id: "s1".to_string(),
                 seq: memory_store
                     .next_turn_seq("s1")
@@ -332,6 +335,7 @@ async fn test_prepare_general_turn_drops_sections_only_after_compaction_exhauste
         memory_store
             .append_turn(&TalosTurn {
                 turn_id: format!("turn-{idx}"),
+            message_id: "msg-1".to_string(),
                 session_id: "s1".to_string(),
                 seq: memory_store
                     .next_turn_seq("s1")
@@ -420,6 +424,7 @@ async fn test_prepare_general_turn_records_rejected_compaction_when_summary_is_m
         memory_store
             .append_turn(&TalosTurn {
                 turn_id: format!("turn-{idx}"),
+            message_id: "msg-1".to_string(),
                 session_id: "s1".to_string(),
                 seq: memory_store
                     .next_turn_seq("s1")
@@ -589,6 +594,7 @@ async fn test_prepare_general_turn_uses_compacted_load_policy_during_recovery() 
         memory_store
             .append_turn(&TalosTurn {
                 turn_id: format!("turn-{idx}"),
+                message_id: "msg-1".to_string(),
                 session_id: "s1".to_string(),
                 seq: memory_store
                     .next_turn_seq("s1")

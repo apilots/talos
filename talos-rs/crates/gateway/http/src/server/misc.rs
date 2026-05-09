@@ -6,7 +6,7 @@ use axum::Json as BodyJson;
 use serde_json::{json, Value};
 use tokio::signal;
 
-use talos_config::LlmConfig;
+use talos_config::{LlmConfig, LlmConfigRead};
 
 use super::errors::ApiError;
 use super::state::HttpApiState;
@@ -35,16 +35,19 @@ pub(super) async fn list_models_handler(
 
 pub(super) async fn get_llm_handler(
     State(state): State<Arc<HttpApiState>>,
-) -> Result<Json<LlmConfig>, ApiError> {
-    let llm = state.config.get_llm().map_err(map_config_error)?;
+) -> Result<Json<LlmConfigRead>, ApiError> {
+    let llm = state.config.get_llm_read().map_err(map_config_error)?;
     Ok(Json(llm))
 }
 
 pub(super) async fn put_llm_handler(
     State(state): State<Arc<HttpApiState>>,
     BodyJson(llm): BodyJson<LlmConfig>,
-) -> Result<Json<LlmConfig>, ApiError> {
-    let result = state.config.update_llm(llm).map_err(map_config_error)?;
+) -> Result<Json<LlmConfigRead>, ApiError> {
+    let result = state
+        .config
+        .update_llm_read(llm)
+        .map_err(map_config_error)?;
     Ok(Json(result))
 }
 

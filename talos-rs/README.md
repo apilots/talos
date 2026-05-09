@@ -61,20 +61,19 @@ cd talos/talos-rs
 
 ### Configuration
 
-1. Copy the example configuration:
+1. Choose the runtime home if you do not want the default `${HOME}/.talos`:
 ```bash
 mkdir -p "${TALOS_HOME:-$HOME/.talos}/conf"
-cp talos.yaml.example "${TALOS_HOME:-$HOME/.talos}/conf/talos.yaml"
 ```
 
-2. Edit `${TALOS_HOME:-$HOME/.talos}/conf/talos.yaml` to match your requirements
+2. Start Talos. It creates `${TALOS_HOME:-$HOME/.talos}/conf/talos.yaml` and `${TALOS_HOME:-$HOME/.talos}/.env` on first run.
 
-3. Set required environment variables:
+3. Put provider secrets in `${TALOS_HOME:-$HOME/.talos}/.env`:
 ```bash
-export ANTHROPIC_API_KEY="your-anthropic-api-key"
+TALOS_LLM_ANTHROPIC_API_KEY="your-anthropic-api-key"
 # or
-export OPENAI_API_KEY="your-openai-api-key"
-export TELEGRAM_BOT_TOKEN="your-telegram-bot-token"  # for Telegram integration
+TALOS_LLM_OPENAI_API_KEY="your-openai-api-key"
+TALOS_TELEGRAM_BOT_TOKEN="your-telegram-bot-token"  # for Telegram integration
 ```
 
 ### Running the Server
@@ -198,13 +197,13 @@ Talos follows an eight-layer architecture with clear separation of concerns:
 
 ## ⚙️ Configuration Options
 
-The system can be configured via `${TALOS_HOME:-$HOME/.talos}/conf/talos.yaml` or environment variables:
+The system can be configured via `${TALOS_HOME:-$HOME/.talos}/conf/talos.yaml` and `${TALOS_HOME:-$HOME/.talos}/.env`:
 
-- `ANTHROPIC_API_KEY` - API key for Anthropic services
-- `OPENAI_API_KEY` - API key for OpenAI services
-- `BAILIAN_API_KEY` - API key for Bailian services
+- `TALOS_LLM_ANTHROPIC_API_KEY` - API key for Anthropic services
+- `TALOS_LLM_OPENAI_API_KEY` - API key for OpenAI services
+- `TALOS_LLM_BAILIAN_API_KEY` - API key for Bailian services
 - `GATEWAY_TOKEN` - Authentication token for the API
-- `TELEGRAM_BOT_TOKEN` - Token for Telegram bot integration
+- `TALOS_TELEGRAM_BOT_TOKEN` - Token for Telegram bot integration
 - `TALOS_LOG_LEVEL` - Logging level (debug, info, warn, error)
 
 ## 🔒 Security Features

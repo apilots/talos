@@ -13,6 +13,8 @@ import {
   type AppServerTransport,
 } from "@talos/sdk-core";
 
+const PASSTHROUGH_ENV_KEYS = new Set(["HOME", "PATH", "SHELL", "TMPDIR", "USER"]);
+
 export interface JsonRpcStdioTransportOptions {
   command?: string;
   args?: string[];
@@ -70,7 +72,7 @@ export class JsonRpcStdioTransport implements AppServerTransport {
 
     const child = spawn(this.options.command ?? "talos", this.options.args ?? ["app-server"], {
       cwd: this.options.cwd,
-      env: { ...process.env, ...(this.options.env ?? {}) },
+      env: buildAppServerEnvironment(process.env, this.options.env),
       stdio: ["pipe", "pipe", "pipe"],
     });
 
@@ -360,6 +362,29 @@ export class StdioAppServerClient extends AppServerClient {
 
 export function createStdioAppServerClient(options: AppServerClientOptions) {
   return new StdioAppServerClient(options);
+}
+
+export function filterAppServerEnvironment(baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(baseEnv)) {
+    if (value === undefined) {
+      continue;
+    }
+    if (key.startsWith("TALOS_") || PASSTHROUGH_ENV_KEYS.has(key)) {
+      env[key] = value;
+    }
+  }
+  return env;
+}
+
+function buildAppServerEnvironment(
+  baseEnv: NodeJS.ProcessEnv,
+  overrideEnv?: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  return {
+    ...filterAppServerEnvironment(baseEnv),
+    ...filterAppServerEnvironment(overrideEnv ?? {}),
+  };
 }
 
 function isApplicationEventEnvelope(value: unknown): value is AppProtocol.ApplicationEventEnvelope {

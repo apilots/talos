@@ -44,7 +44,6 @@ export function useSessionStreaming(
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: false,
         connectionState: "idle",
-        expectedMessageCount: undefined,
         awaitingFinalResponse: false,
       });
       await invalidateSessionQueries();
@@ -80,8 +79,6 @@ export function useSessionStreaming(
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: true,
         connectionState: "awaiting",
-        expectedMessageCount:
-          typeof serverMessageCount === "number" ? serverMessageCount + 1 : undefined,
         activeInputText: appendUserInput ? text : undefined,
         activeClientMessageId: appendUserInput ? clientMessageId : undefined,
         awaitingFinalResponse: false,
@@ -105,7 +102,6 @@ export function useSessionStreaming(
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: false,
         connectionState: "idle",
-        expectedMessageCount: undefined,
         awaitingFinalResponse: false,
       });
       setSessionStatus(sessionId, undefined);
@@ -160,8 +156,6 @@ export function useSessionStreaming(
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: true,
         connectionState: "awaiting",
-        expectedMessageCount:
-          typeof serverMessageCount === "number" ? serverMessageCount + 1 : undefined,
         activeInputText: text,
         activeClientMessageId: clientMessageId,
         awaitingFinalResponse: false,
@@ -190,7 +184,6 @@ export function useSessionStreaming(
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: false,
         connectionState: "idle",
-        expectedMessageCount: undefined,
         awaitingFinalResponse: false,
       });
       setSessionStatus(sessionId, undefined);

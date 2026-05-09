@@ -11,6 +11,7 @@ pub struct TalosPaths {
     pub talos_home: PathBuf,
     pub conf_dir: PathBuf,
     pub config_file: PathBuf,
+    pub env_file: PathBuf,
     pub logs_dir: PathBuf,
     pub log_file: PathBuf,
     pub data_dir: PathBuf,
@@ -29,6 +30,7 @@ impl TalosPaths {
         let data_dir = talos_home.join("data");
         Self {
             config_file: conf_dir.join("talos.yaml"),
+            env_file: talos_home.join(".env"),
             log_file: logs_dir.join("talos.log"),
             sqlite_db: data_dir.join("talos.db"),
             talos_home,

@@ -19,13 +19,6 @@ fn test_default_config() {
 }
 
 #[test]
-fn test_generate_default() {
-    let yaml = generate_default_config();
-    assert!(yaml.contains("agent:"));
-    assert!(yaml.contains("gateway:"));
-}
-
-#[test]
 fn test_kernel_defaults() {
     let config = Config::default();
     assert_eq!(config.agent.kernel.max_iters, 1);
@@ -237,7 +230,7 @@ fn test_validate_runtime_requires_jwt_secret_when_auth_enabled() {
 }
 
 #[test]
-fn test_validate_runtime_requires_provider_api_key() {
+fn test_model_readiness_reports_missing_provider_api_key() {
     let mut config = Config::default();
     config.gateway.auth = false;
     config.llm.provider = "openai".to_string();
@@ -245,10 +238,17 @@ fn test_validate_runtime_requires_provider_api_key() {
     config.agent.model = "gpt-4o".to_string();
     config.llm.openai.base_url = Some("https://api.openai.com/v1".to_string());
     config.llm.openai.api_key = None;
-    assert!(config.validate_runtime().is_err());
+    assert!(config.validate_runtime().is_ok());
+    let readiness = config.model_readiness();
+    assert!(!readiness.ready);
+    assert!(readiness
+        .issues
+        .iter()
+        .any(|issue| issue.contains("api_key")));
 
     config.llm.openai.api_key = Some("sk-test".to_string());
-    assert!(config.validate_runtime().is_ok());
+    let readiness = config.model_readiness();
+    assert!(readiness.ready);
 }
 
 #[test]

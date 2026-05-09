@@ -23,7 +23,7 @@ use talos_app_protocol::requests::{
 };
 use talos_app_protocol::version::ProtocolVersion;
 use talos_auth::{AdminCreateUserRequest, AdminPatchUserRequest, UserDto};
-use talos_config::LlmConfig;
+use talos_config::{LlmConfig, LlmConfigRead};
 use talos_error::{TalosError, TalosResult};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
@@ -195,11 +195,11 @@ impl AppServerClient {
         self.request_typed("config.read", ConfigReadParams {}).await
     }
 
-    pub async fn get_llm_config(&mut self) -> TalosResult<LlmConfig> {
+    pub async fn get_llm_config(&mut self) -> TalosResult<LlmConfigRead> {
         self.request_typed("config.read", ConfigReadParams {}).await
     }
 
-    pub async fn update_llm_config(&mut self, config: LlmConfig) -> TalosResult<LlmConfig> {
+    pub async fn update_llm_config(&mut self, config: LlmConfig) -> TalosResult<LlmConfigRead> {
         let value = serde_json::to_string(&config)
             .map_err(|error| TalosError::SerializationError(error.to_string()))?;
         self.request_typed(

@@ -83,7 +83,6 @@ pnpm desktop:check
 
 ```bash
 cd talos-rs
-source .env
 cargo build -p talos
 
 cd ../talos-app

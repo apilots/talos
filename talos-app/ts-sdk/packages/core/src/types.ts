@@ -502,3 +502,20 @@ export interface LlmConfig {
   bailian: ProviderConfig;
   ollama: ProviderConfig;
 }
+
+export interface ModelReadiness {
+  ready: boolean;
+  provider: string;
+  model: string;
+  issues: string[];
+}
+
+export interface ProviderKeyStatus {
+  api_key_configured: boolean;
+}
+
+export interface LlmConfigRead {
+  config: LlmConfig;
+  model_readiness: ModelReadiness;
+  provider_keys: Record<string, ProviderKeyStatus>;
+}

@@ -19,8 +19,8 @@ impl LlmProvider for DemoLlmProvider {
         "demo"
     }
 
-    fn default_model(&self) -> &str {
-        "demo-model"
+    fn default_model(&self) -> String {
+        "demo-model".to_string()
     }
 
     async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {

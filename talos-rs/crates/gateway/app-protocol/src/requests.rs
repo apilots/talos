@@ -478,9 +478,7 @@ impl ClientRequest {
             ClientMethod::AppList => ClientRequestParams::AppList(decode(params_value)?),
             ClientMethod::ToolList => ClientRequestParams::ToolList(decode(params_value)?),
             ClientMethod::AccountGet => ClientRequestParams::AccountGet(decode(params_value)?),
-            ClientMethod::AuthRegister => {
-                ClientRequestParams::AuthRegister(decode(params_value)?)
-            }
+            ClientMethod::AuthRegister => ClientRequestParams::AuthRegister(decode(params_value)?),
             ClientMethod::AuthLogin => ClientRequestParams::AuthLogin(decode(params_value)?),
             ClientMethod::AuthLogout => ClientRequestParams::AuthLogout(decode(params_value)?),
             ClientMethod::UserCurrent => ClientRequestParams::UserCurrent(decode(params_value)?),

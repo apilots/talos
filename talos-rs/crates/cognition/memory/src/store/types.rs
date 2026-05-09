@@ -52,6 +52,8 @@ pub struct ToolResultRecord {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TalosTurn {
     pub turn_id: String,
+    #[serde(default)]
+    pub message_id: String,
     pub session_id: String,
     pub seq: u64,
     pub timestamp: DateTime<Utc>,

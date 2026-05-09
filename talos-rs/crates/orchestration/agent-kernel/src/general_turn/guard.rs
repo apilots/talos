@@ -315,8 +315,8 @@ mod tests {
             Ok(ChatStream::new(rx))
         }
 
-        fn default_model(&self) -> &str {
-            "finalization-native-thinking-provider"
+        fn default_model(&self) -> String {
+            "finalization-native-thinking-provider".to_string()
         }
     }
 

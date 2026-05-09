@@ -12,7 +12,7 @@
 //! 使用 `${VAR_NAME}` 语法：
 //! ```yaml
 //! gateway:
-//!   jwt_secret: ${JWT_SECRET}
+//!   jwt_secret: ${TALOS_GATEWAY_JWT_SECRET}
 //! ```
 //!
 //! # 使用方式
@@ -25,11 +25,13 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use talos_error::TalosResult;
 use talos_logging::LoggingConfig;
 
 pub mod domains;
+pub mod env;
 pub mod loader;
 pub mod paths;
 pub mod service;
@@ -61,6 +63,7 @@ pub use domains::tools::{
     LocalExecToolConfig, McpServerConfig, McpToolConfig, McpTransportConfig, ToolApprovalPolicy,
     ToolSandboxModeConfig, ToolSandboxPolicy, ToolsRuntimeConfig,
 };
+pub use env::{EnvSecretStore, RuntimeEnv, TALOS_GATEWAY_JWT_SECRET};
 pub use paths::{
     resolve_runtime_path, resolve_talos_home, sanitize_agent_name, set_talos_home, TalosPaths,
 };
@@ -98,6 +101,26 @@ pub struct Config {
     /// LLM 配置
     #[serde(default)]
     pub llm: LlmConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelReadiness {
+    pub ready: bool,
+    pub provider: String,
+    pub model: String,
+    pub issues: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderKeyStatus {
+    pub api_key_configured: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmConfigRead {
+    pub config: LlmConfig,
+    pub model_readiness: ModelReadiness,
+    pub provider_keys: BTreeMap<String, ProviderKeyStatus>,
 }
 
 impl Default for Config {
@@ -198,11 +221,87 @@ impl Config {
     pub fn validate_runtime(&self) -> TalosResult<()> {
         validate::validate_runtime_config(self)
     }
+
+    pub fn model_readiness(&self) -> ModelReadiness {
+        model_readiness_for_llm(&self.llm)
+    }
 }
 
-/// 生成默认配置文件
-pub fn generate_default_config() -> String {
-    loader::generate_default_config_content()
+pub fn model_readiness_for_llm(llm: &LlmConfig) -> ModelReadiness {
+    let provider_name = llm.provider.trim().to_ascii_lowercase();
+    let mut issues = Vec::new();
+
+    let Some(provider) = provider_config_for_llm(llm, &provider_name) else {
+        issues.push(format!("unsupported llm.provider: {}", provider_name));
+        return ModelReadiness {
+            ready: false,
+            provider: provider_name,
+            model: llm.model.clone(),
+            issues,
+        };
+    };
+
+    if !provider.enabled {
+        issues.push(format!("llm provider '{}' is disabled", provider_name));
+    }
+
+    if provider_name != "ollama" {
+        match provider.api_key.as_ref() {
+            Some(api_key)
+                if !api_key.trim().is_empty() && !validate::is_unresolved_placeholder(api_key) => {}
+            Some(_) => issues.push(format!(
+                "llm.{}.api_key is empty or unresolved placeholder",
+                provider_name
+            )),
+            None => issues.push(format!("llm.{}.api_key is required", provider_name)),
+        }
+    }
+
+    match provider.base_url.as_ref() {
+        Some(base_url)
+            if base_url.trim().is_empty() || validate::is_unresolved_placeholder(base_url) =>
+        {
+            issues.push(format!(
+                "llm.{}.base_url is empty or unresolved placeholder",
+                provider_name
+            ));
+        }
+        None if provider_name == "bailian" || provider_name == "ollama" => {
+            issues.push(format!("llm.{}.base_url is required", provider_name));
+        }
+        _ => {}
+    }
+
+    if llm.model.trim().is_empty() || validate::is_unresolved_placeholder(&llm.model) {
+        issues.push("llm.model is empty or unresolved placeholder".to_string());
+    } else if !provider.models.is_empty()
+        && !provider.models.iter().any(|model| model.id == llm.model)
+    {
+        issues.push(format!(
+            "llm.model '{}' is not configured under llm.{}.models",
+            llm.model, provider_name
+        ));
+    }
+
+    ModelReadiness {
+        ready: issues.is_empty(),
+        provider: provider_name,
+        model: llm.model.clone(),
+        issues,
+    }
+}
+
+pub fn provider_config_for_llm<'a>(
+    llm: &'a LlmConfig,
+    provider: &str,
+) -> Option<&'a ProviderConfig> {
+    match provider.trim().to_ascii_lowercase().as_str() {
+        "anthropic" => Some(&llm.anthropic),
+        "openai" => Some(&llm.openai),
+        "bailian" => Some(&llm.bailian),
+        "ollama" => Some(&llm.ollama),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

@@ -536,11 +536,12 @@ impl LlmProvider for AnthropicProvider {
         "anthropic"
     }
 
-    fn default_model(&self) -> &str {
+    fn default_model(&self) -> String {
         self.config
             .default_model
             .as_deref()
             .unwrap_or("claude-3-5-sonnet-20241022")
+            .to_string()
     }
 
     fn native_thinking_support(&self, model: &str) -> NativeThinkingSupport {

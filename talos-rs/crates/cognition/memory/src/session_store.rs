@@ -252,6 +252,7 @@ fn synthesize_cancelled_turns_from_transcripts(
             }
             Some(TalosTurn {
                 turn_id: group.invocation_id,
+                message_id: String::new(),
                 session_id: session_id.to_string(),
                 seq: next_seq.saturating_add(index as u64),
                 timestamp: group.timestamp,
@@ -605,6 +606,11 @@ pub(crate) async fn append_turn(store: &MemoryStore, turn: &TalosTurn) -> TalosR
     if turn.session_id.trim().is_empty() {
         return Err(TalosError::ValidationError(
             "canonical turn session_id cannot be empty".to_string(),
+        ));
+    }
+    if turn.message_id.trim().is_empty() {
+        return Err(TalosError::ValidationError(
+            "canonical turn message_id cannot be empty".to_string(),
         ));
     }
 

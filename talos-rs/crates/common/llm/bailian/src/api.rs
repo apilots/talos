@@ -571,8 +571,8 @@ impl LlmProvider for BailianProvider {
         "bailian"
     }
 
-    fn default_model(&self) -> &str {
-        "qwen-plus"
+    fn default_model(&self) -> String {
+        "qwen-plus".to_string()
     }
 
     fn prompt_cache_support(&self) -> PromptCacheSupport {

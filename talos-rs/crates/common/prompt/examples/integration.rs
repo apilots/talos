@@ -139,6 +139,7 @@ Based on the request and available tools, decide if a tool should be used. If ye
         let timestamp = chrono::Utc::now();
         let talos_turn = TalosTurn {
             turn_id: turn_id.clone(),
+            message_id: "msg-1".to_string(),
             session_id: DEFAULT_SESSION_ID.to_string(),
             seq,
             timestamp,
@@ -205,8 +206,8 @@ mod tests {
             Ok(talos_llm_provider::ChatStream::new(rx))
         }
 
-        fn default_model(&self) -> &str {
-            "mock-model"
+        fn default_model(&self) -> String {
+            "mock-model".to_string()
         }
     }
 

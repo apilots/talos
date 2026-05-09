@@ -407,6 +407,7 @@ pub enum StopReason {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct InvocationContext {
     pub session_id: String,
+    pub message_id: String,
     pub invocation_id: String,
     pub agent_id: String,
     pub workspace_id: String,
@@ -646,6 +647,7 @@ impl From<&talos_config::AgentKernelConfig> for InvocationLimits {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunRequest {
     pub session_id: String,
+    pub message_id: String,
     pub invocation_id: String,
     pub agent_id: String,
     pub workspace_id: String,
@@ -691,6 +693,7 @@ mod tests {
     fn test_invocation_context_state_write_scopes() {
         let mut ctx = InvocationContext {
             session_id: "s1".to_string(),
+            message_id: "msg-1".to_string(),
             invocation_id: "i1".to_string(),
             agent_id: "a1".to_string(),
             workspace_id: "w1".to_string(),

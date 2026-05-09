@@ -79,6 +79,7 @@ pub struct GeneralTurnResult {
 #[derive(Debug, Clone)]
 pub struct PreparedGeneralTurn {
     pub session_id: String,
+    pub message_id: String,
     pub invocation_id: String,
     pub agent_id: String,
     pub project_root: Option<PathBuf>,

@@ -840,7 +840,8 @@ mod tests {
     ) -> String {
         let (mut client, server) = duplex(16 * 1024);
         let (server_read, server_write) = split(server);
-        let server_task = tokio::spawn(run_jsonl(server_read, server_write, app, validator, config));
+        let server_task =
+            tokio::spawn(run_jsonl(server_read, server_write, app, validator, config));
         client
             .write_all(input.as_bytes())
             .await

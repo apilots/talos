@@ -62,8 +62,8 @@ impl LlmProvider for ModelRecordingProvider {
         Ok(ChatStream::new(rx))
     }
 
-    fn default_model(&self) -> &str {
-        "default-model"
+    fn default_model(&self) -> String {
+        "default-model".to_string()
     }
 }
 
@@ -230,6 +230,7 @@ async fn test_flush_session_memory_returns_early_when_transcript_is_blank() {
     memory_store
         .append_turn(&TalosTurn {
             turn_id: "turn-blank".to_string(),
+            message_id: "msg-1".to_string(),
             session_id: "s1".to_string(),
             seq: memory_store
                 .next_turn_seq("s1")
@@ -516,6 +517,7 @@ async fn test_flush_session_memory_trims_oldest_history_turns_before_summary_req
         memory_store
             .append_turn(&TalosTurn {
                 turn_id: format!("turn-{idx}"),
+                message_id: "msg-1".to_string(),
                 session_id: "s1".to_string(),
                 seq: memory_store
                     .next_turn_seq("s1")
@@ -582,6 +584,7 @@ async fn test_flush_session_memory_trims_old_tool_outputs_before_history() {
         memory_store
             .append_turn(&TalosTurn {
                 turn_id: format!("turn-{idx}"),
+                message_id: "msg-1".to_string(),
                 session_id: "s1".to_string(),
                 seq: memory_store
                     .next_turn_seq("s1")
@@ -668,6 +671,7 @@ async fn test_flush_session_memory_trims_old_tool_exchanges_before_history() {
         memory_store
             .append_turn(&TalosTurn {
                 turn_id: format!("turn-{idx}"),
+                message_id: "msg-1".to_string(),
                 session_id: "s1".to_string(),
                 seq: memory_store
                     .next_turn_seq("s1")

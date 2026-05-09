@@ -32,6 +32,7 @@ async fn test_turn_roundtrip_and_context_dedup() {
 
     let turn_1 = TalosTurn {
         turn_id: "t1".to_string(),
+        message_id: "msg-1".to_string(),
         session_id: session_id.to_string(),
         seq: seq1,
         timestamp: Utc::now(),
@@ -202,6 +203,7 @@ async fn test_session_turns_do_not_duplicate_completed_transcripts() {
     store
         .append_turn(&TalosTurn {
             turn_id: "canonical-turn".to_string(),
+            message_id: "msg-1".to_string(),
             session_id: session_id.to_string(),
             seq: store
                 .next_turn_seq(session_id)
@@ -238,6 +240,7 @@ async fn test_turn_schema_items_roundtrip() {
     let session_id = "roundtrip-items";
     let turn = TalosTurn {
         turn_id: "turn-items-1".to_string(),
+        message_id: "msg-1".to_string(),
         session_id: session_id.to_string(),
         seq: store
             .next_turn_seq(session_id)
@@ -350,6 +353,7 @@ async fn test_reset_session_clears_turns_summaries_and_sequence_cache() {
     store
         .append_turn(&TalosTurn {
             turn_id: "turn-1".to_string(),
+            message_id: "msg-1".to_string(),
             session_id: session_id.to_string(),
             seq: store
                 .next_turn_seq(session_id)
@@ -462,6 +466,7 @@ async fn test_build_prompt_context_includes_summary() {
     store
         .append_turn(&TalosTurn {
             turn_id: "turn-1".to_string(),
+            message_id: "msg-1".to_string(),
             session_id: session_id.to_string(),
             seq: store
                 .next_turn_seq(session_id)
@@ -524,6 +529,7 @@ async fn test_prompt_context_still_builds_after_schema_change() {
     store
         .append_turn(&TalosTurn {
             turn_id: "turn-items-context".to_string(),
+            message_id: "msg-1".to_string(),
             session_id: session_id.to_string(),
             seq: store
                 .next_turn_seq(session_id)
@@ -606,6 +612,7 @@ async fn test_session_size_bytes_after_append_and_summary() {
     store
         .append_turn(&TalosTurn {
             turn_id: "turn-size".to_string(),
+            message_id: "msg-1".to_string(),
             session_id: session_id.to_string(),
             seq: store
                 .next_turn_seq(session_id)
@@ -654,6 +661,7 @@ async fn test_latest_seq_tracks_appended_turns() {
         store
             .append_turn(&TalosTurn {
                 turn_id: format!("turn-{}", turn_id),
+                message_id: "msg-1".to_string(),
                 session_id: session_id.to_string(),
                 seq: store
                     .next_turn_seq(session_id)

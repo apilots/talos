@@ -412,8 +412,8 @@ mod tests {
             Ok(ChatStream::new(rx))
         }
 
-        fn default_model(&self) -> &str {
-            "noop"
+        fn default_model(&self) -> String {
+            "noop".to_string()
         }
     }
 
@@ -471,8 +471,8 @@ mod tests {
             Ok(ToolStream::new(rx))
         }
 
-        fn default_model(&self) -> &str {
-            "usage-stream"
+        fn default_model(&self) -> String {
+            "usage-stream".to_string()
         }
     }
 
@@ -575,8 +575,8 @@ mod tests {
             Ok(ChatStream::new(rx))
         }
 
-        fn default_model(&self) -> &str {
-            "tool-calling-failure"
+        fn default_model(&self) -> String {
+            "tool-calling-failure".to_string()
         }
     }
 
@@ -652,6 +652,7 @@ mod tests {
     fn build_ctx() -> InvocationContext {
         InvocationContext {
             session_id: "s1".to_string(),
+            message_id: "msg-1".to_string(),
             invocation_id: "i1".to_string(),
             agent_id: "a1".to_string(),
             workspace_id: "w1".to_string(),
@@ -841,8 +842,8 @@ mod tests {
             Ok(ChatStream::new(rx))
         }
 
-        fn default_model(&self) -> &str {
-            "selector"
+        fn default_model(&self) -> String {
+            "selector".to_string()
         }
     }
 

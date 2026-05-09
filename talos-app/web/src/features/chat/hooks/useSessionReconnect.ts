@@ -10,40 +10,18 @@ function reconnectDelayMs(attempt: number) {
   return RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)];
 }
 
-export function shouldFinalizeDetachedStream(
-  streamState: StreamSessionState | undefined,
-  serverMessageCount: number | undefined,
-) {
-  if (
-    !streamState?.isStreaming ||
-    typeof streamState.expectedMessageCount !== "number" ||
-    typeof serverMessageCount !== "number" ||
-    serverMessageCount < streamState.expectedMessageCount
-  ) {
-    return false;
-  }
-
-  return (
-    streamState.connectionState === "detached" ||
-    streamState.connectionState === "reconnecting"
-  );
-}
-
 export function useSessionReconnect({
   hasActiveConnection,
   reconnectMessage,
-  serverMessageCount,
   sessionId,
   streamState,
 }: {
   hasActiveConnection: () => boolean;
   reconnectMessage: (messageId: string) => Promise<void>;
-  serverMessageCount?: number;
   sessionId: string;
   streamState?: StreamSessionState;
 }) {
-  const resetStream = useAppStore((state) => state.resetStream);
-  const { connectionKey, invalidateSessionQueries, queryClient } = useSessionQueryInvalidation(sessionId);
+  const { invalidateSessionQueries } = useSessionQueryInvalidation(sessionId);
 
   useEffect(() => {
     if (!streamState?.isStreaming || streamState.pendingUserAction || streamState.pendingApproval) {
@@ -78,28 +56,6 @@ export function useSessionReconnect({
     streamState?.isStreaming,
     streamState?.pendingUserAction,
     streamState?.pendingApproval,
-  ]);
-
-  useEffect(() => {
-    if (!shouldFinalizeDetachedStream(streamState, serverMessageCount)) {
-      return;
-    }
-
-    void queryClient
-      .invalidateQueries({ queryKey: ["talos", connectionKey, "turns", sessionId] })
-      .then(() => {
-        useAppStore.getState().setPendingApproval(sessionId, undefined);
-        useAppStore.getState().setSessionStatus(sessionId, undefined);
-        resetStream(sessionId);
-      });
-  }, [
-    connectionKey,
-    queryClient,
-    resetStream,
-    serverMessageCount,
-    sessionId,
-    streamState?.expectedMessageCount,
-    streamState?.isStreaming,
   ]);
 
   useEffect(() => {

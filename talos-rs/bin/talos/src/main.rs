@@ -1,4 +1,3 @@
-use dotenv::dotenv;
 use std::path::PathBuf;
 use talos_config::Config;
 use talos_server::{init_logging, run_json_rpc_stdio, start_server, TalosServerOptions};
@@ -6,8 +5,6 @@ use tracing::{error, info};
 
 #[tokio::main]
 async fn main() {
-    dotenv().ok();
-
     let command = std::env::args().nth(1);
     if should_print_version(command.as_deref()) {
         println!("talos {}", env!("CARGO_PKG_VERSION"));

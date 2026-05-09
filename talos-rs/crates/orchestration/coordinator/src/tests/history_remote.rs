@@ -30,6 +30,7 @@ async fn test_get_session_turns_returns_ordered_items() {
     ];
     let turn: TalosTurn = serde_json::from_value(serde_json::json!({
         "turn_id": format!("turn-{}", Uuid::new_v4()),
+        "message_id": "msg-history-1",
         "session_id": session_id,
         "seq": 1,
         "timestamp": test_timestamp(),
@@ -59,6 +60,7 @@ async fn test_get_session_turns_returns_ordered_items() {
         .expect("session turns should load");
 
     assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0].message_id, "msg-history-1");
     assert_eq!(turns[0].output.len(), expected_items.len());
     assert!(matches!(
         turns[0].output.first(),
@@ -195,6 +197,7 @@ async fn test_get_session_turns_includes_tool_results() {
     let store = MemoryStore::new_default();
     let turn: TalosTurn = serde_json::from_value(serde_json::json!({
         "turn_id": format!("turn-{}", Uuid::new_v4()),
+        "message_id": "msg-history-tool-1",
         "session_id": session_id,
         "seq": 1,
         "timestamp": test_timestamp(),

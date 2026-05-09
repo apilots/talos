@@ -334,7 +334,7 @@ impl AppServerApplication for TalosApplicationAdapter {
                 let llm = self
                     .app
                     .config
-                    .get_llm()
+                    .get_llm_read()
                     .map_err(AppServerErrorBody::from_talos_error)?;
                 to_value(llm)
             }
@@ -739,7 +739,7 @@ impl TalosApplicationAdapter {
         let updated = self
             .app
             .config
-            .update_llm(llm)
+            .update_llm_read(llm)
             .map_err(AppServerErrorBody::from_talos_error)?;
         to_value(updated)
     }

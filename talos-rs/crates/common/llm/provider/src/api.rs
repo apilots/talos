@@ -145,7 +145,7 @@ pub trait LlmProvider: Send + Sync {
     fn name(&self) -> &str;
     async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse>;
     async fn stream(&self, request: ChatRequest) -> TalosResult<ChatStream>;
-    fn default_model(&self) -> &str;
+    fn default_model(&self) -> String;
     fn native_thinking_support(&self, _model: &str) -> NativeThinkingSupport {
         NativeThinkingSupport::Unsupported
     }

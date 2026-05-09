@@ -61,6 +61,7 @@ impl Runner for DefaultRunner {
     ) -> TalosResult<RunResponse> {
         let crate::RunRequest {
             session_id,
+            message_id,
             invocation_id,
             agent_id,
             workspace_id,
@@ -81,11 +82,13 @@ impl Runner for DefaultRunner {
             .map(|c| c.clone())
             .unwrap_or_default();
         let ctx_session_id = session_id.clone();
+        let ctx_message_id = message_id.clone();
         let user_input_session_id = session_id.clone();
         let user_input_agent_id = agent_id.clone();
 
         let mut ctx = crate::InvocationContext {
             session_id,
+            message_id: ctx_message_id,
             invocation_id,
             agent_id,
             workspace_id,
@@ -334,6 +337,7 @@ mod tests {
     ) -> crate::InvocationContext {
         crate::InvocationContext {
             session_id: "s1".to_string(),
+            message_id: "msg-1".to_string(),
             invocation_id: "i1".to_string(),
             agent_id: "a1".to_string(),
             workspace_id: "w1".to_string(),
@@ -415,6 +419,7 @@ mod tests {
                 Arc::new(MockKernelAgent),
                 RunRequest {
                     session_id: "s1".to_string(),
+                    message_id: "msg-1".to_string(),
                     invocation_id: "i1".to_string(),
                     agent_id: "a1".to_string(),
                     workspace_id: "w1".to_string(),

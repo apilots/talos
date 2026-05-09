@@ -496,6 +496,7 @@ mod tests {
     fn mock_ctx() -> InvocationContext {
         InvocationContext {
             session_id: "s1".to_string(),
+            message_id: "msg-1".to_string(),
             invocation_id: "i1".to_string(),
             agent_id: "a1".to_string(),
             workspace_id: "w1".to_string(),

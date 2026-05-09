@@ -20,6 +20,15 @@ require_file "${PRODUCT_DIR}/desktop-mac/Talos-*.dmg"
 require_file "${PRODUCT_DIR}/desktop-linux/Talos-*.tar.gz"
 require_file "${PRODUCT_DIR}/desktop-linux/SHA256SUMS"
 
+verify_server_config_template() {
+  local archive_path
+  archive_path="$(find "${PRODUCT_DIR}/server" -maxdepth 1 -name "talos-server-*.tar.gz" | head -n 1)"
+  if ! tar -tzf "${archive_path}" | grep -Eq '^(\./)?conf/talos.yaml$'; then
+    echo "Missing server config template in ${archive_path}" >&2
+    exit 1
+  fi
+}
+
 verify_macos_app_server() {
   if [[ "$(uname -s)" != "Darwin" ]]; then
     echo "Skipping macOS DMG app-server inspection on non-Darwin host."
@@ -38,6 +47,11 @@ verify_macos_app_server() {
     echo "Missing packaged macOS app-server binary: ${app_server}" >&2
     exit 1
   fi
+  local config_template="${mount_dir}/Talos.app/Contents/Resources/conf/talos.yaml"
+  if [[ ! -f "${config_template}" ]]; then
+    echo "Missing packaged macOS config template: ${config_template}" >&2
+    exit 1
+  fi
 
   hdiutil detach "${mount_dir}" >/dev/null
   rm -rf "${mount_dir}"
@@ -51,6 +65,10 @@ verify_linux_app_server() {
     echo "Missing packaged Linux app-server binary in ${archive_path}" >&2
     exit 1
   fi
+  if ! tar -tzf "${archive_path}" | grep -Eq '(^|/)resources/conf/talos.yaml$'; then
+    echo "Missing packaged Linux config template in ${archive_path}" >&2
+    exit 1
+  fi
 }
 
 (
@@ -58,6 +76,7 @@ verify_linux_app_server() {
   shasum -a 256 -c SHA256SUMS
 )
 
+verify_server_config_template
 verify_macos_app_server
 verify_linux_app_server
 

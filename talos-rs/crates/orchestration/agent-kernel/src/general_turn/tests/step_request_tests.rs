@@ -5,6 +5,7 @@ use talos_prompt::{PromptMode, PromptWindowUsage};
 fn test_build_general_turn_step_request_respects_parallel_flag() {
     let prepared = PreparedGeneralTurn {
         session_id: "s1".to_string(),
+        message_id: "msg-1".to_string(),
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
         project_root: None,

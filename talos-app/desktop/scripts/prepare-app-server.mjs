@@ -8,6 +8,7 @@ const desktopDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(desktopDir, "../..");
 const rustDir = path.join(repoRoot, "talos-rs");
 const resourcesDir = path.join(desktopDir, "resources", "app-server");
+const resourcesConfDir = path.join(desktopDir, "resources", "conf");
 const profile = process.env.TALOS_DESKTOP_APP_SERVER_PROFILE ?? process.env.PROFILE ?? "dev";
 const binaryName = process.platform === "win32" ? "talos.exe" : "talos";
 const sourceBinary =
@@ -16,12 +17,19 @@ const sourceBinary =
   buildAppServer();
 
 rmSync(resourcesDir, { recursive: true, force: true });
+rmSync(resourcesConfDir, { recursive: true, force: true });
 mkdirSync(resourcesDir, { recursive: true });
+mkdirSync(resourcesConfDir, { recursive: true });
 
 const destination = path.join(resourcesDir, binaryName);
 copyFileSync(sourceBinary, destination);
 chmodSync(destination, 0o755);
 console.log(`Prepared desktop app-server binary: ${destination}`);
+
+const configTemplateSource = path.join(rustDir, "conf", "talos.yaml");
+const configTemplateDestination = path.join(resourcesConfDir, "talos.yaml");
+copyFileSync(configTemplateSource, configTemplateDestination);
+console.log(`Prepared desktop config template: ${configTemplateDestination}`);
 
 function buildAppServer() {
   const args = ["build", "--manifest-path", path.join(rustDir, "Cargo.toml"), "-p", "talos"];

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { LlmConfig, ModelInputKind, ProviderConfig, ProviderModelConfig } from "@talos/sdk-browser";
+import type { LlmConfig, LlmConfigRead, ModelInputKind, ProviderConfig, ProviderModelConfig } from "@talos/sdk-browser";
 import { useTranslation } from "react-i18next";
 import { Brain, File, Image, Mic, Pencil, Plus, Trash2, Type, Video, X } from "lucide-react";
 
@@ -171,10 +171,11 @@ function ModelModal({ mode, form, saving, error, onChange, onSave, onClose }: Mo
 interface ProviderTabProps {
   providerKey: ProviderKey;
   config: ProviderConfig;
+  keyConfigured: boolean;
   onChange: (patch: Partial<ProviderConfig>) => void;
 }
 
-function ProviderTab({ config, onChange }: ProviderTabProps) {
+function ProviderTab({ config, keyConfigured, onChange }: ProviderTabProps) {
   const { t } = useTranslation("admin");
   const [modalMode, setModalMode] = useState<"add" | "edit" | null>(null);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
@@ -218,10 +219,14 @@ function ProviderTab({ config, onChange }: ProviderTabProps) {
           <Input
             type="password"
             value={config.api_key ?? ""}
-            onChange={(e) => onChange({ api_key: e.target.value || null })}
-            placeholder="sk-…"
+            onChange={(e) => onChange({ api_key: e.target.value })}
             className="flex-1 text-sm font-mono"
           />
+          {keyConfigured && (
+            <Button variant="ghost" onClick={() => onChange({ api_key: "" })} type="button">
+              {t("modelsPanel.clearApiKey")}
+            </Button>
+          )}
         </div>
 
         {/* Base URL */}
@@ -309,10 +314,11 @@ export function AdminModelsSection() {
   const [activeProvider, setActiveProvider] = useState<ProviderKey>("anthropic");
   const [draft, setDraft] = useState<LlmConfig | null>(null);
 
-  const { data: serverConfig, isLoading, error } = useQuery({
+  const { data: serverRead, isLoading, error } = useQuery({
     queryKey: ["llm-config", connectionKey],
     queryFn: getLlmConfig,
   });
+  const serverConfig = serverRead?.config;
 
   // Keep draft in sync with server on initial load (but not on mutation success)
   useEffect(() => {
@@ -321,9 +327,9 @@ export function AdminModelsSection() {
 
   const mutation = useMutation({
     mutationFn: updateLlmConfig,
-    onSuccess: (updated) => {
+    onSuccess: (updated: LlmConfigRead) => {
       queryClient.setQueryData(["llm-config", connectionKey], updated);
-      setDraft(updated);
+      setDraft(updated.config);
     },
   });
 
@@ -427,6 +433,7 @@ export function AdminModelsSection() {
         key={activeProvider}
         providerKey={activeProvider}
         config={draft[activeProvider]}
+        keyConfigured={serverRead?.provider_keys[activeProvider]?.api_key_configured ?? false}
         onChange={(patch) => updateProvider(activeProvider, patch)}
       />
 

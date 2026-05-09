@@ -1,8 +1,8 @@
 use crate::CoordinatorImpl;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
-use talos_config::resolve_runtime_path;
+use std::sync::{Arc, RwLock};
+use talos_config::{provider_config_for_llm, resolve_runtime_path, LlmConfig};
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{ChatMessage, ChatRequest, LlmProvider};
 use talos_session_store::SessionStore;
@@ -13,10 +13,9 @@ use talos_types::talos::{
 use talos_types::{
     connection_mode_from_context, normalize_current_directory, resolve_effective_project_root,
     session_title_or_fallback, validate_project_directory, OptionalCurrentDirectoryPatch,
-    OptionalProjectIdPatch, ProjectPatch, ProjectRecord, SessionConf, SessionPatch,
-    SessionPatchAck, SessionQuery, SessionRecord, TalosConfig, TalosSession,
+    OptionalProjectIdPatch, ProjectPatch, ProjectRecord, SessionConf, SessionConfigOverridePolicy,
+    SessionPatch, SessionPatchAck, SessionQuery, SessionRecord, TalosConfig, TalosSession,
 };
-use tokio::sync::RwLock;
 
 const SESSION_TITLE_PROMPT: &str = r#"Generate a concise session title for the user's first question.
 
@@ -74,7 +73,7 @@ pub(super) fn extract_first_user_text(input: &[TalosInputItem]) -> Option<String
 pub(super) struct SessionManager {
     session_store: Arc<dyn SessionStore>,
     session_cache: Arc<RwLock<HashMap<String, TalosSession>>>,
-    base_config: TalosConfig,
+    base_config: Arc<RwLock<TalosConfig>>,
     default_workspace_id: String,
     channel_dm_scopes: HashMap<String, String>,
     session_title_generator: Option<Arc<SessionTitleGenerator>>,
@@ -89,7 +88,7 @@ impl SessionManager {
         Self {
             session_store,
             session_cache: Arc::new(RwLock::new(HashMap::new())),
-            base_config,
+            base_config: Arc::new(RwLock::new(base_config)),
             default_workspace_id: "default".to_string(),
             channel_dm_scopes: HashMap::new(),
             session_title_generator,
@@ -123,8 +122,28 @@ impl SessionManager {
         self.default_workspace_id.as_str()
     }
 
-    fn base_model(&self) -> &str {
-        self.base_config.llm.model.as_str()
+    fn base_model(&self) -> String {
+        self.base_config_snapshot().llm.model
+    }
+
+    fn base_config_snapshot(&self) -> TalosConfig {
+        self.base_config
+            .read()
+            .expect("session base config read lock")
+            .clone()
+    }
+
+    pub(super) fn update_base_llm(&self, llm: &LlmConfig) {
+        let mut base_config = self
+            .base_config
+            .write()
+            .expect("session base config write lock");
+        base_config.llm = llm.clone();
+        base_config.agent.model = llm.model.clone();
+        self.session_cache
+            .write()
+            .expect("session cache write lock")
+            .clear();
     }
 
     fn resolve_dm_scope(&self, provider: &TalosProvider) -> Option<String> {
@@ -136,13 +155,44 @@ impl SessionManager {
         record: &SessionRecord,
         workspace_id: Option<String>,
     ) -> TalosResult<TalosSession> {
-        let mut session = TalosSession::restore(record, &self.base_config, workspace_id)?;
+        let base_config = self.base_config_snapshot();
+        let record = self.normalize_record_for_base_provider(record, &base_config)?;
+        let mut session = TalosSession::restore(&record, &base_config, workspace_id)?;
         session.context.project_root = None;
         Ok(session)
     }
 
+    fn normalize_record_for_base_provider(
+        &self,
+        record: &SessionRecord,
+        base_config: &TalosConfig,
+    ) -> TalosResult<SessionRecord> {
+        let explicit_model = SessionConfigOverridePolicy::extract_agent_model(&record.conf)?;
+        let effective_model = explicit_model.as_deref().unwrap_or(record.model.as_str());
+        if self.base_provider_supports_model(base_config, effective_model) {
+            return Ok(record.clone());
+        }
+
+        let mut normalized = record.clone();
+        normalized.model = base_config.llm.model.clone();
+        normalized.conf = clear_session_model_override(&normalized.conf);
+        Ok(normalized)
+    }
+
+    fn base_provider_supports_model(&self, base_config: &TalosConfig, model: &str) -> bool {
+        if model == base_config.llm.model {
+            return true;
+        }
+        let Some(provider) = provider_config_for_llm(&base_config.llm, &base_config.llm.provider)
+        else {
+            return false;
+        };
+        provider.models.is_empty() || provider.models.iter().any(|entry| entry.id == model)
+    }
+
     fn workspace_root(&self) -> Option<PathBuf> {
-        let workspace_dir = self.base_config.agent.kernel.memory.workspace_dir.trim();
+        let base_config = self.base_config_snapshot();
+        let workspace_dir = base_config.agent.kernel.memory.workspace_dir.trim();
         if workspace_dir.is_empty() {
             return None;
         }
@@ -185,21 +235,31 @@ impl SessionManager {
         let session_id = session.context.session_id.clone();
         self.session_cache
             .write()
-            .await
+            .expect("session cache write lock")
             .insert(session_id, session.clone());
         session
     }
 
     async fn get_cached_session(&self, session_id: &str) -> Option<TalosSession> {
-        self.session_cache.read().await.get(session_id).cloned()
+        self.session_cache
+            .read()
+            .expect("session cache read lock")
+            .get(session_id)
+            .cloned()
     }
 
     pub(super) async fn invalidate_cached_session(&self, session_id: &str) {
-        self.session_cache.write().await.remove(session_id);
+        self.session_cache
+            .write()
+            .expect("session cache write lock")
+            .remove(session_id);
     }
 
     async fn update_cached_session_title(&self, session_id: &str, title: &str) {
-        let mut cache = self.session_cache.write().await;
+        let mut cache = self
+            .session_cache
+            .write()
+            .expect("session cache write lock");
         if let Some(session) = cache.get_mut(session_id) {
             session.title = title.to_string();
         }
@@ -273,7 +333,10 @@ impl SessionManager {
         message_delta: u64,
         usage: &TalosUsage,
     ) {
-        let mut cache = self.session_cache.write().await;
+        let mut cache = self
+            .session_cache
+            .write()
+            .expect("session cache write lock");
         if let Some(session) = cache.get_mut(session_id) {
             session.apply_turn_progress(assistant_model, message_delta, usage);
         }
@@ -299,7 +362,7 @@ impl SessionManager {
             .create_session(
                 &context,
                 target_agent,
-                self.base_model(),
+                &self.base_model(),
                 model.as_deref(),
                 conf,
                 self.resolve_dm_scope(&context.provider),
@@ -496,7 +559,26 @@ impl SessionManager {
     }
 }
 
+fn clear_session_model_override(conf: &SessionConf) -> SessionConf {
+    let mut next = conf.clone();
+    if let Some(agent) = next.agent.as_mut() {
+        agent.model = None;
+    }
+    if next
+        .agent
+        .as_ref()
+        .is_some_and(|agent| agent.model.is_none())
+    {
+        next.agent = None;
+    }
+    next
+}
+
 impl CoordinatorImpl {
+    pub fn update_base_llm(&self, llm: &LlmConfig) {
+        self.sessions.update_base_llm(llm);
+    }
+
     pub fn with_session_title_generator(mut self, llm_provider: Arc<dyn LlmProvider>) -> Self {
         self.sessions = Arc::new(
             self.sessions
@@ -529,5 +611,130 @@ impl CoordinatorImpl {
                 .with_channel_dm_scope(channel_id, dm_scope),
         );
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SessionManager;
+    use std::sync::Arc;
+    use talos_session_store::MockSessionStore;
+    use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType};
+
+    fn provider_model(id: &str) -> talos_config::ProviderModelConfig {
+        talos_config::ProviderModelConfig {
+            id: id.to_string(),
+            name: id.to_string(),
+            context_window: 32_768,
+            reasoning: false,
+            input: Vec::new(),
+            cost: Default::default(),
+            compat: Default::default(),
+        }
+    }
+
+    fn context() -> TalosContext {
+        TalosContext {
+            source_type: TalosSourceType::System,
+            provider: TalosProvider::Http,
+            user_id: "user-1".to_string(),
+            message_id: "message-1".to_string(),
+            trace_id: "trace-1".to_string(),
+            channel_id: None,
+            thread_id: None,
+            project_root: None,
+            environment: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn update_base_llm_changes_new_session_default_model() {
+        let mut base_config = talos_types::TalosConfig::default();
+        base_config.llm.provider = "anthropic".to_string();
+        base_config.llm.model = "old-model".to_string();
+        let manager = SessionManager::new(Arc::new(MockSessionStore::new()), base_config, None);
+        let mut llm = talos_config::LlmConfig::default();
+        llm.provider = "openai".to_string();
+        llm.model = "new-model".to_string();
+
+        manager.update_base_llm(&llm);
+        let session = manager
+            .create_session(context(), "default", None, None, None, None)
+            .await
+            .expect("session should be created");
+
+        assert_eq!(session.config.llm.provider, "openai");
+        assert_eq!(session.config.llm.model, "new-model");
+    }
+
+    #[tokio::test]
+    async fn provider_switch_clears_cached_session_and_resets_model_to_new_default() {
+        let mut base_config = talos_types::TalosConfig::default();
+        base_config.llm.provider = "anthropic".to_string();
+        base_config.llm.model = "old-default".to_string();
+        base_config.llm.anthropic.models = vec![
+            provider_model("old-default"),
+            provider_model("session-model"),
+        ];
+        let manager = SessionManager::new(Arc::new(MockSessionStore::new()), base_config, None);
+        let original = manager
+            .create_session(
+                context(),
+                "default",
+                Some("session-model".to_string()),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("session should be created");
+        assert_eq!(original.config.llm.model, "session-model");
+
+        let mut llm = talos_config::LlmConfig::default();
+        llm.provider = "openai".to_string();
+        llm.model = "new-default".to_string();
+        llm.openai.models = vec![provider_model("new-default")];
+        manager.update_base_llm(&llm);
+
+        let reloaded = manager
+            .get_session(&original.context.session_id)
+            .await
+            .expect("session read should succeed")
+            .expect("session should exist");
+
+        assert_eq!(reloaded.config.llm.provider, "openai");
+        assert_eq!(reloaded.config.llm.model, "new-default");
+    }
+
+    #[tokio::test]
+    async fn requested_session_model_wins_when_current_provider_supports_it() {
+        let mut base_config = talos_types::TalosConfig::default();
+        base_config.llm.provider = "anthropic".to_string();
+        base_config.llm.model = "old-default".to_string();
+        base_config.llm.anthropic.models = vec![provider_model("old-default")];
+        let manager = SessionManager::new(Arc::new(MockSessionStore::new()), base_config, None);
+        let mut llm = talos_config::LlmConfig::default();
+        llm.provider = "anthropic".to_string();
+        llm.model = "new-default".to_string();
+        llm.anthropic.models = vec![
+            provider_model("new-default"),
+            provider_model("session-model"),
+        ];
+
+        manager.update_base_llm(&llm);
+        let session = manager
+            .create_session(
+                context(),
+                "default",
+                Some("session-model".to_string()),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("session should be created");
+
+        assert_eq!(session.config.llm.provider, "anthropic");
+        assert_eq!(session.config.llm.model, "session-model");
     }
 }

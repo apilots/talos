@@ -42,8 +42,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Testing Talos Gateway API with Bailian LLM...");
 
     // 检查必要的环境变量
-    if std::env::var("BAILIAN_API_KEY").is_err() {
-        println!("Warning: BAILIAN_API_KEY environment variable not set");
+    if std::env::var("TALOS_LLM_BAILIAN_API_KEY").is_err() {
+        println!("Warning: TALOS_LLM_BAILIAN_API_KEY environment variable not set");
     }
 
     // 创建HTTP客户端

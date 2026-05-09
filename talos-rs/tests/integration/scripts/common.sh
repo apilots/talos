@@ -110,13 +110,9 @@ text = config_path.read_text()
 # Integration tests should avoid planner-selector quota variance.
 text = text.replace('planner_selection: "auto"', 'planner_selection: "static"', 1)
 
-# Prefer the direct Bailian provider for deterministic tool cases when available.
-if os.environ.get("BAILIAN_API_KEY", "").strip():
-    text = text.replace('provider: "anthropic"', 'provider: "bailian"', 1)
-
 if os.environ.get("TALOS_TEST_ENABLE_JWT_AUTH", "").strip() == "1":
     text = text.replace('token: "talos-local-test-token"', 'token: ~', 1)
-    text = text.replace('jwt_secret: ${JWT_SECRET}', 'jwt_secret: "talos-test-jwt-secret"', 1)
+    text = text.replace('jwt_secret: ${TALOS_GATEWAY_JWT_SECRET}', 'jwt_secret: "talos-test-jwt-secret"', 1)
     text = text.replace('auth: false', 'auth: true', 1)
     text = text.replace('allow_register: true', 'allow_register: true', 1)
 else:

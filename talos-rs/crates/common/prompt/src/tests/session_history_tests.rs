@@ -10,6 +10,7 @@ async fn test_recent_messages_render_as_single_xml_region() {
         memory
             .append_turn(&TalosTurn {
                 turn_id: turn_id.clone(),
+                message_id: "msg-1".to_string(),
                 session_id: "recent-session".to_string(),
                 seq: memory
                     .next_turn_seq("recent-session")
@@ -62,6 +63,7 @@ async fn test_recent_tool_history_renders_as_single_xml_region() {
         memory
             .append_turn(&TalosTurn {
                 turn_id: turn_id.clone(),
+                message_id: "msg-1".to_string(),
                 session_id: "tool-session".to_string(),
                 seq: memory
                     .next_turn_seq("tool-session")
@@ -121,6 +123,7 @@ async fn test_recent_tool_history_can_be_disabled() {
     memory
         .append_turn(&TalosTurn {
             turn_id: "tool-turn-disable".to_string(),
+            message_id: "msg-1".to_string(),
             session_id: "tool-session-disable".to_string(),
             seq: memory
                 .next_turn_seq("tool-session-disable")
@@ -171,6 +174,7 @@ async fn test_recent_tool_outputs_render_as_single_xml_region() {
         memory
             .append_turn(&TalosTurn {
                 turn_id: turn_id.clone(),
+                message_id: "msg-1".to_string(),
                 session_id: "tool-output-session".to_string(),
                 seq: memory
                     .next_turn_seq("tool-output-session")
@@ -221,6 +225,7 @@ async fn test_recent_tool_outputs_can_be_disabled() {
     memory
         .append_turn(&TalosTurn {
             turn_id: "tool-output-turn-disable".to_string(),
+            message_id: "msg-1".to_string(),
             session_id: "tool-output-session-disable".to_string(),
             seq: memory
                 .next_turn_seq("tool-output-session-disable")
@@ -262,6 +267,7 @@ async fn test_recent_messages_respect_total_char_budget() {
         memory
             .append_turn(&TalosTurn {
                 turn_id: format!("recent-budget-turn-{idx}"),
+                message_id: "msg-1".to_string(),
                 session_id: "recent-budget-session".to_string(),
                 seq: memory
                     .next_turn_seq("recent-budget-session")
@@ -304,6 +310,7 @@ async fn test_recent_tool_sections_respect_total_char_budget() {
         memory
             .append_turn(&TalosTurn {
                 turn_id: format!("tool-budget-turn-{idx}"),
+                message_id: "msg-1".to_string(),
                 session_id: "tool-budget-session".to_string(),
                 seq: memory
                     .next_turn_seq("tool-budget-session")
@@ -370,6 +377,7 @@ async fn test_recent_messages_escape_xml_control_sequences() {
     memory
         .append_turn(&TalosTurn {
             turn_id: "recent-turn-escape".to_string(),
+            message_id: "msg-1".to_string(),
             session_id: "recent-session-escape".to_string(),
             seq: memory
                 .next_turn_seq("recent-session-escape")

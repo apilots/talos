@@ -1,11 +1,15 @@
-use config::{Config as ExternalConfig, Environment, File};
 use serde_json::Value;
-use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use talos_error::TalosResult;
 
-use crate::{validate, Config, TalosPaths};
+use crate::{
+    env::{RuntimeEnv, TALOS_GATEWAY_JWT_SECRET},
+    validate, Config, EnvSecretStore, TalosPaths,
+};
+
+const TALOS_RESOURCE_DIR_ENV: &str = "TALOS_RESOURCE_DIR";
+const DEFAULT_CONFIG_RELATIVE_PATH: &str = "conf/talos.yaml";
 
 pub(crate) fn load_config() -> TalosResult<Config> {
     load_config_from_path(None)
@@ -15,11 +19,12 @@ pub(crate) fn load_config_from_path(path: Option<&str>) -> TalosResult<Config> {
     use talos_error::TalosError;
 
     let paths = TalosPaths::resolve();
-    paths.ensure_base_dirs()?;
-
     let config_path = match path {
         Some(path) => PathBuf::from(path),
-        None => default_config_path(),
+        None => {
+            ensure_first_run_files(&paths)?;
+            paths.config_file.clone()
+        }
     };
 
     if !config_path.exists() {
@@ -29,34 +34,110 @@ pub(crate) fn load_config_from_path(path: Option<&str>) -> TalosResult<Config> {
         )));
     }
 
-    let builder = ExternalConfig::builder()
-        .add_source(File::from(config_path).required(true))
-        // Keep TALOS__ overrides for e2e/integration scenarios.
-        .add_source(Environment::with_prefix("TALOS").separator("__"));
+    if path.is_some() {
+        ensure_runtime_env_file(&paths)?;
+    }
+    let runtime_env = RuntimeEnv::load(&paths.env_file)?;
+    let raw = std::fs::read_to_string(&config_path).map_err(|err| {
+        TalosError::ConfigError(format!(
+            "failed to read config file {}: {}",
+            config_path.display(),
+            err
+        ))
+    })?;
+    let yaml_value: serde_yaml::Value = serde_yaml::from_str(&raw)
+        .map_err(|err| TalosError::ConfigError(format!("failed to parse yaml: {}", err)))?;
+    let raw_value: Value = serde_json::to_value(yaml_value)
+        .map_err(|err| TalosError::ConfigError(format!("failed to convert yaml: {}", err)))?;
 
-    // Build merged config values from file + TALOS__ environment overrides.
-    let config = builder
-        .build()
-        .map_err(|e| TalosError::ConfigError(e.to_string()))?;
-
-    // Require explicit top-level operational keys while allowing optional prompt knobs
-    // to fall back to typed defaults when omitted from config files.
-    let raw_value: Value = config
-        .try_deserialize()
-        .map_err(|e| TalosError::ConfigError(e.to_string()))?;
     validate::validate_required_paths(&raw_value)?;
     validate::validate_forbidden_paths(&raw_value)?;
 
     // Deserialize into typed config after strict key presence validation.
     let config: Config =
         serde_json::from_value(raw_value).map_err(|e| TalosError::ConfigError(e.to_string()))?;
-    let mut config = resolve_env_placeholders(config)?;
+    let mut config = resolve_env_placeholders(config, &runtime_env)?;
     config.apply_derived_paths();
     config
         .talos_paths()
         .ensure_agent_workspace(&config.agent.name)?;
 
     Ok(config)
+}
+
+fn ensure_first_run_files(paths: &TalosPaths) -> TalosResult<()> {
+    paths.ensure_base_dirs()?;
+    if !paths.config_file.exists() {
+        copy_default_config_template(paths)?;
+    }
+    ensure_runtime_env_file(paths)?;
+    Ok(())
+}
+
+fn copy_default_config_template(paths: &TalosPaths) -> TalosResult<()> {
+    copy_default_config_template_from_candidates(paths, default_config_template_candidates())
+}
+
+fn copy_default_config_template_from_candidates<I>(
+    paths: &TalosPaths,
+    candidates: I,
+) -> TalosResult<()>
+where
+    I: IntoIterator<Item = PathBuf>,
+{
+    use talos_error::TalosError;
+
+    let candidates: Vec<PathBuf> = candidates.into_iter().collect();
+    let Some(template_path) = candidates.iter().find(|path| path.is_file()) else {
+        let searched = candidates
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(TalosError::InvalidConfiguration(format!(
+            "missing default config template: expected {DEFAULT_CONFIG_RELATIVE_PATH} under {TALOS_RESOURCE_DIR_ENV} or installed resource directory; searched: {searched}"
+        )));
+    };
+
+    std::fs::copy(template_path, &paths.config_file).map_err(|err| {
+        TalosError::ConfigError(format!(
+            "failed to copy default config template from {} to {}: {}",
+            template_path.display(),
+            paths.config_file.display(),
+            err
+        ))
+    })?;
+    Ok(())
+}
+
+fn default_config_template_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(resource_dir) = std::env::var_os(TALOS_RESOURCE_DIR_ENV) {
+        candidates.push(default_config_template_path(PathBuf::from(resource_dir)));
+    }
+
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(bin_dir) = current_exe.parent() {
+            candidates.push(default_config_template_path(bin_dir));
+            if let Some(parent_dir) = bin_dir.parent() {
+                candidates.push(default_config_template_path(parent_dir));
+            }
+        }
+    }
+
+    candidates
+}
+
+fn default_config_template_path(resource_dir: impl AsRef<Path>) -> PathBuf {
+    resource_dir.as_ref().join(DEFAULT_CONFIG_RELATIVE_PATH)
+}
+
+fn ensure_runtime_env_file(paths: &TalosPaths) -> TalosResult<()> {
+    paths.ensure_base_dirs()?;
+    let env_store = EnvSecretStore::new(paths.env_file.clone());
+    env_store.ensure_file()?;
+    env_store.ensure_random(TALOS_GATEWAY_JWT_SECRET)?;
+    Ok(())
 }
 
 pub(crate) fn save_config(config: &Config, path: &str) -> TalosResult<()> {
@@ -75,36 +156,49 @@ pub(crate) fn default_config_path() -> PathBuf {
     TalosPaths::resolve().config_file
 }
 
-pub(crate) fn resolve_env_placeholders(config: Config) -> TalosResult<Config> {
+pub(crate) fn resolve_env_placeholders(
+    config: Config,
+    runtime_env: &RuntimeEnv,
+) -> TalosResult<Config> {
     use talos_error::TalosError;
 
     let mut value = serde_json::to_value(config)
         .map_err(|e| TalosError::ConfigError(format!("Failed to encode config: {}", e)))?;
-    resolve_value_placeholders(&mut value);
+    resolve_value_placeholders(&mut value, runtime_env);
     serde_json::from_value(value)
         .map_err(|e| TalosError::ConfigError(format!("Failed to decode config: {}", e)))
 }
 
-pub(crate) fn resolve_value_placeholders(value: &mut Value) {
+pub(crate) fn resolve_value_placeholders(value: &mut Value, runtime_env: &RuntimeEnv) {
     match value {
         Value::String(text) => {
-            *text = expand_env_in_string(text);
+            *text = expand_env_in_string_with_env(text, runtime_env);
         }
         Value::Array(items) => {
             for item in items {
-                resolve_value_placeholders(item);
+                resolve_value_placeholders(item, runtime_env);
             }
         }
         Value::Object(map) => {
             for v in map.values_mut() {
-                resolve_value_placeholders(v);
+                resolve_value_placeholders(v, runtime_env);
             }
         }
         _ => {}
     }
 }
 
+#[cfg(test)]
 pub(crate) fn expand_env_in_string(input: &str) -> String {
+    let runtime_env = RuntimeEnv::load_from_iter(
+        std::path::Path::new("__talos_missing_env_file__"),
+        std::env::vars(),
+    )
+    .unwrap_or_default();
+    expand_env_in_string_with_env(input, &runtime_env)
+}
+
+fn expand_env_in_string_with_env(input: &str, runtime_env: &RuntimeEnv) -> String {
     let mut result = String::with_capacity(input.len());
     let mut cursor = 0usize;
     while let Some(start_rel) = input[cursor..].find("${") {
@@ -114,7 +208,10 @@ pub(crate) fn expand_env_in_string(input: &str) -> String {
         if let Some(end_rel) = input[after_start..].find('}') {
             let end = after_start + end_rel;
             let var_name = &input[after_start..end];
-            let replacement = env::var(var_name).unwrap_or_else(|_| format!("${{{}}}", var_name));
+            let replacement = runtime_env
+                .get(var_name)
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("${{{}}}", var_name));
             result.push_str(&replacement);
             cursor = end + 1;
         } else {
@@ -128,174 +225,93 @@ pub(crate) fn expand_env_in_string(input: &str) -> String {
     result
 }
 
-pub(crate) fn generate_default_config_content() -> String {
-    r#"# Talos Configuration
-# https://github.com/xiliu/talos
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-# Global timezone for user-visible time rendering
-timezone: UTC
+    fn write_resource_template(root: &Path, content: &str) -> PathBuf {
+        let conf_dir = root.join("conf");
+        std::fs::create_dir_all(&conf_dir).expect("resource conf dir should be created");
+        let template_path = conf_dir.join("talos.yaml");
+        std::fs::write(&template_path, content).expect("resource template should be written");
+        root.to_path_buf()
+    }
 
-# Agent 配置
-agent:
-  name: jarvis
-  model: claude-3-5-sonnet
-  kernel:
-    max_iters: 1
-    max_task_per_turn: 3
-    tool_parallelism: 1
-    max_llm_calls: 8
-    max_tool_rounds: 8
-    tool_result_max_bytes: 65536
-    context_compaction_max_bytes: 262144
-    default_workspace_id: default
-    planner_mode: built_in
-    planner_selection: static
-    execution_mode: single
-    execution_children: 2
-    execution_loop_iters: 3
-    output:
-      max_tokens: 32000
-      upper_limit: 64000
-    compaction:
-      trigger_ratio_percent: 85
-      hard_ratio_percent: 95
-      recent_messages_keep: 24
-      recent_messages_max_chars: 4000
-      compacted_recent_messages_keep: 2
-      compacted_recent_messages_max_chars: 1200
-      recent_summaries_keep: 2
-      summary_max_chars: 1200
-      compacted_summary_max_chars: 800
-      source_recent_messages_limit: 48
-      source_recent_tool_results_limit: 12
-      tool_output_keep_last: 2
-      tool_output_max_chars: 2000
-      compacted_tool_output_max_chars: 600
-      source_recent_tool_exchanges_limit: 12
-      tool_exchange_keep_last: 2
-      tool_exchange_max_chars: 600
-      compacted_tool_exchange_max_chars: 300
-      retrieved_memories_keep: 4
-      retrieved_memory_max_chars: 2000
-      compacted_retrieved_memory_max_chars: 800
-    memory:
-      hot_recent_messages: 64
-      compaction_threshold_bytes: 262144
-      root_memory_filename: MEMORY.md
-      memory_dirname: memory
-      workspace_memory_flush_enabled: true
-      workspace_memory_flush_on_compaction: true
-      flush_file_pattern: YYYY-MM-DD.md
-      tool_search_enabled: true
-      tool_get_enabled: true
-      search_max_results: 6
-      file_list_default_limit: 20
-      file_list_max_limit: 90
-      search_include_root_memory: true
-      search_include_daily_memory: true
-      search_include_sessions: false
+    #[test]
+    fn first_run_files_create_config_and_env_secret() {
+        let dir = tempfile::tempdir().expect("temp dir should be created");
+        let paths = TalosPaths::from_home(dir.path().join(".talos"));
+        let resource_dir = write_resource_template(
+            dir.path(),
+            "gateway:\n  auth: true\n  jwt_secret: ${TALOS_GATEWAY_JWT_SECRET}\nllm:\n  anthropic:\n    api_key: ${TALOS_LLM_ANTHROPIC_API_KEY}\n",
+        );
 
-# Gateway 配置
-gateway:
-  host: 127.0.0.1
-  port: 18789
-  jwt_secret: ${JWT_SECRET}
-  auth: false
-  access_token_ttl_days: 30
-  allow_register: true
-  auth_cache:
-    enabled: true
-    ttl_seconds: 300
+        paths
+            .ensure_base_dirs()
+            .expect("base dirs should be created");
+        copy_default_config_template_from_candidates(
+            &paths,
+            vec![default_config_template_path(resource_dir)],
+        )
+        .expect("default config should copy");
+        ensure_runtime_env_file(&paths).expect("env file should be created");
 
-# 渠道配置
-channels:
-  whatsapp:
-    enabled: false
-    dm_policy: pairing
-    allow_from: []
-  
-  telegram:
-    enabled: false
-    token: ${TELEGRAM_BOT_TOKEN}
-    dm_policy: pairing
-    dm_scope: per_channel_peer_topic
-  
-  discord:
-    enabled: false
-    token: ${DISCORD_BOT_TOKEN}
-  
-  feishu:
-    enabled: false
-    token: ${FEISHU_APP_ID}:${FEISHU_APP_SECRET}
+        let config =
+            std::fs::read_to_string(&paths.config_file).expect("default config should be written");
+        let env = std::fs::read_to_string(&paths.env_file).expect("env file should be written");
+        assert!(config.contains("gateway:"));
+        assert!(config.contains("auth: true"));
+        assert!(config.contains("${TALOS_GATEWAY_JWT_SECRET}"));
+        assert!(config.contains("${TALOS_LLM_ANTHROPIC_API_KEY}"));
+        assert!(env.contains("TALOS_GATEWAY_JWT_SECRET="));
+    }
 
-# LLM 配置
-llm:
-  provider: anthropic
-  model: claude-3-5-sonnet
-  
-  anthropic:
-    api_key: ${ANTHROPIC_API_KEY}
-    enabled: true
-  
-  openai:
-    api_key: ${OPENAI_API_KEY}
-    enabled: true
+    #[test]
+    fn first_run_files_do_not_overwrite_existing_config_or_secret() {
+        let dir = tempfile::tempdir().expect("temp dir should be created");
+        let paths = TalosPaths::from_home(dir.path().join(".talos"));
+        let resource_dir = write_resource_template(
+            dir.path(),
+            "gateway:\n  auth: true\n  jwt_secret: ${TALOS_GATEWAY_JWT_SECRET}\n",
+        );
+        paths
+            .ensure_base_dirs()
+            .expect("base dirs should be created");
+        std::fs::write(&paths.config_file, "gateway:\n  host: custom\n")
+            .expect("config should write");
+        std::fs::write(&paths.env_file, "TALOS_GATEWAY_JWT_SECRET=existing\n")
+            .expect("env should write");
 
-  bailian:
-    api_key: ${BAILIAN_API_KEY}
-    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-    enabled: true
-    models:
-      - id: qwen-max
-        name: qwen-max
-        context_window: 32768
-        reasoning: false
-        input: [text]
-        cost:
-          input: 0
-          output: 0
-          cache_read: 0
-          cache_write: 0
-        compat: {}
-      - id: qwen-plus
-        name: qwen-plus
-        context_window: 32768
-        reasoning: true
-        input: [text]
-        cost:
-          input: 0
-          output: 0
-          cache_read: 0
-          cache_write: 0
-        compat:
-          thinking_format: qwen
-      - id: qwen-turbo
-        name: qwen-turbo
-        context_window: 32768
-        reasoning: false
-        input: [text]
-        cost:
-          input: 0
-          output: 0
-          cache_read: 0
-          cache_write: 0
-        compat: {}
-  
-  ollama:
-    base_url: http://localhost:11434
-    enabled: true
+        if !paths.config_file.exists() {
+            copy_default_config_template_from_candidates(
+                &paths,
+                vec![default_config_template_path(resource_dir)],
+            )
+            .expect("default config should copy");
+        }
+        ensure_runtime_env_file(&paths).expect("env should stay idempotent");
 
-# 日志配置
-logging:
-  level: info
-  format: text  # json or text
-  stdout: true
+        let config = std::fs::read_to_string(&paths.config_file).expect("config should read");
+        let env = std::fs::read_to_string(&paths.env_file).expect("env should read");
+        assert_eq!(config, "gateway:\n  host: custom\n");
+        assert_eq!(env, "TALOS_GATEWAY_JWT_SECRET=existing\n");
+    }
 
-# Storage 配置
-storage:
-  database_type: sqlite
-  max_connections: 5
+    #[test]
+    fn first_run_config_copy_fails_when_resource_template_is_missing() {
+        let dir = tempfile::tempdir().expect("temp dir should be created");
+        let paths = TalosPaths::from_home(dir.path().join(".talos"));
+        paths
+            .ensure_base_dirs()
+            .expect("base dirs should be created");
 
-"#
-    .to_string()
+        let err = copy_default_config_template_from_candidates(
+            &paths,
+            vec![dir.path().join("missing/conf/talos.yaml")],
+        )
+        .expect_err("missing resource template should fail");
+
+        assert!(err.to_string().contains("missing default config template"));
+        assert!(err.to_string().contains("TALOS_RESOURCE_DIR"));
+    }
 }

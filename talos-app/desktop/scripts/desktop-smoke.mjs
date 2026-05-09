@@ -31,8 +31,8 @@ const appArgs = appExecutable
   : [desktopDir, `--remote-debugging-port=${debugPort}`];
 const childEnv = {
   ...process.env,
-  BAILIAN_CODINGPLAN_API_KEY: process.env.BAILIAN_CODINGPLAN_API_KEY ?? "desktop-smoke-dummy",
-  JWT_SECRET: process.env.JWT_SECRET ?? "desktop-smoke-jwt-secret",
+  TALOS_LLM_ANTHROPIC_API_KEY: process.env.TALOS_LLM_ANTHROPIC_API_KEY ?? "desktop-smoke-dummy",
+  TALOS_GATEWAY_JWT_SECRET: process.env.TALOS_GATEWAY_JWT_SECRET ?? "desktop-smoke-jwt-secret",
   TALOS_DESKTOP_LAUNCH_TOKEN: launchToken,
   TALOS_LOCAL_LAUNCH_TOKEN: launchToken,
 };
@@ -68,9 +68,7 @@ try {
     );
     const loginVisible = await evaluate(cdp, "Boolean(document.querySelector('#auth-username'))");
     if (loginVisible) {
-      await setInputValue(cdp, "#auth-username", smokeUsername);
-      await setInputValue(cdp, "#auth-password", smokePassword);
-      await evaluate(cdp, "document.querySelector('form button[type=\"submit\"]')?.click(); undefined");
+      await completeAuth(cdp);
     }
     await waitForExpression(cdp, "Boolean(document.querySelector('[data-smoke=\"chat-composer-input\"]'))", 30_000);
   }
@@ -408,6 +406,15 @@ async function waitForEvaluate(cdp, expression, timeoutMs) {
   throw new Error(`Timed out evaluating expression: ${expression}\n${errorMessage(lastError)}`);
 }
 
+async function waitForExpressionOrTimeout(cdp, expression, timeoutMs) {
+  try {
+    await waitForExpression(cdp, expression, timeoutMs);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function evaluate(cdp, expression) {
   const result = await cdp.call("Runtime.evaluate", {
     expression,
@@ -439,6 +446,49 @@ async function setInputValue(cdp, selector, value) {
       return true;
     })()`,
   );
+}
+
+async function completeAuth(cdp) {
+  await clickAuthMode(cdp, "register");
+  await setInputValue(cdp, "#auth-username", smokeUsername);
+  await setInputValue(cdp, "#auth-email", `${smokeUsername}@example.local`);
+  await setInputValue(cdp, "#auth-password", smokePassword);
+  await submitAuthForm(cdp);
+
+  const registered = await waitForExpressionOrTimeout(
+    cdp,
+    "Boolean(document.querySelector('[data-smoke=\"chat-composer-input\"]'))",
+    5_000,
+  );
+  if (registered) {
+    return;
+  }
+
+  await clickAuthMode(cdp, "login");
+  await setInputValue(cdp, "#auth-username", smokeUsername);
+  await setInputValue(cdp, "#auth-password", smokePassword);
+  await submitAuthForm(cdp);
+}
+
+async function clickAuthMode(cdp, mode) {
+  const clicked = await evaluate(
+    cdp,
+    `(() => {
+      const mode = ${JSON.stringify(mode)};
+      const expected = mode === "register" ? "register" : "login";
+      const button = Array.from(document.querySelectorAll("button")).find((candidate) =>
+        (candidate.textContent || "").trim().toLowerCase().includes(expected)
+      );
+      if (!button) return false;
+      button.click();
+      return true;
+    })()`,
+  );
+  assert(clicked, `Auth mode button not found: ${mode}`);
+}
+
+async function submitAuthForm(cdp) {
+  await evaluate(cdp, "document.querySelector('form button[type=\"submit\"]')?.click(); undefined");
 }
 
 async function clickAnchorByHash(cdp, hash) {

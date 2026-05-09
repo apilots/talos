@@ -6,6 +6,7 @@ import type {
   CreateUserTokenRequest,
   DocUpdateRequest,
   LlmConfig,
+  LlmConfigRead,
   LoginRequest,
   MemoryFileListParams,
   MemorySearchParams,
@@ -167,8 +168,8 @@ export function createDesktopTalosClient(
       },
     },
     llm: {
-      get: () => client.getLlmConfig(),
-      update: (config: LlmConfig) => client.updateLlmConfig(config),
+      get: (): Promise<LlmConfigRead> => client.getLlmConfig(),
+      update: (config: LlmConfig): Promise<LlmConfigRead> => client.updateLlmConfig(config),
     },
     models: {
       list: () => client.listModels(),

@@ -243,8 +243,8 @@ mod tests {
         fn name(&self) -> &str {
             "mock"
         }
-        fn default_model(&self) -> &str {
-            "mock"
+        fn default_model(&self) -> String {
+            "mock".to_string()
         }
         async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
             Ok(ChatResponse {
@@ -300,8 +300,8 @@ mod tests {
         fn name(&self) -> &str {
             "failing"
         }
-        fn default_model(&self) -> &str {
-            "failing"
+        fn default_model(&self) -> String {
+            "failing".to_string()
         }
         async fn chat(&self, _: ChatRequest) -> TalosResult<ChatResponse> {
             Err(talos_error::TalosError::InternalError(

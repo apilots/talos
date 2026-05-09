@@ -140,7 +140,6 @@ export function applyStreamEvent(sessionId: string, event: TalosEvent) {
       state.setStreamMeta(sessionId, {
         isStreaming: false,
         connectionState: "idle",
-        expectedMessageCount: undefined,
         awaitingFinalResponse: false,
       });
       return;
@@ -166,7 +165,6 @@ export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TalosActi
       activeMessageId: activeTurn.message_id ?? undefined,
       isStreaming: false,
       connectionState: "idle",
-      expectedMessageCount: undefined,
       reconnectAttempt: undefined,
       showReconnectControls: undefined,
       awaitingFinalResponse: false,

@@ -105,9 +105,12 @@ impl RequestHandler for CoordinatorImpl {
             .ok_or_else(|| talos_error::TalosError::AgentNotFound(target_agent.clone()))?;
         drop(agents);
 
+        let message_id = format!("msg_{}", Uuid::new_v4().simple());
+        let mut turn_session = session.clone();
+        turn_session.context.message_id = message_id;
         let agent_response = agent
             .run(OrchestratorRequest {
-                session: session.clone(),
+                session: turn_session,
                 input: request.input.clone(),
             })
             .await?;
@@ -177,16 +180,18 @@ impl RequestHandler for CoordinatorImpl {
             .ok_or_else(|| talos_error::TalosError::AgentNotFound(target_agent.clone()))?;
         drop(agents);
 
+        let message_id = format!("msg_{}", Uuid::new_v4().simple());
+        let mut turn_session = session.clone();
+        turn_session.context.message_id = message_id.clone();
         let mut orchestrator_stream = agent
             .run_stream(OrchestratorRequest {
-                session: session.clone(),
+                session: turn_session,
                 input: request.input.clone(),
             })
             .await?;
 
         let sessions = self.sessions.clone();
         let session_id = session.context.session_id.clone();
-        let message_id = format!("msg_{}", Uuid::new_v4().simple());
         let stream_session_id = session.context.session_id.clone();
         let response_model = model_for_turn.clone();
         let sessions_for_title = self.sessions.clone();
@@ -627,7 +632,7 @@ impl SessionService for CoordinatorImpl {
             .into_iter()
             .map(|turn| TalosMessageResponse {
                 request_id: turn.turn_id.clone(),
-                message_id: turn.turn_id.clone(),
+                message_id: turn.message_id.clone(),
                 session_id: turn.session_id.clone(),
                 model: String::new(),
                 reasoning: Vec::new(),

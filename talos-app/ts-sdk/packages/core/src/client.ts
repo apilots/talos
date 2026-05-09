@@ -2,6 +2,7 @@ import type { HttpAdapter, StreamAdapter } from "./adapters";
 import type {
   DocUpdateRequest,
   LlmConfig,
+  LlmConfigRead,
   MemoryFileDetail,
   MemoryFileListParams,
   MemoryFileSummary,
@@ -183,11 +184,11 @@ export class TalosClient {
   };
 
   llm = {
-    get: (): Promise<LlmConfig> => {
-      return this.http.request<LlmConfig>(this.url("/v1/llm"));
+    get: (): Promise<LlmConfigRead> => {
+      return this.http.request<LlmConfigRead>(this.url("/v1/llm"));
     },
-    update: (config: LlmConfig): Promise<LlmConfig> => {
-      return this.http.request<LlmConfig>(this.url("/v1/llm"), {
+    update: (config: LlmConfig): Promise<LlmConfigRead> => {
+      return this.http.request<LlmConfigRead>(this.url("/v1/llm"), {
         method: "PUT",
         body: JSON.stringify(config),
       });

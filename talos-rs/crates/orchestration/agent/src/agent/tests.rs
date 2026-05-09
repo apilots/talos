@@ -407,6 +407,7 @@ async fn test_close_session_flushes_workspace_memory() {
     let timestamp = Utc::now();
     let turn = TalosTurn {
         turn_id: "turn-1".to_string(),
+        message_id: "msg-1".to_string(),
         session_id: session_id.to_string(),
         seq: 1,
         timestamp,
@@ -774,8 +775,8 @@ impl LlmProvider for MockLlmProvider {
         "mock"
     }
 
-    fn default_model(&self) -> &str {
-        "mock-model"
+    fn default_model(&self) -> String {
+        "mock-model".to_string()
     }
 
     async fn chat(&self, request: ChatRequest) -> talos_error::TalosResult<ChatResponse> {

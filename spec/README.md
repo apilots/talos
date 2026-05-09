@@ -1,6 +1,6 @@
 # Talos Spec Organization
 
-`spec/` is the decision and planning entrypoint for Talos changes. New work should start from a scoped spec directory before implementation when the change affects product behavior, architecture, runtime configuration, protocol shape, or cross-client behavior.
+`spec/` is the technical design entrypoint for Talos changes. New work should start from a scoped spec directory before implementation when the change affects product behavior, architecture, runtime configuration, protocol shape, or cross-client behavior.
 
 ## Directory Model
 
@@ -36,18 +36,14 @@ Rules:
 
 ## Spec Contents
 
-Small specs may contain only `README.md`. Larger specs should use:
+Each active spec directory should keep a single core technical design document:
 
 ```text
 feat-001-short-name/
-  README.md
   design.md
-  implementation-plan.md
-  test-plan.md
-  decisions.md
 ```
 
-Each spec `README.md` should include:
+`design.md` should include:
 
 - Status: `draft | active | implemented | verified | archived`
 - Background and problem
@@ -58,6 +54,8 @@ Each spec `README.md` should include:
 - Impacted areas
 - Verification strategy
 - Open risks or follow-ups
+
+Do not put execution breakdowns in `spec/`. Implementation staging, task ownership, and verification progress belong to the separate execution `PLAN` used during implementation.
 
 ## Lifecycle
 
@@ -79,9 +77,9 @@ Archived specs live under `spec/archive/<year>/` and keep their original typed I
 ## AI Collaboration Rules
 
 - Read the relevant active spec before changing code.
-- If a decision is missing, update `decisions.md` or the spec README before encoding it in code.
-- Keep implementation plans staged and verifiable.
-- Record validation commands and results before marking a spec `verified`.
+- If a technical decision is missing, update the spec `design.md` before encoding it in code.
+- Keep implementation plans outside `spec/` in the active execution `PLAN`.
+- Record final validation evidence in the execution output or implementation `PLAN`, not in the design spec.
 - Prefer concise, current specs over large historical documents. Historical material belongs in `archive/`.
 
 ## Legacy Specs

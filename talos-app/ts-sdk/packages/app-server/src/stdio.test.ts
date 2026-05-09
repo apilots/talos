@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { AppServerProtocolError, JsonRpcStdioTransport } from "./stdio";
+import { AppServerProtocolError, JsonRpcStdioTransport, filterAppServerEnvironment } from "./stdio";
 
 describe("AppServerProtocolError", () => {
   it("preserves protocol error fields", () => {
@@ -105,6 +105,26 @@ describe("JsonRpcStdioTransport notifications", () => {
 
     expect(() => transport.handleLine("{")).not.toThrow();
     expect(errors[0]?.message).toContain("Expected property name");
+  });
+});
+
+describe("filterAppServerEnvironment", () => {
+  it("keeps talos variables and minimal process variables", () => {
+    expect(
+      filterAppServerEnvironment({
+        TALOS_HOME: "/tmp/talos",
+        TALOS_LLM_ANTHROPIC_API_KEY: "sk-test",
+        HOME: "/Users/example",
+        PATH: "/usr/bin",
+        ANTHROPIC_API_KEY: "ignored",
+        npm_config_user_agent: "ignored",
+      }),
+    ).toEqual({
+      TALOS_HOME: "/tmp/talos",
+      TALOS_LLM_ANTHROPIC_API_KEY: "sk-test",
+      HOME: "/Users/example",
+      PATH: "/usr/bin",
+    });
   });
 });
 

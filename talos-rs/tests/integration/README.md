@@ -1,7 +1,8 @@
 # Integration Test Scenarios
 
 This directory contains end-to-end integration scenarios grouped by business flow.
-All scenarios are real server/client flows and do not use mock gateway handlers.
+Most scenarios are real server/client flows. The `10_talos_app` group covers
+frontend and SDK mock-flow regression tests that do not start a real gateway.
 
 ## Scenario Groups
 
@@ -72,17 +73,22 @@ All scenarios are real server/client flows and do not use mock gateway handlers.
 - Files:
   - `protocol_e2e.sh`
 
+11. `scenarios/10_talos_app/`
+- Scope: `talos-app` mock e2e and component/API regression tests
+- Files:
+  - `mock_e2e.sh`
+
 ## Runner
 
 Use:
 
 ```bash
-source .env
 tests/integration/run_e2e.sh
 tests/integration/run_e2e.sh --group 06_tools
 tests/integration/run_e2e.sh --case 05_cli/full_flow
 tests/integration/run_e2e.sh --case 05_cli/app_server_e2e
 tests/integration/run_e2e.sh --case 09_app_server/protocol_e2e
+tests/integration/run_e2e.sh --case 10_talos_app/mock_e2e
 ```
 
 `protocol_e2e.sh` starts `talos app-server` through the Rust app-server
