@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { applyActiveTurnSnapshot, applyStreamEvent } from "@/features/chat";
+import { applyActiveTurnSnapshot, applyStreamEvent, clearInactiveTurnSnapshot } from "@/features/chat";
 import { buildSessionInputHistory } from "@/features/chat/hooks/useChatSession";
 import { shouldRefreshSessionTitleAfterTurn } from "@/features/chat/hooks/useSessionQueryInvalidation";
 import { buildSessionBlocks } from "@/features/chat/hooks/useSessionBlocks";
@@ -959,6 +959,25 @@ describe("chat stream integration helpers", () => {
     const state = useAppStore.getState();
     expect(getEffectiveSessionStatus(state.transientStatuses["sess-1"], state.streams["sess-1"])).toBe("running");
     expect(state.streams["sess-1"]?.connectionState).toBe("detached");
+  });
+
+  it("clears detached running state when the server has no active turn", () => {
+    useAppStore.getState().setStreamMeta("sess-1", {
+      isStreaming: true,
+      connectionState: "detached",
+      activeMessageId: "msg-1",
+    });
+    useAppStore.getState().setSessionStatus("sess-1", "running");
+
+    clearInactiveTurnSnapshot("sess-1");
+
+    const state = useAppStore.getState();
+    expect(state.transientStatuses["sess-1"]).toBeUndefined();
+    expect(state.streams["sess-1"]).toMatchObject({
+      isStreaming: false,
+      connectionState: "idle",
+    });
+    expect(getEffectiveSessionStatus(state.transientStatuses["sess-1"], state.streams["sess-1"])).toBe("done");
   });
 
   it("keeps an explicit unbound project option for web sessions", () => {

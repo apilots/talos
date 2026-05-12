@@ -48,4 +48,4 @@ export { useSessionMessageStream } from "./hooks/useSessionMessageStream";
 export { useSessionReconnect } from "./hooks/useSessionReconnect";
 export { useSessionStreaming } from "./hooks/useSessionStreaming";
 export { createChatSlice, type ChatSlice, type ChatSliceSetter } from "./store";
-export { applyActiveTurnSnapshot, applyStreamEvent } from "./stream-events";
+export { applyActiveTurnSnapshot, applyStreamEvent, clearInactiveTurnSnapshot } from "./stream-events";

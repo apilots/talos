@@ -11,14 +11,22 @@ let clientFactory: TalosClientFactory | undefined;
 function createDefaultBrowserClient() {
   const desktopBridge = getDesktopBridge();
   if (desktopBridge) {
-    return createDesktopTalosClient(desktopBridge, () => getConnectionSettings().authToken || undefined);
+    return createDesktopTalosClient(desktopBridge, getAuthTokenForRequests);
   }
 
-  const { serverUrl, authToken } = getConnectionSettings();
+  const { serverUrl } = getConnectionSettings();
   return createBrowserTalosClient({
     baseUrl: serverUrl,
-    getToken: () => authToken || undefined,
+    getToken: getAuthTokenForRequests,
   });
+}
+
+function getAuthTokenForRequests(): string | undefined {
+  const connection = getConnectionSettings();
+  if (connection.authStatus === "open") {
+    return undefined;
+  }
+  return connection.authToken || undefined;
 }
 
 export function setTalosClientFactory(factory: TalosClientFactory) {

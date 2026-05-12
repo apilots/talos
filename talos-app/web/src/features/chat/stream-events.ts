@@ -258,6 +258,30 @@ export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TalosActi
   state.setSessionStatus(sessionId, "running");
 }
 
+export function clearInactiveTurnSnapshot(sessionId: string) {
+  const state = useAppStore.getState();
+  const stream = state.streams[sessionId];
+  if (
+    !stream?.isStreaming &&
+    !state.transientStatuses[sessionId] &&
+    !stream?.pendingApproval &&
+    !stream?.pendingUserAction
+  ) {
+    return;
+  }
+  markPendingInputCompleted(sessionId, stream?.activeMessageId);
+  state.setPendingUserAction(sessionId, undefined);
+  state.setPendingApproval(sessionId, undefined);
+  state.setSessionStatus(sessionId, undefined);
+  state.setStreamMeta(sessionId, {
+    isStreaming: false,
+    connectionState: "idle",
+    reconnectAttempt: undefined,
+    showReconnectControls: undefined,
+    awaitingFinalResponse: false,
+  });
+}
+
 function markPendingInputCompleted(sessionId: string, messageId: string | undefined) {
   const state = useAppStore.getState();
   const pendingInput = state.streams[sessionId]?.pendingInput;

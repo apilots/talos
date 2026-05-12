@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use talos_app_protocol::errors::{AppServerErrorBody, ALREADY_INITIALIZED, UNAUTHORIZED};
@@ -125,12 +125,7 @@ where
         }
     }
 
-    cancel_owned_turns(
-        app.clone(),
-        state.actor.as_ref(),
-        &state.owned_turn_sessions,
-    )
-    .await;
+    cancel_owned_turns(app.clone(), &state.owned_turn_sessions).await;
 
     const DRAIN_BACKGROUND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
@@ -162,7 +157,7 @@ where
 struct RuntimeState {
     actor: Option<Actor>,
     initialized_notification_seen: bool,
-    owned_turn_sessions: HashSet<String>,
+    owned_turn_sessions: HashMap<String, Actor>,
     subscription_tasks: HashMap<String, tokio::task::JoinHandle<()>>,
 }
 
@@ -358,7 +353,7 @@ async fn handle_request(
                             .and_then(serde_json::Value::as_str)
                             .map(ToString::to_string)
                         {
-                            state.owned_turn_sessions.insert(session_id);
+                            state.owned_turn_sessions.insert(session_id, actor.clone());
                         }
                     }
                     send_result(outgoing_tx, id, Ok(result)).await
@@ -376,7 +371,11 @@ async fn resolve_request_actor(
     method: ClientMethod,
     request_actor_credentials: Option<ActorCredentials>,
 ) -> Result<Actor, AppServerErrorBody> {
-    if !config.auth_enabled || is_public_auth_method(method) {
+    if !config.auth_enabled {
+        return Ok(Actor::regular("anonymous"));
+    }
+
+    if is_public_auth_method(method) {
         return state
             .actor
             .clone()
@@ -560,14 +559,10 @@ where
 
 async fn cancel_owned_turns(
     app: Arc<dyn AppServerApplication>,
-    actor: Option<&Actor>,
-    session_ids: &HashSet<String>,
+    session_actors: &HashMap<String, Actor>,
 ) {
-    let Some(actor) = actor else {
-        return;
-    };
-    for session_id in session_ids {
-        if let Err(error) = app.cancel_active_turn(actor, session_id).await {
+    for (session_id, session_actor) in session_actors {
+        if let Err(error) = app.cancel_active_turn(session_actor, session_id).await {
             tracing::warn!(session_id, error = ?error, "failed to cancel owned turn");
         }
     }
@@ -593,7 +588,9 @@ mod tests {
     #[derive(Default)]
     struct MockApp {
         dispatched: Mutex<Vec<String>>,
+        dispatched_actors: Mutex<Vec<String>>,
         cancelled: Mutex<Vec<String>>,
+        cancelled_actors: Mutex<Vec<String>>,
         drained: Mutex<usize>,
         live_tx: Mutex<Option<broadcast::Sender<SessionEventRecord>>>,
     }
@@ -602,13 +599,17 @@ mod tests {
     impl AppServerApplication for MockApp {
         async fn dispatch(
             &self,
-            _actor: &Actor,
+            actor: &Actor,
             request: talos_app_protocol::requests::ClientRequest,
         ) -> ProtocolResult<serde_json::Value> {
             self.dispatched
                 .lock()
                 .expect("dispatch lock")
                 .push(request.method.as_str().to_string());
+            self.dispatched_actors
+                .lock()
+                .expect("dispatch actor lock")
+                .push(actor.user_id.clone());
             Ok(match request.params {
                 ClientRequestParams::TurnStart(params) => json!({
                     "request_id": "req-1",
@@ -642,11 +643,15 @@ mod tests {
             }
         }
 
-        async fn cancel_active_turn(&self, _actor: &Actor, session_id: &str) -> ProtocolResult<()> {
+        async fn cancel_active_turn(&self, actor: &Actor, session_id: &str) -> ProtocolResult<()> {
             self.cancelled
                 .lock()
                 .expect("cancel lock")
                 .push(session_id.to_string());
+            self.cancelled_actors
+                .lock()
+                .expect("cancel actor lock")
+                .push(actor.user_id.clone());
             Ok(())
         }
 
@@ -741,6 +746,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn auth_disabled_dispatches_business_requests_as_anonymous() {
+        let app = Arc::new(MockApp::default());
+        let output = run_with_app(
+            format!("{}{}", initialize_request("secret"), session_read_request()),
+            app.clone(),
+        )
+        .await;
+        let messages = parse_output(&output);
+
+        assert!(messages[1]["result"]["ok"].as_bool().unwrap_or(false));
+        assert_eq!(
+            app.dispatched_actors
+                .lock()
+                .expect("dispatch actor lock")
+                .as_slice(),
+            &["anonymous"]
+        );
+    }
+
+    #[tokio::test]
     async fn auth_enabled_requires_request_actor_credentials_after_initialize() {
         let app = Arc::new(MockApp::default());
         let output = run_with_app_validator_and_config(
@@ -782,6 +807,37 @@ mod tests {
         assert_eq!(
             app.dispatched.lock().expect("dispatch lock").as_slice(),
             &["session.read"]
+        );
+        assert_eq!(
+            app.dispatched_actors
+                .lock()
+                .expect("dispatch actor lock")
+                .as_slice(),
+            &["user-1"]
+        );
+    }
+
+    #[tokio::test]
+    async fn owned_turn_shutdown_uses_business_request_actor() {
+        let app = Arc::new(MockApp::default());
+        let output = run_with_app(
+            format!("{}{}", initialize_request("secret"), turn_start_request()),
+            app.clone(),
+        )
+        .await;
+        let messages = parse_output(&output);
+
+        assert_eq!(messages[1]["result"]["session_id"], "s1");
+        assert_eq!(
+            app.cancelled.lock().expect("cancel lock").as_slice(),
+            &["s1"]
+        );
+        assert_eq!(
+            app.cancelled_actors
+                .lock()
+                .expect("cancel actor lock")
+                .as_slice(),
+            &["anonymous"]
         );
     }
 
@@ -910,6 +966,23 @@ mod tests {
                     }
                 },
                 "params": { "session_id": "s1" }
+            })
+        )
+    }
+
+    fn turn_start_request() -> String {
+        format!(
+            "{}\n",
+            json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "turn.start",
+                "params": {
+                    "session_id": "s1",
+                    "input": [{ "type": "text", "text": "hello" }],
+                    "workspace_id": null,
+                    "client_request_id": "request-1"
+                }
             })
         )
     }

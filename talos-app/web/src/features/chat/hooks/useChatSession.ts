@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import { TalosHttpError } from "@talos/sdk-browser";
 
 import { useSessionApproval } from "./useSessionApproval";
 import { useSessionBlocks } from "./useSessionBlocks";
 import { useSessionReconnect } from "./useSessionReconnect";
 import { useSessionStreaming } from "./useSessionStreaming";
 import { useActiveTurnQuery, useSessionTurnsQuery } from "./useChatQueries";
-import { applyActiveTurnSnapshot } from "../stream-events";
+import { applyActiveTurnSnapshot, clearInactiveTurnSnapshot } from "../stream-events";
 import { useAppStore } from "@/shared/store/app-store";
 import type { ChatApiTurns } from "../api";
 import type { PendingInput, SessionInputHistory, SessionInputHistoryItem } from "@/shared/types/ui";
@@ -58,6 +59,14 @@ export function useChatSession(
     }
     applyActiveTurnSnapshot(sessionId, activeTurnQuery.data);
   }, [activeTurnQuery.data, sessionId]);
+
+  useEffect(() => {
+    const error = activeTurnQuery.error;
+    if (!(error instanceof TalosHttpError) || error.status !== 404) {
+      return;
+    }
+    clearInactiveTurnSnapshot(sessionId);
+  }, [activeTurnQuery.error, sessionId]);
 
   useEffect(() => {
     const activeMessageId = streamState?.activeMessageId;
