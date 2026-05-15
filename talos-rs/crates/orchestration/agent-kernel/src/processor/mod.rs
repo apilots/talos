@@ -2,9 +2,9 @@ use crate::execution::ContentsMode;
 use crate::{
     execution::{PlanningResponseSegmentKind, ReplayDynamicToolResult, ReplayToolInvocation},
     CompactionSummaryPayload, ContentsBuilder, EventActions, EventAuthor, EventPayload,
-    ExecutionEvent, ExecutionEventKind, FlowProfile, InvocationContext, LlmRequestEnvelope,
-    LlmResponseEnvelope, Planner, RequestOutputContract, ResponseDisposition, SessionEvent,
-    SessionEventPayload,
+    ExecutionEvent, ExecutionEventKind, FlowProfile, InvocationContext, KernelTranscriptEvent,
+    KernelTranscriptPayload, LlmRequestEnvelope, LlmResponseEnvelope, Planner,
+    RequestOutputContract, ResponseDisposition,
 };
 use async_trait::async_trait;
 use chrono::Utc;

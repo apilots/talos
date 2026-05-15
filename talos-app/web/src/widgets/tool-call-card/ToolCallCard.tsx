@@ -21,10 +21,17 @@ function Section({
 }
 
 export const ToolCallCard = {
-  Root({ children }: { children: ReactNode }) {
+  Root({ children, compact = false }: { children: ReactNode; compact?: boolean }) {
     return (
-      <div className="w-full md:ml-11 md:max-w-[39rem]">
-        <Panel className="overflow-hidden rounded-[1.25rem] border-border/65 bg-card/76 shadow-[0_10px_24px_rgba(95,84,64,0.035)]">
+      <div className={cn("w-full", !compact && "md:ml-11 md:max-w-[39rem]")}>
+        <Panel
+          className={cn(
+            "overflow-hidden border-border/65 bg-card/76",
+            compact
+              ? "rounded-[0.85rem] shadow-none"
+              : "rounded-[1.25rem] shadow-[0_10px_24px_rgba(95,84,64,0.035)]",
+          )}
+        >
           {children}
         </Panel>
       </div>

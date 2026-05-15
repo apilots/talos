@@ -78,11 +78,11 @@ memory_stream_log="$(scenario_report_path memory_search_stream_events.log)"
 send_message_sse_log "${memory_stream_session_id}" "${memory_stream_payload}" "${memory_stream_log}"
 log_case_json "messages_memory_search_stream" "${memory_stream_payload}" "$(cat "${memory_stream_log}")"
 
-memory_stream_tool_started_count="$(grep -c '^event: message.tool_call.started' "${memory_stream_log}" || true)"
-memory_stream_tool_completed_count="$(grep -c '^event: message.tool_call.completed' "${memory_stream_log}" || true)"
-memory_stream_completed_count="$(grep -c '^event: message.completed' "${memory_stream_log}" || true)"
+memory_stream_tool_started_count="$(grep -c '"kind":"tool_call"' "${memory_stream_log}" || true)"
+memory_stream_tool_completed_count="$(grep -c '"type":"tool_result"' "${memory_stream_log}" || true)"
+memory_stream_completed_count="$(grep -c '^event: timeline.turn.completed' "${memory_stream_log}" || true)"
 memory_stream_tool_started_name_count="$(grep -c '"name":"MemorySearch"' "${memory_stream_log}" || true)"
-memory_stream_tool_completed_name_count="$(grep -c '"tool":"MemorySearch"' "${memory_stream_log}" || true)"
+memory_stream_tool_completed_name_count="$(grep -c '"name":"MemorySearch"' "${memory_stream_log}" || true)"
 memory_stream_results_count="$(grep -c '"results"' "${memory_stream_log}" || true)"
 if [[ "${memory_stream_tool_started_count}" -lt 1 || "${memory_stream_tool_completed_count}" -lt 1 || "${memory_stream_completed_count}" -lt 1 ]]; then
   echo "CASE messages_memory_search_stream FAIL tool_started=${memory_stream_tool_started_count} tool_completed=${memory_stream_tool_completed_count} completed=${memory_stream_completed_count}"
@@ -98,18 +98,26 @@ import sys
 from pathlib import Path
 
 path = Path(sys.argv[1])
-started = None
-completed = None
+item_by_id = {}
+result_item = None
 for line in path.read_text().splitlines():
     if not line.startswith("data: "):
         continue
-    payload = json.loads(line[6:])
-    event_type = payload.get("event_type")
-    event_payload = payload.get("payload", {})
-    if event_type == "message_tool_call_started":
-        started = event_payload.get("call_id")
-    elif event_type == "message_tool_call_completed":
-        completed = event_payload.get("call_id")
+    raw_record = json.loads(line[6:])
+    record = raw_record.get("event") if isinstance(raw_record.get("event"), dict) else raw_record
+    event_type = record.get("event_type")
+    event_payload = record.get("payload", {})
+    if event_type == "item_started":
+        item = event_payload.get("item", {})
+        content = item.get("content", {})
+        if item.get("kind") == "tool_call" and content.get("type") == "tool_call":
+            item_by_id[item.get("item_id")] = content.get("call_id")
+    elif event_type == "item_delta":
+        delta = event_payload.get("delta", {})
+        if delta.get("type") == "tool_result":
+            result_item = event_payload.get("item_id")
+started = next((call_id for call_id in item_by_id.values() if call_id), "")
+completed = item_by_id.get(result_item, "") if result_item else ""
 print(f"{started or ''}\t{completed or ''}")
 PY
 )"

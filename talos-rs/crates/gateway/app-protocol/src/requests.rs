@@ -11,6 +11,7 @@ use ts_rs::TS;
 
 use crate::errors::AppServerErrorBody;
 use crate::version::ProtocolVersion;
+use talos_types::talos::{SessionHistorySnapshot, TalosJsonValue, TimelineEventEnvelope};
 
 pub const DEFERRED_CLIENT_METHODS: &[DeferredClientMethod] = &[];
 
@@ -42,8 +43,10 @@ pub enum ClientMethod {
     SessionClear,
     #[serde(rename = "session.active_turn")]
     SessionActiveTurn,
-    #[serde(rename = "session.turns")]
-    SessionTurns,
+    #[serde(rename = "session.history")]
+    SessionHistory,
+    #[serde(rename = "session.recover")]
+    SessionRecover,
     #[serde(rename = "project.create")]
     ProjectCreate,
     #[serde(rename = "project.list")]
@@ -143,7 +146,8 @@ impl ClientMethod {
             Self::SessionCompact => "session.compact",
             Self::SessionClear => "session.clear",
             Self::SessionActiveTurn => "session.active_turn",
-            Self::SessionTurns => "session.turns",
+            Self::SessionHistory => "session.history",
+            Self::SessionRecover => "session.recover",
             Self::ProjectCreate => "project.create",
             Self::ProjectList => "project.list",
             Self::ProjectRead => "project.read",
@@ -211,7 +215,8 @@ impl FromStr for ClientMethod {
             "session.compact" => Ok(Self::SessionCompact),
             "session.clear" => Ok(Self::SessionClear),
             "session.active_turn" => Ok(Self::SessionActiveTurn),
-            "session.turns" => Ok(Self::SessionTurns),
+            "session.history" => Ok(Self::SessionHistory),
+            "session.recover" => Ok(Self::SessionRecover),
             "project.create" => Ok(Self::ProjectCreate),
             "project.list" => Ok(Self::ProjectList),
             "project.read" => Ok(Self::ProjectRead),
@@ -282,8 +287,10 @@ pub enum ClientRequestParams {
     SessionClear(SessionClearParams),
     #[serde(rename = "session.active_turn")]
     SessionActiveTurn(SessionActiveTurnParams),
-    #[serde(rename = "session.turns")]
-    SessionTurns(SessionTurnsParams),
+    #[serde(rename = "session.history")]
+    SessionHistory(SessionHistoryParams),
+    #[serde(rename = "session.recover")]
+    SessionRecover(TimelineRecoveryParams),
     #[serde(rename = "project.create")]
     ProjectCreate(ProjectCreateParams),
     #[serde(rename = "project.list")]
@@ -402,7 +409,12 @@ impl ClientRequest {
             ClientMethod::SessionActiveTurn => {
                 ClientRequestParams::SessionActiveTurn(decode(params_value)?)
             }
-            ClientMethod::SessionTurns => ClientRequestParams::SessionTurns(decode(params_value)?),
+            ClientMethod::SessionHistory => {
+                ClientRequestParams::SessionHistory(decode(params_value)?)
+            }
+            ClientMethod::SessionRecover => {
+                ClientRequestParams::SessionRecover(decode(params_value)?)
+            }
             ClientMethod::ProjectCreate => {
                 ClientRequestParams::ProjectCreate(decode(params_value)?)
             }
@@ -616,8 +628,91 @@ pub struct SessionActiveTurnParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct SessionTurnsParams {
+pub struct SessionHistoryParams {
     pub session_id: String,
+}
+
+pub type SessionHistoryResponse = SessionHistorySnapshot;
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct TimelineRecoveryParams {
+    pub session_id: String,
+    #[serde(default)]
+    pub after_event_id: Option<String>,
+    #[serde(default)]
+    pub replay_limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct TimelineRecoverySnapshot {
+    pub replay: TimelineReplay,
+    pub active_turn: TimelineActiveTurnSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct TimelineReplay {
+    pub events: Vec<TimelineEventEnvelope>,
+    #[serde(default)]
+    pub high_water_mark_event_id: Option<String>,
+    pub last_replay_seq: i64,
+    pub cursor_status: TimelineCursorStatus,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TimelineCursorStatus {
+    Current,
+    FromBeginning,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct TimelineActiveTurnSnapshot {
+    pub session_id: String,
+    #[serde(default)]
+    pub turn_id: Option<String>,
+    #[serde(default)]
+    pub message_id: Option<String>,
+    pub status: TimelineActiveTurnStatus,
+    #[serde(default)]
+    pub last_event_id: Option<String>,
+    #[serde(default)]
+    pub pending_user_action: Option<TimelinePendingUserAction>,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TimelineActiveTurnStatus {
+    Running,
+    WaitingUserAction,
+    Cancelling,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TimelinePendingUserAction {
+    ToolApproval(TimelinePendingToolApproval),
+    DynamicToolResult(TimelinePendingDynamicToolResult),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct TimelinePendingToolApproval {
+    #[serde(default)]
+    pub item_id: Option<String>,
+    pub call_id: String,
+    pub tool_name: String,
+    pub prompt: String,
+    pub arguments: TalosJsonValue,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct TimelinePendingDynamicToolResult {
+    #[serde(default)]
+    pub item_id: Option<String>,
+    pub call_id: String,
+    pub tool_name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]

@@ -25,7 +25,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum SessionEventKind {
+pub enum KernelTranscriptEventKind {
     UserMessage,
     AgentMessage,
     ToolCall,
@@ -37,35 +37,35 @@ pub enum SessionEventKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum SessionEventPayload {
+pub enum KernelTranscriptPayload {
     Message {
         message: ChatMessage,
     },
     StateOnly,
     Transfer {
-        payload: SessionTransferPayload,
+        payload: KernelTranscriptTransferPayload,
     },
     Auth {
-        payload: SessionAuthPayload,
+        payload: KernelTranscriptAuthPayload,
     },
     Confirmation {
-        payload: SessionConfirmationPayload,
+        payload: KernelTranscriptConfirmationPayload,
     },
     ApprovalResponse {
-        payload: SessionApprovalResponsePayload,
+        payload: KernelTranscriptApprovalResponsePayload,
     },
     DynamicToolRequest {
-        payload: SessionDynamicToolRequestPayload,
+        payload: KernelTranscriptDynamicToolRequestPayload,
     },
     DynamicToolResponse {
-        payload: SessionDynamicToolResponsePayload,
+        payload: KernelTranscriptDynamicToolResponsePayload,
     },
     Compaction {
-        payload: SessionCompactionPayload,
+        payload: KernelTranscriptCompactionPayload,
     },
 }
 
-impl SessionEventPayload {
+impl KernelTranscriptPayload {
     pub fn message(&self) -> Option<&ChatMessage> {
         match self {
             Self::Message { message } => Some(message),
@@ -82,18 +82,18 @@ impl SessionEventPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SessionTransferPayload {
+pub struct KernelTranscriptTransferPayload {
     pub target_agent: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SessionAuthPayload {
+pub struct KernelTranscriptAuthPayload {
     pub provider: String,
     pub prompt: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SessionConfirmationPayload {
+pub struct KernelTranscriptConfirmationPayload {
     pub tool_name: String,
     pub call_id: String,
     pub prompt: String,
@@ -101,7 +101,7 @@ pub struct SessionConfirmationPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SessionApprovalResponsePayload {
+pub struct KernelTranscriptApprovalResponsePayload {
     pub call_id: String,
     pub tool_name: String,
     pub approved: bool,
@@ -109,14 +109,14 @@ pub struct SessionApprovalResponsePayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SessionDynamicToolRequestPayload {
+pub struct KernelTranscriptDynamicToolRequestPayload {
     pub call_id: String,
     pub tool_name: String,
     pub arguments: TalosJsonValue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SessionDynamicToolResponsePayload {
+pub struct KernelTranscriptDynamicToolResponsePayload {
     pub call_id: String,
     pub tool_name: String,
     pub output: String,
@@ -124,19 +124,19 @@ pub struct SessionDynamicToolResponsePayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SessionCompactionPayload {
+pub struct KernelTranscriptCompactionPayload {
     pub summary_message: ChatMessage,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionEvent {
+pub struct KernelTranscriptEvent {
     pub id: String,
     pub session_id: String,
     pub invocation_id: String,
     pub branch: ExecutionBranch,
     pub author: EventAuthor,
-    pub kind: SessionEventKind,
-    pub payload: SessionEventPayload,
+    pub kind: KernelTranscriptEventKind,
+    pub payload: KernelTranscriptPayload,
     #[serde(default)]
     pub actions: EventActions,
     #[serde(default)]
@@ -144,14 +144,14 @@ pub struct SessionEvent {
     pub timestamp: DateTime<Utc>,
 }
 
-impl SessionEvent {
+impl KernelTranscriptEvent {
     pub fn new(
         session_id: impl Into<String>,
         invocation_id: impl Into<String>,
         branch: ExecutionBranch,
         author: EventAuthor,
-        kind: SessionEventKind,
-        payload: SessionEventPayload,
+        kind: KernelTranscriptEventKind,
+        payload: KernelTranscriptPayload,
     ) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
@@ -170,29 +170,29 @@ impl SessionEvent {
     pub fn from_execution_event(session_id: impl Into<String>, event: ExecutionEvent) -> Self {
         let payload = match &event.payload {
             EventPayload::Text { text } => match event.kind {
-                ExecutionEventKind::UserInput => SessionEventPayload::Message {
+                ExecutionEventKind::UserInput => KernelTranscriptPayload::Message {
                     message: ChatMessage::user(text.clone()),
                 },
                 ExecutionEventKind::System | ExecutionEventKind::Error => {
-                    SessionEventPayload::Message {
+                    KernelTranscriptPayload::Message {
                         message: ChatMessage::system(text.clone()),
                     }
                 }
                 ExecutionEventKind::FinalResponse | ExecutionEventKind::Reasoning => {
-                    SessionEventPayload::Message {
+                    KernelTranscriptPayload::Message {
                         message: ChatMessage::assistant(text.clone()),
                     }
                 }
-                ExecutionEventKind::Planning => SessionEventPayload::StateOnly,
+                ExecutionEventKind::Planning => KernelTranscriptPayload::StateOnly,
                 ExecutionEventKind::ToolCall | ExecutionEventKind::ToolResult => {
-                    SessionEventPayload::StateOnly
+                    KernelTranscriptPayload::StateOnly
                 }
             },
             EventPayload::ToolCall {
                 call_id,
                 name,
                 arguments,
-            } => SessionEventPayload::Message {
+            } => KernelTranscriptPayload::Message {
                 message: ChatMessage::assistant_with_tool_calls(
                     "",
                     vec![FunctionCall::new(
@@ -207,34 +207,38 @@ impl SessionEvent {
                 tool_name,
                 content,
                 ..
-            } => SessionEventPayload::Message {
+            } => KernelTranscriptPayload::Message {
                 message: ChatMessage::tool(call_id.clone(), tool_name.clone(), content.to_string()),
             },
-            EventPayload::AuthRequest { payload } => SessionEventPayload::Auth {
-                payload: SessionAuthPayload {
+            EventPayload::AuthRequest { payload } => KernelTranscriptPayload::Auth {
+                payload: KernelTranscriptAuthPayload {
                     provider: payload.provider.clone(),
                     prompt: payload.prompt.clone(),
                 },
             },
-            EventPayload::ConfirmationRequest { payload } => SessionEventPayload::Confirmation {
-                payload: SessionConfirmationPayload {
-                    tool_name: payload.tool_name.clone(),
-                    call_id: payload.call_id.clone(),
-                    prompt: payload.prompt.clone(),
-                    arguments: payload.arguments.clone().into(),
-                },
-            },
-            EventPayload::ApprovalResponse { payload } => SessionEventPayload::ApprovalResponse {
-                payload: SessionApprovalResponsePayload {
-                    call_id: payload.call_id.clone(),
-                    tool_name: payload.tool_name.clone(),
-                    approved: payload.approved,
-                    reason: payload.reason.clone(),
-                },
-            },
+            EventPayload::ConfirmationRequest { payload } => {
+                KernelTranscriptPayload::Confirmation {
+                    payload: KernelTranscriptConfirmationPayload {
+                        tool_name: payload.tool_name.clone(),
+                        call_id: payload.call_id.clone(),
+                        prompt: payload.prompt.clone(),
+                        arguments: payload.arguments.clone().into(),
+                    },
+                }
+            }
+            EventPayload::ApprovalResponse { payload } => {
+                KernelTranscriptPayload::ApprovalResponse {
+                    payload: KernelTranscriptApprovalResponsePayload {
+                        call_id: payload.call_id.clone(),
+                        tool_name: payload.tool_name.clone(),
+                        approved: payload.approved,
+                        reason: payload.reason.clone(),
+                    },
+                }
+            }
             EventPayload::DynamicToolRequest { payload } => {
-                SessionEventPayload::DynamicToolRequest {
-                    payload: SessionDynamicToolRequestPayload {
+                KernelTranscriptPayload::DynamicToolRequest {
+                    payload: KernelTranscriptDynamicToolRequestPayload {
                         call_id: payload.call_id.clone(),
                         tool_name: payload.tool_name.clone(),
                         arguments: payload.arguments.clone().into(),
@@ -242,8 +246,8 @@ impl SessionEvent {
                 }
             }
             EventPayload::DynamicToolResponse { payload } => {
-                SessionEventPayload::DynamicToolResponse {
-                    payload: SessionDynamicToolResponsePayload {
+                KernelTranscriptPayload::DynamicToolResponse {
+                    payload: KernelTranscriptDynamicToolResponsePayload {
                         call_id: payload.call_id.clone(),
                         tool_name: payload.tool_name.clone(),
                         output: payload.output.clone(),
@@ -251,41 +255,41 @@ impl SessionEvent {
                     },
                 }
             }
-            EventPayload::CompactionSummary { payload } => SessionEventPayload::Compaction {
-                payload: SessionCompactionPayload {
+            EventPayload::CompactionSummary { payload } => KernelTranscriptPayload::Compaction {
+                payload: KernelTranscriptCompactionPayload {
                     summary_message: ChatMessage::assistant(payload.summary.clone()),
                 },
             },
             EventPayload::Empty => {
                 if let Some(target_agent) = &event.actions.transfer_to {
-                    SessionEventPayload::Transfer {
-                        payload: SessionTransferPayload {
+                    KernelTranscriptPayload::Transfer {
+                        payload: KernelTranscriptTransferPayload {
                             target_agent: target_agent.clone(),
                         },
                     }
                 } else if event.actions.compaction.is_some() {
-                    SessionEventPayload::Compaction {
-                        payload: SessionCompactionPayload {
+                    KernelTranscriptPayload::Compaction {
+                        payload: KernelTranscriptCompactionPayload {
                             summary_message: ChatMessage::assistant(""),
                         },
                     }
                 } else {
-                    SessionEventPayload::StateOnly
+                    KernelTranscriptPayload::StateOnly
                 }
             }
-            EventPayload::PlannerSelection { .. } => SessionEventPayload::StateOnly,
+            EventPayload::PlannerSelection { .. } => KernelTranscriptPayload::StateOnly,
         };
 
         let kind = match event.kind {
-            ExecutionEventKind::UserInput => SessionEventKind::UserMessage,
+            ExecutionEventKind::UserInput => KernelTranscriptEventKind::UserMessage,
             ExecutionEventKind::FinalResponse | ExecutionEventKind::Reasoning => {
-                SessionEventKind::AgentMessage
+                KernelTranscriptEventKind::AgentMessage
             }
-            ExecutionEventKind::ToolCall => SessionEventKind::ToolCall,
-            ExecutionEventKind::ToolResult => SessionEventKind::ToolResult,
-            ExecutionEventKind::Planning => SessionEventKind::Planning,
+            ExecutionEventKind::ToolCall => KernelTranscriptEventKind::ToolCall,
+            ExecutionEventKind::ToolResult => KernelTranscriptEventKind::ToolResult,
+            ExecutionEventKind::Planning => KernelTranscriptEventKind::Planning,
             ExecutionEventKind::System | ExecutionEventKind::Error => {
-                SessionEventKind::SystemMessage
+                KernelTranscriptEventKind::SystemMessage
             }
         };
 
@@ -333,7 +337,7 @@ impl SessionState {
 pub struct InvocationSession {
     pub session_id: String,
     #[serde(default)]
-    pub events: Vec<SessionEvent>,
+    pub events: Vec<KernelTranscriptEvent>,
     #[serde(default)]
     pub state: SessionState,
 }
@@ -343,7 +347,7 @@ impl InvocationSession {
         &self,
         invocation_id: Option<&str>,
         branch: Option<ExecutionBranch>,
-    ) -> Vec<SessionEvent> {
+    ) -> Vec<KernelTranscriptEvent> {
         self.events
             .iter()
             .filter(|event| {
@@ -360,18 +364,18 @@ impl InvocationSession {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct SessionEventFilter {
+pub struct KernelTranscriptFilter {
     pub invocation_id: Option<String>,
     pub branch: Option<ExecutionBranch>,
 }
 
 #[async_trait]
-pub trait SessionService: Send + Sync {
+pub trait KernelTranscriptService: Send + Sync {
     async fn append_event(
         &self,
         session: &mut InvocationSession,
-        event: SessionEvent,
-    ) -> TalosResult<SessionEvent>;
+        event: KernelTranscriptEvent,
+    ) -> TalosResult<KernelTranscriptEvent>;
 
     async fn load_session(
         &self,
@@ -383,16 +387,16 @@ pub trait SessionService: Send + Sync {
     async fn list_events(
         &self,
         session_id: &str,
-        filter: &SessionEventFilter,
-    ) -> TalosResult<Vec<SessionEvent>>;
+        filter: &KernelTranscriptFilter,
+    ) -> TalosResult<Vec<KernelTranscriptEvent>>;
 }
 
-pub struct MemoryBackedSessionService {
+pub struct MemoryBackedKernelTranscriptService {
     memory_store: Arc<MemoryStore>,
-    mapper: Arc<dyn SessionTranscriptMapper<SessionEvent>>,
+    mapper: Arc<dyn SessionTranscriptMapper<KernelTranscriptEvent>>,
 }
 
-impl MemoryBackedSessionService {
+impl MemoryBackedKernelTranscriptService {
     pub fn new(memory_store: Arc<MemoryStore>) -> Self {
         Self {
             memory_store,
@@ -438,27 +442,27 @@ impl KernelSessionTranscriptMapper {
         }
     }
 
-    fn map_kind_to_transcript(kind: SessionEventKind) -> SessionTranscriptEventKind {
+    fn map_kind_to_transcript(kind: KernelTranscriptEventKind) -> SessionTranscriptEventKind {
         match kind {
-            SessionEventKind::UserMessage => SessionTranscriptEventKind::UserMessage,
-            SessionEventKind::AgentMessage => SessionTranscriptEventKind::AgentMessage,
-            SessionEventKind::ToolCall => SessionTranscriptEventKind::ToolCall,
-            SessionEventKind::ToolResult => SessionTranscriptEventKind::ToolResult,
-            SessionEventKind::SystemMessage => SessionTranscriptEventKind::SystemMessage,
-            SessionEventKind::Planning => SessionTranscriptEventKind::Planning,
-            SessionEventKind::StateUpdate => SessionTranscriptEventKind::StateUpdate,
+            KernelTranscriptEventKind::UserMessage => SessionTranscriptEventKind::UserMessage,
+            KernelTranscriptEventKind::AgentMessage => SessionTranscriptEventKind::AgentMessage,
+            KernelTranscriptEventKind::ToolCall => SessionTranscriptEventKind::ToolCall,
+            KernelTranscriptEventKind::ToolResult => SessionTranscriptEventKind::ToolResult,
+            KernelTranscriptEventKind::SystemMessage => SessionTranscriptEventKind::SystemMessage,
+            KernelTranscriptEventKind::Planning => SessionTranscriptEventKind::Planning,
+            KernelTranscriptEventKind::StateUpdate => SessionTranscriptEventKind::StateUpdate,
         }
     }
 
-    fn map_kind_from_transcript(kind: SessionTranscriptEventKind) -> SessionEventKind {
+    fn map_kind_from_transcript(kind: SessionTranscriptEventKind) -> KernelTranscriptEventKind {
         match kind {
-            SessionTranscriptEventKind::UserMessage => SessionEventKind::UserMessage,
-            SessionTranscriptEventKind::AgentMessage => SessionEventKind::AgentMessage,
-            SessionTranscriptEventKind::ToolCall => SessionEventKind::ToolCall,
-            SessionTranscriptEventKind::ToolResult => SessionEventKind::ToolResult,
-            SessionTranscriptEventKind::SystemMessage => SessionEventKind::SystemMessage,
-            SessionTranscriptEventKind::Planning => SessionEventKind::Planning,
-            SessionTranscriptEventKind::StateUpdate => SessionEventKind::StateUpdate,
+            SessionTranscriptEventKind::UserMessage => KernelTranscriptEventKind::UserMessage,
+            SessionTranscriptEventKind::AgentMessage => KernelTranscriptEventKind::AgentMessage,
+            SessionTranscriptEventKind::ToolCall => KernelTranscriptEventKind::ToolCall,
+            SessionTranscriptEventKind::ToolResult => KernelTranscriptEventKind::ToolResult,
+            SessionTranscriptEventKind::SystemMessage => KernelTranscriptEventKind::SystemMessage,
+            SessionTranscriptEventKind::Planning => KernelTranscriptEventKind::Planning,
+            SessionTranscriptEventKind::StateUpdate => KernelTranscriptEventKind::StateUpdate,
         }
     }
 
@@ -523,30 +527,30 @@ impl KernelSessionTranscriptMapper {
         }
     }
 
-    fn apply_state_delta(session: &mut InvocationSession, event: &SessionEvent) {
+    fn apply_state_delta(session: &mut InvocationSession, event: &KernelTranscriptEvent) {
         for delta in &event.actions.state_delta {
             session.state.apply_delta(delta);
         }
     }
 
-    fn map_payload_to_transcript(payload: &SessionEventPayload) -> SessionTranscriptPayload {
+    fn map_payload_to_transcript(payload: &KernelTranscriptPayload) -> SessionTranscriptPayload {
         match payload {
-            SessionEventPayload::Message { message } => SessionTranscriptPayload::Message {
+            KernelTranscriptPayload::Message { message } => SessionTranscriptPayload::Message {
                 message: message.clone(),
             },
-            SessionEventPayload::StateOnly => SessionTranscriptPayload::StateOnly,
-            SessionEventPayload::Transfer { payload } => SessionTranscriptPayload::Transfer {
+            KernelTranscriptPayload::StateOnly => SessionTranscriptPayload::StateOnly,
+            KernelTranscriptPayload::Transfer { payload } => SessionTranscriptPayload::Transfer {
                 payload: SessionTranscriptTransferPayload {
                     target_agent: payload.target_agent.clone(),
                 },
             },
-            SessionEventPayload::Auth { payload } => SessionTranscriptPayload::Auth {
+            KernelTranscriptPayload::Auth { payload } => SessionTranscriptPayload::Auth {
                 payload: SessionTranscriptAuthPayload {
                     provider: payload.provider.clone(),
                     prompt: payload.prompt.clone(),
                 },
             },
-            SessionEventPayload::Confirmation { payload } => {
+            KernelTranscriptPayload::Confirmation { payload } => {
                 SessionTranscriptPayload::Confirmation {
                     payload: SessionTranscriptConfirmationPayload {
                         tool_name: payload.tool_name.clone(),
@@ -556,7 +560,7 @@ impl KernelSessionTranscriptMapper {
                     },
                 }
             }
-            SessionEventPayload::ApprovalResponse { payload } => {
+            KernelTranscriptPayload::ApprovalResponse { payload } => {
                 SessionTranscriptPayload::ApprovalResponse {
                     payload: SessionTranscriptApprovalResponsePayload {
                         call_id: payload.call_id.clone(),
@@ -566,7 +570,7 @@ impl KernelSessionTranscriptMapper {
                     },
                 }
             }
-            SessionEventPayload::DynamicToolRequest { payload } => {
+            KernelTranscriptPayload::DynamicToolRequest { payload } => {
                 SessionTranscriptPayload::DynamicToolRequest {
                     payload: SessionTranscriptDynamicToolRequestPayload {
                         call_id: payload.call_id.clone(),
@@ -575,7 +579,7 @@ impl KernelSessionTranscriptMapper {
                     },
                 }
             }
-            SessionEventPayload::DynamicToolResponse { payload } => {
+            KernelTranscriptPayload::DynamicToolResponse { payload } => {
                 SessionTranscriptPayload::DynamicToolResponse {
                     payload: SessionTranscriptDynamicToolResponsePayload {
                         call_id: payload.call_id.clone(),
@@ -585,34 +589,36 @@ impl KernelSessionTranscriptMapper {
                     },
                 }
             }
-            SessionEventPayload::Compaction { payload } => SessionTranscriptPayload::Compaction {
-                payload: SessionTranscriptCompactionPayload {
-                    summary_message: payload.summary_message.clone(),
-                },
-            },
+            KernelTranscriptPayload::Compaction { payload } => {
+                SessionTranscriptPayload::Compaction {
+                    payload: SessionTranscriptCompactionPayload {
+                        summary_message: payload.summary_message.clone(),
+                    },
+                }
+            }
         }
     }
 
-    fn map_payload_from_transcript(payload: SessionTranscriptPayload) -> SessionEventPayload {
+    fn map_payload_from_transcript(payload: SessionTranscriptPayload) -> KernelTranscriptPayload {
         match payload {
             SessionTranscriptPayload::Message { message } => {
-                SessionEventPayload::Message { message }
+                KernelTranscriptPayload::Message { message }
             }
-            SessionTranscriptPayload::StateOnly => SessionEventPayload::StateOnly,
-            SessionTranscriptPayload::Transfer { payload } => SessionEventPayload::Transfer {
-                payload: SessionTransferPayload {
+            SessionTranscriptPayload::StateOnly => KernelTranscriptPayload::StateOnly,
+            SessionTranscriptPayload::Transfer { payload } => KernelTranscriptPayload::Transfer {
+                payload: KernelTranscriptTransferPayload {
                     target_agent: payload.target_agent,
                 },
             },
-            SessionTranscriptPayload::Auth { payload } => SessionEventPayload::Auth {
-                payload: SessionAuthPayload {
+            SessionTranscriptPayload::Auth { payload } => KernelTranscriptPayload::Auth {
+                payload: KernelTranscriptAuthPayload {
                     provider: payload.provider,
                     prompt: payload.prompt,
                 },
             },
             SessionTranscriptPayload::Confirmation { payload } => {
-                SessionEventPayload::Confirmation {
-                    payload: SessionConfirmationPayload {
+                KernelTranscriptPayload::Confirmation {
+                    payload: KernelTranscriptConfirmationPayload {
                         tool_name: payload.tool_name,
                         call_id: payload.call_id,
                         prompt: payload.prompt,
@@ -621,8 +627,8 @@ impl KernelSessionTranscriptMapper {
                 }
             }
             SessionTranscriptPayload::ApprovalResponse { payload } => {
-                SessionEventPayload::ApprovalResponse {
-                    payload: SessionApprovalResponsePayload {
+                KernelTranscriptPayload::ApprovalResponse {
+                    payload: KernelTranscriptApprovalResponsePayload {
                         call_id: payload.call_id,
                         tool_name: payload.tool_name,
                         approved: payload.approved,
@@ -631,8 +637,8 @@ impl KernelSessionTranscriptMapper {
                 }
             }
             SessionTranscriptPayload::DynamicToolRequest { payload } => {
-                SessionEventPayload::DynamicToolRequest {
-                    payload: SessionDynamicToolRequestPayload {
+                KernelTranscriptPayload::DynamicToolRequest {
+                    payload: KernelTranscriptDynamicToolRequestPayload {
                         call_id: payload.call_id,
                         tool_name: payload.tool_name,
                         arguments: payload.arguments,
@@ -640,8 +646,8 @@ impl KernelSessionTranscriptMapper {
                 }
             }
             SessionTranscriptPayload::DynamicToolResponse { payload } => {
-                SessionEventPayload::DynamicToolResponse {
-                    payload: SessionDynamicToolResponsePayload {
+                KernelTranscriptPayload::DynamicToolResponse {
+                    payload: KernelTranscriptDynamicToolResponsePayload {
                         call_id: payload.call_id,
                         tool_name: payload.tool_name,
                         output: payload.output,
@@ -649,17 +655,19 @@ impl KernelSessionTranscriptMapper {
                     },
                 }
             }
-            SessionTranscriptPayload::Compaction { payload } => SessionEventPayload::Compaction {
-                payload: SessionCompactionPayload {
-                    summary_message: payload.summary_message,
-                },
-            },
+            SessionTranscriptPayload::Compaction { payload } => {
+                KernelTranscriptPayload::Compaction {
+                    payload: KernelTranscriptCompactionPayload {
+                        summary_message: payload.summary_message,
+                    },
+                }
+            }
         }
     }
 }
 
-impl SessionTranscriptMapper<SessionEvent> for KernelSessionTranscriptMapper {
-    fn to_record(&self, event: &SessionEvent) -> SessionTranscriptRecord {
+impl SessionTranscriptMapper<KernelTranscriptEvent> for KernelSessionTranscriptMapper {
+    fn to_record(&self, event: &KernelTranscriptEvent) -> SessionTranscriptRecord {
         SessionTranscriptRecord {
             header: SessionTranscriptHeader {
                 id: event.id.clone(),
@@ -676,8 +684,8 @@ impl SessionTranscriptMapper<SessionEvent> for KernelSessionTranscriptMapper {
         }
     }
 
-    fn from_record(&self, record: SessionTranscriptRecord) -> SessionEvent {
-        SessionEvent {
+    fn from_record(&self, record: SessionTranscriptRecord) -> KernelTranscriptEvent {
+        KernelTranscriptEvent {
             id: record.header.id,
             session_id: record.header.session_id,
             invocation_id: record.header.invocation_id,
@@ -693,12 +701,12 @@ impl SessionTranscriptMapper<SessionEvent> for KernelSessionTranscriptMapper {
 }
 
 #[async_trait]
-impl SessionService for MemoryBackedSessionService {
+impl KernelTranscriptService for MemoryBackedKernelTranscriptService {
     async fn append_event(
         &self,
         session: &mut InvocationSession,
-        event: SessionEvent,
-    ) -> TalosResult<SessionEvent> {
+        event: KernelTranscriptEvent,
+    ) -> TalosResult<KernelTranscriptEvent> {
         if event.partial {
             return Ok(event);
         }
@@ -757,8 +765,8 @@ impl SessionService for MemoryBackedSessionService {
     async fn list_events(
         &self,
         session_id: &str,
-        filter: &SessionEventFilter,
-    ) -> TalosResult<Vec<SessionEvent>> {
+        filter: &KernelTranscriptFilter,
+    ) -> TalosResult<Vec<KernelTranscriptEvent>> {
         let session = self
             .load_session(session_id, filter.invocation_id.as_deref(), filter.branch)
             .await?;
@@ -777,7 +785,7 @@ mod tests {
     async fn test_load_session_replays_full_branch_history_without_invocation_filter() {
         let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
         let memory_store = Arc::new(MemoryStore::new(workspace_dir));
-        let service = MemoryBackedSessionService::new(memory_store);
+        let service = MemoryBackedKernelTranscriptService::new(memory_store);
         let mut session = InvocationSession {
             session_id: "session-1".to_string(),
             ..InvocationSession::default()
@@ -786,13 +794,13 @@ mod tests {
         service
             .append_event(
                 &mut session,
-                SessionEvent::new(
+                KernelTranscriptEvent::new(
                     "session-1",
                     "invocation-1",
                     ExecutionBranch::ReactiveLoop,
                     EventAuthor::User,
-                    SessionEventKind::UserMessage,
-                    SessionEventPayload::Message {
+                    KernelTranscriptEventKind::UserMessage,
+                    KernelTranscriptPayload::Message {
                         message: ChatMessage::user("hello"),
                     },
                 ),
@@ -802,13 +810,13 @@ mod tests {
         service
             .append_event(
                 &mut session,
-                SessionEvent::new(
+                KernelTranscriptEvent::new(
                     "session-1",
                     "invocation-2",
                     ExecutionBranch::ReactiveLoop,
                     EventAuthor::Agent,
-                    SessionEventKind::AgentMessage,
-                    SessionEventPayload::Message {
+                    KernelTranscriptEventKind::AgentMessage,
+                    KernelTranscriptPayload::Message {
                         message: ChatMessage::assistant("hi again"),
                     },
                 ),
@@ -830,19 +838,19 @@ mod tests {
     async fn test_load_session_replays_state_delta_into_session_state() {
         let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
         let memory_store = Arc::new(MemoryStore::new(workspace_dir));
-        let service = MemoryBackedSessionService::new(memory_store);
+        let service = MemoryBackedKernelTranscriptService::new(memory_store);
         let mut session = InvocationSession {
             session_id: "session-1".to_string(),
             ..InvocationSession::default()
         };
 
-        let mut event = SessionEvent::new(
+        let mut event = KernelTranscriptEvent::new(
             "session-1",
             "invocation-1",
             ExecutionBranch::ReactiveLoop,
             EventAuthor::Agent,
-            SessionEventKind::Planning,
-            SessionEventPayload::StateOnly,
+            KernelTranscriptEventKind::Planning,
+            KernelTranscriptPayload::StateOnly,
         );
         event.actions.state_delta.push(crate::StateDelta {
             namespace: StateNamespace::Session,
@@ -870,7 +878,7 @@ mod tests {
     async fn test_reset_session_clears_replayed_session_state_deltas() {
         let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
         let memory_store = Arc::new(MemoryStore::new(workspace_dir));
-        let service = MemoryBackedSessionService::new(memory_store.clone());
+        let service = MemoryBackedKernelTranscriptService::new(memory_store.clone());
         let mut session = InvocationSession {
             session_id: "session-1".to_string(),
             ..InvocationSession::default()
@@ -883,13 +891,13 @@ mod tests {
                 serde_json::json!({"recent_goal": "resume"}),
             ),
         ] {
-            let mut event = SessionEvent::new(
+            let mut event = KernelTranscriptEvent::new(
                 "session-1",
                 "invocation-1",
                 ExecutionBranch::ReactiveLoop,
                 EventAuthor::Agent,
-                SessionEventKind::StateUpdate,
-                SessionEventPayload::StateOnly,
+                KernelTranscriptEventKind::StateUpdate,
+                KernelTranscriptPayload::StateOnly,
             );
             event.actions.state_delta.push(crate::StateDelta {
                 namespace: StateNamespace::Session,

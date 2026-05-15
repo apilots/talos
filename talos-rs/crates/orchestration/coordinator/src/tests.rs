@@ -2,13 +2,14 @@ use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use talos_agent::{OrchestratorEvent, OrchestratorExecution, OrchestratorRequest};
+use talos_agent::{OrchestratorExecution, OrchestratorRequest};
 use talos_error::{TalosError, TalosResult};
 use talos_memory::{Memory, MemoryStore, TalosTurn};
 use talos_session_store::SessionStore;
 use talos_types::talos::{
     StopReason, TalosConnectionMode, TalosContentItem, TalosContext, TalosInputItem,
-    TalosOutputItem, TalosProvider, TalosSessionEnvironment, TalosSourceType, TalosUsage,
+    TalosOutputItem, TalosProvider, TalosSessionEnvironment, TalosSourceType, TalosTimelineEvent,
+    TalosUsage,
 };
 use talos_types::{
     OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, ProjectPatch, ProjectRecord,
@@ -33,6 +34,7 @@ impl MockRouter {
 struct RecordingApprovalAgent {
     approvals: Arc<Mutex<Vec<(String, String, String, bool, Option<String>)>>>,
     resumed_inputs: Arc<Mutex<Vec<Vec<TalosInputItem>>>>,
+    stream_requests: Arc<Mutex<Vec<OrchestratorRequest>>>,
     cancelled_sessions: Arc<Mutex<Vec<String>>>,
     compacted_sessions: Arc<Mutex<Vec<String>>>,
     cleared_sessions: Arc<Mutex<Vec<String>>>,
@@ -43,6 +45,7 @@ impl RecordingApprovalAgent {
         Self {
             approvals: Arc::new(Mutex::new(Vec::new())),
             resumed_inputs: Arc::new(Mutex::new(Vec::new())),
+            stream_requests: Arc::new(Mutex::new(Vec::new())),
             cancelled_sessions: Arc::new(Mutex::new(Vec::new())),
             compacted_sessions: Arc::new(Mutex::new(Vec::new())),
             cleared_sessions: Arc::new(Mutex::new(Vec::new())),
@@ -134,8 +137,9 @@ impl AgentOrchestrator for RecordingApprovalAgent {
 
     async fn run_stream(
         &self,
-        _request: OrchestratorRequest,
-    ) -> TalosResult<mpsc::Receiver<OrchestratorEvent>> {
+        request: OrchestratorRequest,
+    ) -> TalosResult<mpsc::Receiver<TalosTimelineEvent>> {
+        self.stream_requests.lock().unwrap().push(request);
         let (_tx, rx) = mpsc::channel(1);
         Ok(rx)
     }
@@ -449,7 +453,7 @@ impl AgentOrchestrator for TrackingFlushAgent {
     async fn run_stream(
         &self,
         _request: OrchestratorRequest,
-    ) -> TalosResult<mpsc::Receiver<OrchestratorEvent>> {
+    ) -> TalosResult<mpsc::Receiver<TalosTimelineEvent>> {
         let (_tx, rx) = mpsc::channel(1);
         Ok(rx)
     }
@@ -535,7 +539,7 @@ impl AgentOrchestrator for GuardedSessionAgent {
     async fn run_stream(
         &self,
         _request: OrchestratorRequest,
-    ) -> TalosResult<mpsc::Receiver<OrchestratorEvent>> {
+    ) -> TalosResult<mpsc::Receiver<TalosTimelineEvent>> {
         let (_tx, rx) = mpsc::channel(1);
         Ok(rx)
     }

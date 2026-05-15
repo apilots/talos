@@ -15,7 +15,7 @@ export interface AppServerBridge {
     params: unknown,
     options?: { actorCredentials?: AppProtocol.ActorCredentials | null },
   ): Promise<T>;
-  onEvent(handler: (envelope: AppProtocol.ApplicationEventEnvelope) => void): () => void;
+  onEvent(handler: (event: AppProtocol.TimelineEventEnvelope) => void): () => void;
   onSubscriptionTerminated(handler: (envelope: AppProtocol.SubscriptionTerminatedEnvelope) => void): () => void;
   onError(handler: (error: Error) => void): () => void;
   onExit(handler: (status: { code: number | null; signal: NodeJS.Signals | null }) => void): () => void;
@@ -27,7 +27,7 @@ export interface AppServerBridge {
 
 export interface DesktopAppServerControllerOptions extends AppServerClientOptions {
   bridgeFactory?: (options: AppServerClientOptions) => AppServerBridge;
-  onEvent?: (envelope: AppProtocol.ApplicationEventEnvelope) => void;
+  onEvent?: (event: AppProtocol.TimelineEventEnvelope) => void;
   onSubscriptionTerminated?: (envelope: AppProtocol.SubscriptionTerminatedEnvelope) => void;
   onRuntimeState?: (state: TalosRuntimeState) => void;
   onServerRequest?: (request: AppProtocol.JsonRpcRequest) => Promise<unknown> | unknown;
@@ -121,12 +121,12 @@ export class DesktopAppServerController {
     return bridgeFactory(this.options);
   }
 
-  private handleEvent(envelope: AppProtocol.ApplicationEventEnvelope): void {
-    const subscription = this.subscriptions.get(envelope.event.session_id);
+  private handleEvent(event: AppProtocol.TimelineEventEnvelope): void {
+    const subscription = this.subscriptions.get(event.session_id);
     if (subscription) {
-      subscription.lastEventId = envelope.event_id;
+      subscription.lastEventId = event.event_id;
     }
-    this.options.onEvent?.(envelope);
+    this.options.onEvent?.(event);
   }
 
   private handleSubscriptionTerminated(envelope: AppProtocol.SubscriptionTerminatedEnvelope): void {

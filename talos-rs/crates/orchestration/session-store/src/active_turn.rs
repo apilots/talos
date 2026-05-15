@@ -4,7 +4,7 @@ use talos_error::{TalosError, TalosResult};
 use talos_storage::Row;
 use talos_types::talos::TalosJsonValue;
 
-use crate::events::SessionEventId;
+use crate::events::TimelineEventId;
 use crate::DatabaseSessionStore;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -38,6 +38,8 @@ pub enum PendingUserAction {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PendingToolApproval {
+    #[serde(default)]
+    pub item_id: Option<String>,
     pub call_id: String,
     pub tool_name: String,
     pub prompt: String,
@@ -46,6 +48,8 @@ pub struct PendingToolApproval {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PendingDynamicToolResult {
+    #[serde(default)]
+    pub item_id: Option<String>,
     pub call_id: String,
     pub tool_name: String,
 }
@@ -56,7 +60,7 @@ pub struct ActiveTurnRecord {
     pub turn_id: String,
     pub message_id: Option<String>,
     pub status: ActiveTurnStatus,
-    pub last_event_id: Option<SessionEventId>,
+    pub last_event_id: Option<TimelineEventId>,
     pub pending_user_action: Option<PendingUserAction>,
     pub updated_at: i64,
 }
@@ -67,7 +71,7 @@ pub struct ActiveTurnUpdate {
     pub turn_id: String,
     pub message_id: Option<String>,
     pub status: ActiveTurnStatus,
-    pub last_event_id: Option<SessionEventId>,
+    pub last_event_id: Option<TimelineEventId>,
     pub pending_user_action: Option<PendingUserAction>,
     pub updated_at: i64,
 }
@@ -137,7 +141,7 @@ fn parse_active_turn_row(row: &Row) -> TalosResult<ActiveTurnRecord> {
     let last_event_id = row
         .get_i64("last_event_seq")
         .filter(|value| *value > 0)
-        .map(SessionEventId::from_seq);
+        .map(TimelineEventId::from_seq);
     Ok(ActiveTurnRecord {
         session_id: row.get_string("session_id").unwrap_or_default(),
         turn_id: row.get_string("turn_id").unwrap_or_default(),
@@ -158,7 +162,7 @@ impl ActiveTurnStore for DatabaseSessionStore {
         let last_event_seq = update
             .last_event_id
             .as_ref()
-            .map(SessionEventId::event_seq)
+            .map(TimelineEventId::event_seq)
             .transpose()?
             .unwrap_or_default()
             .to_string();
@@ -233,9 +237,10 @@ mod tests {
                 turn_id: "t1".to_string(),
                 message_id: Some("m1".to_string()),
                 status: ActiveTurnStatus::Cancelling,
-                last_event_id: Some(SessionEventId::from_seq(3)),
+                last_event_id: Some(TimelineEventId::from_seq(3)),
                 pending_user_action: Some(PendingUserAction::DynamicToolResult(
                     PendingDynamicToolResult {
+                        item_id: Some("tool-1".to_string()),
                         call_id: "c1".to_string(),
                         tool_name: "tool".to_string(),
                     },

@@ -17,8 +17,9 @@ import type {
   RegisterRequest,
   TalosActiveTurn,
   TalosMessageAck,
-  TalosMessageResponse,
+  TalosSessionHistorySnapshot,
   TalosSession,
+  TimelineRecoverySnapshot,
   UpdateCurrentUserRequest,
   UserDto,
   UserTokenMeta,
@@ -28,7 +29,7 @@ import type {
 } from "./types";
 
 export type AppServerEventHandler = (
-  envelope: AppProtocol.ApplicationEventEnvelope,
+  event: AppProtocol.TimelineEventEnvelope,
 ) => void;
 
 export type AppServerSubscriptionTerminatedHandler = (
@@ -206,10 +207,24 @@ export class AppServerClient {
     return this.transport.request("session.active_turn", { session_id: sessionId });
   }
 
-  getSessionTurns(sessionId: string): Promise<TalosMessageResponse[]> {
+  getSessionHistory(sessionId: string): Promise<TalosSessionHistorySnapshot> {
     return this.transport
-      .request<ListResponse<TalosMessageResponse>>("session.turns", { session_id: sessionId })
-      .then((response) => response.data);
+      .request<TalosSessionHistorySnapshot>("session.history", { session_id: sessionId })
+      .then(normalizeSessionHistorySnapshot);
+  }
+
+  recoverSession(
+    sessionId: string,
+    afterEventId: string | null = null,
+    replayLimit: number | null = null,
+  ): Promise<TimelineRecoverySnapshot> {
+    return this.transport
+      .request<TimelineRecoverySnapshot>("session.recover", {
+        session_id: sessionId,
+        after_event_id: afterEventId,
+        replay_limit: replayLimit,
+      })
+      .then(normalizeTimelineRecoverySnapshot);
   }
 
   listProjects(): Promise<ProjectRecord[]> {
@@ -348,4 +363,55 @@ export class AppServerClient {
       expected_version: expectedVersion,
     });
   }
+}
+
+function normalizeTimelineRecoverySnapshot(
+  snapshot: TimelineRecoverySnapshot,
+): TimelineRecoverySnapshot {
+  return {
+    ...snapshot,
+    replay: {
+      ...snapshot.replay,
+      events: snapshot.replay.events.map((event) => ({
+        ...event,
+        event_seq: Number(event.event_seq),
+        created_at_ms: Number(event.created_at_ms),
+        event: {
+          ...event.event,
+          event_seq: event.event.event_seq == null ? event.event.event_seq : Number(event.event.event_seq),
+          created_at_ms: event.event.created_at_ms == null ? event.event.created_at_ms : Number(event.event.created_at_ms),
+          sequence: Number(event.event.sequence),
+        },
+      })),
+      last_replay_seq: Number(snapshot.replay.last_replay_seq),
+    },
+    active_turn: {
+      ...snapshot.active_turn,
+      updated_at: Number(snapshot.active_turn.updated_at),
+    },
+  };
+}
+
+function normalizeSessionHistorySnapshot(
+  snapshot: TalosSessionHistorySnapshot,
+): TalosSessionHistorySnapshot {
+  return {
+    ...snapshot,
+    generated_at_ms: Number(snapshot.generated_at_ms),
+    messages: snapshot.messages.map((message) => ({
+      ...message,
+      items: message.items.map((item) => ({
+        ...item,
+        started_at_ms: Number(item.started_at_ms),
+        completed_at_ms:
+          item.completed_at_ms == null ? item.completed_at_ms : Number(item.completed_at_ms),
+      })),
+      usage: {
+        ...message.usage,
+        input_tokens: Number(message.usage.input_tokens),
+        output_tokens: Number(message.usage.output_tokens),
+        total_tokens: Number(message.usage.total_tokens),
+      },
+    })),
+  };
 }

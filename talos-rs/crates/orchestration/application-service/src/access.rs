@@ -7,7 +7,7 @@ use talos_session_store::SessionStore;
 use talos_types::{
     OptionalProjectIdPatch, ProjectPatch, ProjectRecord, SessionConf, SessionPatch,
     SessionPatchAck, SessionQuery, SessionRecord, SessionRuntime,
-    SessionService as LegacySessionService, TalosConfig, TalosContext, TalosSession,
+    SessionService as RuntimeSessionService, TalosConfig, TalosContext, TalosSession,
 };
 
 use crate::session::SessionService;
@@ -51,10 +51,10 @@ pub struct ResourceAccessService {
 }
 
 impl ResourceAccessService {
-    pub fn new(legacy_sessions: Arc<dyn LegacySessionService>) -> Self {
-        let runtime = Arc::new(LegacySessionRuntime::new(legacy_sessions.clone()));
+    pub fn new(runtime_sessions: Arc<dyn RuntimeSessionService>) -> Self {
+        let runtime = Arc::new(RuntimeSessionAdapter::new(runtime_sessions.clone()));
         let records = Arc::new(SessionService::new(
-            Arc::new(LegacySessionStore::new(legacy_sessions)),
+            Arc::new(RuntimeSessionStoreAdapter::new(runtime_sessions)),
             TalosConfig::default(),
         ));
         Self {
@@ -216,17 +216,6 @@ impl ResourceAccessService {
         let _session = self.get_session(actor, session_id).await?;
         self.submit_runtime_dynamic_tool_result(session_id, call_id, tool_name, output, success)
             .await
-    }
-
-    pub async fn get_session_turns(
-        &self,
-        actor: &Actor,
-        session_id: &str,
-    ) -> TalosResult<Vec<talos_types::talos::TalosMessageResponse>> {
-        let _session = self.get_session(actor, session_id).await?;
-        Err(TalosError::InternalError(
-            "session turns are managed by MemoryStore in application service".to_string(),
-        ))
     }
 
     pub async fn list_projects(&self, actor: &Actor) -> TalosResult<Vec<ProjectRecord>> {
@@ -434,16 +423,16 @@ impl ResourceAccessService {
     }
 }
 
-struct LegacySessionRuntime(Arc<dyn LegacySessionService>);
+struct RuntimeSessionAdapter(Arc<dyn RuntimeSessionService>);
 
-impl LegacySessionRuntime {
-    fn new(service: Arc<dyn LegacySessionService>) -> Self {
+impl RuntimeSessionAdapter {
+    fn new(service: Arc<dyn RuntimeSessionService>) -> Self {
         Self(service)
     }
 }
 
 #[async_trait]
-impl SessionRuntime for LegacySessionRuntime {
+impl SessionRuntime for RuntimeSessionAdapter {
     async fn resolve_target_agent(&self, context: &TalosContext) -> TalosResult<String> {
         self.0.resolve_target_agent(context).await
     }
@@ -495,10 +484,10 @@ impl SessionRuntime for LegacySessionRuntime {
     }
 }
 
-struct LegacySessionStore(Arc<dyn LegacySessionService>);
+struct RuntimeSessionStoreAdapter(Arc<dyn RuntimeSessionService>);
 
-impl LegacySessionStore {
-    fn new(service: Arc<dyn LegacySessionService>) -> Self {
+impl RuntimeSessionStoreAdapter {
+    fn new(service: Arc<dyn RuntimeSessionService>) -> Self {
         Self(service)
     }
 
@@ -511,7 +500,7 @@ impl LegacySessionStore {
 }
 
 #[async_trait]
-impl SessionStore for LegacySessionStore {
+impl SessionStore for RuntimeSessionStoreAdapter {
     async fn create_session(
         &self,
         context: &TalosContext,
@@ -765,13 +754,6 @@ mod tests {
             _success: bool,
         ) -> TalosResult<()> {
             Ok(())
-        }
-
-        async fn get_session_turns(
-            &self,
-            _session_id: &str,
-        ) -> TalosResult<Vec<talos_types::talos::TalosMessageResponse>> {
-            Ok(Vec::new())
         }
 
         async fn list_projects(&self) -> TalosResult<Vec<ProjectRecord>> {

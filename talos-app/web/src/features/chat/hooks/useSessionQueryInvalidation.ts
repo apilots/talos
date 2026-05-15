@@ -22,7 +22,8 @@ export function useSessionQueryInvalidation(sessionId: string) {
     await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
     await queryClient.invalidateQueries({ queryKey: chatKeys.session(connectionKey, sessionId) });
     await queryClient.invalidateQueries({ queryKey: chatKeys.activeTurn(connectionKey, sessionId) });
-    await queryClient.invalidateQueries({ queryKey: chatKeys.turns(connectionKey, sessionId) });
+    await queryClient.invalidateQueries({ queryKey: chatKeys.sessionHistory(connectionKey, sessionId) });
+    await queryClient.invalidateQueries({ queryKey: chatKeys.liveRecovery(connectionKey, sessionId) });
   }
 
   async function refreshSessionTitleAfterTurn({

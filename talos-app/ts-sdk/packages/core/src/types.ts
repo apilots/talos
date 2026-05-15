@@ -1,30 +1,44 @@
 import type {
-  TalosEvent as ProtocolTalosEvent,
-  TalosEventPayload,
-  TalosEventType,
+  TalosTimelineItem as ProtocolTalosTimelineItem,
+  TalosTimelineEvent as ProtocolTalosTimelineEvent,
+  TalosTimelineEventPayload,
+  TimelineEventEnvelope as ProtocolTimelineEventEnvelope,
+  TimelineRecoverySnapshot as ProtocolTimelineRecoverySnapshot,
+  TimelineReplay as ProtocolTimelineReplay,
+  SessionHistoryMessage as ProtocolSessionHistoryMessage,
+  SessionHistorySnapshot as ProtocolSessionHistorySnapshot,
 } from "./generated/app-protocol";
 
 export type {
-  TalosEventPayload,
-  TalosEventType,
-  TalosMessageCompletedEvent,
-  TalosMessageErrorEvent,
-  TalosMessageExecutionSummaryEvent,
-  TalosMessageOutputDeltaEvent,
-  TalosMessageReasoningDeltaEvent,
-  TalosMessageStartedEvent,
-  TalosMessageToolCallArgsDeltaEvent,
-  TalosMessageToolCallCompletedEvent,
-  TalosMessageToolCallExecutingEvent,
-  TalosMessageToolCallPendingApprovalEvent,
-  TalosMessageToolCallPendingDynamicResultEvent,
-  TalosMessageToolCallProgressDeltaEvent,
-  TalosMessageToolCallQueuedEvent,
-  TalosMessageToolCallStartedEvent,
-  TalosThinkingSource,
-  TalosThinkingStage,
+  TalosItemCompletedEvent,
+  TalosItemDeltaEvent,
+  TalosItemStartedEvent,
+  TalosTimelineContent,
+  TalosTimelineDelta,
+  TalosTimelineEventPayload,
+  TalosTimelineEventType,
+  TalosTimelineItem,
+  TalosTimelineItemKind,
+  TalosTimelineItemStatus,
+  TalosTimelineNoticeLevel,
+  TalosTimelinePhase,
+  TimelineSubscriptionNotification,
+  TimelineActiveTurnSnapshot,
+  TimelineActiveTurnStatus,
+  TimelineCursorStatus,
+  TimelinePendingDynamicToolResult,
+  TimelinePendingToolApproval,
+  TimelinePendingUserAction,
+  TimelineRecoveryParams,
+  SessionHistoryMessage,
+  SessionHistoryParams,
+  SessionHistorySnapshot,
   TalosToolProgressKind,
-  TalosToolStreamKey,
+  TalosToolProgressEntry,
+  TalosToolResult,
+  TalosTurnCompletedEvent,
+  TalosTurnErrorEvent,
+  TalosTurnStartedEvent,
 } from "./generated/app-protocol";
 
 export type TalosConnectionMode = "embedded" | "remote";
@@ -227,22 +241,63 @@ export interface TalosMessageAck {
   status: TalosMessageCommandStatus;
 }
 
-export type TalosEvent = Omit<ProtocolTalosEvent, "sequence" | "payload"> & {
+export type TalosTimelineEvent = Omit<
+  ProtocolTalosTimelineEvent,
+  "event_seq" | "created_at_ms" | "sequence" | "payload"
+> & {
+  event_seq?: number | null;
+  created_at_ms?: number | null;
   sequence: number;
-  payload: TalosEventPayload;
+  payload: TalosTimelineEventPayload;
 };
 
-export interface TalosSessionEventRecord {
+export type TimelineEventEnvelope = Omit<
+  ProtocolTimelineEventEnvelope,
+  "event_seq" | "created_at_ms" | "event"
+> & {
   event_seq: number;
-  event_id: string;
-  session_id: string;
-  turn_id?: string | null;
-  message_id: string;
-  sequence: number;
-  event_type: TalosEventType;
-  payload: TalosEventPayload;
-  created_at: number;
-}
+  created_at_ms: number;
+  event: TalosTimelineEvent;
+};
+
+export type TimelineReplay = Omit<
+  ProtocolTimelineReplay,
+  "events" | "last_replay_seq"
+> & {
+  events: TimelineEventEnvelope[];
+  last_replay_seq: number;
+};
+
+export type TimelineRecoverySnapshot = Omit<
+  ProtocolTimelineRecoverySnapshot,
+  "replay" | "active_turn"
+> & {
+  replay: TimelineReplay;
+  active_turn: TalosActiveTurn;
+};
+
+export type TalosHistoryTimelineItem = Omit<
+  ProtocolTalosTimelineItem,
+  "started_at_ms" | "completed_at_ms"
+> & {
+  started_at_ms: number;
+  completed_at_ms?: number | null;
+};
+
+export type TalosSessionHistoryMessage = Omit<
+  ProtocolSessionHistoryMessage,
+  "items"
+> & {
+  items: TalosHistoryTimelineItem[];
+};
+
+export type TalosSessionHistorySnapshot = Omit<
+  ProtocolSessionHistorySnapshot,
+  "generated_at_ms" | "messages"
+> & {
+  generated_at_ms: number;
+  messages: TalosSessionHistoryMessage[];
+};
 
 export type TalosActiveTurnStatus =
   | "running"
@@ -253,6 +308,7 @@ export type TalosActiveTurnStatus =
 
 export interface TalosPendingToolApproval {
   type: "tool_approval";
+  item_id?: string | null;
   call_id: string;
   tool_name: string;
   prompt: string;
@@ -261,6 +317,7 @@ export interface TalosPendingToolApproval {
 
 export interface TalosPendingDynamicToolResult {
   type: "dynamic_tool_result";
+  item_id?: string | null;
   call_id: string;
   tool_name: string;
 }

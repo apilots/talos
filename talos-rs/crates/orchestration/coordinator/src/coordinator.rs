@@ -12,12 +12,15 @@ use crate::Coordinator;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
-use talos_agent::{AgentOrchestrator, OrchestratorEvent, OrchestratorRequest};
+use talos_agent::{AgentOrchestrator, OrchestratorRequest};
 use talos_error::TalosResult;
 use talos_router::Router;
 use talos_session_store::SessionStore;
 use talos_types::gateway::{GatewayRequest, GatewayResponse};
-use talos_types::talos::{TalosContext, TalosEvent, TalosUsage};
+use talos_types::talos::{
+    TalosContext, TalosTimelineDelta, TalosTimelineEvent, TalosTimelineEventPayload,
+    TalosTimelinePhase, TalosUsage,
+};
 use talos_types::{
     ProjectPatch, ProjectRecord, RequestHandler, SessionConf, SessionPatch, SessionPatchAck,
     SessionQuery, SessionRuntime, SessionService, TalosConfig, TalosSession,
@@ -27,7 +30,6 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use self::session::{extract_first_user_text, SessionManager};
-use self::stream::map_orchestrator_event;
 
 /// Implementation of the Coordinator trait
 pub struct CoordinatorImpl {
@@ -62,6 +64,35 @@ impl CoordinatorImpl {
     /// Get reference to registered agents
     pub fn agents(&self) -> Arc<RwLock<HashMap<String, Arc<dyn AgentOrchestrator>>>> {
         self.agents.clone()
+    }
+
+    async fn resolve_session_agent(
+        &self,
+        session: &TalosSession,
+    ) -> TalosResult<(String, Arc<dyn AgentOrchestrator>)> {
+        let route_context = TalosContext {
+            source_type: session.context.source_type.clone(),
+            provider: session.context.provider.clone(),
+            user_id: session.context.user_id.clone(),
+            message_id: session.context.message_id.clone(),
+            trace_id: session.context.trace_id.clone(),
+            channel_id: session.context.channel_id.clone(),
+            thread_id: session.context.thread_id.clone(),
+            project_root: session.context.project_root.clone(),
+            environment: session.context.environment.clone(),
+        };
+        let route_channel = Self::route_channel(&route_context);
+        let target_agent = self
+            .router
+            .route(&route_channel, &route_context.user_id)
+            .await?
+            .unwrap_or_else(|| "default".to_string());
+        let agents = self.agents.read().await;
+        let agent = agents
+            .get(&target_agent)
+            .cloned()
+            .ok_or_else(|| talos_error::TalosError::AgentNotFound(target_agent.clone()))?;
+        Ok((target_agent, agent))
     }
 }
 
@@ -105,12 +136,18 @@ impl RequestHandler for CoordinatorImpl {
             .ok_or_else(|| talos_error::TalosError::AgentNotFound(target_agent.clone()))?;
         drop(agents);
 
-        let message_id = format!("msg_{}", Uuid::new_v4().simple());
+        let message_id = if request.resume_context.is_some() {
+            request.context.message_id.clone()
+        } else {
+            format!("msg_{}", Uuid::new_v4().simple())
+        };
         let mut turn_session = session.clone();
         turn_session.context.message_id = message_id;
         let agent_response = agent
             .run(OrchestratorRequest {
                 session: turn_session,
+                turn_id: request.turn_id.clone(),
+                resume_context: request.resume_context.clone(),
                 input: request.input.clone(),
             })
             .await?;
@@ -158,7 +195,7 @@ impl RequestHandler for CoordinatorImpl {
     async fn handle_stream(
         &self,
         request: GatewayRequest,
-    ) -> TalosResult<mpsc::Receiver<TalosEvent>> {
+    ) -> TalosResult<mpsc::Receiver<TalosTimelineEvent>> {
         let context = request.context.clone();
         let route_channel = Self::route_channel(&context);
 
@@ -180,51 +217,57 @@ impl RequestHandler for CoordinatorImpl {
             .ok_or_else(|| talos_error::TalosError::AgentNotFound(target_agent.clone()))?;
         drop(agents);
 
-        let message_id = format!("msg_{}", Uuid::new_v4().simple());
+        let message_id = if request.resume_context.is_some() {
+            request.context.message_id.clone()
+        } else {
+            format!("msg_{}", Uuid::new_v4().simple())
+        };
         let mut turn_session = session.clone();
         turn_session.context.message_id = message_id.clone();
         let mut orchestrator_stream = agent
             .run_stream(OrchestratorRequest {
                 session: turn_session,
+                turn_id: request.turn_id.clone(),
+                resume_context: request.resume_context.clone(),
                 input: request.input.clone(),
             })
             .await?;
 
         let sessions = self.sessions.clone();
         let session_id = session.context.session_id.clone();
-        let stream_session_id = session.context.session_id.clone();
         let response_model = model_for_turn.clone();
         let sessions_for_title = self.sessions.clone();
         let (tx, rx) = mpsc::channel(256);
         tokio::spawn(async move {
-            let mut sequence: u64 = 0;
             let mut final_usage = TalosUsage::default();
             let mut final_message_delta = 2;
             let mut final_output_text = String::new();
+            let mut item_phases = HashMap::new();
 
             while let Some(event) = orchestrator_stream.recv().await {
-                let (event_type, payload) = map_orchestrator_event(event.clone());
-                if let OrchestratorEvent::MessageCompleted(completed) = &event {
-                    final_usage = completed.usage.clone();
-                    final_message_delta = completed.total_output_items.max(1);
-                } else if let OrchestratorEvent::MessageOutputDelta(output) = &event {
-                    final_output_text.push_str(&output.delta);
+                match &event.payload {
+                    TalosTimelineEventPayload::ItemStarted(payload) => {
+                        item_phases.insert(payload.item.item_id.clone(), payload.item.phase);
+                    }
+                    TalosTimelineEventPayload::ItemDelta(payload) => {
+                        if item_phases.get(&payload.item_id)
+                            == Some(&TalosTimelinePhase::FinalAnswer)
+                        {
+                            if let TalosTimelineDelta::Text { text } = &payload.delta {
+                                final_output_text.push_str(text);
+                            }
+                        }
+                    }
+                    TalosTimelineEventPayload::TurnCompleted(completed) => {
+                        final_usage = completed.usage.clone();
+                        final_message_delta = item_phases.len().max(1) as u64;
+                    }
+                    _ => {}
                 }
 
-                if tx
-                    .send(TalosEvent {
-                        event_type,
-                        message_id: message_id.clone(),
-                        session_id: stream_session_id.clone(),
-                        sequence,
-                        payload,
-                    })
-                    .await
-                    .is_err()
-                {
+                if tx.send(event).await.is_err() {
                     return;
                 }
-                sequence = sequence.saturating_add(1);
             }
 
             sessions
@@ -562,22 +605,6 @@ impl SessionService for CoordinatorImpl {
         agent
             .submit_tool_approval(session_id, call_id, tool_name, approved, reason)
             .await?;
-
-        let response = agent
-            .run(OrchestratorRequest {
-                session: session.clone(),
-                input: Vec::new(),
-            })
-            .await?;
-        let model_for_turn = session.config.llm.model.clone();
-        self.sessions
-            .record_turn_completion(
-                &session.context.session_id,
-                &model_for_turn,
-                1,
-                &response.usage,
-            )
-            .await?;
         Ok(())
     }
 
@@ -600,49 +627,7 @@ impl SessionService for CoordinatorImpl {
         agent
             .submit_dynamic_tool_result(session_id, call_id, tool_name, output, success)
             .await?;
-
-        let response = agent
-            .run(OrchestratorRequest {
-                session: session.clone(),
-                input: Vec::new(),
-            })
-            .await?;
-        let model_for_turn = session.config.llm.model.clone();
-        self.sessions
-            .record_turn_completion(
-                &session.context.session_id,
-                &model_for_turn,
-                1,
-                &response.usage,
-            )
-            .await?;
         Ok(())
-    }
-
-    async fn get_session_turns(
-        &self,
-        session_id: &str,
-    ) -> TalosResult<Vec<talos_types::talos::TalosMessageResponse>> {
-        use talos_types::talos::TalosMessageResponse;
-
-        let memory_store = talos_memory::MemoryStore::new_default();
-        let turns = memory_store.load_session_turns(session_id).await?;
-
-        let responses = turns
-            .into_iter()
-            .map(|turn| TalosMessageResponse {
-                request_id: turn.turn_id.clone(),
-                message_id: turn.message_id.clone(),
-                session_id: turn.session_id.clone(),
-                model: String::new(),
-                reasoning: Vec::new(),
-                output: turn.items,
-                stop_reason: turn.stop_reason,
-                usage: turn.usage,
-            })
-            .collect();
-
-        Ok(responses)
     }
 
     async fn list_projects(&self) -> TalosResult<Vec<ProjectRecord>> {

@@ -23,7 +23,10 @@ pub(crate) fn build_flow_step_model_request(
     }
 }
 
-pub(crate) fn stage_session_event(ctx: &mut InvocationContext, event: SessionEvent) {
+pub(crate) fn stage_kernel_transcript_event(
+    ctx: &mut InvocationContext,
+    event: KernelTranscriptEvent,
+) {
     for delta in &event.actions.state_delta {
         ctx.session.state.apply_delta(delta);
     }

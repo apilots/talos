@@ -15,7 +15,7 @@ frontend and SDK mock-flow regression tests that do not start a real gateway.
 - Verifies: `/v1/sessions` create/get/list, `/v1/sessions/{id}` patch
 
 3. `scenarios/03_messages_http_sse.sh`
-- Scope: async ack + session event SSE + idempotency behavior
+- Scope: async ack + timeline event SSE + idempotency behavior
 - Verifies: `/v1/sessions/{id}/messages`, `/v1/sessions/{id}/events`, `Idempotency-Key`
 
 4. `scenarios/04_auth.sh`

@@ -1,4 +1,4 @@
-use talos_client::{TalosContentItem, TalosJsonValue, TalosOutputItem};
+use talos_client::{TalosContentItem, TalosJsonValue};
 
 use crate::types::{ChatBlock, ChatRole, ToolCallStatus};
 use crate::TuiApp;
@@ -56,54 +56,6 @@ impl TuiApp {
             })
             .collect::<Vec<_>>()
             .join("\n")
-    }
-
-    pub(crate) fn replay_history_item(
-        &mut self,
-        item: &TalosOutputItem,
-        turn_index: u64,
-        item_index: u64,
-    ) {
-        match item {
-            TalosOutputItem::UserInput { text } => {
-                self.push_block(ChatRole::User, text.clone());
-                self.add_message_to_history(text.clone());
-            }
-            TalosOutputItem::OutputText { text } => {
-                self.push_block(ChatRole::Assistant, text.clone());
-            }
-            TalosOutputItem::Reasoning { text } => {
-                self.push_block(ChatRole::Thinking, text.clone());
-            }
-            TalosOutputItem::ToolCall {
-                call_id,
-                name,
-                arguments,
-            } => {
-                self.push_tool_call_block(
-                    call_id.clone(),
-                    name.clone(),
-                    arguments.clone(),
-                    turn_index,
-                    item_index,
-                    None,
-                );
-            }
-            TalosOutputItem::ToolResult {
-                call_id,
-                tool_name: _,
-                content,
-                is_error,
-            } => {
-                self.complete_tool_call_block(
-                    call_id,
-                    Self::tool_result_output_text(content),
-                    !is_error,
-                    None,
-                );
-            }
-            TalosOutputItem::ExecutionSummary { .. } => {}
-        }
     }
 
     pub(crate) fn push_tool_call_block(

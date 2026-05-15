@@ -71,11 +71,11 @@ if ! echo "${memory_events_text}" | grep -q "TOOL_CALL_STARTED name=MemorySearch
   echo "CASE cli_chat_stream_memory_search FAIL missing_tool_started events=${memory_events_text}"
   exit 1
 fi
-if ! echo "${memory_events_text}" | grep -q "TOOL_CALL_COMPLETED call_id="; then
-  echo "CASE cli_chat_stream_memory_search FAIL missing_tool_completed events=${memory_events_text}"
+if ! echo "${memory_events_text}" | grep -q "TOOL_CALL_RESULT item="; then
+  echo "CASE cli_chat_stream_memory_search FAIL missing_tool_result events=${memory_events_text}"
   exit 1
 fi
-if ! echo "${memory_events_text}" | grep -q "tool=MemorySearch internal=MemorySearch"; then
+if ! echo "${memory_events_text}" | grep -q "TOOL_CALL_STARTED name=MemorySearch internal=MemorySearch"; then
   echo "CASE cli_chat_stream_memory_search FAIL missing_memory_tool_name events=${memory_events_text}"
   exit 1
 fi
@@ -84,19 +84,21 @@ import os
 import re
 
 events = os.environ.get("EVENTS_TEXT", "")
-started = re.search(r"TOOL_CALL_STARTED name=MemorySearch internal=MemorySearch call_id=([^ ]*)", events)
-completed = re.search(r"TOOL_CALL_COMPLETED call_id=([^ ]+) tool=MemorySearch internal=MemorySearch", events)
-print(f"{started.group(1) if started else ''}\t{completed.group(1) if completed else ''}")
+started = re.search(r"TOOL_CALL_STARTED name=MemorySearch internal=MemorySearch call_id=([^ ]*) item=([^\n ]+)", events)
+result = re.search(r"TOOL_CALL_RESULT item=([^\n ]+) is_error=false", events)
+print(f"{started.group(1) if started else ''}\t{started.group(2) if started else ''}\t{result.group(1) if result else ''}")
 PY
 )"
 memory_started_call_id="${memory_call_ids%%$'\t'*}"
-memory_completed_call_id="${memory_call_ids#*$'\t'}"
-if [[ -z "${memory_started_call_id}" || -z "${memory_completed_call_id}" ]]; then
-  echo "CASE cli_chat_stream_memory_search FAIL missing_call_id started=${memory_started_call_id} completed=${memory_completed_call_id}"
+memory_remaining="${memory_call_ids#*$'\t'}"
+memory_started_item_id="${memory_remaining%%$'\t'*}"
+memory_result_item_id="${memory_remaining#*$'\t'}"
+if [[ -z "${memory_started_call_id}" || -z "${memory_started_item_id}" || -z "${memory_result_item_id}" ]]; then
+  echo "CASE cli_chat_stream_memory_search FAIL missing_tool_identity call_id=${memory_started_call_id} started_item=${memory_started_item_id} result_item=${memory_result_item_id}"
   exit 1
 fi
-if [[ "${memory_started_call_id}" != "${memory_completed_call_id}" ]]; then
-  echo "CASE cli_chat_stream_memory_search FAIL call_id_mismatch started=${memory_started_call_id} completed=${memory_completed_call_id}"
+if [[ "${memory_started_item_id}" != "${memory_result_item_id}" ]]; then
+  echo "CASE cli_chat_stream_memory_search FAIL item_id_mismatch started=${memory_started_item_id} result=${memory_result_item_id}"
   exit 1
 fi
 

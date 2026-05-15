@@ -25,6 +25,7 @@ export function ToolCallBlock({
   status,
   timingMs,
   toolName,
+  variant = "default",
 }: {
   argumentsText: string;
   callId: string;
@@ -34,12 +35,13 @@ export function ToolCallBlock({
   status: "queued" | "running" | "waiting_approval" | "done" | "error";
   timingMs?: number | null;
   toolName: string;
+  variant?: "default" | "timeline";
 }) {
   const { t } = useTranslation("chat");
   const [open, setOpen] = useState(status === "waiting_approval");
 
   return (
-    <ToolCallCard.Root>
+    <ToolCallCard.Root compact={variant === "timeline"}>
       <ToolCallCard.Header
         callId={callId}
         onToggle={() => setOpen((value) => !value)}

@@ -235,6 +235,10 @@ pub(crate) async fn emit_tool_result_stream_event(
     stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
     output: &ToolExecutionOutput,
 ) {
+    if matches!(output.outcome, ToolDispatchOutcome::Pending { .. }) {
+        return;
+    }
+
     let reduced = reduce_tool_execution_output(output);
     emit_stream_event(
         stream_tx,
@@ -267,6 +271,31 @@ pub(crate) fn collect_general_turn_tool_batch(
 
     for output in outputs {
         let reduced = reduce_tool_execution_output(&output);
+        if let ToolDispatchOutcome::Pending {
+            pending: ToolPending::Approval { prompt, .. },
+            ..
+        } = &output.outcome
+        {
+            pending_confirmations.push(PendingToolConfirmation {
+                tool_name: output.tool_name.clone(),
+                call_id: output.call_id.clone(),
+                prompt: prompt.clone(),
+                arguments: reduced.pending_arguments.unwrap_or(Value::Null),
+            });
+            continue;
+        } else if let ToolDispatchOutcome::Pending {
+            pending: ToolPending::Dynamic { .. },
+            ..
+        } = &output.outcome
+        {
+            pending_dynamic_requests.push(PendingDynamicToolRequest {
+                tool_name: output.tool_name.clone(),
+                call_id: output.call_id.clone(),
+                arguments: reduced.pending_arguments.unwrap_or(Value::Null),
+            });
+            continue;
+        }
+
         if reduced.is_error {
             error_count += 1;
         }
@@ -299,28 +328,6 @@ pub(crate) fn collect_general_turn_tool_batch(
             &output.tool_name,
             &reduced.memory_payload,
         ));
-        if let ToolDispatchOutcome::Pending {
-            pending: ToolPending::Approval { prompt, .. },
-            ..
-        } = &output.outcome
-        {
-            pending_confirmations.push(PendingToolConfirmation {
-                tool_name: output.tool_name.clone(),
-                call_id: output.call_id.clone(),
-                prompt: prompt.clone(),
-                arguments: reduced.pending_arguments.unwrap_or(Value::Null),
-            });
-        } else if let ToolDispatchOutcome::Pending {
-            pending: ToolPending::Dynamic { .. },
-            ..
-        } = &output.outcome
-        {
-            pending_dynamic_requests.push(PendingDynamicToolRequest {
-                tool_name: output.tool_name.clone(),
-                call_id: output.call_id.clone(),
-                arguments: reduced.pending_arguments.unwrap_or(Value::Null),
-            });
-        }
         tool_messages.push(ChatMessage::tool(
             output.call_id,
             output.tool_name,
@@ -496,6 +503,49 @@ mod tests {
             }
             other => panic!("expected tool result event, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn emit_tool_result_stream_event_skips_pending_approval() {
+        let output = ToolExecutionOutput {
+            call_id: "call-approval".to_string(),
+            tool_name: "Bash".to_string(),
+            outcome: ToolDispatchOutcome::pending_approval(
+                "Bash",
+                "Approve command?",
+                serde_json::json!({"command": "date"}),
+            ),
+            is_error: false,
+        };
+        let (tx, mut rx) = mpsc::channel(4);
+
+        emit_tool_result_stream_event(Some(&tx), &output).await;
+
+        assert!(
+            rx.try_recv().is_err(),
+            "pending approval should not emit a terminal tool result"
+        );
+    }
+
+    #[test]
+    fn collect_general_turn_tool_batch_excludes_pending_approval_from_results() {
+        let batch = collect_general_turn_tool_batch(vec![ToolExecutionOutput {
+            call_id: "call-approval".to_string(),
+            tool_name: "Bash".to_string(),
+            outcome: ToolDispatchOutcome::pending_approval(
+                "Bash",
+                "Approve command?",
+                serde_json::json!({"command": "date"}),
+            ),
+            is_error: false,
+        }]);
+
+        assert!(batch.output_items.is_empty());
+        assert!(batch.tool_messages.is_empty());
+        assert_eq!(batch.logs.len(), 0);
+        assert_eq!(batch.error_count, 0);
+        assert_eq!(batch.pending_confirmations.len(), 1);
+        assert_eq!(batch.pending_confirmations[0].call_id, "call-approval");
     }
 
     #[test]

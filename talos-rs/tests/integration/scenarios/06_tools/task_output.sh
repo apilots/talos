@@ -119,11 +119,14 @@ import os
 
 data = json.loads(os.environ["BASH_JSON"])
 results = [item for item in data.get("output", []) if item.get("type") == "tool_result"]
-bash_result = next(item for item in results if item.get("tool_name") == "Bash")
-bash_content = (((bash_result.get("content") or [{}])[0].get("value") or {}).get("value", (bash_result.get("content") or [{}])[0].get("value") or {}))
-assert bash_content.get("status") == "running", bash_content
-assert bash_content.get("session_id") is not None, bash_content
-print(bash_content["session_id"])
+for bash_result in reversed(results):
+    if bash_result.get("tool_name") != "Bash":
+        continue
+    bash_content = (((bash_result.get("content") or [{}])[0].get("value") or {}).get("value", (bash_result.get("content") or [{}])[0].get("value") or {}))
+    if bash_content.get("status") == "running" and bash_content.get("session_id") is not None:
+        print(bash_content["session_id"])
+        raise SystemExit(0)
+raise AssertionError(results)
 PY
 )"
 

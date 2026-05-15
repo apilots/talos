@@ -71,6 +71,7 @@ impl TuiApp {
             pending_close_task: None,
             active_stream_message_id: None,
             last_stream_sequence: None,
+            timeline_items: HashMap::new(),
             status_hint: None,
             spinner_index: 0,
             stripe_phase: 0,

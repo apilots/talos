@@ -29,7 +29,7 @@ async fn test_submit_message_command_returns_async_ack() {
 
     let recorded = event_store.events.lock().unwrap().clone();
     assert!(!recorded.is_empty());
-    assert_eq!(recorded[0].event_type, TalosEventType::MessageStarted);
+    assert_eq!(recorded[0].event_type, TalosTimelineEventType::TurnStarted);
     assert_eq!(recorded[0].message_id, "msg_mock");
 }
 
@@ -153,7 +153,7 @@ async fn test_session_message_handler_rejects_idempotency_hash_conflict() {
 async fn test_submit_message_command_timeout_stores_failed_idempotency() {
     let event_store = Arc::new(RecordingEventStore::default());
     let mut config = test_config();
-    config.agent.kernel.session_events.first_event_timeout_ms = 1;
+    config.agent.kernel.timeline_events.first_event_timeout_ms = 1;
     let state = test_state_with_gateway_event_store_config(
         Arc::new(SilentGateway),
         false,
@@ -203,7 +203,7 @@ async fn test_retry_message_attempt_rejects_running_active_turn() {
             turn_id: "turn-running".to_string(),
             message_id: Some("msg-running".to_string()),
             status: ActiveTurnStatus::Running,
-            last_event_id: Some(SessionEventId::from_seq(3)),
+            last_event_id: Some(TimelineEventId::from_seq(3)),
             pending_user_action: None,
             updated_at: 123,
         },
@@ -255,7 +255,7 @@ async fn test_retry_message_attempt_rejects_completed_active_turn() {
             turn_id: "turn-completed".to_string(),
             message_id: Some("msg-completed".to_string()),
             status: ActiveTurnStatus::Completed,
-            last_event_id: Some(SessionEventId::from_seq(4)),
+            last_event_id: Some(TimelineEventId::from_seq(4)),
             pending_user_action: None,
             updated_at: 124,
         },
@@ -307,7 +307,7 @@ async fn test_retry_message_attempt_allows_failed_active_turn() {
             turn_id: "turn-failed".to_string(),
             message_id: Some("msg-failed".to_string()),
             status: ActiveTurnStatus::Failed,
-            last_event_id: Some(SessionEventId::from_seq(5)),
+            last_event_id: Some(TimelineEventId::from_seq(5)),
             pending_user_action: None,
             updated_at: 125,
         },

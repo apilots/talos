@@ -17,16 +17,15 @@ use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usa
 use talos_session_store::{
     ActiveTurnRecord, ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, IdempotencyRecord,
     IdempotencyReservation, IdempotencyStatus, MessageCommandAck, MessageIdempotencyStore,
-    NewSessionEvent, PendingDynamicToolResult, PendingToolApproval, PendingUserAction,
-    SessionEventId, SessionEventRecord, SessionEventRetentionConfig, SessionEventService,
-    SessionEventStore, SessionStore,
+    PendingDynamicToolResult, PendingToolApproval, PendingUserAction, SessionStore,
+    TimelineEventId, TimelineEventRetentionConfig, TimelineEventService, TimelineEventStore,
 };
 use talos_types::talos::{
-    StopReason, TalosContext, TalosEvent, TalosEventPayload, TalosEventType, TalosInputItem,
-    TalosMessageCompletedEvent, TalosMessageOutputDeltaEvent, TalosMessageRequest,
-    TalosMessageStartedEvent, TalosMessageToolCallExecutingEvent,
-    TalosMessageToolCallProgressDeltaEvent, TalosMessageToolCallQueuedEvent, TalosOutputItem,
-    TalosProvider, TalosReasoning, TalosSourceType, TalosToolProgressKind, TalosToolStreamKey,
+    StopReason, TalosContext, TalosInputItem, TalosItemDeltaEvent, TalosItemStartedEvent,
+    TalosMessageRequest, TalosOutputItem, TalosProvider, TalosReasoning, TalosSourceType,
+    TalosTimelineContent, TalosTimelineDelta, TalosTimelineEvent, TalosTimelineEventPayload,
+    TalosTimelineEventType, TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus,
+    TalosTimelinePhase, TalosToolProgressKind, TalosTurnCompletedEvent, TalosTurnStartedEvent,
     TalosUsage,
 };
 use talos_types::{
@@ -36,7 +35,7 @@ use talos_types::{
 use tower::util::ServiceExt;
 
 use crate::server::admin_users::{delete_admin_session_handler, list_admin_sessions_handler};
-use crate::server::events::{get_active_turn_handler, subscribe_session_events_handler};
+use crate::server::events::{get_active_turn_handler, subscribe_timeline_events_handler};
 use crate::server::messages::{
     retry_message_attempt_handler, session_message_handler, submit_message_command,
 };
@@ -98,7 +97,7 @@ fn test_state_with_lifecycle(
 fn build_test_state_with_lifecycle(
     gateway: Arc<dyn Gateway>,
     session_service: Arc<dyn SessionService>,
-    event_service: Arc<SessionEventService>,
+    event_service: Arc<TimelineEventService>,
     idempotency_store: Arc<dyn MessageIdempotencyStore>,
     base_config: talos_types::TalosConfig,
     llm_provider: Arc<dyn LlmProvider>,
@@ -129,7 +128,7 @@ fn build_test_state_with_lifecycle(
 fn build_test_state_with_lifecycle_and_config(
     gateway: Arc<dyn Gateway>,
     session_service: Arc<dyn SessionService>,
-    event_service: Arc<SessionEventService>,
+    event_service: Arc<TimelineEventService>,
     idempotency_store: Arc<dyn MessageIdempotencyStore>,
     base_config: talos_types::TalosConfig,
     llm_provider: Arc<dyn LlmProvider>,
@@ -142,8 +141,8 @@ fn build_test_state_with_lifecycle_and_config(
 ) -> Arc<HttpApiState> {
     let app = Arc::new(TalosApplicationService::new_with_session_store(
         gateway,
-        Arc::new(LegacySessionServiceRuntime::new(session_service.clone())),
-        Arc::new(LegacySessionStore::new(session_service)),
+        Arc::new(SessionServiceRuntimeAdapter::new(session_service.clone())),
+        Arc::new(SessionStoreAdapter::new(session_service)),
         event_service.clone(),
         idempotency_store,
         base_config.clone(),
@@ -187,13 +186,13 @@ fn test_state_with_config(
     )
 }
 
-fn event_service_from_store(store: Arc<RecordingEventStore>) -> Arc<SessionEventService> {
-    let event_store: Arc<dyn SessionEventStore> = store.clone();
+fn event_service_from_store(store: Arc<RecordingEventStore>) -> Arc<TimelineEventService> {
+    let event_store: Arc<dyn TimelineEventStore> = store.clone();
     let active_turn_store: Arc<dyn ActiveTurnStore> = store;
-    Arc::new(SessionEventService::new(
+    Arc::new(TimelineEventService::new(
         event_store,
         active_turn_store,
-        SessionEventRetentionConfig::default(),
+        TimelineEventRetentionConfig::default(),
     ))
 }
 
@@ -228,18 +227,18 @@ fn test_state_with_gateway_event_store_config(
     )
 }
 
-struct LegacySessionServiceRuntime {
+struct SessionServiceRuntimeAdapter {
     service: Arc<dyn SessionService>,
 }
 
-impl LegacySessionServiceRuntime {
+impl SessionServiceRuntimeAdapter {
     fn new(service: Arc<dyn SessionService>) -> Self {
         Self { service }
     }
 }
 
 #[async_trait::async_trait]
-impl SessionRuntime for LegacySessionServiceRuntime {
+impl SessionRuntime for SessionServiceRuntimeAdapter {
     async fn resolve_target_agent(
         &self,
         context: &TalosContext,
@@ -294,11 +293,11 @@ impl SessionRuntime for LegacySessionServiceRuntime {
     }
 }
 
-struct LegacySessionStore {
+struct SessionStoreAdapter {
     service: Arc<dyn SessionService>,
 }
 
-impl LegacySessionStore {
+impl SessionStoreAdapter {
     fn new(service: Arc<dyn SessionService>) -> Self {
         Self { service }
     }
@@ -312,7 +311,7 @@ impl LegacySessionStore {
 }
 
 #[async_trait::async_trait]
-impl SessionStore for LegacySessionStore {
+impl SessionStore for SessionStoreAdapter {
     async fn create_session(
         &self,
         context: &TalosContext,
@@ -497,38 +496,30 @@ fn test_state_with_gateway_event_store_config_and_lifecycle(
 
 #[derive(Default)]
 struct RecordingEventStore {
-    events: std::sync::Mutex<Vec<SessionEventRecord>>,
+    events: std::sync::Mutex<Vec<TalosTimelineEvent>>,
     active_turns: std::sync::Mutex<std::collections::HashMap<String, ActiveTurnRecord>>,
     idempotency_records:
         std::sync::Mutex<std::collections::HashMap<(String, String), IdempotencyRecord>>,
 }
 
 #[async_trait::async_trait]
-impl SessionEventStore for RecordingEventStore {
-    async fn append_event(&self, event: NewSessionEvent) -> TalosResult<SessionEventRecord> {
+impl TimelineEventStore for RecordingEventStore {
+    async fn append_event(&self, mut event: TalosTimelineEvent) -> TalosResult<TalosTimelineEvent> {
         let mut events = self.events.lock().unwrap();
         let event_seq = (events.len() as i64) + 1;
-        let record = SessionEventRecord {
-            event_seq,
-            event_id: SessionEventId::from_seq(event_seq),
-            session_id: event.session_id,
-            turn_id: event.turn_id,
-            message_id: event.message_id,
-            sequence: event.sequence,
-            event_type: event.event_type,
-            payload: event.payload,
-            created_at: event.created_at,
-        };
-        events.push(record.clone());
-        Ok(record)
+        event.event_seq = Some(event_seq);
+        event.event_id = Some(TimelineEventId::from_seq(event_seq).to_string());
+        event.created_at_ms = Some(event.created_at_ms.unwrap_or(1000 + event_seq));
+        events.push(event.clone());
+        Ok(event)
     }
 
     async fn list_events_after(
         &self,
         session_id: &str,
-        after_event_id: Option<&SessionEventId>,
+        after_event_id: Option<&TimelineEventId>,
         limit: usize,
-    ) -> TalosResult<Vec<SessionEventRecord>> {
+    ) -> TalosResult<Vec<TalosTimelineEvent>> {
         let after = match after_event_id {
             Some(event_id) => event_id.event_seq()?,
             None => 0,
@@ -538,13 +529,15 @@ impl SessionEventStore for RecordingEventStore {
             .lock()
             .unwrap()
             .iter()
-            .filter(|event| event.session_id == session_id && event.event_seq > after)
+            .filter(|event| {
+                event.session_id == session_id && event.event_seq.unwrap_or_default() > after
+            })
             .take(limit)
             .cloned()
             .collect())
     }
 
-    async fn latest_event_id(&self, session_id: &str) -> TalosResult<Option<SessionEventId>> {
+    async fn latest_event_id(&self, session_id: &str) -> TalosResult<Option<TimelineEventId>> {
         Ok(self
             .events
             .lock()
@@ -552,17 +545,19 @@ impl SessionEventStore for RecordingEventStore {
             .iter()
             .rev()
             .find(|event| event.session_id == session_id)
-            .map(|event| event.event_id.clone()))
+            .and_then(|event| event.event_id.clone())
+            .map(TimelineEventId::from))
     }
 
-    async fn oldest_event_id(&self, session_id: &str) -> TalosResult<Option<SessionEventId>> {
+    async fn oldest_event_id(&self, session_id: &str) -> TalosResult<Option<TimelineEventId>> {
         Ok(self
             .events
             .lock()
             .unwrap()
             .iter()
             .find(|event| event.session_id == session_id)
-            .map(|event| event.event_id.clone()))
+            .and_then(|event| event.event_id.clone())
+            .map(TimelineEventId::from))
     }
 
     async fn delete_completed_events_before(

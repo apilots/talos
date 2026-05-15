@@ -2,9 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use talos_app_protocol::errors::{AppServerErrorBody, ALREADY_INITIALIZED, UNAUTHORIZED};
-use talos_app_protocol::events::{
-    canonical_method, SubscriptionTerminatedEnvelope, SubscriptionTerminatedReason,
-};
+use talos_app_protocol::events::{canonical_method, TimelineSubscriptionNotification};
 use talos_app_protocol::jsonrpc::{
     parse_message_line, JsonRpcErrorResponse, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest,
     JsonRpcResponse, RequestId,
@@ -21,7 +19,6 @@ use uuid::Uuid;
 
 use crate::application::{AppServerApplication, ProtocolResult};
 use crate::auth::ActorCredentialValidator;
-use crate::events::notification_envelope;
 
 #[derive(Debug, Clone)]
 pub struct AppServerConfig {
@@ -134,8 +131,8 @@ where
     }
 
     // Keep subscriptions alive while background drains run so final turn events can still be
-    // forwarded. After the drain boundary, abort them explicitly; idle subscriptions block on
-    // live_events.recv() and would otherwise keep stdio shutdown from completing.
+    // forwarded. After the drain boundary, abort them explicitly; idle subscriptions wait on
+    // the application-service stream and would otherwise keep stdio shutdown from completing.
     for (_, task) in state.subscription_tasks {
         task.abort();
         let _ = task.await;
@@ -263,7 +260,7 @@ async fn handle_request(
                 Ok(actor) => actor,
                 Err(error) => return send_error(outgoing_tx, id, error).await,
             };
-            match app.subscribe_session_events(&actor, params).await {
+            match app.subscribe_timeline_events(&actor, params).await {
                 Ok(source) => {
                     let subscription_id = format!("sub_{}", Uuid::new_v4().simple());
                     let response = EventSubscribeResponse {
@@ -372,7 +369,7 @@ async fn resolve_request_actor(
     request_actor_credentials: Option<ActorCredentials>,
 ) -> Result<Actor, AppServerErrorBody> {
     if !config.auth_enabled {
-        return Ok(Actor::regular("anonymous"));
+        return Ok(Actor::full("anonymous"));
     }
 
     if is_public_auth_method(method) {
@@ -403,9 +400,7 @@ fn spawn_subscription(
     _subscription_capacity: usize,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut last_sent_seq = source.replay.last_replay_seq;
-        for record in source.replay.events {
-            last_sent_seq = record.event_seq;
+        while let Some(record) = source.events.recv().await {
             if send_event(&subscription_id, record, &outgoing_tx)
                 .await
                 .is_err()
@@ -413,51 +408,20 @@ fn spawn_subscription(
                 return;
             }
         }
-
-        loop {
-            match source.live_events.recv().await {
-                Ok(record) => {
-                    if record.session_id != source.session_id || record.event_seq <= last_sent_seq {
-                        continue;
-                    }
-                    last_sent_seq = record.event_seq;
-                    let terminal = is_terminal_event(&record.payload);
-                    if send_event(&subscription_id, record, &outgoing_tx)
-                        .await
-                        .is_err()
-                    {
-                        return;
-                    }
-                    if terminal {
-                        return;
-                    }
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                    tracing::warn!(skipped, "app-server subscription lagged");
-                    let _ = send_subscription_terminated(
-                        &subscription_id,
-                        &source.session_id,
-                        SubscriptionTerminatedReason::SlowConsumer,
-                        "subscription lagged behind retained live events",
-                        &outgoing_tx,
-                    )
-                    .await;
-                    return;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
-            }
-        }
     })
 }
 
 async fn send_event(
     subscription_id: &str,
-    record: talos_session_store::SessionEventRecord,
+    record: talos_types::talos::TimelineEventEnvelope,
     outgoing_tx: &mpsc::Sender<OutgoingMessage>,
 ) -> Result<(), ()> {
-    let envelope = notification_envelope(subscription_id, record);
-    let method = canonical_method(&envelope.event.event_type);
-    let params = serde_json::to_value(envelope).map_err(|err| {
+    let method = canonical_method(&record.event.event_type);
+    let params = serde_json::to_value(TimelineSubscriptionNotification {
+        subscription_id: subscription_id.to_string(),
+        event: record,
+    })
+    .map_err(|err| {
         tracing::error!(error = %err, "failed to serialize app-server event");
     })?;
     outgoing_tx
@@ -467,39 +431,6 @@ async fn send_event(
         )))
         .await
         .map_err(|_| ())
-}
-
-async fn send_subscription_terminated(
-    subscription_id: &str,
-    session_id: &str,
-    reason: SubscriptionTerminatedReason,
-    message: &str,
-    outgoing_tx: &mpsc::Sender<OutgoingMessage>,
-) -> Result<(), ()> {
-    let envelope = SubscriptionTerminatedEnvelope {
-        subscription_id: subscription_id.to_string(),
-        session_id: session_id.to_string(),
-        reason,
-        message: message.to_string(),
-    };
-    let params = serde_json::to_value(envelope).map_err(|err| {
-        tracing::error!(error = %err, "failed to serialize subscription termination");
-    })?;
-    outgoing_tx
-        .send(OutgoingMessage::Notification(JsonRpcNotification::new(
-            "subscription.terminated",
-            Some(params),
-        )))
-        .await
-        .map_err(|_| ())
-}
-
-fn is_terminal_event(payload: &talos_types::talos::TalosEventPayload) -> bool {
-    matches!(
-        payload,
-        talos_types::talos::TalosEventPayload::MessageCompleted(_)
-            | talos_types::talos::TalosEventPayload::MessageError(_)
-    )
 }
 
 async fn send_result(
@@ -577,9 +508,12 @@ mod tests {
     use talos_app_protocol::errors::{NOT_INITIALIZED, PARSE_ERROR, UNAUTHORIZED};
     use talos_app_protocol::requests::{ActorCredentials, EventSubscribeParams};
     use talos_application_service::{Actor, EventReplay};
-    use talos_session_store::SessionEventRecord;
-    use tokio::io::{duplex, split, AsyncReadExt, AsyncWriteExt};
-    use tokio::sync::broadcast;
+    use talos_types::talos::{
+        TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType,
+        TalosTurnStartedEvent, TimelineEventEnvelope,
+    };
+    use tokio::io::{duplex, split, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+    use tokio::sync::{broadcast, mpsc};
 
     use super::*;
     use crate::application::SubscriptionSource;
@@ -589,10 +523,12 @@ mod tests {
     struct MockApp {
         dispatched: Mutex<Vec<String>>,
         dispatched_actors: Mutex<Vec<String>>,
+        dispatched_full_access: Mutex<Vec<bool>>,
         cancelled: Mutex<Vec<String>>,
         cancelled_actors: Mutex<Vec<String>>,
         drained: Mutex<usize>,
-        live_tx: Mutex<Option<broadcast::Sender<SessionEventRecord>>>,
+        live_tx: Mutex<Option<broadcast::Sender<TimelineEventEnvelope>>>,
+        stream_txs: Mutex<Vec<mpsc::Sender<TimelineEventEnvelope>>>,
     }
 
     #[async_trait]
@@ -610,6 +546,10 @@ mod tests {
                 .lock()
                 .expect("dispatch actor lock")
                 .push(actor.user_id.clone());
+            self.dispatched_full_access
+                .lock()
+                .expect("dispatch access lock")
+                .push(actor.has_full_access());
             Ok(match request.params {
                 ClientRequestParams::TurnStart(params) => json!({
                     "request_id": "req-1",
@@ -622,23 +562,30 @@ mod tests {
             })
         }
 
-        async fn subscribe_session_events(
+        async fn subscribe_timeline_events(
             &self,
             _actor: &Actor,
             params: EventSubscribeParams,
         ) -> ProtocolResult<SubscriptionSource> {
             let live_tx = self.live_tx.lock().expect("live tx lock").as_ref().cloned();
             match live_tx {
-                Some(live_tx) => Ok(SubscriptionSource {
-                    session_id: params.session_id,
-                    high_water_mark_event_id: None,
-                    replay: EventReplay {
-                        events: Vec::new(),
-                        last_replay_seq: 0,
-                    },
-                    live_events: live_tx.subscribe(),
-                    has_live_turn: false,
-                }),
+                Some(_live_tx) => {
+                    let (_tx, events) = mpsc::channel(16);
+                    self.stream_txs.lock().expect("stream tx lock").push(_tx);
+                    Ok(SubscriptionSource {
+                        session_id: params.session_id,
+                        high_water_mark_event_id: None,
+                        replay: EventReplay {
+                            events: Vec::new(),
+                            high_water_mark_event_id: None,
+                            last_replay_seq: 0,
+                            cursor_status:
+                                talos_application_service::TimelineCursorStatus::FromBeginning,
+                        },
+                        events,
+                        has_live_turn: false,
+                    })
+                }
                 None => Err(AppServerErrorBody::method_not_found("event.subscribe")),
             }
         }
@@ -763,6 +710,13 @@ mod tests {
                 .as_slice(),
             &["anonymous"]
         );
+        assert_eq!(
+            app.dispatched_full_access
+                .lock()
+                .expect("dispatch access lock")
+                .as_slice(),
+            &[true]
+        );
     }
 
     #[tokio::test]
@@ -815,6 +769,13 @@ mod tests {
                 .as_slice(),
             &["user-1"]
         );
+        assert_eq!(
+            app.dispatched_full_access
+                .lock()
+                .expect("dispatch access lock")
+                .as_slice(),
+            &[false]
+        );
     }
 
     #[tokio::test]
@@ -865,6 +826,111 @@ mod tests {
 
         assert_eq!(messages[1]["result"]["session_id"], "s1");
         assert_eq!(*app.drained.lock().expect("drain lock"), 1);
+    }
+
+    #[tokio::test]
+    async fn event_unsubscribe_stops_only_target_subscription() {
+        let app = Arc::new(MockApp::default());
+        let (live_tx, _live_rx) = broadcast::channel(16);
+        *app.live_tx.lock().expect("live tx lock") = Some(live_tx);
+
+        let (client, server) = duplex(16 * 1024);
+        let (server_read, server_write) = split(server);
+        let server_task = tokio::spawn(run_jsonl(
+            server_read,
+            server_write,
+            app.clone(),
+            Arc::new(EnvLaunchTokenValidator::new("secret", "tester")),
+            AppServerConfig::default(),
+        ));
+        let (client_read, mut client_write) = split(client);
+        let mut output = BufReader::new(client_read).lines();
+
+        client_write
+            .write_all(
+                format!(
+                    "{}{}{}{}",
+                    initialize_request("secret"),
+                    initialized_notification(),
+                    event_subscribe_request_with_id(2),
+                    event_subscribe_request_with_id(3)
+                )
+                .as_bytes(),
+            )
+            .await
+            .expect("write requests");
+
+        let initialize = read_output_line(&mut output).await;
+        let first_subscribe = read_output_line(&mut output).await;
+        let second_subscribe = read_output_line(&mut output).await;
+        assert_eq!(initialize["result"]["protocol_version"]["major"], 0);
+        assert_eq!(first_subscribe["result"]["session_id"], "s1");
+        assert_eq!(second_subscribe["result"]["session_id"], "s1");
+
+        let first_subscription_id = first_subscribe["result"]["subscription_id"]
+            .as_str()
+            .expect("first subscription id")
+            .to_string();
+        let second_subscription_id = second_subscribe["result"]["subscription_id"]
+            .as_str()
+            .expect("second subscription id")
+            .to_string();
+        assert_ne!(first_subscription_id, second_subscription_id);
+
+        let senders = app.stream_txs.lock().expect("stream tx lock").clone();
+        assert_eq!(senders.len(), 2);
+        senders[0]
+            .send(timeline_envelope("ev_1", 1))
+            .await
+            .expect("send first subscription event");
+        senders[1]
+            .send(timeline_envelope("ev_2", 2))
+            .await
+            .expect("send second subscription event");
+
+        let first_notification = read_output_line(&mut output).await;
+        let second_notification = read_output_line(&mut output).await;
+        assert_eq!(
+            first_notification["params"]["subscription_id"],
+            first_subscription_id
+        );
+        assert_eq!(first_notification["params"]["event"]["event_id"], "ev_1");
+        assert_eq!(
+            second_notification["params"]["subscription_id"],
+            second_subscription_id
+        );
+        assert_eq!(second_notification["params"]["event"]["event_id"], "ev_2");
+
+        client_write
+            .write_all(event_unsubscribe_request(4, &first_subscription_id).as_bytes())
+            .await
+            .expect("write unsubscribe request");
+        let unsubscribe = read_output_line(&mut output).await;
+        assert_eq!(
+            unsubscribe["result"]["subscription_id"],
+            first_subscription_id
+        );
+        assert!(unsubscribe["result"]["unsubscribed"]
+            .as_bool()
+            .unwrap_or(false));
+
+        assert!(senders[0].send(timeline_envelope("ev_3", 3)).await.is_err());
+        senders[1]
+            .send(timeline_envelope("ev_4", 4))
+            .await
+            .expect("second subscription should remain active");
+        let remaining_notification = read_output_line(&mut output).await;
+        assert_eq!(
+            remaining_notification["params"]["subscription_id"],
+            second_subscription_id
+        );
+        assert_eq!(
+            remaining_notification["params"]["event"]["event_id"],
+            "ev_4"
+        );
+
+        client_write.shutdown().await.expect("shutdown input");
+        server_task.await.expect("server join").expect("server run");
     }
 
     async fn run_with_input(input: String) -> String {
@@ -998,11 +1064,15 @@ mod tests {
     }
 
     fn event_subscribe_request() -> String {
+        event_subscribe_request_with_id(2)
+    }
+
+    fn event_subscribe_request_with_id(id: u64) -> String {
         format!(
             "{}\n",
             json!({
                 "jsonrpc": "2.0",
-                "id": 2,
+                "id": id,
                 "method": "event.subscribe",
                 "params": {
                     "session_id": "s1",
@@ -1011,6 +1081,59 @@ mod tests {
                 }
             })
         )
+    }
+
+    fn event_unsubscribe_request(id: u64, subscription_id: &str) -> String {
+        format!(
+            "{}\n",
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": "event.unsubscribe",
+                "params": {
+                    "subscription_id": subscription_id
+                }
+            })
+        )
+    }
+
+    async fn read_output_line<R>(output: &mut tokio::io::Lines<BufReader<R>>) -> serde_json::Value
+    where
+        R: tokio::io::AsyncRead + Unpin,
+    {
+        let line = output
+            .next_line()
+            .await
+            .expect("read output line")
+            .expect("output line");
+        serde_json::from_str(&line).expect("json output line")
+    }
+
+    fn timeline_envelope(event_id: &str, event_seq: i64) -> TimelineEventEnvelope {
+        let event = TalosTimelineEvent {
+            event_seq: Some(event_seq),
+            event_id: Some(event_id.to_string()),
+            created_at_ms: Some(100 + event_seq),
+            event_type: TalosTimelineEventType::TurnStarted,
+            turn_id: "turn-1".to_string(),
+            message_id: "msg-1".to_string(),
+            session_id: "s1".to_string(),
+            sequence: event_seq as u64,
+            payload: TalosTimelineEventPayload::TurnStarted(TalosTurnStartedEvent {
+                request_id: "req-1".to_string(),
+                turn_id: "turn-1".to_string(),
+                started_at_ms: 100 + event_seq as u64,
+            }),
+        };
+        TimelineEventEnvelope {
+            event_id: event_id.to_string(),
+            event_seq,
+            created_at_ms: 100 + event_seq,
+            session_id: event.session_id.clone(),
+            turn_id: event.turn_id.clone(),
+            message_id: event.message_id.clone(),
+            event,
+        }
     }
 
     fn parse_output(output: &str) -> Vec<serde_json::Value> {

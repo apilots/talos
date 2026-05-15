@@ -128,6 +128,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 config: talos_config::Config::default(),
                 state: SessionState::default(),
             },
+            turn_id: None,
+            resume_context: None,
             input: vec![TalosInputItem::Text {
                 text: "Tell me about Rust programming language".to_string(),
             }],

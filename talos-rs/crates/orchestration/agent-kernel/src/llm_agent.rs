@@ -2,7 +2,7 @@ use crate::{
     planner_selector::{PlannerSelectionRequest, PlannerSelector},
     Agent, AgentRunResult, BuiltInPlanner, EventAuthor, EventPayload, ExecutionBranch,
     ExecutionEvent, ExecutionEventHandler, ExecutionEventKind, FlowFactory, FlowProfile,
-    InvocationContext, MemoryBackedSessionService, PlanReActPlanner, Planner, PlannerKind,
+    InvocationContext, MemoryBackedKernelTranscriptService, PlanReActPlanner, Planner, PlannerKind,
     StopReason, TaskResult, TaskStatus,
 };
 use async_trait::async_trait;
@@ -118,8 +118,11 @@ impl LlmKernelAgent {
         }
     }
 
-    async fn load_recent_history(&self, ctx: &InvocationContext) -> Vec<crate::SessionEvent> {
-        let events = match ctx.session_service() {
+    async fn load_recent_history(
+        &self,
+        ctx: &InvocationContext,
+    ) -> Vec<crate::KernelTranscriptEvent> {
+        let events = match ctx.transcript_service() {
             Ok(service) => match service.load_session(&ctx.session_id, None, None).await {
                 Ok(session) if !session.events.is_empty() => session.events,
                 _ => ctx.session.events.clone(),
@@ -132,7 +135,8 @@ impl LlmKernelAgent {
             .filter(|event| {
                 matches!(
                     event.kind,
-                    crate::SessionEventKind::UserMessage | crate::SessionEventKind::AgentMessage
+                    crate::KernelTranscriptEventKind::UserMessage
+                        | crate::KernelTranscriptEventKind::AgentMessage
                 )
             })
             .rev()
@@ -170,7 +174,7 @@ impl LlmKernelAgent {
         }
     }
 
-    async fn persist_staged_session_events(
+    async fn persist_staged_transcript_events(
         ctx: &mut InvocationContext,
         persisted_event_count: usize,
     ) -> TalosResult<()> {
@@ -179,9 +183,9 @@ impl LlmKernelAgent {
         }
 
         let staged_events = ctx.session.events.split_off(persisted_event_count);
-        let session_service = ctx.session_service()?;
+        let transcript_service = ctx.transcript_service()?;
         for event in staged_events {
-            let _ = session_service
+            let _ = transcript_service
                 .append_event(&mut ctx.session, event)
                 .await?;
         }
@@ -203,8 +207,8 @@ impl LlmKernelAgent {
         let mut usage = TalosUsage::default();
         let mut warnings = Vec::new();
 
-        if ctx.session_service.is_none() {
-            ctx.session_service = Some(Arc::new(MemoryBackedSessionService::new(
+        if ctx.transcript_service.is_none() {
+            ctx.transcript_service = Some(Arc::new(MemoryBackedKernelTranscriptService::new(
                 self.memory_store.clone(),
             )));
         }
@@ -247,10 +251,10 @@ impl LlmKernelAgent {
             self.kernel_config.clone(),
             planner,
         );
-        let session_service = ctx.session_service()?;
+        let transcript_service = ctx.transcript_service()?;
         let plugin_manager = ctx.plugin_manager.clone();
         plugin_manager.before_flow(ctx, flow.settings()).await?;
-        let persisted_event_count = session_service
+        let persisted_event_count = transcript_service
             .load_session(
                 &ctx.session_id,
                 None,
@@ -273,7 +277,7 @@ impl LlmKernelAgent {
                 flow_execution.summary.output_text
             }
             Err(e) => {
-                Self::persist_staged_session_events(ctx, persisted_event_count).await?;
+                Self::persist_staged_transcript_events(ctx, persisted_event_count).await?;
                 status = TaskStatus::Failed;
                 error = Some(e.to_string());
                 output_items.push(TalosOutputItem::Reasoning {
@@ -372,8 +376,8 @@ mod tests {
     use super::*;
     use crate::{
         ContextStateBags, EventAuthor, EventPayload, ExecutionBranch, ExecutionEvent,
-        ExecutionEventKind, InvocationLimits, SessionEvent, SessionEventFilter, SessionEventKind,
-        SessionEventPayload, SessionService, TurnPhase,
+        ExecutionEventKind, InvocationLimits, KernelTranscriptEvent, KernelTranscriptEventKind,
+        KernelTranscriptFilter, KernelTranscriptPayload, KernelTranscriptService, TurnPhase,
     };
     use async_trait::async_trait;
     use std::collections::HashMap;
@@ -476,8 +480,8 @@ mod tests {
         }
     }
 
-    struct RecordingSessionService {
-        recorded: Arc<Mutex<Vec<SessionEvent>>>,
+    struct RecordingKernelTranscriptService {
+        recorded: Arc<Mutex<Vec<KernelTranscriptEvent>>>,
     }
 
     #[derive(Default)]
@@ -489,7 +493,7 @@ mod tests {
         call_count: AtomicUsize,
     }
 
-    impl RecordingSessionService {
+    impl RecordingKernelTranscriptService {
         fn new() -> Self {
             Self {
                 recorded: Arc::new(Mutex::new(Vec::new())),
@@ -510,12 +514,12 @@ mod tests {
     }
 
     #[async_trait]
-    impl SessionService for RecordingSessionService {
+    impl KernelTranscriptService for RecordingKernelTranscriptService {
         async fn append_event(
             &self,
             session: &mut crate::InvocationSession,
-            event: SessionEvent,
-        ) -> TalosResult<SessionEvent> {
+            event: KernelTranscriptEvent,
+        ) -> TalosResult<KernelTranscriptEvent> {
             session.events.push(event.clone());
             self.recorded.lock().unwrap().push(event.clone());
             Ok(event)
@@ -536,8 +540,8 @@ mod tests {
         async fn list_events(
             &self,
             _session_id: &str,
-            _filter: &SessionEventFilter,
-        ) -> TalosResult<Vec<SessionEvent>> {
+            _filter: &KernelTranscriptFilter,
+        ) -> TalosResult<Vec<KernelTranscriptEvent>> {
             Ok(self.recorded.lock().unwrap().clone())
         }
     }
@@ -682,7 +686,7 @@ mod tests {
             limits: InvocationLimits::default(),
             events: Vec::new(),
             plugin_manager: crate::default_plugin_manager(),
-            session_service: None,
+            transcript_service: None,
             stream_tx: None,
         }
     }
@@ -773,16 +777,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_run_persists_staged_session_events_on_flow_error() {
+    async fn test_run_persists_staged_kernel_transcript_events_on_flow_error() {
         let agent = build_agent_with_provider_and_registry(
             Arc::new(ToolCallingFailureProvider {
                 call_count: AtomicUsize::new(0),
             }),
             Arc::new(ToolRegistry::new()),
         );
-        let session_service = Arc::new(RecordingSessionService::new());
+        let transcript_service = Arc::new(RecordingKernelTranscriptService::new());
         let mut ctx = build_ctx();
-        ctx.session_service = Some(session_service.clone());
+        ctx.transcript_service = Some(transcript_service.clone());
 
         let result = agent
             .run(&mut ctx, None)
@@ -791,20 +795,20 @@ mod tests {
 
         assert_eq!(result.task_results.len(), 1);
         assert_eq!(result.task_results[0].status, TaskStatus::Failed);
-        let recorded = session_service.recorded.lock().unwrap().clone();
+        let recorded = transcript_service.recorded.lock().unwrap().clone();
         assert_eq!(recorded.len(), 3);
         assert!(recorded.iter().any(|event| {
-            event.kind == SessionEventKind::UserMessage
+            event.kind == KernelTranscriptEventKind::UserMessage
                 && matches!(
                     &event.payload,
-                    SessionEventPayload::Message { message } if message.content == "hello"
+                    KernelTranscriptPayload::Message { message } if message.content == "hello"
                 )
         }));
         assert!(recorded.iter().any(|event| {
-            event.kind == SessionEventKind::ToolCall && event.author == EventAuthor::Agent
+            event.kind == KernelTranscriptEventKind::ToolCall && event.author == EventAuthor::Agent
         }));
         assert!(recorded.iter().any(|event| {
-            event.kind == SessionEventKind::ToolResult && event.author == EventAuthor::Tool
+            event.kind == KernelTranscriptEventKind::ToolResult && event.author == EventAuthor::Tool
         }));
     }
 
@@ -865,18 +869,18 @@ mod tests {
             Arc::new(ToolRegistry::new()),
             Arc::new(PlannerSelector::new(provider)),
         );
-        let session_service = Arc::new(RecordingSessionService::new());
+        let transcript_service = Arc::new(RecordingKernelTranscriptService::new());
         let mut event_handler = RecordingEventHandler::default();
         let mut ctx = build_ctx();
-        ctx.session_service = Some(session_service);
-        ctx.session.events.push(SessionEvent {
+        ctx.transcript_service = Some(transcript_service);
+        ctx.session.events.push(KernelTranscriptEvent {
             id: "history-1".to_string(),
             session_id: "s1".to_string(),
             invocation_id: "prev".to_string(),
             branch: ExecutionBranch::ReactiveLoop,
             author: EventAuthor::Agent,
-            kind: SessionEventKind::AgentMessage,
-            payload: SessionEventPayload::Message {
+            kind: KernelTranscriptEventKind::AgentMessage,
+            payload: KernelTranscriptPayload::Message {
                 message: talos_llm_provider::ChatMessage::assistant("previous answer"),
             },
             actions: crate::EventActions::default(),

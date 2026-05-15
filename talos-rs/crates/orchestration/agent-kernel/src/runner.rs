@@ -1,8 +1,8 @@
 use crate::{
     Agent, ExecutionEvent, ExecutionEventHandler, FinalResponseEventData, IterationEventData,
-    KernelEvent, KernelEventData, KernelEventLabel, KernelEventType, PluginRegistry, RunRequest,
-    RunResponse, Runner, SessionEvent, TaskCompletedEventData, TransferRequestedEventData,
-    UserInputEventData,
+    KernelEvent, KernelEventData, KernelEventLabel, KernelEventType, KernelTranscriptEvent,
+    PluginRegistry, RunRequest, RunResponse, Runner, TaskCompletedEventData,
+    TransferRequestedEventData, UserInputEventData,
 };
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -28,11 +28,11 @@ impl ExecutionEventHandler for RunnerEventHandler {
             return Ok(None);
         }
         if !event.partial {
-            let session_service = ctx.session_service()?;
-            let session_event =
-                SessionEvent::from_execution_event(ctx.session_id.clone(), event.clone());
-            let _ = session_service
-                .append_event(&mut ctx.session, session_event)
+            let transcript_service = ctx.transcript_service()?;
+            let kernel_transcript_event =
+                KernelTranscriptEvent::from_execution_event(ctx.session_id.clone(), event.clone());
+            let _ = transcript_service
+                .append_event(&mut ctx.session, kernel_transcript_event)
                 .await?;
         }
         Ok(Some(event))
@@ -116,7 +116,7 @@ impl Runner for DefaultRunner {
                 }),
             )],
             plugin_manager: Arc::new(self.plugins.clone()),
-            session_service: None,
+            transcript_service: None,
             stream_tx,
         };
 
@@ -250,14 +250,14 @@ mod tests {
     use talos_types::talos::{TalosOutputItem, TalosUsage};
 
     struct MockKernelAgent;
-    struct RecordingSessionService {
-        recorded: Arc<Mutex<Vec<SessionEvent>>>,
+    struct RecordingKernelTranscriptService {
+        recorded: Arc<Mutex<Vec<KernelTranscriptEvent>>>,
     }
 
     struct RedactingPlugin;
     struct DroppingPlugin;
 
-    impl RecordingSessionService {
+    impl RecordingKernelTranscriptService {
         fn new() -> Self {
             Self {
                 recorded: Arc::new(Mutex::new(Vec::new())),
@@ -266,12 +266,12 @@ mod tests {
     }
 
     #[async_trait]
-    impl crate::SessionService for RecordingSessionService {
+    impl crate::KernelTranscriptService for RecordingKernelTranscriptService {
         async fn append_event(
             &self,
             session: &mut crate::InvocationSession,
-            event: SessionEvent,
-        ) -> TalosResult<SessionEvent> {
+            event: KernelTranscriptEvent,
+        ) -> TalosResult<KernelTranscriptEvent> {
             session.events.push(event.clone());
             self.recorded.lock().unwrap().push(event.clone());
             Ok(event)
@@ -292,8 +292,8 @@ mod tests {
         async fn list_events(
             &self,
             _session_id: &str,
-            _filter: &crate::SessionEventFilter,
-        ) -> TalosResult<Vec<SessionEvent>> {
+            _filter: &crate::KernelTranscriptFilter,
+        ) -> TalosResult<Vec<KernelTranscriptEvent>> {
             Ok(self.recorded.lock().unwrap().clone())
         }
     }
@@ -332,7 +332,7 @@ mod tests {
     }
 
     fn mock_ctx(
-        session_service: Arc<dyn crate::SessionService>,
+        transcript_service: Arc<dyn crate::KernelTranscriptService>,
         plugin_manager: Arc<crate::InvocationPluginManager>,
     ) -> crate::InvocationContext {
         crate::InvocationContext {
@@ -367,7 +367,7 @@ mod tests {
             limits: crate::InvocationLimits::default(),
             events: Vec::new(),
             plugin_manager,
-            session_service: Some(session_service),
+            transcript_service: Some(transcript_service),
             stream_tx: None,
         }
     }
@@ -453,11 +453,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_runner_event_handler_applies_plugin_redaction_before_persist() {
-        let session_service = Arc::new(RecordingSessionService::new());
+        let transcript_service = Arc::new(RecordingKernelTranscriptService::new());
         let mut plugin_manager = crate::InvocationPluginManager::new();
         plugin_manager.register(Arc::new(RedactingPlugin));
         let plugin_manager = Arc::new(plugin_manager);
-        let mut ctx = mock_ctx(session_service.clone(), plugin_manager);
+        let mut ctx = mock_ctx(transcript_service.clone(), plugin_manager);
         let mut handler = RunnerEventHandler;
 
         let event =
@@ -477,16 +477,16 @@ mod tests {
                 .map(|message| message.content.as_str()),
             Some("redacted")
         );
-        assert_eq!(session_service.recorded.lock().unwrap().len(), 1);
+        assert_eq!(transcript_service.recorded.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]
     async fn test_runner_event_handler_does_not_persist_dropped_event() {
-        let session_service = Arc::new(RecordingSessionService::new());
+        let transcript_service = Arc::new(RecordingKernelTranscriptService::new());
         let mut plugin_manager = crate::InvocationPluginManager::new();
         plugin_manager.register(Arc::new(DroppingPlugin));
         let plugin_manager = Arc::new(plugin_manager);
-        let mut ctx = mock_ctx(session_service.clone(), plugin_manager);
+        let mut ctx = mock_ctx(transcript_service.clone(), plugin_manager);
         let mut handler = RunnerEventHandler;
 
         let event =
@@ -495,6 +495,6 @@ mod tests {
 
         assert!(handled.is_none());
         assert!(ctx.session.events.is_empty());
-        assert!(session_service.recorded.lock().unwrap().is_empty());
+        assert!(transcript_service.recorded.lock().unwrap().is_empty());
     }
 }

@@ -18,12 +18,12 @@ export interface DesktopTalosInvoke {
   ): Promise<T>;
 }
 
-export interface DesktopTalosEventSource {
+export interface DesktopTimelineEventSource {
   onEvent(handler: AppServerEventHandler): () => void;
   onSubscriptionTerminated(handler: AppServerSubscriptionTerminatedHandler): () => void;
 }
 
-export interface DesktopRendererBridge extends DesktopTalosEventSource {
+export interface DesktopRendererBridge extends DesktopTimelineEventSource {
   connect?(): Promise<AppProtocol.InitializeResponse>;
   invoke: DesktopTalosInvoke;
 }

@@ -1,8 +1,7 @@
 import { i18n } from "@/shared/i18n/setup";
-import type { TalosContentItem, TalosMessageResponse, TalosOutputItem, TalosSession } from "./protocol";
+import type { TalosContentItem, TalosSession } from "./protocol";
 import type {
   ApprovalMode,
-  ChatRenderBlock,
   FileRecord,
   MemoryRecord,
   ProjectRecord,
@@ -178,91 +177,6 @@ export function outputContentToText(content: TalosContentItem[]) {
       return JSON.stringify(item.value, null, 2);
     })
     .join("\n");
-}
-
-export function mapOutputItemToBlocks(item: TalosOutputItem, index: number): ChatRenderBlock[] {
-  switch (item.type) {
-    case "user_input":
-      return [{ id: `history-user-${index}`, kind: "user", text: item.text }];
-    case "output_text":
-      return [{ id: `history-assistant-${index}`, kind: "assistant", text: item.text }];
-    case "reasoning":
-      return [{ id: `history-thinking-${index}`, kind: "thinking", text: item.text }];
-    case "execution_summary":
-      return [{ id: `history-summary-${index}`, kind: "system", text: item.text }];
-    case "tool_call":
-      return [
-        {
-          id: `history-tool-call-${item.call_id}`,
-          kind: "tool",
-          callId: item.call_id,
-          toolName: item.name,
-          arguments: item.arguments,
-          status: "queued",
-          progress: [],
-        },
-      ];
-    case "tool_result":
-      return [
-        {
-          id: `history-tool-result-${item.call_id}`,
-          kind: "tool",
-          callId: item.call_id,
-          toolName: item.tool_name,
-          arguments: null,
-          status: item.is_error ? "error" : "done",
-          output: outputContentToText(item.content),
-          progress: [],
-        },
-      ];
-  }
-}
-
-export function mapTurnsToBlocks(turns: TalosMessageResponse[]) {
-  const blocks: ChatRenderBlock[] = [];
-
-  turns.forEach((turn, turnIndex) => {
-    turn.output.forEach((item, itemIndex) => {
-      const blockIndex = turnIndex * 1000 + itemIndex;
-      if (item.type === "tool_call") {
-        blocks.push({
-          id: `history-tool-${item.call_id}`,
-          kind: "tool",
-          callId: item.call_id,
-          toolName: item.name,
-          arguments: item.arguments,
-          status: "queued",
-          progress: [],
-        });
-        return;
-      }
-
-      if (item.type === "tool_result") {
-        const existing = [...blocks]
-          .reverse()
-          .find((block): block is Extract<ChatRenderBlock, { kind: "tool" }> =>
-            block.kind === "tool" && block.callId === item.call_id,
-          );
-        if (existing) {
-          existing.toolName = item.tool_name;
-          existing.output = outputContentToText(item.content);
-          existing.status = item.is_error ? "error" : "done";
-          return;
-        }
-      }
-
-      blocks.push(...mapOutputItemToBlocks(item, blockIndex));
-    });
-    if (turn.stop_reason === "cancelled") {
-      blocks.push({
-        id: `history-cancelled-${turn.message_id || turn.request_id || turnIndex}`,
-        kind: "system",
-        text: "Response cancelled.",
-      });
-    }
-  });
-
-  return blocks;
 }
 
 export function getSessionModel(session: TalosSession) {

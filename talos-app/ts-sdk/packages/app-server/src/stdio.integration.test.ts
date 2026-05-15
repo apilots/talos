@@ -52,7 +52,7 @@ describeIntegration("StdioAppServerClient integration", () => {
       current_directory: null,
     });
 
-    const events: AppProtocol.ApplicationEventEnvelope[] = [];
+    const events: AppProtocol.TimelineEventEnvelope[] = [];
     const unsubscribe = client.onEvent((event) => events.push(event));
     try {
       await client.subscribeEvents({
@@ -66,13 +66,13 @@ describeIntegration("StdioAppServerClient integration", () => {
         workspace_id: null,
         client_request_id: "ts-sdk-app-server-smoke",
       });
-      await waitFor(() => events.some((event) => event.event.event_type === "message_completed"), 90_000);
+      await waitFor(() => events.some((event) => event.event.event_type === "turn_completed"), 90_000);
     } finally {
       unsubscribe();
     }
 
-    expect(events.some((event) => event.event.event_type === "message_started")).toBe(true);
-    expect(events.some((event) => event.event.event_type === "message_output_delta")).toBe(true);
+    expect(events.some((event) => event.event.event_type === "turn_started")).toBe(true);
+    expect(events.some((event) => event.event.event_type === "item_delta")).toBe(true);
   }, 120_000);
 });
 

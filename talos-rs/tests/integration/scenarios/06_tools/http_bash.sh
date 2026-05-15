@@ -168,56 +168,57 @@ stream_tool_log="$(scenario_report_path tool_stream_events.log)"
 send_message_sse_log "${stream_tool_session_id}" "${stream_tool_payload}" "${stream_tool_log}"
 log_case_json "messages_tool_exec_stream" "${stream_tool_payload}" "$(cat "${stream_tool_log}")"
 
-stream_started_count="$(grep -c '^event: message.started' "${stream_tool_log}" || true)"
-stream_reasoning_count="$(grep -c '^event: message.reasoning.delta' "${stream_tool_log}" || true)"
-stream_summary_count="$(grep -c '^event: message.execution.summary' "${stream_tool_log}" || true)"
-stream_tool_queued_count="$(grep -c '^event: message.tool_call.queued' "${stream_tool_log}" || true)"
-stream_tool_executing_count="$(grep -c '^event: message.tool_call.executing' "${stream_tool_log}" || true)"
-stream_tool_progress_count="$(grep -c '^event: message.tool_call.progress_delta' "${stream_tool_log}" || true)"
-stream_tool_started_count="$(grep -c '^event: message.tool_call.started' "${stream_tool_log}" || true)"
-stream_tool_completed_count="$(grep -c '^event: message.tool_call.completed' "${stream_tool_log}" || true)"
-stream_output_count="$(grep -c '^event: message.output.delta' "${stream_tool_log}" || true)"
-stream_completed_count="$(grep -c '^event: message.completed' "${stream_tool_log}" || true)"
-stream_step_id_count="$(grep -c '"step_id"' "${stream_tool_log}" || true)"
-stream_iteration_count="$(grep -c '"iteration"' "${stream_tool_log}" || true)"
+stream_started_count="$(grep -c '^event: timeline.turn.started' "${stream_tool_log}" || true)"
+stream_reasoning_count="$(grep -c '"phase":"thinking"' "${stream_tool_log}" || true)"
+stream_summary_count="$(grep -c '"kind":"execution_summary"' "${stream_tool_log}" || true)"
+stream_tool_started_count="$(grep -c '"kind":"tool_call"' "${stream_tool_log}" || true)"
+stream_tool_progress_count="$(grep -c '"type":"tool_progress"' "${stream_tool_log}" || true)"
+stream_tool_result_count="$(grep -c '"type":"tool_result"' "${stream_tool_log}" || true)"
+stream_final_count="$(grep -c '"phase":"final_answer"' "${stream_tool_log}" || true)"
+stream_completed_count="$(grep -c '^event: timeline.turn.completed' "${stream_tool_log}" || true)"
 stream_request_id_count="$(grep -c '"request_id"' "${stream_tool_log}" || true)"
-if [[ "${stream_started_count}" -lt 1 || "${stream_tool_queued_count}" -lt 1 || "${stream_tool_executing_count}" -lt 1 || "${stream_tool_progress_count}" -lt 1 || "${stream_tool_started_count}" -lt 1 || "${stream_tool_completed_count}" -lt 1 || "${stream_output_count}" -lt 1 || "${stream_completed_count}" -lt 1 || "${stream_step_id_count}" -lt 1 || "${stream_iteration_count}" -lt 1 || "${stream_request_id_count}" -lt 1 ]]; then
-  echo "CASE messages_tool_exec_stream FAIL started=${stream_started_count} tool_queued=${stream_tool_queued_count} tool_executing=${stream_tool_executing_count} tool_progress=${stream_tool_progress_count} tool_started=${stream_tool_started_count} tool_completed=${stream_tool_completed_count} output=${stream_output_count} completed=${stream_completed_count}"
+if [[ "${stream_started_count}" -lt 1 || "${stream_tool_progress_count}" -lt 1 || "${stream_tool_started_count}" -lt 1 || "${stream_tool_result_count}" -lt 1 || "${stream_final_count}" -lt 1 || "${stream_completed_count}" -lt 1 || "${stream_request_id_count}" -lt 1 ]]; then
+  echo "CASE messages_tool_exec_stream FAIL started=${stream_started_count} tool_progress=${stream_tool_progress_count} tool_started=${stream_tool_started_count} tool_result=${stream_tool_result_count} final=${stream_final_count} completed=${stream_completed_count}"
   exit 1
 fi
 if [[ "${stream_reasoning_count}" -lt 1 && "${stream_summary_count}" -lt 1 ]]; then
   echo "CASE messages_tool_exec_stream FAIL missing_thinking_or_summary reasoning=${stream_reasoning_count} summary=${stream_summary_count}"
   exit 1
 fi
-stream_tool_call_ids="$(python3 - "${stream_tool_log}" <<'PY'
+stream_tool_call_check="$(python3 - "${stream_tool_log}" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 path = Path(sys.argv[1])
-started = None
-completed = None
+item_by_id = {}
+result_pairs = []
 for line in path.read_text().splitlines():
     if not line.startswith("data: "):
         continue
-    payload = json.loads(line[6:])
-    event_type = payload.get("event_type")
-    event_payload = payload.get("payload", {})
-    if event_type == "message_tool_call_started":
-        started = event_payload.get("call_id")
-    elif event_type == "message_tool_call_completed":
-        completed = event_payload.get("call_id")
-print(f"{started or ''}\t{completed or ''}")
+    raw_record = json.loads(line[6:])
+    record = raw_record.get("event") if isinstance(raw_record.get("event"), dict) else raw_record
+    event_type = record.get("event_type")
+    event_payload = record.get("payload", {})
+    if event_type == "item_started":
+        item = event_payload.get("item", {})
+        content = item.get("content", {})
+        if item.get("kind") == "tool_call" and content.get("type") == "tool_call":
+            item_by_id[item.get("item_id")] = content.get("call_id")
+    elif event_type == "item_delta":
+        delta = event_payload.get("delta", {})
+        if delta.get("type") == "tool_result":
+            item_id = event_payload.get("item_id")
+            result_pairs.append((item_id, item_by_id.get(item_id, "")))
+started_count = sum(1 for call_id in item_by_id.values() if call_id)
+matched_result_count = sum(1 for _, call_id in result_pairs if call_id)
+print(f"{started_count}\t{matched_result_count}")
 PY
 )"
-stream_started_call_id="${stream_tool_call_ids%%$'\t'*}"
-stream_completed_call_id="${stream_tool_call_ids#*$'\t'}"
-if [[ -z "${stream_started_call_id}" || -z "${stream_completed_call_id}" ]]; then
-  echo "CASE messages_tool_exec_stream FAIL missing_call_id started=${stream_started_call_id} completed=${stream_completed_call_id}"
+stream_started_tool_items="${stream_tool_call_check%%$'\t'*}"
+stream_matched_tool_results="${stream_tool_call_check#*$'\t'}"
+if [[ "${stream_started_tool_items}" -lt 1 || "${stream_matched_tool_results}" -lt 1 ]]; then
+  echo "CASE messages_tool_exec_stream FAIL missing_call_id started_items=${stream_started_tool_items} matched_results=${stream_matched_tool_results}"
   exit 1
 fi
-if [[ "${stream_started_call_id}" != "${stream_completed_call_id}" ]]; then
-  echo "CASE messages_tool_exec_stream FAIL call_id_mismatch started=${stream_started_call_id} completed=${stream_completed_call_id}"
-  exit 1
-fi
-echo "CASE messages_tool_exec_stream PASS started=${stream_started_count} reasoning=${stream_reasoning_count} summary=${stream_summary_count} tool_queued=${stream_tool_queued_count} tool_executing=${stream_tool_executing_count} tool_progress=${stream_tool_progress_count} tool_started=${stream_tool_started_count} tool_completed=${stream_tool_completed_count} output=${stream_output_count} completed=${stream_completed_count} step_id=${stream_step_id_count} iteration=${stream_iteration_count} request_id=${stream_request_id_count}"
+echo "CASE messages_tool_exec_stream PASS started=${stream_started_count} reasoning=${stream_reasoning_count} summary=${stream_summary_count} tool_progress=${stream_tool_progress_count} tool_started=${stream_tool_started_count} tool_result=${stream_tool_result_count} final=${stream_final_count} completed=${stream_completed_count} request_id=${stream_request_id_count} started_items=${stream_started_tool_items} matched_results=${stream_matched_tool_results}"

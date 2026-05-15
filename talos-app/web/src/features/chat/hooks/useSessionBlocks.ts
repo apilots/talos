@@ -1,18 +1,18 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
-import { mapTurnsToBlocks } from "@/shared/types/domain";
 import type { ChatRenderBlock, StreamSessionState } from "@/shared/types/ui";
-import type { ChatApiTurns } from "../api";
+import { buildBlocksFromHistorySnapshot } from "../stream-events";
+import type { ChatApiSessionHistory } from "../api";
 
 export function useSessionBlocks({
   sessionId,
   streamState,
-  turns,
+  sessionHistory,
 }: {
   sessionId: string;
   streamState?: StreamSessionState;
-  turns?: ChatApiTurns;
+  sessionHistory?: ChatApiSessionHistory;
 }) {
   const { t } = useTranslation("chat");
 
@@ -20,7 +20,7 @@ export function useSessionBlocks({
     return buildSessionBlocks({
       sessionId,
       streamState,
-      turns,
+      sessionHistory,
       waitingResponseDetail: t("waitingResponseDetail"),
       waitingResponseTitle: t("waitingResponseTitle"),
       finalResponseWaitDetail: t("finalResponseWaitDetail"),
@@ -31,15 +31,15 @@ export function useSessionBlocks({
   }, [
     sessionId,
     streamState,
+    sessionHistory,
     t,
-    turns,
   ]);
 }
 
 export function buildSessionBlocks({
   sessionId,
   streamState,
-  turns,
+  sessionHistory,
   waitingResponseDetail,
   waitingResponseTitle,
   finalResponseWaitDetail = "Talos is composing the final response.",
@@ -49,7 +49,7 @@ export function buildSessionBlocks({
 }: {
   sessionId: string;
   streamState?: StreamSessionState;
-  turns?: ChatApiTurns;
+  sessionHistory?: ChatApiSessionHistory;
   waitingResponseDetail: string;
   waitingResponseTitle: string;
   finalResponseWaitDetail?: string;
@@ -57,11 +57,21 @@ export function buildSessionBlocks({
   stoppingResponseDetail: string;
   stoppingResponseTitle: string;
 }) {
-  const historyBlocks = mapTurnsToBlocks(turns ?? []);
-  const historyHasActiveMessage = hasHistoryMessage(turns, streamState?.activeMessageId);
-  const historyHasPendingInput = hasHistoryPendingInput(turns, streamState?.pendingInput);
+  const history = buildBlocksFromHistorySnapshot(sessionHistory);
+  const recoveredMessageIds = history.messageIds;
+  const recoveredInputItems = history.inputItems;
+  const historyBlocks = history.blocks;
+  const historyHasActiveMessage = hasHistoryMessage(
+    recoveredMessageIds,
+    streamState?.activeMessageId,
+  );
+  const historyHasPendingInput = hasHistoryPendingInput(
+    recoveredInputItems,
+    streamState?.pendingInput,
+  );
   const pendingInputBlock = historyHasPendingInput ? undefined : createPendingInputBlock(streamState);
-  const liveBlocks = historyHasActiveMessage ? [] : streamState?.blocks ?? [];
+  const liveBlocks =
+    historyHasActiveMessage && !streamState?.isStreaming ? [] : streamState?.blocks ?? [];
   const nextBlocks = [
     ...historyBlocks,
     ...(pendingInputBlock ? [pendingInputBlock] : []),
@@ -72,7 +82,8 @@ export function buildSessionBlocks({
       block.kind === "assistant" ||
       block.kind === "thinking" ||
       block.kind === "system" ||
-      block.kind === "tool",
+      block.kind === "tool" ||
+      block.kind === "timeline",
   );
   const shouldShowWaitingPlaceholder =
     Boolean(streamState?.isStreaming) &&
@@ -80,9 +91,7 @@ export function buildSessionBlocks({
     !streamState?.pendingUserAction &&
     !streamState?.error &&
     !hasLiveResponse &&
-    streamState?.connectionState !== "cancelling" &&
-    streamState?.connectionState !== "detached" &&
-    streamState?.connectionState !== "reconnecting";
+    streamState?.connectionState !== "cancelling";
 
   if (shouldShowWaitingPlaceholder) {
     nextBlocks.push({
@@ -126,32 +135,25 @@ export function buildSessionBlocks({
   return nextBlocks;
 }
 
-function hasHistoryMessage(turns: ChatApiTurns | undefined, messageId: string | undefined) {
-  if (!messageId) {
-    return false;
-  }
-  return (turns ?? []).some((turn) => turn.message_id === messageId);
+function hasHistoryMessage(messageIds: Set<string>, messageId: string | undefined) {
+  return Boolean(messageId && messageIds.has(messageId));
 }
 
 function hasHistoryPendingInput(
-  turns: ChatApiTurns | undefined,
+  inputItems: Array<{ messageId: string }>,
   pendingInput: StreamSessionState["pendingInput"],
 ) {
   if (!pendingInput?.serverMessageId) {
     return false;
   }
-  return (turns ?? []).some(
-    (turn) =>
-      turn.message_id === pendingInput.serverMessageId &&
-      turn.output.some((item) => item.type === "user_input"),
-  );
+  return inputItems.some((item) => item.messageId === pendingInput.serverMessageId);
 }
 
 function createPendingInputBlock(
   streamState: StreamSessionState | undefined,
 ): ChatRenderBlock | undefined {
   const pendingInput = streamState?.pendingInput;
-  if (!pendingInput?.text.trim()) {
+  if (!pendingInput?.text.trim() || pendingInput.phase === "completed") {
     return undefined;
   }
 

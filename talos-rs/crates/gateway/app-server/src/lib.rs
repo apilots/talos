@@ -1,6 +1,5 @@
 mod application;
 mod auth;
-mod events;
 mod runtime;
 
 pub use application::{

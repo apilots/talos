@@ -91,10 +91,14 @@ pub trait RequestHandler: Send + Sync {
         request: gateway::GatewayRequest,
     ) -> crate::TalosResult<gateway::GatewayResponse>;
 
+    /// Return the internal domain timeline stream before application-service persistence.
+    ///
+    /// Public transports must expose `TimelineEventEnvelope` after application-service records
+    /// these domain events and attaches recovery cursor metadata.
     async fn handle_stream(
         &self,
         request: gateway::GatewayRequest,
-    ) -> crate::TalosResult<tokio::sync::mpsc::Receiver<talos::TalosEvent>>;
+    ) -> crate::TalosResult<tokio::sync::mpsc::Receiver<talos::TalosTimelineEvent>>;
 
     async fn cancel_active_turn(&self, session_id: &str) -> crate::TalosResult<()>;
 

@@ -22,7 +22,7 @@ export interface TalosDesktopBridge {
     params: unknown,
     options?: { actorCredentials?: AppProtocol.ActorCredentials | null },
   ): Promise<T>;
-  onEvent(handler: (envelope: AppProtocol.ApplicationEventEnvelope) => void): () => void;
+  onEvent(handler: (event: AppProtocol.TimelineEventEnvelope) => void): () => void;
   onSubscriptionTerminated(handler: (envelope: AppProtocol.SubscriptionTerminatedEnvelope) => void): () => void;
   onRuntimeState(handler: (state: TalosRuntimeState) => void): () => void;
 }

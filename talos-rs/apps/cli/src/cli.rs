@@ -4,11 +4,13 @@
 //! through the local JSON-RPC app-server client.
 
 use clap::Parser;
+use std::collections::HashMap;
 use std::io::Write;
 use talos_client::{
     AppServerClient, AppServerClientConfig, EventSubscribeParams, ProtocolTalosContext,
-    SessionCreateParams, TalosEventPayload, TalosEventType, TalosInputItem, TalosMessageRequest,
-    TalosThinkingSource, TalosThinkingStage,
+    SessionCreateParams, TalosInputItem, TalosMessageRequest, TalosTimelineContent,
+    TalosTimelineDelta, TalosTimelineEventPayload, TalosTimelineItemKind, TalosTimelinePhase,
+    TimelineEventEnvelope,
 };
 use tracing::{debug, error};
 
@@ -104,7 +106,7 @@ async fn run_app_server_turn_smoke(
         })
         .await?;
     let session_id = session.context.session_id;
-    let subscription = client
+    client
         .subscribe_events(EventSubscribeParams {
             session_id: session_id.clone(),
             since_event_id: None,
@@ -127,20 +129,22 @@ async fn run_app_server_turn_smoke(
     let mut saw_started = false;
     let mut saw_delta = false;
     for _ in 0..128 {
-        let event = client.next_event().await?;
-        if event.subscription_id != subscription.subscription_id {
+        let envelope = client.next_event().await?;
+        if envelope.session_id != session_id {
             continue;
         }
-        match event.event.event_type {
-            TalosEventType::MessageStarted => saw_started = true,
-            TalosEventType::MessageOutputDelta => saw_delta = true,
-            TalosEventType::MessageCompleted if saw_started && saw_delta => return Ok(()),
-            TalosEventType::MessageError => {
-                let error = match event.event.payload {
-                    TalosEventPayload::MessageError(payload) => payload.error,
-                    _ => "unknown app-server error".to_string(),
-                };
-                return Err(format!("app-server turn failed: {error}").into());
+        match envelope.event.payload {
+            TalosTimelineEventPayload::TurnStarted(_) => saw_started = true,
+            TalosTimelineEventPayload::ItemDelta(payload) => {
+                if matches!(payload.delta, TalosTimelineDelta::Text { .. }) {
+                    saw_delta = true;
+                }
+            }
+            TalosTimelineEventPayload::TurnCompleted(_) if saw_started && saw_delta => {
+                return Ok(());
+            }
+            TalosTimelineEventPayload::TurnError(payload) => {
+                return Err(format!("app-server turn failed: {}", payload.error).into());
             }
             _ => {}
         }
@@ -160,7 +164,7 @@ async fn run_app_server_approval_resume(
         })
         .await?;
     let session_id = session.context.session_id;
-    let subscription = client
+    let setup_subscription = client
         .subscribe_events(EventSubscribeParams {
             session_id: session_id.clone(),
             since_event_id: None,
@@ -187,23 +191,26 @@ async fn run_app_server_approval_resume(
     let mut pending_call_id = None;
     let mut pending_tool_name = None;
     let mut pending_event_id = None;
-    let mut pending_sequence = None;
     for _ in 0..1024 {
-        let event = client.next_event().await?;
-        if event.subscription_id != subscription.subscription_id {
+        let envelope = client.next_event().await?;
+        if envelope.session_id != session_id {
             continue;
         }
-        match event.event.payload {
-            TalosEventPayload::MessageToolCallPendingApproval(payload) => {
-                pending_call_id = Some(payload.call_id);
-                pending_tool_name = Some(payload.tool_name);
-                pending_event_id = Some(event.event_id.clone());
-                pending_sequence = Some(parse_app_server_event_sequence(&event.event_id)?);
+        match envelope.event.payload {
+            TalosTimelineEventPayload::ItemDelta(payload) => {
+                if let TalosTimelineDelta::ToolApprovalRequest {
+                    call_id, tool_name, ..
+                } = payload.delta
+                {
+                    pending_call_id = Some(call_id);
+                    pending_tool_name = Some(tool_name);
+                    pending_event_id = Some(envelope.event_id.clone());
+                }
             }
-            TalosEventPayload::MessageCompleted(_) if pending_call_id.is_some() => {
+            TalosTimelineEventPayload::TurnCompleted(_) if pending_call_id.is_some() => {
                 break;
             }
-            TalosEventPayload::MessageError(payload) => {
+            TalosTimelineEventPayload::TurnError(payload) => {
                 return Err(format!("app-server approval setup failed: {}", payload.error).into());
             }
             _ => {}
@@ -213,13 +220,8 @@ async fn run_app_server_approval_resume(
     let call_id = pending_call_id.ok_or("missing pending approval call_id")?;
     let tool_name = pending_tool_name.ok_or("missing pending approval tool_name")?;
     let event_id = pending_event_id.ok_or("missing pending approval event_id")?;
-    let after_sequence = pending_sequence.ok_or("missing pending approval sequence")?;
-    let _live_resume_subscription = client
-        .subscribe_events(EventSubscribeParams {
-            session_id: session_id.clone(),
-            since_event_id: None,
-            replay_limit: Some(128),
-        })
+    client
+        .unsubscribe_events(&setup_subscription.subscription_id)
         .await?;
     client
         .submit_tool_approval(
@@ -230,7 +232,7 @@ async fn run_app_server_approval_resume(
             Some("approved by cli regression".to_string()),
         )
         .await?;
-    let resumed_subscription = client
+    client
         .subscribe_events(EventSubscribeParams {
             session_id: session_id.clone(),
             since_event_id: Some(event_id),
@@ -240,18 +242,25 @@ async fn run_app_server_approval_resume(
 
     let mut saw_tool_completed = false;
     for _ in 0..1024 {
-        let event = client.next_event().await?;
-        if event.subscription_id != resumed_subscription.subscription_id
-            || parse_app_server_event_sequence(&event.event_id)? <= after_sequence
-        {
+        let envelope = client.next_event().await?;
+        if envelope.session_id != session_id {
             continue;
         }
-        match event.event.payload {
-            TalosEventPayload::MessageToolCallCompleted(payload) if payload.call_id == call_id => {
-                saw_tool_completed = true;
+        match envelope.event.payload {
+            TalosTimelineEventPayload::ItemDelta(payload) => {
+                if matches!(payload.delta, TalosTimelineDelta::ToolResult { .. }) {
+                    saw_tool_completed = true;
+                }
             }
-            TalosEventPayload::MessageCompleted(_) if saw_tool_completed => return Ok(()),
-            TalosEventPayload::MessageError(payload) => {
+            TalosTimelineEventPayload::ItemCompleted(payload) => {
+                if timeline_tool_call_id(payload.final_content.as_ref()).as_deref()
+                    == Some(call_id.as_str())
+                {
+                    saw_tool_completed = true;
+                }
+            }
+            TalosTimelineEventPayload::TurnCompleted(_) if saw_tool_completed => return Ok(()),
+            TalosTimelineEventPayload::TurnError(payload) => {
                 return Err(format!("app-server approval resume failed: {}", payload.error).into());
             }
             _ => {}
@@ -261,11 +270,11 @@ async fn run_app_server_approval_resume(
     Err("app-server approval resume did not complete approved tool call".into())
 }
 
-fn parse_app_server_event_sequence(event_id: &str) -> Result<u64, Box<dyn std::error::Error>> {
-    Ok(event_id
-        .strip_prefix("ev_")
-        .ok_or_else(|| format!("invalid event id prefix: {event_id}"))?
-        .parse::<u64>()?)
+fn timeline_tool_call_id(content: Option<&TalosTimelineContent>) -> Option<String> {
+    match content {
+        Some(TalosTimelineContent::ToolCall { call_id, .. }) => Some(call_id.clone()),
+        _ => None,
+    }
 }
 
 async fn execute_app_server_chat_command(
@@ -486,12 +495,13 @@ async fn send_and_render_app_server_message(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let mut output_text = String::new();
     let mut output_stream = std::io::stdout();
-    let mut events = client.send_message_events(session_id, request).await?;
+    let mut events = client.send_timeline_events(session_id, request).await?;
+    let mut item_phases = HashMap::new();
 
-    while let Some(event) = events.recv().await {
+    while let Some(envelope) = events.recv().await {
         if render_event(
-            &event.event_type,
-            &event.payload,
+            &envelope,
+            &mut item_phases,
             &mut output_text,
             &mut output_stream,
         )? {
@@ -507,133 +517,130 @@ async fn send_and_render_app_server_message(
 }
 
 fn render_event(
-    event_type: &TalosEventType,
-    payload: &TalosEventPayload,
+    envelope: &TimelineEventEnvelope,
+    item_phases: &mut HashMap<String, TalosTimelinePhase>,
     output_text: &mut String,
     output_stream: &mut std::io::Stdout,
 ) -> Result<bool, Box<dyn std::error::Error>> {
-    match (event_type, payload) {
-        (
-            TalosEventType::MessageReasoningDelta,
-            TalosEventPayload::MessageReasoningDelta(payload),
-        ) => {
-            if !payload.delta.trim().is_empty() {
+    let event = &envelope.event;
+    match &event.payload {
+        TalosTimelineEventPayload::ItemStarted(payload) => {
+            item_phases.insert(payload.item.item_id.clone(), payload.item.phase);
+            render_started_item(&payload.item);
+        }
+        TalosTimelineEventPayload::ItemDelta(payload) => match &payload.delta {
+            TalosTimelineDelta::Text { text } => {
+                if item_phases.get(&payload.item_id) == Some(&TalosTimelinePhase::FinalAnswer) {
+                    output_text.push_str(text);
+                    write!(output_stream, "{}", text)?;
+                    output_stream.flush()?;
+                } else if !text.trim().is_empty() {
+                    eprintln!("TIMELINE_TEXT item={} {}", payload.item_id, text);
+                }
+            }
+            TalosTimelineDelta::ToolArguments { arguments_delta } => {
                 eprintln!(
-                    "THINKING[{}:{}][iter={}][{}] {}",
-                    format_thinking_source(payload.source),
-                    format_thinking_stage(payload.stage),
-                    payload.iteration,
-                    payload.step_id,
-                    payload.delta
+                    "TOOL_CALL_ARGS_DELTA item={} delta={}",
+                    payload.item_id, arguments_delta
+                );
+            }
+            TalosTimelineDelta::ToolProgress {
+                progress_kind,
+                text_delta,
+            } => {
+                eprintln!(
+                    "TOOL_CALL_PROGRESS item={} kind={:?} message={}",
+                    payload.item_id, progress_kind, text_delta
+                );
+            }
+            TalosTimelineDelta::ToolResult { is_error, .. } => {
+                eprintln!(
+                    "TOOL_CALL_RESULT item={} is_error={}",
+                    payload.item_id, is_error
+                );
+            }
+            TalosTimelineDelta::ToolApprovalRequest {
+                call_id, tool_name, ..
+            } => {
+                eprintln!(
+                    "TOOL_CALL_APPROVAL tool={} internal={} call_id={}",
+                    display_tool_name(tool_name),
+                    tool_name,
+                    call_id
+                );
+            }
+            TalosTimelineDelta::ToolDynamicRequest {
+                call_id, tool_name, ..
+            } => {
+                eprintln!(
+                    "TOOL_CALL_DYNAMIC tool={} internal={} call_id={}",
+                    display_tool_name(tool_name),
+                    tool_name,
+                    call_id
+                );
+            }
+            TalosTimelineDelta::Status { status } => {
+                eprintln!("ITEM_STATUS item={} status={:?}", payload.item_id, status);
+            }
+        },
+        TalosTimelineEventPayload::ItemCompleted(payload) => {
+            if let Some(TalosTimelineContent::ToolCall {
+                call_id,
+                name,
+                result,
+                ..
+            }) = &payload.final_content
+            {
+                eprintln!(
+                    "TOOL_CALL_COMPLETED call_id={} tool={} internal={} is_error={}",
+                    call_id,
+                    display_tool_name(name),
+                    name,
+                    result.as_ref().map(|value| value.is_error).unwrap_or(false)
                 );
             }
         }
-        (
-            TalosEventType::MessageExecutionSummary,
-            TalosEventPayload::MessageExecutionSummary(payload),
-        ) => {
-            if !payload.text.trim().is_empty() {
-                eprintln!(
-                    "SUMMARY[iter={}][{}] {}",
-                    payload.iteration, payload.step_id, payload.text
-                );
-            }
-        }
-        (TalosEventType::MessageOutputDelta, TalosEventPayload::MessageOutputDelta(payload)) => {
-            output_text.push_str(&payload.delta);
-            write!(output_stream, "{}", payload.delta)?;
-            output_stream.flush()?;
-        }
-        (
-            TalosEventType::MessageToolCallStarted,
-            TalosEventPayload::MessageToolCallStarted(payload),
-        ) => {
-            eprintln!(
-                "TOOL_CALL_STARTED name={} internal={} call_id={} step={}",
-                display_tool_name(&payload.name),
-                payload.name,
-                payload.call_id,
-                payload.step_id
-            );
-        }
-        (
-            TalosEventType::MessageToolCallArgsDelta,
-            TalosEventPayload::MessageToolCallArgsDelta(payload),
-        ) => {
-            eprintln!(
-                "TOOL_CALL_ARGS_DELTA tool={} internal={} call_id={} step={} delta={}",
-                payload
-                    .tool_name
-                    .as_deref()
-                    .map(display_tool_name)
-                    .unwrap_or("unknown"),
-                payload.tool_name.as_deref().unwrap_or("unknown"),
-                payload.call_id.as_deref().unwrap_or("pending"),
-                payload.step_id,
-                payload.delta
-            );
-        }
-        (
-            TalosEventType::MessageToolCallQueued,
-            TalosEventPayload::MessageToolCallQueued(payload),
-        ) => {
-            eprintln!(
-                "TOOL_CALL_QUEUED tool={} internal={} call_id={} step={}",
-                display_tool_name(&payload.tool_name),
-                payload.tool_name,
-                payload.call_id,
-                payload.step_id
-            );
-        }
-        (
-            TalosEventType::MessageToolCallExecuting,
-            TalosEventPayload::MessageToolCallExecuting(payload),
-        ) => {
-            eprintln!(
-                "TOOL_CALL_EXECUTING tool={} internal={} call_id={} step={}",
-                display_tool_name(&payload.tool_name),
-                payload.tool_name,
-                payload.call_id,
-                payload.step_id
-            );
-        }
-        (
-            TalosEventType::MessageToolCallProgressDelta,
-            TalosEventPayload::MessageToolCallProgressDelta(payload),
-        ) => {
-            eprintln!(
-                "TOOL_CALL_PROGRESS tool={} internal={} call_id={} kind={:?} step={} message={}",
-                display_tool_name(&payload.tool_name),
-                payload.tool_name,
-                payload.call_id,
-                payload.progress_kind,
-                payload.step_id,
-                payload.message
-            );
-        }
-        (
-            TalosEventType::MessageToolCallCompleted,
-            TalosEventPayload::MessageToolCallCompleted(payload),
-        ) => {
-            eprintln!(
-                "TOOL_CALL_COMPLETED call_id={} tool={} internal={} is_error={}",
-                payload.call_id,
-                display_tool_name(&payload.tool),
-                payload.tool,
-                payload.is_error
-            );
-        }
-        (TalosEventType::MessageError, TalosEventPayload::MessageError(payload)) => {
-            error!("MESSAGE_ERROR {}", payload.error);
+        TalosTimelineEventPayload::TurnError(payload) => {
+            error!("TURN_ERROR {}", payload.error);
             return Ok(true);
         }
-        (TalosEventType::MessageCompleted, TalosEventPayload::MessageCompleted(_)) => {
+        TalosTimelineEventPayload::TurnCompleted(_) => {
             return Ok(true);
         }
-        (TalosEventType::MessageStarted, TalosEventPayload::MessageStarted(_)) => {}
-        _ => {}
+        TalosTimelineEventPayload::TurnStarted(_) => {}
     }
     Ok(false)
+}
+
+fn render_started_item(item: &talos_client::TalosTimelineItem) {
+    match (&item.kind, &item.phase, &item.content) {
+        (TalosTimelineItemKind::Reasoning, TalosTimelinePhase::Thinking, _) => {
+            eprintln!("THINKING item={}", item.item_id);
+        }
+        (
+            TalosTimelineItemKind::ExecutionSummary,
+            _,
+            TalosTimelineContent::ExecutionSummary { summary },
+        ) => {
+            if !summary.trim().is_empty() {
+                eprintln!("SUMMARY {}", summary);
+            }
+        }
+        (
+            TalosTimelineItemKind::ToolCall,
+            _,
+            TalosTimelineContent::ToolCall { call_id, name, .. },
+        ) => {
+            eprintln!(
+                "TOOL_CALL_STARTED name={} internal={} call_id={} item={}",
+                display_tool_name(name),
+                name,
+                call_id,
+                item.item_id
+            );
+        }
+        _ => {}
+    }
 }
 
 fn display_tool_name(tool_name: &str) -> &str {
@@ -660,23 +667,6 @@ fn default_chat_context(user_id: &str) -> ProtocolTalosContext {
 
 fn current_cli_directory() -> Option<std::path::PathBuf> {
     std::env::current_dir().ok()
-}
-
-fn format_thinking_source(source: TalosThinkingSource) -> &'static str {
-    match source {
-        TalosThinkingSource::Provider => "provider",
-        TalosThinkingSource::Framework => "framework",
-    }
-}
-
-fn format_thinking_stage(stage: TalosThinkingStage) -> &'static str {
-    match stage {
-        TalosThinkingStage::ModelReasoning => "model_reasoning",
-        TalosThinkingStage::FrameworkPlan => "framework_plan",
-        TalosThinkingStage::FrameworkAct => "framework_act",
-        TalosThinkingStage::FrameworkObserve => "framework_observe",
-        TalosThinkingStage::FrameworkReflect => "framework_reflect",
-    }
 }
 
 #[cfg(test)]

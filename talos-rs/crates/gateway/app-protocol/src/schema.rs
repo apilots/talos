@@ -4,12 +4,11 @@ use serde::Serialize;
 use ts_rs::TS;
 
 use crate::errors::AppServerErrorBody;
-use crate::events::ApplicationEventEnvelope;
 use crate::jsonrpc::JsonRpcMessage;
 use crate::notifications::ServerNotification;
 use crate::requests::{
     ClientRequest, ClientRequestParams, EventSubscribeResponse, EventUnsubscribeResponse,
-    InitializeResponse, TurnStartResponse,
+    InitializeResponse, SessionHistoryResponse, TimelineRecoverySnapshot, TurnStartResponse,
 };
 use crate::server_requests::ServerRequest;
 
@@ -25,9 +24,12 @@ pub struct AppProtocolSchemaRoot {
     pub server_notification: ServerNotification,
     pub server_request: ServerRequest,
     pub error: AppServerErrorBody,
-    pub event_envelope: ApplicationEventEnvelope,
+    pub timeline_event: talos_types::talos::TalosTimelineEvent,
+    pub timeline_event_envelope: talos_types::talos::TimelineEventEnvelope,
     pub initialize_response: InitializeResponse,
     pub turn_start_response: TurnStartResponse,
+    pub session_history_response: SessionHistoryResponse,
+    pub timeline_recovery_snapshot: TimelineRecoverySnapshot,
     pub event_subscribe_response: EventSubscribeResponse,
     pub event_unsubscribe_response: EventUnsubscribeResponse,
 }
@@ -70,7 +72,18 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::SessionCompactParams>());
     output.push_str(&export::<crate::requests::SessionClearParams>());
     output.push_str(&export::<crate::requests::SessionActiveTurnParams>());
-    output.push_str(&export::<crate::requests::SessionTurnsParams>());
+    output.push_str(&export::<crate::requests::SessionHistoryParams>());
+    output.push_str(&export::<talos_types::talos::SessionHistorySnapshot>());
+    output.push_str(&export::<talos_types::talos::SessionHistoryMessage>());
+    output.push_str(&export::<crate::requests::TimelineRecoveryParams>());
+    output.push_str(&export::<crate::requests::TimelineRecoverySnapshot>());
+    output.push_str(&export::<crate::requests::TimelineReplay>());
+    output.push_str(&export::<crate::requests::TimelineCursorStatus>());
+    output.push_str(&export::<crate::requests::TimelineActiveTurnSnapshot>());
+    output.push_str(&export::<crate::requests::TimelineActiveTurnStatus>());
+    output.push_str(&export::<crate::requests::TimelinePendingUserAction>());
+    output.push_str(&export::<crate::requests::TimelinePendingToolApproval>());
+    output.push_str(&export::<crate::requests::TimelinePendingDynamicToolResult>());
     output.push_str(&export::<crate::requests::ProjectCreateParams>());
     output.push_str(&export::<crate::requests::ProjectListParams>());
     output.push_str(&export::<crate::requests::ProjectReadParams>());
@@ -129,50 +142,33 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::OptionalPathPatch>());
     output.push_str(&export::<crate::requests::ProtocolTalosContext>());
     output.push_str(&export::<crate::requests::ProtocolInputItem>());
-    output.push_str(&export::<crate::events::ApplicationEventEnvelope>());
-    output.push_str(&export::<talos_types::talos::TalosEvent>());
-    output.push_str(&export::<talos_types::talos::TalosEventType>());
-    output.push_str(&export::<talos_types::talos::TalosEventPayload>());
+    output.push_str(&export::<talos_types::talos::TalosTimelineEvent>());
+    output.push_str(&export::<talos_types::talos::TimelineEventEnvelope>());
+    output.push_str(&export::<talos_types::talos::TalosTimelineEventType>());
+    output.push_str(&export::<talos_types::talos::TalosTimelineEventPayload>());
+    output.push_str(&export::<talos_types::talos::TalosTimelineItem>());
+    output.push_str(&export::<talos_types::talos::TalosTimelineItemKind>());
+    output.push_str(&export::<talos_types::talos::TalosTimelinePhase>());
+    output.push_str(&export::<talos_types::talos::TalosTimelineItemStatus>());
+    output.push_str(&export::<talos_types::talos::TalosTimelineNoticeLevel>());
+    output.push_str(&export::<talos_types::talos::TalosTimelineContent>());
+    output.push_str(&export::<talos_types::talos::TalosTimelineDelta>());
+    output.push_str(&export::<talos_types::talos::TalosToolProgressEntry>());
+    output.push_str(&export::<talos_types::talos::TalosToolResult>());
+    output.push_str(&export::<talos_types::talos::TalosTurnStartedEvent>());
+    output.push_str(&export::<talos_types::talos::TalosItemStartedEvent>());
+    output.push_str(&export::<talos_types::talos::TalosItemDeltaEvent>());
+    output.push_str(&export::<talos_types::talos::TalosItemCompletedEvent>());
+    output.push_str(&export::<talos_types::talos::TalosTurnCompletedEvent>());
+    output.push_str(&export::<talos_types::talos::TalosTurnErrorEvent>());
     output.push_str(&export::<talos_types::talos::TalosJsonValue>());
     output.push_str(&export::<talos_types::talos::TalosContentItem>());
     output.push_str(&export::<talos_types::talos::TalosUsage>());
     output.push_str(&export::<talos_types::talos::StopReason>());
-    output.push_str(&export::<talos_types::talos::TalosThinkingSource>());
-    output.push_str(&export::<talos_types::talos::TalosThinkingStage>());
-    output.push_str(&export::<talos_types::talos::TalosToolStreamKey>());
     output.push_str(&export::<talos_types::talos::TalosToolProgressKind>());
-    output.push_str(&export::<talos_types::talos::TalosMessageStartedEvent>());
-    output.push_str(&export::<talos_types::talos::TalosMessageReasoningDeltaEvent>());
-    output.push_str(&export::<
-        talos_types::talos::TalosMessageExecutionSummaryEvent,
-    >());
-    output.push_str(&export::<talos_types::talos::TalosMessageOutputDeltaEvent>());
-    output.push_str(&export::<
-        talos_types::talos::TalosMessageToolCallStartedEvent,
-    >());
-    output.push_str(&export::<
-        talos_types::talos::TalosMessageToolCallArgsDeltaEvent,
-    >());
-    output.push_str(&export::<talos_types::talos::TalosMessageToolCallQueuedEvent>());
-    output.push_str(&export::<
-        talos_types::talos::TalosMessageToolCallExecutingEvent,
-    >());
-    output.push_str(&export::<
-        talos_types::talos::TalosMessageToolCallProgressDeltaEvent,
-    >());
-    output.push_str(&export::<
-        talos_types::talos::TalosMessageToolCallCompletedEvent,
-    >());
-    output.push_str(&export::<
-        talos_types::talos::TalosMessageToolCallPendingApprovalEvent,
-    >());
-    output.push_str(&export::<
-        talos_types::talos::TalosMessageToolCallPendingDynamicResultEvent,
-    >());
-    output.push_str(&export::<talos_types::talos::TalosMessageCompletedEvent>());
-    output.push_str(&export::<talos_types::talos::TalosMessageErrorEvent>());
     output.push_str(&export::<crate::events::ConfigWarningEvent>());
     output.push_str(&export::<crate::events::SubscriptionTerminatedEnvelope>());
+    output.push_str(&export::<crate::events::TimelineSubscriptionNotification>());
     output.push_str(&export::<crate::events::SubscriptionTerminatedEvent>());
     output.push_str(&export::<crate::events::SubscriptionTerminatedReason>());
     output.push_str(&export::<crate::notifications::ServerNotification>());
@@ -219,6 +215,17 @@ mod tests {
     fn typescript_generation_includes_jsonrpc_message() {
         let typescript = generate_typescript();
         assert!(typescript.contains("JsonRpcMessage"));
+    }
+
+    #[test]
+    fn generated_protocol_includes_timeline_types() {
+        let schema = generate_json_schema();
+        assert!(schema.contains("TalosTimelineEvent"));
+        assert!(schema.contains("TalosTimelineItem"));
+
+        let typescript = generate_typescript();
+        assert!(typescript.contains("TalosTimelineEvent"));
+        assert!(typescript.contains("TalosTimelineDelta"));
     }
 
     #[test]

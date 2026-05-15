@@ -34,7 +34,7 @@ fn test_input_status_line_uses_dynamic_token_left_percent() {
 }
 
 #[tokio::test]
-async fn test_message_completed_updates_session_usage() {
+async fn test_turn_completed_updates_session_usage() {
     let mut app = create_remote_app();
     app.initialize_remote().await;
     set_test_model_info(&mut app, "qwen-max", 32_768);

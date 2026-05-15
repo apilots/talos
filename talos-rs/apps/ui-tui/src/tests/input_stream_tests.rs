@@ -433,7 +433,7 @@ async fn test_status_command_displays_cache_usage_metrics() {
 }
 
 #[tokio::test]
-async fn test_send_message_events_updates_assistant_block() {
+async fn test_send_timeline_events_updates_assistant_block() {
     let mut app = create_remote_app();
     app.initialize_remote().await;
     assert!(app.send_user_message("hello".to_string()).await.unwrap());
@@ -655,7 +655,7 @@ async fn test_timeout_uses_status_hint_not_chat_block() {
 }
 
 #[tokio::test]
-async fn test_stale_message_events_are_ignored() {
+async fn test_stale_timeline_events_are_ignored() {
     let mut app = create_remote_app();
     app.initialize_remote().await;
     app.in_flight = true;
@@ -707,34 +707,23 @@ async fn test_stale_tool_event_does_not_advance_sequence_or_block_valid_output()
         None,
     );
 
-    app.handle_stream_event(TalosEvent {
-        event_type: TalosEventType::MessageToolCallCompleted,
-        message_id: "msg-stale".to_string(),
-        session_id: "sess-test".to_string(),
-        sequence: 99,
-        payload: TalosEventPayload::MessageToolCallCompleted(
-            talos_client::TalosMessageToolCallCompletedEvent {
-                request_id: "req1".to_string(),
-                call_id: "call-current".to_string(),
-                tool: "bash".to_string(),
-                content: vec![TalosContentItem::Text {
-                    text: "stale".to_string(),
-                }],
-                is_error: false,
-                item_index: 0,
-                iteration: 1,
-                step_id: "step-1".to_string(),
-                timing_ms: Some(1),
-            },
-        ),
-    });
+    app.handle_stream_event(tool_completed_event(
+        "msg-stale",
+        "sess-test",
+        99,
+        "call-current",
+        "bash",
+        "stale",
+        false,
+    ));
 
     assert_eq!(app.last_stream_sequence, Some(3));
 
+    app.handle_stream_event(output_item_started_event("msg-current", "sess-test", 4));
     app.handle_stream_event(output_delta_event(
         "msg-current".to_string(),
         "sess-test",
-        4,
+        5,
         "final answer",
     ));
 
@@ -748,7 +737,7 @@ async fn test_stale_tool_event_does_not_advance_sequence_or_block_valid_output()
 }
 
 #[tokio::test]
-async fn test_message_completed_finishes_stream_without_output_delta() {
+async fn test_turn_completed_finishes_stream_without_output_delta() {
     let mut app = create_remote_app();
     app.initialize_remote().await;
     app.in_flight = true;
@@ -776,21 +765,12 @@ async fn test_execution_summary_stays_in_right_panel_not_transcript() {
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
 
-    app.handle_stream_event(TalosEvent {
-        event_type: TalosEventType::MessageExecutionSummary,
-        message_id: "msg-summary".to_string(),
-        session_id: "sess-test".to_string(),
-        sequence: 1,
-        payload: TalosEventPayload::MessageExecutionSummary(
-            talos_client::TalosMessageExecutionSummaryEvent {
-                request_id: "req-test".to_string(),
-                text: "Kernel summary: executed 1 tool call(s).".to_string(),
-                item_index: 0,
-                iteration: 1,
-                step_id: "step-1".to_string(),
-            },
-        ),
-    });
+    app.handle_stream_event(execution_summary_event(
+        "msg-summary",
+        "sess-test",
+        1,
+        "Kernel summary: executed 1 tool call(s).",
+    ));
 
     assert!(!app
         .chat_blocks
@@ -809,10 +789,11 @@ async fn test_tool_using_stream_keeps_assistant_output_interleaved() {
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
 
+    app.handle_stream_event(output_item_started_event("msg-tools", "sess-test", 1));
     app.handle_stream_event(output_delta_event(
         "msg-tools",
         "sess-test",
-        1,
+        2,
         "Draft summary",
     ));
     let assistant_before_tool = app
@@ -823,28 +804,18 @@ async fn test_tool_using_stream_keeps_assistant_output_interleaved() {
         .unwrap_or_default();
     assert_eq!(assistant_before_tool, "Draft summary");
 
-    app.handle_stream_event(TalosEvent {
-        event_type: TalosEventType::MessageToolCallStarted,
-        message_id: "msg-tools".to_string(),
-        session_id: "sess-test".to_string(),
-        sequence: 2,
-        payload: TalosEventPayload::MessageToolCallStarted(
-            talos_client::TalosMessageToolCallStartedEvent {
-                request_id: "req-test".to_string(),
-                call_id: "call-buffer".to_string(),
-                name: "read".to_string(),
-                arguments: serde_json::json!({"path":"/tmp/example.txt"}).into(),
-                item_index: 0,
-                iteration: 1,
-                step_id: "step-1".to_string(),
-                timing_ms: None,
-            },
-        ),
-    });
-    app.handle_stream_event(output_delta_event(
+    app.handle_stream_event(tool_started_event(
         "msg-tools",
         "sess-test",
         3,
+        "call-buffer",
+        "read",
+        serde_json::json!({"path":"/tmp/example.txt"}),
+    ));
+    app.handle_stream_event(output_delta_event(
+        "msg-tools",
+        "sess-test",
+        4,
         "\nFinal answer",
     ));
 
@@ -862,7 +833,7 @@ async fn test_tool_using_stream_keeps_assistant_output_interleaved() {
     app.handle_stream_event(completed_event(
         "msg-tools",
         "sess-test",
-        4,
+        5,
         TalosUsage::default(),
     ));
 
@@ -887,7 +858,8 @@ async fn test_stream_event_preserves_manual_scroll_mode() {
     app.chat_scroll = 5;
     app.session_id = Some("sess-test".to_string());
 
-    app.handle_stream_event(output_delta_event("msg-follow", "sess-test", 1, "hello"));
+    app.handle_stream_event(output_item_started_event("msg-follow", "sess-test", 1));
+    app.handle_stream_event(output_delta_event("msg-follow", "sess-test", 2, "hello"));
 
     assert!(app.chat_manual_scroll);
     assert_eq!(app.chat_scroll, 5);

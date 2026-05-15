@@ -19,7 +19,7 @@ pub struct RequestProcessorOutput {
 }
 
 pub(crate) fn stage_request_event(ctx: &mut InvocationContext, event: &ExecutionEvent) {
-    let staged = SessionEvent::from_execution_event(ctx.session_id.clone(), event.clone());
+    let staged = KernelTranscriptEvent::from_execution_event(ctx.session_id.clone(), event.clone());
     for delta in &staged.actions.state_delta {
         ctx.session.state.apply_delta(delta);
     }
@@ -29,8 +29,8 @@ pub(crate) fn stage_request_event(ctx: &mut InvocationContext, event: &Execution
 pub(crate) fn latest_branch_event<'a>(
     ctx: &'a InvocationContext,
     branch: crate::ExecutionBranch,
-    predicate: impl Fn(&'a SessionEvent) -> bool,
-) -> Option<&'a SessionEvent> {
+    predicate: impl Fn(&'a KernelTranscriptEvent) -> bool,
+) -> Option<&'a KernelTranscriptEvent> {
     ctx.session
         .events
         .iter()
@@ -40,8 +40,8 @@ pub(crate) fn latest_branch_event<'a>(
 
 pub(crate) fn latest_event<'a>(
     ctx: &'a InvocationContext,
-    predicate: impl Fn(&'a SessionEvent) -> bool,
-) -> Option<&'a SessionEvent> {
+    predicate: impl Fn(&'a KernelTranscriptEvent) -> bool,
+) -> Option<&'a KernelTranscriptEvent> {
     ctx.session
         .events
         .iter()

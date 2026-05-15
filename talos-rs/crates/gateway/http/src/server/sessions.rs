@@ -8,6 +8,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use talos_auth::RequestIdentity;
+use talos_types::talos::SessionHistorySnapshot;
 use talos_types::talos::TalosContext;
 use talos_types::{
     OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, SessionConf, SessionPatch, SessionQuery,
@@ -95,17 +96,18 @@ pub(super) async fn get_session_handler(
     Ok(Json(json!(session)))
 }
 
-pub(super) async fn get_session_turns_handler(
+pub(super) async fn get_session_history_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
     Path(session_id): Path<String>,
-) -> Result<Json<Value>, ApiError> {
-    let turns = state
+) -> Result<Json<SessionHistorySnapshot>, ApiError> {
+    let snapshot = state
         .app
-        .get_session_turns(&shared_actor(&actor.0), &session_id)
+        .get_session_history(&shared_actor(&actor.0), &session_id)
         .await
         .map_err(|e| map_session_error(e, "session not found"))?;
-    Ok(Json(json!({ "data": turns })))
+
+    Ok(Json(snapshot))
 }
 
 pub(super) async fn patch_session_handler(

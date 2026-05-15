@@ -7,7 +7,6 @@ pub(crate) struct TranscriptState {
     pub(crate) live_thinking_idx: Option<usize>,
     pub(crate) live_assistant_idx: Option<usize>,
     pub(crate) active_tool_calls: HashMap<String, usize>,
-    pub(crate) stream_key_to_call_id: HashMap<(u32, usize), String>,
     pub(crate) has_visible_activity: bool,
 }
 
@@ -16,7 +15,6 @@ impl TranscriptState {
         self.live_thinking_idx = None;
         self.live_assistant_idx = None;
         self.active_tool_calls.clear();
-        self.stream_key_to_call_id.clear();
         self.has_visible_activity = false;
     }
 
@@ -94,11 +92,6 @@ impl TranscriptState {
         Some(idx)
     }
 
-    pub(crate) fn record_stream_key(&mut self, round: u32, index: usize, call_id: &str) {
-        self.stream_key_to_call_id
-            .insert((round, index), call_id.to_string());
-    }
-
     pub(crate) fn finalize(&mut self, chat_blocks: &mut Vec<ChatBlock>) {
         let mut remove_indices = Vec::new();
 
@@ -134,7 +127,6 @@ impl TranscriptState {
         self.live_thinking_idx = None;
         self.live_assistant_idx = None;
         self.active_tool_calls.clear();
-        self.stream_key_to_call_id.clear();
         self.has_visible_activity = false;
     }
 }

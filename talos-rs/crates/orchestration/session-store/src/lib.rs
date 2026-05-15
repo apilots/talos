@@ -25,8 +25,8 @@ pub use active_turn::{
     ActiveTurnRecord, ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate,
     PendingDynamicToolResult, PendingToolApproval, PendingUserAction,
 };
-pub use event_service::{SessionEventRetentionConfig, SessionEventService};
-pub use events::{NewSessionEvent, SessionEventId, SessionEventRecord, SessionEventStore};
+pub use event_service::{TimelineEventRetentionConfig, TimelineEventService};
+pub use events::{TimelineEventId, TimelineEventStore};
 pub use idempotency::{
     IdempotencyRecord, IdempotencyReservation, IdempotencyStatus, MessageCommandAck,
     MessageIdempotencyStore,
@@ -795,7 +795,7 @@ impl SessionStore for DatabaseSessionStore {
 
     async fn delete_session_record(&self, session_id: &str) -> TalosResult<SessionPatchAck> {
         self.storage
-            .delete("session_events", "session_id = ?", &[session_id])
+            .delete("timeline_events", "session_id = ?", &[session_id])
             .await?;
         self.storage
             .delete("active_turns", "session_id = ?", &[session_id])

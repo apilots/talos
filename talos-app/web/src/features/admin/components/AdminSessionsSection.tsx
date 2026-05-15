@@ -81,7 +81,7 @@ export function AdminSessionsSection({
       await queryClient.invalidateQueries({ queryKey: ["admin-sessions", connectionKey] });
       await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
       queryClient.removeQueries({ queryKey: chatKeys.session(connectionKey, sessionId) });
-      queryClient.removeQueries({ queryKey: chatKeys.turns(connectionKey, sessionId) });
+      queryClient.removeQueries({ queryKey: chatKeys.liveRecovery(connectionKey, sessionId) });
       setActionError("");
     },
     onError: (error) => {

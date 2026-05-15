@@ -1,5 +1,6 @@
 use crate::talos::{
-    StopReason, TalosContext, TalosInputItem, TalosOutputItem, TalosReasoning, TalosUsage,
+    StopReason, TalosContext, TalosInputItem, TalosJsonValue, TalosOutputItem, TalosReasoning,
+    TalosUsage,
 };
 use serde::{Deserialize, Serialize};
 
@@ -8,9 +9,27 @@ use serde::{Deserialize, Serialize};
 pub struct GatewayRequest {
     pub session_id: String,
     #[serde(default)]
+    pub turn_id: Option<String>,
+    #[serde(default)]
     pub workspace_id: Option<String>,
+    #[serde(default)]
+    pub resume_context: Option<GatewayResumeContext>,
     pub input: Vec<TalosInputItem>,
     pub context: TalosContext,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayResumeContext {
+    #[serde(default)]
+    pub tool_call: Option<GatewayResumeToolCall>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GatewayResumeToolCall {
+    pub item_id: String,
+    pub call_id: String,
+    pub tool_name: String,
+    pub arguments: TalosJsonValue,
 }
 
 /// Response from the gateway.

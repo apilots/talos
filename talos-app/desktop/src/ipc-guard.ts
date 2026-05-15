@@ -57,7 +57,7 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "session.list": emptyParams,
   "session.patch": sessionParams,
   "session.read": sessionParams,
-  "session.turns": sessionParams,
+  "session.recover": sessionParams,
   "skill.list": emptyParams,
   "tool.approval.submit": (params) =>
     hasString(params, "session_id") &&

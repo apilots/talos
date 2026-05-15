@@ -247,8 +247,8 @@ export class JsonRpcStdioTransport implements AppServerTransport {
 
     if ("method" in message && !("id" in message)) {
       this.events.emit("notification", message);
-      if (isApplicationEventEnvelope(message.params)) {
-        this.events.emit("event", message.params);
+      if (isTimelineSubscriptionNotification(message.params)) {
+        this.events.emit("event", message.params.event);
       }
       if (isSubscriptionTerminatedEnvelope(message.params)) {
         this.events.emit("subscriptionTerminated", message.params);
@@ -387,16 +387,22 @@ function buildAppServerEnvironment(
   };
 }
 
-function isApplicationEventEnvelope(value: unknown): value is AppProtocol.ApplicationEventEnvelope {
+function isTimelineSubscriptionNotification(
+  value: unknown,
+): value is AppProtocol.TimelineSubscriptionNotification {
   if (!value || typeof value !== "object") {
     return false;
   }
-  const candidate = value as Partial<AppProtocol.ApplicationEventEnvelope>;
+  const candidate = value as Partial<AppProtocol.TimelineSubscriptionNotification>;
+  const event = candidate.event as Partial<AppProtocol.TimelineEventEnvelope> | undefined;
   return (
     typeof candidate.subscription_id === "string" &&
-    typeof candidate.event_id === "string" &&
-    typeof candidate.event === "object" &&
-    candidate.event !== null
+    !!event &&
+    typeof event.session_id === "string" &&
+    typeof event.message_id === "string" &&
+    typeof event.event_id === "string" &&
+    typeof event.event === "object" &&
+    event.event !== null
   );
 }
 

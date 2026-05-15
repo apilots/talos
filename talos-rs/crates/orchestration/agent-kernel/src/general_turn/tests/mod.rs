@@ -659,7 +659,7 @@ fn build_ctx_with_stream(
         limits: InvocationLimits::default(),
         events: Vec::new(),
         plugin_manager: crate::default_plugin_manager(),
-        session_service: None,
+        transcript_service: None,
         stream_tx,
     }
 }

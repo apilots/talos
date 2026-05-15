@@ -1,5 +1,8 @@
 use super::*;
-use crate::{EventAuthor, ExecutionBranch, SessionEvent, SessionEventKind, SessionEventPayload};
+use crate::{
+    EventAuthor, ExecutionBranch, KernelTranscriptEvent, KernelTranscriptEventKind,
+    KernelTranscriptPayload,
+};
 use serde::de::DeserializeOwned;
 use talos_prompt::{DynamicTrimPolicy, PromptSectionKind};
 use talos_tools::{PermissionMode, ToolSelectionPhase, ToolSelectionRequest};
@@ -511,20 +514,20 @@ pub(crate) fn stage_session_state_update(
     key: &str,
     value: serde_json::Value,
 ) {
-    let mut event = SessionEvent::new(
+    let mut event = KernelTranscriptEvent::new(
         session_id.to_string(),
         invocation_id.to_string(),
         branch,
         EventAuthor::System,
-        SessionEventKind::Planning,
-        SessionEventPayload::StateOnly,
+        KernelTranscriptEventKind::Planning,
+        KernelTranscriptPayload::StateOnly,
     );
     event.actions.state_delta.push(crate::StateDelta {
         namespace: crate::StateNamespace::Session,
         key: key.to_string(),
         value,
     });
-    crate::flow::stage_session_event(ctx, event);
+    crate::flow::stage_kernel_transcript_event(ctx, event);
 }
 
 fn build_continuity_last_failure(executed: &ExecutedTurnArtifacts) -> Option<String> {

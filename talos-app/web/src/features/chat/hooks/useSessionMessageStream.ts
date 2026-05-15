@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 
-import { retryMessageEvents, sendMessageEvents, subscribeSessionEventsForMessage } from "../api";
+import { retryTimelineEvents, sendTimelineEvents, subscribeTimelineEventsForMessage } from "../api";
 import { applyStreamEvent } from "../stream-events";
 
 export function useSessionMessageStream(sessionId: string) {
@@ -19,7 +19,7 @@ export function useSessionMessageStream(sessionId: string) {
       abortRef.current = controller;
 
       try {
-        await sendMessageEvents(
+        await sendTimelineEvents(
           sessionId,
           text,
           (event) => applyStreamEvent(sessionId, event),
@@ -41,17 +41,18 @@ export function useSessionMessageStream(sessionId: string) {
   }, []);
 
   const reconnectMessage = useCallback(
-    async (messageId: string) => {
+    async (messageId: string, afterEventId?: string) => {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
 
       try {
-        await subscribeSessionEventsForMessage(
+        await subscribeTimelineEventsForMessage(
           sessionId,
           messageId,
           (event) => applyStreamEvent(sessionId, event),
           controller.signal,
+          afterEventId,
         );
       } finally {
         if (abortRef.current === controller) {
@@ -79,7 +80,7 @@ export function useSessionMessageStream(sessionId: string) {
       abortRef.current = controller;
 
       try {
-        await retryMessageEvents(
+        await retryTimelineEvents(
           sessionId,
           {
             client_message_id: clientMessageId,

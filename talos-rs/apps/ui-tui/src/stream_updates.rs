@@ -230,8 +230,8 @@ impl TuiApp {
                     self.push_right_event("model picker switch failed".to_string());
                 }
             },
-            RemoteCommandUpdate::SessionTurnsLoaded { session, result } => match result {
-                Ok(turns) => {
+            RemoteCommandUpdate::SessionHistoryLoaded { session, result } => match result {
+                Ok(load) => {
                     let sid = &session.context.session_id;
                     let model = &session.config.llm.model;
                     let title = &session.title;
@@ -239,24 +239,38 @@ impl TuiApp {
                         ChatRole::System,
                         format!("Session: {}  ({})\nModel: {}", title, sid, model),
                     );
-                    for (turn_index, turn) in turns.iter().enumerate() {
-                        for (item_index, item) in turn.output.iter().enumerate() {
-                            self.replay_history_item(item, turn_index as u64, item_index as u64);
+                    let item_count = self.replay_history_snapshot(load.history);
+                    self.message_history_index = None;
+                    self.push_right_event(format!("history loaded: {} items", item_count));
+                    if let Some(live_recovery) = load.live_recovery {
+                        match live_recovery {
+                            Ok(snapshot) => {
+                                let event_count = self.replay_recovery_snapshot(snapshot);
+                                self.push_right_event(format!(
+                                    "live recovery replayed: {} events",
+                                    event_count
+                                ));
+                            }
+                            Err(err) => {
+                                self.push_block(
+                                    ChatRole::System,
+                                    format!("Failed to recover active turn: {}", err),
+                                );
+                                self.push_right_event("live recovery failed".to_string());
+                            }
                         }
                     }
-                    self.message_history_index = None;
-                    self.push_right_event(format!("turns loaded: {}", turns.len()));
                 }
                 Err(err) => {
                     let sid = &session.context.session_id;
                     self.push_block(
                         ChatRole::System,
                         format!(
-                            "Session: {}  ({})\nFailed to load history: {}",
+                            "Session: {}  ({})\nFailed to load session history: {}",
                             session.title, sid, err
                         ),
                     );
-                    self.push_right_event("turns load failed".to_string());
+                    self.push_right_event("history load failed".to_string());
                 }
             },
         }

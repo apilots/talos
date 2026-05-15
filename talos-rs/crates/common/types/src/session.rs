@@ -571,11 +571,6 @@ pub trait SessionService: Send + Sync {
         success: bool,
     ) -> crate::TalosResult<()>;
 
-    async fn get_session_turns(
-        &self,
-        session_id: &str,
-    ) -> crate::TalosResult<Vec<talos::TalosMessageResponse>>;
-
     async fn list_projects(&self) -> crate::TalosResult<Vec<ProjectRecord>>;
 
     async fn get_project(&self, project_id: &str) -> crate::TalosResult<Option<ProjectRecord>>;

@@ -46,23 +46,25 @@ mod basic_tests {
         async fn handle_stream(
             &self,
             request: talos_types::gateway::GatewayRequest,
-        ) -> TalosResult<mpsc::Receiver<talos_types::talos::TalosEvent>> {
+        ) -> TalosResult<mpsc::Receiver<talos_types::talos::TalosTimelineEvent>> {
             let response = self.handle(request).await?;
             let (tx, rx) = mpsc::channel(1);
             tokio::spawn(async move {
                 let _ = tx
-                    .send(talos_types::talos::TalosEvent {
-                        event_type: talos_types::talos::TalosEventType::MessageStarted,
+                    .send(talos_types::talos::TalosTimelineEvent {
+                        event_seq: None,
+                        event_id: None,
+                        created_at_ms: None,
+                        event_type: talos_types::talos::TalosTimelineEventType::TurnStarted,
+                        turn_id: "turn-mock".to_string(),
                         message_id: "msg-mock".to_string(),
                         session_id: response.session_id,
                         sequence: 0,
-                        payload: talos_types::talos::TalosEventPayload::MessageStarted(
-                            talos_types::talos::TalosMessageStartedEvent {
+                        payload: talos_types::talos::TalosTimelineEventPayload::TurnStarted(
+                            talos_types::talos::TalosTurnStartedEvent {
                                 request_id: "req-mock".to_string(),
-                                model: "test-model".to_string(),
-                                usage: TalosUsage::default(),
-                                iteration: 0,
-                                step_id: "start".to_string(),
+                                turn_id: "turn-mock".to_string(),
+                                started_at_ms: 0,
                             },
                         ),
                     })
@@ -84,7 +86,9 @@ mod basic_tests {
         let gateway_impl = GatewayImpl::new(Arc::new(mock_handler));
         let request = GatewayRequest {
             session_id: "test-session".to_string(),
+            turn_id: None,
             workspace_id: None,
+            resume_context: None,
             input: vec![TalosInputItem::Text {
                 text: "test content".to_string(),
             }],
@@ -112,7 +116,9 @@ mod basic_tests {
         let gateway_impl = GatewayImpl::new(Arc::new(mock_handler));
         let request = GatewayRequest {
             session_id: "test-session".to_string(),
+            turn_id: None,
             workspace_id: None,
+            resume_context: None,
             input: vec![TalosInputItem::Text {
                 text: "test content".to_string(),
             }],

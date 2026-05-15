@@ -166,9 +166,15 @@ try {
 
   await waitForExpression(
     cdp,
-    `window.__talosSmokeInvoke("session.turns", { session_id: ${JSON.stringify(createdSessionId)} }).then((response) => {
-      const turns = response?.data ?? [];
-      return turns.some((turn) => Array.isArray(turn.output) && turn.output.some((item) => item.type === "user_input" && item.text === ${JSON.stringify(smokePrompt)}));
+    `window.__talosSmokeInvoke("session.recover", { session_id: ${JSON.stringify(createdSessionId)}, after_event_id: null, replay_limit: null }).then((response) => {
+      const events = response?.replay?.events ?? [];
+      return events.some((envelope) => {
+        const item = envelope?.event?.payload?.item;
+        return item?.kind === "user_input" &&
+          item?.phase === "input" &&
+          item?.content?.type === "text" &&
+          item.content.text === ${JSON.stringify(smokePrompt)};
+      });
     })`,
     120_000,
   );

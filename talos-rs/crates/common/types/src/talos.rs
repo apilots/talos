@@ -325,7 +325,7 @@ pub enum TalosInputItem {
 }
 
 /// Talos content item for rich output blocks.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TalosContentItem {
     Text { text: String },
@@ -424,99 +424,272 @@ pub struct TalosMessageResponse {
     pub usage: TalosUsage,
 }
 
-/// Stream event type.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+/// Timeline stream event lifecycle type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
-pub enum TalosEventType {
-    MessageStarted,
-    MessageReasoningDelta,
-    MessageExecutionSummary,
-    MessageOutputDelta,
-    MessageToolCallStarted,
-    MessageToolCallArgsDelta,
-    MessageToolCallQueued,
-    MessageToolCallExecuting,
-    MessageToolCallProgressDelta,
-    MessageToolCallCompleted,
-    MessageToolCallPendingApproval,
-    MessageToolCallPendingDynamicResult,
-    MessageCompleted,
-    MessageError,
+pub enum TalosTimelineEventType {
+    TurnStarted,
+    ItemStarted,
+    ItemDelta,
+    ItemCompleted,
+    TurnCompleted,
+    TurnError,
+}
+
+/// Timeline item kind rendered by clients.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum TalosTimelineItemKind {
+    UserInput,
+    Reasoning,
+    AssistantText,
+    ToolCall,
+    ExecutionSummary,
+    SystemNotice,
+}
+
+/// Server-owned phase for a timeline item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum TalosTimelinePhase {
+    Input,
+    Thinking,
+    Acting,
+    Commentary,
+    FinalAnswer,
+    System,
+}
+
+/// Lifecycle status for a timeline item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum TalosTimelineItemStatus {
+    Running,
+    WaitingApproval,
+    Completed,
+    Failed,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
-pub enum TalosThinkingSource {
-    Provider,
-    Framework,
+pub enum TalosTimelineNoticeLevel {
+    Info,
+    Warning,
+    Error,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum TalosThinkingStage {
-    ModelReasoning,
-    FrameworkPlan,
-    FrameworkAct,
-    FrameworkObserve,
-    FrameworkReflect,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-pub struct TalosMessageStartedEvent {
-    pub request_id: String,
-    pub model: String,
-    pub usage: TalosUsage,
-    pub iteration: u64,
-    pub step_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-pub struct TalosMessageReasoningDeltaEvent {
-    pub request_id: String,
-    pub delta: String,
-    pub source: TalosThinkingSource,
-    pub stage: TalosThinkingStage,
-    pub item_index: u64,
-    pub iteration: u64,
-    pub step_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-pub struct TalosMessageExecutionSummaryEvent {
-    pub request_id: String,
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct TalosToolProgressEntry {
+    pub progress_kind: TalosToolProgressKind,
     pub text: String,
-    pub item_index: u64,
-    pub iteration: u64,
-    pub step_id: String,
+    pub timestamp_ms: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-pub struct TalosMessageOutputDeltaEvent {
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct TalosToolResult {
+    pub content: Vec<TalosContentItem>,
+    pub is_error: bool,
+}
+
+/// Current full content for a timeline item.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TalosTimelineContent {
+    Empty,
+    Text {
+        text: String,
+    },
+    ToolCall {
+        call_id: String,
+        name: String,
+        arguments: String,
+        #[serde(default)]
+        progress: Vec<TalosToolProgressEntry>,
+        #[serde(default)]
+        result: Option<TalosToolResult>,
+    },
+    ExecutionSummary {
+        summary: String,
+    },
+    SystemNotice {
+        level: TalosTimelineNoticeLevel,
+        message: String,
+    },
+}
+
+/// Incremental update for an existing timeline item.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TalosTimelineDelta {
+    Text {
+        text: String,
+    },
+    ToolArguments {
+        arguments_delta: String,
+    },
+    ToolProgress {
+        progress_kind: TalosToolProgressKind,
+        text_delta: String,
+    },
+    ToolResult {
+        content: Vec<TalosContentItem>,
+        is_error: bool,
+    },
+    ToolApprovalRequest {
+        call_id: String,
+        tool_name: String,
+        prompt: String,
+        arguments: TalosJsonValue,
+    },
+    ToolDynamicRequest {
+        call_id: String,
+        tool_name: String,
+        arguments: TalosJsonValue,
+    },
+    Status {
+        status: TalosTimelineItemStatus,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct TalosTimelineItem {
+    pub item_id: String,
+    #[serde(default)]
+    pub parent_item_id: Option<String>,
+    pub kind: TalosTimelineItemKind,
+    pub phase: TalosTimelinePhase,
+    pub status: TalosTimelineItemStatus,
+    #[serde(default)]
+    pub title: Option<String>,
+    pub started_at_ms: u64,
+    #[serde(default)]
+    pub completed_at_ms: Option<u64>,
+    pub content: TalosTimelineContent,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct TalosTurnStartedEvent {
     pub request_id: String,
-    pub delta: String,
-    pub item_index: u64,
-    pub iteration: u64,
-    pub step_id: String,
+    pub turn_id: String,
+    pub started_at_ms: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-pub struct TalosMessageToolCallStartedEvent {
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct TalosItemStartedEvent {
     pub request_id: String,
-    pub call_id: String,
-    pub name: String,
-    #[schemars(schema_with = "crate::schema::json_value_schema")]
-    #[ts(type = "unknown")]
-    pub arguments: TalosJsonValue,
-    pub item_index: u64,
-    pub iteration: u64,
-    pub step_id: String,
-    pub timing_ms: Option<u64>,
+    pub turn_id: String,
+    pub item: TalosTimelineItem,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-pub struct TalosToolStreamKey {
-    pub round: u32,
-    pub index: usize,
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct TalosItemDeltaEvent {
+    pub request_id: String,
+    pub turn_id: String,
+    pub item_id: String,
+    pub delta: TalosTimelineDelta,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct TalosItemCompletedEvent {
+    pub request_id: String,
+    pub turn_id: String,
+    pub item_id: String,
+    pub status: TalosTimelineItemStatus,
+    pub completed_at_ms: u64,
+    #[serde(default)]
+    pub final_content: Option<TalosTimelineContent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct TalosTurnCompletedEvent {
+    pub request_id: String,
+    pub turn_id: String,
+    pub completed_at_ms: u64,
+    pub stop_reason: StopReason,
+    pub usage: TalosUsage,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct TalosTurnErrorEvent {
+    pub request_id: String,
+    pub turn_id: String,
+    pub error: String,
+    pub failed_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TalosTimelineEventPayload {
+    TurnStarted(TalosTurnStartedEvent),
+    ItemStarted(TalosItemStartedEvent),
+    ItemDelta(TalosItemDeltaEvent),
+    ItemCompleted(TalosItemCompletedEvent),
+    TurnCompleted(TalosTurnCompletedEvent),
+    TurnError(TalosTurnErrorEvent),
+}
+
+/// Domain timeline event payload.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct TalosTimelineEvent {
+    #[serde(default)]
+    pub event_seq: Option<i64>,
+    #[serde(default)]
+    pub event_id: Option<String>,
+    #[serde(default)]
+    pub created_at_ms: Option<i64>,
+    pub event_type: TalosTimelineEventType,
+    pub turn_id: String,
+    pub message_id: String,
+    pub session_id: String,
+    pub sequence: u64,
+    pub payload: TalosTimelineEventPayload,
+}
+
+/// Public recoverable timeline stream event.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct TimelineEventEnvelope {
+    pub event_id: String,
+    pub event_seq: i64,
+    pub created_at_ms: i64,
+    pub session_id: String,
+    pub turn_id: String,
+    pub message_id: String,
+    pub event: TalosTimelineEvent,
+}
+
+impl TimelineEventEnvelope {
+    pub fn from_persisted_event(event: TalosTimelineEvent) -> Option<Self> {
+        Some(Self {
+            event_id: event.event_id.clone()?,
+            event_seq: event.event_seq?,
+            created_at_ms: event.created_at_ms?,
+            session_id: event.session_id.clone(),
+            turn_id: event.turn_id.clone(),
+            message_id: event.message_id.clone(),
+            event,
+        })
+    }
+}
+
+/// Stable session history snapshot. This is not a replay cursor envelope.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct SessionHistorySnapshot {
+    pub session_id: String,
+    pub messages: Vec<SessionHistoryMessage>,
+    pub generated_at_ms: i64,
+    #[serde(default)]
+    pub last_stable_event_id: Option<String>,
+}
+
+/// Stable message view for session history.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct SessionHistoryMessage {
+    pub message_id: String,
+    pub turn_id: String,
+    pub items: Vec<TalosTimelineItem>,
+    pub stop_reason: StopReason,
+    pub usage: TalosUsage,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -525,133 +698,4 @@ pub enum TalosToolProgressKind {
     Status,
     Stdout,
     Stderr,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-pub struct TalosMessageToolCallArgsDeltaEvent {
-    pub request_id: String,
-    pub stream_key: TalosToolStreamKey,
-    pub call_id: Option<String>,
-    pub tool_name: Option<String>,
-    pub delta: String,
-    pub item_index: u64,
-    pub iteration: u64,
-    pub step_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-pub struct TalosMessageToolCallQueuedEvent {
-    pub request_id: String,
-    pub stream_key: TalosToolStreamKey,
-    pub call_id: String,
-    pub tool_name: String,
-    pub item_index: u64,
-    pub iteration: u64,
-    pub step_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-pub struct TalosMessageToolCallExecutingEvent {
-    pub request_id: String,
-    pub stream_key: TalosToolStreamKey,
-    pub call_id: String,
-    pub tool_name: String,
-    pub item_index: u64,
-    pub iteration: u64,
-    pub step_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-pub struct TalosMessageToolCallProgressDeltaEvent {
-    pub request_id: String,
-    pub stream_key: TalosToolStreamKey,
-    pub call_id: String,
-    pub tool_name: String,
-    pub message: String,
-    pub progress_kind: TalosToolProgressKind,
-    pub item_index: u64,
-    pub iteration: u64,
-    pub step_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-pub struct TalosMessageToolCallCompletedEvent {
-    pub request_id: String,
-    pub call_id: String,
-    pub tool: String,
-    pub content: Vec<TalosContentItem>,
-    pub is_error: bool,
-    pub item_index: u64,
-    pub iteration: u64,
-    pub step_id: String,
-    pub timing_ms: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-pub struct TalosMessageToolCallPendingApprovalEvent {
-    pub request_id: String,
-    pub call_id: String,
-    pub tool_name: String,
-    pub prompt: String,
-    #[schemars(schema_with = "crate::schema::json_value_schema")]
-    #[ts(type = "unknown")]
-    pub arguments: TalosJsonValue,
-    pub step_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-pub struct TalosMessageToolCallPendingDynamicResultEvent {
-    pub request_id: String,
-    pub call_id: String,
-    pub tool_name: String,
-    #[schemars(schema_with = "crate::schema::json_value_schema")]
-    #[ts(type = "unknown")]
-    pub arguments: TalosJsonValue,
-    pub step_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-pub struct TalosMessageCompletedEvent {
-    pub request_id: String,
-    pub stop_reason: StopReason,
-    pub usage: TalosUsage,
-    pub total_output_items: u64,
-    pub iteration: u64,
-    pub step_id: String,
-    pub task_count: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-pub struct TalosMessageErrorEvent {
-    pub request_id: String,
-    pub error: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum TalosEventPayload {
-    MessageStarted(TalosMessageStartedEvent),
-    MessageReasoningDelta(TalosMessageReasoningDeltaEvent),
-    MessageExecutionSummary(TalosMessageExecutionSummaryEvent),
-    MessageOutputDelta(TalosMessageOutputDeltaEvent),
-    MessageToolCallStarted(TalosMessageToolCallStartedEvent),
-    MessageToolCallArgsDelta(TalosMessageToolCallArgsDeltaEvent),
-    MessageToolCallQueued(TalosMessageToolCallQueuedEvent),
-    MessageToolCallExecuting(TalosMessageToolCallExecutingEvent),
-    MessageToolCallProgressDelta(TalosMessageToolCallProgressDeltaEvent),
-    MessageToolCallCompleted(TalosMessageToolCallCompletedEvent),
-    MessageToolCallPendingApproval(TalosMessageToolCallPendingApprovalEvent),
-    MessageToolCallPendingDynamicResult(TalosMessageToolCallPendingDynamicResultEvent),
-    MessageCompleted(TalosMessageCompletedEvent),
-    MessageError(TalosMessageErrorEvent),
-}
-
-/// Canonical stream event payload.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-pub struct TalosEvent {
-    pub event_type: TalosEventType,
-    pub message_id: String,
-    pub session_id: String,
-    pub sequence: u64,
-    pub payload: TalosEventPayload,
 }

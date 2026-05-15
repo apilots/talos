@@ -10,13 +10,14 @@ pub(crate) use serde_json::json;
 pub(crate) use std::path::PathBuf;
 use std::sync::Mutex;
 pub(crate) use talos_client::{
-    SessionCreateParams, StopReason, TalosContentItem, TalosEventPayload, TalosInputItem,
-    TalosMessageCompletedEvent, TalosMessageOutputDeltaEvent, TalosMessageReasoningDeltaEvent,
-    TalosMessageRequest, TalosMessageResponse, TalosMessageStartedEvent, TalosOutputItem,
-    TalosThinkingSource, TalosThinkingStage,
+    SessionCreateParams, SessionHistorySnapshot, StopReason, TalosContentItem, TalosInputItem,
+    TalosMessageRequest, TalosTimelineContent, TalosTimelineDelta, TalosTimelineEvent,
+    TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItem, TalosTimelineItemKind,
+    TalosTimelineItemStatus, TalosTimelinePhase, TimelineActiveTurnSnapshot,
+    TimelineActiveTurnStatus, TimelineCursorStatus, TimelineEventEnvelope,
+    TimelineRecoverySnapshot, TimelineReplay,
 };
 use talos_error::TalosError;
-pub(crate) use talos_types::talos::TalosEventType;
 
 #[derive(Default)]
 pub(crate) struct MockGatewayState {
@@ -58,20 +59,49 @@ pub(crate) fn mock_model_info(id: &str, context_window: u32) -> ModelInfo {
     }
 }
 
-pub(crate) fn started_event(message_id: impl Into<String>, sequence: u64) -> TalosEvent {
-    TalosEvent {
-        event_type: TalosEventType::MessageStarted,
-        message_id: message_id.into(),
-        session_id: "sess-test".to_string(),
+pub(crate) fn started_event(message_id: impl Into<String>, sequence: u64) -> TimelineEventEnvelope {
+    timeline_event(
+        message_id.into(),
+        "sess-test".to_string(),
         sequence,
-        payload: TalosEventPayload::MessageStarted(TalosMessageStartedEvent {
+        TalosTimelineEventType::TurnStarted,
+        TalosTimelineEventPayload::TurnStarted(talos_client::TalosTurnStartedEvent {
             request_id: "req-test".to_string(),
-            model: "qwen-plus".to_string(),
-            usage: TalosUsage::default(),
-            iteration: 0,
-            step_id: "start".to_string(),
+            turn_id: "turn-test".to_string(),
+            started_at_ms: sequence,
         }),
-    }
+    )
+}
+
+pub(crate) fn output_item_started_event(
+    message_id: impl Into<String>,
+    session_id: impl Into<String>,
+    sequence: u64,
+) -> TimelineEventEnvelope {
+    let item_id = "final-answer".to_string();
+    timeline_event(
+        message_id.into(),
+        session_id.into(),
+        sequence,
+        TalosTimelineEventType::ItemStarted,
+        TalosTimelineEventPayload::ItemStarted(talos_client::TalosItemStartedEvent {
+            request_id: "req-test".to_string(),
+            turn_id: "turn-test".to_string(),
+            item: TalosTimelineItem {
+                item_id,
+                parent_item_id: None,
+                kind: TalosTimelineItemKind::AssistantText,
+                phase: TalosTimelinePhase::FinalAnswer,
+                status: TalosTimelineItemStatus::Running,
+                title: None,
+                started_at_ms: sequence,
+                completed_at_ms: None,
+                content: TalosTimelineContent::Text {
+                    text: String::new(),
+                },
+            },
+        }),
+    )
 }
 
 pub(crate) fn output_delta_event(
@@ -79,20 +109,19 @@ pub(crate) fn output_delta_event(
     session_id: impl Into<String>,
     sequence: u64,
     delta: impl Into<String>,
-) -> TalosEvent {
-    TalosEvent {
-        event_type: TalosEventType::MessageOutputDelta,
-        message_id: message_id.into(),
-        session_id: session_id.into(),
+) -> TimelineEventEnvelope {
+    timeline_event(
+        message_id.into(),
+        session_id.into(),
         sequence,
-        payload: TalosEventPayload::MessageOutputDelta(TalosMessageOutputDeltaEvent {
+        TalosTimelineEventType::ItemDelta,
+        TalosTimelineEventPayload::ItemDelta(talos_client::TalosItemDeltaEvent {
             request_id: "req-test".to_string(),
-            delta: delta.into(),
-            item_index: sequence,
-            iteration: sequence,
-            step_id: format!("step-{}", sequence),
+            turn_id: "turn-test".to_string(),
+            item_id: "final-answer".to_string(),
+            delta: TalosTimelineDelta::Text { text: delta.into() },
         }),
-    }
+    )
 }
 
 pub(crate) fn reasoning_delta_event(
@@ -100,22 +129,29 @@ pub(crate) fn reasoning_delta_event(
     session_id: impl Into<String>,
     sequence: u64,
     delta: impl Into<String>,
-) -> TalosEvent {
-    TalosEvent {
-        event_type: TalosEventType::MessageReasoningDelta,
-        message_id: message_id.into(),
-        session_id: session_id.into(),
+) -> TimelineEventEnvelope {
+    let item_id = "reasoning".to_string();
+    timeline_event(
+        message_id.into(),
+        session_id.into(),
         sequence,
-        payload: TalosEventPayload::MessageReasoningDelta(TalosMessageReasoningDeltaEvent {
+        TalosTimelineEventType::ItemStarted,
+        TalosTimelineEventPayload::ItemStarted(talos_client::TalosItemStartedEvent {
             request_id: "req-test".to_string(),
-            delta: delta.into(),
-            source: TalosThinkingSource::Provider,
-            stage: TalosThinkingStage::ModelReasoning,
-            item_index: sequence,
-            iteration: sequence,
-            step_id: format!("step-{}", sequence),
+            turn_id: "turn-test".to_string(),
+            item: TalosTimelineItem {
+                item_id,
+                parent_item_id: None,
+                kind: TalosTimelineItemKind::Reasoning,
+                phase: TalosTimelinePhase::Thinking,
+                status: TalosTimelineItemStatus::Running,
+                title: None,
+                started_at_ms: sequence,
+                completed_at_ms: None,
+                content: TalosTimelineContent::Text { text: delta.into() },
+            },
         }),
-    }
+    )
 }
 
 pub(crate) fn completed_event(
@@ -123,21 +159,163 @@ pub(crate) fn completed_event(
     session_id: impl Into<String>,
     sequence: u64,
     usage: TalosUsage,
-) -> TalosEvent {
-    TalosEvent {
-        event_type: TalosEventType::MessageCompleted,
-        message_id: message_id.into(),
-        session_id: session_id.into(),
+) -> TimelineEventEnvelope {
+    timeline_event(
+        message_id.into(),
+        session_id.into(),
         sequence,
-        payload: TalosEventPayload::MessageCompleted(TalosMessageCompletedEvent {
+        TalosTimelineEventType::TurnCompleted,
+        TalosTimelineEventPayload::TurnCompleted(talos_client::TalosTurnCompletedEvent {
             request_id: "req-test".to_string(),
+            turn_id: "turn-test".to_string(),
+            completed_at_ms: sequence,
             stop_reason: StopReason::EndTurn,
             usage,
-            total_output_items: sequence.max(1),
-            iteration: sequence,
-            step_id: "completed".to_string(),
-            task_count: 1,
         }),
+    )
+}
+
+pub(crate) fn execution_summary_event(
+    message_id: impl Into<String>,
+    session_id: impl Into<String>,
+    sequence: u64,
+    summary: impl Into<String>,
+) -> TimelineEventEnvelope {
+    timeline_event(
+        message_id.into(),
+        session_id.into(),
+        sequence,
+        TalosTimelineEventType::ItemStarted,
+        TalosTimelineEventPayload::ItemStarted(talos_client::TalosItemStartedEvent {
+            request_id: "req-test".to_string(),
+            turn_id: "turn-test".to_string(),
+            item: TalosTimelineItem {
+                item_id: format!("summary-{sequence}"),
+                parent_item_id: None,
+                kind: TalosTimelineItemKind::ExecutionSummary,
+                phase: TalosTimelinePhase::System,
+                status: TalosTimelineItemStatus::Completed,
+                title: None,
+                started_at_ms: sequence,
+                completed_at_ms: Some(sequence),
+                content: TalosTimelineContent::ExecutionSummary {
+                    summary: summary.into(),
+                },
+            },
+        }),
+    )
+}
+
+pub(crate) fn tool_started_event(
+    message_id: impl Into<String>,
+    session_id: impl Into<String>,
+    sequence: u64,
+    call_id: impl Into<String>,
+    name: impl Into<String>,
+    arguments: serde_json::Value,
+) -> TimelineEventEnvelope {
+    let call_id = call_id.into();
+    let name = name.into();
+    timeline_event(
+        message_id.into(),
+        session_id.into(),
+        sequence,
+        TalosTimelineEventType::ItemStarted,
+        TalosTimelineEventPayload::ItemStarted(talos_client::TalosItemStartedEvent {
+            request_id: "req-test".to_string(),
+            turn_id: "turn-test".to_string(),
+            item: TalosTimelineItem {
+                item_id: format!("tool-{call_id}"),
+                parent_item_id: None,
+                kind: TalosTimelineItemKind::ToolCall,
+                phase: TalosTimelinePhase::Acting,
+                status: TalosTimelineItemStatus::Running,
+                title: Some(name.clone()),
+                started_at_ms: sequence,
+                completed_at_ms: None,
+                content: TalosTimelineContent::ToolCall {
+                    call_id,
+                    name,
+                    arguments: arguments.to_string(),
+                    progress: Vec::new(),
+                    result: None,
+                },
+            },
+        }),
+    )
+}
+
+pub(crate) fn tool_completed_event(
+    message_id: impl Into<String>,
+    session_id: impl Into<String>,
+    sequence: u64,
+    call_id: impl Into<String>,
+    name: impl Into<String>,
+    output: impl Into<String>,
+    is_error: bool,
+) -> TimelineEventEnvelope {
+    let call_id = call_id.into();
+    let name = name.into();
+    timeline_event(
+        message_id.into(),
+        session_id.into(),
+        sequence,
+        TalosTimelineEventType::ItemCompleted,
+        TalosTimelineEventPayload::ItemCompleted(talos_client::TalosItemCompletedEvent {
+            request_id: "req-test".to_string(),
+            turn_id: "turn-test".to_string(),
+            item_id: format!("tool-{call_id}"),
+            status: if is_error {
+                TalosTimelineItemStatus::Failed
+            } else {
+                TalosTimelineItemStatus::Completed
+            },
+            completed_at_ms: sequence,
+            final_content: Some(TalosTimelineContent::ToolCall {
+                call_id,
+                name,
+                arguments: "{}".to_string(),
+                progress: Vec::new(),
+                result: Some(talos_client::TalosToolResult {
+                    content: vec![TalosContentItem::Text {
+                        text: output.into(),
+                    }],
+                    is_error,
+                }),
+            }),
+        }),
+    )
+}
+
+fn timeline_event(
+    message_id: String,
+    session_id: String,
+    sequence: u64,
+    event_type: TalosTimelineEventType,
+    payload: TalosTimelineEventPayload,
+) -> TimelineEventEnvelope {
+    let event_id = format!("ev_{sequence}");
+    let event_seq = sequence as i64;
+    let created_at_ms = sequence as i64;
+    let event = TalosTimelineEvent {
+        event_seq: Some(event_seq),
+        event_id: Some(event_id.clone()),
+        created_at_ms: Some(created_at_ms),
+        event_type,
+        turn_id: "turn-test".to_string(),
+        message_id: message_id.clone(),
+        session_id: session_id.clone(),
+        sequence,
+        payload,
+    };
+    TimelineEventEnvelope {
+        event_id,
+        event_seq,
+        created_at_ms,
+        session_id,
+        turn_id: "turn-test".to_string(),
+        message_id,
+        event,
     }
 }
 
@@ -209,16 +387,6 @@ impl MockGatewayClient {
     pub(crate) fn with_close_delay(close_session_delay_ms: u64) -> Self {
         let client = Self::new();
         client.state.lock().unwrap().close_session_delay_ms = close_session_delay_ms;
-        client
-    }
-
-    pub(crate) fn with_close_failures(close_session_failures_remaining: u8) -> Self {
-        let client = Self::new();
-        client
-            .state
-            .lock()
-            .unwrap()
-            .close_session_failures_remaining = close_session_failures_remaining;
         client
     }
 }
@@ -504,11 +672,11 @@ impl GatewayClient for MockGatewayClient {
         })
     }
 
-    async fn send_message_events(
+    async fn send_timeline_events(
         &self,
         session_id: &str,
         request: &TalosMessageRequest,
-    ) -> TalosResult<mpsc::Receiver<TalosEvent>> {
+    ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>> {
         let (delay, should_fail) = {
             let mut state = self.state.lock().unwrap();
             let should_fail = if state.stream_failures_remaining > 0 {
@@ -545,12 +713,10 @@ impl GatewayClient for MockGatewayClient {
         };
 
         tx.send(started_event(message_id.clone(), 0)).await.unwrap();
-
-        tx.send(output_delta_event(
+        tx.send(output_item_started_event(
             message_id.clone(),
             session_id.to_string(),
             1,
-            "# Title\n",
         ))
         .await
         .unwrap();
@@ -559,7 +725,7 @@ impl GatewayClient for MockGatewayClient {
             message_id.clone(),
             session_id.to_string(),
             2,
-            "- item\n",
+            "# Title\n",
         ))
         .await
         .unwrap();
@@ -568,6 +734,15 @@ impl GatewayClient for MockGatewayClient {
             message_id.clone(),
             session_id.to_string(),
             3,
+            "- item\n",
+        ))
+        .await
+        .unwrap();
+
+        tx.send(output_delta_event(
+            message_id.clone(),
+            session_id.to_string(),
+            4,
             format!("reply({})", prompt),
         ))
         .await
@@ -576,7 +751,7 @@ impl GatewayClient for MockGatewayClient {
         tx.send(completed_event(
             message_id,
             session_id.to_string(),
-            4,
+            5,
             TalosUsage::default(),
         ))
         .await
@@ -597,8 +772,49 @@ impl GatewayClient for MockGatewayClient {
         Ok(())
     }
 
-    async fn get_session_turns(&self, _session_id: &str) -> TalosResult<Vec<TalosMessageResponse>> {
-        Ok(vec![])
+    async fn get_session_history(&self, session_id: &str) -> TalosResult<SessionHistorySnapshot> {
+        Ok(SessionHistorySnapshot {
+            session_id: session_id.to_string(),
+            messages: Vec::new(),
+            generated_at_ms: 0,
+            last_stable_event_id: None,
+        })
+    }
+
+    async fn get_active_turn(&self, session_id: &str) -> TalosResult<TimelineActiveTurnSnapshot> {
+        Ok(TimelineActiveTurnSnapshot {
+            session_id: session_id.to_string(),
+            status: TimelineActiveTurnStatus::Completed,
+            turn_id: None,
+            message_id: None,
+            last_event_id: None,
+            pending_user_action: None,
+            updated_at: 0,
+        })
+    }
+
+    async fn recover_session(
+        &self,
+        _session_id: &str,
+        _after_event_id: Option<String>,
+    ) -> TalosResult<TimelineRecoverySnapshot> {
+        Ok(TimelineRecoverySnapshot {
+            replay: TimelineReplay {
+                events: Vec::new(),
+                high_water_mark_event_id: None,
+                last_replay_seq: 0,
+                cursor_status: TimelineCursorStatus::FromBeginning,
+            },
+            active_turn: TimelineActiveTurnSnapshot {
+                session_id: _session_id.to_string(),
+                status: TimelineActiveTurnStatus::Completed,
+                turn_id: None,
+                message_id: None,
+                last_event_id: None,
+                pending_user_action: None,
+                updated_at: 0,
+            },
+        })
     }
 
     async fn shutdown(&self) -> TalosResult<()> {

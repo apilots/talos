@@ -1,13 +1,12 @@
 import { useMutation } from "@tanstack/react-query";
 
 import { submitToolApproval } from "../api";
+import { useSessionQueryInvalidation } from "./useSessionQueryInvalidation";
 import { useAppStore } from "@/shared/store/app-store";
 
-export function useSessionApproval(
-  sessionId: string,
-  continueAfterApproval: (text: string) => Promise<unknown>,
-) {
+export function useSessionApproval(sessionId: string) {
   const pendingApproval = useAppStore((state) => state.streams[sessionId]?.pendingApproval);
+  const { invalidateSessionQueries } = useSessionQueryInvalidation(sessionId);
 
   const approvalMutation = useMutation({
     mutationFn: async (approved: boolean) => {
@@ -21,11 +20,14 @@ export function useSessionApproval(
       });
       useAppStore.getState().setPendingUserAction(sessionId, undefined);
       useAppStore.getState().setPendingApproval(sessionId, undefined);
-      useAppStore.getState().setSessionStatus(sessionId, "running");
-      const continuation = approved
-        ? ""
-        : `[Tool \`${pendingApproval.toolName}\` was rejected by user.]`;
-      await continueAfterApproval(continuation);
+      useAppStore.getState().setStreamMeta(sessionId, {
+        isStreaming: false,
+        connectionState: "idle",
+        awaitingFinalResponse: false,
+        showReconnectControls: false,
+      });
+      useAppStore.getState().setSessionStatus(sessionId, undefined);
+      await invalidateSessionQueries();
     },
   });
 

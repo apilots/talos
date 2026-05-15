@@ -10,8 +10,9 @@ import {
   deleteProject,
   deleteSession,
   getActiveTurn,
+  getSessionHistory,
+  recoverSessionLiveTail,
   getSession,
-  getSessionTurns,
   listModels,
   listProjects,
   listSessions,
@@ -31,8 +32,10 @@ export const chatKeys = {
     [...chatKeys.all, connectionKey, "session", sessionId] as const,
   activeTurn: (connectionKey: string, sessionId: string) =>
     [...chatKeys.all, connectionKey, "active-turn", sessionId] as const,
-  turns: (connectionKey: string, sessionId: string) =>
-    [...chatKeys.all, connectionKey, "turns", sessionId] as const,
+  sessionHistory: (connectionKey: string, sessionId: string) =>
+    [...chatKeys.all, connectionKey, "session-history", sessionId] as const,
+  liveRecovery: (connectionKey: string, sessionId: string, afterEventId?: string) =>
+    [...chatKeys.all, connectionKey, "live-recovery", sessionId, afterEventId ?? "tail"] as const,
 };
 
 export function useConnectionKey() {
@@ -105,15 +108,6 @@ export function useSessionQuery(sessionId: string) {
   });
 }
 
-export function useSessionTurnsQuery(sessionId: string) {
-  const connectionKey = useConnectionKey();
-  return useQuery({
-    queryKey: chatKeys.turns(connectionKey, sessionId),
-    queryFn: () => getSessionTurns(sessionId),
-    enabled: Boolean(sessionId),
-  });
-}
-
 export function useActiveTurnQuery(sessionId: string) {
   const connectionKey = useConnectionKey();
   return useQuery({
@@ -125,6 +119,28 @@ export function useActiveTurnQuery(sessionId: string) {
       query.state.data?.status === "waiting_user_action"
         ? 4_000
         : false,
+  });
+}
+
+export function useLiveRecoveryQuery(
+  sessionId: string,
+  afterEventId?: string,
+  enabled = true,
+) {
+  const connectionKey = useConnectionKey();
+  return useQuery({
+    queryKey: chatKeys.liveRecovery(connectionKey, sessionId, afterEventId),
+    queryFn: () => recoverSessionLiveTail(sessionId, afterEventId),
+    enabled: Boolean(sessionId) && enabled,
+  });
+}
+
+export function useSessionHistoryQuery(sessionId: string) {
+  const connectionKey = useConnectionKey();
+  return useQuery({
+    queryKey: chatKeys.sessionHistory(connectionKey, sessionId),
+    queryFn: () => getSessionHistory(sessionId),
+    enabled: Boolean(sessionId),
   });
 }
 
@@ -224,7 +240,8 @@ export function useDeleteSessionMutation() {
     onSuccess: async (_, sessionId) => {
       await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
       queryClient.removeQueries({ queryKey: chatKeys.session(connectionKey, sessionId) });
-      queryClient.removeQueries({ queryKey: chatKeys.turns(connectionKey, sessionId) });
+      queryClient.removeQueries({ queryKey: chatKeys.sessionHistory(connectionKey, sessionId) });
+      queryClient.removeQueries({ queryKey: chatKeys.liveRecovery(connectionKey, sessionId) });
     },
   });
 }
@@ -244,7 +261,8 @@ export function useSessionActions(sessionId: string) {
       onSuccess: async () => {
         await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
         await queryClient.invalidateQueries({ queryKey: chatKeys.session(connectionKey, sessionId) });
-        await queryClient.invalidateQueries({ queryKey: chatKeys.turns(connectionKey, sessionId) });
+        await queryClient.invalidateQueries({ queryKey: chatKeys.sessionHistory(connectionKey, sessionId) });
+        await queryClient.invalidateQueries({ queryKey: chatKeys.liveRecovery(connectionKey, sessionId) });
       },
     }),
     clear: useMutation({
@@ -252,7 +270,8 @@ export function useSessionActions(sessionId: string) {
       onSuccess: async () => {
         await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
         await queryClient.invalidateQueries({ queryKey: chatKeys.session(connectionKey, sessionId) });
-        await queryClient.invalidateQueries({ queryKey: chatKeys.turns(connectionKey, sessionId) });
+        await queryClient.invalidateQueries({ queryKey: chatKeys.sessionHistory(connectionKey, sessionId) });
+        await queryClient.invalidateQueries({ queryKey: chatKeys.liveRecovery(connectionKey, sessionId) });
       },
     }),
   };

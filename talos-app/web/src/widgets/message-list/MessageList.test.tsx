@@ -150,4 +150,201 @@ describe("MessageList", () => {
       expect(writeText).toHaveBeenCalledWith(expect.stringContaining("ok"));
     });
   });
+
+  it("renders timeline blocks with tool progress and duration", async () => {
+    const { getAllByText, getByText } = render(
+      <MessageList
+        blocks={[
+          {
+            id: "timeline-1",
+            kind: "timeline",
+            items: [
+              {
+                itemId: "thinking-1",
+                kind: "reasoning",
+                phase: "thinking",
+                status: "completed",
+                text: "Checking context",
+                startedAtMs: 10,
+                completedAtMs: 20,
+              },
+              {
+                itemId: "tool-1",
+                kind: "tool_call",
+                phase: "acting",
+                status: "completed",
+                callId: "call-1",
+                toolName: "Bash",
+                arguments: { cmd: "pnpm test" },
+                output: "ok",
+                progress: [{ kind: "stdout", message: "running" }],
+                startedAtMs: 25,
+                completedAtMs: 67,
+              },
+            ],
+          },
+        ]}
+        emptyDetail=""
+        emptyTitle=""
+      />,
+    );
+
+    expect(getByText("Thinking / Acting")).not.toBeNull();
+    expect(getByText((content) => content === "57ms")).not.toBeNull();
+    fireEvent.click(getByText("Thinking / Acting"));
+
+    await waitFor(() => {
+      expect(getByText("Checking context")).not.toBeNull();
+      expect(getAllByText("Bash").length).toBeGreaterThan(0);
+      expect(getByText("completed · 42ms")).not.toBeNull();
+    });
+  });
+
+  it("renders thinking text as ordered timeline thought lines", async () => {
+    const { container, getAllByText, getByLabelText, getByText } = render(
+      <MessageList
+        blocks={[
+          {
+            id: "timeline-2",
+            kind: "timeline",
+            items: [
+              {
+                itemId: "thinking-1",
+                kind: "reasoning",
+                phase: "thinking",
+                status: "running",
+                text: "First thought. Second thought.",
+                startedAtMs: 10,
+              },
+              {
+                itemId: "tool-1",
+                kind: "tool_call",
+                phase: "acting",
+                status: "running",
+                callId: "call-1",
+                toolName: "Glob",
+                arguments: { pattern: "**/*.rs" },
+                progress: [],
+                startedAtMs: 20,
+              },
+            ],
+          },
+        ]}
+        emptyDetail=""
+        emptyTitle=""
+      />,
+    );
+
+    expect(getByText("First thought.")).not.toBeNull();
+    expect(getByText("Second thought.")).not.toBeNull();
+    expect(getAllByText("Glob").length).toBeGreaterThan(0);
+    expect(getByLabelText("Waiting for timeline update")).not.toBeNull();
+    expect(container.querySelectorAll("ol > li")).toHaveLength(3);
+  });
+
+  it("does not show a running status label on thinking items", async () => {
+    const { getByLabelText, queryByText } = render(
+      <MessageList
+        blocks={[
+          {
+            id: "timeline-running-thinking",
+            kind: "timeline",
+            items: [
+              {
+                itemId: "thinking-1",
+                kind: "reasoning",
+                phase: "thinking",
+                status: "running",
+                text: "Checking the current context.",
+                startedAtMs: Date.now() - 1200,
+              },
+            ],
+          },
+        ]}
+        emptyDetail=""
+        emptyTitle=""
+      />,
+    );
+
+    expect(queryByText("running")).toBeNull();
+    expect(getByLabelText("Waiting for timeline update")).not.toBeNull();
+  });
+
+  it("hides the timeline waiting indicator after the final answer phase starts", async () => {
+    const { queryByLabelText } = render(
+      <MessageList
+        blocks={[
+          {
+            id: "timeline-final-answer",
+            kind: "timeline",
+            items: [
+              {
+                itemId: "answer-1",
+                kind: "assistant_text",
+                phase: "final_answer",
+                status: "running",
+                text: "Streaming final answer.",
+                startedAtMs: Date.now() - 1200,
+              },
+            ],
+          },
+        ]}
+        emptyDetail=""
+        emptyTitle=""
+      />,
+    );
+
+    expect(queryByLabelText("Waiting for timeline update")).toBeNull();
+  });
+
+  it("collapses the whole timeline when execution finishes and can be reopened", async () => {
+    const runningBlock = {
+      id: "timeline-3",
+      kind: "timeline" as const,
+      items: [
+        {
+          itemId: "thinking-1",
+          kind: "reasoning" as const,
+          phase: "thinking" as const,
+          status: "running" as const,
+          text: "Still thinking.",
+          startedAtMs: 10,
+        },
+      ],
+    };
+    const { container, getByText, rerender } = render(
+      <MessageList blocks={[runningBlock]} emptyDetail="" emptyTitle="" />,
+    );
+
+    expect(container.querySelector("details")?.hasAttribute("open")).toBe(true);
+
+    rerender(
+      <MessageList
+        blocks={[
+          {
+            ...runningBlock,
+            items: [
+              {
+                ...runningBlock.items[0],
+                status: "completed" as const,
+                completedAtMs: 30,
+              },
+            ],
+          },
+        ]}
+        emptyDetail=""
+        emptyTitle=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector("details")?.hasAttribute("open")).toBe(false);
+    });
+
+    fireEvent.click(getByText("Thinking / Acting"));
+
+    await waitFor(() => {
+      expect(container.querySelector("details")?.hasAttribute("open")).toBe(true);
+    });
+  });
 });

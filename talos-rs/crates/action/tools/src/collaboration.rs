@@ -155,7 +155,9 @@ impl CollaborationRuntime {
         let status_tx = task.status_tx.clone();
         let request = GatewayRequest {
             session_id: session_id.to_string(),
+            turn_id: None,
             workspace_id: session.context.workspace_id.clone(),
+            resume_context: None,
             input: vec![TalosInputItem::Text {
                 text: message.to_string(),
             }],

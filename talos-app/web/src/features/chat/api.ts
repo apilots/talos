@@ -5,11 +5,11 @@ import type {
   SessionQuery,
   SessionUpdate,
   TalosContext,
-  TalosEvent,
   TalosMessageRequest,
   TalosMessageRetryRequest,
-  TalosMessageResponse,
   TalosSession,
+  TalosSessionHistorySnapshot,
+  TimelineEventEnvelope,
   ToolApprovalRequest,
 } from "@talos/sdk-browser";
 
@@ -79,10 +79,6 @@ export async function listSessionsByProject(projectId: string) {
 
 export async function getSession(sessionId: string) {
   return getTalosClient().sessions.get(sessionId);
-}
-
-export async function getSessionTurns(sessionId: string) {
-  return getTalosClient().sessions.turns(sessionId);
 }
 
 export async function createSession(
@@ -186,6 +182,14 @@ export async function getActiveTurn(sessionId: string) {
   return getTalosClient().sessions.activeTurn(sessionId);
 }
 
+export async function getSessionHistory(sessionId: string) {
+  return getTalosClient().sessions.history(sessionId);
+}
+
+export async function recoverSessionLiveTail(sessionId: string, afterEventId?: string) {
+  return getTalosClient().sessions.recover(sessionId, afterEventId);
+}
+
 export async function sendMessage(sessionId: string, text: string) {
   const request: TalosMessageRequest = {
     input: [{ type: "text", text }],
@@ -193,10 +197,10 @@ export async function sendMessage(sessionId: string, text: string) {
   return getTalosClient().messages.send(sessionId, request);
 }
 
-export async function sendMessageEvents(
+export async function sendTimelineEvents(
   sessionId: string,
   text: string,
-  onEvent: (event: TalosEvent) => void,
+  onEvent: (event: TimelineEventEnvelope) => void,
   signal?: AbortSignal,
   onAcceptedMessageId?: (messageId: string) => void,
 ) {
@@ -212,10 +216,10 @@ export async function sendMessageEvents(
   return client.messages.eventsForMessage(sessionId, ack.message_id, onEvent, signal);
 }
 
-export async function retryMessageEvents(
+export async function retryTimelineEvents(
   sessionId: string,
   request: TalosMessageRetryRequest,
-  onEvent: (event: TalosEvent) => void,
+  onEvent: (event: TimelineEventEnvelope) => void,
   signal?: AbortSignal,
   onAcceptedMessageId?: (messageId: string) => void,
 ) {
@@ -228,13 +232,20 @@ export async function retryMessageEvents(
   return client.messages.eventsForMessage(sessionId, ack.message_id, onEvent, signal);
 }
 
-export async function subscribeSessionEventsForMessage(
+export async function subscribeTimelineEventsForMessage(
   sessionId: string,
   messageId: string,
-  onEvent: (event: TalosEvent) => void,
+  onEvent: (event: TimelineEventEnvelope) => void,
   signal?: AbortSignal,
+  afterEventId?: string,
 ) {
-  return getTalosClient().messages.eventsForMessage(sessionId, messageId, onEvent, signal);
+  return getTalosClient().messages.eventsForMessage(
+    sessionId,
+    messageId,
+    onEvent,
+    signal,
+    afterEventId,
+  );
 }
 
 export async function submitToolApproval(
@@ -254,5 +265,5 @@ export function belongsToProject(session: TalosSession, project?: ProjectRecord)
 export type ChatApiModel = ModelInfo;
 export type ChatApiSession = TalosSession;
 export type ChatApiActiveTurn = Awaited<ReturnType<typeof getActiveTurn>>;
+export type ChatApiSessionHistory = TalosSessionHistorySnapshot;
 export type ChatApiSessionDetail = TalosSession;
-export type ChatApiTurns = TalosMessageResponse[];

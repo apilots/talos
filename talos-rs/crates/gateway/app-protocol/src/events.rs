@@ -1,38 +1,25 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use talos_types::talos::{TalosEvent, TalosEventType};
+use talos_types::talos::{TalosTimelineEventType, TimelineEventEnvelope};
 use ts_rs::TS;
 
 pub type EventSubscriptionId = String;
-pub type ApplicationEvent = TalosEvent;
+pub type ApplicationEvent = TimelineEventEnvelope;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
-pub struct ApplicationEventEnvelope {
+pub struct TimelineSubscriptionNotification {
     pub subscription_id: EventSubscriptionId,
-    pub event_id: String,
-    #[serde(default)]
-    pub turn_id: Option<String>,
-    pub event: ApplicationEvent,
+    pub event: TimelineEventEnvelope,
 }
 
-pub fn canonical_method(event_type: &TalosEventType) -> &'static str {
+pub fn canonical_method(event_type: &TalosTimelineEventType) -> &'static str {
     match event_type {
-        TalosEventType::MessageStarted => "message.started",
-        TalosEventType::MessageReasoningDelta => "message.reasoning.delta",
-        TalosEventType::MessageExecutionSummary => "message.execution.summary",
-        TalosEventType::MessageOutputDelta => "message.output.delta",
-        TalosEventType::MessageToolCallStarted => "message.tool_call.started",
-        TalosEventType::MessageToolCallArgsDelta => "message.tool_call.args_delta",
-        TalosEventType::MessageToolCallQueued => "message.tool_call.queued",
-        TalosEventType::MessageToolCallExecuting => "message.tool_call.executing",
-        TalosEventType::MessageToolCallProgressDelta => "message.tool_call.progress_delta",
-        TalosEventType::MessageToolCallCompleted => "message.tool_call.completed",
-        TalosEventType::MessageToolCallPendingApproval => "message.tool_call.pending_approval",
-        TalosEventType::MessageToolCallPendingDynamicResult => {
-            "message.tool_call.pending_dynamic_result"
-        }
-        TalosEventType::MessageCompleted => "message.completed",
-        TalosEventType::MessageError => "message.error",
+        TalosTimelineEventType::TurnStarted => "timeline.turn.started",
+        TalosTimelineEventType::ItemStarted => "timeline.item.started",
+        TalosTimelineEventType::ItemDelta => "timeline.item.delta",
+        TalosTimelineEventType::ItemCompleted => "timeline.item.completed",
+        TalosTimelineEventType::TurnCompleted => "timeline.turn.completed",
+        TalosTimelineEventType::TurnError => "timeline.turn.error",
     }
 }
 
@@ -72,10 +59,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn canonical_method_matches_talos_event_type() {
+    fn canonical_method_matches_talos_timeline_event_type() {
         assert_eq!(
-            canonical_method(&TalosEventType::MessageOutputDelta),
-            "message.output.delta"
+            canonical_method(&TalosTimelineEventType::ItemDelta),
+            "timeline.item.delta"
         );
     }
 }

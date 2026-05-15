@@ -4,6 +4,7 @@ pub mod admin;
 pub mod config;
 pub mod event;
 pub mod file;
+pub mod history;
 pub mod memory;
 pub mod session;
 pub mod turn;
@@ -13,11 +14,15 @@ pub use access::{Actor, ActorAccess, ResourceAccessService};
 pub use account::AccountService;
 pub use admin::{AdminSessionPage, DEFAULT_ADMIN_SESSION_PAGE_SIZE, MAX_ADMIN_SESSION_PAGE_SIZE};
 pub use config::{ConfigService, RuntimeConfigReloadHook};
-pub use event::{ApplicationEvent, ApplicationEventStream, EventReplay, EventService};
+pub use event::{
+    ApplicationEvent, ApplicationEventStream, EventReplay, EventService, TimelineCursorStatus,
+    TimelineRecoverySnapshot, TimelineSubscribeParams, TimelineSubscription,
+};
 pub use file::{
     content_hash, modified_at_ms, read_optional, validate_expected_version, with_file_lock,
     workspace_root, write_atomic, FileLockRegistry,
 };
+pub use history::SessionHistoryService;
 pub use memory::{MemoryDate, MemoryListParams, MemorySearchParams, MemoryService};
 pub use session::SessionService;
 pub use turn::{message_request_hash, TurnRetryRequest, TurnService};
@@ -31,11 +36,10 @@ use talos_auth::{AuthService, UserService};
 use talos_config::LlmConfigService;
 use talos_gateway::Gateway;
 use talos_llm_provider::LlmProvider;
-use talos_memory::MemoryStore;
 use talos_session_store::{
-    MessageCommandAck, MessageIdempotencyStore, SessionEventService, SessionStore,
+    MessageCommandAck, MessageIdempotencyStore, SessionStore, TimelineEventService,
 };
-use talos_types::talos::{TalosContext, TalosMessageRequest, TalosMessageResponse};
+use talos_types::talos::{TalosContext, TalosMessageRequest};
 use talos_types::{
     ModelInfo, ProjectPatch, ProjectRecord, SessionConf, SessionPatch, SessionPatchAck,
     SessionQuery, SessionRuntime, TalosConfig, TalosSession,
@@ -47,6 +51,7 @@ pub struct TalosApplicationService {
     pub account: AccountService,
     pub turns: TurnService,
     pub events: EventService,
+    pub history: SessionHistoryService,
     pub config: ConfigService,
     pub memory: MemoryService,
     pub workspace_docs: WorkspaceDocService,
@@ -57,7 +62,7 @@ impl TalosApplicationService {
         gateway: Arc<dyn Gateway>,
         session_runtime: Arc<dyn SessionRuntime>,
         session_store: Arc<dyn SessionStore>,
-        event_service: Arc<SessionEventService>,
+        event_service: Arc<TimelineEventService>,
         idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
         llm_provider: Arc<dyn LlmProvider>,
@@ -86,7 +91,7 @@ impl TalosApplicationService {
         gateway: Arc<dyn Gateway>,
         session_runtime: Arc<dyn SessionRuntime>,
         session_store: Arc<dyn SessionStore>,
-        event_service: Arc<SessionEventService>,
+        event_service: Arc<TimelineEventService>,
         idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
         llm_provider: Arc<dyn LlmProvider>,
@@ -124,7 +129,8 @@ impl TalosApplicationService {
                 idempotency_store,
                 base_config.clone(),
             ),
-            events: EventService::new(event_service),
+            events: EventService::new(event_service.clone()),
+            history: SessionHistoryService::new(base_config.clone(), event_service.clone()),
             config: ConfigService::new_with_reload_hook(llm_config_service, models, reload_hook),
             memory: MemoryService::new(base_config.clone(), llm_provider, file_locks.clone()),
             workspace_docs: WorkspaceDocService::new(base_config, file_locks),
@@ -135,7 +141,7 @@ impl TalosApplicationService {
         gateway: Arc<dyn Gateway>,
         session_runtime: Arc<dyn SessionRuntime>,
         session_store: Arc<dyn SessionStore>,
-        event_service: Arc<SessionEventService>,
+        event_service: Arc<TimelineEventService>,
         idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
         llm_provider: Arc<dyn LlmProvider>,
@@ -205,28 +211,13 @@ impl TalosApplicationService {
         self.access.get_session(actor, session_id).await
     }
 
-    pub async fn get_session_turns(
+    pub async fn get_session_history(
         &self,
         actor: &Actor,
         session_id: &str,
-    ) -> ApplicationResult<Vec<TalosMessageResponse>> {
+    ) -> ApplicationResult<talos_types::talos::SessionHistorySnapshot> {
         let _session = self.access.get_session(actor, session_id).await?;
-        let memory_store = MemoryStore::new_default();
-        let turns = memory_store.load_session_turns(session_id).await?;
-
-        Ok(turns
-            .into_iter()
-            .map(|turn| TalosMessageResponse {
-                request_id: turn.turn_id.clone(),
-                message_id: turn.message_id.clone(),
-                session_id: turn.session_id.clone(),
-                model: String::new(),
-                reasoning: Vec::new(),
-                output: turn.items,
-                stop_reason: turn.stop_reason,
-                usage: turn.usage,
-            })
-            .collect())
+        self.history.snapshot(session_id).await
     }
 
     pub async fn submit_message(

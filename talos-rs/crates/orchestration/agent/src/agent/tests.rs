@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use talos_agent_kernel::StopReason as KernelStopReason;
 use talos_agent_kernel::{
-    ExecutionSummaryStreamData, KernelBuilder, KernelStreamEvent, KernelStreamEventData,
-    KernelStreamEventType, PromptWarningEventData, RunRequest, RunResponse, Runner,
+    KernelBuilder, OutputDeltaStreamData, RunRequest, RunResponse, Runner, ToolArgsDeltaStreamData,
+    ToolCallStartStreamData, ToolResultStreamData,
 };
 use talos_config::AgentKernelConfig;
 use talos_error::TalosResult;
@@ -19,7 +19,7 @@ use talos_tools::{ReadTool, Tool, ToolContext, ToolOutputPayload, ToolRegistry, 
 use talos_tools_policy::ToolPolicy;
 use talos_types::talos::{
     StopReason as TalosStopReason, TalosInputItem, TalosOutputItem, TalosProvider, TalosSourceType,
-    TalosUsage,
+    TalosTimelineEventPayload, TalosUsage,
 };
 use talos_types::{SessionConf, SessionContext, SessionState, TalosSession};
 use tempfile::TempDir;
@@ -84,6 +84,8 @@ struct CapturingRunner {
     seen_kernel_config: Arc<Mutex<Option<AgentKernelConfig>>>,
 }
 
+struct StreamingOutputRunner;
+
 #[async_trait::async_trait]
 impl Runner for CapturingRunner {
     async fn run_turn(
@@ -130,6 +132,43 @@ impl Runner for SequencedRunner {
             output_text: "runner ok".to_string(),
             output_items: vec![TalosOutputItem::OutputText {
                 text: "runner ok".to_string(),
+            }],
+            stop_reason: KernelStopReason::EndTurn,
+            usage: TalosUsage::default(),
+            warnings: Vec::new(),
+            model: "mock-model".to_string(),
+            task_results: Vec::new(),
+            transfer_to: None,
+            iterations: 1,
+            events: Vec::new(),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl Runner for StreamingOutputRunner {
+    async fn run_turn(
+        &self,
+        _agent: Arc<dyn talos_agent_kernel::Agent>,
+        request: RunRequest,
+    ) -> talos_error::TalosResult<RunResponse> {
+        if let Some(stream_tx) = request.stream_tx {
+            stream_tx
+                .send(KernelStreamEvent::new(
+                    KernelStreamEventType::OutputDelta,
+                    KernelStreamEventData::OutputDelta(OutputDeltaStreamData {
+                        delta: "streamed answer".to_string(),
+                        round: None,
+                        source: None,
+                    }),
+                ))
+                .await
+                .expect("stream receiver should be open");
+        }
+        Ok(RunResponse {
+            output_text: "streamed answer".to_string(),
+            output_items: vec![TalosOutputItem::OutputText {
+                text: "streamed answer".to_string(),
             }],
             stop_reason: KernelStopReason::EndTurn,
             usage: TalosUsage::default(),
@@ -190,6 +229,210 @@ fn build_test_session(session_id: &str, workspace_id: &str) -> TalosSession {
             usage: TalosUsage::default(),
         },
     }
+}
+
+#[test]
+fn test_approval_resume_completes_same_timeline_tool_item() {
+    let mut timeline = TimelineBuilder::new(
+        "request-approval",
+        "turn-approval",
+        "message-1",
+        "session-1",
+    );
+    let mut state = KernelTimelineState::default();
+    let stream_key = ToolStreamKey { round: 0, index: 0 };
+
+    let start_events = emit_kernel_timeline_events(
+        &mut timeline,
+        &mut state,
+        KernelStreamEvent::new(
+            KernelStreamEventType::ToolCallStart,
+            KernelStreamEventData::ToolCallStart(ToolCallStartStreamData {
+                index: stream_key.index,
+                call_id: Some("call-approval".to_string()),
+                tool_name: Some("Bash".to_string()),
+                arguments: json!({"command": "date"}),
+                round: stream_key.round,
+            }),
+        ),
+    )
+    .expect("tool call start should emit timeline events");
+    let tool_item_id = match &start_events[0].payload {
+        TalosTimelineEventPayload::ItemStarted(payload) => {
+            assert_eq!(payload.item.kind, TalosTimelineItemKind::ToolCall);
+            assert_eq!(payload.item.phase, TalosTimelinePhase::Acting);
+            payload.item.item_id.clone()
+        }
+        _ => panic!("expected tool item start"),
+    };
+
+    let approval_events = emit_kernel_timeline_events(
+        &mut timeline,
+        &mut state,
+        KernelStreamEvent::new(
+            KernelStreamEventType::ConfirmationRequest,
+            KernelStreamEventData::ConfirmationRequest(ConfirmationRequestStreamData {
+                call_id: "call-approval".to_string(),
+                tool_name: "Bash".to_string(),
+                prompt: "Approve command?".to_string(),
+                arguments: json!({"command": "date"}),
+            }),
+        ),
+    )
+    .expect("approval request should update the existing tool item");
+    assert_eq!(approval_events.len(), 2);
+    assert!(approval_events.iter().any(|event| match &event.payload {
+        TalosTimelineEventPayload::ItemDelta(payload) => {
+            payload.item_id == tool_item_id
+                && matches!(
+                    payload.delta,
+                    TalosTimelineDelta::Status {
+                        status: TalosTimelineItemStatus::WaitingApproval
+                    }
+                )
+        }
+        _ => false,
+    }));
+    assert!(approval_events.iter().any(|event| match &event.payload {
+        TalosTimelineEventPayload::ItemDelta(payload) => {
+            payload.item_id == tool_item_id
+                && matches!(
+                    payload.delta,
+                    TalosTimelineDelta::ToolApprovalRequest { .. }
+                )
+        }
+        _ => false,
+    }));
+    assert_eq!(
+        timeline
+            .item(&tool_item_id)
+            .expect("tool item should exist")
+            .status,
+        TalosTimelineItemStatus::WaitingApproval
+    );
+
+    let result_events = emit_kernel_timeline_events(
+        &mut timeline,
+        &mut state,
+        KernelStreamEvent::new(
+            KernelStreamEventType::ToolResult,
+            KernelStreamEventData::ToolResult(ToolResultStreamData {
+                call_id: "call-approval".to_string(),
+                tool_name: "Bash".to_string(),
+                content: vec![TalosContentItem::Text {
+                    text: "Tue May 12".to_string(),
+                }],
+                is_error: false,
+                semantic_events: vec!["tool_use_complete".to_string()],
+                envelope: None,
+                next_turn_failure: None,
+            }),
+        ),
+    )
+    .expect("tool result should complete the existing tool item");
+
+    assert_eq!(
+        start_events
+            .iter()
+            .chain(approval_events.iter())
+            .chain(result_events.iter())
+            .filter(|event| matches!(
+                event.payload,
+                TalosTimelineEventPayload::ItemStarted(ref payload)
+                    if payload.item.kind == TalosTimelineItemKind::ToolCall
+            ))
+            .count(),
+        1
+    );
+    assert!(result_events.iter().all(|event| match &event.payload {
+        TalosTimelineEventPayload::ItemDelta(payload) => payload.item_id == tool_item_id,
+        TalosTimelineEventPayload::ItemCompleted(payload) => payload.item_id == tool_item_id,
+        TalosTimelineEventPayload::ItemStarted(_) => false,
+        _ => true,
+    }));
+    assert_eq!(
+        timeline
+            .item(&tool_item_id)
+            .expect("tool item should exist")
+            .status,
+        TalosTimelineItemStatus::Completed
+    );
+    match &timeline
+        .item(&tool_item_id)
+        .expect("tool item should exist")
+        .content
+    {
+        TalosTimelineContent::ToolCall { result, .. } => {
+            assert!(result.as_ref().is_some_and(|result| !result.is_error));
+        }
+        _ => panic!("expected tool call content"),
+    }
+}
+
+#[test]
+fn test_tool_call_start_reuses_item_created_by_argument_delta() {
+    let mut timeline = TimelineBuilder::new(
+        "request-tool-stream",
+        "turn-tool-stream",
+        "message-1",
+        "session-1",
+    );
+    let mut state = KernelTimelineState::default();
+    let stream_key = ToolStreamKey { round: 0, index: 0 };
+
+    let argument_events = emit_kernel_timeline_events(
+        &mut timeline,
+        &mut state,
+        KernelStreamEvent::new(
+            KernelStreamEventType::ToolArgsDelta,
+            KernelStreamEventData::ToolArgsDelta(ToolArgsDeltaStreamData {
+                stream_key: stream_key.clone(),
+                call_id: Some("call-read".to_string()),
+                tool_name: Some("Read".to_string()),
+                delta: "{\"path\":\"notes/read_target.txt\"}".to_string(),
+            }),
+        ),
+    )
+    .expect("tool argument delta should create a tool item");
+    let tool_item_id = argument_events
+        .iter()
+        .find_map(|event| match &event.payload {
+            TalosTimelineEventPayload::ItemStarted(payload) => Some(payload.item.item_id.clone()),
+            _ => None,
+        })
+        .expect("tool item should be started");
+
+    let start_events = emit_kernel_timeline_events(
+        &mut timeline,
+        &mut state,
+        KernelStreamEvent::new(
+            KernelStreamEventType::ToolCallStart,
+            KernelStreamEventData::ToolCallStart(ToolCallStartStreamData {
+                index: stream_key.index,
+                call_id: Some("call-read".to_string()),
+                tool_name: Some("Read".to_string()),
+                arguments: json!({"path": "notes/read_target.txt"}),
+                round: stream_key.round,
+            }),
+        ),
+    )
+    .expect("tool call start should reuse the existing tool item");
+
+    assert!(
+        start_events.is_empty(),
+        "tool call start must not create a second timeline item"
+    );
+    assert_eq!(
+        state.tool_item_by_call_id.get("call-read"),
+        Some(&tool_item_id)
+    );
+    assert_eq!(
+        timeline
+            .item(&tool_item_id)
+            .expect("tool item should exist")
+            .status,
+        TalosTimelineItemStatus::Running
+    );
 }
 
 #[tokio::test]
@@ -277,64 +520,6 @@ async fn test_add_tool() {
     assert!(tools.contains(&"WebSearch".to_string()));
 }
 
-#[test]
-fn test_map_kernel_stream_event_drops_prompt_warning() {
-    let payload: PromptWarningEventData = serde_json::from_value(json!({
-        "warning": {
-            "type": "prompt_dynamic_section_dropped",
-            "payload": {
-                "sections": ["recent_messages"]
-            }
-        },
-        "agent_id": "agent-1",
-        "session_id": "session-1",
-        "phase": "execution"
-    }))
-    .expect("prompt warning payload should deserialize");
-    let event = KernelStreamEvent::new(
-        KernelStreamEventType::PromptWarning,
-        KernelStreamEventData::PromptWarning(payload),
-    );
-    let mut item_index = 5;
-
-    let mapped = AgentImpl::map_kernel_stream_event(event, "req-1", &mut item_index);
-
-    assert!(
-        mapped.is_none(),
-        "prompt warning should not be exposed upstream"
-    );
-    assert_eq!(
-        item_index, 5,
-        "dropped prompt warning should not consume item index"
-    );
-}
-
-#[test]
-fn test_map_kernel_stream_event_keeps_execution_summary() {
-    let event = KernelStreamEvent::new(
-        KernelStreamEventType::ExecutionSummary,
-        KernelStreamEventData::ExecutionSummary(ExecutionSummaryStreamData {
-            text: "Executed 1 tool call".to_string(),
-            round: None,
-        }),
-    );
-    let mut item_index = 2;
-
-    let mapped = AgentImpl::map_kernel_stream_event(event, "req-1", &mut item_index);
-
-    match mapped {
-        Some(OrchestratorEvent::MessageExecutionSummary(payload)) => {
-            assert_eq!(payload.text, "Executed 1 tool call");
-            assert_eq!(payload.item_index, 2);
-        }
-        other => panic!("unexpected mapped event: {other:?}"),
-    }
-    assert_eq!(
-        item_index, 3,
-        "execution summary should still consume item index"
-    );
-}
-
 #[tokio::test]
 async fn test_execute_tool() {
     let mock_provider = MockLlmProvider {};
@@ -380,6 +565,8 @@ async fn test_run_uses_session_kernel_config_override() {
     let result = agent
         .run(OrchestratorRequest {
             session,
+            turn_id: None,
+            resume_context: None,
             input: vec![TalosInputItem::Text {
                 text: "hello".to_string(),
             }],
@@ -594,6 +781,8 @@ async fn test_cancel_active_turn_aborts_only_current_session_turn() {
     let mut first_stream = agent
         .run_stream(OrchestratorRequest {
             session: session.clone(),
+            turn_id: None,
+            resume_context: None,
             input: vec![TalosInputItem::Text {
                 text: "first".to_string(),
             }],
@@ -608,7 +797,7 @@ async fn test_cancel_active_turn_aborts_only_current_session_turn() {
 
     let mut first_stop_reason = None;
     while let Some(event) = first_stream.recv().await {
-        if let OrchestratorEvent::MessageCompleted(payload) = event {
+        if let TalosTimelineEventPayload::TurnCompleted(payload) = event.payload {
             first_stop_reason = Some(payload.stop_reason);
             break;
         }
@@ -618,6 +807,8 @@ async fn test_cancel_active_turn_aborts_only_current_session_turn() {
     let mut second_stream = agent
         .run_stream(OrchestratorRequest {
             session,
+            turn_id: None,
+            resume_context: None,
             input: vec![TalosInputItem::Text {
                 text: "second".to_string(),
             }],
@@ -626,7 +817,7 @@ async fn test_cancel_active_turn_aborts_only_current_session_turn() {
         .expect("second stream should start");
     let mut second_stop_reason = None;
     while let Some(event) = second_stream.recv().await {
-        if let OrchestratorEvent::MessageCompleted(payload) = event {
+        if let TalosTimelineEventPayload::TurnCompleted(payload) = event.payload {
             second_stop_reason = Some(payload.stop_reason);
             break;
         }
@@ -651,6 +842,8 @@ async fn test_run_stream_queues_second_active_turn_for_same_session() {
     let mut first_stream = agent
         .run_stream(OrchestratorRequest {
             session: session.clone(),
+            turn_id: None,
+            resume_context: None,
             input: vec![TalosInputItem::Text {
                 text: "first".to_string(),
             }],
@@ -662,6 +855,8 @@ async fn test_run_stream_queues_second_active_turn_for_same_session() {
     let mut second_stream = agent
         .run_stream(OrchestratorRequest {
             session: session.clone(),
+            turn_id: None,
+            resume_context: None,
             input: vec![TalosInputItem::Text {
                 text: "second".to_string(),
             }],
@@ -683,7 +878,7 @@ async fn test_run_stream_queues_second_active_turn_for_same_session() {
 
     let mut first_stop_reason = None;
     while let Some(event) = first_stream.recv().await {
-        if let OrchestratorEvent::MessageCompleted(payload) = event {
+        if let TalosTimelineEventPayload::TurnCompleted(payload) = event.payload {
             first_stop_reason = Some(payload.stop_reason);
             break;
         }
@@ -692,12 +887,94 @@ async fn test_run_stream_queues_second_active_turn_for_same_session() {
 
     let mut second_stop_reason = None;
     while let Some(event) = second_stream.recv().await {
-        if let OrchestratorEvent::MessageCompleted(payload) = event {
+        if let TalosTimelineEventPayload::TurnCompleted(payload) = event.payload {
             second_stop_reason = Some(payload.stop_reason);
             break;
         }
     }
     assert_eq!(second_stop_reason, Some(TalosStopReason::EndTurn));
+}
+
+#[tokio::test]
+async fn test_run_stream_emits_user_input_and_single_final_answer() {
+    let mut agent = build_test_agent();
+    agent.kernel_runtime = Arc::new(
+        KernelBuilder::new()
+            .with_runner(Arc::new(StreamingOutputRunner))
+            .build(),
+    );
+    let session = build_test_session("session-timeline", "workspace-a");
+
+    let mut stream = agent
+        .run_stream(OrchestratorRequest {
+            session,
+            turn_id: None,
+            resume_context: None,
+            input: vec![TalosInputItem::Text {
+                text: "hello".to_string(),
+            }],
+        })
+        .await
+        .expect("stream should start");
+
+    let mut events = Vec::new();
+    while let Some(event) = stream.recv().await {
+        let terminal = matches!(
+            event.payload,
+            TalosTimelineEventPayload::TurnCompleted(_) | TalosTimelineEventPayload::TurnError(_)
+        );
+        events.push(event);
+        if terminal {
+            break;
+        }
+    }
+
+    let mut user_input_item_id = None;
+    let mut final_answer_item_id = None;
+    let mut commentary_count = 0;
+    for event in &events {
+        match &event.payload {
+            TalosTimelineEventPayload::ItemStarted(payload)
+                if payload.item.kind == TalosTimelineItemKind::UserInput =>
+            {
+                assert_eq!(payload.item.phase, TalosTimelinePhase::Input);
+                user_input_item_id = Some(payload.item.item_id.clone());
+            }
+            TalosTimelineEventPayload::ItemStarted(payload)
+                if payload.item.phase == TalosTimelinePhase::FinalAnswer =>
+            {
+                final_answer_item_id = Some(payload.item.item_id.clone());
+            }
+            TalosTimelineEventPayload::ItemStarted(payload)
+                if payload.item.phase == TalosTimelinePhase::Commentary =>
+            {
+                commentary_count += 1;
+            }
+            _ => {}
+        }
+    }
+
+    let user_input_item_id = user_input_item_id.expect("user input item should start");
+    let final_answer_item_id = final_answer_item_id.expect("final answer item should start");
+    assert_eq!(commentary_count, 0);
+    assert!(events.iter().any(|event| matches!(
+        &event.payload,
+        TalosTimelineEventPayload::ItemCompleted(payload)
+            if payload.item_id == user_input_item_id
+                && payload.status == TalosTimelineItemStatus::Completed
+    )));
+    assert!(events.iter().any(|event| matches!(
+        &event.payload,
+        TalosTimelineEventPayload::ItemDelta(payload)
+            if payload.item_id == final_answer_item_id
+                && matches!(payload.delta, TalosTimelineDelta::Text { .. })
+    )));
+    assert!(events.iter().any(|event| matches!(
+        &event.payload,
+        TalosTimelineEventPayload::ItemCompleted(payload)
+            if payload.item_id == final_answer_item_id
+                && payload.status == TalosTimelineItemStatus::Completed
+    )));
 }
 
 #[tokio::test]
@@ -721,6 +998,8 @@ async fn test_run_queues_second_active_turn_for_same_session() {
         first_agent
             .run(OrchestratorRequest {
                 session: first_session,
+                turn_id: None,
+                resume_context: None,
                 input: vec![TalosInputItem::Text {
                     text: "first".to_string(),
                 }],
@@ -735,6 +1014,8 @@ async fn test_run_queues_second_active_turn_for_same_session() {
         second_agent
             .run(OrchestratorRequest {
                 session: second_session,
+                turn_id: None,
+                resume_context: None,
                 input: vec![TalosInputItem::Text {
                     text: "second".to_string(),
                 }],

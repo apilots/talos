@@ -9,17 +9,22 @@ use talos_app_protocol::requests::{
     MemoryFileReadParams, MemoryFileWriteParams, MessageCommandStatus, OptionalPathPatch,
     OptionalStringPatch, ProjectCreateParams, ProjectPatchParams, ProtocolInputItem,
     ProtocolTalosContext, SessionCreateParams, SessionListParams, SessionPatchParams,
-    TurnStartParams, TurnStartResponse,
+    TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
+    TimelinePendingDynamicToolResult, TimelinePendingToolApproval, TimelinePendingUserAction,
+    TimelineRecoverySnapshot, TimelineReplay, TurnStartParams, TurnStartResponse,
 };
 use talos_application_service::{
-    Actor, AdminSessionPage, ApplicationEventStream, EventReplay, MemoryDate, MemoryListParams,
-    MemorySearchParams, TalosApplicationService, TurnRetryRequest, WorkspaceDocService,
+    Actor, AdminSessionPage, MemoryDate, MemoryListParams, MemorySearchParams,
+    TalosApplicationService, TimelineCursorStatus as ApplicationTimelineCursorStatus,
+    TimelineSubscribeParams, TimelineSubscription, TurnRetryRequest, WorkspaceDocService,
 };
 use talos_auth::{
     AdminCreateUserRequest, AdminPatchUserRequest, AuthScope, RequestIdentity, UserRole,
 };
 use talos_error::TalosError;
-use talos_session_store::{ActiveTurnRecord, IdempotencyStatus, SessionEventId};
+use talos_session_store::{
+    ActiveTurnRecord, ActiveTurnStatus, IdempotencyStatus, PendingUserAction, TimelineEventId,
+};
 use talos_tools::ToolRegistry;
 use talos_types::talos::{
     TalosContext, TalosInputItem, TalosMessageRequest, TalosProvider, TalosSourceType,
@@ -57,7 +62,7 @@ pub type ProtocolResult<T> = Result<T, AppServerErrorBody>;
 pub trait AppServerApplication: Send + Sync {
     async fn dispatch(&self, actor: &Actor, request: ClientRequest) -> ProtocolResult<Value>;
 
-    async fn subscribe_session_events(
+    async fn subscribe_timeline_events(
         &self,
         actor: &Actor,
         params: EventSubscribeParams,
@@ -68,13 +73,7 @@ pub trait AppServerApplication: Send + Sync {
     async fn drain_background_tasks(&self, timeout: Duration) -> TalosResult<()>;
 }
 
-pub struct SubscriptionSource {
-    pub session_id: String,
-    pub high_water_mark_event_id: Option<SessionEventId>,
-    pub replay: EventReplay,
-    pub live_events: ApplicationEventStream,
-    pub has_live_turn: bool,
-}
+pub type SubscriptionSource = TimelineSubscription;
 
 #[derive(Clone)]
 pub struct TalosApplicationAdapter {
@@ -168,13 +167,40 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .map_err(AppServerErrorBody::from_talos_error)?;
                 to_value(render_active_turn(&params.session_id, active_turn))
             }
-            ClientRequestParams::SessionTurns(params) => {
-                let turns = self
-                    .app
-                    .get_session_turns(actor, &params.session_id)
+            ClientRequestParams::SessionHistory(params) => to_value(
+                self.app
+                    .get_session_history(actor, &params.session_id)
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
+            ClientRequestParams::SessionRecover(params) => {
+                self.app
+                    .get_session(actor, &params.session_id)
                     .await
                     .map_err(AppServerErrorBody::from_talos_error)?;
-                to_value(json!({ "data": turns }))
+                let after_event_id = parse_event_id(params.after_event_id)?;
+                let snapshot = self
+                    .app
+                    .events
+                    .recover_session(
+                        &params.session_id,
+                        after_event_id.as_ref(),
+                        params.replay_limit.unwrap_or(self.replay_limit).max(1),
+                    )
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(TimelineRecoverySnapshot {
+                    replay: TimelineReplay {
+                        events: snapshot.replay.events,
+                        high_water_mark_event_id: snapshot
+                            .replay
+                            .high_water_mark_event_id
+                            .map(|value| value.to_string()),
+                        last_replay_seq: snapshot.replay.last_replay_seq,
+                        cursor_status: map_timeline_cursor_status(snapshot.replay.cursor_status),
+                    },
+                    active_turn: map_active_turn_snapshot(&params.session_id, snapshot.active_turn),
+                })
             }
             ClientRequestParams::ProjectCreate(params) => {
                 to_value(self.create_project(actor, params).await?)
@@ -489,7 +515,7 @@ impl AppServerApplication for TalosApplicationAdapter {
         }
     }
 
-    async fn subscribe_session_events(
+    async fn subscribe_timeline_events(
         &self,
         actor: &Actor,
         params: EventSubscribeParams,
@@ -500,36 +526,17 @@ impl AppServerApplication for TalosApplicationAdapter {
             .map_err(AppServerErrorBody::from_talos_error)?;
         let after_event_id = parse_event_id(params.since_event_id)?;
         let limit = params.replay_limit.unwrap_or(self.replay_limit).max(1);
-        let live_events = self
-            .app
+        self.app
             .events
-            .subscribe_live_events()
-            .map_err(AppServerErrorBody::from_talos_error)?;
-        let high_water_mark_event_id = self
-            .app
-            .events
-            .latest_event_id(&params.session_id)
+            .subscribe(TimelineSubscribeParams {
+                session_id: params.session_id,
+                after_event_id,
+                replay_limit: limit,
+                close_when_idle: false,
+                close_on_terminal: false,
+            })
             .await
-            .map_err(AppServerErrorBody::from_talos_error)?;
-        let replay = self
-            .app
-            .events
-            .replay_after(&params.session_id, after_event_id.as_ref(), limit)
-            .await
-            .map_err(AppServerErrorBody::from_talos_error)?;
-        let has_live_turn = self
-            .app
-            .events
-            .has_live_turn(&params.session_id)
-            .await
-            .map_err(AppServerErrorBody::from_talos_error)?;
-        Ok(SubscriptionSource {
-            session_id: params.session_id,
-            high_water_mark_event_id,
-            replay,
-            live_events,
-            has_live_turn,
-        })
+            .map_err(AppServerErrorBody::from_talos_error)
     }
 
     async fn cancel_active_turn(&self, actor: &Actor, session_id: &str) -> ProtocolResult<()> {
@@ -887,25 +894,71 @@ fn map_context(context: ProtocolTalosContext) -> ProtocolResult<TalosContext> {
 }
 
 fn render_active_turn(session_id: &str, active_turn: Option<ActiveTurnRecord>) -> Value {
+    serde_json::to_value(map_active_turn_snapshot(session_id, active_turn))
+        .unwrap_or_else(|_| json!({ "session_id": session_id, "status": "failed" }))
+}
+
+fn map_active_turn_snapshot(
+    session_id: &str,
+    active_turn: Option<ActiveTurnRecord>,
+) -> TimelineActiveTurnSnapshot {
     match active_turn {
-        Some(record) => json!({
-            "session_id": record.session_id,
-            "turn_id": record.turn_id,
-            "message_id": record.message_id,
-            "status": record.status,
-            "last_event_id": record.last_event_id.map(|value| value.to_string()),
-            "pending_user_action": record.pending_user_action,
-            "updated_at": record.updated_at,
-        }),
-        None => json!({
-            "session_id": session_id,
-            "turn_id": null,
-            "message_id": null,
-            "status": "completed",
-            "last_event_id": null,
-            "pending_user_action": null,
-            "updated_at": current_time_millis(),
-        }),
+        Some(record) => TimelineActiveTurnSnapshot {
+            session_id: record.session_id,
+            turn_id: Some(record.turn_id),
+            message_id: record.message_id,
+            status: map_active_turn_status(record.status),
+            last_event_id: record.last_event_id.map(|value| value.to_string()),
+            pending_user_action: record.pending_user_action.map(map_pending_user_action),
+            updated_at: record.updated_at,
+        },
+        None => TimelineActiveTurnSnapshot {
+            session_id: session_id.to_string(),
+            turn_id: None,
+            message_id: None,
+            status: TimelineActiveTurnStatus::Completed,
+            last_event_id: None,
+            pending_user_action: None,
+            updated_at: current_time_millis(),
+        },
+    }
+}
+
+fn map_active_turn_status(status: ActiveTurnStatus) -> TimelineActiveTurnStatus {
+    match status {
+        ActiveTurnStatus::Running => TimelineActiveTurnStatus::Running,
+        ActiveTurnStatus::WaitingUserAction => TimelineActiveTurnStatus::WaitingUserAction,
+        ActiveTurnStatus::Cancelling => TimelineActiveTurnStatus::Cancelling,
+        ActiveTurnStatus::Completed => TimelineActiveTurnStatus::Completed,
+        ActiveTurnStatus::Failed => TimelineActiveTurnStatus::Failed,
+    }
+}
+
+fn map_pending_user_action(action: PendingUserAction) -> TimelinePendingUserAction {
+    match action {
+        PendingUserAction::ToolApproval(pending) => {
+            TimelinePendingUserAction::ToolApproval(TimelinePendingToolApproval {
+                item_id: pending.item_id,
+                call_id: pending.call_id,
+                tool_name: pending.tool_name,
+                prompt: pending.prompt,
+                arguments: pending.arguments,
+            })
+        }
+        PendingUserAction::DynamicToolResult(pending) => {
+            TimelinePendingUserAction::DynamicToolResult(TimelinePendingDynamicToolResult {
+                item_id: pending.item_id,
+                call_id: pending.call_id,
+                tool_name: pending.tool_name,
+            })
+        }
+    }
+}
+
+fn map_timeline_cursor_status(status: ApplicationTimelineCursorStatus) -> TimelineCursorStatus {
+    match status {
+        ApplicationTimelineCursorStatus::Current => TimelineCursorStatus::Current,
+        ApplicationTimelineCursorStatus::FromBeginning => TimelineCursorStatus::FromBeginning,
     }
 }
 
@@ -966,10 +1019,10 @@ fn request_identity(actor: &Actor) -> RequestIdentity {
     }
 }
 
-fn parse_event_id(value: Option<String>) -> ProtocolResult<Option<SessionEventId>> {
+fn parse_event_id(value: Option<String>) -> ProtocolResult<Option<TimelineEventId>> {
     value
         .map(|raw| {
-            let event_id = SessionEventId::from(raw);
+            let event_id = TimelineEventId::from(raw);
             event_id
                 .event_seq()
                 .map_err(AppServerErrorBody::from_talos_error)?;

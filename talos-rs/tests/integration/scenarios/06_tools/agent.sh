@@ -113,24 +113,57 @@ import os
 
 data = json.loads(os.environ["AGENT_JSON"])
 results = [item for item in data.get("output", []) if item.get("type") == "tool_result"]
-assert results, "missing tool_result"
-result = results[0]
-assert result.get("tool_name") == "Agent", result.get("tool_name")
-content_items = result.get("content") or []
-assert content_items, "missing content payload"
-content = ((content_items[0].get("value") or {}).get("value", content_items[0].get("value") or {}))
-envelope = content.get("envelope") or {}
-pending = envelope.get("pending") or {}
-if envelope.get("status") == "pending":
-    assert result.get("is_error") is True, result
-    assert pending.get("pending_kind") == "approval", pending
-    assert "approval" in (pending.get("prompt") or "").lower(), pending
-    assert "tool_use_progress" in (content.get("semantic_events") or []), content
-else:
+if results:
+    result = results[0]
+    assert result.get("tool_name") == "Agent", result.get("tool_name")
+    content_items = result.get("content") or []
+    assert content_items, "missing content payload"
+    content = ((content_items[0].get("value") or {}).get("value", content_items[0].get("value") or {}))
+    envelope = content.get("envelope") or {}
     assert content.get("session_id"), content
     assert content.get("agent_kind") in {"general_purpose", "review", "implementation", "research"}, content
     assert content.get("execution_mode") == "background", content
     assert content.get("status") in {"running", "completed"}, content
+PY
+
+AGENT_EVENTS_LOG="$(scenario_report_path agent_events.log)"
+AGENT_EVENTS_LOG="${AGENT_EVENTS_LOG}" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+path = Path(os.environ["AGENT_EVENTS_LOG"])
+tool_item_id = None
+saw_waiting_approval = False
+saw_approval_request = False
+saw_terminal_result = False
+
+for line in path.read_text(encoding="utf-8").splitlines():
+    if not line.startswith("data: "):
+        continue
+    raw_record = json.loads(line[6:])
+    record = raw_record.get("event") if isinstance(raw_record.get("event"), dict) else raw_record
+    payload = record.get("payload") or {}
+    if record.get("event_type") == "item_started":
+        item = payload.get("item") or {}
+        content = item.get("content") or {}
+        if item.get("kind") == "tool_call" and content.get("type") == "tool_call" and content.get("name") == "Agent":
+            tool_item_id = item.get("item_id")
+    elif record.get("event_type") == "item_delta":
+        delta = payload.get("delta") or {}
+        if payload.get("item_id") != tool_item_id:
+            continue
+        if delta.get("type") == "status" and delta.get("status") == "waiting_approval":
+            saw_waiting_approval = True
+        elif delta.get("type") == "tool_approval_request":
+            saw_approval_request = True
+        elif delta.get("type") == "tool_result":
+            saw_terminal_result = True
+
+assert tool_item_id, "missing Agent tool item"
+assert saw_waiting_approval, "missing waiting_approval status"
+assert saw_approval_request, "missing tool approval request delta"
+assert not saw_terminal_result, "pending approval must not emit terminal tool_result"
 PY
 
 echo "CASE tool_agent PASS"

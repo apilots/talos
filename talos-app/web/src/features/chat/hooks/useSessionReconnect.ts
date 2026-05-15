@@ -17,7 +17,7 @@ export function useSessionReconnect({
   streamState,
 }: {
   hasActiveConnection: () => boolean;
-  reconnectMessage: (messageId: string) => Promise<void>;
+  reconnectMessage: (messageId: string, afterEventId?: string) => Promise<void>;
   sessionId: string;
   streamState?: StreamSessionState;
 }) {
@@ -101,7 +101,7 @@ export function useSessionReconnect({
           showReconnectControls: false,
         });
         try {
-          await reconnectMessage(currentStream.activeMessageId);
+          await reconnectMessage(currentStream.activeMessageId, currentStream.lastEventId);
           return;
         } catch {
           if (disposed) {
@@ -154,7 +154,7 @@ export function useSessionReconnect({
       });
       const currentStream = useAppStore.getState().streams[sessionId];
       if (currentStream?.activeMessageId) {
-        await reconnectMessage(currentStream.activeMessageId);
+        await reconnectMessage(currentStream.activeMessageId, currentStream.lastEventId);
         return;
       }
       await invalidateSessionQueries();

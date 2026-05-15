@@ -12,6 +12,7 @@ mod processor;
 mod runner;
 mod runtime;
 mod session;
+mod timeline;
 mod tool_execution;
 mod traits;
 mod types;
@@ -63,10 +64,12 @@ pub use processor::{
 pub use runner::DefaultRunner;
 pub use runtime::{KernelBuilder, KernelOutput, KernelRuntime};
 pub use session::{
-    InvocationSession, MemoryBackedSessionService, SessionApprovalResponsePayload,
-    SessionConfirmationPayload, SessionEvent, SessionEventFilter, SessionEventKind,
-    SessionEventPayload, SessionService, SessionState,
+    InvocationSession, KernelTranscriptApprovalResponsePayload,
+    KernelTranscriptConfirmationPayload, KernelTranscriptEvent, KernelTranscriptEventKind,
+    KernelTranscriptFilter, KernelTranscriptPayload, KernelTranscriptService,
+    MemoryBackedKernelTranscriptService, SessionState,
 };
+pub use timeline::TimelineBuilder;
 pub use tool_execution::{
     ParallelToolExecutor, SequentialToolExecutor, StreamingToolExecutionOutput,
     StreamingToolScheduler, ToolExecutionContext, ToolExecutionInput, ToolExecutionOutput,

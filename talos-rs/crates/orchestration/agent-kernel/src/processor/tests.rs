@@ -67,7 +67,7 @@ fn mock_ctx() -> InvocationContext {
         limits: InvocationLimits::default(),
         events: Vec::new(),
         plugin_manager: crate::default_plugin_manager(),
-        session_service: None,
+        transcript_service: None,
         stream_tx: None,
     }
 }
@@ -259,70 +259,70 @@ async fn test_compaction_processor_emits_typed_summary_event() {
     let mut ctx = mock_ctx();
     ctx.limits.context_compaction_max_bytes = 32;
     ctx.session.events = vec![
-        crate::SessionEvent {
+        crate::KernelTranscriptEvent {
             id: "evt-old-1".to_string(),
             session_id: "s1".to_string(),
             invocation_id: "old-1".to_string(),
             branch: ExecutionBranch::ReactiveLoop,
             author: EventAuthor::User,
-            kind: crate::SessionEventKind::UserMessage,
-            payload: crate::SessionEventPayload::Message {
+            kind: crate::KernelTranscriptEventKind::UserMessage,
+            payload: crate::KernelTranscriptPayload::Message {
                 message: ChatMessage::user("first user message that is long enough"),
             },
             actions: crate::EventActions::default(),
             partial: false,
             timestamp: chrono::Utc::now(),
         },
-        crate::SessionEvent {
+        crate::KernelTranscriptEvent {
             id: "evt-old-1-assistant".to_string(),
             session_id: "s1".to_string(),
             invocation_id: "old-1".to_string(),
             branch: ExecutionBranch::ReactiveLoop,
             author: EventAuthor::Agent,
-            kind: crate::SessionEventKind::AgentMessage,
-            payload: crate::SessionEventPayload::Message {
+            kind: crate::KernelTranscriptEventKind::AgentMessage,
+            payload: crate::KernelTranscriptPayload::Message {
                 message: ChatMessage::assistant("first assistant reply that is long enough"),
             },
             actions: crate::EventActions::default(),
             partial: false,
             timestamp: chrono::Utc::now(),
         },
-        crate::SessionEvent {
+        crate::KernelTranscriptEvent {
             id: "evt-old-2".to_string(),
             session_id: "s1".to_string(),
             invocation_id: "old-2".to_string(),
             branch: ExecutionBranch::ReactiveLoop,
             author: EventAuthor::User,
-            kind: crate::SessionEventKind::UserMessage,
-            payload: crate::SessionEventPayload::Message {
+            kind: crate::KernelTranscriptEventKind::UserMessage,
+            payload: crate::KernelTranscriptPayload::Message {
                 message: ChatMessage::user("second user message that is long enough"),
             },
             actions: crate::EventActions::default(),
             partial: false,
             timestamp: chrono::Utc::now(),
         },
-        crate::SessionEvent {
+        crate::KernelTranscriptEvent {
             id: "evt-old-2-assistant".to_string(),
             session_id: "s1".to_string(),
             invocation_id: "old-2".to_string(),
             branch: ExecutionBranch::ReactiveLoop,
             author: EventAuthor::Agent,
-            kind: crate::SessionEventKind::AgentMessage,
-            payload: crate::SessionEventPayload::Message {
+            kind: crate::KernelTranscriptEventKind::AgentMessage,
+            payload: crate::KernelTranscriptPayload::Message {
                 message: ChatMessage::assistant("second assistant reply that is long enough"),
             },
             actions: crate::EventActions::default(),
             partial: false,
             timestamp: chrono::Utc::now(),
         },
-        crate::SessionEvent {
+        crate::KernelTranscriptEvent {
             id: "evt-old-3".to_string(),
             session_id: "s1".to_string(),
             invocation_id: "old-3".to_string(),
             branch: ExecutionBranch::ReactiveLoop,
             author: EventAuthor::User,
-            kind: crate::SessionEventKind::UserMessage,
-            payload: crate::SessionEventPayload::Message {
+            kind: crate::KernelTranscriptEventKind::UserMessage,
+            payload: crate::KernelTranscriptPayload::Message {
                 message: ChatMessage::user("third user message that is long enough"),
             },
             actions: crate::EventActions::default(),
@@ -362,28 +362,28 @@ async fn test_compaction_processor_compacts_whole_invocations_only() {
     let mut ctx = mock_ctx();
     ctx.limits.context_compaction_max_bytes = 40;
     ctx.session.events = vec![
-        crate::SessionEvent {
+        crate::KernelTranscriptEvent {
             id: "evt-old-1-user".to_string(),
             session_id: "s1".to_string(),
             invocation_id: "old-1".to_string(),
             branch: ExecutionBranch::ReactiveLoop,
             author: EventAuthor::User,
-            kind: crate::SessionEventKind::UserMessage,
-            payload: crate::SessionEventPayload::Message {
+            kind: crate::KernelTranscriptEventKind::UserMessage,
+            payload: crate::KernelTranscriptPayload::Message {
                 message: ChatMessage::user("first invocation user message that is long enough"),
             },
             actions: crate::EventActions::default(),
             partial: false,
             timestamp: chrono::Utc::now(),
         },
-        crate::SessionEvent {
+        crate::KernelTranscriptEvent {
             id: "evt-old-1-agent".to_string(),
             session_id: "s1".to_string(),
             invocation_id: "old-1".to_string(),
             branch: ExecutionBranch::ReactiveLoop,
             author: EventAuthor::Agent,
-            kind: crate::SessionEventKind::AgentMessage,
-            payload: crate::SessionEventPayload::Message {
+            kind: crate::KernelTranscriptEventKind::AgentMessage,
+            payload: crate::KernelTranscriptPayload::Message {
                 message: ChatMessage::assistant(
                     "first invocation assistant message that is long enough",
                 ),
@@ -392,42 +392,42 @@ async fn test_compaction_processor_compacts_whole_invocations_only() {
             partial: false,
             timestamp: chrono::Utc::now(),
         },
-        crate::SessionEvent {
+        crate::KernelTranscriptEvent {
             id: "evt-old-2-user".to_string(),
             session_id: "s1".to_string(),
             invocation_id: "old-2".to_string(),
             branch: ExecutionBranch::ReactiveLoop,
             author: EventAuthor::User,
-            kind: crate::SessionEventKind::UserMessage,
-            payload: crate::SessionEventPayload::Message {
+            kind: crate::KernelTranscriptEventKind::UserMessage,
+            payload: crate::KernelTranscriptPayload::Message {
                 message: ChatMessage::user("second invocation user message that is also long"),
             },
             actions: crate::EventActions::default(),
             partial: false,
             timestamp: chrono::Utc::now(),
         },
-        crate::SessionEvent {
+        crate::KernelTranscriptEvent {
             id: "evt-old-2-agent".to_string(),
             session_id: "s1".to_string(),
             invocation_id: "old-2".to_string(),
             branch: ExecutionBranch::ReactiveLoop,
             author: EventAuthor::Agent,
-            kind: crate::SessionEventKind::AgentMessage,
-            payload: crate::SessionEventPayload::Message {
+            kind: crate::KernelTranscriptEventKind::AgentMessage,
+            payload: crate::KernelTranscriptPayload::Message {
                 message: ChatMessage::assistant("second invocation assistant message"),
             },
             actions: crate::EventActions::default(),
             partial: false,
             timestamp: chrono::Utc::now(),
         },
-        crate::SessionEvent {
+        crate::KernelTranscriptEvent {
             id: "evt-old-3-user".to_string(),
             session_id: "s1".to_string(),
             invocation_id: "old-3".to_string(),
             branch: ExecutionBranch::ReactiveLoop,
             author: EventAuthor::User,
-            kind: crate::SessionEventKind::UserMessage,
-            payload: crate::SessionEventPayload::Message {
+            kind: crate::KernelTranscriptEventKind::UserMessage,
+            payload: crate::KernelTranscriptPayload::Message {
                 message: ChatMessage::user("third invocation user message"),
             },
             actions: crate::EventActions::default(),
@@ -461,42 +461,42 @@ async fn test_compaction_processor_skips_current_invocation_events() {
     ctx.invocation_id = "current".to_string();
     ctx.limits.context_compaction_max_bytes = 32;
     ctx.session.events = vec![
-        crate::SessionEvent {
+        crate::KernelTranscriptEvent {
             id: "evt-history".to_string(),
             session_id: "s1".to_string(),
             invocation_id: "history".to_string(),
             branch: ExecutionBranch::ReactiveLoop,
             author: EventAuthor::User,
-            kind: crate::SessionEventKind::UserMessage,
-            payload: crate::SessionEventPayload::Message {
+            kind: crate::KernelTranscriptEventKind::UserMessage,
+            payload: crate::KernelTranscriptPayload::Message {
                 message: ChatMessage::user("short"),
             },
             actions: crate::EventActions::default(),
             partial: false,
             timestamp: chrono::Utc::now(),
         },
-        crate::SessionEvent {
+        crate::KernelTranscriptEvent {
             id: "evt-current-1".to_string(),
             session_id: "s1".to_string(),
             invocation_id: "current".to_string(),
             branch: ExecutionBranch::ReactiveLoop,
             author: EventAuthor::User,
-            kind: crate::SessionEventKind::UserMessage,
-            payload: crate::SessionEventPayload::Message {
+            kind: crate::KernelTranscriptEventKind::UserMessage,
+            payload: crate::KernelTranscriptPayload::Message {
                 message: ChatMessage::user("current invocation message that is very long"),
             },
             actions: crate::EventActions::default(),
             partial: false,
             timestamp: chrono::Utc::now(),
         },
-        crate::SessionEvent {
+        crate::KernelTranscriptEvent {
             id: "evt-current-2".to_string(),
             session_id: "s1".to_string(),
             invocation_id: "current".to_string(),
             branch: ExecutionBranch::ReactiveLoop,
             author: EventAuthor::Agent,
-            kind: crate::SessionEventKind::AgentMessage,
-            payload: crate::SessionEventPayload::Message {
+            kind: crate::KernelTranscriptEventKind::AgentMessage,
+            payload: crate::KernelTranscriptPayload::Message {
                 message: ChatMessage::assistant("current invocation reply that is very long"),
             },
             actions: crate::EventActions::default(),
@@ -522,17 +522,17 @@ fn make_confirmation_event(
     call_id: &str,
     tool_name: &str,
     ts_offset_ms: i64,
-) -> crate::SessionEvent {
+) -> crate::KernelTranscriptEvent {
     let timestamp = chrono::Utc::now() + chrono::Duration::milliseconds(ts_offset_ms);
-    crate::SessionEvent {
+    crate::KernelTranscriptEvent {
         id: format!("conf-{}", call_id),
         session_id: "s1".to_string(),
         invocation_id: "i0".to_string(),
         branch: ExecutionBranch::ReactiveLoop,
         author: crate::EventAuthor::System,
-        kind: crate::SessionEventKind::SystemMessage,
-        payload: crate::SessionEventPayload::Confirmation {
-            payload: crate::SessionConfirmationPayload {
+        kind: crate::KernelTranscriptEventKind::SystemMessage,
+        payload: crate::KernelTranscriptPayload::Confirmation {
+            payload: crate::KernelTranscriptConfirmationPayload {
                 call_id: call_id.to_string(),
                 tool_name: tool_name.to_string(),
                 prompt: "Need approval.".to_string(),
@@ -550,17 +550,17 @@ fn make_approval_event(
     tool_name: &str,
     approved: bool,
     ts_offset_ms: i64,
-) -> crate::SessionEvent {
+) -> crate::KernelTranscriptEvent {
     let timestamp = chrono::Utc::now() + chrono::Duration::milliseconds(ts_offset_ms);
-    crate::SessionEvent {
+    crate::KernelTranscriptEvent {
         id: format!("approval-{}", call_id),
         session_id: "s1".to_string(),
         invocation_id: "i1".to_string(),
         branch: ExecutionBranch::ReactiveLoop,
         author: crate::EventAuthor::System,
-        kind: crate::SessionEventKind::SystemMessage,
-        payload: crate::SessionEventPayload::ApprovalResponse {
-            payload: crate::SessionApprovalResponsePayload {
+        kind: crate::KernelTranscriptEventKind::SystemMessage,
+        payload: crate::KernelTranscriptPayload::ApprovalResponse {
+            payload: crate::KernelTranscriptApprovalResponsePayload {
                 call_id: call_id.to_string(),
                 tool_name: tool_name.to_string(),
                 approved,

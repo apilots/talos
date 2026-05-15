@@ -4,7 +4,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use talos_llm_provider::{ChatMessage, ChatRequest, LlmProvider, Role};
 
-use crate::{PlannerKind, SessionEvent, SessionEventPayload};
+use crate::{KernelTranscriptEvent, KernelTranscriptPayload, PlannerKind};
 
 const CLASSIFIER_SYSTEM_PROMPT: &str = r#"You are a task routing assistant. Your sole job is to classify the user's request
 into one of two execution modes and return a JSON object.
@@ -85,7 +85,7 @@ pub enum LlmCallError {
 /// Input to the planner selector.
 pub struct PlannerSelectionRequest {
     pub input: String,
-    pub recent_events: Vec<SessionEvent>,
+    pub recent_events: Vec<KernelTranscriptEvent>,
     pub tool_names: Vec<String>,
     pub model: String,
 }
@@ -193,7 +193,7 @@ fn build_user_content(request: &PlannerSelectionRequest) -> String {
         .recent_events
         .iter()
         .filter_map(|event| match &event.payload {
-            SessionEventPayload::Message { message } => {
+            KernelTranscriptPayload::Message { message } => {
                 let role = match message.role {
                     Role::User => "user",
                     Role::Assistant => "assistant",
@@ -230,7 +230,7 @@ fn truncate_for_selector(value: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EventActions, EventAuthor, ExecutionBranch, SessionEventKind};
+    use crate::{EventActions, EventAuthor, ExecutionBranch, KernelTranscriptEventKind};
     use talos_error::TalosResult;
     use talos_llm_provider::{ChatResponse, ChatStream, Usage};
 
@@ -331,28 +331,28 @@ mod tests {
         let request = PlannerSelectionRequest {
             input: "implement follow-up".to_string(),
             recent_events: vec![
-                SessionEvent {
+                KernelTranscriptEvent {
                     id: "1".to_string(),
                     session_id: "s1".to_string(),
                     invocation_id: "i1".to_string(),
                     branch: ExecutionBranch::ReactiveLoop,
                     author: EventAuthor::User,
-                    kind: SessionEventKind::UserMessage,
-                    payload: SessionEventPayload::Message {
+                    kind: KernelTranscriptEventKind::UserMessage,
+                    payload: KernelTranscriptPayload::Message {
                         message: ChatMessage::user("please inspect foo.rs first"),
                     },
                     actions: EventActions::default(),
                     partial: false,
                     timestamp: chrono::Utc::now(),
                 },
-                SessionEvent {
+                KernelTranscriptEvent {
                     id: "2".to_string(),
                     session_id: "s1".to_string(),
                     invocation_id: "i1".to_string(),
                     branch: ExecutionBranch::ReactiveLoop,
                     author: EventAuthor::Agent,
-                    kind: SessionEventKind::AgentMessage,
-                    payload: SessionEventPayload::Message {
+                    kind: KernelTranscriptEventKind::AgentMessage,
+                    payload: KernelTranscriptPayload::Message {
                         message: ChatMessage::assistant("I found the existing endpoint pattern"),
                     },
                     actions: EventActions::default(),

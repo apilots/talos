@@ -35,7 +35,7 @@ class RecordingBridge implements AppServerBridge {
     return this.inner.invoke<T>(method, params);
   }
 
-  onEvent(handler: (envelope: AppProtocol.ApplicationEventEnvelope) => void): () => void {
+  onEvent(handler: (envelope: AppProtocol.TimelineEventEnvelope) => void): () => void {
     return this.inner.onEvent(handler);
   }
 
@@ -72,8 +72,8 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
     const launchToken = process.env.TALOS_LOCAL_LAUNCH_TOKEN ?? "talos-desktop-test-token";
     const bridges: RecordingBridge[] = [];
     const lifecycle: TalosRuntimeState[] = [];
-    const rendererHandlers = new Set<(envelope: AppProtocol.ApplicationEventEnvelope) => void>();
-    const rendererEvents: AppProtocol.ApplicationEventEnvelope[] = [];
+    const rendererHandlers = new Set<(envelope: AppProtocol.TimelineEventEnvelope) => void>();
+    const rendererEvents: AppProtocol.TimelineEventEnvelope[] = [];
     const stderr: string[] = [];
 
     controller = new DesktopAppServerController({
@@ -110,7 +110,7 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
       },
       onSubscriptionTerminated: () => () => undefined,
     });
-    const sdkEvents: AppProtocol.ApplicationEventEnvelope[] = [];
+    const sdkEvents: AppProtocol.TimelineEventEnvelope[] = [];
     const unsubscribe = rendererClient.onEvent((envelope) => sdkEvents.push(envelope));
 
     try {
@@ -142,7 +142,7 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
       });
       await waitForEvent(
         sdkEvents,
-        (event) => event.event.event_type === "message_completed",
+        (event) => event.event.event_type === "turn_completed",
         120_000,
       );
       const lastEventId = requireLastEventId(sdkEvents);
@@ -167,7 +167,7 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
       });
       await waitForEvent(
         sdkEvents,
-        (event) => event.event_id !== lastEventId && event.event.event_type === "message_completed",
+        (event) => event.event_id !== lastEventId && event.event.event_type === "turn_completed",
         120_000,
       );
 
@@ -187,16 +187,16 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
       writeDesktopSmokeArtifact({
         lifecycle,
         bridgeRequests: bridges.map((bridge) => bridge.requests),
-        rendererEventIds: rendererEvents.map((event) => event.event_id),
-        sdkEventIds: sdkEvents.map((event) => event.event_id),
+        rendererEventIds: eventIds(rendererEvents),
+        sdkEventIds: eventIds(sdkEvents),
       });
     }
   }, 300_000);
 });
 
 async function waitForEvent(
-  events: AppProtocol.ApplicationEventEnvelope[],
-  predicate: (event: AppProtocol.ApplicationEventEnvelope) => boolean,
+  events: AppProtocol.TimelineEventEnvelope[],
+  predicate: (event: AppProtocol.TimelineEventEnvelope) => boolean,
   timeoutMs: number,
 ): Promise<void> {
   const start = Date.now();
@@ -237,7 +237,7 @@ function containsOrdered<T>(values: T[], expected: T[]): boolean {
   return false;
 }
 
-function requireLastEventId(events: AppProtocol.ApplicationEventEnvelope[]): string {
+function requireLastEventId(events: AppProtocol.TimelineEventEnvelope[]): string {
   const event = events.at(-1);
   if (!event) {
     throw new Error("No app-server events were received.");
@@ -256,6 +256,10 @@ interface DesktopSmokeArtifact {
   bridgeRequests: Array<Array<{ method: AppProtocol.ClientMethod; params: unknown }>>;
   rendererEventIds: string[];
   sdkEventIds: string[];
+}
+
+function eventIds(events: AppProtocol.TimelineEventEnvelope[]): string[] {
+  return events.map((event) => event.event_id);
 }
 
 function writeDesktopSmokeArtifact(artifact: DesktopSmokeArtifact): void {

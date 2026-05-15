@@ -18,9 +18,9 @@ export function registerDesktopIpcHandlers(runtime: DesktopAppServerController):
   );
 }
 
-export function broadcastApplicationEvent(envelope: AppProtocol.ApplicationEventEnvelope): void {
+export function broadcastApplicationEvent(event: AppProtocol.TimelineEventEnvelope): void {
   for (const window of BrowserWindow.getAllWindows()) {
-    window.webContents.send(TALOS_IPC.event, envelope);
+    window.webContents.send(TALOS_IPC.event, event);
   }
 }
 

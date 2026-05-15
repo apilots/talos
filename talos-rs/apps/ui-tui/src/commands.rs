@@ -7,10 +7,10 @@ use tokio::sync::mpsc;
 use tracing::error;
 
 use crate::client::GatewayClient;
-use crate::types::{AppState, ChatRole, QueuedMessage, RemoteCommandUpdate};
+use crate::types::{AppState, ChatRole, QueuedMessage, RemoteCommandUpdate, SessionHistoryLoad};
 use crate::utils::summarize_for_queue;
 use crate::{TuiApp, MAX_QUEUE_LEN, SESSION_CLOSE_TIMEOUT};
-use talos_client::TalosSession;
+use talos_client::{TalosSession, TimelineActiveTurnStatus};
 
 impl TuiApp {
     pub(crate) async fn submit_input(&mut self) -> TalosResult<bool> {
@@ -490,7 +490,7 @@ impl TuiApp {
             return;
         };
         self.current_state = AppState::Chat;
-        self.load_session_and_turns(session);
+        self.load_session_history(session);
     }
 
     pub(crate) fn switch_to_sessions_picker(&mut self) {
@@ -502,10 +502,10 @@ impl TuiApp {
             return;
         };
         self.show_sessions_picker = false;
-        self.load_session_and_turns(session);
+        self.load_session_history(session);
     }
 
-    pub(crate) fn load_session_and_turns(&mut self, session: TalosSession) {
+    pub(crate) fn load_session_history(&mut self, session: TalosSession) {
         let session_id = session.context.session_id.clone();
         let model = session.config.llm.model.clone();
         self.session_id = Some(session_id.clone());
@@ -529,11 +529,38 @@ impl TuiApp {
             self.push_block(ChatRole::System, format!("Session: {}", session_id));
             return;
         };
-        let _ = self.spawn_remote_command_task("loading session turns", async move {
-            RemoteCommandUpdate::SessionTurnsLoaded {
-                result: client.get_session_turns(&session_id).await,
-                session,
-            }
+        let _ = self.spawn_remote_command_task("loading session history", async move {
+            let result = match client.get_session_history(&session_id).await {
+                Ok(history) => {
+                    let live_recovery = match client.get_active_turn(&session_id).await {
+                        Ok(active_turn)
+                            if matches!(
+                                active_turn.status,
+                                TimelineActiveTurnStatus::Running
+                                    | TimelineActiveTurnStatus::WaitingUserAction
+                                    | TimelineActiveTurnStatus::Cancelling
+                            ) =>
+                        {
+                            Some(
+                                client
+                                    .recover_session(
+                                        &session_id,
+                                        history.last_stable_event_id.clone(),
+                                    )
+                                    .await,
+                            )
+                        }
+                        Ok(_) => None,
+                        Err(err) => Some(Err(err)),
+                    };
+                    Ok(SessionHistoryLoad {
+                        history,
+                        live_recovery,
+                    })
+                }
+                Err(err) => Err(err),
+            };
+            RemoteCommandUpdate::SessionHistoryLoaded { result, session }
         });
     }
 

@@ -13,7 +13,7 @@ class FakeBridge implements AppServerBridge {
   connected = false;
   closed = false;
   readonly requests: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
-  private eventHandler?: (envelope: AppProtocol.ApplicationEventEnvelope) => void;
+  private eventHandler?: (envelope: AppProtocol.TimelineEventEnvelope) => void;
   private subscriptionTerminatedHandler?: (envelope: AppProtocol.SubscriptionTerminatedEnvelope) => void;
   private exitHandler?: (status: { code: number | null; signal: NodeJS.Signals | null }) => void;
 
@@ -43,7 +43,7 @@ class FakeBridge implements AppServerBridge {
     return Promise.resolve({} as T);
   }
 
-  onEvent(handler: (envelope: AppProtocol.ApplicationEventEnvelope) => void): () => void {
+  onEvent(handler: (envelope: AppProtocol.TimelineEventEnvelope) => void): () => void {
     this.eventHandler = handler;
     return () => {
       this.eventHandler = undefined;
@@ -76,7 +76,7 @@ class FakeBridge implements AppServerBridge {
     return () => undefined;
   }
 
-  emitEvent(envelope: AppProtocol.ApplicationEventEnvelope): void {
+  emitEvent(envelope: AppProtocol.TimelineEventEnvelope): void {
     this.eventHandler?.(envelope);
   }
 
@@ -110,31 +110,7 @@ describe("DesktopAppServerController", () => {
       replay_limit: 50,
     } satisfies AppProtocol.EventSubscribeParams);
 
-    bridges[0]?.emitEvent({
-      subscription_id: "sub-1",
-      event_id: "event-7",
-      turn_id: null,
-      event: {
-        event_type: "message_started",
-        message_id: "message-1",
-        session_id: "session-1",
-        sequence: 0n,
-        payload: {
-          type: "message_started",
-          request_id: "request-1",
-          model: "test-model",
-          usage: {
-            input_tokens: 0,
-            output_tokens: 0,
-            total_tokens: 0,
-            cache_creation_input_tokens: null,
-            cache_read_input_tokens: null,
-          },
-          iteration: 0n,
-          step_id: "step-1",
-        },
-      },
-    });
+    bridges[0]?.emitEvent(createEventEnvelope("event-7", "session-1", "turn_started"));
     bridges[0]?.emitExit();
 
     await vi.advanceTimersByTimeAsync(10);
@@ -189,8 +165,8 @@ describe("DesktopAppServerController", () => {
     vi.useFakeTimers();
     const bridges: FakeBridge[] = [];
     const lifecycle: TalosRuntimeState[] = [];
-    const rendererHandlers = new Set<(envelope: AppProtocol.ApplicationEventEnvelope) => void>();
-    const rendererEvents: AppProtocol.ApplicationEventEnvelope[] = [];
+    const rendererHandlers = new Set<(envelope: AppProtocol.TimelineEventEnvelope) => void>();
+    const rendererEvents: AppProtocol.TimelineEventEnvelope[] = [];
     const controller = new DesktopAppServerController({
       launchToken: "token",
       restartDelayMs: 10,
@@ -217,7 +193,7 @@ describe("DesktopAppServerController", () => {
       },
       onSubscriptionTerminated: () => () => undefined,
     });
-    const sdkEvents: AppProtocol.ApplicationEventEnvelope[] = [];
+    const sdkEvents: AppProtocol.TimelineEventEnvelope[] = [];
     const unsubscribe = rendererClient.onEvent((envelope) => sdkEvents.push(envelope));
 
     try {
@@ -228,12 +204,12 @@ describe("DesktopAppServerController", () => {
         replay_limit: 50,
       });
 
-      bridges[0]?.emitEvent(createEventEnvelope("sub-1", "event-7", "session-1", "message_started"));
+      bridges[0]?.emitEvent(createEventEnvelope("event-7", "session-1", "turn_started"));
       bridges[0]?.emitExit();
 
       await vi.advanceTimersByTimeAsync(10);
       bridges[1]?.emitEvent(
-        createEventEnvelope("sub-2", "event-8", "session-1", "message_completed"),
+        createEventEnvelope("event-8", "session-1", "turn_completed"),
       );
 
       expect(lifecycle.map((state) => state.kind)).toEqual([
@@ -262,8 +238,8 @@ describe("DesktopAppServerController", () => {
       writeDesktopSmokeArtifact({
         lifecycle,
         bridgeRequests: bridges.map((bridge) => bridge.requests),
-        rendererEventIds: rendererEvents.map((event) => event.event_id),
-        sdkEventIds: sdkEvents.map((event) => event.event_id),
+        rendererEventIds: eventIds(rendererEvents),
+        sdkEventIds: eventIds(sdkEvents),
       });
       vi.useRealTimers();
     }
@@ -271,39 +247,39 @@ describe("DesktopAppServerController", () => {
 });
 
 function createEventEnvelope(
-  subscriptionId: string,
   eventId: string,
   sessionId: string,
-  eventType: "message_started" | "message_completed",
-): AppProtocol.ApplicationEventEnvelope {
+  eventType: "turn_started" | "turn_completed",
+): AppProtocol.TimelineEventEnvelope {
   return {
-    subscription_id: subscriptionId,
+    event_seq: 1n,
     event_id: eventId,
-    turn_id: null,
+    created_at_ms: 1n,
+    turn_id: "turn-1",
+    message_id: "message-1",
+    session_id: sessionId,
     event: {
+      event_seq: 1n,
+      event_id: eventId,
+      created_at_ms: 1n,
+      turn_id: "turn-1",
       event_type: eventType,
       message_id: "message-1",
       session_id: sessionId,
       sequence: 0n,
       payload:
-        eventType === "message_started"
+        eventType === "turn_started"
           ? {
-              type: "message_started",
+              type: "turn_started",
               request_id: "request-1",
-              model: "test-model",
-              usage: {
-                input_tokens: 0,
-                output_tokens: 0,
-                total_tokens: 0,
-                cache_creation_input_tokens: null,
-                cache_read_input_tokens: null,
-              },
-              iteration: 0n,
-              step_id: "step-1",
+              turn_id: "turn-1",
+              started_at_ms: 1n,
             }
           : {
-              type: "message_completed",
+              type: "turn_completed",
               request_id: "request-1",
+              turn_id: "turn-1",
+              completed_at_ms: 2n,
               stop_reason: "end_turn",
               usage: {
                 input_tokens: 0,
@@ -312,10 +288,6 @@ function createEventEnvelope(
                 cache_creation_input_tokens: null,
                 cache_read_input_tokens: null,
               },
-              total_output_items: 1n,
-              iteration: 0n,
-              step_id: "step-1",
-              task_count: 0,
             },
     },
   };
@@ -326,6 +298,10 @@ interface DesktopSmokeArtifact {
   bridgeRequests: Array<Array<{ method: AppProtocol.ClientMethod; params: unknown }>>;
   rendererEventIds: string[];
   sdkEventIds: string[];
+}
+
+function eventIds(events: AppProtocol.TimelineEventEnvelope[]): string[] {
+  return events.map((event) => event.event_id);
 }
 
 function writeDesktopSmokeArtifact(artifact: DesktopSmokeArtifact): void {

@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use talos_agent::{AgentImpl, AgentOrchestrator, OrchestratorEvent, OrchestratorRequest};
+use talos_agent::{AgentImpl, AgentOrchestrator, OrchestratorRequest};
 use talos_error::TalosResult;
 use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, Role, ToolStream,
@@ -10,7 +10,10 @@ use talos_llm_provider::{
 };
 use talos_tools::{Tool, ToolContext, ToolOutputPayload, ToolRegistry};
 use talos_tools_policy::ToolPolicy;
-use talos_types::talos::{TalosInputItem, TalosProvider, TalosSourceType};
+use talos_types::talos::{
+    TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineDelta, TalosTimelineEventPayload,
+    TalosTimelineItemKind,
+};
 use talos_types::{SessionContext, SessionState, TalosSession};
 use tokio::sync::mpsc;
 
@@ -312,6 +315,8 @@ fn build_request(input: &str) -> OrchestratorRequest {
             config: talos_config::Config::default(),
             state: SessionState::default(),
         },
+        turn_id: None,
+        resume_context: None,
         input: vec![TalosInputItem::Text {
             text: input.to_string(),
         }],
@@ -359,43 +364,43 @@ async fn integration_stream_exposes_reasoning_output_and_tool_events() {
 
     let mut events = Vec::new();
     while let Some(event) = stream.recv().await {
-        let is_completion = matches!(event, OrchestratorEvent::MessageCompleted(_));
         events.push(event);
-        if is_completion {
-            break;
-        }
     }
 
     assert!(events.iter().any(|event| {
         matches!(
-            event,
-            OrchestratorEvent::MessageStarted(payload) if !payload.request_id.is_empty()
+            &event.payload,
+            TalosTimelineEventPayload::TurnStarted(payload) if !payload.request_id.is_empty()
         )
     }));
     assert!(events.iter().any(|event| {
         matches!(
-            event,
-            OrchestratorEvent::MessageReasoningDelta(payload)
-                if payload.delta == "Need tool context first."
+            &event.payload,
+            TalosTimelineEventPayload::ItemDelta(payload)
+                if matches!(&payload.delta, TalosTimelineDelta::Text { text } if text == "Need tool context first.")
         )
     }));
     assert!(events.iter().any(|event| {
         matches!(
-            event,
-            OrchestratorEvent::MessageOutputDelta(payload)
-                if payload.delta.contains("Final answer after tool execution")
+            &event.payload,
+            TalosTimelineEventPayload::ItemDelta(payload)
+                if matches!(&payload.delta, TalosTimelineDelta::Text { text } if text.contains("Final answer after tool execution"))
         )
     }));
-    assert!(events
-        .iter()
-        .any(|event| matches!(event, OrchestratorEvent::MessageToolCallStarted(_))));
-    assert!(events
-        .iter()
-        .any(|event| matches!(event, OrchestratorEvent::MessageToolCallCompleted(_))));
+    assert!(events.iter().any(|event| matches!(
+        &event.payload,
+        TalosTimelineEventPayload::ItemStarted(payload)
+            if payload.item.kind == TalosTimelineItemKind::ToolCall
+    )));
+    assert!(events.iter().any(|event| matches!(
+        &event.payload,
+        TalosTimelineEventPayload::ItemCompleted(payload)
+            if payload.item_id.starts_with("tool-")
+    )));
     assert!(events.iter().any(|event| {
         matches!(
-            event,
-            OrchestratorEvent::MessageCompleted(payload)
+            &event.payload,
+            TalosTimelineEventPayload::TurnCompleted(payload)
                 if payload.stop_reason == talos_types::talos::StopReason::EndTurn
         )
     }));

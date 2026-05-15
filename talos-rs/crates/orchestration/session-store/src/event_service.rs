@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use talos_error::TalosResult;
-use talos_types::talos::TalosEvent;
+use talos_types::talos::{
+    TalosTimelineDelta, TalosTimelineEvent, TalosTimelineEventPayload, TimelineEventEnvelope,
+};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
@@ -9,17 +11,17 @@ use crate::active_turn::{
     ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, PendingDynamicToolResult,
     PendingToolApproval, PendingUserAction,
 };
-use crate::events::{NewSessionEvent, SessionEventRecord, SessionEventStore};
+use crate::events::TimelineEventStore;
 
 #[derive(Debug, Clone)]
-pub struct SessionEventRetentionConfig {
+pub struct TimelineEventRetentionConfig {
     pub retention_hours: u32,
     pub max_events_per_session: usize,
     pub gc_interval_minutes: u32,
     pub gc_batch_size: usize,
 }
 
-impl Default for SessionEventRetentionConfig {
+impl Default for TimelineEventRetentionConfig {
     fn default() -> Self {
         Self {
             retention_hours: 24,
@@ -31,18 +33,18 @@ impl Default for SessionEventRetentionConfig {
 }
 
 #[derive(Clone)]
-pub struct SessionEventService {
-    event_store: Arc<dyn SessionEventStore>,
+pub struct TimelineEventService {
+    event_store: Arc<dyn TimelineEventStore>,
     active_turn_store: Arc<dyn ActiveTurnStore>,
-    retention: SessionEventRetentionConfig,
-    live_tx: broadcast::Sender<SessionEventRecord>,
+    retention: TimelineEventRetentionConfig,
+    live_tx: broadcast::Sender<TimelineEventEnvelope>,
 }
 
-impl SessionEventService {
+impl TimelineEventService {
     pub fn new(
-        event_store: Arc<dyn SessionEventStore>,
+        event_store: Arc<dyn TimelineEventStore>,
         active_turn_store: Arc<dyn ActiveTurnStore>,
-        retention: SessionEventRetentionConfig,
+        retention: TimelineEventRetentionConfig,
     ) -> Self {
         Self {
             event_store,
@@ -55,9 +57,9 @@ impl SessionEventService {
     pub async fn list_events_after(
         &self,
         session_id: &str,
-        after_event_id: Option<&crate::SessionEventId>,
+        after_event_id: Option<&crate::TimelineEventId>,
         limit: usize,
-    ) -> TalosResult<Vec<SessionEventRecord>> {
+    ) -> TalosResult<Vec<TalosTimelineEvent>> {
         self.event_store
             .list_events_after(session_id, after_event_id, limit)
             .await
@@ -66,18 +68,18 @@ impl SessionEventService {
     pub async fn latest_event_id(
         &self,
         session_id: &str,
-    ) -> TalosResult<Option<crate::SessionEventId>> {
+    ) -> TalosResult<Option<crate::TimelineEventId>> {
         self.event_store.latest_event_id(session_id).await
     }
 
     pub async fn oldest_event_id(
         &self,
         session_id: &str,
-    ) -> TalosResult<Option<crate::SessionEventId>> {
+    ) -> TalosResult<Option<crate::TimelineEventId>> {
         self.event_store.oldest_event_id(session_id).await
     }
 
-    pub fn subscribe_live_events(&self) -> broadcast::Receiver<SessionEventRecord> {
+    pub fn subscribe_live_events(&self) -> broadcast::Receiver<TimelineEventEnvelope> {
         self.live_tx.subscribe()
     }
 
@@ -88,67 +90,121 @@ impl SessionEventService {
         self.active_turn_store.get_active_turn(session_id).await
     }
 
+    pub async fn resolve_pending_user_action(&self, session_id: &str) -> TalosResult<()> {
+        let Some(active) = self.active_turn_store.get_active_turn(session_id).await? else {
+            return Ok(());
+        };
+        if active.status != ActiveTurnStatus::WaitingUserAction {
+            return Ok(());
+        }
+        self.active_turn_store
+            .upsert_active_turn(ActiveTurnUpdate {
+                session_id: active.session_id,
+                turn_id: active.turn_id,
+                message_id: active.message_id,
+                status: ActiveTurnStatus::Running,
+                last_event_id: active.last_event_id,
+                pending_user_action: None,
+                updated_at: chrono::Utc::now().timestamp_millis(),
+            })
+            .await
+    }
+
     pub async fn record_talos_event(
         &self,
-        turn_id: Option<String>,
-        event: TalosEvent,
-    ) -> TalosResult<SessionEventRecord> {
+        event: TalosTimelineEvent,
+    ) -> TalosResult<TimelineEventEnvelope> {
         let session_id = event.session_id.clone();
         let message_id = event.message_id.clone();
+        let turn_id = event.turn_id.clone();
         let active_state = match &event.payload {
-            talos_types::talos::TalosEventPayload::MessageCompleted(_) => {
-                self.completed_active_state(&session_id, &message_id, turn_id.as_deref())
+            TalosTimelineEventPayload::TurnCompleted(_) => {
+                self.completed_active_state(&session_id, &message_id, Some(turn_id.as_str()))
                     .await?
             }
-            talos_types::talos::TalosEventPayload::MessageError(_) => {
-                Some((ActiveTurnStatus::Failed, None))
-            }
-            talos_types::talos::TalosEventPayload::MessageToolCallPendingApproval(payload) => {
-                Some((
+            TalosTimelineEventPayload::TurnError(_) => Some((ActiveTurnStatus::Failed, None)),
+            TalosTimelineEventPayload::ItemDelta(payload) => match &payload.delta {
+                TalosTimelineDelta::ToolApprovalRequest {
+                    call_id,
+                    tool_name,
+                    prompt,
+                    arguments,
+                } => Some((
                     ActiveTurnStatus::WaitingUserAction,
                     Some(PendingUserAction::ToolApproval(PendingToolApproval {
-                        call_id: payload.call_id.clone(),
-                        tool_name: payload.tool_name.clone(),
-                        prompt: payload.prompt.clone(),
-                        arguments: payload.arguments.clone(),
+                        item_id: Some(payload.item_id.clone()),
+                        call_id: call_id.clone(),
+                        tool_name: tool_name.clone(),
+                        prompt: prompt.clone(),
+                        arguments: arguments.clone(),
                     })),
-                ))
-            }
-            talos_types::talos::TalosEventPayload::MessageToolCallPendingDynamicResult(payload) => {
-                Some((
+                )),
+                TalosTimelineDelta::ToolDynamicRequest {
+                    call_id, tool_name, ..
+                } => Some((
                     ActiveTurnStatus::WaitingUserAction,
                     Some(PendingUserAction::DynamicToolResult(
                         PendingDynamicToolResult {
-                            call_id: payload.call_id.clone(),
-                            tool_name: payload.tool_name.clone(),
+                            item_id: Some(payload.item_id.clone()),
+                            call_id: call_id.clone(),
+                            tool_name: tool_name.clone(),
                         },
                     )),
-                ))
+                )),
+                TalosTimelineDelta::ToolResult { .. } => {
+                    self.resolve_pending_item_state(&session_id, turn_id.as_str(), &payload.item_id)
+                        .await?
+                }
+                _ => {
+                    self.running_active_state(&session_id, turn_id.as_str())
+                        .await?
+                }
+            },
+            TalosTimelineEventPayload::ItemCompleted(payload)
+                if payload.status
+                    == talos_types::talos::TalosTimelineItemStatus::WaitingApproval =>
+            {
+                None
             }
-            _ => Some((ActiveTurnStatus::Running, None)),
+            TalosTimelineEventPayload::ItemCompleted(payload)
+                if matches!(
+                    payload.status,
+                    talos_types::talos::TalosTimelineItemStatus::Completed
+                        | talos_types::talos::TalosTimelineItemStatus::Failed
+                        | talos_types::talos::TalosTimelineItemStatus::Cancelled
+                ) =>
+            {
+                self.resolve_pending_item_state(&session_id, turn_id.as_str(), &payload.item_id)
+                    .await?
+            }
+            _ => {
+                self.running_active_state(&session_id, turn_id.as_str())
+                    .await?
+            }
         };
-        let active_turn_id = turn_id.clone();
-        let new_event = NewSessionEvent::from_talos_event(turn_id, event);
-        let record = self.event_store.append_event(new_event).await?;
-        let _ = self.live_tx.send(record.clone());
+        let record = self.event_store.append_event(event).await?;
+        let envelope = TimelineEventEnvelope::from_persisted_event(record).ok_or_else(|| {
+            talos_error::TalosError::SerializationError(
+                "persisted timeline event is missing envelope metadata".to_string(),
+            )
+        })?;
+        let _ = self.live_tx.send(envelope.clone());
 
-        if let (Some(active_turn_id), Some((status, pending_user_action))) =
-            (active_turn_id, active_state)
-        {
+        if let Some((status, pending_user_action)) = active_state {
             self.active_turn_store
                 .upsert_active_turn(ActiveTurnUpdate {
                     session_id,
-                    turn_id: active_turn_id,
+                    turn_id,
                     message_id: Some(message_id),
                     status,
-                    last_event_id: Some(record.event_id.clone()),
+                    last_event_id: Some(crate::TimelineEventId::from(envelope.event_id.clone())),
                     pending_user_action,
-                    updated_at: record.created_at,
+                    updated_at: envelope.created_at_ms,
                 })
                 .await?;
         }
 
-        Ok(record)
+        Ok(envelope)
     }
 
     async fn completed_active_state(
@@ -177,6 +233,58 @@ impl SessionEventService {
         Ok(Some((ActiveTurnStatus::Completed, None)))
     }
 
+    async fn running_active_state(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+    ) -> TalosResult<Option<(ActiveTurnStatus, Option<PendingUserAction>)>> {
+        let Some(active) = self.active_turn_store.get_active_turn(session_id).await? else {
+            return Ok(Some((ActiveTurnStatus::Running, None)));
+        };
+        if active.turn_id == turn_id
+            && active.status == ActiveTurnStatus::WaitingUserAction
+            && active.pending_user_action.is_some()
+        {
+            return Ok(Some((
+                ActiveTurnStatus::WaitingUserAction,
+                active.pending_user_action,
+            )));
+        }
+        Ok(Some((ActiveTurnStatus::Running, None)))
+    }
+
+    async fn resolve_pending_item_state(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        item_id: &str,
+    ) -> TalosResult<Option<(ActiveTurnStatus, Option<PendingUserAction>)>> {
+        let Some(active) = self.active_turn_store.get_active_turn(session_id).await? else {
+            return Ok(Some((ActiveTurnStatus::Running, None)));
+        };
+        if active.turn_id != turn_id || active.status != ActiveTurnStatus::WaitingUserAction {
+            return Ok(Some((ActiveTurnStatus::Running, None)));
+        }
+        let resolves_pending = match active.pending_user_action.as_ref() {
+            Some(PendingUserAction::ToolApproval(pending)) => pending
+                .item_id
+                .as_deref()
+                .is_none_or(|pending_item_id| pending_item_id == item_id),
+            Some(PendingUserAction::DynamicToolResult(pending)) => pending
+                .item_id
+                .as_deref()
+                .is_none_or(|pending_item_id| pending_item_id == item_id),
+            None => false,
+        };
+        if resolves_pending {
+            return Ok(Some((ActiveTurnStatus::Running, None)));
+        }
+        Ok(Some((
+            ActiveTurnStatus::WaitingUserAction,
+            active.pending_user_action,
+        )))
+    }
+
     pub async fn run_event_log_gc(&self) -> TalosResult<u64> {
         let cutoff = chrono::Utc::now()
             .timestamp_millis()
@@ -201,7 +309,7 @@ impl SessionEventService {
             tokio::time::interval(std::time::Duration::from_secs(interval_minutes * 60));
 
         if let Err(err) = self.run_event_log_gc().await {
-            tracing::warn!(error = %err, "session event log gc failed on startup");
+            tracing::warn!(error = %err, "timeline event log gc failed on startup");
         }
 
         loop {
@@ -209,7 +317,7 @@ impl SessionEventService {
                 _ = shutdown.cancelled() => break,
                 _ = interval.tick() => {
                     if let Err(err) = self.run_event_log_gc().await {
-                        tracing::warn!(error = %err, "session event log gc failed");
+                        tracing::warn!(error = %err, "timeline event log gc failed");
                     }
                 }
             }
@@ -220,27 +328,146 @@ impl SessionEventService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DatabaseSessionStore, SessionEventStore};
+    use crate::{DatabaseSessionStore, TimelineEventId, TimelineEventStore};
     use std::sync::Arc;
     use talos_storage::SqliteStorage;
     use talos_types::talos::{
-        StopReason, TalosEventPayload, TalosEventType, TalosMessageCompletedEvent,
-        TalosMessageToolCallPendingApprovalEvent, TalosMessageToolCallPendingDynamicResultEvent,
-        TalosUsage,
+        StopReason, TalosContentItem, TalosItemCompletedEvent, TalosItemDeltaEvent,
+        TalosTimelineDelta, TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType,
+        TalosTimelineItemStatus, TalosTurnCompletedEvent, TalosUsage,
     };
 
-    async fn service() -> (SessionEventService, Arc<DatabaseSessionStore>) {
+    async fn service() -> (TimelineEventService, Arc<DatabaseSessionStore>) {
         let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
         let store = Arc::new(DatabaseSessionStore::new(storage).await.unwrap());
-        let event_store: Arc<dyn SessionEventStore> = store.clone();
+        let event_store: Arc<dyn TimelineEventStore> = store.clone();
         let active_turn_store: Arc<dyn ActiveTurnStore> = store.clone();
         (
-            SessionEventService::new(
+            TimelineEventService::new(
                 event_store,
                 active_turn_store,
-                SessionEventRetentionConfig::default(),
+                TimelineEventRetentionConfig::default(),
             ),
             store,
+        )
+    }
+
+    fn timeline_event(
+        sequence: u64,
+        event_type: TalosTimelineEventType,
+        payload: TalosTimelineEventPayload,
+    ) -> TalosTimelineEvent {
+        TalosTimelineEvent {
+            event_seq: None,
+            event_id: None,
+            created_at_ms: Some(1000 + sequence as i64),
+            event_type,
+            turn_id: "turn_1".to_string(),
+            message_id: "msg_1".to_string(),
+            session_id: "s1".to_string(),
+            sequence,
+            payload,
+        }
+    }
+
+    fn completed_event(sequence: u64) -> TalosTimelineEvent {
+        timeline_event(
+            sequence,
+            TalosTimelineEventType::TurnCompleted,
+            TalosTimelineEventPayload::TurnCompleted(TalosTurnCompletedEvent {
+                request_id: "req_1".to_string(),
+                turn_id: "turn_1".to_string(),
+                completed_at_ms: 1000,
+                stop_reason: StopReason::EndTurn,
+                usage: TalosUsage::default(),
+            }),
+        )
+    }
+
+    fn approval_event(sequence: u64) -> TalosTimelineEvent {
+        timeline_event(
+            sequence,
+            TalosTimelineEventType::ItemDelta,
+            TalosTimelineEventPayload::ItemDelta(TalosItemDeltaEvent {
+                request_id: "req_1".to_string(),
+                turn_id: "turn_1".to_string(),
+                item_id: "tool-1".to_string(),
+                delta: TalosTimelineDelta::ToolApprovalRequest {
+                    call_id: "call_1".to_string(),
+                    tool_name: "Bash".to_string(),
+                    prompt: "Approve?".to_string(),
+                    arguments: serde_json::json!({"cmd": "date"}).into(),
+                },
+            }),
+        )
+    }
+
+    fn dynamic_event(sequence: u64) -> TalosTimelineEvent {
+        timeline_event(
+            sequence,
+            TalosTimelineEventType::ItemDelta,
+            TalosTimelineEventPayload::ItemDelta(TalosItemDeltaEvent {
+                request_id: "req_1".to_string(),
+                turn_id: "turn_1".to_string(),
+                item_id: "tool-1".to_string(),
+                delta: TalosTimelineDelta::ToolDynamicRequest {
+                    call_id: "call_1".to_string(),
+                    tool_name: "ExternalTool".to_string(),
+                    arguments: serde_json::json!({"query": "input"}).into(),
+                },
+            }),
+        )
+    }
+
+    fn text_delta_event(sequence: u64) -> TalosTimelineEvent {
+        timeline_event(
+            sequence,
+            TalosTimelineEventType::ItemDelta,
+            TalosTimelineEventPayload::ItemDelta(TalosItemDeltaEvent {
+                request_id: "req_1".to_string(),
+                turn_id: "turn_1".to_string(),
+                item_id: "assistant-1".to_string(),
+                delta: TalosTimelineDelta::Text {
+                    text: "Tool confirmation pending.".to_string(),
+                },
+            }),
+        )
+    }
+
+    fn tool_result_event(sequence: u64, item_id: &str) -> TalosTimelineEvent {
+        timeline_event(
+            sequence,
+            TalosTimelineEventType::ItemDelta,
+            TalosTimelineEventPayload::ItemDelta(TalosItemDeltaEvent {
+                request_id: "req_1".to_string(),
+                turn_id: "turn_1".to_string(),
+                item_id: item_id.to_string(),
+                delta: TalosTimelineDelta::ToolResult {
+                    content: vec![TalosContentItem::Text {
+                        text: "ok".to_string(),
+                    }],
+                    is_error: false,
+                },
+            }),
+        )
+    }
+
+    fn item_completed_event(
+        sequence: u64,
+        item_id: &str,
+        status: TalosTimelineItemStatus,
+    ) -> TalosTimelineEvent {
+        timeline_event(
+            sequence,
+            TalosTimelineEventType::ItemCompleted,
+            TalosTimelineEventPayload::ItemCompleted(TalosItemCompletedEvent {
+                request_id: "req_1".to_string(),
+                turn_id: "turn_1".to_string(),
+                item_id: item_id.to_string(),
+                status,
+                completed_at_ms: 1000,
+                final_content: None,
+            }),
         )
     }
 
@@ -248,60 +475,127 @@ mod tests {
     async fn completed_event_updates_active_turn_terminal_status() {
         let (service, store) = service().await;
         let record = service
-            .record_talos_event(
-                Some("turn_1".to_string()),
-                TalosEvent {
-                    event_type: TalosEventType::MessageCompleted,
-                    message_id: "msg_1".to_string(),
-                    session_id: "s1".to_string(),
-                    sequence: 1,
-                    payload: TalosEventPayload::MessageCompleted(TalosMessageCompletedEvent {
-                        request_id: "req_1".to_string(),
-                        stop_reason: StopReason::EndTurn,
-                        usage: TalosUsage::default(),
-                        total_output_items: 1,
-                        iteration: 1,
-                        step_id: "step-1".to_string(),
-                        task_count: 1,
-                    }),
-                },
-            )
+            .record_talos_event(completed_event(1))
             .await
             .unwrap();
 
         let active = store.get_active_turn("s1").await.unwrap().unwrap();
         assert_eq!(active.status, ActiveTurnStatus::Completed);
-        assert_eq!(active.last_event_id, Some(record.event_id));
+        assert_eq!(
+            active.last_event_id,
+            Some(TimelineEventId::from(record.event_id))
+        );
     }
 
     #[tokio::test]
     async fn pending_approval_event_updates_active_turn_user_action() {
         let (service, store) = service().await;
+        service.record_talos_event(approval_event(1)).await.unwrap();
+
+        let active = store.get_active_turn("s1").await.unwrap().unwrap();
+        assert_eq!(active.status, ActiveTurnStatus::WaitingUserAction);
+        assert!(matches!(
+            active.pending_user_action,
+            Some(PendingUserAction::ToolApproval(ref pending))
+                if pending.item_id.as_deref() == Some("tool-1")
+                    && pending.call_id == "call_1"
+                    && pending.tool_name == "Bash"
+        ));
+    }
+
+    #[tokio::test]
+    async fn pending_dynamic_event_updates_active_turn_user_action() {
+        let (service, store) = service().await;
+        service.record_talos_event(dynamic_event(1)).await.unwrap();
+
+        let active = store.get_active_turn("s1").await.unwrap().unwrap();
+        assert_eq!(active.status, ActiveTurnStatus::WaitingUserAction);
+        assert!(matches!(
+            active.pending_user_action,
+            Some(PendingUserAction::DynamicToolResult(ref pending))
+                if pending.item_id.as_deref() == Some("tool-1")
+                    && pending.call_id == "call_1"
+                    && pending.tool_name == "ExternalTool"
+        ));
+    }
+
+    #[tokio::test]
+    async fn tool_result_for_pending_approval_clears_pending_user_action() {
+        let (service, store) = service().await;
+        service.record_talos_event(approval_event(1)).await.unwrap();
+        let result = service
+            .record_talos_event(tool_result_event(2, "tool-1"))
+            .await
+            .unwrap();
+
+        let active = store.get_active_turn("s1").await.unwrap().unwrap();
+        assert_eq!(active.status, ActiveTurnStatus::Running);
+        assert_eq!(active.pending_user_action, None);
+        assert_eq!(
+            active.last_event_id,
+            Some(TimelineEventId::from(result.event_id))
+        );
+    }
+
+    #[tokio::test]
+    async fn item_completed_for_pending_approval_clears_pending_user_action() {
+        let (service, store) = service().await;
+        service.record_talos_event(approval_event(1)).await.unwrap();
+        let completed = service
+            .record_talos_event(item_completed_event(
+                2,
+                "tool-1",
+                TalosTimelineItemStatus::Completed,
+            ))
+            .await
+            .unwrap();
+
+        let active = store.get_active_turn("s1").await.unwrap().unwrap();
+        assert_eq!(active.status, ActiveTurnStatus::Running);
+        assert_eq!(active.pending_user_action, None);
+        assert_eq!(
+            active.last_event_id,
+            Some(TimelineEventId::from(completed.event_id))
+        );
+    }
+
+    #[tokio::test]
+    async fn turn_completed_after_resolved_approval_marks_completed_without_pending() {
+        let (service, store) = service().await;
+        service.record_talos_event(approval_event(1)).await.unwrap();
         service
-            .record_talos_event(
-                Some("turn_1".to_string()),
-                TalosEvent {
-                    event_type: talos_types::talos::TalosEventType::MessageToolCallPendingApproval,
-                    message_id: "msg_1".to_string(),
-                    session_id: "s1".to_string(),
-                    sequence: 1,
-                    payload: TalosEventPayload::MessageToolCallPendingApproval(
-                        TalosMessageToolCallPendingApprovalEvent {
-                            request_id: "req_1".to_string(),
-                            call_id: "call_1".to_string(),
-                            tool_name: "Bash".to_string(),
-                            prompt: "Approve?".to_string(),
-                            arguments: serde_json::json!({"cmd": "date"}).into(),
-                            step_id: "step-1".to_string(),
-                        },
-                    ),
-                },
-            )
+            .record_talos_event(tool_result_event(2, "tool-1"))
+            .await
+            .unwrap();
+        let completed = service
+            .record_talos_event(completed_event(3))
+            .await
+            .unwrap();
+
+        let active = store.get_active_turn("s1").await.unwrap().unwrap();
+        assert_eq!(active.status, ActiveTurnStatus::Completed);
+        assert_eq!(active.pending_user_action, None);
+        assert_eq!(
+            active.last_event_id,
+            Some(TimelineEventId::from(completed.event_id))
+        );
+    }
+
+    #[tokio::test]
+    async fn completed_event_preserves_pending_approval_active_turn() {
+        let (service, store) = service().await;
+        service.record_talos_event(approval_event(1)).await.unwrap();
+        let completed = service
+            .record_talos_event(completed_event(2))
             .await
             .unwrap();
 
         let active = store.get_active_turn("s1").await.unwrap().unwrap();
         assert_eq!(active.status, ActiveTurnStatus::WaitingUserAction);
+        assert_eq!(
+            active.last_event_id,
+            Some(TimelineEventId::from(completed.event_id))
+        );
         assert!(matches!(
             active.pending_user_action,
             Some(PendingUserAction::ToolApproval(ref pending))
@@ -310,90 +604,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pending_dynamic_event_updates_active_turn_user_action() {
+    async fn non_terminal_events_preserve_pending_approval_active_turn_for_same_turn() {
         let (service, store) = service().await;
-        service
-            .record_talos_event(
-                Some("turn_1".to_string()),
-                TalosEvent {
-                    event_type:
-                        talos_types::talos::TalosEventType::MessageToolCallPendingDynamicResult,
-                    message_id: "msg_1".to_string(),
-                    session_id: "s1".to_string(),
-                    sequence: 1,
-                    payload: TalosEventPayload::MessageToolCallPendingDynamicResult(
-                        TalosMessageToolCallPendingDynamicResultEvent {
-                            request_id: "req_1".to_string(),
-                            call_id: "call_1".to_string(),
-                            tool_name: "ExternalTool".to_string(),
-                            arguments: serde_json::json!({"query": "input"}).into(),
-                            step_id: "step-1".to_string(),
-                        },
-                    ),
-                },
-            )
+        service.record_talos_event(approval_event(1)).await.unwrap();
+        let text_delta = service
+            .record_talos_event(text_delta_event(2))
             .await
             .unwrap();
 
         let active = store.get_active_turn("s1").await.unwrap().unwrap();
         assert_eq!(active.status, ActiveTurnStatus::WaitingUserAction);
-        assert!(matches!(
-            active.pending_user_action,
-            Some(PendingUserAction::DynamicToolResult(ref pending))
-                if pending.call_id == "call_1" && pending.tool_name == "ExternalTool"
-        ));
-    }
-
-    #[tokio::test]
-    async fn completed_event_preserves_pending_approval_active_turn() {
-        let (service, store) = service().await;
-        service
-            .record_talos_event(
-                Some("turn_1".to_string()),
-                TalosEvent {
-                    event_type: talos_types::talos::TalosEventType::MessageToolCallPendingApproval,
-                    message_id: "msg_1".to_string(),
-                    session_id: "s1".to_string(),
-                    sequence: 1,
-                    payload: TalosEventPayload::MessageToolCallPendingApproval(
-                        TalosMessageToolCallPendingApprovalEvent {
-                            request_id: "req_1".to_string(),
-                            call_id: "call_1".to_string(),
-                            tool_name: "Bash".to_string(),
-                            prompt: "Approve?".to_string(),
-                            arguments: serde_json::json!({"cmd": "date"}).into(),
-                            step_id: "step-1".to_string(),
-                        },
-                    ),
-                },
-            )
-            .await
-            .unwrap();
-        let completed = service
-            .record_talos_event(
-                Some("turn_1".to_string()),
-                TalosEvent {
-                    event_type: TalosEventType::MessageCompleted,
-                    message_id: "msg_1".to_string(),
-                    session_id: "s1".to_string(),
-                    sequence: 2,
-                    payload: TalosEventPayload::MessageCompleted(TalosMessageCompletedEvent {
-                        request_id: "req_1".to_string(),
-                        stop_reason: StopReason::EndTurn,
-                        usage: TalosUsage::default(),
-                        total_output_items: 1,
-                        iteration: 1,
-                        step_id: "done".to_string(),
-                        task_count: 1,
-                    }),
-                },
-            )
-            .await
-            .unwrap();
-
-        let active = store.get_active_turn("s1").await.unwrap().unwrap();
-        assert_eq!(active.status, ActiveTurnStatus::WaitingUserAction);
-        assert_eq!(active.last_event_id, Some(completed.event_id));
+        assert_eq!(
+            active.last_event_id,
+            Some(TimelineEventId::from(text_delta.event_id))
+        );
         assert!(matches!(
             active.pending_user_action,
             Some(PendingUserAction::ToolApproval(ref pending))
@@ -404,53 +628,18 @@ mod tests {
     #[tokio::test]
     async fn completed_event_preserves_pending_dynamic_active_turn() {
         let (service, store) = service().await;
-        service
-            .record_talos_event(
-                Some("turn_1".to_string()),
-                TalosEvent {
-                    event_type:
-                        talos_types::talos::TalosEventType::MessageToolCallPendingDynamicResult,
-                    message_id: "msg_1".to_string(),
-                    session_id: "s1".to_string(),
-                    sequence: 1,
-                    payload: TalosEventPayload::MessageToolCallPendingDynamicResult(
-                        TalosMessageToolCallPendingDynamicResultEvent {
-                            request_id: "req_1".to_string(),
-                            call_id: "call_1".to_string(),
-                            tool_name: "ExternalTool".to_string(),
-                            arguments: serde_json::json!({"query": "input"}).into(),
-                            step_id: "step-1".to_string(),
-                        },
-                    ),
-                },
-            )
-            .await
-            .unwrap();
+        service.record_talos_event(dynamic_event(1)).await.unwrap();
         let completed = service
-            .record_talos_event(
-                Some("turn_1".to_string()),
-                TalosEvent {
-                    event_type: TalosEventType::MessageCompleted,
-                    message_id: "msg_1".to_string(),
-                    session_id: "s1".to_string(),
-                    sequence: 2,
-                    payload: TalosEventPayload::MessageCompleted(TalosMessageCompletedEvent {
-                        request_id: "req_1".to_string(),
-                        stop_reason: StopReason::EndTurn,
-                        usage: TalosUsage::default(),
-                        total_output_items: 1,
-                        iteration: 1,
-                        step_id: "done".to_string(),
-                        task_count: 1,
-                    }),
-                },
-            )
+            .record_talos_event(completed_event(2))
             .await
             .unwrap();
 
         let active = store.get_active_turn("s1").await.unwrap().unwrap();
         assert_eq!(active.status, ActiveTurnStatus::WaitingUserAction);
-        assert_eq!(active.last_event_id, Some(completed.event_id));
+        assert_eq!(
+            active.last_event_id,
+            Some(TimelineEventId::from(completed.event_id))
+        );
         assert!(matches!(
             active.pending_user_action,
             Some(PendingUserAction::DynamicToolResult(ref pending))

@@ -6,7 +6,7 @@ use talos_application_service::{
 };
 use talos_auth::AuthService;
 #[cfg(test)]
-use talos_session_store::SessionEventService;
+use talos_session_store::TimelineEventService;
 use talos_types::TalosConfig;
 
 use super::lifecycle::ServerLifecycle;
@@ -15,7 +15,7 @@ use super::lifecycle::ServerLifecycle;
 pub(super) struct HttpApiState {
     pub(super) app: Arc<TalosApplicationService>,
     #[cfg(test)]
-    pub(super) event_service: Arc<SessionEventService>,
+    pub(super) event_service: Arc<TimelineEventService>,
     pub(super) events: Arc<EventService>,
     pub(super) config: Arc<ConfigService>,
     pub(super) memory: Arc<MemoryService>,
@@ -30,7 +30,7 @@ pub(super) struct HttpApiState {
 impl HttpApiState {
     pub(super) fn from_application_service(
         app: Arc<TalosApplicationService>,
-        #[cfg(test)] event_service: Arc<SessionEventService>,
+        #[cfg(test)] event_service: Arc<TimelineEventService>,
         base_config: TalosConfig,
         auth_service: Arc<dyn AuthService>,
         auth_disabled: bool,

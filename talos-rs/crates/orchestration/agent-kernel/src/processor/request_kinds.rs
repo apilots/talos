@@ -84,10 +84,10 @@ impl RequestProcessor for AuthRequestProcessor {
         request: &mut LlmRequestEnvelope,
     ) -> TalosResult<RequestProcessorOutput> {
         let latest_auth = latest_branch_event(ctx, request.branch, |event| {
-            matches!(event.payload, SessionEventPayload::Auth { .. })
+            matches!(event.payload, KernelTranscriptPayload::Auth { .. })
         });
         let latest_user = latest_branch_event(ctx, request.branch, |event| {
-            matches!(event.payload, SessionEventPayload::Message { .. })
+            matches!(event.payload, KernelTranscriptPayload::Message { .. })
                 && matches!(event.author, EventAuthor::User)
         });
         if let Some(event) = latest_auth {
@@ -95,7 +95,7 @@ impl RequestProcessor for AuthRequestProcessor {
                 .map(|user_event| user_event.timestamp <= event.timestamp)
                 .unwrap_or(true);
             if auth_is_pending {
-                if let SessionEventPayload::Auth { payload } = &event.payload {
+                if let KernelTranscriptPayload::Auth { payload } = &event.payload {
                     request.prompt_prefix_messages.push(ChatMessage::system(format!(
                         "Authentication is still pending for provider `{}`. Only continue once the credential challenge has been resolved. Context: {}",
                         payload.provider, payload.prompt
@@ -121,13 +121,13 @@ impl RequestProcessor for RequestConfirmationRequestProcessor {
         if let Some((confirmation_event, approval_event)) =
             latest_confirmation_approval_pair(ctx, request.branch)
         {
-            let SessionEventPayload::Confirmation {
+            let KernelTranscriptPayload::Confirmation {
                 payload: confirmation,
             } = &confirmation_event.payload
             else {
                 return Ok(RequestProcessorOutput::default());
             };
-            let SessionEventPayload::ApprovalResponse { payload: approval } =
+            let KernelTranscriptPayload::ApprovalResponse { payload: approval } =
                 &approval_event.payload
             else {
                 return Ok(RequestProcessorOutput::default());
@@ -150,11 +150,11 @@ impl RequestProcessor for RequestConfirmationRequestProcessor {
         }
 
         let latest_confirmation = latest_branch_event(ctx, request.branch, |event| {
-            matches!(event.payload, SessionEventPayload::Confirmation { .. })
+            matches!(event.payload, KernelTranscriptPayload::Confirmation { .. })
         })
         .or_else(|| {
             latest_event(ctx, |event| {
-                matches!(event.payload, SessionEventPayload::Confirmation { .. })
+                matches!(event.payload, KernelTranscriptPayload::Confirmation { .. })
             })
         });
 
@@ -162,7 +162,7 @@ impl RequestProcessor for RequestConfirmationRequestProcessor {
             return Ok(RequestProcessorOutput::default());
         };
 
-        let SessionEventPayload::Confirmation {
+        let KernelTranscriptPayload::Confirmation {
             payload: confirmation,
         } = &confirmation_event.payload
         else {
@@ -181,7 +181,7 @@ impl RequestProcessor for RequestConfirmationRequestProcessor {
 fn latest_confirmation_approval_pair<'a>(
     ctx: &'a InvocationContext,
     branch: crate::ExecutionBranch,
-) -> Option<(&'a SessionEvent, &'a SessionEvent)> {
+) -> Option<(&'a KernelTranscriptEvent, &'a KernelTranscriptEvent)> {
     let latest_branch_pair = ctx.session.events.iter().rev().find_map(|approval_event| {
         if approval_event.branch != branch {
             return None;
@@ -199,9 +199,9 @@ fn latest_confirmation_approval_pair<'a>(
 
 fn confirmation_for_approval<'a>(
     ctx: &'a InvocationContext,
-    approval_event: &'a SessionEvent,
-) -> Option<(&'a SessionEvent, &'a SessionEvent)> {
-    let SessionEventPayload::ApprovalResponse { payload: approval } = &approval_event.payload
+    approval_event: &'a KernelTranscriptEvent,
+) -> Option<(&'a KernelTranscriptEvent, &'a KernelTranscriptEvent)> {
+    let KernelTranscriptPayload::ApprovalResponse { payload: approval } = &approval_event.payload
     else {
         return None;
     };
@@ -213,7 +213,7 @@ fn confirmation_for_approval<'a>(
             if candidate.timestamp >= approval_event.timestamp {
                 return false;
             }
-            if let SessionEventPayload::Confirmation {
+            if let KernelTranscriptPayload::Confirmation {
                 payload: confirmation,
             } = &candidate.payload
             {
@@ -240,7 +240,7 @@ impl RequestProcessor for DynamicToolReplayRequestProcessor {
         let latest_dynamic_request = latest_branch_event(ctx, request.branch, |event| {
             matches!(
                 event.payload,
-                SessionEventPayload::DynamicToolRequest { .. }
+                KernelTranscriptPayload::DynamicToolRequest { .. }
             )
         });
 
@@ -248,7 +248,7 @@ impl RequestProcessor for DynamicToolReplayRequestProcessor {
             return Ok(RequestProcessorOutput::default());
         };
 
-        let SessionEventPayload::DynamicToolRequest {
+        let KernelTranscriptPayload::DynamicToolRequest {
             payload: dynamic_request,
         } = &dynamic_request_event.payload
         else {
@@ -256,7 +256,7 @@ impl RequestProcessor for DynamicToolReplayRequestProcessor {
         };
 
         let latest_dynamic_response = latest_branch_event(ctx, request.branch, |event| {
-            if let SessionEventPayload::DynamicToolResponse { payload } = &event.payload {
+            if let KernelTranscriptPayload::DynamicToolResponse { payload } = &event.payload {
                 payload.call_id == dynamic_request.call_id
             } else {
                 false
@@ -265,7 +265,8 @@ impl RequestProcessor for DynamicToolReplayRequestProcessor {
 
         match latest_dynamic_response {
             Some(response_event) if response_event.timestamp > dynamic_request_event.timestamp => {
-                let SessionEventPayload::DynamicToolResponse { payload } = &response_event.payload
+                let KernelTranscriptPayload::DynamicToolResponse { payload } =
+                    &response_event.payload
                 else {
                     return Ok(RequestProcessorOutput::default());
                 };
@@ -375,7 +376,7 @@ impl RequestProcessor for InteractionsRequestProcessor {
             event.branch == request.branch
                 && !event.partial
                 && matches!(event.author, EventAuthor::Agent)
-                && matches!(event.payload, SessionEventPayload::Message { .. })
+                && matches!(event.payload, KernelTranscriptPayload::Message { .. })
         }) {
             request.interaction_context = Some(crate::RequestInteractionContext {
                 previous_invocation_id: previous_agent_event.invocation_id.clone(),

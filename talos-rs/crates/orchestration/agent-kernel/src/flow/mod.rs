@@ -11,11 +11,11 @@ use crate::{
     ConfirmationRequestPayload, ConfirmationRequestStreamData, EventAuthor, EventPayload,
     ExecutionBranch, ExecutionEvent, ExecutionEventKind, FlowKind, FlowProfile, InvocationContext,
     InvocationPluginManager, KernelExecutionSettings, KernelStreamEvent, KernelStreamEventData,
-    KernelStreamEventType, KernelThinkingSource, KernelThinkingStage, KernelWarning,
-    LlmRequestEnvelope, LlmResponseEnvelope, MemoryBackedSessionService, Planner,
-    RequestProcessorPipeline, ResponseProcessorPipeline, SessionEvent, SessionEventKind,
-    SessionEventPayload, SessionService, StopReason, ThinkingDeltaStreamData, ToolCallbackPayload,
-    ToolExecutor, ToolExecutorFactory,
+    KernelStreamEventType, KernelThinkingSource, KernelThinkingStage, KernelTranscriptEvent,
+    KernelTranscriptEventKind, KernelTranscriptPayload, KernelTranscriptService, KernelWarning,
+    LlmRequestEnvelope, LlmResponseEnvelope, MemoryBackedKernelTranscriptService, Planner,
+    RequestProcessorPipeline, ResponseProcessorPipeline, StopReason, ThinkingDeltaStreamData,
+    ToolCallbackPayload, ToolExecutor, ToolExecutorFactory,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -44,7 +44,7 @@ pub use types::{BaseLlmFlow, FlowExecution, FlowRunSummary};
 
 pub(crate) use callbacks::{
     build_flow_step_model_request, emit_framework_thinking, has_final_response,
-    stage_session_event, tool_names_for_thinking,
+    stage_kernel_transcript_event, tool_names_for_thinking,
 };
 #[cfg(test)]
 pub(crate) use factory::is_local_path_analysis_request;

@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use talos_client::TalosEvent;
+use talos_client::TimelineEventEnvelope;
 use talos_error::{TalosError, TalosResult};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
@@ -36,7 +36,7 @@ impl TuiApp {
     }
 
     pub(crate) async fn poll_stream_connect(&mut self) {
-        let mut connect_result: Option<TalosResult<mpsc::Receiver<TalosEvent>>> = None;
+        let mut connect_result: Option<TalosResult<mpsc::Receiver<TimelineEventEnvelope>>> = None;
         let mut should_clear = false;
 
         if let Some(rx) = self.pending_stream_connect.as_mut() {

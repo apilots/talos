@@ -52,14 +52,14 @@ describe("createDesktopTalosClient", () => {
   });
 
   it("streams desktop turn events by message ack even when event request ids differ", async () => {
-    let eventHandler: ((envelope: AppProtocol.ApplicationEventEnvelope) => void) | undefined;
+    let eventHandler: ((envelope: AppProtocol.TimelineEventEnvelope) => void) | undefined;
     const received: string[] = [];
     const bridge: DesktopRendererBridge = {
       invoke: async function <T>(method: AppProtocol.ClientMethod): Promise<T> {
         if (method === "event.subscribe") {
           queueMicrotask(() => {
-            eventHandler?.(eventEnvelope("message_started", "req-provider", "turn-1", "message-1"));
-            eventHandler?.(eventEnvelope("message_completed", "req-provider", "turn-1", "message-1"));
+            eventHandler?.(eventEnvelope("turn_started", "req-provider", "turn-1", "message-1"));
+            eventHandler?.(eventEnvelope("turn_completed", "req-provider", "turn-1", "message-1"));
           });
           return { subscription_id: "sub-1" } as T;
         }
@@ -90,47 +90,50 @@ describe("createDesktopTalosClient", () => {
     await client.messages.sendEvents(
       "session-1",
       { input: [{ type: "text", text: "hello" }] },
-      (event) => received.push(event.event_type),
+      (envelope) => received.push(envelope.event.event_type),
     );
 
-    expect(received).toEqual(["message_started", "message_completed"]);
+    expect(received).toEqual(["turn_started", "turn_completed"]);
   });
 });
 
 function eventEnvelope(
-  eventType: "message_started" | "message_completed",
+  eventType: "turn_started" | "turn_completed",
   requestId: string,
   turnId: string,
   messageId: string,
-): AppProtocol.ApplicationEventEnvelope {
+): AppProtocol.TimelineEventEnvelope {
   return {
+    event_seq: 1n,
     event_id: `ev-${eventType}`,
-    subscription_id: "sub-1",
+    created_at_ms: 1n,
     turn_id: turnId,
+    message_id: messageId,
+    session_id: "session-1",
     event: {
+      event_seq: 1n,
+      event_id: `ev-${eventType}`,
+      created_at_ms: 1n,
+      turn_id: turnId,
       session_id: "session-1",
       message_id: messageId,
       sequence: 1n,
       event_type: eventType,
       payload:
-        eventType === "message_started"
+        eventType === "turn_started"
           ? {
-              type: "message_started",
+              type: "turn_started",
               request_id: requestId,
-              model: "model-a",
-              usage: usage(),
-              iteration: 1n,
-              step_id: "step-1",
+              turn_id: turnId,
+              started_at_ms: 1n,
             }
           : {
-              type: "message_completed",
+              type: "turn_completed",
               request_id: requestId,
+              turn_id: turnId,
+              completed_at_ms: 2n,
               stop_reason: "end_turn",
               usage: usage(),
-              total_output_items: 1n,
-              iteration: 1n,
-              step_id: "step-1",
-              task_count: 0,
             },
     },
   };

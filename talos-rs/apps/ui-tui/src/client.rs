@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use talos_client::{
-    AppServerClient, ModelInfo, SessionCreateParams, TalosEvent, TalosMessageRequest,
-    TalosMessageResponse, TalosSession,
+    AppServerClient, ModelInfo, SessionCreateParams, SessionHistorySnapshot, TalosMessageRequest,
+    TalosSession, TimelineActiveTurnSnapshot, TimelineEventEnvelope, TimelineRecoverySnapshot,
 };
 use talos_error::{TalosError, TalosResult};
 use tokio::sync::mpsc;
@@ -23,11 +23,13 @@ pub trait GatewayClient: Send + Sync {
     ) -> TalosResult<TalosSession>;
     async fn compact_session(&self, session_id: &str) -> TalosResult<TalosSession>;
     async fn clear_session(&self, session_id: &str) -> TalosResult<TalosSession>;
-    async fn send_message_events(
+    async fn get_session_history(&self, session_id: &str) -> TalosResult<SessionHistorySnapshot>;
+    async fn get_active_turn(&self, session_id: &str) -> TalosResult<TimelineActiveTurnSnapshot>;
+    async fn send_timeline_events(
         &self,
         session_id: &str,
         request: &TalosMessageRequest,
-    ) -> TalosResult<mpsc::Receiver<TalosEvent>>;
+    ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>>;
     async fn submit_tool_approval(
         &self,
         session_id: &str,
@@ -36,7 +38,11 @@ pub trait GatewayClient: Send + Sync {
         approved: bool,
         reason: Option<String>,
     ) -> TalosResult<()>;
-    async fn get_session_turns(&self, session_id: &str) -> TalosResult<Vec<TalosMessageResponse>>;
+    async fn recover_session(
+        &self,
+        session_id: &str,
+        after_event_id: Option<String>,
+    ) -> TalosResult<TimelineRecoverySnapshot>;
     /// Shut down the remote gateway process. After this call, the client must not be reused.
     async fn shutdown(&self) -> TalosResult<()>;
 }
@@ -94,14 +100,22 @@ impl GatewayClient for Mutex<AppServerClient> {
         ))
     }
 
-    async fn send_message_events(
+    async fn get_session_history(&self, session_id: &str) -> TalosResult<SessionHistorySnapshot> {
+        self.lock().await.get_session_history(session_id).await
+    }
+
+    async fn get_active_turn(&self, session_id: &str) -> TalosResult<TimelineActiveTurnSnapshot> {
+        self.lock().await.get_active_turn(session_id).await
+    }
+
+    async fn send_timeline_events(
         &self,
         session_id: &str,
         request: &TalosMessageRequest,
-    ) -> TalosResult<mpsc::Receiver<TalosEvent>> {
+    ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>> {
         self.lock()
             .await
-            .send_message_events(session_id, request.clone())
+            .send_timeline_events(session_id, request.clone())
             .await
     }
 
@@ -119,8 +133,15 @@ impl GatewayClient for Mutex<AppServerClient> {
             .await
     }
 
-    async fn get_session_turns(&self, _session_id: &str) -> TalosResult<Vec<TalosMessageResponse>> {
-        self.lock().await.get_session_turns(_session_id).await
+    async fn recover_session(
+        &self,
+        session_id: &str,
+        after_event_id: Option<String>,
+    ) -> TalosResult<TimelineRecoverySnapshot> {
+        self.lock()
+            .await
+            .recover_session_after(session_id, after_event_id)
+            .await
     }
 
     async fn shutdown(&self) -> TalosResult<()> {

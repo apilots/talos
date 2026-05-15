@@ -30,7 +30,9 @@ use self::admin_users::{
     patch_admin_user_handler,
 };
 use self::auth::{auth_middleware, lifecycle_gate_middleware};
-use self::events::{get_active_turn_handler, subscribe_session_events_handler};
+use self::events::{
+    get_active_turn_handler, recover_timeline_handler, subscribe_timeline_events_handler,
+};
 pub use self::lifecycle::{ServerLifecycle, ServerLifecycleState};
 use self::memory_files::{
     get_memory_file_handler, list_memory_files_handler, put_memory_file_handler,
@@ -50,7 +52,7 @@ use self::projects::{
 use self::sessions::{
     cancel_active_turn_handler, clear_session_handler, close_session_handler,
     compact_session_handler, create_session_handler, delete_session_handler, get_session_handler,
-    get_session_turns_handler, list_sessions_handler, patch_session_handler,
+    get_session_history_handler, list_sessions_handler, patch_session_handler,
 };
 use self::state::HttpApiState;
 use self::user_profile::{
@@ -64,14 +66,14 @@ use self::workspace_docs::{
 use talos_application_service::TalosApplicationService;
 use talos_auth::AuthService;
 use talos_error::TalosResult;
-use talos_session_store::SessionEventService;
+use talos_session_store::TimelineEventService;
 use talos_types::TalosConfig;
 
 /// HTTP Server for the Talos Gateway.
 pub struct HttpServer {
     application_service: Arc<TalosApplicationService>,
     #[cfg(test)]
-    event_service: Arc<SessionEventService>,
+    event_service: Arc<TimelineEventService>,
     auth_service: Arc<dyn AuthService>,
     base_config: TalosConfig,
     host: String,
@@ -86,7 +88,7 @@ impl HttpServer {
     /// Create a new HTTP server instance.
     pub fn new(
         application_service: Arc<TalosApplicationService>,
-        event_service: Arc<SessionEventService>,
+        event_service: Arc<TimelineEventService>,
         auth_service: Arc<dyn AuthService>,
         base_config: TalosConfig,
         host: impl Into<String>,
@@ -227,12 +229,16 @@ impl HttpServer {
                     .delete(delete_session_handler),
             )
             .route(
-                "/v1/sessions/:session_id/turns",
-                get(get_session_turns_handler),
+                "/v1/sessions/:session_id/events",
+                get(subscribe_timeline_events_handler),
             )
             .route(
-                "/v1/sessions/:session_id/events",
-                get(subscribe_session_events_handler),
+                "/v1/sessions/:session_id/history",
+                get(get_session_history_handler),
+            )
+            .route(
+                "/v1/sessions/:session_id/recovery",
+                get(recover_timeline_handler),
             )
             .route(
                 "/v1/sessions/:session_id/active-turn",

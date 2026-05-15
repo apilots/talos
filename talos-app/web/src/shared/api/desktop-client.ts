@@ -14,12 +14,13 @@ import type {
   RegisterRequest,
   SessionQuery,
   SessionUpdate,
-  TalosEvent,
   TalosMessageAck,
   TalosMessageRequest,
   TalosMessageRetryRequest,
   TalosSession,
-  TalosSessionEventRecord,
+  TalosSessionHistorySnapshot,
+  TimelineEventEnvelope,
+  TimelineRecoverySnapshot,
   ToolApprovalRequest,
   UpdateCurrentUserRequest,
   WorkspaceDocKind,
@@ -94,36 +95,37 @@ export function createDesktopTalosClient(
     events: (
       sessionId: string,
       afterEventId: string | undefined,
-      onEvent: (record: TalosSessionEventRecord) => void,
+      onEvent: (event: TimelineEventEnvelope) => void,
       signal?: AbortSignal,
-    ) => streamSessionEvents(client, sessionId, afterEventId ?? null, (envelope) => {
-      onEvent(toSessionEventRecord(envelope));
+    ) => streamTimelineEvents(client, sessionId, afterEventId ?? null, (event) => {
+      onEvent(toTimelineEnvelope(event));
     }, signal),
     eventsForMessage: (
       sessionId: string,
       messageId: string,
-      onEvent: (event: TalosEvent) => void,
+      onEvent: (event: TimelineEventEnvelope) => void,
       signal?: AbortSignal,
-    ) => streamUntilTerminal(client, sessionId, signal, (envelope, stop) => {
-      const event = toTalosEvent(envelope.event);
-      if (event.message_id !== messageId) {
+      afterEventId?: string,
+    ) => streamUntilTerminal(client, sessionId, signal, (event, stop) => {
+      const envelope = toTimelineEnvelope(event);
+      if (envelope.message_id !== messageId) {
         return;
       }
-      onEvent(event);
-      if (isTerminalEvent(event)) {
+      onEvent(envelope);
+      if (isTerminalEvent(envelope)) {
         stop();
       }
-    }),
+    }, undefined, afterEventId ?? null),
     sendEvents: (
       sessionId: string,
       request: TalosMessageRequest,
-      onEvent: (event: TalosEvent) => void,
+      onEvent: (event: TimelineEventEnvelope) => void,
       signal?: AbortSignal,
     ) => startTurnAndStream(client, sessionId, request, onEvent, signal),
     retryEvents: (
       sessionId: string,
       request: TalosMessageRetryRequest,
-      onEvent: (event: TalosEvent) => void,
+      onEvent: (event: TimelineEventEnvelope) => void,
       signal?: AbortSignal,
     ) => retryTurnAndStream(client, sessionId, request, onEvent, signal),
   };
@@ -210,7 +212,14 @@ export function createDesktopTalosClient(
       compact: (sessionId: string) => client.compactSession(sessionId),
       clear: (sessionId: string) => client.clearSession(sessionId),
       activeTurn: (sessionId: string) => client.getActiveTurn(sessionId),
-      turns: (sessionId: string) => client.getSessionTurns(sessionId),
+      history: (sessionId: string): Promise<TalosSessionHistorySnapshot> =>
+        client.getSessionHistory(sessionId),
+      recover: (
+        sessionId: string,
+        afterEventId?: string,
+        replayLimit?: number,
+      ): Promise<TimelineRecoverySnapshot> =>
+        client.recoverSession(sessionId, afterEventId ?? null, replayLimit ?? null),
     },
     projects: {
       list: () => client.listProjects(),
@@ -254,7 +263,7 @@ async function startTurnAndStream(
   client: ReturnType<typeof createElectronAppServerClient>,
   sessionId: string,
   request: TalosMessageRequest,
-  onEvent: (event: TalosEvent) => void,
+  onEvent: (event: TimelineEventEnvelope) => void,
   signal?: AbortSignal,
 ): Promise<void> {
   const clientRequestId = createClientRequestId();
@@ -268,11 +277,11 @@ async function startTurnAndStream(
     throw new Error(`Message ack did not include message_id: ${ack.turn_id}`);
   }
 
-  await streamUntilTerminal(client, sessionId, signal, async (envelope, stop) => {
-    if (envelope.event.message_id === ack.message_id) {
-      const event = toTalosEvent(envelope.event);
-      onEvent(event);
-      if (isTerminalEvent(event)) {
+  await streamUntilTerminal(client, sessionId, signal, async (event, stop) => {
+    const envelope = toTimelineEnvelope(event);
+    if (envelope.message_id === ack.message_id) {
+      onEvent(envelope);
+      if (isTerminalEvent(envelope)) {
         stop();
       }
     }
@@ -283,7 +292,7 @@ async function retryTurnAndStream(
   client: ReturnType<typeof createElectronAppServerClient>,
   sessionId: string,
   request: TalosMessageRetryRequest,
-  onEvent: (event: TalosEvent) => void,
+  onEvent: (event: TimelineEventEnvelope) => void,
   signal?: AbortSignal,
 ): Promise<void> {
   const ack = await client.retryTurn({
@@ -297,26 +306,26 @@ async function retryTurnAndStream(
     throw new Error(`Retry ack did not include message_id: ${ack.turn_id}`);
   }
 
-  await streamUntilTerminal(client, sessionId, signal, async (envelope, stop) => {
-    if (envelope.event.message_id === ack.message_id) {
-      const event = toTalosEvent(envelope.event);
-      onEvent(event);
-      if (isTerminalEvent(event)) {
+  await streamUntilTerminal(client, sessionId, signal, async (event, stop) => {
+    const envelope = toTimelineEnvelope(event);
+    if (envelope.message_id === ack.message_id) {
+      onEvent(envelope);
+      if (isTerminalEvent(envelope)) {
         stop();
       }
     }
   });
 }
 
-function streamSessionEvents(
+function streamTimelineEvents(
   client: ReturnType<typeof createElectronAppServerClient>,
   sessionId: string,
   sinceEventId: string | null,
-  onEnvelope: (envelope: AppProtocol.ApplicationEventEnvelope) => void,
+  onEvent: (event: AppProtocol.TimelineEventEnvelope) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  return streamUntilTerminal(client, sessionId, signal, (envelope) => {
-    onEnvelope(envelope);
+  return streamUntilTerminal(client, sessionId, signal, (event) => {
+    onEvent(event);
   }, undefined, sinceEventId);
 }
 
@@ -324,8 +333,8 @@ function streamUntilTerminal(
   client: ReturnType<typeof createElectronAppServerClient>,
   sessionId: string,
   signal: AbortSignal | undefined,
-  onEnvelope: (
-    envelope: AppProtocol.ApplicationEventEnvelope,
+  onEvent: (
+    event: AppProtocol.TimelineEventEnvelope,
     stop: () => void,
   ) => void | Promise<void>,
   afterSubscribe?: () => void | Promise<void>,
@@ -379,11 +388,11 @@ function streamUntilTerminal(
       cleanupFns.push(() => signal.removeEventListener("abort", abortHandler));
     }
 
-    const unsubscribe = client.onEvent((envelope: AppProtocol.ApplicationEventEnvelope) => {
-      if (envelope.event.session_id !== sessionId) {
+    const unsubscribe = client.onEvent((event) => {
+      if (event.session_id !== sessionId) {
         return;
       }
-      void Promise.resolve(onEnvelope(envelope, finish)).catch(fail);
+      void Promise.resolve(onEvent(event, finish)).catch(fail);
     });
     cleanupFns.push(unsubscribe);
 
@@ -413,30 +422,22 @@ function streamUntilTerminal(
   });
 }
 
-function toSessionEventRecord(envelope: AppProtocol.ApplicationEventEnvelope): TalosSessionEventRecord {
-  const event = toTalosEvent(envelope.event);
-  return {
-    event_seq: Number(event.sequence),
-    event_id: envelope.event_id,
-    session_id: event.session_id,
-    turn_id: envelope.turn_id,
-    message_id: event.message_id,
-    sequence: event.sequence,
-    event_type: event.event_type,
-    payload: event.payload,
-    created_at: Date.now(),
-  };
-}
-
-function toTalosEvent(event: AppProtocol.TalosEvent): TalosEvent {
+function toTimelineEnvelope(event: AppProtocol.TimelineEventEnvelope): TimelineEventEnvelope {
   return {
     ...event,
-    sequence: Number(event.sequence),
-  } as TalosEvent;
+    event_seq: Number(event.event_seq),
+    created_at_ms: Number(event.created_at_ms),
+    event: {
+      ...event.event,
+      event_seq: event.event.event_seq == null ? event.event.event_seq : Number(event.event.event_seq),
+      created_at_ms: event.event.created_at_ms == null ? event.event.created_at_ms : Number(event.event.created_at_ms),
+      sequence: Number(event.event.sequence),
+    },
+  } as TimelineEventEnvelope;
 }
 
-function isTerminalEvent(event: TalosEvent): boolean {
-  return event.event_type === "message_completed" || event.event_type === "message_error";
+function isTerminalEvent(event: TimelineEventEnvelope): boolean {
+  return event.event.event_type === "turn_completed" || event.event.event_type === "turn_error";
 }
 
 function toProtocolProjectPatch(

@@ -26,14 +26,14 @@ import type {
   SessionQuery,
   SessionUpdate,
   TalosContext,
-  TalosEvent,
+  TimelineEventEnvelope,
   TalosActiveTurn,
+  TalosSessionHistorySnapshot,
   TalosMessageAck,
   TalosMessageRequest,
   TalosMessageRetryRequest,
-  TalosMessageResponse,
-  TalosSessionEventRecord,
   TalosSession,
+  TimelineRecoverySnapshot,
   ToolApprovalRequest,
   WorkspaceDocDetail,
   WorkspaceDocKind,
@@ -260,11 +260,24 @@ export class TalosClient {
       }),
     activeTurn: (sessionId: string) =>
       this.http.request<TalosActiveTurn>(this.url(`/v1/sessions/${sessionId}/active-turn`)),
-    turns: async (sessionId: string): Promise<TalosMessageResponse[]> => {
-      const response = await this.http.request<ListResponse<TalosMessageResponse>>(
-        this.url(`/v1/sessions/${sessionId}/turns`),
+    history: async (sessionId: string): Promise<TalosSessionHistorySnapshot> => {
+      const response = await this.http.request<TalosSessionHistorySnapshot>(
+        this.url(`/v1/sessions/${sessionId}/history`),
       );
-      return response.data;
+      return normalizeSessionHistorySnapshot(response);
+    },
+    recover: async (
+      sessionId: string,
+      afterEventId?: string,
+      replayLimit?: number,
+    ): Promise<TimelineRecoverySnapshot> => {
+      const response = await this.http.request<TimelineRecoverySnapshot>(
+        this.urlWithQuery(`/v1/sessions/${sessionId}/recovery`, {
+          after_event_id: afterEventId,
+          limit: replayLimit,
+        }),
+      );
+      return normalizeTimelineRecoverySnapshot(response);
     },
   };
 
@@ -371,7 +384,7 @@ export class TalosClient {
     events: (
       sessionId: string,
       afterEventId: string | undefined,
-      onEvent: (record: TalosSessionEventRecord) => void,
+      onEvent: (event: TimelineEventEnvelope) => void,
       signal?: AbortSignal,
     ) => {
       const query = afterEventId
@@ -390,15 +403,16 @@ export class TalosClient {
           if (data === "[DONE]") {
             return;
           }
-          onEvent(JSON.parse(data) as TalosSessionEventRecord);
+          onEvent(normalizeTimelineEnvelope(JSON.parse(data)));
         },
       );
     },
     eventsForMessage: async (
       sessionId: string,
       messageId: string,
-      onEvent: (event: TalosEvent) => void,
+      onEvent: (event: TimelineEventEnvelope) => void,
       signal?: AbortSignal,
+      afterEventId?: string,
     ): Promise<void> => {
       const controller = new AbortController();
       let completed = false;
@@ -412,20 +426,13 @@ export class TalosClient {
       try {
         await this.messages.events(
           sessionId,
-          undefined,
+          afterEventId,
           (record) => {
             if (record.message_id !== messageId) {
               return;
             }
-            const event: TalosEvent = {
-              event_type: record.event_type,
-              message_id: record.message_id,
-              session_id: record.session_id,
-              sequence: record.sequence,
-              payload: record.payload,
-            };
-            onEvent(event);
-            if (event.event_type === "message_completed" || event.event_type === "message_error") {
+            onEvent(record);
+            if (isTerminalTimelineEvent(record)) {
               completed = true;
               controller.abort();
             }
@@ -443,7 +450,7 @@ export class TalosClient {
     sendEvents: async (
       sessionId: string,
       request: TalosMessageRequest,
-      onEvent: (event: TalosEvent) => void,
+      onEvent: (event: TimelineEventEnvelope) => void,
       signal?: AbortSignal,
     ): Promise<void> => {
       const ack = await this.messages.send(sessionId, request);
@@ -456,7 +463,7 @@ export class TalosClient {
     retryEvents: async (
       sessionId: string,
       request: TalosMessageRetryRequest,
-      onEvent: (event: TalosEvent) => void,
+      onEvent: (event: TimelineEventEnvelope) => void,
       signal?: AbortSignal,
     ): Promise<void> => {
       const ack = await this.messages.retry(sessionId, request);
@@ -482,4 +489,65 @@ function createIdempotencyKey() {
     return `msg_${globalThis.crypto.randomUUID()}`;
   }
   return `msg_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+function normalizeTimelineEnvelope(value: unknown): TimelineEventEnvelope {
+  const envelope = value as TimelineEventEnvelope;
+  const event = envelope.event;
+  return {
+    ...envelope,
+    event_seq: Number(envelope.event_seq),
+    created_at_ms: Number(envelope.created_at_ms),
+    event: {
+      ...event,
+      event_seq: event.event_seq == null ? event.event_seq : Number(event.event_seq),
+      created_at_ms: event.created_at_ms == null ? event.created_at_ms : Number(event.created_at_ms),
+      sequence: Number(event.sequence),
+    },
+  };
+}
+
+function normalizeTimelineRecoverySnapshot(
+  snapshot: TimelineRecoverySnapshot,
+): TimelineRecoverySnapshot {
+  return {
+    ...snapshot,
+    replay: {
+      ...snapshot.replay,
+      events: snapshot.replay.events.map((event) => normalizeTimelineEnvelope(event)),
+      last_replay_seq: Number(snapshot.replay.last_replay_seq),
+    },
+    active_turn: {
+      ...snapshot.active_turn,
+      updated_at: Number(snapshot.active_turn.updated_at),
+    },
+  };
+}
+
+function normalizeSessionHistorySnapshot(
+  snapshot: TalosSessionHistorySnapshot,
+): TalosSessionHistorySnapshot {
+  return {
+    ...snapshot,
+    generated_at_ms: Number(snapshot.generated_at_ms),
+    messages: snapshot.messages.map((message) => ({
+      ...message,
+      items: message.items.map((item) => ({
+        ...item,
+        started_at_ms: Number(item.started_at_ms),
+        completed_at_ms:
+          item.completed_at_ms == null ? item.completed_at_ms : Number(item.completed_at_ms),
+      })),
+      usage: {
+        ...message.usage,
+        input_tokens: Number(message.usage.input_tokens),
+        output_tokens: Number(message.usage.output_tokens),
+        total_tokens: Number(message.usage.total_tokens),
+      },
+    })),
+  };
+}
+
+function isTerminalTimelineEvent(envelope: TimelineEventEnvelope): boolean {
+  return envelope.event.event_type === "turn_completed" || envelope.event.event_type === "turn_error";
 }

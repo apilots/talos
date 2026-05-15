@@ -413,31 +413,31 @@ impl Storage for SqliteStorage {
         .await?;
         debug!("User tokens table created/verified");
 
-        let create_session_events = r#"
-            CREATE TABLE IF NOT EXISTS session_events (
+        let create_timeline_events = r#"
+            CREATE TABLE IF NOT EXISTS timeline_events (
                 event_seq INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
-                turn_id TEXT,
+                turn_id TEXT NOT NULL,
                 message_id TEXT NOT NULL,
                 sequence INTEGER NOT NULL,
                 event_type TEXT NOT NULL,
                 payload_json TEXT NOT NULL,
-                created_at INTEGER NOT NULL
+                created_at_ms INTEGER NOT NULL
             )
         "#;
 
-        self.execute(create_session_events, &[]).await?;
+        self.execute(create_timeline_events, &[]).await?;
         self.execute(
-            "CREATE INDEX IF NOT EXISTS idx_session_events_session_seq ON session_events(session_id, event_seq)",
+            "CREATE INDEX IF NOT EXISTS idx_timeline_events_session_seq ON timeline_events(session_id, event_seq)",
             &[],
         )
         .await?;
         self.execute(
-            "CREATE INDEX IF NOT EXISTS idx_session_events_turn ON session_events(session_id, turn_id)",
+            "CREATE INDEX IF NOT EXISTS idx_timeline_events_turn ON timeline_events(session_id, turn_id)",
             &[],
         )
         .await?;
-        debug!("Session events table created/verified");
+        debug!("Timeline events table created/verified");
 
         let create_active_turns = r#"
             CREATE TABLE IF NOT EXISTS active_turns (

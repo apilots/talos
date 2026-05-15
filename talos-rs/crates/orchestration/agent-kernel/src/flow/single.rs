@@ -8,7 +8,7 @@ use crate::{
         SessionCompactionState, ToolLoopGuardState, LAST_PROMPT_DIAGNOSTICS_STATE_KEY,
         PROMPT_WARNING_STATE_KEY, SESSION_COMPACTION_STATE_KEY, SESSION_CONTINUITY_STATE_KEY,
     },
-    StreamingToolExecutionConfig, ToolExecutionContext, ToolResultStreamData,
+    StreamingToolExecutionConfig, ToolExecutionContext,
 };
 
 pub struct SingleFlow {
@@ -28,7 +28,7 @@ pub struct SingleFlow {
     response_pipeline: ResponseProcessorPipeline,
     plugin_manager: Arc<InvocationPluginManager>,
     tool_executor: Arc<dyn ToolExecutor>,
-    session_service: Arc<dyn SessionService>,
+    transcript_service: Arc<dyn KernelTranscriptService>,
 }
 
 impl SingleFlow {
@@ -70,7 +70,9 @@ impl SingleFlow {
             response_pipeline: ResponseProcessorPipeline::for_profile(flow_profile, planner),
             plugin_manager: Arc::new(InvocationPluginManager::new()),
             tool_executor,
-            session_service: Arc::new(MemoryBackedSessionService::new(memory_store.clone())),
+            transcript_service: Arc::new(MemoryBackedKernelTranscriptService::new(
+                memory_store.clone(),
+            )),
         }
     }
 
@@ -105,8 +107,11 @@ impl SingleFlow {
         self
     }
 
-    pub fn with_session_service(mut self, session_service: Arc<dyn SessionService>) -> Self {
-        self.session_service = session_service;
+    pub fn with_transcript_service(
+        mut self,
+        transcript_service: Arc<dyn KernelTranscriptService>,
+    ) -> Self {
+        self.transcript_service = transcript_service;
         self
     }
 
@@ -181,11 +186,11 @@ impl BaseLlmFlow for SingleFlow {
         ctx.plugin_manager = Arc::new(ctx.plugin_manager.merged_with(&self.plugin_manager));
         let mut events = Vec::new();
         let branch = self.current_branch();
-        let session_service = ctx
-            .session_service
+        let transcript_service = ctx
+            .transcript_service
             .clone()
-            .unwrap_or_else(|| self.session_service.clone());
-        ctx.session = session_service
+            .unwrap_or_else(|| self.transcript_service.clone());
+        ctx.session = transcript_service
             .load_session(&ctx.session_id, None, Some(branch))
             .await?;
         events.push(ExecutionEvent::text(
@@ -273,15 +278,15 @@ impl BaseLlmFlow for SingleFlow {
                 prepared.session_id
             )));
         }
-        stage_session_event(
+        stage_kernel_transcript_event(
             ctx,
-            SessionEvent::new(
+            KernelTranscriptEvent::new(
                 prepared.session_id.clone(),
                 prepared.invocation_id.clone(),
                 request.branch,
                 EventAuthor::User,
-                SessionEventKind::UserMessage,
-                SessionEventPayload::Message {
+                KernelTranscriptEventKind::UserMessage,
+                KernelTranscriptPayload::Message {
                     message: talos_llm_provider::ChatMessage::user(input),
                 },
             ),
@@ -390,42 +395,16 @@ impl BaseLlmFlow for SingleFlow {
                 events.extend(replay_output.events);
                 self.observe_tool_callbacks(ctx, &replay_response.output_items)
                     .await?;
-                if let Some(tx) = prepared.stream_tx.as_ref() {
-                    for output_item in &replay_batch.output_items {
-                        if let TalosOutputItem::ToolResult {
-                            call_id,
-                            tool_name,
-                            content,
-                            is_error,
-                        } = output_item
-                        {
-                            let _ = tx
-                                .send(KernelStreamEvent::new(
-                                    KernelStreamEventType::ToolResult,
-                                    KernelStreamEventData::ToolResult(ToolResultStreamData {
-                                        call_id: call_id.clone(),
-                                        tool_name: tool_name.clone(),
-                                        content: content.clone(),
-                                        is_error: *is_error,
-                                        semantic_events: Vec::new(),
-                                        envelope: None,
-                                        next_turn_failure: None,
-                                    }),
-                                ))
-                                .await;
-                        }
-                    }
-                }
                 for tool_message in &replay_batch.tool_messages {
-                    stage_session_event(
+                    stage_kernel_transcript_event(
                         ctx,
-                        SessionEvent::new(
+                        KernelTranscriptEvent::new(
                             prepared.session_id.clone(),
                             prepared.invocation_id.clone(),
                             request.branch,
                             EventAuthor::Tool,
-                            SessionEventKind::ToolResult,
-                            SessionEventPayload::Message {
+                            KernelTranscriptEventKind::ToolResult,
+                            KernelTranscriptPayload::Message {
                                 message: tool_message.clone(),
                             },
                         ),
@@ -521,16 +500,16 @@ impl BaseLlmFlow for SingleFlow {
             if !projected_step_response.actions.state_delta.is_empty()
                 || projected_step_response.actions.branch_override.is_some()
             {
-                let mut planning_event = SessionEvent::new(
+                let mut planning_event = KernelTranscriptEvent::new(
                     prepared.session_id.clone(),
                     prepared.invocation_id.clone(),
                     projected_step_response.branch,
                     EventAuthor::Agent,
-                    SessionEventKind::Planning,
-                    SessionEventPayload::StateOnly,
+                    KernelTranscriptEventKind::Planning,
+                    KernelTranscriptPayload::StateOnly,
                 );
                 planning_event.actions = projected_step_response.actions.clone();
-                stage_session_event(ctx, planning_event);
+                stage_kernel_transcript_event(ctx, planning_event);
                 request.branch = projected_step_response.branch;
             }
             if let Some(cause) = should_force_finalization_for_step(&mut tool_loop_guard, &step) {
@@ -591,15 +570,15 @@ impl BaseLlmFlow for SingleFlow {
                     break StopReason::ToolRoundLimit;
                 }
                 final_text = step.text.clone();
-                stage_session_event(
+                stage_kernel_transcript_event(
                     ctx,
-                    SessionEvent::new(
+                    KernelTranscriptEvent::new(
                         prepared.session_id.clone(),
                         prepared.invocation_id.clone(),
                         request.branch,
                         EventAuthor::Agent,
-                        SessionEventKind::AgentMessage,
-                        SessionEventPayload::Message {
+                        KernelTranscriptEventKind::AgentMessage,
+                        KernelTranscriptPayload::Message {
                             message: talos_llm_provider::ChatMessage::assistant(final_text.clone()),
                         },
                     ),
@@ -659,15 +638,15 @@ impl BaseLlmFlow for SingleFlow {
                 )
                 .await;
             }
-            stage_session_event(
+            stage_kernel_transcript_event(
                 ctx,
-                SessionEvent::new(
+                KernelTranscriptEvent::new(
                     prepared.session_id.clone(),
                     prepared.invocation_id.clone(),
                     request.branch,
                     EventAuthor::Agent,
-                    SessionEventKind::ToolCall,
-                    SessionEventPayload::Message {
+                    KernelTranscriptEventKind::ToolCall,
+                    KernelTranscriptPayload::Message {
                         message: talos_llm_provider::ChatMessage::assistant_with_tool_calls(
                             step.text.clone(),
                             step.tool_calls.clone(),
@@ -705,15 +684,15 @@ impl BaseLlmFlow for SingleFlow {
             self.observe_tool_callbacks(ctx, &tool_response.output_items)
                 .await?;
             for tool_message in &tool_batch.tool_messages {
-                stage_session_event(
+                stage_kernel_transcript_event(
                     ctx,
-                    SessionEvent::new(
+                    KernelTranscriptEvent::new(
                         prepared.session_id.clone(),
                         prepared.invocation_id.clone(),
                         request.branch,
                         EventAuthor::Tool,
-                        SessionEventKind::ToolResult,
-                        SessionEventPayload::Message {
+                        KernelTranscriptEventKind::ToolResult,
+                        KernelTranscriptPayload::Message {
                             message: tool_message.clone(),
                         },
                     ),
@@ -735,16 +714,16 @@ impl BaseLlmFlow for SingleFlow {
                     },
                     false,
                 ));
-                stage_session_event(
+                stage_kernel_transcript_event(
                     ctx,
-                    SessionEvent::new(
+                    KernelTranscriptEvent::new(
                         prepared.session_id.clone(),
                         prepared.invocation_id.clone(),
                         request.branch,
                         EventAuthor::System,
-                        SessionEventKind::SystemMessage,
-                        SessionEventPayload::Confirmation {
-                            payload: crate::session::SessionConfirmationPayload {
+                        KernelTranscriptEventKind::SystemMessage,
+                        KernelTranscriptPayload::Confirmation {
+                            payload: crate::session::KernelTranscriptConfirmationPayload {
                                 tool_name: confirmation.tool_name.clone(),
                                 call_id: confirmation.call_id.clone(),
                                 prompt: confirmation.prompt.clone(),
@@ -769,16 +748,16 @@ impl BaseLlmFlow for SingleFlow {
                     },
                     false,
                 ));
-                stage_session_event(
+                stage_kernel_transcript_event(
                     ctx,
-                    SessionEvent::new(
+                    KernelTranscriptEvent::new(
                         prepared.session_id.clone(),
                         prepared.invocation_id.clone(),
                         request.branch,
                         EventAuthor::System,
-                        SessionEventKind::SystemMessage,
-                        SessionEventPayload::DynamicToolRequest {
-                            payload: crate::session::SessionDynamicToolRequestPayload {
+                        KernelTranscriptEventKind::SystemMessage,
+                        KernelTranscriptPayload::DynamicToolRequest {
+                            payload: crate::session::KernelTranscriptDynamicToolRequestPayload {
                                 tool_name: dynamic_request.tool_name.clone(),
                                 call_id: dynamic_request.call_id.clone(),
                                 arguments: dynamic_request.arguments.clone().into(),

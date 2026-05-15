@@ -9,14 +9,14 @@ struct InvocationCompactionGroup {
     total_bytes: usize,
 }
 
-fn is_context_visible_event(event: &SessionEvent) -> bool {
+fn is_context_visible_event(event: &KernelTranscriptEvent) -> bool {
     !event.partial
         && !matches!(
             event.payload,
-            SessionEventPayload::StateOnly
-                | SessionEventPayload::Transfer { .. }
-                | SessionEventPayload::Auth { .. }
-                | SessionEventPayload::Confirmation { .. }
+            KernelTranscriptPayload::StateOnly
+                | KernelTranscriptPayload::Transfer { .. }
+                | KernelTranscriptPayload::Auth { .. }
+                | KernelTranscriptPayload::Confirmation { .. }
         )
         && event.payload.message().is_some_and(|message| {
             !message.content.trim().is_empty() || message.tool_calls.is_some()
@@ -32,7 +32,7 @@ fn message_size(message: &ChatMessage) -> usize {
     message.content.len() + tool_call_bytes + usize::from(message.tool_call_id.is_some()) * 32
 }
 
-fn group_events_by_invocation(events: &[SessionEvent]) -> Vec<InvocationCompactionGroup> {
+fn group_events_by_invocation(events: &[KernelTranscriptEvent]) -> Vec<InvocationCompactionGroup> {
     let mut groups: Vec<InvocationCompactionGroup> = Vec::new();
     for (index, event) in events.iter().enumerate() {
         let event_bytes = event
@@ -64,7 +64,7 @@ fn truncate_for_summary(text: &str, limit: usize) -> String {
     format!("{}...", compact)
 }
 
-fn summarize_compacted_events(events: &[SessionEvent]) -> Option<String> {
+fn summarize_compacted_events(events: &[KernelTranscriptEvent]) -> Option<String> {
     if events.is_empty() {
         return None;
     }

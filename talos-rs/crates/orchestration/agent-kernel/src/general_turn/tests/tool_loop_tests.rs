@@ -68,10 +68,13 @@ async fn test_run_general_turn_stops_on_pending_tool_confirmation() {
     .expect("general turn should succeed");
 
     assert_eq!(result.output_text, "Tool confirmation pending.");
-    assert!(result.output_items.iter().any(|item| matches!(
-        item,
-        talos_types::talos::TalosOutputItem::ToolResult { is_error: true, .. }
-    )));
+    assert!(
+        result
+            .output_items
+            .iter()
+            .all(|item| !matches!(item, talos_types::talos::TalosOutputItem::ToolResult { .. })),
+        "pending approval should not be emitted as a terminal tool result"
+    );
     assert_eq!(provider.round.load(Ordering::SeqCst), 1);
 
     let continuity_value = ctx
@@ -86,16 +89,13 @@ async fn test_run_general_turn_stops_on_pending_tool_confirmation() {
         continuity.recent_goal,
         "Use Bash with escalated permissions."
     );
-    assert_eq!(
-        continuity.last_failure.as_deref(),
-        Some("Bash returned an error")
-    );
+    assert_eq!(continuity.last_failure.as_deref(), None);
     assert_eq!(
         continuity.suggested_next_step.as_deref(),
-        Some("adjust the failing path, command, or tool arguments before retrying")
+        Some("continue with a narrower follow-up tool step")
     );
     assert_eq!(
         continuity.pending_tasks,
-        vec!["fix the failing tool step and retry".to_string()]
+        vec!["continue with a narrower follow-up tool step".to_string()]
     );
 }

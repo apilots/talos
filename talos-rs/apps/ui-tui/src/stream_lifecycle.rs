@@ -54,6 +54,7 @@ impl TuiApp {
         self.pending_stream_connect = None;
         self.active_stream_message_id = None;
         self.last_stream_sequence = None;
+        self.timeline_items.clear();
 
         if reset_retry_state {
             let user_idx = self.push_block(ChatRole::User, user_message.clone());
@@ -65,7 +66,7 @@ impl TuiApp {
         self.push_right_event(format!("message dispatched to session {}", session_id));
 
         let handle = tokio::spawn(async move {
-            let result = client.send_message_events(&session_id, &request).await;
+            let result = client.send_timeline_events(&session_id, &request).await;
             if tx.send(result).await.is_err() {
                 error!(
                     session_id = %session_id,
@@ -108,6 +109,7 @@ impl TuiApp {
         self.active_user_idx = None;
         self.active_stream_message_id = None;
         self.last_stream_sequence = None;
+        self.timeline_items.clear();
         self.stream_started_at = None;
         self.last_stream_event_at = None;
         self.active_message = None;

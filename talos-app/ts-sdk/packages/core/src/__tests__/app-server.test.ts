@@ -17,8 +17,7 @@ class RecordingTransport implements AppServerTransport {
       method === "memory.search" ||
       method === "project.list" ||
       method === "admin.project.list" ||
-      method === "admin.user.list" ||
-      method === "session.turns"
+      method === "admin.user.list"
     ) {
       return Promise.resolve({ data: [] } as T);
     }
@@ -27,6 +26,9 @@ class RecordingTransport implements AppServerTransport {
         data: [],
         pagination: { total: 0, limit: 20, offset: 0 },
       } as T);
+    }
+    if (method === "session.recover") {
+      return Promise.resolve(emptyRecoverySnapshot as T);
     }
     if (method === "config.read" || method === "config.value.write") {
       return Promise.resolve(testLlmConfig as T);
@@ -70,7 +72,7 @@ describe("AppServerClient", () => {
     await client.listAdminSessions({ limit: 20, offset: 0, user_id: null, channel_id: null, provider: null, project_id: null });
     await client.createProject("Talos", "/tmp/talos");
     await client.patchProject("project-1", { name: "Talos Core" });
-    await client.getSessionTurns("session-1");
+    await client.recoverSession("session-1", "ev_00000000000000000001", 100);
     await client.submitDynamicToolResult({
       session_id: "session-1",
       call_id: "call-1",
@@ -133,7 +135,14 @@ describe("AppServerClient", () => {
       },
       { method: "project.create", params: { name: "Talos", directory: "/tmp/talos" } },
       { method: "project.patch", params: { project_id: "project-1", name: "Talos Core" } },
-      { method: "session.turns", params: { session_id: "session-1" } },
+      {
+        method: "session.recover",
+        params: {
+          session_id: "session-1",
+          after_event_id: "ev_00000000000000000001",
+          replay_limit: 100,
+        },
+      },
       {
         method: "tool.dynamic_result.submit",
         params: {
@@ -155,6 +164,24 @@ const emptyProvider = {
   base_url: null,
   enabled: false,
   models: [],
+};
+
+const emptyRecoverySnapshot = {
+  replay: {
+    events: [],
+    high_water_mark_event_id: null,
+    last_replay_seq: 0,
+    cursor_status: "from_beginning",
+  },
+  active_turn: {
+    session_id: "session-1",
+    turn_id: null,
+    message_id: null,
+    status: "completed",
+    last_event_id: null,
+    pending_user_action: null,
+    updated_at: 0,
+  },
 };
 
 const testLlmConfig = {

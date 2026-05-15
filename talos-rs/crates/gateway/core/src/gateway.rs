@@ -45,7 +45,7 @@ impl Gateway for GatewayImpl {
     async fn handle_request_stream(
         &self,
         request: GatewayRequest,
-    ) -> TalosResult<tokio::sync::mpsc::Receiver<talos_types::talos::TalosEvent>> {
+    ) -> TalosResult<tokio::sync::mpsc::Receiver<talos_types::talos::TalosTimelineEvent>> {
         self.handler.handle_stream(request).await
     }
 

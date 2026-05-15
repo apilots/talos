@@ -2,14 +2,15 @@
 
 ## 0.3
 
-- Add app-server parity methods for `session.compact`, `session.clear`, `session.active_turn`, and `turn.retry`.
+- Add app-server parity methods for `session.compact`, `session.clear`, `session.active_turn`, `session.history`, and `turn.retry`.
+- Split stable session history snapshots from active-turn live recovery snapshots.
 - Freeze `tool.dynamic_result.submit`, `admin.session.list`, and `admin.project.list`; `DEFERRED_CLIENT_METHODS` is empty after P2 protocol completion.
 - Refresh JSON Schema and generated TypeScript fixtures from Rust protocol types.
 - Extend app-server protocol resource matrix coverage for admin list and dynamic tool result error mapping.
 
 ## 0.2
 
-- Add frozen app-server methods for `session.turns` and `project.create/list/read/patch/delete`.
+- Add frozen app-server methods for session and project CRUD.
 - Refresh JSON Schema and generated TypeScript fixtures from Rust protocol types.
 - Cover project, memory file, workspace docs, replay, multi-subscriber, and error mapping flows in app-server protocol e2e.
 

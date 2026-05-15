@@ -1,6 +1,7 @@
 use crate::execution::ContentsMode;
 use crate::{
-    ExecutionBranch, InvocationSession, SessionEvent, SessionEventKind, SessionEventPayload,
+    ExecutionBranch, InvocationSession, KernelTranscriptEvent, KernelTranscriptEventKind,
+    KernelTranscriptPayload,
 };
 use talos_llm_provider::ChatMessage;
 
@@ -26,20 +27,20 @@ impl ContentsBuilder {
         events
             .into_iter()
             .filter_map(|event| match event.payload {
-                SessionEventPayload::Message { message } => Some(message),
-                SessionEventPayload::Compaction { payload } => Some(payload.summary_message),
-                SessionEventPayload::StateOnly
-                | SessionEventPayload::Transfer { .. }
-                | SessionEventPayload::Auth { .. }
-                | SessionEventPayload::Confirmation { .. }
-                | SessionEventPayload::ApprovalResponse { .. }
-                | SessionEventPayload::DynamicToolRequest { .. }
-                | SessionEventPayload::DynamicToolResponse { .. } => None,
+                KernelTranscriptPayload::Message { message } => Some(message),
+                KernelTranscriptPayload::Compaction { payload } => Some(payload.summary_message),
+                KernelTranscriptPayload::StateOnly
+                | KernelTranscriptPayload::Transfer { .. }
+                | KernelTranscriptPayload::Auth { .. }
+                | KernelTranscriptPayload::Confirmation { .. }
+                | KernelTranscriptPayload::ApprovalResponse { .. }
+                | KernelTranscriptPayload::DynamicToolRequest { .. }
+                | KernelTranscriptPayload::DynamicToolResponse { .. } => None,
             })
             .collect()
     }
 
-    fn filter_context_events(events: Vec<SessionEvent>) -> Vec<SessionEvent> {
+    fn filter_context_events(events: Vec<KernelTranscriptEvent>) -> Vec<KernelTranscriptEvent> {
         events
             .into_iter()
             .filter(|event| !event.partial)
@@ -50,7 +51,7 @@ impl ContentsBuilder {
             .collect()
     }
 
-    fn apply_rewind(events: Vec<SessionEvent>) -> Vec<SessionEvent> {
+    fn apply_rewind(events: Vec<KernelTranscriptEvent>) -> Vec<KernelTranscriptEvent> {
         let mut filtered = Vec::new();
         let mut index = events.len();
         while index > 0 {
@@ -71,7 +72,7 @@ impl ContentsBuilder {
         filtered
     }
 
-    fn apply_compaction_ranges(events: Vec<SessionEvent>) -> Vec<SessionEvent> {
+    fn apply_compaction_ranges(events: Vec<KernelTranscriptEvent>) -> Vec<KernelTranscriptEvent> {
         let mut compaction_ranges = Vec::new();
 
         for event in &events {
@@ -111,7 +112,7 @@ impl ContentsBuilder {
             .collect()
     }
 
-    fn contains_empty_content(event: &SessionEvent) -> bool {
+    fn contains_empty_content(event: &KernelTranscriptEvent) -> bool {
         let Some(message) = event.payload.message() else {
             return true;
         };
@@ -124,22 +125,24 @@ impl ContentsBuilder {
         !has_text && !has_tool_calls && !has_tool_response
     }
 
-    fn is_framework_event(event: &SessionEvent) -> bool {
+    fn is_framework_event(event: &KernelTranscriptEvent) -> bool {
         matches!(
             event.payload,
-            SessionEventPayload::StateOnly | SessionEventPayload::Transfer { .. }
+            KernelTranscriptPayload::StateOnly | KernelTranscriptPayload::Transfer { .. }
         )
     }
 
-    fn is_auth_event(event: &SessionEvent) -> bool {
-        matches!(event.payload, SessionEventPayload::Auth { .. })
+    fn is_auth_event(event: &KernelTranscriptEvent) -> bool {
+        matches!(event.payload, KernelTranscriptPayload::Auth { .. })
     }
 
-    fn is_confirmation_event(event: &SessionEvent) -> bool {
-        matches!(event.payload, SessionEventPayload::Confirmation { .. })
+    fn is_confirmation_event(event: &KernelTranscriptEvent) -> bool {
+        matches!(event.payload, KernelTranscriptPayload::Confirmation { .. })
     }
 
-    fn rearrange_latest_tool_results(events: Vec<SessionEvent>) -> Vec<SessionEvent> {
+    fn rearrange_latest_tool_results(
+        events: Vec<KernelTranscriptEvent>,
+    ) -> Vec<KernelTranscriptEvent> {
         let Some(last_event) = events.last() else {
             return events;
         };
@@ -182,7 +185,9 @@ impl ContentsBuilder {
         prefix
     }
 
-    fn rearrange_tool_results_in_history(events: Vec<SessionEvent>) -> Vec<SessionEvent> {
+    fn rearrange_tool_results_in_history(
+        events: Vec<KernelTranscriptEvent>,
+    ) -> Vec<KernelTranscriptEvent> {
         let all_events = events.clone();
         let mut tool_result_index_by_call_id = std::collections::HashMap::new();
         for (index, event) in all_events.iter().enumerate() {
@@ -214,8 +219,8 @@ impl ContentsBuilder {
         result
     }
 
-    fn tool_call_ids(event: &SessionEvent) -> Vec<String> {
-        if event.kind != SessionEventKind::ToolCall {
+    fn tool_call_ids(event: &KernelTranscriptEvent) -> Vec<String> {
+        if event.kind != KernelTranscriptEventKind::ToolCall {
             return Vec::new();
         }
         event
@@ -231,8 +236,8 @@ impl ContentsBuilder {
             .unwrap_or_default()
     }
 
-    fn tool_result_id(event: &SessionEvent) -> Option<String> {
-        if event.kind != SessionEventKind::ToolResult {
+    fn tool_result_id(event: &KernelTranscriptEvent) -> Option<String> {
+        if event.kind != KernelTranscriptEventKind::ToolResult {
             return None;
         }
         event.payload.message()?.tool_call_id.clone()
@@ -244,33 +249,33 @@ mod tests {
     use super::*;
     use crate::execution::EventCompaction;
     use crate::session::{
-        SessionAuthPayload, SessionCompactionPayload, SessionConfirmationPayload,
-        SessionTransferPayload,
+        KernelTranscriptAuthPayload, KernelTranscriptCompactionPayload,
+        KernelTranscriptConfirmationPayload, KernelTranscriptTransferPayload,
     };
     use crate::{EventAuthor, SessionState};
     use talos_llm_provider::FunctionCall;
 
-    fn session_event(
-        kind: SessionEventKind,
+    fn kernel_transcript_event(
+        kind: KernelTranscriptEventKind,
         message: ChatMessage,
         branch: ExecutionBranch,
-    ) -> SessionEvent {
-        SessionEvent {
+    ) -> KernelTranscriptEvent {
+        KernelTranscriptEvent {
             id: format!("evt-{}", uuid::Uuid::new_v4()),
             session_id: "s1".to_string(),
             invocation_id: "i1".to_string(),
             branch,
             author: match kind {
-                SessionEventKind::UserMessage => EventAuthor::User,
-                SessionEventKind::ToolResult => EventAuthor::Tool,
-                SessionEventKind::SystemMessage => EventAuthor::System,
-                SessionEventKind::AgentMessage
-                | SessionEventKind::ToolCall
-                | SessionEventKind::Planning
-                | SessionEventKind::StateUpdate => EventAuthor::Agent,
+                KernelTranscriptEventKind::UserMessage => EventAuthor::User,
+                KernelTranscriptEventKind::ToolResult => EventAuthor::Tool,
+                KernelTranscriptEventKind::SystemMessage => EventAuthor::System,
+                KernelTranscriptEventKind::AgentMessage
+                | KernelTranscriptEventKind::ToolCall
+                | KernelTranscriptEventKind::Planning
+                | KernelTranscriptEventKind::StateUpdate => EventAuthor::Agent,
             },
             kind,
-            payload: SessionEventPayload::Message { message },
+            payload: KernelTranscriptPayload::Message { message },
             actions: crate::EventActions::default(),
             partial: false,
             timestamp: chrono::Utc::now(),
@@ -288,15 +293,15 @@ mod tests {
         ChatMessage::tool(id, name, content)
     }
 
-    fn state_only_event() -> SessionEvent {
-        SessionEvent {
+    fn state_only_event() -> KernelTranscriptEvent {
+        KernelTranscriptEvent {
             id: format!("evt-{}", uuid::Uuid::new_v4()),
             session_id: "s1".to_string(),
             invocation_id: "i1".to_string(),
             branch: ExecutionBranch::ReactiveLoop,
             author: EventAuthor::Agent,
-            kind: SessionEventKind::Planning,
-            payload: SessionEventPayload::StateOnly,
+            kind: KernelTranscriptEventKind::Planning,
+            payload: KernelTranscriptPayload::StateOnly,
             actions: crate::EventActions::default(),
             partial: false,
             timestamp: chrono::Utc::now(),
@@ -308,23 +313,23 @@ mod tests {
         let session = InvocationSession {
             session_id: "s1".to_string(),
             events: vec![
-                session_event(
-                    SessionEventKind::UserMessage,
+                kernel_transcript_event(
+                    KernelTranscriptEventKind::UserMessage,
                     ChatMessage::user("hello"),
                     ExecutionBranch::ReactiveLoop,
                 ),
-                session_event(
-                    SessionEventKind::ToolCall,
+                kernel_transcript_event(
+                    KernelTranscriptEventKind::ToolCall,
                     assistant_tool_call("call_1", "read"),
                     ExecutionBranch::ReactiveLoop,
                 ),
-                session_event(
-                    SessionEventKind::AgentMessage,
+                kernel_transcript_event(
+                    KernelTranscriptEventKind::AgentMessage,
                     ChatMessage::assistant("intermediate"),
                     ExecutionBranch::ReactiveLoop,
                 ),
-                session_event(
-                    SessionEventKind::ToolResult,
+                kernel_transcript_event(
+                    KernelTranscriptEventKind::ToolResult,
                     tool_result("call_1", "read", "done"),
                     ExecutionBranch::ReactiveLoop,
                 ),
@@ -353,13 +358,13 @@ mod tests {
         let session = InvocationSession {
             session_id: "s1".to_string(),
             events: vec![
-                session_event(
-                    SessionEventKind::UserMessage,
+                kernel_transcript_event(
+                    KernelTranscriptEventKind::UserMessage,
                     ChatMessage::user("hello"),
                     ExecutionBranch::ReactiveLoop,
                 ),
-                session_event(
-                    SessionEventKind::ToolCall,
+                kernel_transcript_event(
+                    KernelTranscriptEventKind::ToolCall,
                     ChatMessage::assistant_with_tool_calls(
                         "",
                         vec![
@@ -369,13 +374,13 @@ mod tests {
                     ),
                     ExecutionBranch::ReactiveLoop,
                 ),
-                session_event(
-                    SessionEventKind::ToolResult,
+                kernel_transcript_event(
+                    KernelTranscriptEventKind::ToolResult,
                     tool_result("call_2", "grep", "b"),
                     ExecutionBranch::ReactiveLoop,
                 ),
-                session_event(
-                    SessionEventKind::ToolResult,
+                kernel_transcript_event(
+                    KernelTranscriptEventKind::ToolResult,
                     tool_result("call_1", "read", "a"),
                     ExecutionBranch::ReactiveLoop,
                 ),
@@ -401,8 +406,8 @@ mod tests {
 
     #[test]
     fn test_build_messages_filters_branch_and_partial_events() {
-        let mut partial_event = session_event(
-            SessionEventKind::AgentMessage,
+        let mut partial_event = kernel_transcript_event(
+            KernelTranscriptEventKind::AgentMessage,
             ChatMessage::assistant("partial"),
             ExecutionBranch::ReactiveLoop,
         );
@@ -411,14 +416,14 @@ mod tests {
         let session = InvocationSession {
             session_id: "s1".to_string(),
             events: vec![
-                session_event(
-                    SessionEventKind::UserMessage,
+                kernel_transcript_event(
+                    KernelTranscriptEventKind::UserMessage,
                     ChatMessage::user("visible"),
                     ExecutionBranch::ReactiveLoop,
                 ),
                 partial_event,
-                session_event(
-                    SessionEventKind::UserMessage,
+                kernel_transcript_event(
+                    KernelTranscriptEventKind::UserMessage,
                     ChatMessage::user("hidden"),
                     ExecutionBranch::DirectAnswer,
                 ),
@@ -443,20 +448,20 @@ mod tests {
         let session = InvocationSession {
             session_id: "s1".to_string(),
             events: vec![
-                session_event(
-                    SessionEventKind::UserMessage,
+                kernel_transcript_event(
+                    KernelTranscriptEventKind::UserMessage,
                     ChatMessage::user("hello"),
                     ExecutionBranch::ReactiveLoop,
                 ),
-                SessionEvent {
+                KernelTranscriptEvent {
                     id: "transfer".to_string(),
                     session_id: "s1".to_string(),
                     invocation_id: "i1".to_string(),
                     branch: ExecutionBranch::ReactiveLoop,
                     author: EventAuthor::Agent,
-                    kind: SessionEventKind::StateUpdate,
-                    payload: SessionEventPayload::Transfer {
-                        payload: SessionTransferPayload {
+                    kind: KernelTranscriptEventKind::StateUpdate,
+                    payload: KernelTranscriptPayload::Transfer {
+                        payload: KernelTranscriptTransferPayload {
                             target_agent: "agent-b".to_string(),
                         },
                     },
@@ -464,15 +469,15 @@ mod tests {
                     partial: false,
                     timestamp: now,
                 },
-                SessionEvent {
+                KernelTranscriptEvent {
                     id: "auth".to_string(),
                     session_id: "s1".to_string(),
                     invocation_id: "i1".to_string(),
                     branch: ExecutionBranch::ReactiveLoop,
                     author: EventAuthor::System,
-                    kind: SessionEventKind::SystemMessage,
-                    payload: SessionEventPayload::Auth {
-                        payload: SessionAuthPayload {
+                    kind: KernelTranscriptEventKind::SystemMessage,
+                    payload: KernelTranscriptPayload::Auth {
+                        payload: KernelTranscriptAuthPayload {
                             provider: "github".to_string(),
                             prompt: "auth required".to_string(),
                         },
@@ -481,15 +486,15 @@ mod tests {
                     partial: false,
                     timestamp: now,
                 },
-                SessionEvent {
+                KernelTranscriptEvent {
                     id: "confirm".to_string(),
                     session_id: "s1".to_string(),
                     invocation_id: "i1".to_string(),
                     branch: ExecutionBranch::ReactiveLoop,
                     author: EventAuthor::System,
-                    kind: SessionEventKind::SystemMessage,
-                    payload: SessionEventPayload::Confirmation {
-                        payload: SessionConfirmationPayload {
+                    kind: KernelTranscriptEventKind::SystemMessage,
+                    payload: KernelTranscriptPayload::Confirmation {
+                        payload: KernelTranscriptConfirmationPayload {
                             tool_name: "rm".to_string(),
                             call_id: "call_1".to_string(),
                             prompt: "confirm".to_string(),
@@ -528,19 +533,19 @@ mod tests {
         let session = InvocationSession {
             session_id: "s1".to_string(),
             events: vec![
-                session_event(
-                    SessionEventKind::UserMessage,
+                kernel_transcript_event(
+                    KernelTranscriptEventKind::UserMessage,
                     ChatMessage::user("old"),
                     ExecutionBranch::ReactiveLoop,
                 ),
-                SessionEvent {
+                KernelTranscriptEvent {
                     id: "new-user".to_string(),
                     session_id: "s1".to_string(),
                     invocation_id: "i2".to_string(),
                     branch: ExecutionBranch::ReactiveLoop,
                     author: EventAuthor::User,
-                    kind: SessionEventKind::UserMessage,
-                    payload: SessionEventPayload::Message {
+                    kind: KernelTranscriptEventKind::UserMessage,
+                    payload: KernelTranscriptPayload::Message {
                         message: ChatMessage::user("new"),
                     },
                     actions: crate::EventActions::default(),
@@ -548,14 +553,14 @@ mod tests {
                     timestamp: now,
                 },
                 rewind_event,
-                SessionEvent {
+                KernelTranscriptEvent {
                     id: "post-rewind".to_string(),
                     session_id: "s1".to_string(),
                     invocation_id: "i3".to_string(),
                     branch: ExecutionBranch::ReactiveLoop,
                     author: EventAuthor::User,
-                    kind: SessionEventKind::UserMessage,
-                    payload: SessionEventPayload::Message {
+                    kind: KernelTranscriptEventKind::UserMessage,
+                    payload: KernelTranscriptPayload::Message {
                         message: ChatMessage::user("after rewind"),
                     },
                     actions: crate::EventActions::default(),
@@ -583,15 +588,15 @@ mod tests {
         let middle = start + chrono::Duration::milliseconds(10);
         let end = start + chrono::Duration::milliseconds(20);
 
-        let mut compaction_event = SessionEvent {
+        let mut compaction_event = KernelTranscriptEvent {
             id: "compact".to_string(),
             session_id: "s1".to_string(),
             invocation_id: "i2".to_string(),
             branch: ExecutionBranch::ReactiveLoop,
             author: EventAuthor::Agent,
-            kind: SessionEventKind::StateUpdate,
-            payload: SessionEventPayload::Compaction {
-                payload: SessionCompactionPayload {
+            kind: KernelTranscriptEventKind::StateUpdate,
+            payload: KernelTranscriptPayload::Compaction {
+                payload: KernelTranscriptCompactionPayload {
                     summary_message: ChatMessage::assistant("summary"),
                 },
             },
@@ -607,28 +612,28 @@ mod tests {
         let session = InvocationSession {
             session_id: "s1".to_string(),
             events: vec![
-                SessionEvent {
+                KernelTranscriptEvent {
                     id: "u1".to_string(),
                     session_id: "s1".to_string(),
                     invocation_id: "i1".to_string(),
                     branch: ExecutionBranch::ReactiveLoop,
                     author: EventAuthor::User,
-                    kind: SessionEventKind::UserMessage,
-                    payload: SessionEventPayload::Message {
+                    kind: KernelTranscriptEventKind::UserMessage,
+                    payload: KernelTranscriptPayload::Message {
                         message: ChatMessage::user("hello"),
                     },
                     actions: crate::EventActions::default(),
                     partial: false,
                     timestamp: start,
                 },
-                SessionEvent {
+                KernelTranscriptEvent {
                     id: "a1".to_string(),
                     session_id: "s1".to_string(),
                     invocation_id: "i1".to_string(),
                     branch: ExecutionBranch::ReactiveLoop,
                     author: EventAuthor::Agent,
-                    kind: SessionEventKind::AgentMessage,
-                    payload: SessionEventPayload::Message {
+                    kind: KernelTranscriptEventKind::AgentMessage,
+                    payload: KernelTranscriptPayload::Message {
                         message: ChatMessage::assistant("detail"),
                     },
                     actions: crate::EventActions::default(),
@@ -636,14 +641,14 @@ mod tests {
                     timestamp: middle,
                 },
                 compaction_event,
-                SessionEvent {
+                KernelTranscriptEvent {
                     id: "u2".to_string(),
                     session_id: "s1".to_string(),
                     invocation_id: "i2".to_string(),
                     branch: ExecutionBranch::ReactiveLoop,
                     author: EventAuthor::User,
-                    kind: SessionEventKind::UserMessage,
-                    payload: SessionEventPayload::Message {
+                    kind: KernelTranscriptEventKind::UserMessage,
+                    payload: KernelTranscriptPayload::Message {
                         message: ChatMessage::user("fresh"),
                     },
                     actions: crate::EventActions::default(),
@@ -670,15 +675,15 @@ mod tests {
     fn test_build_messages_compaction_uses_event_id_boundaries_not_timestamp_ranges() {
         let timestamp = chrono::Utc::now();
 
-        let mut compaction_event = SessionEvent {
+        let mut compaction_event = KernelTranscriptEvent {
             id: "compact".to_string(),
             session_id: "s1".to_string(),
             invocation_id: "i2".to_string(),
             branch: ExecutionBranch::ReactiveLoop,
             author: EventAuthor::Agent,
-            kind: SessionEventKind::StateUpdate,
-            payload: SessionEventPayload::Compaction {
-                payload: SessionCompactionPayload {
+            kind: KernelTranscriptEventKind::StateUpdate,
+            payload: KernelTranscriptPayload::Compaction {
+                payload: KernelTranscriptCompactionPayload {
                     summary_message: ChatMessage::assistant("summary"),
                 },
             },
@@ -694,28 +699,28 @@ mod tests {
         let session = InvocationSession {
             session_id: "s1".to_string(),
             events: vec![
-                SessionEvent {
+                KernelTranscriptEvent {
                     id: "u1".to_string(),
                     session_id: "s1".to_string(),
                     invocation_id: "i1".to_string(),
                     branch: ExecutionBranch::ReactiveLoop,
                     author: EventAuthor::User,
-                    kind: SessionEventKind::UserMessage,
-                    payload: SessionEventPayload::Message {
+                    kind: KernelTranscriptEventKind::UserMessage,
+                    payload: KernelTranscriptPayload::Message {
                         message: ChatMessage::user("hello"),
                     },
                     actions: crate::EventActions::default(),
                     partial: false,
                     timestamp,
                 },
-                SessionEvent {
+                KernelTranscriptEvent {
                     id: "a1".to_string(),
                     session_id: "s1".to_string(),
                     invocation_id: "i1".to_string(),
                     branch: ExecutionBranch::ReactiveLoop,
                     author: EventAuthor::Agent,
-                    kind: SessionEventKind::AgentMessage,
-                    payload: SessionEventPayload::Message {
+                    kind: KernelTranscriptEventKind::AgentMessage,
+                    payload: KernelTranscriptPayload::Message {
                         message: ChatMessage::assistant("detail"),
                     },
                     actions: crate::EventActions::default(),
@@ -723,14 +728,14 @@ mod tests {
                     timestamp,
                 },
                 compaction_event,
-                SessionEvent {
+                KernelTranscriptEvent {
                     id: "u2".to_string(),
                     session_id: "s1".to_string(),
                     invocation_id: "i2".to_string(),
                     branch: ExecutionBranch::ReactiveLoop,
                     author: EventAuthor::User,
-                    kind: SessionEventKind::UserMessage,
-                    payload: SessionEventPayload::Message {
+                    kind: KernelTranscriptEventKind::UserMessage,
+                    payload: KernelTranscriptPayload::Message {
                         message: ChatMessage::user("fresh"),
                     },
                     actions: crate::EventActions::default(),

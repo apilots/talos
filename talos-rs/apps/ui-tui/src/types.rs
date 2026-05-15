@@ -1,5 +1,7 @@
 use ratatui::text::Line;
-use talos_client::{ModelInfo, TalosJsonValue, TalosMessageResponse, TalosSession};
+use talos_client::{
+    ModelInfo, SessionHistorySnapshot, TalosJsonValue, TalosSession, TimelineRecoverySnapshot,
+};
 use talos_error::TalosResult;
 
 // ── Suggestions ──────────────────────────────────────────────────────────────
@@ -281,6 +283,11 @@ pub(crate) struct PendingApprovalState {
     pub(crate) arguments: TalosJsonValue,
 }
 
+pub(crate) struct SessionHistoryLoad {
+    pub(crate) history: SessionHistorySnapshot,
+    pub(crate) live_recovery: Option<TalosResult<TimelineRecoverySnapshot>>,
+}
+
 // ── Remote command update ────────────────────────────────────────────────────
 
 pub(crate) enum RemoteCommandUpdate {
@@ -297,8 +304,8 @@ pub(crate) enum RemoteCommandUpdate {
         requested: String,
         result: TalosResult<TalosSession>,
     },
-    SessionTurnsLoaded {
+    SessionHistoryLoaded {
         session: TalosSession,
-        result: TalosResult<Vec<TalosMessageResponse>>,
+        result: TalosResult<SessionHistoryLoad>,
     },
 }

@@ -1,12 +1,6 @@
 use super::AgentImpl;
 use crate::{
-    service::{
-        OrchestratorEvent, OrchestratorExecution, OrchestratorMessageCompletedEvent,
-        OrchestratorMessageOutputDeltaEvent, OrchestratorMessageStartedEvent,
-        OrchestratorMessageToolCallExecutingEvent, OrchestratorMessageToolCallProgressDeltaEvent,
-        OrchestratorMessageToolCallQueuedEvent, OrchestratorRequest, OrchestratorToolProgressKind,
-        OrchestratorToolStreamKey,
-    },
+    service::{OrchestratorExecution, OrchestratorRequest},
     Agent, AgentOrchestrator, AgentResponse,
 };
 use async_trait::async_trait;
@@ -14,10 +8,13 @@ use std::collections::HashMap;
 use std::time::Duration;
 use talos_agent_kernel::{
     Agent as KernelAgent, AgentRunResult, InvocationContext, StopReason, TaskKind, TaskResult,
-    TaskStatus,
+    TaskStatus, TimelineBuilder,
 };
 use talos_error::TalosResult;
-use talos_types::talos::{TalosOutputItem, TalosUsage};
+use talos_types::talos::{
+    TalosOutputItem, TalosTimelineDelta, TalosTimelineEvent, TalosTimelineItemStatus,
+    TalosToolProgressKind, TalosUsage,
+};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -117,86 +114,65 @@ impl AgentOrchestrator for MockAgent {
     async fn run_stream(
         &self,
         request: OrchestratorRequest,
-    ) -> TalosResult<mpsc::Receiver<OrchestratorEvent>> {
+    ) -> TalosResult<mpsc::Receiver<TalosTimelineEvent>> {
+        let turn_id = request
+            .turn_id
+            .clone()
+            .unwrap_or_else(|| format!("turn_{}", Uuid::new_v4().simple()));
+        let message_id = request.session.context.message_id.clone();
+        let session_id = request.session.context.session_id.clone();
         let execution = AgentOrchestrator::run(self, request).await?;
         let request_id = format!("req_{}", Uuid::new_v4().simple());
         let (tx, rx) = mpsc::channel(8);
         tokio::spawn(async move {
+            let mut timeline = TimelineBuilder::new(request_id, turn_id, message_id, session_id);
+            let _ = tx.send(timeline.start_turn()).await;
+            let answer_started = timeline.start_final_answer();
+            let item_id = match &answer_started.payload {
+                talos_types::talos::TalosTimelineEventPayload::ItemStarted(payload) => {
+                    payload.item.item_id.clone()
+                }
+                _ => unreachable!("start_final_answer returns item_started"),
+            };
+            let _ = tx.send(answer_started).await;
+            if let Ok(delta) = timeline.append_delta(
+                &item_id,
+                TalosTimelineDelta::Text {
+                    text: execution.output_text,
+                },
+            ) {
+                let _ = tx.send(delta).await;
+            }
+            if let Ok(completed) =
+                timeline.complete_item(&item_id, TalosTimelineItemStatus::Completed, None)
+            {
+                let _ = tx.send(completed).await;
+            }
+            let tool_started =
+                timeline.start_tool_call("call-1", "Bash", serde_json::json!({}).to_string());
+            let tool_item_id = match &tool_started.payload {
+                talos_types::talos::TalosTimelineEventPayload::ItemStarted(payload) => {
+                    payload.item.item_id.clone()
+                }
+                _ => unreachable!("start_tool_call returns item_started"),
+            };
+            let _ = tx.send(tool_started).await;
+            if let Ok(progress) = timeline.append_delta(
+                &tool_item_id,
+                TalosTimelineDelta::ToolProgress {
+                    progress_kind: TalosToolProgressKind::Status,
+                    text_delta: "execution started".to_string(),
+                },
+            ) {
+                let _ = tx.send(progress).await;
+            }
+            if let Ok(completed) =
+                timeline.complete_item(&tool_item_id, TalosTimelineItemStatus::Completed, None)
+            {
+                let _ = tx.send(completed).await;
+            }
             let _ = tx
-                .send(OrchestratorEvent::MessageStarted(
-                    OrchestratorMessageStartedEvent {
-                        request_id: request_id.clone(),
-                        model: "mock-model".to_string(),
-                        usage: TalosUsage::default(),
-                        iteration: 0,
-                        step_id: "start".to_string(),
-                    },
-                ))
-                .await;
-            let _ = tx
-                .send(OrchestratorEvent::MessageOutputDelta(
-                    OrchestratorMessageOutputDeltaEvent {
-                        request_id: request_id.clone(),
-                        delta: execution.output_text,
-                        item_index: 0,
-                        iteration: 1,
-                        step_id: "step-1".to_string(),
-                    },
-                ))
-                .await;
-            let _ = tx
-                .send(OrchestratorEvent::MessageToolCallQueued(
-                    OrchestratorMessageToolCallQueuedEvent {
-                        request_id: request_id.clone(),
-                        stream_key: OrchestratorToolStreamKey { round: 0, index: 0 },
-                        call_id: "call-1".to_string(),
-                        tool_name: "Bash".to_string(),
-                        item_index: 1,
-                        iteration: 2,
-                        step_id: "step-2".to_string(),
-                    },
-                ))
-                .await;
-            let _ = tx
-                .send(OrchestratorEvent::MessageToolCallExecuting(
-                    OrchestratorMessageToolCallExecutingEvent {
-                        request_id: request_id.clone(),
-                        stream_key: OrchestratorToolStreamKey { round: 0, index: 0 },
-                        call_id: "call-1".to_string(),
-                        tool_name: "Bash".to_string(),
-                        item_index: 2,
-                        iteration: 3,
-                        step_id: "step-3".to_string(),
-                    },
-                ))
-                .await;
-            let _ = tx
-                .send(OrchestratorEvent::MessageToolCallProgressDelta(
-                    OrchestratorMessageToolCallProgressDeltaEvent {
-                        request_id: request_id.clone(),
-                        stream_key: OrchestratorToolStreamKey { round: 0, index: 0 },
-                        call_id: "call-1".to_string(),
-                        tool_name: "Bash".to_string(),
-                        message: "execution started".to_string(),
-                        progress_kind: OrchestratorToolProgressKind::Status,
-                        item_index: 3,
-                        iteration: 4,
-                        step_id: "step-4".to_string(),
-                    },
-                ))
-                .await;
-            let _ = tx
-                .send(OrchestratorEvent::MessageCompleted(
-                    OrchestratorMessageCompletedEvent {
-                        request_id,
-                        stop_reason: execution.stop_reason,
-                        usage: execution.usage,
-                        total_output_items: 4,
-                        iteration: 5,
-                        step_id: "completed".to_string(),
-                        task_count: execution.task_count,
-                    },
-                ))
+                .send(timeline.complete_turn(execution.stop_reason, execution.usage))
                 .await;
         });
         Ok(rx)

@@ -1,5 +1,6 @@
 import type {
   ApprovalMode,
+  ChatTimelineItem,
   PendingApproval,
   PendingInput,
   SessionUiStatus,
@@ -24,6 +25,7 @@ export interface ChatSlice {
     kind: StreamTextKind,
     chunk: string,
   ) => void;
+  upsertUserInputBlock: (sessionId: string, messageId: string, text: string) => void;
   setPendingInput: (sessionId: string, input?: PendingInput) => void;
   upsertStreamTool: (
     sessionId: string,
@@ -48,6 +50,19 @@ export interface ChatSlice {
     status: "done" | "error",
     timingMs?: number | null,
   ) => void;
+  upsertTimelineItem: (sessionId: string, item: ChatTimelineItem) => void;
+  appendTimelineItemText: (sessionId: string, item: ChatTimelineItem, chunk: string, sequence?: number) => void;
+  updateTimelineTool: (
+    sessionId: string,
+    itemId: string,
+    payload: Partial<Extract<ChatTimelineItem, { kind: "tool_call" }>>,
+  ) => void;
+  completeTimelineItem: (
+    sessionId: string,
+    itemId: string,
+    status: ChatTimelineItem["status"],
+    completedAtMs: number,
+  ) => void;
   setPendingUserAction: (
     sessionId: string,
     pendingUserAction?: StreamSessionState["pendingUserAction"],
@@ -61,6 +76,8 @@ export interface ChatSlice {
         StreamSessionState,
         | "isStreaming"
         | "activeMessageId"
+        | "lastEventId"
+        | "lastEventSeq"
         | "lastSequence"
         | "connectionState"
         | "reconnectAttempt"
@@ -83,6 +100,56 @@ function ensureStreamState(state: Pick<ChatSlice, "streams">, sessionId: string)
       blocks: [],
     }
   );
+}
+
+function ensureTimelineBlock(blocks: StreamSessionState["blocks"], sessionId: string) {
+  const existingIndex = blocks.findIndex((block) => block.kind === "timeline");
+  if (existingIndex >= 0) {
+    return existingIndex;
+  }
+  blocks.push({
+    id: `timeline-${sessionId}`,
+    kind: "timeline",
+    items: [],
+    live: true,
+  });
+  return blocks.length - 1;
+}
+
+function mergeTimelineItem(
+  current: ChatTimelineItem,
+  next: ChatTimelineItem,
+): ChatTimelineItem {
+  if (current.kind === "tool_call" && next.kind === "tool_call") {
+    const status =
+      current.status === "waiting_approval" && next.status === "running"
+        ? current.status
+        : next.status;
+    return {
+      ...current,
+      ...next,
+      status,
+      progress: next.progress.length > 0 ? next.progress : current.progress,
+      output: next.output ?? current.output,
+      prompt: next.prompt ?? current.prompt,
+      completedAtMs: next.completedAtMs ?? current.completedAtMs,
+    };
+  }
+  if (current.kind !== "tool_call" && next.kind !== "tool_call") {
+    return {
+      ...current,
+      ...next,
+      text: next.text || current.text,
+      completedAtMs: next.completedAtMs ?? current.completedAtMs,
+    };
+  }
+  return next;
+}
+
+type TextTimelineItem = Extract<ChatTimelineItem, { text: string }>;
+
+function isTextTimelineItem(item: ChatTimelineItem): item is TextTimelineItem {
+  return item.kind !== "tool_call";
 }
 
 export function createChatSlice(set: ChatSliceSetter): ChatSlice {
@@ -179,6 +246,32 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
           },
         };
       }),
+    upsertUserInputBlock: (sessionId, messageId, text) =>
+      set((state) => {
+        const stream = ensureStreamState(state, sessionId);
+        const blocks = [...stream.blocks];
+        const id = `user-${messageId}`;
+        const index = blocks.findIndex((block) => block.id === id && block.kind === "user");
+        if (index >= 0) {
+          const current = blocks[index];
+          if (current.kind === "user") {
+            blocks[index] = { ...current, text, live: false };
+          }
+        } else {
+          blocks.push({
+            id,
+            kind: "user",
+            text,
+            live: false,
+          });
+        }
+        return {
+          streams: {
+            ...state.streams,
+            [sessionId]: { ...stream, blocks },
+          },
+        };
+      }),
     setPendingInput: (sessionId, pendingInput) =>
       set((state) => {
         const stream = ensureStreamState(state, sessionId);
@@ -268,6 +361,115 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
             status,
             timingMs,
             live: true,
+          };
+        });
+        return {
+          streams: {
+            ...state.streams,
+            [sessionId]: { ...stream, blocks },
+          },
+        };
+      }),
+    upsertTimelineItem: (sessionId, item) =>
+      set((state) => {
+        const stream = ensureStreamState(state, sessionId);
+        const blocks = [...stream.blocks];
+        const timelineIndex = ensureTimelineBlock(blocks, sessionId);
+        const timeline = blocks[timelineIndex];
+        if (timeline.kind !== "timeline") {
+          return {};
+        }
+        const existingIndex = timeline.items.findIndex((entry) => entry.itemId === item.itemId);
+        const items = [...timeline.items];
+        if (existingIndex >= 0) {
+          items[existingIndex] = mergeTimelineItem(items[existingIndex], item);
+        } else {
+          items.push(item);
+        }
+        blocks[timelineIndex] = { ...timeline, items, live: true };
+        return {
+          streams: {
+            ...state.streams,
+            [sessionId]: { ...stream, isStreaming: true, blocks },
+          },
+        };
+      }),
+    appendTimelineItemText: (sessionId, sourceItem, chunk, sequence) =>
+      set((state) => {
+        const stream = ensureStreamState(state, sessionId);
+        const blocks = [...stream.blocks];
+        const timelineIndex = ensureTimelineBlock(blocks, sessionId);
+        const timeline = blocks[timelineIndex];
+        if (timeline.kind !== "timeline") {
+          return {};
+        }
+        const sourceItemId = sourceItem.sourceItemId ?? sourceItem.itemId;
+        const sameSource = (item: ChatTimelineItem): item is TextTimelineItem =>
+          isTextTimelineItem(item) && (item.sourceItemId ?? item.itemId) === sourceItemId;
+        const items = timeline.items.filter((item) => !sameSource(item) || item.text.trim() !== "");
+        const lastItem = items.at(-1);
+        if (lastItem && sameSource(lastItem)) {
+          items[items.length - 1] = { ...lastItem, text: lastItem.text + chunk };
+        } else if (sourceItem.kind !== "tool_call") {
+          const hasExistingSegment = items.some(sameSource);
+          items.push({
+            ...sourceItem,
+            itemId: hasExistingSegment ? `${sourceItemId}::segment-${sequence ?? items.length}` : sourceItemId,
+            sourceItemId,
+            text: chunk,
+          });
+        }
+        blocks[timelineIndex] = { ...timeline, items, live: true };
+        return {
+          streams: {
+            ...state.streams,
+            [sessionId]: { ...stream, isStreaming: true, blocks },
+          },
+        };
+      }),
+    updateTimelineTool: (sessionId, itemId, payload) =>
+      set((state) => {
+        const stream = ensureStreamState(state, sessionId);
+        const blocks = stream.blocks.map((block) => {
+          if (block.kind !== "timeline") {
+            return block;
+          }
+          return {
+            ...block,
+            live: true,
+            items: block.items.map((item) => {
+              if (item.itemId !== itemId || item.kind !== "tool_call") {
+                return item;
+              }
+              return {
+                ...item,
+                ...payload,
+                progress: payload.progress ?? item.progress,
+              };
+            }),
+          };
+        });
+        return {
+          streams: {
+            ...state.streams,
+            [sessionId]: { ...stream, isStreaming: true, blocks },
+          },
+        };
+      }),
+    completeTimelineItem: (sessionId, itemId, status, completedAtMs) =>
+      set((state) => {
+        const stream = ensureStreamState(state, sessionId);
+        const blocks = stream.blocks.map((block) => {
+          if (block.kind !== "timeline") {
+            return block;
+          }
+          return {
+            ...block,
+            items: block.items.map((item) =>
+              (item.itemId === itemId || item.sourceItemId === itemId)
+                ? { ...item, status, completedAtMs }
+                : item,
+            ),
           };
         });
         return {

@@ -8,7 +8,7 @@ pub mod server_requests;
 pub mod version;
 
 pub use errors::{AppServerErrorBody, AppServerErrorCode, AppServerErrorData};
-pub use events::{ApplicationEvent, ApplicationEventEnvelope, EventSubscriptionId};
+pub use events::{ApplicationEvent, EventSubscriptionId};
 pub use jsonrpc::{
     JsonRpcErrorResponse, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse,
     RequestId, JSONRPC_VERSION,

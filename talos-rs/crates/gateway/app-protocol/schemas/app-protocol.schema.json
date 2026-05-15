@@ -430,32 +430,6 @@
         }
       ]
     },
-    "ApplicationEventEnvelope": {
-      "properties": {
-        "event": {
-          "$ref": "#/definitions/TalosEvent"
-        },
-        "event_id": {
-          "type": "string"
-        },
-        "subscription_id": {
-          "type": "string"
-        },
-        "turn_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "event",
-        "event_id",
-        "subscription_id"
-      ],
-      "type": "object"
-    },
     "AuthLogoutParams": {
       "type": "object"
     },
@@ -534,7 +508,8 @@
         "session.compact",
         "session.clear",
         "session.active_turn",
-        "session.turns",
+        "session.history",
+        "session.recover",
         "project.create",
         "project.list",
         "project.read",
@@ -781,12 +756,30 @@
           "properties": {
             "method": {
               "enum": [
-                "session.turns"
+                "session.history"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/SessionTurnsParams"
+              "$ref": "#/definitions/SessionHistoryParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "session.recover"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/TimelineRecoveryParams"
             }
           },
           "required": [
@@ -2214,12 +2207,12 @@
           "properties": {
             "method": {
               "enum": [
-                "message.started"
+                "timeline.turn.started"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/ApplicationEventEnvelope"
+              "$ref": "#/definitions/TimelineSubscriptionNotification"
             }
           },
           "required": [
@@ -2232,12 +2225,12 @@
           "properties": {
             "method": {
               "enum": [
-                "message.reasoning.delta"
+                "timeline.item.started"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/ApplicationEventEnvelope"
+              "$ref": "#/definitions/TimelineSubscriptionNotification"
             }
           },
           "required": [
@@ -2250,12 +2243,12 @@
           "properties": {
             "method": {
               "enum": [
-                "message.execution.summary"
+                "timeline.item.delta"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/ApplicationEventEnvelope"
+              "$ref": "#/definitions/TimelineSubscriptionNotification"
             }
           },
           "required": [
@@ -2268,12 +2261,12 @@
           "properties": {
             "method": {
               "enum": [
-                "message.output.delta"
+                "timeline.item.completed"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/ApplicationEventEnvelope"
+              "$ref": "#/definitions/TimelineSubscriptionNotification"
             }
           },
           "required": [
@@ -2286,12 +2279,12 @@
           "properties": {
             "method": {
               "enum": [
-                "message.tool_call.started"
+                "timeline.turn.completed"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/ApplicationEventEnvelope"
+              "$ref": "#/definitions/TimelineSubscriptionNotification"
             }
           },
           "required": [
@@ -2304,156 +2297,12 @@
           "properties": {
             "method": {
               "enum": [
-                "message.tool_call.args_delta"
+                "timeline.turn.error"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/ApplicationEventEnvelope"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "message.tool_call.queued"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/ApplicationEventEnvelope"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "message.tool_call.executing"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/ApplicationEventEnvelope"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "message.tool_call.progress_delta"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/ApplicationEventEnvelope"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "message.tool_call.completed"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/ApplicationEventEnvelope"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "message.tool_call.pending_approval"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/ApplicationEventEnvelope"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "message.tool_call.pending_dynamic_result"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/ApplicationEventEnvelope"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "message.completed"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/ApplicationEventEnvelope"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "message.error"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/ApplicationEventEnvelope"
+              "$ref": "#/definitions/TimelineSubscriptionNotification"
             }
           },
           "required": [
@@ -2627,6 +2476,79 @@
       ],
       "type": "object"
     },
+    "SessionHistoryMessage": {
+      "description": "Stable message view for session history.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/TalosTimelineItem"
+          },
+          "type": "array"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "stop_reason": {
+          "$ref": "#/definitions/StopReason"
+        },
+        "turn_id": {
+          "type": "string"
+        },
+        "usage": {
+          "$ref": "#/definitions/TalosUsage"
+        }
+      },
+      "required": [
+        "items",
+        "message_id",
+        "stop_reason",
+        "turn_id",
+        "usage"
+      ],
+      "type": "object"
+    },
+    "SessionHistoryParams": {
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "SessionHistorySnapshot": {
+      "description": "Stable session history snapshot. This is not a replay cursor envelope.",
+      "properties": {
+        "generated_at_ms": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "last_stable_event_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "messages": {
+          "items": {
+            "$ref": "#/definitions/SessionHistoryMessage"
+          },
+          "type": "array"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "generated_at_ms",
+        "messages",
+        "session_id"
+      ],
+      "type": "object"
+    },
     "SessionListParams": {
       "properties": {
         "limit": {
@@ -2698,17 +2620,6 @@
       "type": "object"
     },
     "SessionReadParams": {
-      "properties": {
-        "session_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "session_id"
-      ],
-      "type": "object"
-    },
-    "SessionTurnsParams": {
       "properties": {
         "session_id": {
           "type": "string"
@@ -2809,675 +2720,6 @@
         }
       ]
     },
-    "TalosEvent": {
-      "description": "Canonical stream event payload.",
-      "properties": {
-        "event_type": {
-          "$ref": "#/definitions/TalosEventType"
-        },
-        "message_id": {
-          "type": "string"
-        },
-        "payload": {
-          "$ref": "#/definitions/TalosEventPayload"
-        },
-        "sequence": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "session_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "event_type",
-        "message_id",
-        "payload",
-        "sequence",
-        "session_id"
-      ],
-      "type": "object"
-    },
-    "TalosEventPayload": {
-      "oneOf": [
-        {
-          "properties": {
-            "iteration": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "model": {
-              "type": "string"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "step_id": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "message_started"
-              ],
-              "type": "string"
-            },
-            "usage": {
-              "$ref": "#/definitions/TalosUsage"
-            }
-          },
-          "required": [
-            "iteration",
-            "model",
-            "request_id",
-            "step_id",
-            "type",
-            "usage"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "delta": {
-              "type": "string"
-            },
-            "item_index": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "iteration": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "source": {
-              "$ref": "#/definitions/TalosThinkingSource"
-            },
-            "stage": {
-              "$ref": "#/definitions/TalosThinkingStage"
-            },
-            "step_id": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "message_reasoning_delta"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "delta",
-            "item_index",
-            "iteration",
-            "request_id",
-            "source",
-            "stage",
-            "step_id",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "item_index": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "iteration": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "step_id": {
-              "type": "string"
-            },
-            "text": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "message_execution_summary"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "item_index",
-            "iteration",
-            "request_id",
-            "step_id",
-            "text",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "delta": {
-              "type": "string"
-            },
-            "item_index": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "iteration": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "step_id": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "message_output_delta"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "delta",
-            "item_index",
-            "iteration",
-            "request_id",
-            "step_id",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "arguments": {
-              "type": "object"
-            },
-            "call_id": {
-              "type": "string"
-            },
-            "item_index": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "iteration": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "name": {
-              "type": "string"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "step_id": {
-              "type": "string"
-            },
-            "timing_ms": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "type": {
-              "enum": [
-                "message_tool_call_started"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "arguments",
-            "call_id",
-            "item_index",
-            "iteration",
-            "name",
-            "request_id",
-            "step_id",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "call_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "delta": {
-              "type": "string"
-            },
-            "item_index": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "iteration": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "step_id": {
-              "type": "string"
-            },
-            "stream_key": {
-              "$ref": "#/definitions/TalosToolStreamKey"
-            },
-            "tool_name": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "type": {
-              "enum": [
-                "message_tool_call_args_delta"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "delta",
-            "item_index",
-            "iteration",
-            "request_id",
-            "step_id",
-            "stream_key",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "call_id": {
-              "type": "string"
-            },
-            "item_index": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "iteration": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "step_id": {
-              "type": "string"
-            },
-            "stream_key": {
-              "$ref": "#/definitions/TalosToolStreamKey"
-            },
-            "tool_name": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "message_tool_call_queued"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "call_id",
-            "item_index",
-            "iteration",
-            "request_id",
-            "step_id",
-            "stream_key",
-            "tool_name",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "call_id": {
-              "type": "string"
-            },
-            "item_index": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "iteration": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "step_id": {
-              "type": "string"
-            },
-            "stream_key": {
-              "$ref": "#/definitions/TalosToolStreamKey"
-            },
-            "tool_name": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "message_tool_call_executing"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "call_id",
-            "item_index",
-            "iteration",
-            "request_id",
-            "step_id",
-            "stream_key",
-            "tool_name",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "call_id": {
-              "type": "string"
-            },
-            "item_index": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "iteration": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "message": {
-              "type": "string"
-            },
-            "progress_kind": {
-              "$ref": "#/definitions/TalosToolProgressKind"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "step_id": {
-              "type": "string"
-            },
-            "stream_key": {
-              "$ref": "#/definitions/TalosToolStreamKey"
-            },
-            "tool_name": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "message_tool_call_progress_delta"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "call_id",
-            "item_index",
-            "iteration",
-            "message",
-            "progress_kind",
-            "request_id",
-            "step_id",
-            "stream_key",
-            "tool_name",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "call_id": {
-              "type": "string"
-            },
-            "content": {
-              "items": {
-                "$ref": "#/definitions/TalosContentItem"
-              },
-              "type": "array"
-            },
-            "is_error": {
-              "type": "boolean"
-            },
-            "item_index": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "iteration": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "step_id": {
-              "type": "string"
-            },
-            "timing_ms": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "tool": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "message_tool_call_completed"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "call_id",
-            "content",
-            "is_error",
-            "item_index",
-            "iteration",
-            "request_id",
-            "step_id",
-            "tool",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "arguments": {
-              "type": "object"
-            },
-            "call_id": {
-              "type": "string"
-            },
-            "prompt": {
-              "type": "string"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "step_id": {
-              "type": "string"
-            },
-            "tool_name": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "message_tool_call_pending_approval"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "arguments",
-            "call_id",
-            "prompt",
-            "request_id",
-            "step_id",
-            "tool_name",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "arguments": {
-              "type": "object"
-            },
-            "call_id": {
-              "type": "string"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "step_id": {
-              "type": "string"
-            },
-            "tool_name": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "message_tool_call_pending_dynamic_result"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "arguments",
-            "call_id",
-            "request_id",
-            "step_id",
-            "tool_name",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "iteration": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "step_id": {
-              "type": "string"
-            },
-            "stop_reason": {
-              "$ref": "#/definitions/StopReason"
-            },
-            "task_count": {
-              "format": "uint32",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "total_output_items": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "type": {
-              "enum": [
-                "message_completed"
-              ],
-              "type": "string"
-            },
-            "usage": {
-              "$ref": "#/definitions/TalosUsage"
-            }
-          },
-          "required": [
-            "iteration",
-            "request_id",
-            "step_id",
-            "stop_reason",
-            "task_count",
-            "total_output_items",
-            "type",
-            "usage"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "error": {
-              "type": "string"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "message_error"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "error",
-            "request_id",
-            "type"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "TalosEventType": {
-      "description": "Stream event type.",
-      "enum": [
-        "message_started",
-        "message_reasoning_delta",
-        "message_execution_summary",
-        "message_output_delta",
-        "message_tool_call_started",
-        "message_tool_call_args_delta",
-        "message_tool_call_queued",
-        "message_tool_call_executing",
-        "message_tool_call_progress_delta",
-        "message_tool_call_completed",
-        "message_tool_call_pending_approval",
-        "message_tool_call_pending_dynamic_result",
-        "message_completed",
-        "message_error"
-      ],
-      "type": "string"
-    },
     "TalosJsonValue": {
       "properties": {
         "value": {
@@ -3489,22 +2731,680 @@
       ],
       "type": "object"
     },
-    "TalosThinkingSource": {
+    "TalosTimelineContent": {
+      "description": "Current full content for a timeline item.",
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "empty"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "arguments": {
+              "type": "string"
+            },
+            "call_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "progress": {
+              "default": [],
+              "items": {
+                "$ref": "#/definitions/TalosToolProgressEntry"
+              },
+              "type": "array"
+            },
+            "result": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/TalosToolResult"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "type": {
+              "enum": [
+                "tool_call"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "arguments",
+            "call_id",
+            "name",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "summary": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "execution_summary"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "summary",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "level": {
+              "$ref": "#/definitions/TalosTimelineNoticeLevel"
+            },
+            "message": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "system_notice"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "level",
+            "message",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TalosTimelineDelta": {
+      "description": "Incremental update for an existing timeline item.",
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "arguments_delta": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "tool_arguments"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "arguments_delta",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "progress_kind": {
+              "$ref": "#/definitions/TalosToolProgressKind"
+            },
+            "text_delta": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "tool_progress"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "progress_kind",
+            "text_delta",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "content": {
+              "items": {
+                "$ref": "#/definitions/TalosContentItem"
+              },
+              "type": "array"
+            },
+            "is_error": {
+              "type": "boolean"
+            },
+            "type": {
+              "enum": [
+                "tool_result"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "content",
+            "is_error",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "arguments": {
+              "$ref": "#/definitions/TalosJsonValue"
+            },
+            "call_id": {
+              "type": "string"
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "tool_name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "tool_approval_request"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "arguments",
+            "call_id",
+            "prompt",
+            "tool_name",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "arguments": {
+              "$ref": "#/definitions/TalosJsonValue"
+            },
+            "call_id": {
+              "type": "string"
+            },
+            "tool_name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "tool_dynamic_request"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "arguments",
+            "call_id",
+            "tool_name",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "status": {
+              "$ref": "#/definitions/TalosTimelineItemStatus"
+            },
+            "type": {
+              "enum": [
+                "status"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TalosTimelineEvent": {
+      "description": "Domain timeline event payload.",
+      "properties": {
+        "created_at_ms": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "event_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "event_seq": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "event_type": {
+          "$ref": "#/definitions/TalosTimelineEventType"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/definitions/TalosTimelineEventPayload"
+        },
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_type",
+        "message_id",
+        "payload",
+        "sequence",
+        "session_id",
+        "turn_id"
+      ],
+      "type": "object"
+    },
+    "TalosTimelineEventPayload": {
+      "oneOf": [
+        {
+          "properties": {
+            "request_id": {
+              "type": "string"
+            },
+            "started_at_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "turn_started"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_id",
+            "started_at_ms",
+            "turn_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "item": {
+              "$ref": "#/definitions/TalosTimelineItem"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "item_started"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "item",
+            "request_id",
+            "turn_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "delta": {
+              "$ref": "#/definitions/TalosTimelineDelta"
+            },
+            "item_id": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "item_delta"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "delta",
+            "item_id",
+            "request_id",
+            "turn_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "completed_at_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "final_content": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/TalosTimelineContent"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "item_id": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/definitions/TalosTimelineItemStatus"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "item_completed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "completed_at_ms",
+            "item_id",
+            "request_id",
+            "status",
+            "turn_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "completed_at_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "stop_reason": {
+              "$ref": "#/definitions/StopReason"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "turn_completed"
+              ],
+              "type": "string"
+            },
+            "usage": {
+              "$ref": "#/definitions/TalosUsage"
+            }
+          },
+          "required": [
+            "completed_at_ms",
+            "request_id",
+            "stop_reason",
+            "turn_id",
+            "type",
+            "usage"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "error": {
+              "type": "string"
+            },
+            "failed_at_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "turn_error"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "error",
+            "failed_at_ms",
+            "request_id",
+            "turn_id",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TalosTimelineEventType": {
+      "description": "Timeline stream event lifecycle type.",
       "enum": [
-        "provider",
-        "framework"
+        "turn_started",
+        "item_started",
+        "item_delta",
+        "item_completed",
+        "turn_completed",
+        "turn_error"
       ],
       "type": "string"
     },
-    "TalosThinkingStage": {
+    "TalosTimelineItem": {
+      "properties": {
+        "completed_at_ms": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "content": {
+          "$ref": "#/definitions/TalosTimelineContent"
+        },
+        "item_id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/TalosTimelineItemKind"
+        },
+        "parent_item_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phase": {
+          "$ref": "#/definitions/TalosTimelinePhase"
+        },
+        "started_at_ms": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/definitions/TalosTimelineItemStatus"
+        },
+        "title": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "content",
+        "item_id",
+        "kind",
+        "phase",
+        "started_at_ms",
+        "status"
+      ],
+      "type": "object"
+    },
+    "TalosTimelineItemKind": {
+      "description": "Timeline item kind rendered by clients.",
       "enum": [
-        "model_reasoning",
-        "framework_plan",
-        "framework_act",
-        "framework_observe",
-        "framework_reflect"
+        "user_input",
+        "reasoning",
+        "assistant_text",
+        "tool_call",
+        "execution_summary",
+        "system_notice"
       ],
       "type": "string"
+    },
+    "TalosTimelineItemStatus": {
+      "description": "Lifecycle status for a timeline item.",
+      "enum": [
+        "running",
+        "waiting_approval",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "type": "string"
+    },
+    "TalosTimelineNoticeLevel": {
+      "enum": [
+        "info",
+        "warning",
+        "error"
+      ],
+      "type": "string"
+    },
+    "TalosTimelinePhase": {
+      "description": "Server-owned phase for a timeline item.",
+      "enum": [
+        "input",
+        "thinking",
+        "acting",
+        "commentary",
+        "final_answer",
+        "system"
+      ],
+      "type": "string"
+    },
+    "TalosToolProgressEntry": {
+      "properties": {
+        "progress_kind": {
+          "$ref": "#/definitions/TalosToolProgressKind"
+        },
+        "text": {
+          "type": "string"
+        },
+        "timestamp_ms": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "progress_kind",
+        "text",
+        "timestamp_ms"
+      ],
+      "type": "object"
     },
     "TalosToolProgressKind": {
       "enum": [
@@ -3514,22 +3414,21 @@
       ],
       "type": "string"
     },
-    "TalosToolStreamKey": {
+    "TalosToolResult": {
       "properties": {
-        "index": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
+        "content": {
+          "items": {
+            "$ref": "#/definitions/TalosContentItem"
+          },
+          "type": "array"
         },
-        "round": {
-          "format": "uint32",
-          "minimum": 0.0,
-          "type": "integer"
+        "is_error": {
+          "type": "boolean"
         }
       },
       "required": [
-        "index",
-        "round"
+        "content",
+        "is_error"
       ],
       "type": "object"
     },
@@ -3574,6 +3473,270 @@
         "input_tokens",
         "output_tokens",
         "total_tokens"
+      ],
+      "type": "object"
+    },
+    "TimelineActiveTurnSnapshot": {
+      "properties": {
+        "last_event_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pending_user_action": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TimelinePendingUserAction"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/TimelineActiveTurnStatus"
+        },
+        "turn_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updated_at": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "session_id",
+        "status",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "TimelineActiveTurnStatus": {
+      "enum": [
+        "running",
+        "waiting_user_action",
+        "cancelling",
+        "completed",
+        "failed"
+      ],
+      "type": "string"
+    },
+    "TimelineCursorStatus": {
+      "enum": [
+        "current",
+        "from_beginning"
+      ],
+      "type": "string"
+    },
+    "TimelineEventEnvelope": {
+      "description": "Public recoverable timeline stream event.",
+      "properties": {
+        "created_at_ms": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "event": {
+          "$ref": "#/definitions/TalosTimelineEvent"
+        },
+        "event_id": {
+          "type": "string"
+        },
+        "event_seq": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "created_at_ms",
+        "event",
+        "event_id",
+        "event_seq",
+        "message_id",
+        "session_id",
+        "turn_id"
+      ],
+      "type": "object"
+    },
+    "TimelinePendingUserAction": {
+      "oneOf": [
+        {
+          "properties": {
+            "arguments": {
+              "$ref": "#/definitions/TalosJsonValue"
+            },
+            "call_id": {
+              "type": "string"
+            },
+            "item_id": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "tool_name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "tool_approval"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "arguments",
+            "call_id",
+            "prompt",
+            "tool_name",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "item_id": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tool_name": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "dynamic_tool_result"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "call_id",
+            "tool_name",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TimelineRecoveryParams": {
+      "properties": {
+        "after_event_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "replay_limit": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "TimelineRecoverySnapshot": {
+      "properties": {
+        "active_turn": {
+          "$ref": "#/definitions/TimelineActiveTurnSnapshot"
+        },
+        "replay": {
+          "$ref": "#/definitions/TimelineReplay"
+        }
+      },
+      "required": [
+        "active_turn",
+        "replay"
+      ],
+      "type": "object"
+    },
+    "TimelineReplay": {
+      "properties": {
+        "cursor_status": {
+          "$ref": "#/definitions/TimelineCursorStatus"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/definitions/TimelineEventEnvelope"
+          },
+          "type": "array"
+        },
+        "high_water_mark_event_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last_replay_seq": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cursor_status",
+        "events",
+        "last_replay_seq"
+      ],
+      "type": "object"
+    },
+    "TimelineSubscriptionNotification": {
+      "properties": {
+        "event": {
+          "$ref": "#/definitions/TimelineEventEnvelope"
+        },
+        "subscription_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "event",
+        "subscription_id"
       ],
       "type": "object"
     },
@@ -3826,9 +3989,6 @@
     "error": {
       "$ref": "#/definitions/AppServerErrorBody"
     },
-    "event_envelope": {
-      "$ref": "#/definitions/ApplicationEventEnvelope"
-    },
     "event_subscribe_response": {
       "$ref": "#/definitions/EventSubscribeResponse"
     },
@@ -3847,6 +4007,18 @@
     "server_request": {
       "$ref": "#/definitions/ServerRequest"
     },
+    "session_history_response": {
+      "$ref": "#/definitions/SessionHistorySnapshot"
+    },
+    "timeline_event": {
+      "$ref": "#/definitions/TalosTimelineEvent"
+    },
+    "timeline_event_envelope": {
+      "$ref": "#/definitions/TimelineEventEnvelope"
+    },
+    "timeline_recovery_snapshot": {
+      "$ref": "#/definitions/TimelineRecoverySnapshot"
+    },
     "turn_start_response": {
       "$ref": "#/definitions/TurnStartResponse"
     }
@@ -3855,13 +4027,16 @@
     "client_request",
     "client_request_params",
     "error",
-    "event_envelope",
     "event_subscribe_response",
     "event_unsubscribe_response",
     "initialize_response",
     "jsonrpc_message",
     "server_notification",
     "server_request",
+    "session_history_response",
+    "timeline_event",
+    "timeline_event_envelope",
+    "timeline_recovery_snapshot",
     "turn_start_response"
   ],
   "title": "AppProtocolSchemaRoot",

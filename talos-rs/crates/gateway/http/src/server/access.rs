@@ -172,13 +172,6 @@ mod tests {
             Ok(())
         }
 
-        async fn get_session_turns(
-            &self,
-            _session_id: &str,
-        ) -> TalosResult<Vec<talos_types::talos::TalosMessageResponse>> {
-            Ok(Vec::new())
-        }
-
         async fn list_projects(&self) -> TalosResult<Vec<ProjectRecord>> {
             Ok(vec![
                 ProjectRecord {

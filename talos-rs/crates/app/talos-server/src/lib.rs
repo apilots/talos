@@ -25,8 +25,8 @@ use talos_llm_provider::{
 use talos_logging::LogGuard;
 use talos_router::{Binding, MatchRule, Router, RouterImpl};
 use talos_session_store::{
-    ActiveTurnStore, DatabaseSessionStore, MessageIdempotencyStore, SessionEventRetentionConfig,
-    SessionEventService, SessionEventStore, SessionStore,
+    ActiveTurnStore, DatabaseSessionStore, MessageIdempotencyStore, SessionStore,
+    TimelineEventRetentionConfig, TimelineEventService, TimelineEventStore,
 };
 use talos_storage::{create_storage, StorageConfig};
 use talos_tools::{
@@ -62,7 +62,7 @@ pub struct TalosServerRuntime {
 pub struct TalosApplicationRuntime {
     pub config: Config,
     pub application_service: Arc<TalosApplicationService>,
-    pub event_service: Arc<SessionEventService>,
+    pub event_service: Arc<TimelineEventService>,
     pub auth_service: Arc<dyn AuthService>,
     pub request_handler: Arc<dyn RequestHandler>,
     pub coordinator: Arc<CoordinatorImpl>,
@@ -297,7 +297,7 @@ pub async fn start_server(
 
 pub async fn run_json_rpc_stdio(config: Config) -> TalosResult<()> {
     let runtime = build_application_runtime(config.clone()).await?;
-    let replay_limit = config.agent.kernel.session_events.replay_batch_size.max(1);
+    let replay_limit = config.agent.kernel.timeline_events.replay_batch_size.max(1);
     let app = Arc::new(
         talos_app_server::TalosApplicationAdapter::new(runtime.application_service, replay_limit)
             .with_drain_provider(Box::new(CoordinatorDrain {
@@ -339,17 +339,17 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
     let storage: Arc<dyn talos_storage::Storage> = Arc::from(storage_impl);
     let session_store_impl = Arc::new(DatabaseSessionStore::new(storage.clone()).await?);
     let session_store: Arc<dyn SessionStore> = session_store_impl.clone();
-    let event_store: Arc<dyn SessionEventStore> = session_store_impl.clone();
+    let event_store: Arc<dyn TimelineEventStore> = session_store_impl.clone();
     let active_turn_store: Arc<dyn ActiveTurnStore> = session_store_impl.clone();
     let idempotency_store: Arc<dyn MessageIdempotencyStore> = session_store_impl.clone();
-    let event_service = Arc::new(SessionEventService::new(
+    let event_service = Arc::new(TimelineEventService::new(
         event_store,
         active_turn_store,
-        SessionEventRetentionConfig {
-            retention_hours: config.agent.kernel.session_events.retention_hours,
-            max_events_per_session: config.agent.kernel.session_events.max_events_per_session,
-            gc_interval_minutes: config.agent.kernel.session_events.gc_interval_minutes,
-            gc_batch_size: config.agent.kernel.session_events.gc_batch_size,
+        TimelineEventRetentionConfig {
+            retention_hours: config.agent.kernel.timeline_events.retention_hours,
+            max_events_per_session: config.agent.kernel.timeline_events.max_events_per_session,
+            gc_interval_minutes: config.agent.kernel.timeline_events.gc_interval_minutes,
+            gc_batch_size: config.agent.kernel.timeline_events.gc_batch_size,
         },
     ));
     let user_store_impl = Arc::new(DatabaseUserStore::new(storage.clone()).await?);

@@ -204,7 +204,9 @@ fn build_gateway_request(
 
     GatewayRequest {
         session_id,
+        turn_id: None,
         workspace_id: None,
+        resume_context: None,
         input,
         context,
     }
@@ -226,8 +228,8 @@ mod tests {
     use std::sync::Mutex;
     use talos_types::gateway::{GatewayRequest, GatewayResponse};
     use talos_types::talos::{
-        TalosEvent, TalosEventPayload, TalosEventType, TalosMessageStartedEvent, TalosReasoning,
-        TalosUsage,
+        TalosReasoning, TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType,
+        TalosTurnStartedEvent, TalosUsage,
     };
 
     use crate::traits::{ChannelCapabilities, ChannelDefinition, DeliveryResult, OutboundAdapter};
@@ -341,22 +343,24 @@ mod tests {
         async fn handle_stream(
             &self,
             request: GatewayRequest,
-        ) -> TalosResult<tokio::sync::mpsc::Receiver<TalosEvent>> {
+        ) -> TalosResult<tokio::sync::mpsc::Receiver<TalosTimelineEvent>> {
             let response = self.handle(request).await?;
             let (tx, rx) = tokio::sync::mpsc::channel(1);
             tokio::spawn(async move {
                 let _ = tx
-                    .send(TalosEvent {
-                        event_type: TalosEventType::MessageStarted,
+                    .send(TalosTimelineEvent {
+                        event_seq: None,
+                        event_id: None,
+                        created_at_ms: None,
+                        event_type: TalosTimelineEventType::TurnStarted,
+                        turn_id: "turn-mock".to_string(),
                         message_id: "msg-mock".to_string(),
                         session_id: response.session_id,
                         sequence: 0,
-                        payload: TalosEventPayload::MessageStarted(TalosMessageStartedEvent {
+                        payload: TalosTimelineEventPayload::TurnStarted(TalosTurnStartedEvent {
                             request_id: "req-mock".to_string(),
-                            model: "mock-model".to_string(),
-                            usage: TalosUsage::default(),
-                            iteration: 0,
-                            step_id: "start".to_string(),
+                            turn_id: "turn-mock".to_string(),
+                            started_at_ms: 0,
                         }),
                     })
                     .await;

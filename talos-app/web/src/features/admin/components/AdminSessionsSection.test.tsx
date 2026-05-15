@@ -27,7 +27,8 @@ vi.mock("@/features/chat", () => ({
   chatKeys: {
     sessions: (connectionKey: string) => ["talos", connectionKey, "sessions"],
     session: (connectionKey: string, sessionId: string) => ["talos", connectionKey, "session", sessionId],
-    turns: (connectionKey: string, sessionId: string) => ["talos", connectionKey, "turns", sessionId],
+    liveRecovery: (connectionKey: string, sessionId: string) =>
+      ["talos", connectionKey, "live-recovery", sessionId],
   },
   deleteAdminSession: (sessionId: string) => deleteAdminSessionMock(sessionId),
   useConnectionKey: () => "test-connection",

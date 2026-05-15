@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { TalosEvent } from "@talos/sdk-browser";
+import type { TalosTimelineEvent, TimelineEventEnvelope } from "@talos/sdk-browser";
 
 import {
   createSession,
-  retryMessageEvents,
-  sendMessageEvents,
+  retryTimelineEvents,
+  sendTimelineEvents,
   updateSessionApprovalMode,
 } from "./api";
 import {
@@ -73,17 +73,23 @@ describe("chat message api", () => {
     resetTalosClientFactory();
   });
 
-  it("exposes the accepted server message id before streaming message events", async () => {
+  it("exposes the accepted server message id before streaming timeline events", async () => {
     const onAcceptedMessageId = vi.fn();
     const onEvent = vi.fn();
-    const event: TalosEvent = {
-      event_type: "message_completed",
+    const timelineEvent: TalosTimelineEvent = {
+      event_seq: 1,
+      event_id: "ev_00000000000000000001",
+      created_at_ms: 1,
+      event_type: "turn_completed",
+      turn_id: "turn-1",
       message_id: "msg-accepted",
       session_id: "sess-1",
       sequence: 1,
       payload: {
-        type: "message_completed",
+        type: "turn_completed",
         request_id: "req-1",
+        turn_id: "turn-1",
+        completed_at_ms: 1n,
         stop_reason: "end_turn",
         usage: {
           input_tokens: 0,
@@ -92,11 +98,16 @@ describe("chat message api", () => {
           cache_creation_input_tokens: null,
           cache_read_input_tokens: null,
         },
-        total_output_items: 1n,
-        iteration: 0n,
-        step_id: "step-1",
-        task_count: 0,
       },
+    };
+    const event: TimelineEventEnvelope = {
+      event_id: "ev_00000000000000000001",
+      event_seq: 1,
+      created_at_ms: 1,
+      session_id: "sess-1",
+      turn_id: "turn-1",
+      message_id: "msg-accepted",
+      event: timelineEvent,
     };
     const eventsForMessage = vi.fn(async (_sessionId, _messageId, callback) => {
       callback(event);
@@ -115,7 +126,7 @@ describe("chat message api", () => {
       },
     } as unknown as TalosWebClient));
 
-    await sendMessageEvents("sess-1", "hello", onEvent, undefined, onAcceptedMessageId);
+    await sendTimelineEvents("sess-1", "hello", onEvent, undefined, onAcceptedMessageId);
 
     expect(onAcceptedMessageId).toHaveBeenCalledWith("msg-accepted");
     expect(eventsForMessage).toHaveBeenCalledWith(
@@ -144,7 +155,7 @@ describe("chat message api", () => {
       },
     } as unknown as TalosWebClient));
 
-    await retryMessageEvents(
+    await retryTimelineEvents(
       "sess-1",
       {
         client_message_id: "client-1",

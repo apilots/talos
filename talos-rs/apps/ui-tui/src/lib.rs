@@ -34,7 +34,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use talos_client::{ModelInfo, TalosEvent, TalosSession};
+use talos_client::{ModelInfo, TalosSession, TalosTimelineItem, TimelineEventEnvelope};
 use talos_error::TalosResult;
 use talos_types::talos::{TalosConnectionMode, TalosUsage};
 use tokio::sync::mpsc;
@@ -118,15 +118,16 @@ pub struct TuiApp {
     pub(crate) pending_session_connect: Option<mpsc::Receiver<TalosResult<String>>>,
     pub(crate) pending_session_task: Option<tokio::task::JoinHandle<()>>,
     pub(crate) pending_stream_connect:
-        Option<mpsc::Receiver<TalosResult<mpsc::Receiver<TalosEvent>>>>,
+        Option<mpsc::Receiver<TalosResult<mpsc::Receiver<TimelineEventEnvelope>>>>,
     pub(crate) pending_stream_task: Option<tokio::task::JoinHandle<()>>,
-    pub(crate) pending_stream: Option<mpsc::Receiver<TalosEvent>>,
+    pub(crate) pending_stream: Option<mpsc::Receiver<TimelineEventEnvelope>>,
     pub(crate) pending_command_update: Option<mpsc::Receiver<RemoteCommandUpdate>>,
     pub(crate) pending_command_task: Option<tokio::task::JoinHandle<()>>,
     pub(crate) pending_close_update: Option<mpsc::Receiver<TalosResult<String>>>,
     pub(crate) pending_close_task: Option<tokio::task::JoinHandle<()>>,
     pub(crate) active_stream_message_id: Option<String>,
     pub(crate) last_stream_sequence: Option<u64>,
+    pub(crate) timeline_items: HashMap<String, TalosTimelineItem>,
     pub(crate) status_hint: Option<(String, Instant)>,
     pub(crate) spinner_index: usize,
     pub(crate) stripe_phase: usize,

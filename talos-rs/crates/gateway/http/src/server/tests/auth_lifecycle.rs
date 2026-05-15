@@ -88,7 +88,7 @@ async fn test_get_llm_allows_auth_disabled_actor() {
     let response = get_llm_handler(State(state))
         .await
         .expect("auth disabled actor should access llm config");
-    assert_eq!(response.0.provider, "anthropic");
+    assert_eq!(response.0.config.provider, "anthropic");
 }
 
 #[tokio::test]

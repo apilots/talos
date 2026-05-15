@@ -96,8 +96,8 @@ sse_payload='{
 send_message_sse_log "${session_id}" "${sse_payload}" "${sse_log}"
 log_case_json "messages_sse_stream" "${sse_payload}" "$(cat "${sse_log}")"
 
-started_count="$(grep -c '^event: message.started' "${sse_log}" || true)"
-completed_count="$(grep -c '^event: message.completed' "${sse_log}" || true)"
+started_count="$(grep -c '^event: timeline.turn.started' "${sse_log}" || true)"
+completed_count="$(grep -c '^event: timeline.turn.completed' "${sse_log}" || true)"
 stream_usage_total="$(python3 - "${sse_log}" <<'PY'
 import json
 import sys
@@ -109,10 +109,11 @@ with open(path, "r", encoding="utf-8") as handle:
         if not line.startswith("data: "):
             continue
         try:
-            event = json.loads(line[6:])
+            record = json.loads(line[6:])
+            event = record.get("event") if isinstance(record.get("event"), dict) else record
         except Exception:
             continue
-        if event.get("event_type") != "message_completed":
+        if event.get("event_type") != "turn_completed":
             continue
         usage = (
             event.get("payload", {})
@@ -175,22 +176,30 @@ echo "CASE messages_idempotency PASS message_id=${id1}"
 echo "DETAIL messages_idempotency_first_output=${first_output}"
 echo "DETAIL messages_idempotency_second_output=${second_output}"
 
-turns_json="$(curl -sS -H "Authorization: Bearer ${AUTH_TOKEN}" "${GATEWAY_URL}/v1/sessions/${session_id}/turns")"
-log_case_json "session_turns" "{\"session_id\":\"${session_id}\"}" "${turns_json}"
-TURNS_JSON="${turns_json}" python3 - <<'PY'
+recovery_json="$(curl -sS -H "Authorization: Bearer ${AUTH_TOKEN}" "${GATEWAY_URL}/v1/sessions/${session_id}/recovery")"
+log_case_json "session_recovery" "{\"session_id\":\"${session_id}\"}" "${recovery_json}"
+RECOVERY_JSON="${recovery_json}" python3 - <<'PY'
 import json, os, sys
-raw = os.environ.get("TURNS_JSON", "")
+raw = os.environ.get("RECOVERY_JSON", "")
 try:
     data = json.loads(raw)
 except Exception as e:
-    print(f"CASE session_turns FAIL parse_error={e}")
+    print(f"CASE session_recovery FAIL parse_error={e}")
     sys.exit(1)
-turns = data.get("data", [])
-turn_count = len(turns)
-has_user_input = any(item.get("type") == "user_input" for t in turns for item in t.get("output", []))
-has_output_text = any(item.get("type") == "output_text" for t in turns for item in t.get("output", []))
-if turn_count < 1 or not has_user_input or not has_output_text:
-    print(f"CASE session_turns FAIL turn_count={turn_count} has_user_input={has_user_input} has_output_text={has_output_text}")
+events = data.get("replay", {}).get("events", [])
+has_user_input = False
+has_final_answer = False
+for envelope in events:
+    payload = envelope.get("event", {}).get("payload", {})
+    if payload.get("type") != "item_started":
+        continue
+    item = payload.get("item", {})
+    if item.get("kind") == "user_input" and item.get("phase") == "input":
+        has_user_input = True
+    if item.get("kind") == "assistant_text" and item.get("phase") == "final_answer":
+        has_final_answer = True
+if len(events) < 1 or not has_user_input or not has_final_answer:
+    print(f"CASE session_recovery FAIL event_count={len(events)} has_user_input={has_user_input} has_final_answer={has_final_answer}")
     sys.exit(1)
-print(f"CASE session_turns PASS turn_count={turn_count} has_user_input={has_user_input} has_output_text={has_output_text}")
+print(f"CASE session_recovery PASS event_count={len(events)} has_user_input={has_user_input} has_final_answer={has_final_answer}")
 PY

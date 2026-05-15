@@ -10,7 +10,7 @@ async fn test_get_active_turn_handler_returns_active_state() {
             turn_id: "turn-1".to_string(),
             message_id: Some("msg-1".to_string()),
             status: ActiveTurnStatus::Running,
-            last_event_id: Some(SessionEventId::from_seq(7)),
+            last_event_id: Some(TimelineEventId::from_seq(7)),
             pending_user_action: None,
             updated_at: 123,
         },
@@ -54,8 +54,9 @@ async fn test_get_active_turn_handler_returns_pending_approval_action() {
             turn_id: "turn-approval".to_string(),
             message_id: Some("msg-approval".to_string()),
             status: ActiveTurnStatus::WaitingUserAction,
-            last_event_id: Some(SessionEventId::from_seq(8)),
+            last_event_id: Some(TimelineEventId::from_seq(8)),
             pending_user_action: Some(PendingUserAction::ToolApproval(PendingToolApproval {
+                item_id: Some("tool-approval".to_string()),
                 call_id: "call-approval".to_string(),
                 tool_name: "Bash".to_string(),
                 prompt: "Approve command?".to_string(),
@@ -105,9 +106,10 @@ async fn test_get_active_turn_handler_returns_pending_dynamic_action() {
             turn_id: "turn-dynamic".to_string(),
             message_id: Some("msg-dynamic".to_string()),
             status: ActiveTurnStatus::WaitingUserAction,
-            last_event_id: Some(SessionEventId::from_seq(9)),
+            last_event_id: Some(TimelineEventId::from_seq(9)),
             pending_user_action: Some(PendingUserAction::DynamicToolResult(
                 PendingDynamicToolResult {
+                    item_id: Some("tool-dynamic".to_string()),
                     call_id: "call-dynamic".to_string(),
                     tool_name: "ExternalTool".to_string(),
                 },
@@ -165,7 +167,26 @@ async fn test_cancel_active_turn_handler_returns_success() {
 
 #[tokio::test]
 async fn test_submit_tool_approval_handler_returns_no_content() {
-    let state = test_state(false);
+    let event_store = Arc::new(RecordingEventStore::default());
+    event_store.active_turns.lock().unwrap().insert(
+        "mock-session".to_string(),
+        ActiveTurnRecord {
+            session_id: "mock-session".to_string(),
+            turn_id: "turn-approval".to_string(),
+            message_id: Some("msg-approval".to_string()),
+            status: ActiveTurnStatus::WaitingUserAction,
+            last_event_id: Some(TimelineEventId::from_seq(8)),
+            pending_user_action: Some(PendingUserAction::ToolApproval(PendingToolApproval {
+                item_id: Some("tool-approval".to_string()),
+                call_id: "call-1".to_string(),
+                tool_name: "Bash".to_string(),
+                prompt: "Approve command?".to_string(),
+                arguments: serde_json::json!({"cmd": "date"}).into(),
+            })),
+            updated_at: 124,
+        },
+    );
+    let state = test_state_with_event_store(false, event_store);
     let app = Router::new()
         .route(
             "/v1/sessions/:session_id/tool-approvals",

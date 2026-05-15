@@ -1,4 +1,10 @@
-import type { TalosPendingUserAction, TalosToolProgressKind } from "./protocol";
+import type {
+  TalosPendingUserAction,
+  TalosTimelineItemKind,
+  TalosTimelineItemStatus,
+  TalosTimelinePhase,
+  TalosToolProgressKind,
+} from "./protocol";
 
 export type RuntimeMode = "cloud" | "local";
 export type ApprovalMode = "needs_approval" | "skip";
@@ -81,6 +87,42 @@ export type ChatRenderBlock =
       prompt?: string;
       timingMs?: number | null;
       live?: boolean;
+    }
+  | {
+      id: string;
+      kind: "timeline";
+      items: ChatTimelineItem[];
+      live?: boolean;
+    };
+
+export type ChatTimelineItem =
+  | {
+      itemId: string;
+      sourceItemId?: string;
+      kind: Exclude<TalosTimelineItemKind, "tool_call">;
+      phase: TalosTimelinePhase;
+      status: TalosTimelineItemStatus;
+      title?: string | null;
+      text: string;
+      startedAtMs: number;
+      completedAtMs?: number | null;
+    }
+  | {
+      itemId: string;
+      sourceItemId?: string;
+      kind: "tool_call";
+      phase: TalosTimelinePhase;
+      status: TalosTimelineItemStatus;
+      title?: string | null;
+      callId: string;
+      toolName: string;
+      arguments: unknown;
+      output?: string;
+      isError?: boolean;
+      progress: Array<{ kind: TalosToolProgressKind; message: string }>;
+      prompt?: string;
+      startedAtMs: number;
+      completedAtMs?: number | null;
     };
 
 export interface PendingApproval {
@@ -113,6 +155,8 @@ export interface SessionInputHistory {
 export interface StreamSessionState {
   isStreaming: boolean;
   connectionState?: StreamConnectionState;
+  lastEventId?: string;
+  lastEventSeq?: number;
   lastSequence?: number;
   activeMessageId?: string;
   reconnectAttempt?: number;

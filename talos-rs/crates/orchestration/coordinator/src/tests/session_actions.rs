@@ -39,8 +39,7 @@ async fn test_submit_tool_approval_routes_to_session_agent() {
     drop(approvals);
 
     let resumed_inputs = resumed_inputs.lock().unwrap();
-    assert_eq!(resumed_inputs.len(), 1);
-    assert!(resumed_inputs[0].is_empty());
+    assert!(resumed_inputs.is_empty());
 }
 
 #[tokio::test]
@@ -328,7 +327,9 @@ async fn test_first_turn_assigns_deterministic_session_title() {
     let response = coordinator
         .handle(GatewayRequest {
             session_id: "session-1".to_string(),
+            turn_id: None,
             workspace_id: None,
+            resume_context: None,
             input: vec![TalosInputItem::Text {
                 text: "Fix tui paste handling".to_string(),
             }],

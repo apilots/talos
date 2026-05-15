@@ -5,6 +5,24 @@ pub(crate) struct SilentGateway;
 pub(crate) struct MockSessionService;
 pub(crate) struct MockLlmProvider;
 
+fn test_timeline_event(
+    sequence: u64,
+    event_type: TalosTimelineEventType,
+    payload: TalosTimelineEventPayload,
+) -> TalosTimelineEvent {
+    TalosTimelineEvent {
+        event_seq: None,
+        event_id: None,
+        created_at_ms: None,
+        event_type,
+        turn_id: "turn_mock".to_string(),
+        message_id: "msg_mock".to_string(),
+        session_id: "mock-session".to_string(),
+        sequence,
+        payload,
+    }
+}
+
 #[async_trait::async_trait]
 impl LlmProvider for MockLlmProvider {
     fn name(&self) -> &str {
@@ -73,113 +91,112 @@ impl Gateway for MockGateway {
     async fn handle_request_stream(
         &self,
         _request: GatewayRequest,
-    ) -> TalosResult<tokio::sync::mpsc::Receiver<TalosEvent>> {
+    ) -> TalosResult<tokio::sync::mpsc::Receiver<TalosTimelineEvent>> {
         let (tx, rx) = tokio::sync::mpsc::channel(8);
         tokio::spawn(async move {
-            let started = TalosEvent {
-                event_type: TalosEventType::MessageStarted,
-                message_id: "msg_mock".to_string(),
-                session_id: "mock-session".to_string(),
-                sequence: 0,
-                payload: TalosEventPayload::MessageStarted(TalosMessageStartedEvent {
+            let started = test_timeline_event(
+                0,
+                TalosTimelineEventType::TurnStarted,
+                TalosTimelineEventPayload::TurnStarted(TalosTurnStartedEvent {
                     request_id: "req_mock".to_string(),
-                    model: "qwen-plus".to_string(),
-                    usage: TalosUsage::default(),
-                    iteration: 0,
-                    step_id: "start".to_string(),
+                    turn_id: "turn_mock".to_string(),
+                    started_at_ms: 0,
                 }),
-            };
+            );
             let _ = tx.send(started).await;
 
-            let output = TalosEvent {
-                event_type: TalosEventType::MessageOutputDelta,
-                message_id: "msg_mock".to_string(),
-                session_id: "mock-session".to_string(),
-                sequence: 1,
-                payload: TalosEventPayload::MessageOutputDelta(TalosMessageOutputDeltaEvent {
-                    request_id: "req_mock".to_string(),
-                    delta: "stream only content".to_string(),
-                    item_index: 0,
-                    iteration: 1,
-                    step_id: "step-1".to_string(),
-                }),
+            let assistant_item = TalosTimelineItem {
+                item_id: "assistant-1".to_string(),
+                parent_item_id: None,
+                kind: TalosTimelineItemKind::AssistantText,
+                phase: TalosTimelinePhase::FinalAnswer,
+                status: TalosTimelineItemStatus::Running,
+                title: None,
+                started_at_ms: 1,
+                completed_at_ms: None,
+                content: TalosTimelineContent::Text {
+                    text: String::new(),
+                },
             };
+            let output_started = test_timeline_event(
+                1,
+                TalosTimelineEventType::ItemStarted,
+                TalosTimelineEventPayload::ItemStarted(TalosItemStartedEvent {
+                    request_id: "req_mock".to_string(),
+                    turn_id: "turn_mock".to_string(),
+                    item: assistant_item,
+                }),
+            );
+            let _ = tx.send(output_started).await;
+
+            let output = test_timeline_event(
+                2,
+                TalosTimelineEventType::ItemDelta,
+                TalosTimelineEventPayload::ItemDelta(TalosItemDeltaEvent {
+                    request_id: "req_mock".to_string(),
+                    turn_id: "turn_mock".to_string(),
+                    item_id: "assistant-1".to_string(),
+                    delta: TalosTimelineDelta::Text {
+                        text: "stream only content".to_string(),
+                    },
+                }),
+            );
             let _ = tx.send(output).await;
 
-            let queued = TalosEvent {
-                event_type: TalosEventType::MessageToolCallQueued,
-                message_id: "msg_mock".to_string(),
-                session_id: "mock-session".to_string(),
-                sequence: 2,
-                payload: TalosEventPayload::MessageToolCallQueued(
-                    TalosMessageToolCallQueuedEvent {
-                        request_id: "req_mock".to_string(),
-                        stream_key: TalosToolStreamKey { round: 0, index: 0 },
-                        call_id: "call-1".to_string(),
-                        tool_name: "Bash".to_string(),
-                        item_index: 1,
-                        iteration: 2,
-                        step_id: "step-2".to_string(),
-                    },
-                ),
+            let tool_item = TalosTimelineItem {
+                item_id: "tool-1".to_string(),
+                parent_item_id: None,
+                kind: TalosTimelineItemKind::ToolCall,
+                phase: TalosTimelinePhase::Acting,
+                status: TalosTimelineItemStatus::Running,
+                title: Some("Bash".to_string()),
+                started_at_ms: 3,
+                completed_at_ms: None,
+                content: TalosTimelineContent::ToolCall {
+                    call_id: "call-1".to_string(),
+                    name: "Bash".to_string(),
+                    arguments: String::new(),
+                    progress: Vec::new(),
+                    result: None,
+                },
             };
-            let _ = tx.send(queued).await;
+            let tool_started = test_timeline_event(
+                3,
+                TalosTimelineEventType::ItemStarted,
+                TalosTimelineEventPayload::ItemStarted(TalosItemStartedEvent {
+                    request_id: "req_mock".to_string(),
+                    turn_id: "turn_mock".to_string(),
+                    item: tool_item,
+                }),
+            );
+            let _ = tx.send(tool_started).await;
 
-            let executing = TalosEvent {
-                event_type: TalosEventType::MessageToolCallExecuting,
-                message_id: "msg_mock".to_string(),
-                session_id: "mock-session".to_string(),
-                sequence: 3,
-                payload: TalosEventPayload::MessageToolCallExecuting(
-                    TalosMessageToolCallExecutingEvent {
-                        request_id: "req_mock".to_string(),
-                        stream_key: TalosToolStreamKey { round: 0, index: 0 },
-                        call_id: "call-1".to_string(),
-                        tool_name: "Bash".to_string(),
-                        item_index: 2,
-                        iteration: 3,
-                        step_id: "step-3".to_string(),
-                    },
-                ),
-            };
-            let _ = tx.send(executing).await;
-
-            let progress = TalosEvent {
-                event_type: TalosEventType::MessageToolCallProgressDelta,
-                message_id: "msg_mock".to_string(),
-                session_id: "mock-session".to_string(),
-                sequence: 4,
-                payload: TalosEventPayload::MessageToolCallProgressDelta(
-                    TalosMessageToolCallProgressDeltaEvent {
-                        request_id: "req_mock".to_string(),
-                        stream_key: TalosToolStreamKey { round: 0, index: 0 },
-                        call_id: "call-1".to_string(),
-                        tool_name: "Bash".to_string(),
-                        message: "execution started".to_string(),
+            let progress = test_timeline_event(
+                4,
+                TalosTimelineEventType::ItemDelta,
+                TalosTimelineEventPayload::ItemDelta(TalosItemDeltaEvent {
+                    request_id: "req_mock".to_string(),
+                    turn_id: "turn_mock".to_string(),
+                    item_id: "tool-1".to_string(),
+                    delta: TalosTimelineDelta::ToolProgress {
                         progress_kind: TalosToolProgressKind::Status,
-                        item_index: 3,
-                        iteration: 4,
-                        step_id: "step-4".to_string(),
+                        text_delta: "execution started".to_string(),
                     },
-                ),
-            };
+                }),
+            );
             let _ = tx.send(progress).await;
 
-            let completed = TalosEvent {
-                event_type: TalosEventType::MessageCompleted,
-                message_id: "msg_mock".to_string(),
-                session_id: "mock-session".to_string(),
-                sequence: 5,
-                payload: TalosEventPayload::MessageCompleted(TalosMessageCompletedEvent {
+            let completed = test_timeline_event(
+                5,
+                TalosTimelineEventType::TurnCompleted,
+                TalosTimelineEventPayload::TurnCompleted(TalosTurnCompletedEvent {
                     request_id: "req_mock".to_string(),
+                    turn_id: "turn_mock".to_string(),
+                    completed_at_ms: 5,
                     stop_reason: StopReason::EndTurn,
                     usage: TalosUsage::default(),
-                    total_output_items: 4,
-                    iteration: 5,
-                    step_id: "completed".to_string(),
-                    task_count: 1,
                 }),
-            };
+            );
             let _ = tx.send(completed).await;
         });
         Ok(rx)
@@ -228,7 +245,7 @@ impl Gateway for SilentGateway {
     async fn handle_request_stream(
         &self,
         _request: GatewayRequest,
-    ) -> TalosResult<tokio::sync::mpsc::Receiver<TalosEvent>> {
+    ) -> TalosResult<tokio::sync::mpsc::Receiver<TalosTimelineEvent>> {
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
@@ -430,13 +447,6 @@ impl SessionService for MockSessionService {
             )));
         }
         Ok(())
-    }
-
-    async fn get_session_turns(
-        &self,
-        _session_id: &str,
-    ) -> TalosResult<Vec<talos_types::talos::TalosMessageResponse>> {
-        Ok(vec![])
     }
 
     async fn list_projects(&self) -> TalosResult<Vec<talos_types::ProjectRecord>> {

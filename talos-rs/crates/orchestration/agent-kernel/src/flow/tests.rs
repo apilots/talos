@@ -362,7 +362,7 @@ fn build_ctx() -> InvocationContext {
         limits: InvocationLimits::default(),
         events: Vec::new(),
         plugin_manager: crate::default_plugin_manager(),
-        session_service: None,
+        transcript_service: None,
         stream_tx: None,
     }
 }
@@ -672,7 +672,7 @@ async fn test_single_flow_stages_confirmation_event_for_pending_tool_approval() 
     )));
     assert!(ctx.session.events.iter().any(|event| matches!(
         &event.payload,
-        SessionEventPayload::Confirmation { payload }
+        KernelTranscriptPayload::Confirmation { payload }
             if payload.tool_name == "Bash"
                 && payload.call_id == "call_approval"
                 && payload.prompt == "tool approval is required: Please confirm the risky command."

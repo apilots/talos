@@ -442,7 +442,7 @@ async fn test_http_and_app_server_adapters_share_application_service_contract() 
         )
         .await
         .expect("app-server config read should use shared config service");
-    assert!(config["llm"].is_object());
+    assert!(config["config"]["provider"].is_string());
 
     let missing_approval = adapter
         .dispatch(

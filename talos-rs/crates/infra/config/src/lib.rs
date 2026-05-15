@@ -44,7 +44,7 @@ pub use domains::agent::{
 };
 pub use domains::kernel::{
     AgentKernelCompactionConfig, AgentKernelConfig, AgentKernelOutputConfig,
-    AgentKernelSessionEventsConfig,
+    AgentKernelTimelineEventsConfig,
 };
 pub use domains::memory::AgentKernelMemoryConfig;
 pub use domains::network::{

@@ -5,7 +5,7 @@ gateway:
   host: "0.0.0.0"
   token: "talos-local-test-token"
   jwt_secret: ${TALOS_GATEWAY_JWT_SECRET}
-  auth: true
+  auth: false
   access_token_ttl_days: 30
   allow_register: true
 

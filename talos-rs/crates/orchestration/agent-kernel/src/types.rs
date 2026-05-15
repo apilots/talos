@@ -1,5 +1,6 @@
 use crate::{
-    ExecutionBranch, InvocationPluginManager, InvocationSession, KernelWarning, SessionService,
+    ExecutionBranch, InvocationPluginManager, InvocationSession, KernelTranscriptService,
+    KernelWarning,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -434,7 +435,7 @@ pub struct InvocationContext {
     #[serde(skip, default = "crate::default_plugin_manager")]
     pub plugin_manager: std::sync::Arc<InvocationPluginManager>,
     #[serde(skip, default)]
-    pub session_service: Option<std::sync::Arc<dyn SessionService>>,
+    pub transcript_service: Option<std::sync::Arc<dyn KernelTranscriptService>>,
     #[serde(skip)]
     pub stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
 }
@@ -484,22 +485,22 @@ impl InvocationContext {
         ))
     }
 
-    pub fn current_session_events(
+    pub fn current_transcript_events(
         &self,
         current_invocation: bool,
         current_branch: bool,
         branch: ExecutionBranch,
-    ) -> Vec<crate::SessionEvent> {
+    ) -> Vec<crate::KernelTranscriptEvent> {
         self.session.filter_events(
             current_invocation.then_some(self.invocation_id.as_str()),
             current_branch.then_some(branch),
         )
     }
 
-    pub fn session_service(&self) -> TalosResult<std::sync::Arc<dyn SessionService>> {
-        self.session_service.clone().ok_or_else(|| {
+    pub fn transcript_service(&self) -> TalosResult<std::sync::Arc<dyn KernelTranscriptService>> {
+        self.transcript_service.clone().ok_or_else(|| {
             TalosError::ValidationError(
-                "session_service is not configured in InvocationContext".to_string(),
+                "transcript_service is not configured in InvocationContext".to_string(),
             )
         })
     }
@@ -723,7 +724,7 @@ mod tests {
             limits: InvocationLimits::default(),
             events: Vec::new(),
             plugin_manager: crate::default_plugin_manager(),
-            session_service: None,
+            transcript_service: None,
             stream_tx: None,
         };
 

@@ -1,16 +1,21 @@
 use crate::types::{GatewayRequest, GatewayResponse};
 use async_trait::async_trait;
 use talos_error::TalosResult;
-use talos_types::talos::TalosEvent;
+use talos_types::talos::TalosTimelineEvent;
 use tokio::sync::mpsc;
 
 #[async_trait]
 pub trait Gateway: Send + Sync {
     async fn handle_request(&self, request: GatewayRequest) -> TalosResult<GatewayResponse>;
+
+    /// Return the internal domain timeline stream before application-service persistence.
+    ///
+    /// Public transports must expose `TimelineEventEnvelope` after application-service records
+    /// these domain events and attaches recovery cursor metadata.
     async fn handle_request_stream(
         &self,
         request: GatewayRequest,
-    ) -> TalosResult<mpsc::Receiver<TalosEvent>>;
+    ) -> TalosResult<mpsc::Receiver<TalosTimelineEvent>>;
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()>;
     async fn submit_tool_approval(
         &self,

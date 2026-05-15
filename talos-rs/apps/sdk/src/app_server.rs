@@ -6,20 +6,22 @@ use std::time::Duration;
 
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
-use talos_app_protocol::events::ApplicationEventEnvelope;
+use talos_app_protocol::events::TimelineSubscriptionNotification;
 use talos_app_protocol::jsonrpc::{JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, RequestId};
 use talos_app_protocol::requests::{
     ActorCredential, ActorCredentials, AdminProjectListParams, AdminProjectListResponse,
     AdminSessionListParams, AdminSessionListResponse, ClientCapabilities, ClientInfo,
     ConfigReadParams, ConfigValueWriteParams, EventSubscribeParams, EventSubscribeResponse,
-    InitializeParams, InitializeResponse, MemoryFileListParams as ProtocolMemoryFileListParams,
-    MemoryFileReadParams, MemoryFileWriteParams,
-    MessageCommandStatus as ProtocolMessageCommandStatus, ModelListParams, ProjectCreateParams,
-    ProjectDeleteParams, ProjectListParams, ProjectPatchParams, ProjectReadParams,
-    ProtocolInputItem, SessionCloseParams, SessionCreateParams, SessionDeleteParams,
-    SessionListParams, SessionPatchParams, SessionReadParams, SessionTurnsParams,
-    ToolApprovalSubmitParams, ToolDynamicResultSubmitParams, TurnInterruptParams, TurnStartParams,
-    TurnStartResponse, WorkspaceDocListParams, WorkspaceDocReadParams, WorkspaceDocWriteParams,
+    EventUnsubscribeParams, EventUnsubscribeResponse, InitializeParams, InitializeResponse,
+    MemoryFileListParams as ProtocolMemoryFileListParams, MemoryFileReadParams,
+    MemoryFileWriteParams, MessageCommandStatus as ProtocolMessageCommandStatus, ModelListParams,
+    ProjectCreateParams, ProjectDeleteParams, ProjectListParams, ProjectPatchParams,
+    ProjectReadParams, ProtocolInputItem, SessionActiveTurnParams, SessionCloseParams,
+    SessionCreateParams, SessionDeleteParams, SessionHistoryParams, SessionListParams,
+    SessionPatchParams, SessionReadParams, TimelineActiveTurnSnapshot, TimelineRecoveryParams,
+    TimelineRecoverySnapshot, ToolApprovalSubmitParams, ToolDynamicResultSubmitParams,
+    TurnInterruptParams, TurnStartParams, TurnStartResponse, WorkspaceDocListParams,
+    WorkspaceDocReadParams, WorkspaceDocWriteParams,
 };
 use talos_app_protocol::version::ProtocolVersion;
 use talos_auth::{AdminCreateUserRequest, AdminPatchUserRequest, UserDto};
@@ -29,15 +31,15 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
-use crate::app_server_events::{is_terminal_application_event, map_application_event};
+use crate::app_server_events::is_terminal_application_event;
 use crate::common::{expected_file_version_token, workspace_doc_kind_token};
 use crate::ExpectedFileVersion;
 use crate::{
     MemoryFileDetail, MemoryFileSummary, MessageCommandAck, MessageCommandStatus, ProjectPatch,
-    ProjectRecord, TalosEvent, TalosMessageResponse, WorkspaceDocDetail, WorkspaceDocKind,
-    WorkspaceDocSummary,
+    ProjectRecord, WorkspaceDocDetail, WorkspaceDocKind, WorkspaceDocSummary,
 };
 use crate::{ModelInfo, TalosInputItem, TalosMessageRequest, TalosSession};
+use talos_types::talos::{SessionHistorySnapshot, TimelineEventEnvelope};
 
 #[derive(Debug, Clone)]
 pub struct AppServerClientConfig {
@@ -70,13 +72,15 @@ pub struct AppServerClient {
     next_id: i32,
     pending_responses: Arc<Mutex<HashMap<i32, oneshot::Sender<TalosResult<Value>>>>>,
     subscription_senders: Arc<Mutex<HashMap<String, SubscriptionStream>>>,
-    events: mpsc::Receiver<ApplicationEventEnvelope>,
+    events: mpsc::Receiver<TimelineEventEnvelope>,
+    notifications: mpsc::Receiver<TimelineSubscriptionNotification>,
 }
 
 struct SubscriptionStream {
-    sender: mpsc::Sender<TalosEvent>,
+    session_id: String,
+    sender: mpsc::Sender<TimelineEventEnvelope>,
     turn_id: Option<String>,
-    pending: Vec<ApplicationEventEnvelope>,
+    pending: Vec<TimelineEventEnvelope>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -137,11 +141,13 @@ impl AppServerClient {
         let pending_responses = Arc::new(Mutex::new(HashMap::new()));
         let subscription_senders = Arc::new(Mutex::new(HashMap::new()));
         let (events_tx, events_rx) = mpsc::channel(1024);
+        let (notifications_tx, notifications_rx) = mpsc::channel(1024);
         spawn_stdout_reader(
             stdout,
             pending_responses.clone(),
             subscription_senders.clone(),
             events_tx,
+            notifications_tx,
         );
         Ok(Self {
             child: Some(child),
@@ -150,6 +156,7 @@ impl AppServerClient {
             pending_responses,
             subscription_senders,
             events: events_rx,
+            notifications: notifications_rx,
         })
     }
 
@@ -365,6 +372,32 @@ impl AppServerClient {
         .await
     }
 
+    pub async fn get_session_history(
+        &mut self,
+        session_id: &str,
+    ) -> TalosResult<SessionHistorySnapshot> {
+        self.request_typed(
+            "session.history",
+            SessionHistoryParams {
+                session_id: session_id.to_string(),
+            },
+        )
+        .await
+    }
+
+    pub async fn get_active_turn(
+        &mut self,
+        session_id: &str,
+    ) -> TalosResult<TimelineActiveTurnSnapshot> {
+        self.request_typed(
+            "session.active_turn",
+            SessionActiveTurnParams {
+                session_id: session_id.to_string(),
+            },
+        )
+        .await
+    }
+
     pub async fn delete_session(&mut self, session_id: &str) -> TalosResult<()> {
         let _: Value = self
             .request_typed(
@@ -389,18 +422,27 @@ impl AppServerClient {
         Ok(())
     }
 
-    pub async fn get_session_turns(
+    pub async fn recover_session(
         &mut self,
         session_id: &str,
-    ) -> TalosResult<Vec<TalosMessageResponse>> {
-        self.request_typed::<_, ListResponse<TalosMessageResponse>>(
-            "session.turns",
-            SessionTurnsParams {
+    ) -> TalosResult<TimelineRecoverySnapshot> {
+        self.recover_session_after(session_id, None).await
+    }
+
+    pub async fn recover_session_after(
+        &mut self,
+        session_id: &str,
+        after_event_id: Option<String>,
+    ) -> TalosResult<TimelineRecoverySnapshot> {
+        self.request_typed(
+            "session.recover",
+            TimelineRecoveryParams {
                 session_id: session_id.to_string(),
+                after_event_id,
+                replay_limit: None,
             },
         )
         .await
-        .map(|response| response.data)
     }
 
     pub async fn list_projects(&mut self) -> TalosResult<Vec<ProjectRecord>> {
@@ -588,23 +630,41 @@ impl AppServerClient {
         self.request_typed("event.subscribe", params).await
     }
 
-    pub async fn next_event(&mut self) -> TalosResult<ApplicationEventEnvelope> {
+    pub async fn unsubscribe_events(
+        &mut self,
+        subscription_id: &str,
+    ) -> TalosResult<EventUnsubscribeResponse> {
+        self.subscription_senders
+            .lock()
+            .await
+            .remove(subscription_id);
+        self.request_typed(
+            "event.unsubscribe",
+            EventUnsubscribeParams {
+                subscription_id: subscription_id.to_string(),
+            },
+        )
+        .await
+    }
+
+    pub async fn next_event(&mut self) -> TalosResult<TimelineEventEnvelope> {
         self.events
             .recv()
             .await
             .ok_or_else(|| TalosError::ClientError("app-server event stream closed".to_string()))
     }
 
-    pub async fn next_talos_event(&mut self) -> TalosResult<TalosEvent> {
-        let event = self.next_event().await?;
-        map_application_event(event)
+    pub async fn next_notification(&mut self) -> TalosResult<TimelineSubscriptionNotification> {
+        self.notifications.recv().await.ok_or_else(|| {
+            TalosError::ClientError("app-server notification stream closed".to_string())
+        })
     }
 
-    pub async fn send_message_events(
+    pub async fn send_timeline_events(
         &mut self,
         session_id: &str,
         request: TalosMessageRequest,
-    ) -> TalosResult<mpsc::Receiver<TalosEvent>> {
+    ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>> {
         let subscription = self
             .subscribe_events(EventSubscribeParams {
                 session_id: session_id.to_string(),
@@ -617,6 +677,7 @@ impl AppServerClient {
         self.subscription_senders.lock().await.insert(
             subscription_id.clone(),
             SubscriptionStream {
+                session_id: session_id.to_string(),
                 sender: tx,
                 turn_id: None,
                 pending: Vec::new(),
@@ -659,13 +720,11 @@ impl AppServerClient {
             let mut terminal_seen = false;
             let mut outbound = Vec::new();
             for event in pending {
-                if event.turn_id.as_deref() != Some(turn_id.as_str()) {
+                if event.turn_id != turn_id {
                     continue;
                 }
                 terminal_seen |= is_terminal_application_event(&event);
-                if let Ok(talos_event) = map_application_event(event) {
-                    outbound.push((stream.sender.clone(), talos_event));
-                }
+                outbound.push((stream.sender.clone(), event));
             }
             if terminal_seen {
                 streams.remove(subscription_id);
@@ -781,7 +840,8 @@ fn spawn_stdout_reader(
     stdout: ChildStdout,
     pending_responses: Arc<Mutex<HashMap<i32, oneshot::Sender<TalosResult<Value>>>>>,
     subscription_senders: Arc<Mutex<HashMap<String, SubscriptionStream>>>,
-    events_tx: mpsc::Sender<ApplicationEventEnvelope>,
+    events_tx: mpsc::Sender<TimelineEventEnvelope>,
+    notifications_tx: mpsc::Sender<TimelineSubscriptionNotification>,
 ) {
     tokio::spawn(async move {
         let mut reader = BufReader::new(stdout);
@@ -825,10 +885,24 @@ fn spawn_stdout_reader(
                     }
                 }
                 JsonRpcMessage::Notification(notification) => {
-                    let Ok(Some(event)) = decode_event_notification(notification) else {
+                    let Ok(Some(notification)) = decode_event_notification(notification) else {
                         continue;
                     };
-                    dispatch_application_event(&subscription_senders, event.clone()).await;
+                    let subscription_id = notification.subscription_id.clone();
+                    let event = notification.event.clone();
+                    dispatch_application_event(
+                        &subscription_senders,
+                        &subscription_id,
+                        event.clone(),
+                    )
+                    .await;
+                    match notifications_tx.try_send(notification) {
+                        Ok(()) => {}
+                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {}
+                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                            return;
+                        }
+                    }
                     match events_tx.try_send(event) {
                         Ok(()) => {}
                         Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {}
@@ -858,38 +932,40 @@ async fn fail_pending_responses(
 
 async fn dispatch_application_event(
     subscription_senders: &Arc<Mutex<HashMap<String, SubscriptionStream>>>,
-    event: ApplicationEventEnvelope,
+    subscription_id: &str,
+    event: TimelineEventEnvelope,
 ) {
-    let subscription_id = event.subscription_id.clone();
     let terminal = is_terminal_application_event(&event);
-    let mut outbound = None;
+    let mut sender = None;
     let mut should_remove = false;
     {
         let mut streams = subscription_senders.lock().await;
-        if let Some(stream) = streams.get_mut(&subscription_id) {
-            match stream.turn_id.as_deref() {
-                Some(turn_id) if event.turn_id.as_deref() == Some(turn_id) => {
-                    if let Ok(talos_event) = map_application_event(event) {
-                        outbound = Some((stream.sender.clone(), talos_event));
-                    }
-                    should_remove = terminal;
-                }
-                Some(_) => {}
-                None => {
-                    if stream.pending.len() < 256 {
-                        stream.pending.push(event);
-                    }
+        let Some(stream) = streams.get_mut(subscription_id) else {
+            return;
+        };
+        if event.session_id != stream.session_id {
+            return;
+        }
+        match stream.turn_id.as_deref() {
+            Some(turn_id) if event.turn_id == turn_id => {
+                sender = Some(stream.sender.clone());
+                should_remove = terminal;
+            }
+            Some(_) => {}
+            None => {
+                if stream.pending.len() < 256 {
+                    stream.pending.push(event.clone());
                 }
             }
         }
     }
-    if let Some((sender, talos_event)) = outbound {
-        if sender.try_send(talos_event).is_err() {
+    if let Some(sender) = sender {
+        if sender.try_send(event).is_err() {
             should_remove = true;
         }
     }
     if should_remove {
-        subscription_senders.lock().await.remove(&subscription_id);
+        subscription_senders.lock().await.remove(subscription_id);
     }
 }
 
@@ -928,11 +1004,11 @@ fn map_message_command_status(status: ProtocolMessageCommandStatus) -> MessageCo
 
 fn decode_event_notification(
     notification: JsonRpcNotification,
-) -> TalosResult<Option<ApplicationEventEnvelope>> {
+) -> TalosResult<Option<TimelineSubscriptionNotification>> {
     let Some(params) = notification.params else {
         return Ok(None);
     };
-    if params.get("event").is_none() {
+    if !notification.method.starts_with("timeline.") {
         return Ok(None);
     }
     serde_json::from_value(params)
@@ -959,6 +1035,10 @@ fn map_app_server_error(error: talos_app_protocol::errors::AppServerErrorBody) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use talos_types::talos::{
+        TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType,
+        TalosTurnStartedEvent, TimelineEventEnvelope,
+    };
 
     #[test]
     fn rejects_non_text_input() {
@@ -983,5 +1063,66 @@ mod tests {
         assert_eq!(ack.request_id, "req-1");
         assert_eq!(ack.message_id.as_deref(), Some("msg-1"));
         assert_eq!(ack.status, MessageCommandStatus::Accepted);
+    }
+
+    #[tokio::test]
+    async fn dispatch_application_event_routes_only_matching_subscription() {
+        let subscription_senders = Arc::new(Mutex::new(HashMap::new()));
+        let (first_tx, mut first_rx) = mpsc::channel(4);
+        let (second_tx, mut second_rx) = mpsc::channel(4);
+        {
+            let mut streams = subscription_senders.lock().await;
+            streams.insert(
+                "sub-1".to_string(),
+                SubscriptionStream {
+                    session_id: "session-1".to_string(),
+                    sender: first_tx,
+                    turn_id: Some("turn-1".to_string()),
+                    pending: Vec::new(),
+                },
+            );
+            streams.insert(
+                "sub-2".to_string(),
+                SubscriptionStream {
+                    session_id: "session-1".to_string(),
+                    sender: second_tx,
+                    turn_id: Some("turn-1".to_string()),
+                    pending: Vec::new(),
+                },
+            );
+        }
+
+        dispatch_application_event(&subscription_senders, "sub-1", timeline_envelope("ev_1", 1))
+            .await;
+
+        assert_eq!(first_rx.recv().await.expect("first event").event_id, "ev_1");
+        assert!(second_rx.try_recv().is_err());
+    }
+
+    fn timeline_envelope(event_id: &str, event_seq: i64) -> TimelineEventEnvelope {
+        let event = TalosTimelineEvent {
+            event_seq: Some(event_seq),
+            event_id: Some(event_id.to_string()),
+            created_at_ms: Some(event_seq),
+            event_type: TalosTimelineEventType::TurnStarted,
+            turn_id: "turn-1".to_string(),
+            message_id: "msg-1".to_string(),
+            session_id: "session-1".to_string(),
+            sequence: event_seq as u64,
+            payload: TalosTimelineEventPayload::TurnStarted(TalosTurnStartedEvent {
+                request_id: "req-1".to_string(),
+                turn_id: "turn-1".to_string(),
+                started_at_ms: event_seq as u64,
+            }),
+        };
+        TimelineEventEnvelope {
+            event_id: event_id.to_string(),
+            event_seq,
+            created_at_ms: event_seq,
+            session_id: event.session_id.clone(),
+            turn_id: event.turn_id.clone(),
+            message_id: event.message_id.clone(),
+            event,
+        }
     }
 }

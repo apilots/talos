@@ -22,9 +22,11 @@ pub async fn persist_general_turn_artifacts(
     let turn_id = Uuid::new_v4().to_string();
     let now = Utc::now();
     let mut items = Vec::with_capacity(executed.output_items.len().saturating_add(1));
-    items.push(TalosOutputItem::UserInput {
-        text: input.to_string(),
-    });
+    if !input.trim().is_empty() {
+        items.push(TalosOutputItem::UserInput {
+            text: input.to_string(),
+        });
+    }
     items.extend(executed.output_items.clone());
     let talos_turn = TalosTurn {
         turn_id: turn_id.clone(),

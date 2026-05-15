@@ -2,7 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::events::{ApplicationEventEnvelope, SubscriptionTerminatedEnvelope};
+use crate::events::{SubscriptionTerminatedEnvelope, TimelineSubscriptionNotification};
 use crate::version::ProtocolVersion;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
@@ -10,34 +10,18 @@ use crate::version::ProtocolVersion;
 pub enum ServerNotification {
     #[serde(rename = "initialized")]
     Initialized(InitializedNotification),
-    #[serde(rename = "message.started")]
-    MessageStarted(ApplicationEventEnvelope),
-    #[serde(rename = "message.reasoning.delta")]
-    MessageReasoningDelta(ApplicationEventEnvelope),
-    #[serde(rename = "message.execution.summary")]
-    MessageExecutionSummary(ApplicationEventEnvelope),
-    #[serde(rename = "message.output.delta")]
-    MessageOutputDelta(ApplicationEventEnvelope),
-    #[serde(rename = "message.tool_call.started")]
-    MessageToolCallStarted(ApplicationEventEnvelope),
-    #[serde(rename = "message.tool_call.args_delta")]
-    MessageToolCallArgsDelta(ApplicationEventEnvelope),
-    #[serde(rename = "message.tool_call.queued")]
-    MessageToolCallQueued(ApplicationEventEnvelope),
-    #[serde(rename = "message.tool_call.executing")]
-    MessageToolCallExecuting(ApplicationEventEnvelope),
-    #[serde(rename = "message.tool_call.progress_delta")]
-    MessageToolCallProgressDelta(ApplicationEventEnvelope),
-    #[serde(rename = "message.tool_call.completed")]
-    MessageToolCallCompleted(ApplicationEventEnvelope),
-    #[serde(rename = "message.tool_call.pending_approval")]
-    MessageToolCallPendingApproval(ApplicationEventEnvelope),
-    #[serde(rename = "message.tool_call.pending_dynamic_result")]
-    MessageToolCallPendingDynamicResult(ApplicationEventEnvelope),
-    #[serde(rename = "message.completed")]
-    MessageCompleted(ApplicationEventEnvelope),
-    #[serde(rename = "message.error")]
-    MessageError(ApplicationEventEnvelope),
+    #[serde(rename = "timeline.turn.started")]
+    TimelineTurnStarted(TimelineSubscriptionNotification),
+    #[serde(rename = "timeline.item.started")]
+    TimelineItemStarted(TimelineSubscriptionNotification),
+    #[serde(rename = "timeline.item.delta")]
+    TimelineItemDelta(TimelineSubscriptionNotification),
+    #[serde(rename = "timeline.item.completed")]
+    TimelineItemCompleted(TimelineSubscriptionNotification),
+    #[serde(rename = "timeline.turn.completed")]
+    TimelineTurnCompleted(TimelineSubscriptionNotification),
+    #[serde(rename = "timeline.turn.error")]
+    TimelineTurnError(TimelineSubscriptionNotification),
     #[serde(rename = "subscription.terminated")]
     SubscriptionTerminated(SubscriptionTerminatedEnvelope),
 }

@@ -264,7 +264,7 @@ send_message_ack() {
   curl "${args[@]}" -d "${payload}"
 }
 
-collect_message_events() {
+collect_timeline_events() {
   local session_id="$1"
   local message_id="$2"
   local output_path="$3"
@@ -302,8 +302,14 @@ request = urllib.request.Request(
     },
 )
 
-terminal_types = {"message_completed", "message_error"}
+terminal_types = {"turn_completed", "turn_error"}
 current = {"id": "", "event": "", "data": []}
+
+def timeline_event(record):
+    event = record.get("event")
+    if isinstance(event, dict):
+        return event
+    return record
 
 def reset():
     current["id"] = ""
@@ -320,7 +326,8 @@ def flush(handle):
     except Exception:
         reset()
         return False
-    if record.get("message_id") != message_id:
+    event_record = timeline_event(record)
+    if event_record.get("message_id") != message_id:
         reset()
         return False
 
@@ -330,7 +337,7 @@ def flush(handle):
         handle.write(f"event: {current['event']}\n")
     handle.write(f"data: {json.dumps(record, ensure_ascii=False, separators=(',', ':'))}\n\n")
     handle.flush()
-    done = record.get("event_type") in terminal_types
+    done = event_record.get("event_type") in terminal_types
     reset()
     return done
 
@@ -349,7 +356,7 @@ try:
             elif line.startswith("data:"):
                 current["data"].append(line[5:].strip())
 except Exception as exc:
-    print(f"collect_message_events failed: {exc}", file=sys.stderr)
+    print(f"collect_timeline_events failed: {exc}", file=sys.stderr)
     sys.exit(1)
 
 print(f"message stream ended before terminal event: {message_id}", file=sys.stderr)
@@ -372,6 +379,8 @@ model = ""
 output_text = ""
 reasoning_text = ""
 output = []
+items = {}
+tool_results = {}
 usage = {
     "input_tokens": 0,
     "output_tokens": 0,
@@ -379,46 +388,93 @@ usage = {
 }
 stop_reason = "end_turn"
 
+def timeline_event(record):
+    event = record.get("event")
+    if isinstance(event, dict):
+        return event
+    return record
+
 with open(events_path, "r", encoding="utf-8") as handle:
     for line in handle:
         if not line.startswith("data: "):
             continue
-        record = json.loads(line[6:])
+        record = timeline_event(json.loads(line[6:]))
         payload = record.get("payload") or {}
         event_type = record.get("event_type")
         request_id = payload.get("request_id", request_id)
-        if event_type == "message_started":
-            model = payload.get("model", model)
-        elif event_type == "message_reasoning_delta":
-            reasoning_text += payload.get("delta", "")
-        elif event_type == "message_execution_summary":
-            output.append({"type": "execution_summary", "text": payload.get("text", "")})
-        elif event_type == "message_output_delta":
-            output_text += payload.get("delta", "")
-        elif event_type == "message_tool_call_started":
-            output.append({
-                "type": "tool_call",
-                "call_id": payload.get("call_id", ""),
-                "name": payload.get("name", ""),
-                "arguments": payload.get("arguments") or {},
-            })
-        elif event_type == "message_tool_call_completed":
-            output.append({
-                "type": "tool_result",
-                "call_id": payload.get("call_id", ""),
-                "tool_name": payload.get("tool", ""),
-                "content": payload.get("content") or [],
-                "is_error": bool(payload.get("is_error", False)),
-            })
-        elif event_type == "message_completed":
+        if event_type == "item_started":
+            item = payload.get("item") or {}
+            item_id = item.get("item_id", "")
+            kind = item.get("kind", "")
+            phase = item.get("phase", "")
+            content = item.get("content") or {}
+            if item_id:
+                items[item_id] = {
+                    "kind": kind,
+                    "phase": phase,
+                    "content": content,
+                    "text": content.get("text", "") if content.get("type") == "text" else "",
+                    "arguments": content.get("arguments", "") if content.get("type") == "tool_call" else "",
+                }
+            if kind == "execution_summary" and content.get("type") == "execution_summary":
+                output.append({"type": "execution_summary", "text": content.get("summary", "")})
+        elif event_type == "item_delta":
+            item_id = payload.get("item_id", "")
+            item = items.setdefault(item_id, {"kind": "", "phase": "", "content": {}, "text": "", "arguments": ""})
+            delta = payload.get("delta") or {}
+            delta_type = delta.get("type")
+            phase = item.get("phase", "")
+            if delta_type == "text":
+                text = delta.get("text", "")
+                item["text"] = item.get("text", "") + text
+                if phase == "final_answer":
+                    output_text += text
+                elif phase == "thinking":
+                    reasoning_text += text
+            elif delta_type == "tool_arguments":
+                item["arguments"] = item.get("arguments", "") + delta.get("arguments_delta", "")
+            elif delta_type == "tool_result":
+                content = item.get("content") or {}
+                if content.get("type") == "tool_call":
+                    call_id = content.get("call_id", "")
+                    tool_name = content.get("name", "")
+                else:
+                    call_id = ""
+                    tool_name = ""
+                tool_results[item_id] = {
+                    "type": "tool_result",
+                    "call_id": call_id,
+                    "tool_name": tool_name,
+                    "content": delta.get("content") or [],
+                    "is_error": bool(delta.get("is_error", False)),
+                }
+        elif event_type == "turn_completed":
             stop_reason = payload.get("stop_reason", stop_reason)
             usage = payload.get("usage") or usage
-        elif event_type == "message_error":
+        elif event_type == "turn_error":
             stop_reason = "error"
             output_text = "Error: " + payload.get("error", "")
 
 if output_text:
     output.append({"type": "output_text", "text": output_text})
+
+for item_id, item in items.items():
+    content = item.get("content") or {}
+    if item.get("kind") != "tool_call" or content.get("type") != "tool_call":
+        continue
+    raw_arguments = item.get("arguments", "")
+    try:
+        arguments = json.loads(raw_arguments) if raw_arguments else {}
+    except Exception:
+        arguments = raw_arguments
+    output.append({
+        "type": "tool_call",
+        "call_id": content.get("call_id", ""),
+        "name": content.get("name", ""),
+        "arguments": arguments,
+    })
+    if item_id in tool_results:
+        output.append(tool_results[item_id])
 
 response = {
     "request_id": request_id,
@@ -451,7 +507,7 @@ send_message_response() {
   fi
 
   events_log="$(scenario_report_path "${log_name}_events.log")"
-  collect_message_events "${session_id}" "${message_id}" "${events_log}"
+  collect_timeline_events "${session_id}" "${message_id}" "${events_log}"
   message_response_from_events "${ack_json}" "${events_log}"
 }
 
@@ -469,7 +525,7 @@ send_message_sse_log() {
     printf '%s\n' "${ack_json}" > "${output_path}"
     return 1
   fi
-  collect_message_events "${session_id}" "${message_id}" "${output_path}"
+  collect_timeline_events "${session_id}" "${message_id}" "${output_path}"
 }
 
 log_case_json() {

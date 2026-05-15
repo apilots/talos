@@ -1,5 +1,8 @@
 export type {
   TalosContentItem,
+  TalosTimelineItemKind,
+  TalosTimelineItemStatus,
+  TalosTimelinePhase,
   TalosPendingUserAction,
   TalosMessageResponse,
   TalosOutputItem,

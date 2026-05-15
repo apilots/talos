@@ -33,6 +33,47 @@ fn test_talos_roundtrip() {
 }
 
 #[test]
+fn test_talos_timeline_tool_progress_updates_same_item() {
+    let event = talos::TalosTimelineEvent {
+        event_seq: None,
+        event_id: None,
+        created_at_ms: None,
+        event_type: talos::TalosTimelineEventType::ItemDelta,
+        turn_id: "turn-1".to_string(),
+        message_id: "message-1".to_string(),
+        session_id: "session-1".to_string(),
+        sequence: 2,
+        payload: talos::TalosTimelineEventPayload::ItemDelta(talos::TalosItemDeltaEvent {
+            request_id: "request-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            item_id: "tool-1".to_string(),
+            delta: talos::TalosTimelineDelta::ToolProgress {
+                progress_kind: talos::TalosToolProgressKind::Stdout,
+                text_delta: "running".to_string(),
+            },
+        }),
+    };
+
+    let encoded = serde_json::to_string(&event).expect("timeline event should encode");
+    assert!(encoded.contains("\"event_type\":\"item_delta\""));
+    assert!(encoded.contains("\"item_id\":\"tool-1\""));
+    assert!(!encoded.contains("tool_progress_item"));
+
+    let decoded: talos::TalosTimelineEvent =
+        serde_json::from_str(&encoded).expect("timeline event should decode");
+    match decoded.payload {
+        talos::TalosTimelineEventPayload::ItemDelta(payload) => {
+            assert_eq!(payload.item_id, "tool-1");
+            assert!(matches!(
+                payload.delta,
+                talos::TalosTimelineDelta::ToolProgress { .. }
+            ));
+        }
+        _ => panic!("expected item delta payload"),
+    }
+}
+
+#[test]
 fn test_desktop_source_type_roundtrip() {
     assert_eq!(talos::TalosSourceType::Desktop.as_str(), "desktop");
     assert!(matches!(

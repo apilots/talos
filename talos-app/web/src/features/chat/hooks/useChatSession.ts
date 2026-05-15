@@ -5,10 +5,13 @@ import { useSessionApproval } from "./useSessionApproval";
 import { useSessionBlocks } from "./useSessionBlocks";
 import { useSessionReconnect } from "./useSessionReconnect";
 import { useSessionStreaming } from "./useSessionStreaming";
-import { useActiveTurnQuery, useSessionTurnsQuery } from "./useChatQueries";
-import { applyActiveTurnSnapshot, clearInactiveTurnSnapshot } from "../stream-events";
+import {
+  useActiveTurnQuery,
+  useSessionHistoryQuery,
+  useLiveRecoveryQuery,
+} from "./useChatQueries";
+import { applyActiveTurnSnapshot, applyStreamEvent, clearInactiveTurnSnapshot } from "../stream-events";
 import { useAppStore } from "@/shared/store/app-store";
-import type { ChatApiTurns } from "../api";
 import type { PendingInput, SessionInputHistory, SessionInputHistoryItem } from "@/shared/types/ui";
 
 export function useChatSession(
@@ -18,12 +21,17 @@ export function useChatSession(
 ) {
   const [draft, setDraft] = useState("");
   const activeTurnQuery = useActiveTurnQuery(sessionId);
-  const turnsQuery = useSessionTurnsQuery(sessionId);
+  const sessionHistoryQuery = useSessionHistoryQuery(sessionId);
+  const shouldRecoverLiveTail = isLiveRecoverableActiveTurn(activeTurnQuery.data?.status);
+  const liveRecoveryQuery = useLiveRecoveryQuery(
+    sessionId,
+    sessionHistoryQuery.data?.last_stable_event_id ?? undefined,
+    shouldRecoverLiveTail && sessionHistoryQuery.isSuccess,
+  );
   const streamState = useAppStore((state) => state.streams[sessionId]);
   const pendingInput = streamState?.pendingInput;
   const pendingInputServerMessageId = streamState?.pendingInput?.serverMessageId;
   const {
-    continueAfterApproval,
     hasActiveConnection,
     isCancelling,
     isStreaming,
@@ -36,7 +44,7 @@ export function useChatSession(
     canRetryResponse,
   } =
     useSessionStreaming(sessionId, serverMessageCount, sessionTitle);
-  const { pendingApproval, submitApproval } = useSessionApproval(sessionId, continueAfterApproval);
+  const { pendingApproval, submitApproval } = useSessionApproval(sessionId);
   const { retryStream } = useSessionReconnect({
     hasActiveConnection,
     reconnectMessage,
@@ -46,11 +54,11 @@ export function useChatSession(
   const blocks = useSessionBlocks({
     sessionId,
     streamState,
-    turns: turnsQuery.data,
+    sessionHistory: sessionHistoryQuery.data,
   });
   const inputHistory = useMemo(
-    () => buildSessionInputHistory(turnsQuery.data, pendingInput),
-    [pendingInput, turnsQuery.data],
+    () => buildSessionInputHistory(sessionHistoryQuery.data, pendingInput),
+    [pendingInput, sessionHistoryQuery.data],
   );
 
   useEffect(() => {
@@ -59,6 +67,23 @@ export function useChatSession(
     }
     applyActiveTurnSnapshot(sessionId, activeTurnQuery.data);
   }, [activeTurnQuery.data, sessionId]);
+
+  useEffect(() => {
+    if (!liveRecoveryQuery.data?.active_turn) {
+      return;
+    }
+    applyActiveTurnSnapshot(sessionId, liveRecoveryQuery.data.active_turn);
+  }, [sessionId, liveRecoveryQuery.data?.active_turn]);
+
+  useEffect(() => {
+    const events = liveRecoveryQuery.data?.replay.events ?? [];
+    if (events.length === 0) {
+      return;
+    }
+    [...events]
+      .sort((left, right) => left.event_seq - right.event_seq)
+      .forEach((event) => applyStreamEvent(sessionId, event));
+  }, [sessionId, liveRecoveryQuery.data?.replay.events]);
 
   useEffect(() => {
     const error = activeTurnQuery.error;
@@ -79,8 +104,10 @@ export function useChatSession(
       return;
     }
 
-    const historyHasActiveMessage = (turnsQuery.data ?? []).some(
-      (turn) => turn.message_id === activeMessageId,
+    const historyHasActiveMessage = Boolean(
+      sessionHistoryQuery.data?.messages.some(
+        (message) => message.message_id === activeMessageId,
+      ),
     );
     if (!historyHasActiveMessage) {
       return;
@@ -98,6 +125,7 @@ export function useChatSession(
       activeMessageId: undefined,
       activeInputText: undefined,
       activeClientMessageId: undefined,
+      lastEventSeq: undefined,
       lastSequence: undefined,
       awaitingFinalResponse: false,
     });
@@ -110,7 +138,7 @@ export function useChatSession(
     pendingInput,
     pendingInputServerMessageId,
     inputHistory,
-    turnsQuery.data,
+    sessionHistoryQuery.data,
   ]);
 
   return {
@@ -138,26 +166,28 @@ export function useChatSession(
     showReconnectControls: streamState?.showReconnectControls ?? false,
     pendingApproval,
     streamError: streamState?.error,
-    turnsQuery,
+    sessionHistoryQuery,
   };
 }
 
 export function buildSessionInputHistory(
-  turns: ChatApiTurns | undefined,
+  history: ReturnType<typeof useSessionHistoryQuery>["data"] | undefined,
   pendingInput: PendingInput | undefined,
 ): SessionInputHistory {
   const committed: SessionInputHistoryItem[] = [];
 
-  (turns ?? []).forEach((turn) => {
-    turn.output.forEach((item, itemIndex) => {
-      if (item.type !== "user_input") {
+  let itemIndex = 0;
+  (history?.messages ?? []).forEach((message) => {
+    message.items.forEach((item) => {
+      if (item.phase !== "input" || item.content.type !== "text") {
         return;
       }
       committed.push({
-        messageId: turn.message_id,
+        messageId: message.message_id,
         itemIndex,
-        text: item.text,
+        text: item.content.text,
       });
+      itemIndex += 1;
     });
   });
 
@@ -165,6 +195,10 @@ export function buildSessionInputHistory(
     committed,
     pendingInput,
   };
+}
+
+function isLiveRecoverableActiveTurn(status: string | undefined) {
+  return status === "running" || status === "waiting_user_action" || status === "cancelling";
 }
 
 function sessionInputHistoryHasMessage(
