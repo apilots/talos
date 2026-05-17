@@ -54,9 +54,11 @@ describe("createDesktopTalosClient", () => {
   it("streams desktop turn events by message ack even when event request ids differ", async () => {
     let eventHandler: ((envelope: AppProtocol.TimelineEventEnvelope) => void) | undefined;
     const received: string[] = [];
+    let subscribeParams: AppProtocol.EventSubscribeParams | undefined;
     const bridge: DesktopRendererBridge = {
-      invoke: async function <T>(method: AppProtocol.ClientMethod): Promise<T> {
+      invoke: async function <T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T> {
         if (method === "event.subscribe") {
+          subscribeParams = params as AppProtocol.EventSubscribeParams;
           queueMicrotask(() => {
             eventHandler?.(eventEnvelope("turn_started", "req-provider", "turn-1", "message-1"));
             eventHandler?.(eventEnvelope("turn_completed", "req-provider", "turn-1", "message-1"));
@@ -94,6 +96,10 @@ describe("createDesktopTalosClient", () => {
     );
 
     expect(received).toEqual(["turn_started", "turn_completed"]);
+    expect(subscribeParams).toMatchObject({
+      close_when_idle: true,
+      close_on_terminal: true,
+    });
   });
 });
 

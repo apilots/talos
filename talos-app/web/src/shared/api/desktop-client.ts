@@ -115,7 +115,7 @@ export function createDesktopTalosClient(
       if (isTerminalEvent(envelope)) {
         stop();
       }
-    }, undefined, afterEventId ?? null),
+    }, undefined, afterEventId ?? null, true, true),
     sendEvents: (
       sessionId: string,
       request: TalosMessageRequest,
@@ -285,7 +285,7 @@ async function startTurnAndStream(
         stop();
       }
     }
-  });
+  }, undefined, null, true, true);
 }
 
 async function retryTurnAndStream(
@@ -314,7 +314,7 @@ async function retryTurnAndStream(
         stop();
       }
     }
-  });
+  }, undefined, null, true, true);
 }
 
 function streamTimelineEvents(
@@ -326,7 +326,7 @@ function streamTimelineEvents(
 ): Promise<void> {
   return streamUntilTerminal(client, sessionId, signal, (event) => {
     onEvent(event);
-  }, undefined, sinceEventId);
+  }, undefined, sinceEventId, true, true);
 }
 
 function streamUntilTerminal(
@@ -339,6 +339,8 @@ function streamUntilTerminal(
   ) => void | Promise<void>,
   afterSubscribe?: () => void | Promise<void>,
   sinceEventId: string | null = null,
+  closeWhenIdle = false,
+  closeOnTerminal = false,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -403,6 +405,10 @@ function streamUntilTerminal(
       if (!matchesSubscription) {
         return;
       }
+      if (envelope.reason === "completed") {
+        finish();
+        return;
+      }
       fail(new Error(`Desktop event subscription terminated: ${envelope.reason}: ${envelope.message}`));
     });
     cleanupFns.push(unsubscribeTerminated);
@@ -411,6 +417,8 @@ function streamUntilTerminal(
       session_id: sessionId,
       since_event_id: sinceEventId,
       replay_limit: null,
+      close_when_idle: closeWhenIdle,
+      close_on_terminal: closeOnTerminal,
     }).then((response) => {
       if (settled) {
         void client.unsubscribeEvents(response.subscription_id).catch(() => undefined);

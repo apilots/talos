@@ -666,11 +666,7 @@ impl AppServerClient {
         request: TalosMessageRequest,
     ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>> {
         let subscription = self
-            .subscribe_events(EventSubscribeParams {
-                session_id: session_id.to_string(),
-                since_event_id: None,
-                replay_limit: Some(256),
-            })
+            .subscribe_events(send_timeline_subscription_params(session_id))
             .await?;
         let subscription_id = subscription.subscription_id;
         let (tx, rx) = mpsc::channel(256);
@@ -833,6 +829,16 @@ impl AppServerClient {
             .flush()
             .await
             .map_err(|error| TalosError::ClientError(error.to_string()))
+    }
+}
+
+fn send_timeline_subscription_params(session_id: &str) -> EventSubscribeParams {
+    EventSubscribeParams {
+        session_id: session_id.to_string(),
+        since_event_id: None,
+        replay_limit: Some(256),
+        close_when_idle: Some(false),
+        close_on_terminal: Some(true),
     }
 }
 
@@ -1063,6 +1069,15 @@ mod tests {
         assert_eq!(ack.request_id, "req-1");
         assert_eq!(ack.message_id.as_deref(), Some("msg-1"));
         assert_eq!(ack.status, MessageCommandStatus::Accepted);
+    }
+
+    #[test]
+    fn send_timeline_events_keeps_pre_turn_subscription_open_while_idle() {
+        let params = send_timeline_subscription_params("session-1");
+
+        assert_eq!(params.session_id, "session-1");
+        assert_eq!(params.close_when_idle, Some(false));
+        assert_eq!(params.close_on_terminal, Some(true));
     }
 
     #[tokio::test]

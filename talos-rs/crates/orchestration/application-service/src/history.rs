@@ -32,10 +32,13 @@ impl SessionHistoryService {
     pub async fn snapshot(&self, session_id: &str) -> TalosResult<SessionHistorySnapshot> {
         let turns = self.memory_store.load_session_turns(session_id).await?;
         let mut messages = map_turns_to_history_messages(turns);
-        for timeline_message in self.completed_timeline_messages(session_id).await? {
+        let completed_timeline_messages = self.completed_timeline_messages(session_id).await?;
+        let last_stable_event_id = self
+            .last_stable_event_id(session_id, &completed_timeline_messages)
+            .await?;
+        for timeline_message in completed_timeline_messages {
             merge_completed_timeline_message(&mut messages, timeline_message);
         }
-        let last_stable_event_id = self.last_stable_event_id(session_id, &messages).await?;
         Ok(SessionHistorySnapshot {
             session_id: session_id.to_string(),
             messages,
@@ -76,17 +79,8 @@ impl SessionHistoryService {
         session_id: &str,
         messages: &[SessionHistoryMessage],
     ) -> TalosResult<Option<String>> {
-        let stable_turn_ids = messages
-            .iter()
-            .map(|message| message.turn_id.as_str())
-            .filter(|turn_id| !turn_id.is_empty())
-            .collect::<HashSet<_>>();
-        let stable_message_ids = messages
-            .iter()
-            .map(|message| message.message_id.as_str())
-            .filter(|message_id| !message_id.is_empty())
-            .collect::<HashSet<_>>();
-        if stable_turn_ids.is_empty() && stable_message_ids.is_empty() {
+        let stable_keys = stable_message_keys(messages);
+        if stable_keys.is_empty() {
             return Ok(None);
         }
 
@@ -101,9 +95,7 @@ impl SessionHistoryService {
                 break;
             }
             for event in &events {
-                let belongs_to_stable_turn = stable_turn_ids.contains(event.turn_id.as_str())
-                    || stable_message_ids.contains(event.message_id.as_str());
-                if belongs_to_stable_turn {
+                if stable_keys.contains_event(event) {
                     last_stable_event_id = event.event_id.clone();
                 }
             }
@@ -116,6 +108,37 @@ impl SessionHistoryService {
             }
         }
         Ok(last_stable_event_id)
+    }
+}
+
+struct StableMessageKeys<'a> {
+    turn_ids: HashSet<&'a str>,
+    message_ids: HashSet<&'a str>,
+}
+
+impl StableMessageKeys<'_> {
+    fn is_empty(&self) -> bool {
+        self.turn_ids.is_empty() && self.message_ids.is_empty()
+    }
+
+    fn contains_event(&self, event: &TalosTimelineEvent) -> bool {
+        self.turn_ids.contains(event.turn_id.as_str())
+            || self.message_ids.contains(event.message_id.as_str())
+    }
+}
+
+fn stable_message_keys(messages: &[SessionHistoryMessage]) -> StableMessageKeys<'_> {
+    StableMessageKeys {
+        turn_ids: messages
+            .iter()
+            .map(|message| message.turn_id.as_str())
+            .filter(|turn_id| !turn_id.is_empty())
+            .collect(),
+        message_ids: messages
+            .iter()
+            .map(|message| message.message_id.as_str())
+            .filter(|message_id| !message_id.is_empty())
+            .collect(),
     }
 }
 
@@ -618,6 +641,51 @@ mod tests {
         assert_eq!(messages[0].items[1].item_id, "event-thinking");
         assert_eq!(messages[0].items[1].started_at_ms, 120);
         assert_eq!(messages[0].items[1].completed_at_ms, Some(240));
+    }
+
+    #[test]
+    fn stable_message_keys_ignore_active_memory_only_turns() {
+        let completed_timeline_messages = vec![test_history_message("message-1", "turn-1")];
+        let keys = stable_message_keys(&completed_timeline_messages);
+
+        assert!(keys.contains_event(&test_timeline_event("message-1", "turn-1", 1)));
+        assert!(!keys.contains_event(&test_timeline_event("message-active", "turn-active", 2)));
+    }
+
+    fn test_history_message(message_id: &str, turn_id: &str) -> SessionHistoryMessage {
+        SessionHistoryMessage {
+            message_id: message_id.to_string(),
+            turn_id: turn_id.to_string(),
+            items: vec![test_text_item(
+                "input-1",
+                TalosTimelinePhase::Input,
+                TalosTimelineItemKind::UserInput,
+                100,
+                100,
+            )],
+            usage: TalosUsage::default(),
+            stop_reason: StopReason::EndTurn,
+        }
+    }
+
+    fn test_timeline_event(message_id: &str, turn_id: &str, sequence: u64) -> TalosTimelineEvent {
+        TalosTimelineEvent {
+            event_seq: Some(sequence as i64),
+            event_id: Some(format!("ev_{sequence}")),
+            created_at_ms: Some(sequence as i64),
+            event_type: talos_types::talos::TalosTimelineEventType::TurnStarted,
+            turn_id: turn_id.to_string(),
+            message_id: message_id.to_string(),
+            session_id: "session-1".to_string(),
+            sequence,
+            payload: TalosTimelineEventPayload::TurnStarted(
+                talos_types::talos::TalosTurnStartedEvent {
+                    request_id: "request-1".to_string(),
+                    turn_id: turn_id.to_string(),
+                    started_at_ms: sequence,
+                },
+            ),
+        }
     }
 
     fn test_text_item(

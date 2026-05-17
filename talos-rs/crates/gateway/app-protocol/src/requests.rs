@@ -792,6 +792,10 @@ pub struct EventSubscribeParams {
     pub since_event_id: Option<String>,
     #[serde(default)]
     pub replay_limit: Option<usize>,
+    #[serde(default)]
+    pub close_when_idle: Option<bool>,
+    #[serde(default)]
+    pub close_on_terminal: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]

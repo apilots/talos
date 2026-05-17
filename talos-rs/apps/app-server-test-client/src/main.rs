@@ -444,6 +444,8 @@ async fn subscribe_events_with_cursor(
             session_id: session_id.to_string(),
             since_event_id,
             replay_limit: Some(replay_limit),
+            close_when_idle: None,
+            close_on_terminal: None,
         })
         .await?)
 }

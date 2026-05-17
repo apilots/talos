@@ -7,7 +7,8 @@ use std::sync::{Arc, Mutex};
 use talos_agent_kernel::StopReason as KernelStopReason;
 use talos_agent_kernel::{
     AssistantTextCompletedStreamData, AssistantTextDeltaStreamData, AssistantTextStartedStreamData,
-    KernelAssistantTextPhase, KernelBuilder, KernelStreamItemKey, RunRequest, RunResponse, Runner,
+    KernelAssistantTextPhase, KernelBuilder, KernelStreamItemKey, KernelThinkingSource,
+    KernelThinkingStage, RunRequest, RunResponse, Runner, ThinkingDeltaStreamData,
     ToolArgsDeltaStreamData, ToolCallStartStreamData, ToolResultStreamData,
 };
 use talos_config::AgentKernelConfig;
@@ -559,6 +560,122 @@ fn test_assistant_text_delta_without_started_item_fails() {
     assert!(err
         .to_string()
         .contains("timeline assistant text item not found for delta"));
+}
+
+#[test]
+fn test_reasoning_item_closes_before_tool_boundary_and_restarts_after_tool() {
+    let mut timeline = TimelineBuilder::new(
+        "request-reasoning-tool",
+        "turn-reasoning-tool",
+        "message-1",
+        "session-1",
+    );
+    let mut state = KernelTimelineState::default();
+
+    let first_reasoning_events = emit_kernel_timeline_events(
+        &mut timeline,
+        &mut state,
+        KernelStreamEvent::new(
+            KernelStreamEventType::ThinkingDelta,
+            KernelStreamEventData::ThinkingDelta(ThinkingDeltaStreamData {
+                delta: "I need to inspect the workspace.".to_string(),
+                source: KernelThinkingSource::Provider,
+                stage: KernelThinkingStage::ModelReasoning,
+                round: Some(1),
+            }),
+        ),
+    )
+    .expect("first reasoning delta should start a reasoning item");
+    let first_reasoning_item_id = first_reasoning_events
+        .iter()
+        .find_map(|event| match &event.payload {
+            TalosTimelineEventPayload::ItemStarted(payload)
+                if payload.item.kind == TalosTimelineItemKind::Reasoning =>
+            {
+                Some(payload.item.item_id.clone())
+            }
+            _ => None,
+        })
+        .expect("reasoning item should be started");
+
+    let tool_start_events = emit_kernel_timeline_events(
+        &mut timeline,
+        &mut state,
+        KernelStreamEvent::new(
+            KernelStreamEventType::ToolCallStart,
+            KernelStreamEventData::ToolCallStart(ToolCallStartStreamData {
+                index: 0,
+                call_id: Some("call-read".to_string()),
+                tool_name: Some("Read".to_string()),
+                arguments: json!({"path": "src/lib.rs"}),
+                round: 1,
+            }),
+        ),
+    )
+    .expect("tool start should close active reasoning first");
+
+    assert!(matches!(
+        &tool_start_events[0].payload,
+        TalosTimelineEventPayload::ItemCompleted(payload)
+            if payload.item_id == first_reasoning_item_id
+                && payload.status == TalosTimelineItemStatus::Completed
+    ));
+    assert!(matches!(
+        &tool_start_events[1].payload,
+        TalosTimelineEventPayload::ItemStarted(payload)
+            if payload.item.kind == TalosTimelineItemKind::ToolCall
+                && payload.item.phase == TalosTimelinePhase::Acting
+    ));
+    assert!(tool_start_events[0].sequence < tool_start_events[1].sequence);
+    assert!(state.reasoning_item_id.is_none());
+
+    emit_kernel_timeline_events(
+        &mut timeline,
+        &mut state,
+        KernelStreamEvent::new(
+            KernelStreamEventType::ToolResult,
+            KernelStreamEventData::ToolResult(ToolResultStreamData {
+                call_id: "call-read".to_string(),
+                tool_name: "Read".to_string(),
+                content: vec![TalosContentItem::Text {
+                    text: "file content".to_string(),
+                }],
+                is_error: false,
+                semantic_events: Vec::new(),
+                envelope: None,
+                next_turn_failure: None,
+            }),
+        ),
+    )
+    .expect("tool result should complete the tool item");
+
+    let second_reasoning_events = emit_kernel_timeline_events(
+        &mut timeline,
+        &mut state,
+        KernelStreamEvent::new(
+            KernelStreamEventType::ThinkingDelta,
+            KernelStreamEventData::ThinkingDelta(ThinkingDeltaStreamData {
+                delta: "Now I can inspect the result.".to_string(),
+                source: KernelThinkingSource::Provider,
+                stage: KernelThinkingStage::ModelReasoning,
+                round: Some(2),
+            }),
+        ),
+    )
+    .expect("later reasoning should start a new reasoning item");
+    let second_reasoning_item_id = second_reasoning_events
+        .iter()
+        .find_map(|event| match &event.payload {
+            TalosTimelineEventPayload::ItemStarted(payload)
+                if payload.item.kind == TalosTimelineItemKind::Reasoning =>
+            {
+                Some(payload.item.item_id.clone())
+            }
+            _ => None,
+        })
+        .expect("new reasoning item should be started");
+
+    assert_ne!(first_reasoning_item_id, second_reasoning_item_id);
 }
 
 #[tokio::test]

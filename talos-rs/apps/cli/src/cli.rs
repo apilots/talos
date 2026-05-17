@@ -89,6 +89,8 @@ async fn run_app_server_smoke(
             session_id: session.context.session_id,
             since_event_id: None,
             replay_limit: Some(32),
+            close_when_idle: None,
+            close_on_terminal: None,
         })
         .await?;
     Ok(())
@@ -111,6 +113,8 @@ async fn run_app_server_turn_smoke(
             session_id: session_id.clone(),
             since_event_id: None,
             replay_limit: Some(32),
+            close_when_idle: None,
+            close_on_terminal: None,
         })
         .await?;
     client
@@ -169,6 +173,8 @@ async fn run_app_server_approval_resume(
             session_id: session_id.clone(),
             since_event_id: None,
             replay_limit: Some(128),
+            close_when_idle: None,
+            close_on_terminal: None,
         })
         .await?;
 
@@ -237,6 +243,8 @@ async fn run_app_server_approval_resume(
             session_id: session_id.clone(),
             since_event_id: Some(event_id),
             replay_limit: Some(512),
+            close_when_idle: None,
+            close_on_terminal: None,
         })
         .await?;
 

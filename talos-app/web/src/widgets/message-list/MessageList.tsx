@@ -74,7 +74,7 @@ export function MessageList({ blocks, emptyTitle, emptyDetail, actions }: Messag
         if (block.kind === "timeline") {
           return (
             <CopyableBlock copyLabel={copyBlockLabel} copyText={copyText} copiedLabel={copiedBlockLabel} key={block.id}>
-              <TimelineBlock items={block.items} />
+              <TimelineBlock items={block.items} live={Boolean(block.live)} />
             </CopyableBlock>
           );
         }
@@ -174,17 +174,22 @@ function blockToMarkdown(block: ChatRenderBlock) {
 
 function TimelineBlock({
   items,
+  live,
 }: {
   items: Extract<ChatRenderBlock, { kind: "timeline" }>["items"];
+  live: boolean;
 }) {
   const hasRunningItem = items.some((item) => item.status === "running" || item.status === "waiting_approval");
+  const hasActiveTimeline = live || hasRunningItem;
   const isAwaitingTimelineDelta =
     items.some((item) => item.status === "running") &&
     !items.some((item) => item.phase === "final_answer");
   const [nowMs, setNowMs] = useState(() => Date.now());
   const totalDuration = timelineDuration(items, nowMs);
-  const [open, setOpen] = useState(hasRunningItem);
-  const wasRunningRef = useRef(hasRunningItem);
+  const activitySignature = timelineActivitySignature(items);
+  const [open, setOpen] = useState(hasActiveTimeline);
+  const wasActiveRef = useRef(hasActiveTimeline);
+  const activitySignatureRef = useRef(activitySignature);
 
   useEffect(() => {
     if (!hasRunningItem) {
@@ -195,14 +200,16 @@ function TimelineBlock({
   }, [hasRunningItem]);
 
   useEffect(() => {
-    if (hasRunningItem && !wasRunningRef.current) {
+    const changed = activitySignatureRef.current !== activitySignature;
+    if (hasActiveTimeline && (!wasActiveRef.current || changed)) {
       setOpen(true);
     }
-    if (!hasRunningItem && wasRunningRef.current) {
+    if (!hasActiveTimeline && wasActiveRef.current) {
       setOpen(false);
     }
-    wasRunningRef.current = hasRunningItem;
-  }, [hasRunningItem]);
+    wasActiveRef.current = hasActiveTimeline;
+    activitySignatureRef.current = activitySignature;
+  }, [activitySignature, hasActiveTimeline]);
 
   return (
     <div className="flex items-start gap-3.5 md:gap-4">
@@ -211,10 +218,15 @@ function TimelineBlock({
       </div>
       <details
         className="group/timeline flex-1 rounded-[1.1rem] border border-border/70 bg-background/38 text-ink shadow-[0_10px_26px_rgba(95,84,64,0.035)]"
-        onToggle={(event) => setOpen(event.currentTarget.open)}
         open={open}
       >
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-medium marker:hidden">
+        <summary
+          className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-medium marker:hidden"
+          onClick={(event) => {
+            event.preventDefault();
+            setOpen((current) => !current);
+          }}
+        >
           <span className="flex min-w-0 items-center gap-2">
             <span>Thinking / Acting</span>
             <span className="rounded-full border border-border/70 px-2 py-0.5 text-[11px] font-normal text-muted">
@@ -365,6 +377,30 @@ function timelineItemDuration(item: Extract<ChatRenderBlock, { kind: "timeline" 
     return null;
   }
   return Math.max(0, item.completedAtMs - item.startedAtMs);
+}
+
+function timelineActivitySignature(items: Extract<ChatRenderBlock, { kind: "timeline" }>["items"]) {
+  return items
+    .map((item) => {
+      if (item.kind === "tool_call") {
+        const argumentsLength = typeof item.arguments === "string" ? item.arguments.length : (JSON.stringify(item.arguments)?.length ?? 0);
+        return [
+          item.itemId,
+          item.status,
+          item.progress.length,
+          item.output?.length ?? 0,
+          argumentsLength,
+          item.completedAtMs ?? "",
+        ].join(":");
+      }
+      return [
+        item.itemId,
+        item.status,
+        item.text.length,
+        item.completedAtMs ?? "",
+      ].join(":");
+    })
+    .join("|");
 }
 
 function timelineDuration(items: Extract<ChatRenderBlock, { kind: "timeline" }>["items"], nowMs: number) {

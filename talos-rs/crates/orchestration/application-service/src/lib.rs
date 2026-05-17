@@ -17,6 +17,7 @@ pub use config::{ConfigService, RuntimeConfigReloadHook};
 pub use event::{
     ApplicationEvent, ApplicationEventStream, EventReplay, EventService, TimelineCursorStatus,
     TimelineRecoverySnapshot, TimelineSubscribeParams, TimelineSubscription,
+    TimelineSubscriptionCloseReason, TimelineSubscriptionClosed, TimelineSubscriptionMessage,
 };
 pub use file::{
     content_hash, modified_at_ms, read_optional, validate_expected_version, with_file_lock,

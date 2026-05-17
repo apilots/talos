@@ -108,6 +108,8 @@ describe("DesktopAppServerController", () => {
       session_id: "session-1",
       since_event_id: null,
       replay_limit: 50,
+      close_when_idle: true,
+      close_on_terminal: true,
     } satisfies AppProtocol.EventSubscribeParams);
 
     bridges[0]?.emitEvent(createEventEnvelope("event-7", "session-1", "turn_started"));
@@ -124,6 +126,8 @@ describe("DesktopAppServerController", () => {
           session_id: "session-1",
           since_event_id: "event-7",
           replay_limit: 50,
+          close_when_idle: true,
+          close_on_terminal: true,
         },
       },
     ]);
@@ -148,6 +152,8 @@ describe("DesktopAppServerController", () => {
       session_id: "session-1",
       since_event_id: null,
       replay_limit: 50,
+      close_when_idle: null,
+      close_on_terminal: null,
     } satisfies AppProtocol.EventSubscribeParams);
     await controller.invoke("event.unsubscribe", {
       subscription_id: response.subscription_id,
@@ -202,6 +208,8 @@ describe("DesktopAppServerController", () => {
         session_id: "session-1",
         since_event_id: null,
         replay_limit: 50,
+        close_when_idle: null,
+        close_on_terminal: null,
       });
 
       bridges[0]?.emitEvent(createEventEnvelope("event-7", "session-1", "turn_started"));
@@ -227,6 +235,8 @@ describe("DesktopAppServerController", () => {
             session_id: "session-1",
             since_event_id: "event-7",
             replay_limit: 50,
+            close_when_idle: null,
+            close_on_terminal: null,
           },
         },
       ]);

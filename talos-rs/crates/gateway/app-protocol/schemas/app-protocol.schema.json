@@ -1594,6 +1594,20 @@
     },
     "EventSubscribeParams": {
       "properties": {
+        "close_on_terminal": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "close_when_idle": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "replay_limit": {
           "default": null,
           "format": "uint",

@@ -39,6 +39,8 @@ interface SubscriptionReplayState {
   subscriptionId: string;
   replayLimit: number | null;
   lastEventId: string | null;
+  closeWhenIdle: boolean | null;
+  closeOnTerminal: boolean | null;
 }
 
 export class DesktopAppServerController {
@@ -179,6 +181,8 @@ export class DesktopAppServerController {
           session_id: subscription.sessionId,
           since_event_id: subscription.lastEventId,
           replay_limit: subscription.replayLimit,
+          close_when_idle: subscription.closeWhenIdle,
+          close_on_terminal: subscription.closeOnTerminal,
         } satisfies AppProtocol.EventSubscribeParams,
       );
       this.subscriptions.set(subscription.sessionId, {
@@ -204,6 +208,8 @@ export class DesktopAppServerController {
       subscriptionId: response.subscription_id,
       replayLimit: params.replay_limit,
       lastEventId: response.high_water_mark_event_id ?? params.since_event_id,
+      closeWhenIdle: params.close_when_idle ?? null,
+      closeOnTerminal: params.close_on_terminal ?? null,
     });
     this.sessionsBySubscriptionId.set(response.subscription_id, params.session_id);
   }

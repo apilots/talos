@@ -532,8 +532,8 @@ impl AppServerApplication for TalosApplicationAdapter {
                 session_id: params.session_id,
                 after_event_id,
                 replay_limit: limit,
-                close_when_idle: false,
-                close_on_terminal: false,
+                close_when_idle: params.close_when_idle.unwrap_or(false),
+                close_on_terminal: params.close_on_terminal.unwrap_or(false),
             })
             .await
             .map_err(AppServerErrorBody::from_talos_error)

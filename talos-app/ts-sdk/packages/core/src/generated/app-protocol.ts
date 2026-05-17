@@ -102,7 +102,7 @@ export type TurnInterruptParams = { session_id: string, };
 
 export type TurnRetryParams = { session_id: string, input: Array<ProtocolInputItem>, workspace_id: string | null, client_message_id: string, retry_of_message_id: string, };
 
-export type EventSubscribeParams = { session_id: string, since_event_id: string | null, replay_limit: number | null, };
+export type EventSubscribeParams = { session_id: string, since_event_id: string | null, replay_limit: number | null, close_when_idle: boolean | null, close_on_terminal: boolean | null, };
 
 export type EventSubscribeResponse = { subscription_id: string, session_id: string, high_water_mark_event_id: string | null, };
 

@@ -17,8 +17,10 @@ use talos_app_protocol::requests::{
     TimelinePendingDynamicToolResult, TimelinePendingToolApproval, TimelinePendingUserAction,
     TimelineRecoverySnapshot, TimelineReplay,
 };
-use talos_application_service::TimelineCursorStatus as ApplicationTimelineCursorStatus;
-use talos_application_service::TimelineSubscribeParams;
+use talos_application_service::{
+    TimelineCursorStatus as ApplicationTimelineCursorStatus, TimelineSubscribeParams,
+    TimelineSubscriptionMessage,
+};
 use talos_auth::RequestIdentity;
 use talos_session_store::{ActiveTurnRecord, ActiveTurnStatus, PendingUserAction, TimelineEventId};
 
@@ -78,43 +80,48 @@ pub(super) async fn subscribe_timeline_events_handler(
         .await
         .map_err(map_event_replay_error)?;
 
-    let stream = ReceiverStream::new(subscription.events).map(|record| {
-        let event_name = canonical_method(&record.event.event_type);
-        let data = match serde_json::to_string(&record) {
-            Ok(data) => data,
-            Err(err) => {
-                error!(error = %err, "failed to serialize timeline event record");
-                let turn_id = record.turn_id.clone();
-                json!({
-                    "event_id": record.event_id,
-                    "event_seq": record.event_seq,
-                    "created_at_ms": record.created_at_ms,
-                    "session_id": record.session_id,
-                    "message_id": record.message_id,
-                    "turn_id": turn_id,
-                    "event": {
-                        "event_type": "turn_error",
-                        "session_id": record.session_id,
-                        "message_id": record.message_id,
-                        "sequence": 0,
-                        "turn_id": turn_id,
-                        "payload": { "type": "turn_error", "request_id": "unknown", "turn_id": turn_id, "error": "failed to serialize timeline event", "failed_at_ms": 0 }
-                    }
-                })
-                .to_string()
-            }
+    let stream = ReceiverStream::new(subscription.events).filter_map(|message| {
+        let TimelineSubscriptionMessage::Event(record) = message else {
+            return None;
         };
-        Ok::<Event, Infallible>(
-            Event::default()
-                .id(record.event_id)
-                .event(event_name)
-                .data(data),
-        )
+        Some(Ok::<Event, Infallible>(timeline_sse_event(record)))
     });
 
     Ok(Sse::new(stream)
         .keep_alive(KeepAlive::default())
         .into_response())
+}
+
+fn timeline_sse_event(record: talos_types::talos::TimelineEventEnvelope) -> Event {
+    let event_name = canonical_method(&record.event.event_type);
+    let data = match serde_json::to_string(&record) {
+        Ok(data) => data,
+        Err(err) => {
+            error!(error = %err, "failed to serialize timeline event record");
+            let turn_id = record.turn_id.clone();
+            json!({
+                "event_id": record.event_id,
+                "event_seq": record.event_seq,
+                "created_at_ms": record.created_at_ms,
+                "session_id": record.session_id,
+                "message_id": record.message_id,
+                "turn_id": turn_id,
+                "event": {
+                    "event_type": "turn_error",
+                    "session_id": record.session_id,
+                    "message_id": record.message_id,
+                    "sequence": 0,
+                    "turn_id": turn_id,
+                    "payload": { "type": "turn_error", "request_id": "unknown", "turn_id": turn_id, "error": "failed to serialize timeline event", "failed_at_ms": 0 }
+                }
+            })
+            .to_string()
+        }
+    };
+    Event::default()
+        .id(record.event_id)
+        .event(event_name)
+        .data(data)
 }
 
 pub(super) async fn recover_timeline_handler(

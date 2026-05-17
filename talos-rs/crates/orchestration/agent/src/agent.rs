@@ -665,6 +665,7 @@ fn emit_kernel_timeline_events(
             TalosTimelineContent::ExecutionSummary { summary: data.text },
         )]),
         (KernelStreamEventType::ToolCallStart, KernelStreamEventData::ToolCallStart(data)) => {
+            let mut events = close_active_reasoning_item(timeline, state)?;
             let stream_key = ToolStreamKey {
                 round: data.round,
                 index: data.index,
@@ -681,9 +682,11 @@ fn emit_kernel_timeline_events(
                 Some(&tool_name),
                 data.arguments.to_string(),
             )?;
-            Ok(started.into_iter().collect())
+            events.extend(started);
+            Ok(events)
         }
         (KernelStreamEventType::ToolArgsDelta, KernelStreamEventData::ToolArgsDelta(data)) => {
+            let mut events = close_active_reasoning_item(timeline, state)?;
             let (item_id, started) = ensure_tool_item(
                 timeline,
                 state,
@@ -698,9 +701,11 @@ fn emit_kernel_timeline_events(
                     arguments_delta: data.delta,
                 },
             )?;
-            Ok(optional_started_with_delta(started, delta))
+            events.extend(optional_started_with_delta(started, delta));
+            Ok(events)
         }
         (KernelStreamEventType::ToolQueued, KernelStreamEventData::ToolQueued(data)) => {
+            let mut events = close_active_reasoning_item(timeline, state)?;
             let (item_id, started) = ensure_tool_item(
                 timeline,
                 state,
@@ -715,9 +720,11 @@ fn emit_kernel_timeline_events(
                     status: TalosTimelineItemStatus::Running,
                 },
             )?;
-            Ok(optional_started_with_delta(started, delta))
+            events.extend(optional_started_with_delta(started, delta));
+            Ok(events)
         }
         (KernelStreamEventType::ToolExecuting, KernelStreamEventData::ToolExecuting(data)) => {
+            let mut events = close_active_reasoning_item(timeline, state)?;
             let (item_id, started) = ensure_tool_item(
                 timeline,
                 state,
@@ -733,12 +740,14 @@ fn emit_kernel_timeline_events(
                     text_delta: format!("Executing {}", data.tool_name),
                 },
             )?;
-            Ok(optional_started_with_delta(started, delta))
+            events.extend(optional_started_with_delta(started, delta));
+            Ok(events)
         }
         (
             KernelStreamEventType::ToolProgressDelta,
             KernelStreamEventData::ToolProgressDelta(data),
         ) => {
+            let mut events = close_active_reasoning_item(timeline, state)?;
             let (item_id, started) = ensure_tool_item(
                 timeline,
                 state,
@@ -754,9 +763,11 @@ fn emit_kernel_timeline_events(
                     text_delta: data.message,
                 },
             )?;
-            Ok(optional_started_with_delta(started, delta))
+            events.extend(optional_started_with_delta(started, delta));
+            Ok(events)
         }
         (KernelStreamEventType::ToolResult, KernelStreamEventData::ToolResult(data)) => {
+            let mut events = close_active_reasoning_item(timeline, state)?;
             let (item_id, started) =
                 ensure_tool_item_for_call(timeline, state, &data.call_id, &data.tool_name);
             let result = timeline.append_delta(
@@ -773,7 +784,8 @@ fn emit_kernel_timeline_events(
                 },
             )?;
             if data.next_turn_failure.is_some() {
-                return Ok(optional_started_with_delta(started, result));
+                events.extend(optional_started_with_delta(started, result));
+                return Ok(events);
             }
             let completed = timeline.complete_item(
                 &item_id,
@@ -785,7 +797,7 @@ fn emit_kernel_timeline_events(
                 None,
             )?;
             state.completed_tool_call_ids.insert(data.call_id);
-            let mut events = optional_started_with_delta(started, result);
+            events.extend(optional_started_with_delta(started, result));
             events.push(completed);
             Ok(events)
         }
@@ -798,6 +810,7 @@ fn emit_kernel_timeline_events(
                 arguments,
             }),
         ) => {
+            let mut events = close_active_reasoning_item(timeline, state)?;
             let item_id = state
                 .tool_item_by_call_id
                 .get(&call_id)
@@ -813,20 +826,20 @@ fn emit_kernel_timeline_events(
                 prompt: prompt.clone(),
                 arguments: arguments.clone().into(),
             };
-            Ok(vec![
-                timeline.append_delta(
-                    &item_id,
-                    TalosTimelineDelta::Status {
-                        status: TalosTimelineItemStatus::WaitingApproval,
-                    },
-                )?,
-                timeline.append_delta(&item_id, delta)?,
-            ])
+            events.push(timeline.append_delta(
+                &item_id,
+                TalosTimelineDelta::Status {
+                    status: TalosTimelineItemStatus::WaitingApproval,
+                },
+            )?);
+            events.push(timeline.append_delta(&item_id, delta)?);
+            Ok(events)
         }
         (
             KernelStreamEventType::DynamicToolRequest,
             KernelStreamEventData::DynamicToolRequest(data),
         ) => {
+            let mut events = close_active_reasoning_item(timeline, state)?;
             let item_id = state
                 .tool_item_by_call_id
                 .get(&data.call_id)
@@ -837,28 +850,39 @@ fn emit_kernel_timeline_events(
                         data.call_id
                     ))
                 })?;
-            Ok(vec![
-                timeline.append_delta(
-                    &item_id,
-                    TalosTimelineDelta::Status {
-                        status: TalosTimelineItemStatus::WaitingApproval,
-                    },
-                )?,
-                timeline.append_delta(
-                    &item_id,
-                    TalosTimelineDelta::ToolDynamicRequest {
-                        call_id: data.call_id,
-                        tool_name: data.tool_name,
-                        arguments: data.arguments.into(),
-                    },
-                )?,
-            ])
+            events.push(timeline.append_delta(
+                &item_id,
+                TalosTimelineDelta::Status {
+                    status: TalosTimelineItemStatus::WaitingApproval,
+                },
+            )?);
+            events.push(timeline.append_delta(
+                &item_id,
+                TalosTimelineDelta::ToolDynamicRequest {
+                    call_id: data.call_id,
+                    tool_name: data.tool_name,
+                    arguments: data.arguments.into(),
+                },
+            )?);
+            Ok(events)
         }
         (KernelStreamEventType::PromptWarning, KernelStreamEventData::PromptWarning(_)) => {
             Ok(Vec::new())
         }
         _ => Ok(Vec::new()),
     }
+}
+
+fn close_active_reasoning_item(
+    timeline: &mut TimelineBuilder,
+    state: &mut KernelTimelineState,
+) -> TalosResult<Vec<TalosTimelineEvent>> {
+    let Some(item_id) = state.reasoning_item_id.clone() else {
+        return Ok(Vec::new());
+    };
+    let completed = timeline.complete_item(&item_id, TalosTimelineItemStatus::Completed, None)?;
+    state.reasoning_item_id = None;
+    Ok(vec![completed])
 }
 
 fn append_text_item_delta(
@@ -894,6 +918,7 @@ fn emit_missing_tool_items_from_result(
                 name,
                 arguments,
             } if !state.tool_item_by_call_id.contains_key(call_id) => {
+                events.extend(close_active_reasoning_item(timeline, state)?);
                 let started = timeline.start_tool_call(call_id, name, arguments.to_string());
                 let item_id = item_id_from_started(&started)?;
                 state
@@ -908,6 +933,7 @@ fn emit_missing_tool_items_from_result(
                 content,
                 is_error,
             } if !state.completed_tool_call_ids.contains(call_id) => {
+                events.extend(close_active_reasoning_item(timeline, state)?);
                 let item_id = match state.tool_item_by_call_id.get(call_id).cloned() {
                     Some(item_id) => item_id,
                     None => {

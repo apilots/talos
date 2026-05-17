@@ -188,7 +188,6 @@ impl TimelineEventService {
                 "persisted timeline event is missing envelope metadata".to_string(),
             )
         })?;
-        let _ = self.live_tx.send(envelope.clone());
 
         if let Some((status, pending_user_action)) = active_state {
             self.active_turn_store
@@ -203,6 +202,8 @@ impl TimelineEventService {
                 })
                 .await?;
         }
+
+        let _ = self.live_tx.send(envelope.clone());
 
         Ok(envelope)
     }

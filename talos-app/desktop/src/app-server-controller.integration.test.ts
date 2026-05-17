@@ -133,6 +133,8 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
         session_id: session.context.session_id,
         since_event_id: null,
         replay_limit: 50,
+        close_when_idle: null,
+        close_on_terminal: null,
       });
       await rendererClient.startTurn({
         session_id: session.context.session_id,

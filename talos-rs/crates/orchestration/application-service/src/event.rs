@@ -24,8 +24,27 @@ pub struct TimelineSubscription {
     pub session_id: String,
     pub high_water_mark_event_id: Option<TimelineEventId>,
     pub replay: EventReplay,
-    pub events: mpsc::Receiver<TimelineEventEnvelope>,
+    pub events: mpsc::Receiver<TimelineSubscriptionMessage>,
     pub has_live_turn: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TimelineSubscriptionClosed {
+    pub reason: TimelineSubscriptionCloseReason,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimelineSubscriptionCloseReason {
+    Completed,
+    ServerShutdown,
+    Lagged,
+}
+
+#[derive(Debug, Clone)]
+pub enum TimelineSubscriptionMessage {
+    Event(TimelineEventEnvelope),
+    Closed(TimelineSubscriptionClosed),
 }
 
 #[derive(Debug)]
@@ -204,18 +223,28 @@ fn spawn_subscription_stream(
     has_live_turn: bool,
     close_when_idle: bool,
     close_on_terminal: bool,
-) -> mpsc::Receiver<TimelineEventEnvelope> {
+) -> mpsc::Receiver<TimelineSubscriptionMessage> {
     let (tx, rx) = mpsc::channel(256);
     tokio::spawn(async move {
         let mut last_sent_seq = last_replay_seq;
         for record in replay_events {
             last_sent_seq = record.event_seq;
-            if tx.send(record).await.is_err() {
+            if tx
+                .send(TimelineSubscriptionMessage::Event(record))
+                .await
+                .is_err()
+            {
                 return;
             }
         }
 
         if close_when_idle && !has_live_turn {
+            let _ = send_subscription_closed(
+                &tx,
+                TimelineSubscriptionCloseReason::Completed,
+                "event subscription completed",
+            )
+            .await;
             return;
         }
 
@@ -228,10 +257,20 @@ fn spawn_subscription_stream(
                     }
                     last_sent_seq = event_seq;
                     let is_terminal = is_terminal_event(&record);
-                    if tx.send(record).await.is_err() {
+                    if tx
+                        .send(TimelineSubscriptionMessage::Event(record))
+                        .await
+                        .is_err()
+                    {
                         return;
                     }
                     if close_on_terminal && is_terminal {
+                        let _ = send_subscription_closed(
+                            &tx,
+                            TimelineSubscriptionCloseReason::Completed,
+                            "event subscription completed",
+                        )
+                        .await;
                         return;
                     }
                 }
@@ -240,13 +279,41 @@ fn spawn_subscription_stream(
                         skipped,
                         "timeline subscription lagged; closing stream for explicit recovery"
                     );
+                    let _ = send_subscription_closed(
+                        &tx,
+                        TimelineSubscriptionCloseReason::Lagged,
+                        "subscription lagged behind retained live events",
+                    )
+                    .await;
                     return;
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    let _ = send_subscription_closed(
+                        &tx,
+                        TimelineSubscriptionCloseReason::ServerShutdown,
+                        "event source closed",
+                    )
+                    .await;
+                    return;
+                }
             }
         }
     });
     rx
+}
+
+async fn send_subscription_closed(
+    tx: &mpsc::Sender<TimelineSubscriptionMessage>,
+    reason: TimelineSubscriptionCloseReason,
+    message: &str,
+) -> Result<(), mpsc::error::SendError<TimelineSubscriptionMessage>> {
+    tx.send(TimelineSubscriptionMessage::Closed(
+        TimelineSubscriptionClosed {
+            reason,
+            message: message.to_string(),
+        },
+    ))
+    .await
 }
 
 fn is_terminal_event(record: &TimelineEventEnvelope) -> bool {
@@ -289,7 +356,8 @@ fn expired_cursor_error() -> TalosError {
 #[cfg(test)]
 mod tests {
     use super::{
-        reject_expired_cursor, EventService, TimelineCursorStatus, TimelineSubscribeParams,
+        reject_expired_cursor, EventService, TimelineCursorStatus, TimelineEventEnvelope,
+        TimelineSubscribeParams, TimelineSubscriptionCloseReason, TimelineSubscriptionMessage,
     };
     use async_trait::async_trait;
     use std::sync::{Arc, Mutex};
@@ -302,6 +370,7 @@ mod tests {
         StopReason, TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType,
         TalosTurnCompletedEvent, TalosTurnStartedEvent, TalosUsage,
     };
+    use tokio::sync::mpsc;
 
     #[test]
     fn replay_cursor_rejects_retention_gap() {
@@ -435,8 +504,8 @@ mod tests {
             .record_talos_event(unpersisted_event(2))
             .await
             .unwrap();
-        let replay = subscription.events.recv().await.unwrap();
-        let live = subscription.events.recv().await.unwrap();
+        let replay = recv_event(&mut subscription.events).await;
+        let live = recv_event(&mut subscription.events).await;
         assert_eq!(replay.event_id, first_event_id);
         assert_eq!(live.event_id, second.event_id);
         assert!(live.event_seq > subscription.replay.last_replay_seq);
@@ -467,8 +536,8 @@ mod tests {
             .await
             .unwrap();
 
-        let first = subscription.events.recv().await.unwrap();
-        let second = subscription.events.recv().await.unwrap();
+        let first = recv_event(&mut subscription.events).await;
+        let second = recv_event(&mut subscription.events).await;
         assert_eq!(first.event_id, terminal.event_id);
         assert_eq!(second.event_id, next_turn.event_id);
     }
@@ -499,7 +568,13 @@ mod tests {
         let mut received = Vec::new();
         loop {
             match tokio::time::timeout(Duration::from_secs(1), subscription.events.recv()).await {
-                Ok(Some(event)) => received.push(event.event_seq),
+                Ok(Some(TimelineSubscriptionMessage::Event(event))) => {
+                    received.push(event.event_seq)
+                }
+                Ok(Some(TimelineSubscriptionMessage::Closed(closed))) => {
+                    assert_eq!(closed.reason, TimelineSubscriptionCloseReason::Lagged);
+                    break;
+                }
                 Ok(None) => break,
                 Err(_) => panic!("lagged subscription did not close"),
             }
@@ -507,6 +582,40 @@ mod tests {
 
         if !received.is_empty() {
             assert_eq!(received, (1..=received.len() as i64).collect::<Vec<_>>());
+        }
+    }
+
+    #[tokio::test]
+    async fn idle_scoped_subscription_reports_completed_close() {
+        let (timeline, _store) = service();
+        let events = EventService::new(Arc::new(timeline.clone()));
+
+        let mut subscription = events
+            .subscribe(TimelineSubscribeParams {
+                session_id: "s1".to_string(),
+                after_event_id: None,
+                replay_limit: 32,
+                close_when_idle: true,
+                close_on_terminal: false,
+            })
+            .await
+            .unwrap();
+
+        let message = subscription.events.recv().await.expect("close message");
+        let TimelineSubscriptionMessage::Closed(closed) = message else {
+            panic!("expected subscription close message");
+        };
+        assert_eq!(closed.reason, TimelineSubscriptionCloseReason::Completed);
+    }
+
+    async fn recv_event(
+        events: &mut mpsc::Receiver<TimelineSubscriptionMessage>,
+    ) -> TimelineEventEnvelope {
+        match events.recv().await.expect("subscription message") {
+            TimelineSubscriptionMessage::Event(event) => event,
+            TimelineSubscriptionMessage::Closed(closed) => {
+                panic!("unexpected subscription close: {closed:?}")
+            }
         }
     }
 

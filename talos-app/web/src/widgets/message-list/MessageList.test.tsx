@@ -311,10 +311,11 @@ describe("MessageList", () => {
     expect(queryByLabelText("Waiting for timeline update")).toBeNull();
   });
 
-  it("collapses the whole timeline when execution finishes and can be reopened", async () => {
+  it("keeps live timeline open across idle gaps and reopens after manual collapse when new events arrive", async () => {
     const runningBlock = {
       id: "timeline-3",
       kind: "timeline" as const,
+      live: true,
       items: [
         {
           itemId: "thinking-1",
@@ -330,13 +331,78 @@ describe("MessageList", () => {
       <MessageList blocks={[runningBlock]} emptyDetail="" emptyTitle="" />,
     );
 
-    expect(container.querySelector("details")?.hasAttribute("open")).toBe(true);
+    await waitFor(() => {
+      expect(container.querySelector("details")?.hasAttribute("open")).toBe(true);
+    });
+    fireEvent.click(getByText("Thinking / Acting"));
+    expect(container.querySelector("details")?.hasAttribute("open")).toBe(false);
 
     rerender(
       <MessageList
         blocks={[
           {
             ...runningBlock,
+            items: [
+              {
+                ...runningBlock.items[0],
+                status: "completed" as const,
+                completedAtMs: 30,
+              },
+            ],
+          },
+        ]}
+        emptyDetail=""
+        emptyTitle=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector("details")?.hasAttribute("open")).toBe(true);
+    });
+
+    fireEvent.click(getByText("Thinking / Acting"));
+    expect(container.querySelector("details")?.hasAttribute("open")).toBe(false);
+
+    rerender(
+      <MessageList
+        blocks={[
+          {
+            ...runningBlock,
+            items: [
+              {
+                ...runningBlock.items[0],
+                status: "completed" as const,
+                completedAtMs: 30,
+              },
+              {
+                itemId: "tool-1",
+                kind: "tool_call" as const,
+                phase: "acting" as const,
+                status: "running" as const,
+                callId: "call-1",
+                toolName: "Read",
+                arguments: { file: "README.md" },
+                progress: [],
+                startedAtMs: 31,
+              },
+            ],
+          },
+        ]}
+        emptyDetail=""
+        emptyTitle=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector("details")?.hasAttribute("open")).toBe(true);
+    });
+
+    rerender(
+      <MessageList
+        blocks={[
+          {
+            ...runningBlock,
+            live: false,
             items: [
               {
                 ...runningBlock.items[0],

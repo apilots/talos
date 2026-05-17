@@ -2,7 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use talos_app_protocol::errors::{AppServerErrorBody, ALREADY_INITIALIZED, UNAUTHORIZED};
-use talos_app_protocol::events::{canonical_method, TimelineSubscriptionNotification};
+use talos_app_protocol::events::{
+    canonical_method, SubscriptionTerminatedEnvelope, SubscriptionTerminatedReason,
+    TimelineSubscriptionNotification,
+};
 use talos_app_protocol::jsonrpc::{
     parse_message_line, JsonRpcErrorResponse, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest,
     JsonRpcResponse, RequestId,
@@ -12,7 +15,9 @@ use talos_app_protocol::requests::{
     EventUnsubscribeResponse, InitializeResponse, ServerInfo,
 };
 use talos_app_protocol::version::ProtocolVersion;
-use talos_application_service::Actor;
+use talos_application_service::{
+    Actor, TimelineSubscriptionCloseReason, TimelineSubscriptionMessage,
+};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -400,15 +405,51 @@ fn spawn_subscription(
     _subscription_capacity: usize,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        while let Some(record) = source.events.recv().await {
-            if send_event(&subscription_id, record, &outgoing_tx)
-                .await
-                .is_err()
-            {
-                return;
+        let session_id = source.session_id.clone();
+        while let Some(message) = source.events.recv().await {
+            match message {
+                TimelineSubscriptionMessage::Event(record) => {
+                    if send_event(&subscription_id, record, &outgoing_tx)
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+                TimelineSubscriptionMessage::Closed(closed) => {
+                    let _ = send_subscription_terminated(
+                        &subscription_id,
+                        &session_id,
+                        map_subscription_close_reason(closed.reason),
+                        &closed.message,
+                        &outgoing_tx,
+                    )
+                    .await;
+                    return;
+                }
             }
         }
+        let _ = send_subscription_terminated(
+            &subscription_id,
+            &session_id,
+            SubscriptionTerminatedReason::Interrupted,
+            "event subscription closed without a close reason",
+            &outgoing_tx,
+        )
+        .await;
     })
+}
+
+fn map_subscription_close_reason(
+    reason: TimelineSubscriptionCloseReason,
+) -> SubscriptionTerminatedReason {
+    match reason {
+        TimelineSubscriptionCloseReason::Completed => SubscriptionTerminatedReason::Completed,
+        TimelineSubscriptionCloseReason::ServerShutdown => {
+            SubscriptionTerminatedReason::ServerShutdown
+        }
+        TimelineSubscriptionCloseReason::Lagged => SubscriptionTerminatedReason::Lagged,
+    }
 }
 
 async fn send_event(
@@ -427,6 +468,31 @@ async fn send_event(
     outgoing_tx
         .send(OutgoingMessage::Notification(JsonRpcNotification::new(
             method,
+            Some(params),
+        )))
+        .await
+        .map_err(|_| ())
+}
+
+async fn send_subscription_terminated(
+    subscription_id: &str,
+    session_id: &str,
+    reason: SubscriptionTerminatedReason,
+    message: &str,
+    outgoing_tx: &mpsc::Sender<OutgoingMessage>,
+) -> Result<(), ()> {
+    let params = serde_json::to_value(SubscriptionTerminatedEnvelope {
+        subscription_id: subscription_id.to_string(),
+        session_id: session_id.to_string(),
+        reason,
+        message: message.to_string(),
+    })
+    .map_err(|err| {
+        tracing::error!(error = %err, "failed to serialize app-server subscription termination");
+    })?;
+    outgoing_tx
+        .send(OutgoingMessage::Notification(JsonRpcNotification::new(
+            "subscription.terminated",
             Some(params),
         )))
         .await
@@ -507,7 +573,10 @@ mod tests {
     use serde_json::json;
     use talos_app_protocol::errors::{NOT_INITIALIZED, PARSE_ERROR, UNAUTHORIZED};
     use talos_app_protocol::requests::{ActorCredentials, EventSubscribeParams};
-    use talos_application_service::{Actor, EventReplay};
+    use talos_application_service::{
+        Actor, EventReplay, TimelineSubscriptionCloseReason, TimelineSubscriptionClosed,
+        TimelineSubscriptionMessage,
+    };
     use talos_types::talos::{
         TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType,
         TalosTurnStartedEvent, TimelineEventEnvelope,
@@ -528,7 +597,7 @@ mod tests {
         cancelled_actors: Mutex<Vec<String>>,
         drained: Mutex<usize>,
         live_tx: Mutex<Option<broadcast::Sender<TimelineEventEnvelope>>>,
-        stream_txs: Mutex<Vec<mpsc::Sender<TimelineEventEnvelope>>>,
+        stream_txs: Mutex<Vec<mpsc::Sender<TimelineSubscriptionMessage>>>,
     }
 
     #[async_trait]
@@ -880,11 +949,15 @@ mod tests {
         let senders = app.stream_txs.lock().expect("stream tx lock").clone();
         assert_eq!(senders.len(), 2);
         senders[0]
-            .send(timeline_envelope("ev_1", 1))
+            .send(TimelineSubscriptionMessage::Event(timeline_envelope(
+                "ev_1", 1,
+            )))
             .await
             .expect("send first subscription event");
         senders[1]
-            .send(timeline_envelope("ev_2", 2))
+            .send(TimelineSubscriptionMessage::Event(timeline_envelope(
+                "ev_2", 2,
+            )))
             .await
             .expect("send second subscription event");
 
@@ -914,9 +987,16 @@ mod tests {
             .as_bool()
             .unwrap_or(false));
 
-        assert!(senders[0].send(timeline_envelope("ev_3", 3)).await.is_err());
+        assert!(senders[0]
+            .send(TimelineSubscriptionMessage::Event(timeline_envelope(
+                "ev_3", 3
+            )))
+            .await
+            .is_err());
         senders[1]
-            .send(timeline_envelope("ev_4", 4))
+            .send(TimelineSubscriptionMessage::Event(timeline_envelope(
+                "ev_4", 4,
+            )))
             .await
             .expect("second subscription should remain active");
         let remaining_notification = read_output_line(&mut output).await;
@@ -928,6 +1008,133 @@ mod tests {
             remaining_notification["params"]["event"]["event_id"],
             "ev_4"
         );
+
+        client_write.shutdown().await.expect("shutdown input");
+        server_task.await.expect("server join").expect("server run");
+    }
+
+    #[tokio::test]
+    async fn closed_subscription_sends_completed_notification() {
+        let app = Arc::new(MockApp::default());
+        let (live_tx, _live_rx) = broadcast::channel(16);
+        *app.live_tx.lock().expect("live tx lock") = Some(live_tx);
+
+        let (client, server) = duplex(16 * 1024);
+        let (server_read, server_write) = split(server);
+        let server_task = tokio::spawn(run_jsonl(
+            server_read,
+            server_write,
+            app.clone(),
+            Arc::new(EnvLaunchTokenValidator::new("secret", "tester")),
+            AppServerConfig::default(),
+        ));
+        let (client_read, mut client_write) = split(client);
+        let mut output = BufReader::new(client_read).lines();
+
+        client_write
+            .write_all(
+                format!(
+                    "{}{}{}",
+                    initialize_request("secret"),
+                    initialized_notification(),
+                    event_subscribe_request()
+                )
+                .as_bytes(),
+            )
+            .await
+            .expect("write requests");
+
+        let _initialize = read_output_line(&mut output).await;
+        let subscribe = read_output_line(&mut output).await;
+        let subscription_id = subscribe["result"]["subscription_id"]
+            .as_str()
+            .expect("subscription id")
+            .to_string();
+        let sender = app
+            .stream_txs
+            .lock()
+            .expect("stream tx lock")
+            .first()
+            .cloned()
+            .expect("subscription sender");
+        sender
+            .send(TimelineSubscriptionMessage::Closed(
+                TimelineSubscriptionClosed {
+                    reason: TimelineSubscriptionCloseReason::Completed,
+                    message: "event subscription completed".to_string(),
+                },
+            ))
+            .await
+            .expect("send completed close");
+
+        let notification = read_output_line(&mut output).await;
+        assert_eq!(notification["method"], "subscription.terminated");
+        assert_eq!(notification["params"]["subscription_id"], subscription_id);
+        assert_eq!(notification["params"]["session_id"], "s1");
+        assert_eq!(notification["params"]["reason"], "completed");
+
+        client_write.shutdown().await.expect("shutdown input");
+        server_task.await.expect("server join").expect("server run");
+    }
+
+    #[tokio::test]
+    async fn lagged_subscription_close_is_not_reported_as_completed() {
+        let app = Arc::new(MockApp::default());
+        let (live_tx, _live_rx) = broadcast::channel(16);
+        *app.live_tx.lock().expect("live tx lock") = Some(live_tx);
+
+        let (client, server) = duplex(16 * 1024);
+        let (server_read, server_write) = split(server);
+        let server_task = tokio::spawn(run_jsonl(
+            server_read,
+            server_write,
+            app.clone(),
+            Arc::new(EnvLaunchTokenValidator::new("secret", "tester")),
+            AppServerConfig::default(),
+        ));
+        let (client_read, mut client_write) = split(client);
+        let mut output = BufReader::new(client_read).lines();
+
+        client_write
+            .write_all(
+                format!(
+                    "{}{}{}",
+                    initialize_request("secret"),
+                    initialized_notification(),
+                    event_subscribe_request()
+                )
+                .as_bytes(),
+            )
+            .await
+            .expect("write requests");
+
+        let _initialize = read_output_line(&mut output).await;
+        let subscribe = read_output_line(&mut output).await;
+        let subscription_id = subscribe["result"]["subscription_id"]
+            .as_str()
+            .expect("subscription id")
+            .to_string();
+        let sender = app
+            .stream_txs
+            .lock()
+            .expect("stream tx lock")
+            .first()
+            .cloned()
+            .expect("subscription sender");
+        sender
+            .send(TimelineSubscriptionMessage::Closed(
+                TimelineSubscriptionClosed {
+                    reason: TimelineSubscriptionCloseReason::Lagged,
+                    message: "subscription lagged behind retained live events".to_string(),
+                },
+            ))
+            .await
+            .expect("send lagged close");
+
+        let notification = read_output_line(&mut output).await;
+        assert_eq!(notification["method"], "subscription.terminated");
+        assert_eq!(notification["params"]["subscription_id"], subscription_id);
+        assert_eq!(notification["params"]["reason"], "lagged");
 
         client_write.shutdown().await.expect("shutdown input");
         server_task.await.expect("server join").expect("server run");
