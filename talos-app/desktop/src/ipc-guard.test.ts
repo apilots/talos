@@ -8,6 +8,9 @@ describe("desktop IPC guard", () => {
       assertDesktopRendererInvoke("session.read", { session_id: "session-1" }),
     ).not.toThrow();
     expect(() =>
+      assertDesktopRendererInvoke("session.history", { session_id: "session-1" }),
+    ).not.toThrow();
+    expect(() =>
       assertDesktopRendererInvoke("turn.start", {
         session_id: "session-1",
         input: [{ type: "text", text: "hello" }],
@@ -21,10 +24,14 @@ describe("desktop IPC guard", () => {
     expect(isDesktopRendererMethod("admin.session.list")).toBe(true);
     expect(isDesktopRendererMethod("admin.user.list")).toBe(true);
     expect(isDesktopRendererMethod("config.read")).toBe(true);
+    expect(isDesktopRendererMethod("config.reload")).toBe(true);
     expect(() => assertDesktopRendererInvoke("admin.session.list", {})).not.toThrow();
     expect(() => assertDesktopRendererInvoke("config.value.write", {
       path: "llm",
       value: "{}",
+    })).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("config.batch.write", {
+      entries: [{ path: "llm", value: "{}" }],
     })).not.toThrow();
   });
 
@@ -88,5 +95,14 @@ describe("desktop IPC guard", () => {
         approved: "true",
       }),
     ).toThrow("Invalid desktop renderer params for method: tool.approval.submit");
+    expect(() =>
+      assertDesktopRendererInvoke("tool.dynamic_result.submit", {
+        session_id: "session-1",
+        call_id: "call-1",
+        tool_name: "bash",
+        output: "ok",
+        success: "true",
+      }),
+    ).toThrow("Invalid desktop renderer params for method: tool.dynamic_result.submit");
   });
 });

@@ -709,7 +709,7 @@ async fn test_single_flow_streaming_path_emits_streaming_tool_lifecycle_events()
     let mut saw_executing = false;
     let mut saw_progress = false;
     let mut saw_completed = false;
-    let mut saw_output = false;
+    let mut saw_assistant_text = false;
     let mut saw_thinking = false;
 
     while let Ok(event) = rx.try_recv() {
@@ -718,7 +718,7 @@ async fn test_single_flow_streaming_path_emits_streaming_tool_lifecycle_events()
             crate::KernelStreamEventData::ToolExecuting(_) => saw_executing = true,
             crate::KernelStreamEventData::ToolProgressDelta(_) => saw_progress = true,
             crate::KernelStreamEventData::ToolResult(_) => saw_completed = true,
-            crate::KernelStreamEventData::OutputDelta(_) => saw_output = true,
+            crate::KernelStreamEventData::AssistantTextDelta(_) => saw_assistant_text = true,
             crate::KernelStreamEventData::ThinkingDelta(_) => saw_thinking = true,
             _ => {}
         }
@@ -730,7 +730,10 @@ async fn test_single_flow_streaming_path_emits_streaming_tool_lifecycle_events()
     );
     assert_eq!(state.round.load(Ordering::SeqCst), 2);
     assert!(saw_thinking, "thinking delta should be streamed");
-    assert!(saw_output, "assistant text delta should be streamed");
+    assert!(
+        saw_assistant_text,
+        "assistant text delta should be streamed"
+    );
     assert!(saw_queued, "tool queued event should be emitted");
     assert!(saw_executing, "tool executing event should be emitted");
     assert!(saw_progress, "tool progress delta should be emitted");
@@ -929,7 +932,7 @@ fn test_is_read_only_tool_round_true_for_read_only_calls() {
         model_finish_reason: ModelFinishReason::ToolCalls,
         output_items: Vec::new(),
         usage: talos_types::talos::TalosUsage::default(),
-        saw_output_delta: false,
+        final_answer_streamed: false,
         disposition: GeneralTurnStepDisposition::ContinueWithTools,
     };
     assert!(is_read_only_tool_round(&step));
@@ -945,7 +948,7 @@ fn test_is_read_only_tool_round_false_for_bash() {
         model_finish_reason: ModelFinishReason::ToolCalls,
         output_items: Vec::new(),
         usage: talos_types::talos::TalosUsage::default(),
-        saw_output_delta: false,
+        final_answer_streamed: false,
         disposition: GeneralTurnStepDisposition::ContinueWithTools,
     };
     assert!(!is_read_only_tool_round(&step));

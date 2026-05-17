@@ -217,8 +217,10 @@ pub struct PromptWarningEventData {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum KernelStreamEventType {
-    OutputDelta,
     ThinkingDelta,
+    AssistantTextStarted,
+    AssistantTextDelta,
+    AssistantTextCompleted,
     ExecutionSummary,
     ToolCallStart,
     ToolArgsDelta,
@@ -251,8 +253,10 @@ impl KernelStreamEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum KernelStreamEventData {
-    OutputDelta(OutputDeltaStreamData),
     ThinkingDelta(ThinkingDeltaStreamData),
+    AssistantTextStarted(AssistantTextStartedStreamData),
+    AssistantTextDelta(AssistantTextDeltaStreamData),
+    AssistantTextCompleted(AssistantTextCompletedStreamData),
     ExecutionSummary(ExecutionSummaryStreamData),
     ToolCallStart(ToolCallStartStreamData),
     ToolArgsDelta(ToolArgsDeltaStreamData),
@@ -265,7 +269,38 @@ pub enum KernelStreamEventData {
     DynamicToolRequest(DynamicToolRequestStreamData),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct KernelStreamItemKey {
+    pub round: Option<u32>,
+    pub local_id: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum KernelAssistantTextPhase {
+    Commentary,
+    FinalAnswer,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssistantTextStartedStreamData {
+    pub item_key: KernelStreamItemKey,
+    pub phase: KernelAssistantTextPhase,
+    pub round: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssistantTextDeltaStreamData {
+    pub item_key: KernelStreamItemKey,
+    pub delta: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssistantTextCompletedStreamData {
+    pub item_key: KernelStreamItemKey,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct ToolStreamKey {
     pub round: u32,
     pub index: usize,
@@ -284,13 +319,6 @@ pub struct DynamicToolRequestStreamData {
     pub call_id: String,
     pub tool_name: String,
     pub arguments: Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OutputDeltaStreamData {
-    pub delta: String,
-    pub round: Option<u32>,
-    pub source: Option<KernelOutputDeltaSource>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -368,13 +396,6 @@ pub struct ToolResultStreamData {
     pub envelope: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_turn_failure: Option<Value>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum KernelOutputDeltaSource {
-    Provider,
-    KernelFallback,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

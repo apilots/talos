@@ -26,7 +26,6 @@ pub(crate) struct StreamRound {
     pub(crate) tool_calls: Vec<FunctionCall>,
     pub(crate) streamed_tool_outputs: Vec<ToolExecutionOutput>,
     pub(crate) finish_reason: Option<String>,
-    pub(crate) saw_output_delta: bool,
     pub(crate) usage: TalosUsage,
 }
 
@@ -85,7 +84,6 @@ pub(crate) async fn stream_round(
     let mut finish_reason = None;
     let mut pending_calls: BTreeMap<usize, PendingToolCall> = BTreeMap::new();
     let mut streamed_tool_outputs = Vec::new();
-    let mut saw_output_delta = false;
     let mut usage = TalosUsage::default();
     let mut scheduler = streaming_tool_execution.map(|config| {
         crate::tool_execution::StreamingToolScheduler::new(
@@ -100,17 +98,6 @@ pub(crate) async fn stream_round(
         match event? {
             ToolStreamEvent::TextDelta { delta } => {
                 content.push_str(&delta);
-                saw_output_delta = true;
-                emit_stream_event(
-                    stream_tx,
-                    KernelStreamEventType::OutputDelta,
-                    KernelStreamEventData::OutputDelta(OutputDeltaStreamData {
-                        delta,
-                        round: Some(round),
-                        source: Some(KernelOutputDeltaSource::Provider),
-                    }),
-                )
-                .await;
             }
             ToolStreamEvent::ReasoningSignature { .. } => {
                 // thinking block integrity signature — no action needed at kernel level
@@ -241,7 +228,6 @@ pub(crate) async fn stream_round(
         tool_calls: finalize_tool_calls(round, pending_calls),
         streamed_tool_outputs,
         finish_reason,
-        saw_output_delta,
         usage,
     })
 }
@@ -258,9 +244,72 @@ async fn chat_round(
         tool_calls,
         streamed_tool_outputs: Vec::new(),
         finish_reason: response.finish_reason,
-        saw_output_delta: false,
         usage: talos_usage_from_provider_usage(&response.usage),
     })
+}
+
+pub(crate) async fn emit_assistant_text_stream_item(
+    stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
+    item_key: KernelStreamItemKey,
+    phase: KernelAssistantTextPhase,
+    round: Option<u32>,
+    text: &str,
+) -> bool {
+    if stream_tx.is_none() || text.trim().is_empty() {
+        return false;
+    }
+
+    emit_stream_event(
+        stream_tx,
+        KernelStreamEventType::AssistantTextStarted,
+        KernelStreamEventData::AssistantTextStarted(AssistantTextStartedStreamData {
+            item_key: item_key.clone(),
+            phase,
+            round,
+        }),
+    )
+    .await;
+    emit_stream_event(
+        stream_tx,
+        KernelStreamEventType::AssistantTextDelta,
+        KernelStreamEventData::AssistantTextDelta(AssistantTextDeltaStreamData {
+            item_key: item_key.clone(),
+            delta: text.to_string(),
+        }),
+    )
+    .await;
+    emit_stream_event(
+        stream_tx,
+        KernelStreamEventType::AssistantTextCompleted,
+        KernelStreamEventData::AssistantTextCompleted(AssistantTextCompletedStreamData {
+            item_key,
+        }),
+    )
+    .await;
+    true
+}
+
+async fn emit_assistant_text_for_step(
+    stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
+    round: u32,
+    text: &str,
+    disposition: GeneralTurnStepDisposition,
+) -> bool {
+    let phase = match disposition {
+        GeneralTurnStepDisposition::ContinueWithTools => KernelAssistantTextPhase::Commentary,
+        GeneralTurnStepDisposition::FinalResponse => KernelAssistantTextPhase::FinalAnswer,
+    };
+    emit_assistant_text_stream_item(
+        stream_tx,
+        KernelStreamItemKey {
+            round: Some(round),
+            local_id: "assistant_text".to_string(),
+        },
+        phase,
+        Some(round),
+        text,
+    )
+    .await
 }
 
 pub async fn execute_general_turn_step(
@@ -306,6 +355,14 @@ pub async fn execute_general_turn_step(
     } else {
         GeneralTurnStepDisposition::ContinueWithTools
     };
+    let final_answer_streamed = emit_assistant_text_for_step(
+        stream_tx.as_ref(),
+        round,
+        &round_response.content,
+        disposition,
+    )
+    .await
+        && matches!(disposition, GeneralTurnStepDisposition::FinalResponse);
     let model_finish_reason = ModelFinishReason::from_provider(
         round_response.finish_reason.as_deref(),
         !round_response.tool_calls.is_empty(),
@@ -319,13 +376,13 @@ pub async fn execute_general_turn_step(
         model_finish_reason,
         output_items,
         usage: round_response.usage,
-        saw_output_delta: round_response.saw_output_delta,
+        final_answer_streamed,
         disposition,
     })
 }
 
 pub fn apply_general_turn_step(state: &mut GeneralTurnLoopState, step: &GeneralTurnStepResult) {
-    state.saw_output_delta = state.saw_output_delta || step.saw_output_delta;
+    state.final_answer_streamed = state.final_answer_streamed || step.final_answer_streamed;
     state.usage.accumulate(&step.usage);
     state.output_items.extend(step.output_items.clone());
     state.reasoning_log.extend(step.reasoning.clone());

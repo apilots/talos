@@ -6,8 +6,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use talos_agent_kernel::StopReason as KernelStopReason;
 use talos_agent_kernel::{
-    KernelBuilder, OutputDeltaStreamData, RunRequest, RunResponse, Runner, ToolArgsDeltaStreamData,
-    ToolCallStartStreamData, ToolResultStreamData,
+    AssistantTextCompletedStreamData, AssistantTextDeltaStreamData, AssistantTextStartedStreamData,
+    KernelAssistantTextPhase, KernelBuilder, KernelStreamItemKey, RunRequest, RunResponse, Runner,
+    ToolArgsDeltaStreamData, ToolCallStartStreamData, ToolResultStreamData,
 };
 use talos_config::AgentKernelConfig;
 use talos_error::TalosResult;
@@ -153,14 +154,37 @@ impl Runner for StreamingOutputRunner {
         request: RunRequest,
     ) -> talos_error::TalosResult<RunResponse> {
         if let Some(stream_tx) = request.stream_tx {
+            let item_key = KernelStreamItemKey {
+                round: None,
+                local_id: "test_final_answer".to_string(),
+            };
             stream_tx
                 .send(KernelStreamEvent::new(
-                    KernelStreamEventType::OutputDelta,
-                    KernelStreamEventData::OutputDelta(OutputDeltaStreamData {
-                        delta: "streamed answer".to_string(),
+                    KernelStreamEventType::AssistantTextStarted,
+                    KernelStreamEventData::AssistantTextStarted(AssistantTextStartedStreamData {
+                        item_key: item_key.clone(),
+                        phase: KernelAssistantTextPhase::FinalAnswer,
                         round: None,
-                        source: None,
                     }),
+                ))
+                .await
+                .expect("stream receiver should be open");
+            stream_tx
+                .send(KernelStreamEvent::new(
+                    KernelStreamEventType::AssistantTextDelta,
+                    KernelStreamEventData::AssistantTextDelta(AssistantTextDeltaStreamData {
+                        item_key: item_key.clone(),
+                        delta: "streamed answer".to_string(),
+                    }),
+                ))
+                .await
+                .expect("stream receiver should be open");
+            stream_tx
+                .send(KernelStreamEvent::new(
+                    KernelStreamEventType::AssistantTextCompleted,
+                    KernelStreamEventData::AssistantTextCompleted(
+                        AssistantTextCompletedStreamData { item_key },
+                    ),
                 ))
                 .await
                 .expect("stream receiver should be open");
@@ -433,6 +457,108 @@ fn test_tool_call_start_reuses_item_created_by_argument_delta() {
             .status,
         TalosTimelineItemStatus::Running
     );
+}
+
+#[test]
+fn test_assistant_text_commentary_maps_without_final_answer() {
+    let mut timeline = TimelineBuilder::new(
+        "request-commentary",
+        "turn-commentary",
+        "message-1",
+        "session-1",
+    );
+    let mut state = KernelTimelineState::default();
+    let item_key = KernelStreamItemKey {
+        round: Some(1),
+        local_id: "assistant_text".to_string(),
+    };
+
+    let started_events = emit_kernel_timeline_events(
+        &mut timeline,
+        &mut state,
+        KernelStreamEvent::new(
+            KernelStreamEventType::AssistantTextStarted,
+            KernelStreamEventData::AssistantTextStarted(AssistantTextStartedStreamData {
+                item_key: item_key.clone(),
+                phase: KernelAssistantTextPhase::Commentary,
+                round: Some(1),
+            }),
+        ),
+    )
+    .expect("commentary should start");
+    let item_id = match &started_events[0].payload {
+        TalosTimelineEventPayload::ItemStarted(payload) => {
+            assert_eq!(payload.item.kind, TalosTimelineItemKind::AssistantText);
+            assert_eq!(payload.item.phase, TalosTimelinePhase::Commentary);
+            payload.item.item_id.clone()
+        }
+        _ => panic!("expected commentary item start"),
+    };
+
+    let delta_events = emit_kernel_timeline_events(
+        &mut timeline,
+        &mut state,
+        KernelStreamEvent::new(
+            KernelStreamEventType::AssistantTextDelta,
+            KernelStreamEventData::AssistantTextDelta(AssistantTextDeltaStreamData {
+                item_key: item_key.clone(),
+                delta: "I will inspect the code.".to_string(),
+            }),
+        ),
+    )
+    .expect("commentary delta should append");
+    assert!(delta_events.iter().any(|event| matches!(
+        &event.payload,
+        TalosTimelineEventPayload::ItemDelta(payload)
+            if payload.item_id == item_id
+                && matches!(&payload.delta, TalosTimelineDelta::Text { text } if text == "I will inspect the code.")
+    )));
+
+    let completed_events = emit_kernel_timeline_events(
+        &mut timeline,
+        &mut state,
+        KernelStreamEvent::new(
+            KernelStreamEventType::AssistantTextCompleted,
+            KernelStreamEventData::AssistantTextCompleted(AssistantTextCompletedStreamData {
+                item_key,
+            }),
+        ),
+    )
+    .expect("commentary should complete");
+    assert!(completed_events.iter().any(|event| matches!(
+        &event.payload,
+        TalosTimelineEventPayload::ItemCompleted(payload)
+            if payload.item_id == item_id
+                && payload.status == TalosTimelineItemStatus::Completed
+    )));
+    assert!(state.final_answer_item_id.is_none());
+}
+
+#[test]
+fn test_assistant_text_delta_without_started_item_fails() {
+    let mut timeline =
+        TimelineBuilder::new("request-delta", "turn-delta", "message-1", "session-1");
+    let mut state = KernelTimelineState::default();
+
+    let err = emit_kernel_timeline_events(
+        &mut timeline,
+        &mut state,
+        KernelStreamEvent::new(
+            KernelStreamEventType::AssistantTextDelta,
+            KernelStreamEventData::AssistantTextDelta(AssistantTextDeltaStreamData {
+                item_key: KernelStreamItemKey {
+                    round: Some(2),
+                    local_id: "missing".to_string(),
+                },
+                delta: "orphan text".to_string(),
+            }),
+        ),
+    )
+    .expect_err("orphan assistant text delta should fail");
+
+    assert!(err
+        .to_string()
+        .contains("timeline assistant text item not found for delta"));
 }
 
 #[tokio::test]

@@ -124,6 +124,56 @@ pub(crate) fn output_delta_event(
     )
 }
 
+pub(crate) fn commentary_item_started_event(
+    message_id: impl Into<String>,
+    session_id: impl Into<String>,
+    sequence: u64,
+) -> TimelineEventEnvelope {
+    timeline_event(
+        message_id.into(),
+        session_id.into(),
+        sequence,
+        TalosTimelineEventType::ItemStarted,
+        TalosTimelineEventPayload::ItemStarted(talos_client::TalosItemStartedEvent {
+            request_id: "req-test".to_string(),
+            turn_id: "turn-test".to_string(),
+            item: TalosTimelineItem {
+                item_id: "commentary".to_string(),
+                parent_item_id: None,
+                kind: TalosTimelineItemKind::AssistantText,
+                phase: TalosTimelinePhase::Commentary,
+                status: TalosTimelineItemStatus::Running,
+                title: None,
+                started_at_ms: sequence,
+                completed_at_ms: None,
+                content: TalosTimelineContent::Text {
+                    text: String::new(),
+                },
+            },
+        }),
+    )
+}
+
+pub(crate) fn commentary_delta_event(
+    message_id: impl Into<String>,
+    session_id: impl Into<String>,
+    sequence: u64,
+    delta: impl Into<String>,
+) -> TimelineEventEnvelope {
+    timeline_event(
+        message_id.into(),
+        session_id.into(),
+        sequence,
+        TalosTimelineEventType::ItemDelta,
+        TalosTimelineEventPayload::ItemDelta(talos_client::TalosItemDeltaEvent {
+            request_id: "req-test".to_string(),
+            turn_id: "turn-test".to_string(),
+            item_id: "commentary".to_string(),
+            delta: TalosTimelineDelta::Text { text: delta.into() },
+        }),
+    )
+}
+
 pub(crate) fn reasoning_delta_event(
     message_id: impl Into<String>,
     session_id: impl Into<String>,

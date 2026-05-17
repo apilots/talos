@@ -103,7 +103,7 @@ pub struct ExecutedTurnArtifacts {
     pub reasoning_log: Vec<String>,
     pub tool_call_log: Vec<ToolCallRecord>,
     pub tool_result_log: Vec<ToolResultLog>,
-    pub saw_output_delta: bool,
+    pub final_answer_streamed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,7 +146,7 @@ pub struct GeneralTurnLoopState {
     pub retrieved_memories: Vec<RetrievedMemoryItem>,
     pub tool_call_count: usize,
     pub tool_error_count: usize,
-    pub saw_output_delta: bool,
+    pub final_answer_streamed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -195,7 +195,7 @@ impl GeneralTurnLoopState {
             retrieved_memories: Vec::new(),
             tool_call_count: 0,
             tool_error_count: 0,
-            saw_output_delta: false,
+            final_answer_streamed: false,
         }
     }
 }
@@ -247,7 +247,7 @@ pub struct GeneralTurnStepResult {
     pub model_finish_reason: ModelFinishReason,
     pub output_items: Vec<TalosOutputItem>,
     pub usage: TalosUsage,
-    pub saw_output_delta: bool,
+    pub final_answer_streamed: bool,
     pub disposition: GeneralTurnStepDisposition,
 }
 

@@ -61,7 +61,7 @@ pub fn finalize_general_turn_artifacts(
         reasoning_log,
         tool_call_log: state.tool_call_log,
         tool_result_log: state.tool_result_log,
-        saw_output_delta: state.saw_output_delta,
+        final_answer_streamed: state.final_answer_streamed,
     }
 }
 
@@ -69,15 +69,16 @@ pub async fn emit_general_turn_finalization_stream(
     prepared: &PreparedGeneralTurn,
     executed: &ExecutedTurnArtifacts,
 ) {
-    if !executed.saw_output_delta && !executed.output_text.trim().is_empty() {
-        emit_stream_event(
+    if !executed.final_answer_streamed && !executed.output_text.trim().is_empty() {
+        emit_assistant_text_stream_item(
             prepared.stream_tx.as_ref(),
-            KernelStreamEventType::OutputDelta,
-            KernelStreamEventData::OutputDelta(OutputDeltaStreamData {
-                delta: executed.output_text.clone(),
+            KernelStreamItemKey {
                 round: None,
-                source: Some(KernelOutputDeltaSource::KernelFallback),
-            }),
+                local_id: "finalization_output".to_string(),
+            },
+            KernelAssistantTextPhase::FinalAnswer,
+            None,
+            &executed.output_text,
         )
         .await;
     }

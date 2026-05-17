@@ -8,13 +8,14 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | --- | ---: |
 | `feat` | 020 |
 | `fix` | 004 |
-| `refactor` | 021 |
+| `refactor` | 022 |
 | `docs` | 001 |
 
 ## Active Specs
 
 | ID | Directory | Status |
 | --- | --- | --- |
+| refactor-021 | `refactor-021-kernel-stream-phase-ownership` | implemented |
 | refactor-020 | `refactor-020-application-timeline-recovery-stream` | active |
 | refactor-019 | `refactor-019-message-timeline-model` | active |
 | refactor-018 | `refactor-018-runtime-env-bootstrap` | draft |

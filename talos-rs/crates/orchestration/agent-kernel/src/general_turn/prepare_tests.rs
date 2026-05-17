@@ -17,7 +17,7 @@ fn build_executed_turn_artifacts(
         reasoning_log: Vec::new(),
         tool_call_log,
         tool_result_log,
-        saw_output_delta: false,
+        final_answer_streamed: false,
     }
 }
 

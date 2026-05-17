@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ToolCallCard } from "@/widgets/tool-call-card/ToolCallCard";
+import { formatDuration } from "./formatDuration";
 
 function resolveTone(status: string) {
   if (status === "done") {
@@ -56,7 +57,9 @@ export function ToolCallBlock({
           {prompt ? <ToolCallCard.ApprovalActions prompt={prompt} title={t("approvalPrompt")} /> : null}
           {progress.length > 0 ? <ToolCallCard.Progress entries={progress} title={t("progress")} /> : null}
           {output ? <ToolCallCard.Output content={output} title={t("output")} /> : null}
-          {timingMs ? <div className="text-[11px] text-muted">{t("duration", { value: timingMs })}</div> : null}
+          {timingMs !== null && timingMs !== undefined ? (
+            <div className="text-[11px] text-muted">{t("duration", { value: formatDuration(timingMs) })}</div>
+          ) : null}
         </ToolCallCard.Body>
       ) : null}
     </ToolCallCard.Root>

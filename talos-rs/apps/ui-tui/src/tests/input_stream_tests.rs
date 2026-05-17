@@ -783,6 +783,36 @@ async fn test_execution_summary_stays_in_right_panel_not_transcript() {
 }
 
 #[tokio::test]
+async fn test_commentary_stream_does_not_update_assistant_block() {
+    let mut app = create_remote_app();
+    app.initialize_remote().await;
+    app.in_flight = true;
+    app.session_id = Some("sess-test".to_string());
+
+    app.handle_stream_event(commentary_item_started_event(
+        "msg-commentary",
+        "sess-test",
+        1,
+    ));
+    app.handle_stream_event(commentary_delta_event(
+        "msg-commentary",
+        "sess-test",
+        2,
+        "I will inspect the workspace.",
+    ));
+
+    assert!(!app
+        .chat_blocks
+        .iter()
+        .any(|b| b.role == ChatRole::Assistant
+            && b.content.contains("I will inspect the workspace.")));
+    assert!(app.chat_blocks.iter().any(
+        |b| b.role == ChatRole::Thinking && b.content.contains("I will inspect the workspace.")
+    ));
+    assert!(!app.received_output_delta);
+}
+
+#[tokio::test]
 async fn test_tool_using_stream_keeps_assistant_output_interleaved() {
     let mut app = create_remote_app();
     app.initialize_remote().await;

@@ -1,11 +1,12 @@
 use crate::tool_execution::ToolExecutionContext;
 use crate::{
-    warnings::derive_prompt_warnings, ExecutionSummaryStreamData, InvocationContext, KernelEvent,
-    KernelEventData, KernelEventLabel, KernelEventType, KernelOutputDeltaSource, KernelStreamEvent,
-    KernelStreamEventData, KernelStreamEventType, KernelThinkingSource, KernelThinkingStage,
-    KernelWarning, OutputDeltaStreamData, PromptWarningEventData, StopReason,
-    ThinkingDeltaStreamData, ToolCallStartStreamData, ToolExecutionInput, ToolExecutor,
-    ToolResultStreamData,
+    warnings::derive_prompt_warnings, AssistantTextCompletedStreamData,
+    AssistantTextDeltaStreamData, AssistantTextStartedStreamData, ExecutionSummaryStreamData,
+    InvocationContext, KernelAssistantTextPhase, KernelEvent, KernelEventData, KernelEventLabel,
+    KernelEventType, KernelStreamEvent, KernelStreamEventData, KernelStreamEventType,
+    KernelStreamItemKey, KernelThinkingSource, KernelThinkingStage, KernelWarning,
+    PromptWarningEventData, StopReason, ThinkingDeltaStreamData, ToolCallStartStreamData,
+    ToolExecutionInput, ToolExecutor, ToolResultStreamData,
 };
 use chrono::Utc;
 use serde_json::Value;
@@ -94,10 +95,10 @@ pub(crate) use prepare::{
     SESSION_CONTINUITY_STATE_KEY,
 };
 pub use run::run_general_turn;
-pub(crate) use step_execute::emit_stream_event;
 #[cfg(test)]
 pub(crate) use step_execute::stream_round;
 pub use step_execute::{apply_general_turn_step, execute_general_turn_step};
+pub(crate) use step_execute::{emit_assistant_text_stream_item, emit_stream_event};
 pub use step_request::build_general_turn_step_request;
 pub(crate) use tool_batch::collect_general_turn_tool_batch;
 #[cfg(test)]

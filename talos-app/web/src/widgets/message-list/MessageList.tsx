@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Bot, Check, Clock3, Copy, LoaderCircle, Sparkles, Wrench } from "lucide-react";
+import { Check, Clock3, Copy, LoaderCircle, Sparkles, Wrench } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -9,6 +9,7 @@ import { Button } from "@/shared/ui/Button";
 import { ToolCallBlock } from "./ToolCallBlock";
 import { TextMessageBlock } from "./TextMessageBlock";
 import { StatusMessageBlock } from "./StatusMessageBlock";
+import { formatDuration } from "./formatDuration";
 
 interface MessageListProps {
   blocks: ChatRenderBlock[];
@@ -223,7 +224,7 @@ function TimelineBlock({
           {totalDuration !== null ? (
             <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-normal text-muted">
               <Clock3 size={13} />
-              {totalDuration}ms
+              {formatDuration(totalDuration)}
             </span>
           ) : null}
         </summary>
@@ -242,9 +243,6 @@ function TimelineBlock({
                   <header className="flex items-center justify-between gap-3 px-3 py-2.5">
                     <span className="flex min-w-0 items-center gap-2">
                       <span className="truncate text-sm font-medium">{timelineItemTitle(item)}</span>
-                      <span className="shrink-0 rounded-full bg-background/70 px-2 py-0.5 text-[11px] text-muted">
-                        {item.phase.replaceAll("_", " ")}
-                      </span>
                     </span>
                     {statusLabel ? <span className="shrink-0 text-[11px] text-muted">{statusLabel}</span> : null}
                   </header>
@@ -294,9 +292,6 @@ function TimelineItemIcon({
   if (kind === "tool_call") {
     return <Wrench className="shrink-0 text-brand" size={13} />;
   }
-  if (kind === "assistant_text") {
-    return <Bot className="shrink-0 text-brand" size={13} />;
-  }
   return <Sparkles className="shrink-0 text-brand" size={13} />;
 }
 
@@ -340,16 +335,26 @@ function timelineItemTitle(item: Extract<ChatRenderBlock, { kind: "timeline" }>[
   if (item.kind === "tool_call") {
     return item.toolName;
   }
+  if (item.phase === "thinking" || item.phase === "commentary") {
+    return "Thinking";
+  }
+  if (item.phase === "system") {
+    return item.title || "System";
+  }
   return item.title || item.kind.replaceAll("_", " ");
 }
 
 function timelineItemStatus(item: Extract<ChatRenderBlock, { kind: "timeline" }>["items"][number]) {
   const duration = timelineItemDuration(item);
-  return duration === null ? item.status.replaceAll("_", " ") : `${item.status.replaceAll("_", " ")} · ${duration}ms`;
+  return duration === null ? item.status.replaceAll("_", " ") : `${item.status.replaceAll("_", " ")} · ${formatDuration(duration)}`;
 }
 
 function visibleTimelineItemStatus(item: Extract<ChatRenderBlock, { kind: "timeline" }>["items"][number]) {
-  if (item.kind === "tool_call" || item.status === "failed" || item.status === "cancelled") {
+  if (item.kind === "tool_call") {
+    const duration = timelineItemDuration(item);
+    return duration === null ? undefined : formatDuration(duration);
+  }
+  if (item.status === "failed" || item.status === "cancelled") {
     return timelineItemStatus(item);
   }
   return undefined;

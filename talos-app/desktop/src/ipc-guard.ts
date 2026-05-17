@@ -1,11 +1,17 @@
 import type { AppProtocol } from "@talos/sdk-core";
 
 type ParamGuard = (params: unknown) => boolean;
+export type DesktopRendererMethod = Exclude<AppProtocol.ClientMethod, "initialize">;
 
 const emptyParams = (params: unknown) => isRecord(params);
 const sessionParams = (params: unknown) => hasString(params, "session_id");
 const projectParams = (params: unknown) => hasString(params, "project_id");
 const userRole = (value: unknown) => value === "user" || value === "admin";
+const llmConfigWriteParams = (params: unknown) =>
+  hasString(params, "path") &&
+  isRecord(params) &&
+  params.path === "llm" &&
+  hasString(params, "value");
 
 const DESKTOP_RENDERER_METHOD_GUARDS = {
   "account.get": emptyParams,
@@ -31,11 +37,12 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
     isRecord(params) &&
     (params.email === undefined || params.email === null || typeof params.email === "string"),
   "config.read": emptyParams,
-  "config.value.write": (params) =>
-    hasString(params, "path") &&
+  "config.value.write": llmConfigWriteParams,
+  "config.batch.write": (params) =>
     isRecord(params) &&
-    params.path === "llm" &&
-    hasString(params, "value"),
+    Array.isArray(params.entries) &&
+    params.entries.every(llmConfigWriteParams),
+  "config.reload": emptyParams,
   "event.subscribe": sessionParams,
   "event.unsubscribe": (params) => hasString(params, "subscription_id"),
   "memory.file.list": emptyParams,
@@ -54,6 +61,7 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "session.compact": sessionParams,
   "session.create": (params) => isRecord(params) && isRecord(params.context),
   "session.delete": sessionParams,
+  "session.history": sessionParams,
   "session.list": emptyParams,
   "session.patch": sessionParams,
   "session.read": sessionParams,
@@ -64,6 +72,12 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
     hasString(params, "call_id") &&
     hasString(params, "tool_name") &&
     hasBoolean(params, "approved"),
+  "tool.dynamic_result.submit": (params) =>
+    hasString(params, "session_id") &&
+    hasString(params, "call_id") &&
+    hasString(params, "tool_name") &&
+    hasString(params, "output") &&
+    hasBoolean(params, "success"),
   "tool.list": emptyParams,
   "turn.interrupt": sessionParams,
   "turn.retry": (params) =>
@@ -86,9 +100,7 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "workspace.doc.list": emptyParams,
   "workspace.doc.read": (params) => hasString(params, "kind"),
   "workspace.doc.write": (params) => hasString(params, "kind") && hasString(params, "content"),
-} satisfies Partial<Record<AppProtocol.ClientMethod, ParamGuard>>;
-
-export type DesktopRendererMethod = keyof typeof DESKTOP_RENDERER_METHOD_GUARDS;
+} satisfies Record<DesktopRendererMethod, ParamGuard>;
 
 export function assertDesktopRendererInvoke(
   method: unknown,

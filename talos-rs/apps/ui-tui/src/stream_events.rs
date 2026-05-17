@@ -142,7 +142,7 @@ impl TuiApp {
             }
             (
                 TalosTimelineItemKind::AssistantText,
-                TalosTimelinePhase::Commentary | TalosTimelinePhase::FinalAnswer,
+                TalosTimelinePhase::FinalAnswer,
                 TalosTimelineContent::Text { text },
             ) => {
                 if text.trim().is_empty() {
@@ -150,6 +150,18 @@ impl TuiApp {
                 }
                 self.transcript.note_visible_activity();
                 self.append_assistant(text);
+                true
+            }
+            (
+                TalosTimelineItemKind::AssistantText,
+                TalosTimelinePhase::Commentary,
+                TalosTimelineContent::Text { text },
+            ) => {
+                if text.trim().is_empty() {
+                    return false;
+                }
+                self.transcript.note_visible_activity();
+                self.append_thinking(text);
                 true
             }
             (
@@ -250,7 +262,7 @@ impl TuiApp {
             ) => {
                 if !text.is_empty() {
                     self.transcript.note_visible_activity();
-                    self.append_assistant(text);
+                    self.append_thinking(text);
                 }
             }
             (
@@ -456,12 +468,14 @@ impl TuiApp {
                 self.transcript.note_visible_activity();
                 self.append_thinking(text);
             }
-            TalosTimelinePhase::Commentary | TalosTimelinePhase::FinalAnswer => {
+            TalosTimelinePhase::Commentary => {
+                self.transcript.note_visible_activity();
+                self.append_thinking(text);
+            }
+            TalosTimelinePhase::FinalAnswer => {
                 self.transcript.note_visible_activity();
                 self.append_assistant(text);
-                if item.phase == TalosTimelinePhase::FinalAnswer {
-                    self.received_output_delta = true;
-                }
+                self.received_output_delta = true;
             }
             TalosTimelinePhase::System => {
                 self.push_right_event(text.trim().to_string());

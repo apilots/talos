@@ -1,5 +1,45 @@
 use super::*;
 
+struct DirectStreamingAnswerProvider;
+
+#[async_trait]
+impl LlmProvider for DirectStreamingAnswerProvider {
+    fn name(&self) -> &str {
+        "direct-streaming-answer"
+    }
+
+    async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
+        panic!("chat should not be called in streaming step test");
+    }
+
+    async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
+        let (_tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(1);
+        Ok(ChatStream::new(rx))
+    }
+
+    async fn stream_with_tools(&self, _request: ChatRequest) -> TalosResult<ToolStream> {
+        let (tx, rx) = mpsc::channel::<TalosResult<ToolStreamEvent>>(4);
+        tokio::spawn(async move {
+            tx.send(Ok(ToolStreamEvent::TextDelta {
+                delta: "Direct answer.".to_string(),
+            }))
+            .await
+            .expect("text delta should send");
+            tx.send(Ok(ToolStreamEvent::Done {
+                finish_reason: Some("stop".to_string()),
+                usage: None,
+            }))
+            .await
+            .expect("done event should send");
+        });
+        Ok(ToolStream::new(rx))
+    }
+
+    fn default_model(&self) -> String {
+        "direct-streaming-answer".to_string()
+    }
+}
+
 #[tokio::test]
 async fn test_stream_round_normalizes_empty_tool_call_id_before_emitting_start_event() {
     let provider = Arc::new(StreamingToolCallIdProvider);
@@ -22,6 +62,105 @@ async fn test_stream_round_normalizes_empty_tool_call_id_before_emitting_start_e
     }
 
     assert_eq!(started_call_id.as_deref(), Some("tool-0-0"));
+}
+
+#[tokio::test]
+async fn test_execute_step_streams_tool_preface_as_commentary() {
+    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+    let file_path = workspace_dir.join("sample.txt");
+    std::fs::write(&file_path, "streamed content").expect("sample file should exist");
+    let provider = Arc::new(StreamingToolExecutionProvider {
+        path: file_path.to_string_lossy().to_string(),
+    });
+    let (tx, mut rx) = mpsc::channel(16);
+
+    let step = execute_general_turn_step(
+        GeneralTurnStepRequest {
+            round: 3,
+            model: "streaming-tool-execution".to_string(),
+            max_tokens: None,
+            messages: vec![ChatMessage::user("Read the sample file")],
+            tool_definitions: Vec::new(),
+            parallel_tool_calls: false,
+            native_thinking: None,
+            stream_tx: Some(tx),
+            streaming_tool_execution: None,
+        },
+        provider,
+    )
+    .await
+    .expect("step should succeed");
+
+    assert!(matches!(
+        step.disposition,
+        GeneralTurnStepDisposition::ContinueWithTools
+    ));
+    assert!(!step.final_answer_streamed);
+
+    let mut started_phase = None;
+    let mut text_delta = String::new();
+    while let Ok(event) = rx.try_recv() {
+        match event.data {
+            KernelStreamEventData::AssistantTextStarted(data) => {
+                started_phase = Some(data.phase);
+                assert_eq!(data.round, Some(3));
+            }
+            KernelStreamEventData::AssistantTextDelta(data) => text_delta.push_str(&data.delta),
+            _ => {}
+        }
+    }
+
+    assert_eq!(started_phase, Some(KernelAssistantTextPhase::Commentary));
+    assert_eq!(text_delta, "Inspecting a file.");
+}
+
+#[tokio::test]
+async fn test_execute_step_streams_direct_answer_as_final_answer() {
+    let provider = Arc::new(DirectStreamingAnswerProvider);
+    let (tx, mut rx) = mpsc::channel(8);
+
+    let step = execute_general_turn_step(
+        GeneralTurnStepRequest {
+            round: 4,
+            model: "direct-streaming-answer".to_string(),
+            max_tokens: None,
+            messages: vec![ChatMessage::user("Answer directly")],
+            tool_definitions: Vec::new(),
+            parallel_tool_calls: false,
+            native_thinking: None,
+            stream_tx: Some(tx),
+            streaming_tool_execution: None,
+        },
+        provider,
+    )
+    .await
+    .expect("step should succeed");
+
+    assert!(matches!(
+        step.disposition,
+        GeneralTurnStepDisposition::FinalResponse
+    ));
+    assert!(step.final_answer_streamed);
+
+    let mut started_phase = None;
+    let mut text_delta = String::new();
+    let mut completed = false;
+    while let Ok(event) = rx.try_recv() {
+        match event.data {
+            KernelStreamEventData::AssistantTextStarted(data) => {
+                started_phase = Some(data.phase);
+                assert_eq!(data.round, Some(4));
+            }
+            KernelStreamEventData::AssistantTextDelta(data) => text_delta.push_str(&data.delta),
+            KernelStreamEventData::AssistantTextCompleted(_) => completed = true,
+            _ => {}
+        }
+    }
+
+    assert_eq!(started_phase, Some(KernelAssistantTextPhase::FinalAnswer));
+    assert_eq!(text_delta, "Direct answer.");
+    assert!(completed);
 }
 
 #[tokio::test]

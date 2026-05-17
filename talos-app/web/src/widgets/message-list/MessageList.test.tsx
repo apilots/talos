@@ -151,8 +151,8 @@ describe("MessageList", () => {
     });
   });
 
-  it("renders timeline blocks with tool progress and duration", async () => {
-    const { getAllByText, getByText } = render(
+  it("renders timeline blocks with product labels, tool progress, and duration", async () => {
+    const { getAllByText, getByText, queryByText } = render(
       <MessageList
         blocks={[
           {
@@ -169,6 +169,15 @@ describe("MessageList", () => {
                 completedAtMs: 20,
               },
               {
+                itemId: "commentary-1",
+                kind: "assistant_text",
+                phase: "commentary",
+                status: "completed",
+                text: "I will inspect the workspace.",
+                startedAtMs: 21,
+                completedAtMs: 24,
+              },
+              {
                 itemId: "tool-1",
                 kind: "tool_call",
                 phase: "acting",
@@ -179,7 +188,7 @@ describe("MessageList", () => {
                 output: "ok",
                 progress: [{ kind: "stdout", message: "running" }],
                 startedAtMs: 25,
-                completedAtMs: 67,
+                completedAtMs: 325,
               },
             ],
           },
@@ -190,13 +199,18 @@ describe("MessageList", () => {
     );
 
     expect(getByText("Thinking / Acting")).not.toBeNull();
-    expect(getByText((content) => content === "57ms")).not.toBeNull();
+    expect(getByText((content) => content === "315ms")).not.toBeNull();
     fireEvent.click(getByText("Thinking / Acting"));
 
     await waitFor(() => {
       expect(getByText("Checking context")).not.toBeNull();
+      expect(getByText("I will inspect the workspace.")).not.toBeNull();
+      expect(getAllByText("Thinking").length).toBeGreaterThanOrEqual(2);
       expect(getAllByText("Bash").length).toBeGreaterThan(0);
-      expect(getByText("completed · 42ms")).not.toBeNull();
+      expect(getByText("300ms")).not.toBeNull();
+      expect(queryByText("completed · 300ms")).toBeNull();
+      expect(queryByText("assistant text")).toBeNull();
+      expect(queryByText("commentary")).toBeNull();
     });
   });
 

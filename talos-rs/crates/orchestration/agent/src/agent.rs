@@ -23,8 +23,9 @@ use crate::{
     OrchestratorExecution, OrchestratorRequest,
 };
 use talos_agent_kernel::{
-    ConfirmationRequestStreamData, KernelRuntime, KernelStreamEvent, KernelStreamEventData,
-    KernelStreamEventType, RunRequest, TimelineBuilder, ToolProgressKind, ToolStreamKey,
+    ConfirmationRequestStreamData, KernelAssistantTextPhase, KernelRuntime, KernelStreamEvent,
+    KernelStreamEventData, KernelStreamEventType, KernelStreamItemKey, RunRequest, TimelineBuilder,
+    ToolProgressKind, ToolStreamKey,
 };
 use talos_config::{AgentKernelConfig, PlannerMode};
 use talos_error::{TalosError, TalosResult};
@@ -435,26 +436,6 @@ After receiving tool outputs, continue reasoning and provide the final response.
                             return;
                         }
                     }
-                    if !result.output_text.trim().is_empty()
-                        && timeline_state.final_answer_item_id.is_none()
-                    {
-                        match emit_final_answer_from_result(
-                            &mut timeline,
-                            &mut timeline_state,
-                            result.output_text,
-                        ) {
-                            Ok(events) => {
-                                for event in events {
-                                    let _ = tx.send(event).await;
-                                }
-                            }
-                            Err(err) => {
-                                let _ = tx.send(timeline.fail_turn(err.to_string())).await;
-                                this.finish_active_turn_and_resume(&session_id).await;
-                                return;
-                            }
-                        }
-                    }
                     emit_terminal_item_closures(
                         &mut timeline,
                         &tx,
@@ -571,6 +552,7 @@ async fn emit_terminal_item_closures(
 struct KernelTimelineState {
     reasoning_item_id: Option<String>,
     final_answer_item_id: Option<String>,
+    assistant_text_items: HashMap<KernelStreamItemKey, String>,
     active_tool_items: HashMap<String, String>,
     tool_item_by_call_id: HashMap<String, String>,
     completed_tool_call_ids: HashSet<String>,
@@ -605,20 +587,73 @@ fn emit_kernel_timeline_events(
 ) -> TalosResult<Vec<TalosTimelineEvent>> {
     match (event.event_type, event.data) {
         (KernelStreamEventType::ThinkingDelta, KernelStreamEventData::ThinkingDelta(data)) => {
-            append_text_item_delta(
-                timeline,
-                &mut state.reasoning_item_id,
-                TimelineTextItem::Reasoning,
-                data.delta,
-            )
+            append_text_item_delta(timeline, &mut state.reasoning_item_id, data.delta)
         }
-        (KernelStreamEventType::OutputDelta, KernelStreamEventData::OutputDelta(data)) => {
-            append_text_item_delta(
-                timeline,
-                &mut state.final_answer_item_id,
-                TimelineTextItem::FinalAnswer,
-                data.delta,
-            )
+        (
+            KernelStreamEventType::AssistantTextStarted,
+            KernelStreamEventData::AssistantTextStarted(data),
+        ) => {
+            if state.assistant_text_items.contains_key(&data.item_key) {
+                return Err(TalosError::ValidationError(format!(
+                    "timeline assistant text item already started: {:?}",
+                    data.item_key
+                )));
+            }
+            if matches!(data.phase, KernelAssistantTextPhase::FinalAnswer)
+                && state.final_answer_item_id.is_some()
+            {
+                return Err(TalosError::ValidationError(
+                    "timeline final answer item already started".to_string(),
+                ));
+            }
+            let started = match data.phase {
+                KernelAssistantTextPhase::Commentary => timeline.start_commentary(),
+                KernelAssistantTextPhase::FinalAnswer => timeline.start_final_answer(),
+            };
+            let item_id = item_id_from_started(&started)?;
+            if matches!(data.phase, KernelAssistantTextPhase::FinalAnswer) {
+                state.final_answer_item_id = Some(item_id.clone());
+            }
+            state.assistant_text_items.insert(data.item_key, item_id);
+            Ok(vec![started])
+        }
+        (
+            KernelStreamEventType::AssistantTextDelta,
+            KernelStreamEventData::AssistantTextDelta(data),
+        ) => {
+            let item_id = state
+                .assistant_text_items
+                .get(&data.item_key)
+                .cloned()
+                .ok_or_else(|| {
+                    TalosError::ValidationError(format!(
+                        "timeline assistant text item not found for delta: {:?}",
+                        data.item_key
+                    ))
+                })?;
+            Ok(vec![timeline.append_delta(
+                &item_id,
+                TalosTimelineDelta::Text { text: data.delta },
+            )?])
+        }
+        (
+            KernelStreamEventType::AssistantTextCompleted,
+            KernelStreamEventData::AssistantTextCompleted(data),
+        ) => {
+            let item_id = state
+                .assistant_text_items
+                .remove(&data.item_key)
+                .ok_or_else(|| {
+                    TalosError::ValidationError(format!(
+                        "timeline assistant text item not found for completion: {:?}",
+                        data.item_key
+                    ))
+                })?;
+            Ok(vec![timeline.complete_item(
+                &item_id,
+                TalosTimelineItemStatus::Completed,
+                None,
+            )?])
         }
         (
             KernelStreamEventType::ExecutionSummary,
@@ -826,25 +861,16 @@ fn emit_kernel_timeline_events(
     }
 }
 
-enum TimelineTextItem {
-    Reasoning,
-    FinalAnswer,
-}
-
 fn append_text_item_delta(
     timeline: &mut TimelineBuilder,
     item_id_slot: &mut Option<String>,
-    item: TimelineTextItem,
     text: String,
 ) -> TalosResult<Vec<TalosTimelineEvent>> {
     let mut events = Vec::new();
     let item_id = match item_id_slot.clone() {
         Some(item_id) => item_id,
         None => {
-            let started = match item {
-                TimelineTextItem::Reasoning => timeline.start_reasoning(),
-                TimelineTextItem::FinalAnswer => timeline.start_final_answer(),
-            };
+            let started = timeline.start_reasoning();
             let item_id = item_id_from_started(&started)?;
             *item_id_slot = Some(item_id.clone());
             events.push(started);
@@ -852,23 +878,6 @@ fn append_text_item_delta(
         }
     };
     events.push(timeline.append_delta(&item_id, TalosTimelineDelta::Text { text })?);
-    Ok(events)
-}
-
-fn emit_final_answer_from_result(
-    timeline: &mut TimelineBuilder,
-    state: &mut KernelTimelineState,
-    text: String,
-) -> TalosResult<Vec<TalosTimelineEvent>> {
-    let mut events = append_text_item_delta(
-        timeline,
-        &mut state.final_answer_item_id,
-        TimelineTextItem::FinalAnswer,
-        text,
-    )?;
-    if let Some(item_id) = state.final_answer_item_id.as_deref() {
-        events.push(timeline.complete_item(item_id, TalosTimelineItemStatus::Completed, None)?);
-    }
     Ok(events)
 }
 
