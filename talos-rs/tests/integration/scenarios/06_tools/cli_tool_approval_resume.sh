@@ -12,12 +12,12 @@ prepare_talos_home
 mkdir -p "${SCENARIO_REPORT_DIR}"
 
 export TALOS_LOCAL_LAUNCH_TOKEN="${TALOS_LOCAL_LAUNCH_TOKEN:-talos-app-server-test-token}"
-export TALOS_APP_SERVER_BIN="${ROOT_DIR}/target/debug/talos"
+export TALOS_APP_SERVER_BIN="${ROOT_DIR}/target/debug/app-server"
 export TALOS_APP_SERVER_TEST_MODEL="${TALOS_APP_SERVER_TEST_MODEL:-MiniMax-M2.5}"
 
 log_file="$(scenario_report_path "cli_tool_approval_resume.log")"
 if timeout "${TALOS_APP_SERVER_SCENARIO_TIMEOUT_SECS:-180}" \
-  "${ROOT_DIR}/target/debug/talos-client" app-server-smoke --scenario approval-resume \
+  "${ROOT_DIR}/target/debug/talos-cli" app-server-smoke --scenario approval-resume \
   >"${log_file}" 2>&1; then
   echo "CASE cli_tool_approval_resume PASS"
 else

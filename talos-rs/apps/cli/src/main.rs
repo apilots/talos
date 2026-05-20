@@ -1,7 +1,7 @@
 //! Talos Command Line Interface Binary
 //!
 //! This binary provides the main command-line interface for the Talos system.
-//! It uses the talos-client library to communicate with the gateway.
+//! It uses the talos-sdk library to communicate with the gateway.
 
 use tracing_subscriber;
 mod cli;

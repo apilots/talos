@@ -91,7 +91,7 @@ tests/integration/run_e2e.sh --case 09_app_server/protocol_e2e
 tests/integration/run_e2e.sh --case 10_talos_app/mock_e2e
 ```
 
-`protocol_e2e.sh` starts `talos app-server` through the Rust app-server
+`protocol_e2e.sh` starts `app-server` through the Rust app-server
 client and verifies initialize, model/config/session/event flows, replay,
 multi-subscriber ordering, active-turn conflict handling, memory files,
 workspace docs, project CRUD, and protocol error mapping.
@@ -107,7 +107,7 @@ protocol file used by `@talos/sdk-core`.
 
 Useful environment variables for app-server scenarios:
 
-- `TALOS_APP_SERVER_BIN`: binary invoked as `talos app-server`
+- `TALOS_APP_SERVER_BIN`: App Server binary invoked directly
 - `TALOS_LOCAL_LAUNCH_TOKEN`: local initialize token
 - `TALOS_APP_SERVER_TEST_MODEL`: model override for turn smoke scenarios
 - `TALOS_APP_SERVER_SCENARIO_TIMEOUT_SECS`: per-scenario timeout override

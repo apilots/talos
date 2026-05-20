@@ -9,7 +9,7 @@ const desktopDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(desktopDir, "../..");
 const artifactDir = path.resolve(repoRoot, ".tmp/desktop-smoke", timestamp());
 const explicitAppServerBin = process.env.TALOS_APP_SERVER_BIN;
-const appServerBin = explicitAppServerBin ?? path.resolve(repoRoot, "talos-rs/target/debug/talos");
+const appServerBin = explicitAppServerBin ?? path.resolve(repoRoot, "talos-rs/target/debug/app-server");
 const launchToken = process.env.TALOS_DESKTOP_LAUNCH_TOKEN ?? "desktop-smoke-token";
 const appExecutable = process.env.TALOS_DESKTOP_SMOKE_APP;
 const smokeUsername = process.env.TALOS_DESKTOP_SMOKE_USERNAME ?? "admin";
@@ -19,7 +19,7 @@ const createdSessionIds = [];
 let cdp;
 
 if (!appExecutable && !existsSync(appServerBin)) {
-  throw new Error(`Missing app-server binary: ${appServerBin}. Run: cargo build -p talos`);
+  throw new Error(`Missing app-server binary: ${appServerBin}. Run: cargo build -p app-server --bin app-server`);
 }
 
 mkdirSync(artifactDir, { recursive: true });

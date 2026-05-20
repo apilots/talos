@@ -58,7 +58,7 @@ impl AppServerClientConfig {
         })?;
         Ok(Self {
             app_server_bin: std::env::var("TALOS_APP_SERVER_BIN")
-                .unwrap_or_else(|_| "talos".to_string()),
+                .unwrap_or_else(|_| "app-server".to_string()),
             launch_token,
             client_name: "talos-rust-sdk".to_string(),
             client_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -118,17 +118,13 @@ impl AppServerClient {
 
     async fn spawn(config: &AppServerClientConfig) -> TalosResult<Self> {
         let mut child = Command::new(&config.app_server_bin)
-            .arg("app-server")
             .env("TALOS_LOCAL_LAUNCH_TOKEN", &config.launch_token)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()
             .map_err(|error| {
-                TalosError::ClientError(format!(
-                    "spawn {} app-server: {error}",
-                    config.app_server_bin
-                ))
+                TalosError::ClientError(format!("spawn {}: {error}", config.app_server_bin))
             })?;
         let stdin = child
             .stdin

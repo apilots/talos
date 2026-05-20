@@ -30,8 +30,8 @@ The TUI supports four main views accessible via tab navigation:
 ## Architecture
 
 The TUI module integrates with:
-- `talos-client`: For the local JSON-RPC stdio client
-- `talos app-server`: Embedded JSON-RPC stdio runtime
+- `talos-sdk`: For the local JSON-RPC stdio client
+- `app-server`: Embedded JSON-RPC stdio runtime
 - `talos-memory`: For conversation history and context management
 - `talos-tools`: For tool execution monitoring
 - `ratatui` and `crossterm`: For cross-platform terminal rendering
@@ -40,13 +40,13 @@ The TUI module integrates with:
 
 ```bash
 # Run the TUI application in embedded app-server mode (default, no port)
-cargo run -p talos-ui-tui
+cargo run -p talos-ui-tui --bin talos
 
 # Override embedded app-server binary and local launch token
-cargo run -p talos-ui-tui -- --app-server-bin ./target/debug/talos --launch-token local-token
+cargo run -p talos-ui-tui --bin talos -- --app-server-bin ./target/debug/app-server --launch-token local-token
 
 # Environment variable alternatives
-export TALOS_APP_SERVER_BIN=./target/debug/talos
+export TALOS_APP_SERVER_BIN=./target/debug/app-server
 export TALOS_LOCAL_LAUNCH_TOKEN=local-token
 ```
 
@@ -60,7 +60,7 @@ export TALOS_LOCAL_LAUNCH_TOKEN=local-token
 ## Modes of Operation
 
 ### Embedded App-server Mode (Default)
-- Starts `talos app-server` as a child process
+- Starts `app-server` as a child process
 - Uses JSON-RPC over stdio JSONL
 - Does not listen on a local port
 - Shares the same `talos-application-service` path as HTTP and Desktop

@@ -9,7 +9,8 @@ pub(crate) use ratatui::style::{Color, Modifier};
 pub(crate) use serde_json::json;
 pub(crate) use std::path::PathBuf;
 use std::sync::Mutex;
-pub(crate) use talos_client::{
+use talos_error::TalosError;
+pub(crate) use talos_sdk::{
     SessionCreateParams, SessionHistorySnapshot, StopReason, TalosContentItem, TalosInputItem,
     TalosMessageRequest, TalosTimelineContent, TalosTimelineDelta, TalosTimelineEvent,
     TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItem, TalosTimelineItemKind,
@@ -17,7 +18,6 @@ pub(crate) use talos_client::{
     TimelineActiveTurnStatus, TimelineCursorStatus, TimelineEventEnvelope,
     TimelineRecoverySnapshot, TimelineReplay,
 };
-use talos_error::TalosError;
 
 #[derive(Default)]
 pub(crate) struct MockGatewayState {
@@ -65,7 +65,7 @@ pub(crate) fn started_event(message_id: impl Into<String>, sequence: u64) -> Tim
         "sess-test".to_string(),
         sequence,
         TalosTimelineEventType::TurnStarted,
-        TalosTimelineEventPayload::TurnStarted(talos_client::TalosTurnStartedEvent {
+        TalosTimelineEventPayload::TurnStarted(talos_sdk::TalosTurnStartedEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             started_at_ms: sequence,
@@ -84,7 +84,7 @@ pub(crate) fn output_item_started_event(
         session_id.into(),
         sequence,
         TalosTimelineEventType::ItemStarted,
-        TalosTimelineEventPayload::ItemStarted(talos_client::TalosItemStartedEvent {
+        TalosTimelineEventPayload::ItemStarted(talos_sdk::TalosItemStartedEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             item: TalosTimelineItem {
@@ -115,7 +115,7 @@ pub(crate) fn output_delta_event(
         session_id.into(),
         sequence,
         TalosTimelineEventType::ItemDelta,
-        TalosTimelineEventPayload::ItemDelta(talos_client::TalosItemDeltaEvent {
+        TalosTimelineEventPayload::ItemDelta(talos_sdk::TalosItemDeltaEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             item_id: "final-answer".to_string(),
@@ -134,7 +134,7 @@ pub(crate) fn commentary_item_started_event(
         session_id.into(),
         sequence,
         TalosTimelineEventType::ItemStarted,
-        TalosTimelineEventPayload::ItemStarted(talos_client::TalosItemStartedEvent {
+        TalosTimelineEventPayload::ItemStarted(talos_sdk::TalosItemStartedEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             item: TalosTimelineItem {
@@ -165,7 +165,7 @@ pub(crate) fn commentary_delta_event(
         session_id.into(),
         sequence,
         TalosTimelineEventType::ItemDelta,
-        TalosTimelineEventPayload::ItemDelta(talos_client::TalosItemDeltaEvent {
+        TalosTimelineEventPayload::ItemDelta(talos_sdk::TalosItemDeltaEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             item_id: "commentary".to_string(),
@@ -186,7 +186,7 @@ pub(crate) fn reasoning_delta_event(
         session_id.into(),
         sequence,
         TalosTimelineEventType::ItemStarted,
-        TalosTimelineEventPayload::ItemStarted(talos_client::TalosItemStartedEvent {
+        TalosTimelineEventPayload::ItemStarted(talos_sdk::TalosItemStartedEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             item: TalosTimelineItem {
@@ -215,7 +215,7 @@ pub(crate) fn completed_event(
         session_id.into(),
         sequence,
         TalosTimelineEventType::TurnCompleted,
-        TalosTimelineEventPayload::TurnCompleted(talos_client::TalosTurnCompletedEvent {
+        TalosTimelineEventPayload::TurnCompleted(talos_sdk::TalosTurnCompletedEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             completed_at_ms: sequence,
@@ -236,7 +236,7 @@ pub(crate) fn execution_summary_event(
         session_id.into(),
         sequence,
         TalosTimelineEventType::ItemStarted,
-        TalosTimelineEventPayload::ItemStarted(talos_client::TalosItemStartedEvent {
+        TalosTimelineEventPayload::ItemStarted(talos_sdk::TalosItemStartedEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             item: TalosTimelineItem {
@@ -271,7 +271,7 @@ pub(crate) fn tool_started_event(
         session_id.into(),
         sequence,
         TalosTimelineEventType::ItemStarted,
-        TalosTimelineEventPayload::ItemStarted(talos_client::TalosItemStartedEvent {
+        TalosTimelineEventPayload::ItemStarted(talos_sdk::TalosItemStartedEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             item: TalosTimelineItem {
@@ -311,7 +311,7 @@ pub(crate) fn tool_completed_event(
         session_id.into(),
         sequence,
         TalosTimelineEventType::ItemCompleted,
-        TalosTimelineEventPayload::ItemCompleted(talos_client::TalosItemCompletedEvent {
+        TalosTimelineEventPayload::ItemCompleted(talos_sdk::TalosItemCompletedEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             item_id: format!("tool-{call_id}"),
@@ -326,7 +326,7 @@ pub(crate) fn tool_completed_event(
                 name,
                 arguments: "{}".to_string(),
                 progress: Vec::new(),
-                result: Some(talos_client::TalosToolResult {
+                result: Some(talos_sdk::TalosToolResult {
                     content: vec![TalosContentItem::Text {
                         text: output.into(),
                     }],
@@ -503,7 +503,7 @@ impl GatewayClient for MockGatewayClient {
                 project_root: None,
                 environment: None,
             },
-            conf: talos_client::SessionConf::default(),
+            conf: talos_sdk::SessionConf::default(),
             project_id: None,
             current_directory: state.current_project_root.clone(),
             config: {
@@ -541,7 +541,7 @@ impl GatewayClient for MockGatewayClient {
                 project_root: None,
                 environment: None,
             },
-            conf: talos_client::SessionConf::default(),
+            conf: talos_sdk::SessionConf::default(),
             project_id: None,
             current_directory: state.current_project_root.clone(),
             config: {
@@ -624,7 +624,7 @@ impl GatewayClient for MockGatewayClient {
                 project_root: None,
                 environment: None,
             },
-            conf: talos_client::SessionConf::default(),
+            conf: talos_sdk::SessionConf::default(),
             project_id: None,
             current_directory: state.current_project_root.clone(),
             config: {
@@ -664,7 +664,7 @@ impl GatewayClient for MockGatewayClient {
                 project_root: None,
                 environment: None,
             },
-            conf: talos_client::SessionConf::default(),
+            conf: talos_sdk::SessionConf::default(),
             project_id: None,
             current_directory: state.current_project_root.clone(),
             config: {
@@ -704,7 +704,7 @@ impl GatewayClient for MockGatewayClient {
                 project_root: None,
                 environment: None,
             },
-            conf: talos_client::SessionConf::default(),
+            conf: talos_sdk::SessionConf::default(),
             project_id: None,
             current_directory: state.current_project_root.clone(),
             config: {

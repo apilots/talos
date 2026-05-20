@@ -3,6 +3,11 @@ name = "talos-ui-tui"
 version = "0.1.0"
 edition = "2021"
 description = "Talos TUI (Terminal User Interface) module"
+autobins = false
+
+[[bin]]
+name = "talos"
+path = "src/main.rs"
 
 [dependencies]
 ratatui = "0.28"
@@ -12,7 +17,7 @@ talos-error = { workspace = true }
 talos-types = { workspace = true }
 talos-tools-policy = { workspace = true }
 talos-config = { path = "../../crates/infra/config" }
-talos-client = { path = "../sdk" }
+talos-sdk = { path = "../sdk" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tracing = { workspace = true }
@@ -21,6 +26,3 @@ chrono = { workspace = true, features = ["serde"] }
 uuid = { workspace = true, features = ["v4", "serde"] }
 clap = { version = "4.0", features = ["derive"] }
 unicode-width = "0.1"
-
-[dev-dependencies]
-talos-server = { workspace = true }

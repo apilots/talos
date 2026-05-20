@@ -112,11 +112,12 @@ reset_product_dir() {
   mkdir -p "${PRODUCT_DIR}"
 }
 
-copy_rust_binary() {
+copy_rust_binary_as() {
   local binary_name="$1"
-  local output_dir="$2"
-  mkdir -p "${output_dir}"
-  cp "$(rust_target_dir)/${binary_name}" "${output_dir}/${binary_name}"
+  local output_path="$2"
+  mkdir -p "$(dirname "${output_path}")"
+  cp "$(rust_target_dir)/${binary_name}" "${output_path}"
+  chmod 755 "${output_path}"
 }
 
 copy_conf_resource() {
@@ -150,20 +151,20 @@ create_tui_tarball() {
   local package_dir="$1"
   local version="${TUI_PACKAGE_VERSION:-$(workspace_version)}"
   local archive_path="${package_dir}/Talos-TUI-${version}-$(package_platform)-$(package_arch).tar.gz"
-  tar -czf "${archive_path}" -C "${package_dir}" talos-ui-tui conf
+  tar -czf "${archive_path}" -C "${package_dir}" bin libexec conf
 }
 
 build_server() {
   echo "Building Talos server..."
-  cargo build --manifest-path "${RUST_DIR}/Cargo.toml" -p talos $(cargo_profile_args)
-  copy_rust_binary "talos" "${PRODUCT_DIR}/server"
+  cargo build --manifest-path "${RUST_DIR}/Cargo.toml" -p talos-server --bin talos-server $(cargo_profile_args)
+  copy_rust_binary_as "talos-server" "${PRODUCT_DIR}/server/talos-server"
   copy_conf_resource "${PRODUCT_DIR}/server"
 }
 
 build_server_webui() {
   echo "Building deployable Talos server+WebUI package..."
   require_pnpm
-  cargo build --manifest-path "${RUST_DIR}/Cargo.toml" -p talos $(cargo_profile_args)
+  cargo build --manifest-path "${RUST_DIR}/Cargo.toml" -p talos-server --bin talos-server $(cargo_profile_args)
   pnpm --dir "${REPO_ROOT}/talos-app" --filter talos-web build
 
   local version="${SERVER_PACKAGE_VERSION:-$(workspace_version)}"
@@ -171,12 +172,12 @@ build_server_webui() {
   local staging_dir="${PRODUCT_DIR}/.staging/talos-server"
   local archive_path="${archive_dir}/Talos-Server-${version}-$(package_platform)-$(package_arch).tar.gz"
   rm -rf "${staging_dir}" "${archive_dir}"
-  mkdir -p "${staging_dir}/webui" "${archive_dir}"
+  mkdir -p "${staging_dir}/bin" "${staging_dir}/webui" "${archive_dir}"
 
   if [[ -d "${BUILD_ASSET_DIR}/server" ]]; then
     cp -R "${BUILD_ASSET_DIR}/server/." "${staging_dir}/"
   fi
-  cp "$(rust_target_dir)/talos" "${staging_dir}/talos"
+  copy_rust_binary_as "talos-server" "${staging_dir}/bin/talos-server"
   copy_conf_resource "${staging_dir}"
   cp -R "${REPO_ROOT}/talos-app/web/dist/." "${staging_dir}/webui/"
   tar -czf "${archive_path}" -C "${staging_dir}" .
@@ -185,8 +186,12 @@ build_server_webui() {
 
 build_tui() {
   echo "Building Talos TUI..."
-  cargo build --manifest-path "${RUST_DIR}/Cargo.toml" -p talos-ui-tui $(cargo_profile_args)
-  copy_rust_binary "talos-ui-tui" "${PRODUCT_DIR}/tui"
+  cargo build --manifest-path "${RUST_DIR}/Cargo.toml" -p app-server --bin app-server $(cargo_profile_args)
+  cargo build --manifest-path "${RUST_DIR}/Cargo.toml" -p talos-ui-tui --bin talos $(cargo_profile_args)
+  rm -rf "${PRODUCT_DIR}/tui"
+  mkdir -p "${PRODUCT_DIR}/tui"
+  copy_rust_binary_as "talos" "${PRODUCT_DIR}/tui/bin/talos"
+  copy_rust_binary_as "app-server" "${PRODUCT_DIR}/tui/libexec/app-server"
   copy_conf_resource "${PRODUCT_DIR}/tui"
   create_tui_tarball "${PRODUCT_DIR}/tui"
   write_sha256sums "${PRODUCT_DIR}/tui"

@@ -1,5 +1,5 @@
 [package]
-name = "talos-server"
+name = "talos-base"
 version.workspace = true
 edition.workspace = true
 

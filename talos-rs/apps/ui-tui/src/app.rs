@@ -8,7 +8,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
-use talos_client::{ProtocolTalosContext, TalosSession};
+use talos_sdk::{ProtocolTalosContext, TalosSession};
 use talos_types::talos::{TalosConnectionMode, TalosUsage};
 
 use crate::client::GatewayClient;

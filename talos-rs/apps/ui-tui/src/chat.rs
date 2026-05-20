@@ -1,4 +1,4 @@
-use talos_client::{TalosContentItem, TalosJsonValue};
+use talos_sdk::{TalosContentItem, TalosJsonValue};
 
 use crate::types::{ChatBlock, ChatRole, ToolCallStatus};
 use crate::TuiApp;

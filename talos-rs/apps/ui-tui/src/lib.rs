@@ -34,8 +34,8 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use talos_client::{ModelInfo, TalosSession, TalosTimelineItem, TimelineEventEnvelope};
 use talos_error::TalosResult;
+use talos_sdk::{ModelInfo, TalosSession, TalosTimelineItem, TimelineEventEnvelope};
 use talos_types::talos::{TalosConnectionMode, TalosUsage};
 use tokio::sync::mpsc;
 use transcript::TranscriptState;

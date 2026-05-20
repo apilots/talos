@@ -1,8 +1,8 @@
 use ratatui::text::Line;
-use talos_client::{
+use talos_error::TalosResult;
+use talos_sdk::{
     ModelInfo, SessionHistorySnapshot, TalosJsonValue, TalosSession, TimelineRecoverySnapshot,
 };
-use talos_error::TalosResult;
 
 // ── Suggestions ──────────────────────────────────────────────────────────────
 

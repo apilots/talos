@@ -2,12 +2,12 @@ use clap::{Args, Parser, Subcommand};
 
 /// Command-line interface for Talos AI system - Full-featured command set for system access
 #[derive(Parser)]
-#[command(name = "talos")]
-#[command(bin_name = "talos")]
+#[command(name = "talos-cli")]
+#[command(bin_name = "talos-cli")]
 #[command(version = "1.0")]
 #[command(about = "Talos AI System CLI - Full-stack access to AI assistant capabilities", long_about = None)]
 pub struct Cli {
-    /// App-server host binary; invoked as `<binary> app-server`
+    /// App-server host binary.
     #[arg(long)]
     pub(super) app_server_bin: Option<String>,
 
@@ -174,7 +174,7 @@ pub(super) struct AppServerSmokeCmd {
     #[arg(long, default_value = "turn-smoke")]
     pub(super) scenario: String,
 
-    /// App-server host binary; the test client invokes it as `<binary> app-server`
+    /// App-server host binary.
     #[arg(long)]
     pub(super) app_server_bin: Option<String>,
 

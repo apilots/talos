@@ -19,11 +19,19 @@ Talos 是一个 AI 智能管家底层框架，为上层应用（如贾维斯 Jar
 
 Talos提供了多种用户交互界面：
 
+### 产品入口
+
+| 入口 | 说明 |
+|------|------|
+| `talos` | TUI 用户入口；未来 NPM 安装默认只暴露这个命令 |
+| `app-server` | 本地 JSON-RPC over stdio runtime，供 TUI、Desktop、SDK 使用，不作为独立产品发布 |
+| `talos-server` | HTTP API / WebUI 服务端入口，面向服务端 tar 包部署 |
+
 ### 终端用户界面 (TUI)
-- 使用`cargo run -p talos-ui-tui`运行
+- 使用 `cargo run -p talos-ui-tui --bin talos` 运行
 - 丰富的键盘导航支持
 - 支持多面板视图（聊天、历史、工具、设置）
-- 默认以内嵌 `talos app-server` 子进程运行，不占用本地端口
+- 默认以内嵌 `app-server` 子进程运行，不占用本地端口
 
 ### API接口
 - HTTP API + SSE 支持
@@ -106,13 +114,16 @@ cargo run --example basic
 ```bash
 # 启动 TUI 界面（默认内嵌 app-server）
 cd talos/talos-rs
-cargo run -p talos-ui-tui
+cargo run -p talos-ui-tui --bin talos
 
 # 使用网关模式连接到远程服务器
-cargo run -p talos-ui-tui -- --gateway
+cargo run -p talos-ui-tui --bin talos -- --gateway
 
 # 运行 CLI 的本地 app-server 模式
-cargo run -p talos -- --transport app-server models
+cargo run -p talos-cli --bin talos-cli -- models
+
+# 启动 HTTP/WebUI 服务端
+cargo run -p talos-server --bin talos-server
 ```
 
 ---

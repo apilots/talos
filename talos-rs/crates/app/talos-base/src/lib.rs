@@ -72,6 +72,87 @@ pub struct TalosApplicationRuntime {
 const MEMORY_FLUSH_DRAIN_TIMEOUT: Duration = Duration::from_secs(60);
 const SERVER_SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(180);
 
+pub async fn run_app_server() -> TalosResult<()> {
+    let config_source = resolve_default_config_path();
+    let config = load_runtime_config()?;
+    let logging_options = TalosServerOptions {
+        logging_stdout: Some(false),
+        ..TalosServerOptions::default()
+    };
+    let _log_guard = init_logging(&config, Some(&logging_options))?;
+    log_config_source(config_source);
+
+    run_json_rpc_stdio(config).await.map_err(|error| {
+        error!("app-server error: {}", error);
+        error
+    })
+}
+
+pub async fn run_server() -> TalosResult<()> {
+    let config_source = resolve_default_config_path();
+    let config = load_runtime_config()?;
+    let server_options = TalosServerOptions {
+        webui_dir: resolve_packaged_webui_dir(),
+        ..TalosServerOptions::default()
+    };
+    let _log_guard = init_logging(&config, Some(&server_options))?;
+    log_config_source(config_source);
+    info!(
+        "Starting Talos server at {}:{}",
+        config.gateway.host, config.gateway.port
+    );
+
+    let server = start_server(config, Some(server_options)).await?;
+    server.run().await.map_err(|error| {
+        error!("host error: {}", error);
+        error
+    })
+}
+
+pub fn should_print_version(arg: Option<&str>) -> bool {
+    matches!(arg, Some("--version" | "-V" | "version"))
+}
+
+pub fn should_print_help(arg: Option<&str>) -> bool {
+    matches!(arg, Some("--help" | "-h" | "help"))
+}
+
+fn load_runtime_config() -> TalosResult<Config> {
+    let config = Config::load()?;
+    config.validate_runtime()?;
+    Ok(config)
+}
+
+fn resolve_default_config_path() -> Option<PathBuf> {
+    let config_path = Config::default_path();
+    config_path
+        .exists()
+        .then(|| canonical_or_original(config_path))
+}
+
+fn resolve_packaged_webui_dir() -> Option<PathBuf> {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(PathBuf::from))?;
+    let webui_dir = exe_dir.join("webui");
+    webui_dir.join("index.html").exists().then_some(webui_dir)
+}
+
+fn canonical_or_original(path: PathBuf) -> PathBuf {
+    path.canonicalize().unwrap_or(path)
+}
+
+fn log_config_source(config_source: Option<PathBuf>) {
+    if let Some(path) = config_source {
+        info!("Config loaded from {}", path.display());
+    }
+}
+
+pub fn exit_with_error(context: &str, error: TalosError) -> ! {
+    eprintln!("{context}: {error}");
+    std::process::exit(1);
+}
+
 /// Bridges `CoordinatorImpl` to the `BackgroundTaskDrain` trait used by the app-server.
 struct CoordinatorDrain {
     coordinator: Arc<CoordinatorImpl>,

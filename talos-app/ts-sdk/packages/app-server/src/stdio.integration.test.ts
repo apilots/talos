@@ -17,7 +17,7 @@ describeIntegration("StdioAppServerClient integration", () => {
   it("creates a session, starts a turn, and receives app-server events", async () => {
     const launchToken = process.env.TALOS_LOCAL_LAUNCH_TOKEN ?? "talos-ts-sdk-test-token";
     const client = new StdioAppServerClient({
-      command: process.env.TALOS_APP_SERVER_BIN ?? "talos",
+      command: process.env.TALOS_APP_SERVER_BIN ?? "app-server",
       cwd: process.env.TALOS_APP_SERVER_CWD,
       launchToken,
       clientName: "talos-ts-sdk-integration",

@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
-use talos_client::TimelineEventEnvelope;
 use talos_error::{TalosError, TalosResult};
+use talos_sdk::TimelineEventEnvelope;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
 

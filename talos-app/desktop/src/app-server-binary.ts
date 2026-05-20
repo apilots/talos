@@ -25,5 +25,5 @@ export function resolveAppServerCommand(options: AppServerBinaryResolutionOption
 }
 
 function appServerExecutableName(platform: NodeJS.Platform): string {
-  return platform === "win32" ? "talos.exe" : "talos";
+  return platform === "win32" ? "app-server.exe" : "app-server";
 }

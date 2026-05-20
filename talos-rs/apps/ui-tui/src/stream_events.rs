@@ -1,4 +1,4 @@
-use talos_client::{
+use talos_sdk::{
     SessionHistorySnapshot, TalosContentItem, TalosJsonValue, TalosTimelineContent,
     TalosTimelineDelta, TalosTimelineEventPayload, TalosTimelineItem, TalosTimelineItemKind,
     TalosTimelineItemStatus, TalosTimelinePhase, TalosToolProgressKind, TimelineEventEnvelope,
@@ -518,7 +518,7 @@ impl TuiApp {
     ) {
         if let Some(item) = self.timeline_items.get_mut(item_id) {
             if let TalosTimelineContent::ToolCall { result, .. } = &mut item.content {
-                *result = Some(talos_client::TalosToolResult { content, is_error });
+                *result = Some(talos_sdk::TalosToolResult { content, is_error });
             }
         }
     }

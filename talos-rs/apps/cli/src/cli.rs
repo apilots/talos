@@ -6,7 +6,7 @@
 use clap::Parser;
 use std::collections::HashMap;
 use std::io::Write;
-use talos_client::{
+use talos_sdk::{
     AppServerClient, AppServerClientConfig, EventSubscribeParams, ProtocolTalosContext,
     SessionCreateParams, TalosInputItem, TalosMessageRequest, TalosTimelineContent,
     TalosTimelineDelta, TalosTimelineEventPayload, TalosTimelineItemKind, TalosTimelinePhase,
@@ -28,7 +28,7 @@ async fn run_app_server_cli(cli: Cli) -> Result<(), Box<dyn std::error::Error>> 
     let app_server_bin = cli
         .app_server_bin
         .or_else(|| std::env::var("TALOS_APP_SERVER_BIN").ok())
-        .unwrap_or_else(|| "talos".to_string());
+        .unwrap_or_else(|| "app-server".to_string());
     let launch_token = cli
         .launch_token
         .or_else(|| std::env::var("TALOS_LOCAL_LAUNCH_TOKEN").ok())
@@ -620,7 +620,7 @@ fn render_event(
     Ok(false)
 }
 
-fn render_started_item(item: &talos_client::TalosTimelineItem) {
+fn render_started_item(item: &talos_sdk::TalosTimelineItem) {
     match (&item.kind, &item.phase, &item.content) {
         (TalosTimelineItemKind::Reasoning, TalosTimelinePhase::Thinking, _) => {
             eprintln!("THINKING item={}", item.item_id);

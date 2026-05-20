@@ -154,7 +154,7 @@ start_server() {
   mkdir -p "${SCENARIO_REPORT_DIR}"
   prepare_talos_home
   : > "${SERVER_LOG}"
-  "${ROOT_DIR}/target/debug/talos" >>"${SERVER_LOG}" 2>&1 &
+  "${ROOT_DIR}/target/debug/talos-server" >>"${SERVER_LOG}" 2>&1 &
   export TALOS_SERVER_PID=$!
   if ! wait_for_health 90; then
     echo "Server failed to start. See log: ${SERVER_LOG}" >&2
@@ -177,15 +177,16 @@ stop_server() {
 
 build_binaries() {
   if [[ "${TALOS_BINARIES_READY:-}" == "1" ]] \
-    && [[ -x "${ROOT_DIR}/target/debug/talos" ]] \
-    && [[ -x "${ROOT_DIR}/target/debug/talos-client" ]] \
+    && [[ -x "${ROOT_DIR}/target/debug/talos-server" ]] \
+    && [[ -x "${ROOT_DIR}/target/debug/app-server" ]] \
+    && [[ -x "${ROOT_DIR}/target/debug/talos-cli" ]] \
     && [[ -x "${ROOT_DIR}/target/debug/talos-app-server-test-client" ]] \
-    && [[ -x "${ROOT_DIR}/target/debug/talos-ui-tui" ]]; then
+    && [[ -x "${ROOT_DIR}/target/debug/talos" ]]; then
     return 0
   fi
 
   mkdir -p "${REPORT_ROOT}"
-  (cd "${ROOT_DIR}" && cargo build -p talos -p talos-cli -p talos-app-server-test-client -p talos-ui-tui >/dev/null)
+  (cd "${ROOT_DIR}" && cargo build -p talos-server -p app-server -p talos-cli -p talos-app-server-test-client -p talos-ui-tui >/dev/null)
   export TALOS_BINARIES_READY=1
 }
 

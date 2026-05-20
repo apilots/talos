@@ -1,7 +1,7 @@
 # Talos-RS 模块清单
 
 **最后更新**: 2026-04-14
-**当前挂载模块数**: 28 个 crate
+**当前挂载模块数**: 32 个 crate
 **说明**: 本文档是实时 workspace 清单；目标架构与未来扩展方向请看 `ARCHITECTURE.md`。
 
 ## 分层总览
@@ -20,13 +20,13 @@
 ├─────────────────────────────────────────────────────────────────┤
 │ Orchestration 5 crates  | agent runtime and coordination          │
 ├─────────────────────────────────────────────────────────────────┤
-│ Gateway       2 crates  | gateway core and HTTP API               │
+│ Gateway       4 crates  | gateway core, HTTP API, app-server      │
 ├─────────────────────────────────────────────────────────────────┤
-│ App           1 crate   | server composition                      │
+│ App           1 crate   | shared runtime base                     │
 ├─────────────────────────────────────────────────────────────────┤
-│ Apps          3 crates  | SDK, CLI, TUI                           │
+│ Apps          4 crates  | SDK, CLI, TUI, app-server test client   │
 ├─────────────────────────────────────────────────────────────────┤
-│ Binary        1 crate   | executable entrypoint                   │
+│ Binary        2 crates  | app-server and talos-server             │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -87,16 +87,20 @@
 |------|------|------|
 | `talos-gateway` | `crates/gateway/core` | gateway trait 与基础请求/响应模型 |
 | `talos-gateway-http` | `crates/gateway/http` | `/v1/sessions` HTTP API、streaming 和 lifecycle gate |
+| `talos-app-protocol` | `crates/gateway/app-protocol` | App Server JSON-RPC protocol 类型、schema 与 fixtures |
+| `talos-app-server` | `crates/gateway/app-server` | JSON-RPC over stdio App Server runtime |
 
 ## App / Apps / Binary
 
 | Crate | 路径 | 说明 |
 |------|------|------|
-| `talos-server` | `crates/app/talos-server` | 组装 config、provider、gateway、coordinator 的服务入口 |
-| `talos-client` | `apps/sdk` | Rust SDK client |
-| `talos-cli` | `apps/cli` | CLI 客户端 |
-| `talos-ui-tui` | `apps/ui-tui` | 终端交互界面 |
-| `talos` | `bin/talos` | 可执行程序入口 |
+| `talos-base` | `crates/app/talos-base` | 共享 runtime base，供 `app-server` 与 `talos-server` binary 复用 |
+| `talos-sdk` | `apps/sdk` | Rust SDK library |
+| `talos-cli` | `apps/cli` | CLI package，构建 `talos-cli` binary |
+| `talos-app-server-test-client` | `apps/app-server-test-client` | App Server protocol e2e 测试客户端 |
+| `talos-ui-tui` | `apps/ui-tui` | TUI package，构建公开用户入口 binary `talos` |
+| `app-server` | `bin/app-server` | 本地 App Server binary，供 TUI/Desktop/SDK 使用 |
+| `talos-server` | `bin/talos-server` | HTTP/WebUI Server binary |
 
 ## 文档边界
 

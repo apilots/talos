@@ -77,7 +77,7 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
     const stderr: string[] = [];
 
     controller = new DesktopAppServerController({
-      command: process.env.TALOS_APP_SERVER_BIN ?? "talos",
+      command: process.env.TALOS_APP_SERVER_BIN ?? "app-server",
       cwd: process.env.TALOS_APP_SERVER_CWD,
       env: {
         TALOS_LOCAL_LAUNCH_TOKEN: launchToken,

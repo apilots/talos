@@ -35,14 +35,15 @@ members = [
     "crates/gateway/app-protocol",
     "crates/gateway/app-server",
     # App
-    "crates/app/talos-server",
+    "crates/app/talos-base",
     # Apps
     "apps/sdk",
     "apps/cli",
     "apps/app-server-test-client",
     "apps/ui-tui",
     # Binary
-    "bin/talos",
+    "bin/app-server",
+    "bin/talos-server",
 ]
 
 [workspace.package]
@@ -116,6 +117,6 @@ talos-config = { path = "crates/infra/config" }
 talos-logging = { path = "crates/infra/logging" }
 talos-storage = { path = "crates/infra/storage" }
 talos-channel = { path = "crates/perception/channels" }
-talos-client = { path = "apps/sdk" }
-talos-server = { path = "crates/app/talos-server" }
+talos-sdk = { path = "apps/sdk" }
+talos-base = { path = "crates/app/talos-base" }
 talos-application-service = { path = "crates/orchestration/application-service" }

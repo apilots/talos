@@ -3,7 +3,7 @@ use std::process::Stdio;
 
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
-use talos_client::{
+use talos_sdk::{
     canonical_method, AdminSessionListParams, AppServerClient, AppServerClientConfig,
     EventSubscribeParams, ExpectedFileVersion, ProjectPatch, ProtocolTalosContext,
     SessionCreateParams, TalosError, TalosInputItem, TalosMessageRequest, TalosTimelineContent,
@@ -18,7 +18,7 @@ async fn main() -> Result<()> {
     let scenario = Scenario::parse(std::env::args().nth(1).as_deref())?;
     let token = std::env::var("TALOS_LOCAL_LAUNCH_TOKEN")
         .context("TALOS_LOCAL_LAUNCH_TOKEN is required")?;
-    let binary = std::env::var("TALOS_APP_SERVER_BIN").unwrap_or_else(|_| "talos".to_string());
+    let binary = std::env::var("TALOS_APP_SERVER_BIN").unwrap_or_else(|_| "app-server".to_string());
 
     if scenario == Scenario::Malformed {
         return malformed(&binary, &token).await;
@@ -166,7 +166,7 @@ async fn active_turn_conflict(client: &mut AppServerClient) -> Result<()> {
         )
         .await
         .expect_err("second turn should conflict");
-    if matches!(err, talos_client::TalosError::Conflict(_)) {
+    if matches!(err, talos_sdk::TalosError::Conflict(_)) {
         Ok(())
     } else {
         Err(anyhow!("expected active turn conflict, got {err}"))
@@ -412,7 +412,7 @@ async fn create_session(client: &mut AppServerClient) -> Result<String> {
 async fn subscribe_events(
     client: &mut AppServerClient,
     session_id: &str,
-) -> Result<talos_client::EventSubscribeResponse> {
+) -> Result<talos_sdk::EventSubscribeResponse> {
     subscribe_events_with_limit(client, session_id, 32).await
 }
 
@@ -420,7 +420,7 @@ async fn subscribe_events_with_limit(
     client: &mut AppServerClient,
     session_id: &str,
     replay_limit: usize,
-) -> Result<talos_client::EventSubscribeResponse> {
+) -> Result<talos_sdk::EventSubscribeResponse> {
     subscribe_events_with_cursor(client, session_id, None, replay_limit).await
 }
 
@@ -429,7 +429,7 @@ async fn subscribe_events_since(
     session_id: &str,
     since_event_id: String,
     replay_limit: usize,
-) -> Result<talos_client::EventSubscribeResponse> {
+) -> Result<talos_sdk::EventSubscribeResponse> {
     subscribe_events_with_cursor(client, session_id, Some(since_event_id), replay_limit).await
 }
 
@@ -438,7 +438,7 @@ async fn subscribe_events_with_cursor(
     session_id: &str,
     since_event_id: Option<String>,
     replay_limit: usize,
-) -> Result<talos_client::EventSubscribeResponse> {
+) -> Result<talos_sdk::EventSubscribeResponse> {
     Ok(client
         .subscribe_events(EventSubscribeParams {
             session_id: session_id.to_string(),
@@ -808,12 +808,11 @@ async fn collect_two_subscriptions_until_terminal(
 
 async fn malformed(binary: &str, token: &str) -> Result<()> {
     let mut child = Command::new(binary)
-        .arg("app-server")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
-        .with_context(|| format!("spawn {binary} app-server"))?;
+        .with_context(|| format!("spawn {binary}"))?;
     let mut stdin = child
         .stdin
         .take()

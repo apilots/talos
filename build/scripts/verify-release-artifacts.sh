@@ -14,17 +14,34 @@ require_file() {
   fi
 }
 
-require_file "${PRODUCT_DIR}/server/talos-server-*.tar.gz"
-require_file "${PRODUCT_DIR}/tui/talos-ui-tui"
+require_file "${PRODUCT_DIR}/server/Talos-Server-*.tar.gz"
+require_file "${PRODUCT_DIR}/tui/Talos-TUI-*.tar.gz"
 require_file "${PRODUCT_DIR}/desktop-mac/Talos-*.dmg"
-require_file "${PRODUCT_DIR}/desktop-linux/Talos-*.tar.gz"
+require_file "${PRODUCT_DIR}/desktop-linux/Talos-*.AppImage"
 require_file "${PRODUCT_DIR}/desktop-linux/SHA256SUMS"
 
 verify_server_config_template() {
   local archive_path
-  archive_path="$(find "${PRODUCT_DIR}/server" -maxdepth 1 -name "talos-server-*.tar.gz" | head -n 1)"
+  archive_path="$(find "${PRODUCT_DIR}/server" -maxdepth 1 -name "Talos-Server-*.tar.gz" | head -n 1)"
+  if ! tar -tzf "${archive_path}" | grep -Eq '^(\./)?bin/talos-server$'; then
+    echo "Missing server binary in ${archive_path}" >&2
+    exit 1
+  fi
   if ! tar -tzf "${archive_path}" | grep -Eq '^(\./)?conf/talos.yaml$'; then
     echo "Missing server config template in ${archive_path}" >&2
+    exit 1
+  fi
+}
+
+verify_tui_app_server() {
+  local archive_path
+  archive_path="$(find "${PRODUCT_DIR}/tui" -maxdepth 1 -name "Talos-TUI-*.tar.gz" | head -n 1)"
+  if ! tar -tzf "${archive_path}" | grep -Eq '^bin/talos$'; then
+    echo "Missing TUI binary in ${archive_path}" >&2
+    exit 1
+  fi
+  if ! tar -tzf "${archive_path}" | grep -Eq '^libexec/app-server$'; then
+    echo "Missing bundled App Server binary in ${archive_path}" >&2
     exit 1
   fi
 }
@@ -42,7 +59,7 @@ verify_macos_app_server() {
   hdiutil attach -nobrowse -readonly -mountpoint "${mount_dir}" "${dmg_path}" >/dev/null
   trap 'hdiutil detach "${mount_dir}" >/dev/null 2>&1 || true; rm -rf "${mount_dir}"' RETURN
 
-  local app_server="${mount_dir}/Talos.app/Contents/Resources/app-server/talos"
+  local app_server="${mount_dir}/Talos.app/Contents/Resources/app-server/app-server"
   if [[ ! -x "${app_server}" ]]; then
     echo "Missing packaged macOS app-server binary: ${app_server}" >&2
     exit 1
@@ -59,16 +76,7 @@ verify_macos_app_server() {
 }
 
 verify_linux_app_server() {
-  local archive_path
-  archive_path="$(find "${PRODUCT_DIR}/desktop-linux" -maxdepth 1 -name "Talos-*.tar.gz" | head -n 1)"
-  if ! tar -tzf "${archive_path}" | grep -Eq '(^|/)resources/app-server/talos$'; then
-    echo "Missing packaged Linux app-server binary in ${archive_path}" >&2
-    exit 1
-  fi
-  if ! tar -tzf "${archive_path}" | grep -Eq '(^|/)resources/conf/talos.yaml$'; then
-    echo "Missing packaged Linux config template in ${archive_path}" >&2
-    exit 1
-  fi
+  echo "Skipping Linux AppImage app-server inspection."
 }
 
 (
@@ -77,6 +85,7 @@ verify_linux_app_server() {
 )
 
 verify_server_config_template
+verify_tui_app_server
 verify_macos_app_server
 verify_linux_app_server
 

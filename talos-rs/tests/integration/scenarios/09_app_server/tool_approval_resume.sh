@@ -12,7 +12,7 @@ prepare_talos_home
 mkdir -p "${SCENARIO_REPORT_DIR}"
 
 export TALOS_LOCAL_LAUNCH_TOKEN="${TALOS_LOCAL_LAUNCH_TOKEN:-talos-app-server-test-token}"
-export TALOS_APP_SERVER_BIN="${ROOT_DIR}/target/debug/talos"
+export TALOS_APP_SERVER_BIN="${ROOT_DIR}/target/debug/app-server"
 export TALOS_APP_SERVER_TEST_CLIENT_BIN="${ROOT_DIR}/target/debug/talos-app-server-test-client"
 export TALOS_APP_SERVER_TEST_MODEL="${TALOS_APP_SERVER_TEST_MODEL:-MiniMax-M2.5}"
 

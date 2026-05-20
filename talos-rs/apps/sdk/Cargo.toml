@@ -1,8 +1,8 @@
 [package]
-name = "talos-client"
+name = "talos-sdk"
 version = "0.1.0"
 edition = "2021"
-description = "Talos client library for connecting to the gateway"
+description = "Talos SDK library for connecting to App Server and gateway APIs"
 
 [dependencies]
 tokio = { version = "1.0", features = ["full"] }

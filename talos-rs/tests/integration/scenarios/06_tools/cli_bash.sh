@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 source "${ROOT_DIR}/tests/integration/scripts/common.sh"
 
 load_env
-require_command "${ROOT_DIR}/target/debug/talos-client"
+require_command "${ROOT_DIR}/target/debug/talos-cli"
 
 if [[ -z "${TALOS_LLM_BAILIAN_API_KEY:-}" && -z "${TALOS_LLM_ANTHROPIC_API_KEY:-}" && -z "${TALOS_LLM_OPENAI_API_KEY:-}" ]]; then
   echo "CASE cli_stream_real_llm_precheck FAIL missing provider key in .env"
@@ -17,10 +17,10 @@ echo "CASE cli_stream_real_llm_precheck PASS key_detected=true"
 build_binaries
 prepare_talos_home
 
-export TALOS_APP_SERVER_BIN="${ROOT_DIR}/target/debug/talos"
+export TALOS_APP_SERVER_BIN="${ROOT_DIR}/target/debug/app-server"
 export TALOS_LOCAL_LAUNCH_TOKEN="${TALOS_LOCAL_LAUNCH_TOKEN:-talos-cli-bash-token}"
 
-cli="${ROOT_DIR}/target/debug/talos-client"
+cli="${ROOT_DIR}/target/debug/talos-cli"
 
 run_cli() {
   "${cli}" "$@" 2>&1 | sed '/^Command executed successfully$/d'

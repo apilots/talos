@@ -1,9 +1,9 @@
 use async_trait::async_trait;
-use talos_client::{
+use talos_error::{TalosError, TalosResult};
+use talos_sdk::{
     AppServerClient, ModelInfo, SessionCreateParams, SessionHistorySnapshot, TalosMessageRequest,
     TalosSession, TimelineActiveTurnSnapshot, TimelineEventEnvelope, TimelineRecoverySnapshot,
 };
-use talos_error::{TalosError, TalosResult};
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 

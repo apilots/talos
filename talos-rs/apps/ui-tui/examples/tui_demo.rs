@@ -9,10 +9,12 @@ fn main() {
     println!();
     println!("To run the TUI:");
     println!("  # With embedded app-server (requires <talos_home>/conf/talos.yaml):");
-    println!("  cargo run -p talos-ui-tui");
+    println!("  cargo run -p talos-ui-tui --bin talos");
     println!();
     println!("  # Override embedded app-server binary:");
-    println!("  cargo run -p talos-ui-tui -- --app-server-bin ./target/debug/talos");
+    println!(
+        "  cargo run -p talos-ui-tui --bin talos -- --app-server-bin ./target/debug/app-server"
+    );
     println!();
     println!("Key features:");
     println!("- Welcome header with model/mode/workspace");

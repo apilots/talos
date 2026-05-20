@@ -10,7 +10,7 @@ const rustDir = path.join(repoRoot, "talos-rs");
 const resourcesDir = path.join(desktopDir, "resources", "app-server");
 const resourcesConfDir = path.join(desktopDir, "resources", "conf");
 const profile = process.env.TALOS_DESKTOP_APP_SERVER_PROFILE ?? process.env.PROFILE ?? "dev";
-const binaryName = process.platform === "win32" ? "talos.exe" : "talos";
+const binaryName = process.platform === "win32" ? "app-server.exe" : "app-server";
 const sourceBinary =
   process.env.TALOS_DESKTOP_APP_SERVER_BIN ??
   process.env.TALOS_APP_SERVER_BIN ??
@@ -32,7 +32,15 @@ copyFileSync(configTemplateSource, configTemplateDestination);
 console.log(`Prepared desktop config template: ${configTemplateDestination}`);
 
 function buildAppServer() {
-  const args = ["build", "--manifest-path", path.join(rustDir, "Cargo.toml"), "-p", "talos"];
+  const args = [
+    "build",
+    "--manifest-path",
+    path.join(rustDir, "Cargo.toml"),
+    "-p",
+    "app-server",
+    "--bin",
+    "app-server",
+  ];
   if (profile === "release") {
     args.push("--release");
   }
