@@ -1,6 +1,6 @@
 # Application Timeline Recovery Stream Design
 
-Status: active
+Status: Completed
 Owner: agent
 Created: 2026-05-13
 Updated: 2026-05-14

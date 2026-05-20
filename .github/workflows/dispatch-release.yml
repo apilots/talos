@@ -1,0 +1,61 @@
+name: Dispatch release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    name: Dispatch release build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch talos-releases workflow
+        env:
+          GH_TOKEN: ${{ secrets.TALOS_RELEASES_DISPATCH_TOKEN }}
+          RELEASE_REPOSITORY: apilots/talos-releases
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          SOURCE_REF: ${{ github.ref }}
+          SOURCE_SHA: ${{ github.sha }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${GH_TOKEN}" ]]; then
+            echo "TALOS_RELEASES_DISPATCH_TOKEN is required." >&2
+            exit 1
+          fi
+
+          VERSION="${TAG_NAME#v}"
+          if [[ -z "${VERSION}" || "${VERSION}" == "${TAG_NAME}" ]]; then
+            echo "Release tags must use the v* format." >&2
+            exit 1
+          fi
+
+          jq -n \
+            --arg tag "${TAG_NAME}" \
+            --arg version "${VERSION}" \
+            --arg source_repo "${SOURCE_REPOSITORY}" \
+            --arg source_ref "${SOURCE_REF}" \
+            --arg source_sha "${SOURCE_SHA}" \
+            '{
+              event_type: "talos_release",
+              client_payload: {
+                tag: $tag,
+                version: $version,
+                source_repo: $source_repo,
+                source_ref: $source_ref,
+                source_sha: $source_sha
+              }
+            }' > dispatch.json
+
+          curl --fail-with-body \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${RELEASE_REPOSITORY}/dispatches" \
+            --data @dispatch.json

@@ -49,3 +49,4 @@ IMPLEMENTATION_PLAN.md
 
 # node
 node_modules/
+*.tsbuildinfo
