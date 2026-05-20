@@ -21,7 +21,7 @@ Targets:
   webui    Build the browser WebUI bundle.
   desktop      Build the unpackaged Electron Desktop shell for local debug.
   desktop-mac    Build the macOS Desktop DMG package.
-  desktop-linux  Build the Linux Desktop portable tar.gz package.
+  desktop-linux  Build the Linux Desktop AppImage package.
 
 Environment:
   PROFILE=release  Build Rust targets in release mode.
@@ -139,7 +139,7 @@ write_sha256sums() {
   rm -f "${checksum_file}"
   (
     cd "${package_dir}"
-    for artifact in *.tar.gz; do
+    for artifact in *.tar.gz *.dmg *.AppImage *.blockmap; do
       [[ -e "${artifact}" ]] || continue
       shasum -a 256 "${artifact}"
     done
@@ -151,20 +151,6 @@ create_tui_tarball() {
   local version="${TUI_PACKAGE_VERSION:-$(workspace_version)}"
   local archive_path="${package_dir}/Talos-TUI-${version}-$(package_platform)-$(package_arch).tar.gz"
   tar -czf "${archive_path}" -C "${package_dir}" talos-ui-tui conf
-}
-
-create_linux_portable_tarball() {
-  local package_dir="$1"
-  local unpacked_dir
-  unpacked_dir="$(find "${package_dir}" -mindepth 1 -maxdepth 1 -type d \( -name "linux-unpacked" -o -name "linux-*-unpacked" \) | head -n 1)"
-  if [[ -z "${unpacked_dir}" ]]; then
-    echo "Linux unpacked desktop directory was not produced." >&2
-    exit 1
-  fi
-
-  local version="${DESKTOP_PACKAGE_VERSION:-$(desktop_version)}"
-  local archive_path="${package_dir}/Talos-Desktop-${version}-$(package_platform)-$(package_arch).tar.gz"
-  tar -czf "${archive_path}" -C "${unpacked_dir}" .
 }
 
 build_server() {
@@ -237,12 +223,12 @@ build_desktop_dmg() {
 }
 
 build_desktop_linux() {
-  echo "Building Talos Desktop Linux portable package..."
+  echo "Building Talos Desktop Linux AppImage..."
   require_pnpm
   TALOS_DESKTOP_PACKAGE_TARGET="desktop-linux" \
+  TALOS_PACKAGE_ARCH="$(package_arch)" \
   TALOS_DESKTOP_PACKAGE_DIR="${PRODUCT_DIR}/desktop-linux" \
     pnpm --dir "${REPO_ROOT}/talos-app" --filter talos-desktop package:linux
-  create_linux_portable_tarball "${PRODUCT_DIR}/desktop-linux"
   cleanup_desktop_package_dir "${PRODUCT_DIR}/desktop-linux"
   write_sha256sums "${PRODUCT_DIR}/desktop-linux"
 }
