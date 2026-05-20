@@ -55,7 +55,7 @@ module.exports = {
     ],
   },
   dmg: {
-    artifactName: "Talos-${version}-${arch}.${ext}",
+    artifactName: "Talos-Desktop-${version}-macos-${arch}.${ext}",
   },
   linux: {
     icon: path.join(repoRoot, "build/desktop/icons/icon.png"),

@@ -78,13 +78,27 @@ workspace_version() {
 package_arch() {
   case "$(uname -m)" in
     x86_64|amd64)
-      echo "x64"
+      echo "amd64"
       ;;
     aarch64|arm64)
       echo "arm64"
       ;;
     *)
       uname -m
+      ;;
+  esac
+}
+
+package_platform() {
+  case "$(uname -s)" in
+    Darwin)
+      echo "macos"
+      ;;
+    Linux)
+      echo "linux"
+      ;;
+    *)
+      uname -s | tr '[:upper:]' '[:lower:]'
       ;;
   esac
 }
@@ -132,6 +146,13 @@ write_sha256sums() {
   ) >"${checksum_file}"
 }
 
+create_tui_tarball() {
+  local package_dir="$1"
+  local version="${TUI_PACKAGE_VERSION:-$(workspace_version)}"
+  local archive_path="${package_dir}/Talos-TUI-${version}-$(package_platform)-$(package_arch).tar.gz"
+  tar -czf "${archive_path}" -C "${package_dir}" talos-ui-tui conf
+}
+
 create_linux_portable_tarball() {
   local package_dir="$1"
   local unpacked_dir
@@ -142,7 +163,7 @@ create_linux_portable_tarball() {
   fi
 
   local version="${DESKTOP_PACKAGE_VERSION:-$(desktop_version)}"
-  local archive_path="${package_dir}/Talos-${version}-$(package_arch).tar.gz"
+  local archive_path="${package_dir}/Talos-Desktop-${version}-$(package_platform)-$(package_arch).tar.gz"
   tar -czf "${archive_path}" -C "${unpacked_dir}" .
 }
 
@@ -162,7 +183,7 @@ build_server_webui() {
   local version="${SERVER_PACKAGE_VERSION:-$(workspace_version)}"
   local archive_dir="${PRODUCT_DIR}/server"
   local staging_dir="${PRODUCT_DIR}/.staging/talos-server"
-  local archive_path="${archive_dir}/talos-server-${version}-${PROFILE}-$(package_arch).tar.gz"
+  local archive_path="${archive_dir}/Talos-Server-${version}-$(package_platform)-$(package_arch).tar.gz"
   rm -rf "${staging_dir}" "${archive_dir}"
   mkdir -p "${staging_dir}/webui" "${archive_dir}"
 
@@ -181,6 +202,8 @@ build_tui() {
   cargo build --manifest-path "${RUST_DIR}/Cargo.toml" -p talos-ui-tui $(cargo_profile_args)
   copy_rust_binary "talos-ui-tui" "${PRODUCT_DIR}/tui"
   copy_conf_resource "${PRODUCT_DIR}/tui"
+  create_tui_tarball "${PRODUCT_DIR}/tui"
+  write_sha256sums "${PRODUCT_DIR}/tui"
 }
 
 build_webui() {
