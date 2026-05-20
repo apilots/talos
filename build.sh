@@ -114,7 +114,7 @@ copy_conf_resource() {
 cleanup_desktop_package_dir() {
   local package_dir="$1"
   find "${package_dir}" -mindepth 1 -maxdepth 1 -type d \
-    \( -name "mac-*" -o -name "linux-*-unpacked" \) \
+    \( -name "mac-*" -o -name "linux-unpacked" -o -name "linux-*-unpacked" \) \
     -exec rm -rf {} +
   rm -f "${package_dir}"/builder-*.yml
 }
@@ -135,7 +135,7 @@ write_sha256sums() {
 create_linux_portable_tarball() {
   local package_dir="$1"
   local unpacked_dir
-  unpacked_dir="$(find "${package_dir}" -mindepth 1 -maxdepth 1 -type d -name "linux-*-unpacked" | head -n 1)"
+  unpacked_dir="$(find "${package_dir}" -mindepth 1 -maxdepth 1 -type d \( -name "linux-unpacked" -o -name "linux-*-unpacked" \) | head -n 1)"
   if [[ -z "${unpacked_dir}" ]]; then
     echo "Linux unpacked desktop directory was not produced." >&2
     exit 1
