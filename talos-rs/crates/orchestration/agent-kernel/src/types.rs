@@ -282,6 +282,13 @@ pub enum KernelAssistantTextPhase {
     FinalAnswer,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum KernelModelCallMode {
+    WorkingLoop,
+    Finalization,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssistantTextStartedStreamData {
     pub item_key: KernelStreamItemKey,

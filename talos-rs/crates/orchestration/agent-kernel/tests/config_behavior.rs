@@ -12,6 +12,7 @@ use talos_config::{AgentKernelConfig, PlannerMode, PlannerSelection};
 /// - tool_parallelism: 1
 /// - max_llm_calls: 8
 /// - max_tool_rounds: 8
+/// - finalization_required: true
 /// - planner_mode: "built_in"
 /// - planner_selection: "static"
 #[test]
@@ -31,6 +32,10 @@ fn test_default_values() {
     assert_eq!(
         config.max_tool_rounds, 8,
         "max_tool_rounds should default to 8"
+    );
+    assert!(
+        config.finalization_required,
+        "finalization_required should default to true"
     );
 
     assert_eq!(

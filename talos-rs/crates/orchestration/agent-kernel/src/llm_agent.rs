@@ -386,8 +386,9 @@ mod tests {
     use talos_config::{PlannerMode, PlannerSelection};
     use talos_error::TalosResult;
     use talos_llm_provider::{
-        ChatChunk, ChatRequest, ChatResponse, ChatStream, LlmProvider, ToolStream, ToolStreamEvent,
-        Usage,
+        ChatChunk, ChatRequest, ChatResponse, ChatStream, LlmProvider, ModelBlockCompleted,
+        ModelBlockDelta, ModelBlockKind, ModelBlockStarted, ModelBlockStream,
+        ModelBlockStreamEvent, Usage,
     };
     use talos_tools::ToolRegistry;
     use tokio::sync::mpsc;
@@ -451,16 +452,39 @@ mod tests {
             Ok(ChatStream::new(rx))
         }
 
-        async fn stream_with_tools(&self, _request: ChatRequest) -> TalosResult<ToolStream> {
-            let (tx, rx) = mpsc::channel::<TalosResult<ToolStreamEvent>>(4);
+        async fn stream_model_blocks(
+            &self,
+            _request: ChatRequest,
+        ) -> TalosResult<ModelBlockStream> {
+            let (tx, rx) = mpsc::channel::<TalosResult<ModelBlockStreamEvent>>(4);
             tokio::spawn(async move {
                 let _ = tx
-                    .send(Ok(ToolStreamEvent::TextDelta {
-                        delta: "ok".to_string(),
+                    .send(Ok(ModelBlockStreamEvent::BlockStarted(ModelBlockStarted {
+                        model_item_id: "usage-stream-assistant".to_string(),
+                        provider_item_id: None,
+                        kind: ModelBlockKind::AssistantText,
+                        assistant_text_phase_hint: None,
+                        assistant_text_phase_hint_source: None,
+                        tool_call: None,
+                    })))
+                    .await;
+                let _ = tx
+                    .send(Ok(ModelBlockStreamEvent::BlockDelta {
+                        model_item_id: "usage-stream-assistant".to_string(),
+                        delta: ModelBlockDelta::AssistantText {
+                            delta: "ok".to_string(),
+                        },
                     }))
                     .await;
                 let _ = tx
-                    .send(Ok(ToolStreamEvent::Done {
+                    .send(Ok(ModelBlockStreamEvent::BlockCompleted(
+                        ModelBlockCompleted {
+                            model_item_id: "usage-stream-assistant".to_string(),
+                        },
+                    )))
+                    .await;
+                let _ = tx
+                    .send(Ok(ModelBlockStreamEvent::Done {
                         finish_reason: Some("stop".to_string()),
                         usage: Some(Usage {
                             prompt_tokens: 11,
@@ -472,7 +496,7 @@ mod tests {
                     }))
                     .await;
             });
-            Ok(ToolStream::new(rx))
+            Ok(ModelBlockStream::new(rx))
         }
 
         fn default_model(&self) -> String {
@@ -748,8 +772,8 @@ mod tests {
             result.task_results[0].usage.total_tokens,
             result.usage.total_tokens
         );
-        assert_eq!(result.usage.cache_creation_input_tokens, Some(5));
-        assert_eq!(result.usage.cache_read_input_tokens, Some(9));
+        assert_eq!(result.usage.cache_creation_input_tokens, Some(10));
+        assert_eq!(result.usage.cache_read_input_tokens, Some(18));
     }
 
     #[tokio::test]
@@ -768,11 +792,11 @@ mod tests {
             .expect("last prompt diagnostics should be staged");
         assert_eq!(
             diagnostics["window_usage"]["cache_creation_input_tokens"].as_u64(),
-            Some(5)
+            Some(10)
         );
         assert_eq!(
             diagnostics["window_usage"]["cache_read_input_tokens"].as_u64(),
-            Some(9)
+            Some(18)
         );
     }
 

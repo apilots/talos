@@ -47,7 +47,12 @@ pub async fn execute_general_turn_loop(
                 messages,
                 prepared.selected_model.clone(),
                 llm_provider.clone(),
+                prepared.stream_tx.clone(),
                 None,
+                Some(build_execution_summary(
+                    state.tool_call_count,
+                    state.tool_error_count,
+                )),
                 cause.clone(),
             )
             .await?;
@@ -66,7 +71,12 @@ pub async fn execute_general_turn_loop(
                 messages,
                 prepared.selected_model.clone(),
                 llm_provider.clone(),
+                prepared.stream_tx.clone(),
                 None,
+                Some(build_execution_summary(
+                    state.tool_call_count,
+                    state.tool_error_count,
+                )),
                 ForcedFinalizationCause::EmptyFinalResponseAfterTools,
             )
             .await?;
@@ -83,6 +93,31 @@ pub async fn execute_general_turn_loop(
             state
                 .messages
                 .push(ChatMessage::assistant(step_text.clone()));
+            if kernel_config.finalization_required
+                && !step.final_answer_streamed
+                && !matches!(step.model_finish_reason, ModelFinishReason::Length)
+            {
+                let mut messages = prepared.messages.clone();
+                messages.extend(state.messages.clone());
+                let forced_step = run_forced_finalization_step(
+                    messages,
+                    prepared.selected_model.clone(),
+                    llm_provider.clone(),
+                    prepared.stream_tx.clone(),
+                    None,
+                    Some(build_execution_summary(
+                        state.tool_call_count,
+                        state.tool_error_count,
+                    )),
+                    ForcedFinalizationCause::LoopTerminal,
+                )
+                .await?;
+                apply_general_turn_step(&mut state, &forced_step);
+                break (
+                    forced_step.text.clone(),
+                    stop_reason_for_forced_finalization(ForcedFinalizationCause::LoopTerminal),
+                );
+            }
             let stop_reason = match step.model_finish_reason {
                 ModelFinishReason::Length => StopReason::ModelOutputLimit,
                 ModelFinishReason::Stop | ModelFinishReason::Other => StopReason::EndTurn,
@@ -133,7 +168,12 @@ pub async fn execute_general_turn_loop(
                 messages,
                 prepared.selected_model.clone(),
                 llm_provider.clone(),
+                prepared.stream_tx.clone(),
                 None,
+                Some(build_execution_summary(
+                    state.tool_call_count,
+                    state.tool_error_count,
+                )),
                 ForcedFinalizationCause::ToolRoundBudget,
             )
             .await?;

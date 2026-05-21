@@ -20,7 +20,6 @@ use talos_llm_bailian::BailianProvider;
 use talos_llm_openai::OpenAIProvider;
 use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, LlmProvider, NativeThinkingSupport, PromptCacheSupport,
-    ToolStream,
 };
 use talos_logging::LogGuard;
 use talos_router::{Binding, MatchRule, Router, RouterImpl};
@@ -712,8 +711,11 @@ impl LlmProvider for ReloadableLlmProvider {
         self.current().chat_with_tools(request).await
     }
 
-    async fn stream_with_tools(&self, request: ChatRequest) -> TalosResult<ToolStream> {
-        self.current().stream_with_tools(request).await
+    async fn stream_model_blocks(
+        &self,
+        request: ChatRequest,
+    ) -> TalosResult<talos_llm_provider::ModelBlockStream> {
+        self.current().stream_model_blocks(request).await
     }
 }
 

@@ -115,8 +115,7 @@ mod tests {
     use talos_config::AgentKernelConfig;
     use talos_error::TalosResult;
     use talos_llm_provider::{
-        ChatRequest, ChatResponse, ChatStream, LlmProvider, NativeThinkingSupport, ToolStream,
-        Usage,
+        ChatRequest, ChatResponse, ChatStream, LlmProvider, NativeThinkingSupport, Usage,
     };
     use talos_memory::MemoryStore;
 
@@ -161,10 +160,6 @@ mod tests {
 
         fn native_thinking_support(&self, _model: &str) -> NativeThinkingSupport {
             NativeThinkingSupport::Unsupported
-        }
-
-        async fn stream_with_tools(&self, _request: ChatRequest) -> TalosResult<ToolStream> {
-            unreachable!("stream with tools is not used in tests")
         }
     }
 

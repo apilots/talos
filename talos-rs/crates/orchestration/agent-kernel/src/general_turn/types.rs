@@ -104,6 +104,7 @@ pub struct ExecutedTurnArtifacts {
     pub tool_call_log: Vec<ToolCallRecord>,
     pub tool_result_log: Vec<ToolResultLog>,
     pub final_answer_streamed: bool,
+    pub execution_summary_streamed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,10 +148,12 @@ pub struct GeneralTurnLoopState {
     pub tool_call_count: usize,
     pub tool_error_count: usize,
     pub final_answer_streamed: bool,
+    pub execution_summary_streamed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ForcedFinalizationCause {
+    LoopTerminal,
     ToolRoundBudget,
     RepeatedReadOnlyInvestigation,
     EmptyFinalResponseAfterTools,
@@ -196,6 +199,7 @@ impl GeneralTurnLoopState {
             tool_call_count: 0,
             tool_error_count: 0,
             final_answer_streamed: false,
+            execution_summary_streamed: false,
         }
     }
 }
@@ -203,12 +207,14 @@ impl GeneralTurnLoopState {
 #[derive(Debug, Clone)]
 pub struct GeneralTurnStepRequest {
     pub round: u32,
+    pub call_mode: KernelModelCallMode,
     pub model: String,
     pub max_tokens: Option<u32>,
     pub messages: Vec<ChatMessage>,
     pub tool_definitions: Vec<ToolDefinition>,
     pub parallel_tool_calls: bool,
     pub native_thinking: Option<NativeThinkingConfig>,
+    pub pre_final_execution_summary: Option<String>,
     pub stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
     pub streaming_tool_execution: Option<StreamingToolExecutionConfig>,
 }
@@ -248,6 +254,7 @@ pub struct GeneralTurnStepResult {
     pub output_items: Vec<TalosOutputItem>,
     pub usage: TalosUsage,
     pub final_answer_streamed: bool,
+    pub execution_summary_streamed: bool,
     pub disposition: GeneralTurnStepDisposition,
 }
 

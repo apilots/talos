@@ -10,8 +10,9 @@ use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
     CacheControl, ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall,
-    LlmProvider, NativeThinkingSupport, PromptCacheSupport, Role, ToolChoice, ToolDefinition,
-    ToolStream, ToolStreamEvent, Usage,
+    LlmProvider, ModelBlockCompleted, ModelBlockDelta, ModelBlockKind, ModelBlockStarted,
+    ModelBlockStream, ModelBlockStreamEvent, ModelToolCallStart, NativeThinkingSupport,
+    PromptCacheSupport, Role, SseLineDecoder, ToolChoice, ToolDefinition, Usage,
 };
 use tokio::sync::mpsc;
 use tracing::{error, info};
@@ -54,6 +55,20 @@ pub enum BailianThinkingMode {
 pub struct BailianThinkingConfig {
     pub mode: BailianThinkingMode,
     pub budget_tokens: Option<u32>,
+}
+
+#[derive(Debug, Default)]
+struct BailianModelBlockStreamState {
+    reasoning_started: HashMap<usize, bool>,
+    assistant_started: HashMap<usize, bool>,
+    tool_started: HashMap<usize, bool>,
+}
+
+#[derive(Debug, Default)]
+struct BailianModelToolAcc {
+    id: Option<String>,
+    name: Option<String>,
+    arguments: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -454,6 +469,169 @@ impl BailianProvider {
         None
     }
 
+    fn choice_index(choice: Option<&Value>) -> usize {
+        choice
+            .and_then(|c| c.get("index"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize
+    }
+
+    fn reasoning_model_item_id(choice_index: usize) -> String {
+        format!("bailian-choice-{choice_index}-reasoning")
+    }
+
+    fn assistant_model_item_id(choice_index: usize) -> String {
+        format!("bailian-choice-{choice_index}-assistant")
+    }
+
+    fn tool_model_item_id(index: usize) -> String {
+        format!("bailian-tool-{index}")
+    }
+
+    async fn send_model_block_event(
+        tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
+        event: ModelBlockStreamEvent,
+    ) -> bool {
+        tx.send(Ok(event)).await.is_ok()
+    }
+
+    async fn ensure_reasoning_model_block(
+        tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
+        state: &mut BailianModelBlockStreamState,
+        choice_index: usize,
+    ) -> bool {
+        if state.reasoning_started.get(&choice_index) == Some(&true) {
+            return true;
+        }
+        state.reasoning_started.insert(choice_index, true);
+        Self::send_model_block_event(
+            tx,
+            ModelBlockStreamEvent::BlockStarted(ModelBlockStarted {
+                model_item_id: Self::reasoning_model_item_id(choice_index),
+                provider_item_id: Some(format!("choice:{choice_index}:reasoning")),
+                kind: ModelBlockKind::Reasoning,
+                assistant_text_phase_hint: None,
+                assistant_text_phase_hint_source: None,
+                tool_call: None,
+            }),
+        )
+        .await
+    }
+
+    async fn ensure_assistant_model_block(
+        tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
+        state: &mut BailianModelBlockStreamState,
+        choice_index: usize,
+    ) -> bool {
+        if state.assistant_started.get(&choice_index) == Some(&true) {
+            return true;
+        }
+        state.assistant_started.insert(choice_index, true);
+        Self::send_model_block_event(
+            tx,
+            ModelBlockStreamEvent::BlockStarted(ModelBlockStarted {
+                model_item_id: Self::assistant_model_item_id(choice_index),
+                provider_item_id: Some(format!("choice:{choice_index}:message")),
+                kind: ModelBlockKind::AssistantText,
+                assistant_text_phase_hint: None,
+                assistant_text_phase_hint_source: None,
+                tool_call: None,
+            }),
+        )
+        .await
+    }
+
+    async fn ensure_tool_model_block(
+        tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
+        state: &mut BailianModelBlockStreamState,
+        index: usize,
+        acc: &BailianModelToolAcc,
+    ) -> bool {
+        if state.tool_started.get(&index) == Some(&true) {
+            return true;
+        }
+        state.tool_started.insert(index, true);
+        Self::send_model_block_event(
+            tx,
+            ModelBlockStreamEvent::BlockStarted(ModelBlockStarted {
+                model_item_id: Self::tool_model_item_id(index),
+                provider_item_id: acc.id.clone(),
+                kind: ModelBlockKind::ToolCall,
+                assistant_text_phase_hint: None,
+                assistant_text_phase_hint_source: None,
+                tool_call: Some(ModelToolCallStart {
+                    index,
+                    call_id: acc.id.clone(),
+                    tool_name: acc.name.clone(),
+                }),
+            }),
+        )
+        .await
+    }
+
+    async fn complete_open_model_blocks(
+        tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
+        state: &mut BailianModelBlockStreamState,
+    ) -> bool {
+        let reasoning_ids: Vec<_> = state
+            .reasoning_started
+            .iter()
+            .filter_map(|(index, started)| started.then_some(*index))
+            .collect();
+        for index in reasoning_ids {
+            state.reasoning_started.insert(index, false);
+            if !Self::send_model_block_event(
+                tx,
+                ModelBlockStreamEvent::BlockCompleted(ModelBlockCompleted {
+                    model_item_id: Self::reasoning_model_item_id(index),
+                }),
+            )
+            .await
+            {
+                return false;
+            }
+        }
+
+        let assistant_ids: Vec<_> = state
+            .assistant_started
+            .iter()
+            .filter_map(|(index, started)| started.then_some(*index))
+            .collect();
+        for index in assistant_ids {
+            state.assistant_started.insert(index, false);
+            if !Self::send_model_block_event(
+                tx,
+                ModelBlockStreamEvent::BlockCompleted(ModelBlockCompleted {
+                    model_item_id: Self::assistant_model_item_id(index),
+                }),
+            )
+            .await
+            {
+                return false;
+            }
+        }
+
+        let tool_ids: Vec<_> = state
+            .tool_started
+            .iter()
+            .filter_map(|(index, started)| started.then_some(*index))
+            .collect();
+        for index in tool_ids {
+            state.tool_started.insert(index, false);
+            if !Self::send_model_block_event(
+                tx,
+                ModelBlockStreamEvent::BlockCompleted(ModelBlockCompleted {
+                    model_item_id: Self::tool_model_item_id(index),
+                }),
+            )
+            .await
+            {
+                return false;
+            }
+        }
+        true
+    }
+
     pub(crate) fn build_request(request: ChatRequest, stream: bool) -> BailianRequest {
         let thinking = Self::native_thinking_config(&request);
         BailianRequest {
@@ -602,17 +780,27 @@ impl LlmProvider for BailianProvider {
 
         tokio::spawn(async move {
             let mut stream = response.bytes_stream();
+            let mut decoder = SseLineDecoder::new();
             let mut final_finish_reason: Option<String> = None;
 
             while let Some(chunk_result) = stream.next().await {
                 match chunk_result {
                     Ok(bytes) => {
-                        let text = String::from_utf8_lossy(&bytes);
-                        for line in text.lines() {
-                            if !line.starts_with("data: ") {
+                        for line in decoder.push(&bytes) {
+                            let line = match line {
+                                Ok(line) => line,
+                                Err(err) => {
+                                    let _ = tx.send(Err(err)).await;
+                                    return;
+                                }
+                            };
+                            let Some(data) = line.strip_prefix("data:") else {
+                                continue;
+                            };
+                            let data = data.trim_start();
+                            if data.is_empty() {
                                 continue;
                             }
-                            let data = &line[6..];
                             if data == "[DONE]" {
                                 let _ = tx
                                     .send(Ok(ChatChunk {
@@ -625,8 +813,16 @@ impl LlmProvider for BailianProvider {
                                 return;
                             }
 
-                            let Ok(event) = serde_json::from_str::<Value>(data) else {
-                                continue;
+                            let event = match serde_json::from_str::<Value>(data) {
+                                Ok(event) => event,
+                                Err(error) => {
+                                    let _ = tx
+                                        .send(Err(TalosError::InternalError(format!(
+                                            "Bailian stream invalid SSE JSON: {error}"
+                                        ))))
+                                        .await;
+                                    return;
+                                }
                             };
 
                             let choice = event
@@ -671,36 +867,42 @@ impl LlmProvider for BailianProvider {
         Ok(ChatStream::new(rx))
     }
 
-    async fn stream_with_tools(&self, request: ChatRequest) -> TalosResult<ToolStream> {
+    async fn stream_model_blocks(&self, request: ChatRequest) -> TalosResult<ModelBlockStream> {
         let response = self.send_stream(request).await?;
-        let (tx, rx) = mpsc::channel::<TalosResult<ToolStreamEvent>>(100);
+        let (tx, rx) = mpsc::channel::<TalosResult<ModelBlockStreamEvent>>(100);
 
         tokio::spawn(async move {
-            #[derive(Default)]
-            struct Acc {
-                id: Option<String>,
-                name: Option<String>,
-                arguments: String,
-                started: bool,
-            }
-
             let mut stream = response.bytes_stream();
-            let mut accumulators: HashMap<usize, Acc> = HashMap::new();
+            let mut decoder = SseLineDecoder::new();
+            let mut state = BailianModelBlockStreamState::default();
+            let mut tool_acc: HashMap<usize, BailianModelToolAcc> = HashMap::new();
             let mut final_finish_reason: Option<String> = None;
             let mut final_usage: Option<Usage> = None;
 
             while let Some(chunk_result) = stream.next().await {
                 match chunk_result {
                     Ok(bytes) => {
-                        let text = String::from_utf8_lossy(&bytes);
-                        for line in text.lines() {
-                            if !line.starts_with("data: ") {
+                        for line in decoder.push(&bytes) {
+                            let line = match line {
+                                Ok(line) => line,
+                                Err(err) => {
+                                    let _ = tx.send(Err(err)).await;
+                                    return;
+                                }
+                            };
+                            let Some(data) = line.strip_prefix("data:") else {
+                                continue;
+                            };
+                            let data = data.trim_start();
+                            if data.is_empty() {
                                 continue;
                             }
-                            let data = &line[6..];
                             if data == "[DONE]" {
+                                if !Self::complete_open_model_blocks(&tx, &mut state).await {
+                                    return;
+                                }
                                 let _ = tx
-                                    .send(Ok(ToolStreamEvent::Done {
+                                    .send(Ok(ModelBlockStreamEvent::Done {
                                         finish_reason: final_finish_reason
                                             .clone()
                                             .or_else(|| Some("stop".to_string())),
@@ -710,8 +912,16 @@ impl LlmProvider for BailianProvider {
                                 return;
                             }
 
-                            let Ok(event) = serde_json::from_str::<Value>(data) else {
-                                continue;
+                            let event = match serde_json::from_str::<Value>(data) {
+                                Ok(event) => event,
+                                Err(error) => {
+                                    let _ = tx
+                                        .send(Err(TalosError::InternalError(format!(
+                                            "Bailian model block stream invalid SSE JSON: {error}"
+                                        ))))
+                                        .await;
+                                    return;
+                                }
                             };
 
                             if let Some(usage) = event.get("usage").and_then(|value| {
@@ -730,17 +940,30 @@ impl LlmProvider for BailianProvider {
                                 .get("choices")
                                 .and_then(|c| c.as_array())
                                 .and_then(|arr| arr.first());
-
+                            let choice_index = Self::choice_index(choice);
                             let delta_object = choice.and_then(|c| c.get("delta"));
+
                             if let Some(reasoning_delta) =
                                 delta_object.and_then(Self::extract_reasoning_delta)
                             {
-                                if tx
-                                    .send(Ok(ToolStreamEvent::ReasoningDelta {
-                                        delta: reasoning_delta,
-                                    }))
+                                if !Self::ensure_reasoning_model_block(
+                                    &tx,
+                                    &mut state,
+                                    choice_index,
+                                )
+                                .await
+                                    || !Self::send_model_block_event(
+                                        &tx,
+                                        ModelBlockStreamEvent::BlockDelta {
+                                            model_item_id: Self::reasoning_model_item_id(
+                                                choice_index,
+                                            ),
+                                            delta: ModelBlockDelta::ReasoningText {
+                                                delta: reasoning_delta,
+                                            },
+                                        },
+                                    )
                                     .await
-                                    .is_err()
                                 {
                                     return;
                                 }
@@ -750,12 +973,24 @@ impl LlmProvider for BailianProvider {
                                 .and_then(|d| d.get("content"))
                                 .and_then(|t| t.as_str())
                             {
-                                if tx
-                                    .send(Ok(ToolStreamEvent::TextDelta {
-                                        delta: delta.to_string(),
-                                    }))
+                                if !Self::ensure_assistant_model_block(
+                                    &tx,
+                                    &mut state,
+                                    choice_index,
+                                )
+                                .await
+                                    || !Self::send_model_block_event(
+                                        &tx,
+                                        ModelBlockStreamEvent::BlockDelta {
+                                            model_item_id: Self::assistant_model_item_id(
+                                                choice_index,
+                                            ),
+                                            delta: ModelBlockDelta::AssistantText {
+                                                delta: delta.to_string(),
+                                            },
+                                        },
+                                    )
                                     .await
-                                    .is_err()
                                 {
                                     return;
                                 }
@@ -771,53 +1006,62 @@ impl LlmProvider for BailianProvider {
                                         .and_then(|v| v.as_u64())
                                         .unwrap_or(0)
                                         as usize;
-                                    let entry = accumulators.entry(index).or_default();
-
-                                    if let Some(id) = tool_call_delta
-                                        .get("id")
-                                        .and_then(|v| v.as_str())
-                                        .map(str::to_string)
+                                    let mut should_start = false;
                                     {
-                                        entry.id = Some(id);
+                                        let entry = tool_acc.entry(index).or_default();
+                                        if let Some(id) = tool_call_delta
+                                            .get("id")
+                                            .and_then(|v| v.as_str())
+                                            .map(str::to_string)
+                                        {
+                                            entry.id = Some(id);
+                                            should_start = true;
+                                        }
+
+                                        if let Some(name) = tool_call_delta
+                                            .get("function")
+                                            .and_then(|f| f.get("name"))
+                                            .and_then(|v| v.as_str())
+                                            .map(str::to_string)
+                                        {
+                                            entry.name = Some(name);
+                                            should_start = true;
+                                        }
                                     }
 
-                                    if let Some(name) = tool_call_delta
+                                    let arguments_delta = tool_call_delta
                                         .get("function")
-                                        .and_then(|f| f.get("name"))
+                                        .and_then(|f| f.get("arguments"))
                                         .and_then(|v| v.as_str())
-                                        .map(str::to_string)
-                                    {
-                                        entry.name = Some(name);
+                                        .map(str::to_string);
+                                    if arguments_delta.is_some() {
+                                        should_start = true;
                                     }
 
-                                    if !entry.started {
-                                        entry.started = true;
-                                        if tx
-                                            .send(Ok(ToolStreamEvent::ToolCallStart {
-                                                index,
-                                                id: entry.id.clone(),
-                                                name: entry.name.clone(),
-                                            }))
-                                            .await
-                                            .is_err()
+                                    if should_start {
+                                        let entry = tool_acc.entry(index).or_default();
+                                        if !Self::ensure_tool_model_block(
+                                            &tx, &mut state, index, entry,
+                                        )
+                                        .await
                                         {
                                             return;
                                         }
                                     }
 
-                                    if let Some(arguments_delta) = tool_call_delta
-                                        .get("function")
-                                        .and_then(|f| f.get("arguments"))
-                                        .and_then(|v| v.as_str())
-                                    {
-                                        entry.arguments.push_str(arguments_delta);
-                                        if tx
-                                            .send(Ok(ToolStreamEvent::ToolCallDelta {
-                                                index,
-                                                arguments_delta: arguments_delta.to_string(),
-                                            }))
-                                            .await
-                                            .is_err()
+                                    if let Some(arguments_delta) = arguments_delta {
+                                        let entry = tool_acc.entry(index).or_default();
+                                        entry.arguments.push_str(&arguments_delta);
+                                        if !Self::send_model_block_event(
+                                            &tx,
+                                            ModelBlockStreamEvent::BlockDelta {
+                                                model_item_id: Self::tool_model_item_id(index),
+                                                delta: ModelBlockDelta::ToolArguments {
+                                                    delta: arguments_delta,
+                                                },
+                                            },
+                                        )
+                                        .await
                                         {
                                             return;
                                         }
@@ -830,21 +1074,8 @@ impl LlmProvider for BailianProvider {
                                 .and_then(|r| r.as_str())
                             {
                                 final_finish_reason = Some(finish_reason.to_string());
-                                for (index, acc) in accumulators.drain() {
-                                    let arguments = serde_json::from_str::<Value>(&acc.arguments)
-                                        .unwrap_or_else(|_| Value::String(acc.arguments.clone()));
-                                    if tx
-                                        .send(Ok(ToolStreamEvent::ToolCallEnd {
-                                            index,
-                                            id: acc.id,
-                                            name: acc.name,
-                                            arguments,
-                                        }))
-                                        .await
-                                        .is_err()
-                                    {
-                                        return;
-                                    }
+                                if !Self::complete_open_model_blocks(&tx, &mut state).await {
+                                    return;
                                 }
                             }
                         }
@@ -862,6 +1093,6 @@ impl LlmProvider for BailianProvider {
             }
         });
 
-        Ok(ToolStream::new(rx))
+        Ok(ModelBlockStream::new(rx))
     }
 }

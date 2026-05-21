@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 use talos_agent::{AgentImpl, AgentOrchestrator, OrchestratorRequest};
 use talos_error::TalosResult;
 use talos_llm_provider::{
-    ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, Role, ToolStream,
-    ToolStreamEvent, Usage,
+    ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, ModelBlockCompleted,
+    ModelBlockDelta, ModelBlockStarted, ModelBlockStream, ModelBlockStreamEvent, Role, Usage,
 };
 use talos_tools::{Tool, ToolContext, ToolOutputPayload, ToolRegistry};
 use talos_tools_policy::ToolPolicy;
@@ -167,7 +167,7 @@ impl LlmProvider for IntegrationMockProvider {
         Ok(ChatStream { rx })
     }
 
-    async fn stream_with_tools(&self, request: ChatRequest) -> TalosResult<ToolStream> {
+    async fn stream_model_blocks(&self, request: ChatRequest) -> TalosResult<ModelBlockStream> {
         let round = self.state.chat_round.fetch_add(1, Ordering::SeqCst);
         if round > 0 {
             if let Some(message) = request.messages.iter().find(|msg| {
@@ -204,39 +204,72 @@ impl LlmProvider for IntegrationMockProvider {
         tokio::spawn(async move {
             if round == 0 {
                 let _ = tx
-                    .send(Ok(ToolStreamEvent::ReasoningDelta {
-                        delta: "Need tool context first.".to_string(),
+                    .send(Ok(ModelBlockStreamEvent::BlockStarted(
+                        ModelBlockStarted::reasoning(Some("reasoning-0".to_string())),
+                    )))
+                    .await;
+                let _ = tx
+                    .send(Ok(ModelBlockStreamEvent::BlockDelta {
+                        model_item_id: "reasoning".to_string(),
+                        delta: ModelBlockDelta::ReasoningText {
+                            delta: "Need tool context first.".to_string(),
+                        },
                     }))
                     .await;
                 let _ = tx
-                    .send(Ok(ToolStreamEvent::TextDelta {
-                        delta: "Starting response. ".to_string(),
+                    .send(Ok(ModelBlockStreamEvent::BlockCompleted(
+                        ModelBlockCompleted {
+                            model_item_id: "reasoning".to_string(),
+                        },
+                    )))
+                    .await;
+                let _ = tx
+                    .send(Ok(ModelBlockStreamEvent::BlockStarted(
+                        ModelBlockStarted::assistant_text(None, None),
+                    )))
+                    .await;
+                let _ = tx
+                    .send(Ok(ModelBlockStreamEvent::BlockDelta {
+                        model_item_id: "assistant_text".to_string(),
+                        delta: ModelBlockDelta::AssistantText {
+                            delta: "Starting response. ".to_string(),
+                        },
                     }))
                     .await;
                 let _ = tx
-                    .send(Ok(ToolStreamEvent::ToolCallStart {
-                        index: 0,
-                        id: Some("call_1".to_string()),
-                        name: Some("echo_test".to_string()),
+                    .send(Ok(ModelBlockStreamEvent::BlockCompleted(
+                        ModelBlockCompleted {
+                            model_item_id: "assistant_text".to_string(),
+                        },
+                    )))
+                    .await;
+                let _ = tx
+                    .send(Ok(ModelBlockStreamEvent::BlockStarted(
+                        ModelBlockStarted::tool_call(
+                            0,
+                            Some("call_1".to_string()),
+                            Some("echo_test".to_string()),
+                        ),
+                    )))
+                    .await;
+                let _ = tx
+                    .send(Ok(ModelBlockStreamEvent::BlockDelta {
+                        model_item_id: "tool_call_0".to_string(),
+                        delta: ModelBlockDelta::ToolArguments {
+                            delta: "{\"message\":\"ping\"}".to_string(),
+                        },
                     }))
                     .await;
                 let _ = tx
-                    .send(Ok(ToolStreamEvent::ToolCallDelta {
-                        index: 0,
-                        arguments_delta: "{\"message\":\"ping\"}".to_string(),
-                    }))
+                    .send(Ok(ModelBlockStreamEvent::BlockCompleted(
+                        ModelBlockCompleted {
+                            model_item_id: "tool_call_0".to_string(),
+                        },
+                    )))
                     .await;
                 let _ = tx
-                    .send(Ok(ToolStreamEvent::ToolCallEnd {
-                        index: 0,
-                        id: Some("call_1".to_string()),
-                        name: Some("echo_test".to_string()),
-                        arguments: json!({ "message": "ping" }),
-                    }))
-                    .await;
-                let _ = tx
-                    .send(Ok(ToolStreamEvent::Done {
-                        finish_reason: Some("stop".to_string()),
+                    .send(Ok(ModelBlockStreamEvent::Done {
+                        finish_reason: Some("tool_calls".to_string()),
                         usage: None,
                     }))
                     .await;
@@ -244,24 +277,54 @@ impl LlmProvider for IntegrationMockProvider {
             }
 
             let _ = tx
-                .send(Ok(ToolStreamEvent::ReasoningDelta {
-                    delta: "Tool result received.".to_string(),
+                .send(Ok(ModelBlockStreamEvent::BlockStarted(
+                    ModelBlockStarted::reasoning(Some("reasoning-1".to_string())),
+                )))
+                .await;
+            let _ = tx
+                .send(Ok(ModelBlockStreamEvent::BlockDelta {
+                    model_item_id: "reasoning".to_string(),
+                    delta: ModelBlockDelta::ReasoningText {
+                        delta: "Tool result received.".to_string(),
+                    },
                 }))
                 .await;
             let _ = tx
-                .send(Ok(ToolStreamEvent::TextDelta {
-                    delta: format!("Final answer after tool execution: {}", captured_result),
+                .send(Ok(ModelBlockStreamEvent::BlockCompleted(
+                    ModelBlockCompleted {
+                        model_item_id: "reasoning".to_string(),
+                    },
+                )))
+                .await;
+            let _ = tx
+                .send(Ok(ModelBlockStreamEvent::BlockStarted(
+                    ModelBlockStarted::assistant_text(None, None),
+                )))
+                .await;
+            let _ = tx
+                .send(Ok(ModelBlockStreamEvent::BlockDelta {
+                    model_item_id: "assistant_text".to_string(),
+                    delta: ModelBlockDelta::AssistantText {
+                        delta: format!("Final answer after tool execution: {captured_result}"),
+                    },
                 }))
                 .await;
             let _ = tx
-                .send(Ok(ToolStreamEvent::Done {
+                .send(Ok(ModelBlockStreamEvent::BlockCompleted(
+                    ModelBlockCompleted {
+                        model_item_id: "assistant_text".to_string(),
+                    },
+                )))
+                .await;
+            let _ = tx
+                .send(Ok(ModelBlockStreamEvent::Done {
                     finish_reason: Some("stop".to_string()),
                     usage: None,
                 }))
                 .await;
         });
 
-        Ok(ToolStream::new(rx))
+        Ok(ModelBlockStream::new(rx))
     }
 }
 

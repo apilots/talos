@@ -1,11 +1,68 @@
 use super::*;
 use talos_error::TalosError;
 use talos_llm_provider::{
-    CacheControl, CacheControlKind, ChatMessage, ChatRequest, LlmProvider, NativeThinkingConfig,
-    NativeThinkingEffort, NativeThinkingSupport, PromptCacheSupport, ToolStream, ToolStreamEvent,
-    Usage,
+    CacheControl, CacheControlKind, ChatMessage, ChatRequest, LlmProvider, ModelBlockDelta,
+    ModelBlockKind, ModelBlockStream, ModelBlockStreamEvent, NativeThinkingConfig,
+    NativeThinkingEffort, NativeThinkingSupport, PromptCacheSupport,
 };
-use tokio::sync::mpsc;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+
+async fn spawn_sse_server(body: String) -> String {
+    spawn_sse_server_chunks(vec![body]).await
+}
+
+async fn spawn_sse_server_chunks(chunks: Vec<String>) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("test server should bind");
+    let addr = listener
+        .local_addr()
+        .expect("test server addr should exist");
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.expect("request should arrive");
+        let mut buf = vec![0; 4096];
+        let _ = socket.read(&mut buf).await.expect("request should read");
+        let content_length: usize = chunks.iter().map(|chunk| chunk.len()).sum();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+            content_length
+        );
+        socket
+            .write_all(response.as_bytes())
+            .await
+            .expect("headers should write");
+        for chunk in chunks {
+            socket
+                .write_all(chunk.as_bytes())
+                .await
+                .expect("chunk should write");
+        }
+    });
+    format!("http://{addr}")
+}
+
+async fn collect_model_events(mut stream: ModelBlockStream) -> Vec<ModelBlockStreamEvent> {
+    let mut events = Vec::new();
+    while let Some(event) = stream.next().await {
+        let event = event.expect("model block event should succeed");
+        let done = matches!(event, ModelBlockStreamEvent::Done { .. });
+        events.push(event);
+        if done {
+            break;
+        }
+    }
+    events
+}
+
+async fn collect_first_model_error(mut stream: ModelBlockStream) -> TalosError {
+    while let Some(event) = stream.next().await {
+        if let Err(err) = event {
+            return err;
+        }
+    }
+    panic!("stream should emit an error");
+}
 
 #[test]
 fn test_bailian_config_builder() {
@@ -16,6 +73,92 @@ fn test_bailian_config_builder() {
     assert_eq!(config.api_key, "test-api-key");
     assert_eq!(config.base_url, "https://example.com/compatible-mode/v1");
     assert_eq!(config.timeout_secs, 120);
+}
+
+#[tokio::test]
+async fn test_stream_model_blocks_maps_chat_completion_chunks() {
+    let body = concat!(
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"think\"}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"path\\\"\"}}]}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\":\\\"/tmp/a\\\"}\"}}]}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let base_url = spawn_sse_server(body).await;
+    let provider = BailianProvider::new(BailianConfig::new("test-api-key").with_base_url(base_url));
+    let stream = provider
+        .stream_model_blocks(ChatRequest::new_user("test", "qwen-test"))
+        .await
+        .expect("stream should start");
+
+    let events = collect_model_events(stream).await;
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::BlockStarted(started)
+            if started.model_item_id == "bailian-choice-0-reasoning"
+                && started.kind == ModelBlockKind::Reasoning
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::BlockDelta { model_item_id, delta: ModelBlockDelta::AssistantText { delta } }
+            if model_item_id == "bailian-choice-0-assistant" && delta == "hello"
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::BlockStarted(started)
+            if started.model_item_id == "bailian-tool-0"
+                && started.provider_item_id.as_deref() == Some("call_1")
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::BlockCompleted(completed)
+            if completed.model_item_id == "bailian-tool-0"
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::Done { usage: Some(usage), .. }
+            if usage.total_tokens == 3
+    )));
+}
+
+#[tokio::test]
+async fn test_stream_model_blocks_buffers_split_sse_lines() {
+    let chunks = vec![
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"he".to_string(),
+        "llo\"}}]}\n\n".to_string(),
+        "data: [DONE]\n\n".to_string(),
+    ];
+    let base_url = spawn_sse_server_chunks(chunks).await;
+    let provider = BailianProvider::new(BailianConfig::new("test-api-key").with_base_url(base_url));
+    let stream = provider
+        .stream_model_blocks(ChatRequest::new_user("test", "qwen-test"))
+        .await
+        .expect("stream should start");
+
+    let events = collect_model_events(stream).await;
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::BlockDelta { model_item_id, delta: ModelBlockDelta::AssistantText { delta } }
+            if model_item_id == "bailian-choice-0-assistant" && delta == "hello"
+    )));
+}
+
+#[tokio::test]
+async fn test_stream_model_blocks_fails_invalid_sse_json() {
+    let base_url = spawn_sse_server("data: {not-json}\n\n".to_string()).await;
+    let provider = BailianProvider::new(BailianConfig::new("test-api-key").with_base_url(base_url));
+    let stream = provider
+        .stream_model_blocks(ChatRequest::new_user("test", "qwen-test"))
+        .await
+        .expect("stream should start");
+
+    let err = collect_first_model_error(stream).await;
+
+    assert!(format!("{err}").contains("invalid SSE JSON"));
 }
 
 #[test]
@@ -69,37 +212,6 @@ fn test_extract_reasoning_delta_reads_reasoning_content() {
         BailianProvider::extract_reasoning_delta(&delta).as_deref(),
         Some("first second")
     );
-}
-
-#[tokio::test]
-async fn test_stream_done_event_shape_is_preserved() {
-    let (tx, rx) = mpsc::channel(1);
-    tx.send(Ok(ToolStreamEvent::Done {
-        finish_reason: Some("stop".to_string()),
-        usage: Some(Usage {
-            prompt_tokens: 1,
-            completion_tokens: 2,
-            total_tokens: 3,
-            cache_creation_input_tokens: None,
-            cache_read_input_tokens: None,
-        }),
-    }))
-    .await
-    .expect("send should succeed");
-
-    let mut stream = ToolStream::new(rx);
-    let event = stream
-        .next()
-        .await
-        .expect("event should exist")
-        .expect("event should be ok");
-    assert!(matches!(
-        event,
-        ToolStreamEvent::Done {
-            finish_reason: Some(_),
-            usage: Some(_)
-        }
-    ));
 }
 
 #[test]

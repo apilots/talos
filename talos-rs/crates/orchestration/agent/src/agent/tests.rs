@@ -7,9 +7,10 @@ use std::sync::{Arc, Mutex};
 use talos_agent_kernel::StopReason as KernelStopReason;
 use talos_agent_kernel::{
     AssistantTextCompletedStreamData, AssistantTextDeltaStreamData, AssistantTextStartedStreamData,
-    KernelAssistantTextPhase, KernelBuilder, KernelStreamItemKey, KernelThinkingSource,
-    KernelThinkingStage, RunRequest, RunResponse, Runner, ThinkingDeltaStreamData,
-    ToolArgsDeltaStreamData, ToolCallStartStreamData, ToolResultStreamData,
+    ExecutionSummaryStreamData, KernelAssistantTextPhase, KernelBuilder, KernelStreamItemKey,
+    KernelThinkingSource, KernelThinkingStage, RunRequest, RunResponse, Runner,
+    ThinkingDeltaStreamData, ToolArgsDeltaStreamData, ToolCallStartStreamData,
+    ToolResultStreamData,
 };
 use talos_config::AgentKernelConfig;
 use talos_error::TalosResult;
@@ -159,6 +160,17 @@ impl Runner for StreamingOutputRunner {
                 round: None,
                 local_id: "test_final_answer".to_string(),
             };
+            stream_tx
+                .send(KernelStreamEvent::new(
+                    KernelStreamEventType::ExecutionSummary,
+                    KernelStreamEventData::ExecutionSummary(ExecutionSummaryStreamData {
+                        text: "Kernel summary: answered directly without invoking tools."
+                            .to_string(),
+                        round: None,
+                    }),
+                ))
+                .await
+                .expect("stream receiver should be open");
             stream_tx
                 .send(KernelStreamEvent::new(
                     KernelStreamEventType::AssistantTextStarted,
@@ -533,6 +545,120 @@ fn test_assistant_text_commentary_maps_without_final_answer() {
                 && payload.status == TalosTimelineItemStatus::Completed
     )));
     assert!(state.final_answer_item_id.is_none());
+}
+
+#[test]
+fn test_execution_summary_completes_before_final_answer() {
+    let mut timeline = TimelineBuilder::new(
+        "request-summary-final",
+        "turn-summary-final",
+        "message-1",
+        "session-1",
+    );
+    let mut state = KernelTimelineState::default();
+
+    let summary_events = emit_kernel_timeline_events(
+        &mut timeline,
+        &mut state,
+        KernelStreamEvent::new(
+            KernelStreamEventType::ExecutionSummary,
+            KernelStreamEventData::ExecutionSummary(ExecutionSummaryStreamData {
+                text: "Kernel summary: answered directly without invoking tools.".to_string(),
+                round: None,
+            }),
+        ),
+    )
+    .expect("summary should map");
+    let summary_id = match &summary_events[0].payload {
+        TalosTimelineEventPayload::ItemStarted(payload) => {
+            assert_eq!(payload.item.kind, TalosTimelineItemKind::ExecutionSummary);
+            assert_eq!(payload.item.phase, TalosTimelinePhase::System);
+            payload.item.item_id.clone()
+        }
+        _ => panic!("expected summary item start"),
+    };
+    assert!(matches!(
+        &summary_events[1].payload,
+        TalosTimelineEventPayload::ItemCompleted(payload)
+            if payload.item_id == summary_id
+                && payload.status == TalosTimelineItemStatus::Completed
+    ));
+
+    let item_key = KernelStreamItemKey {
+        round: None,
+        local_id: "final".to_string(),
+    };
+    let final_events = emit_kernel_timeline_events(
+        &mut timeline,
+        &mut state,
+        KernelStreamEvent::new(
+            KernelStreamEventType::AssistantTextStarted,
+            KernelStreamEventData::AssistantTextStarted(AssistantTextStartedStreamData {
+                item_key,
+                phase: KernelAssistantTextPhase::FinalAnswer,
+                round: None,
+            }),
+        ),
+    )
+    .expect("final answer should start after summary");
+
+    assert!(summary_events[1].sequence < final_events[0].sequence);
+}
+
+#[test]
+fn test_timeline_rejects_main_events_after_final_answer_started() {
+    let mut timeline = TimelineBuilder::new(
+        "request-post-final",
+        "turn-post-final",
+        "message-1",
+        "session-1",
+    );
+    let mut state = KernelTimelineState::default();
+    emit_kernel_timeline_events(
+        &mut timeline,
+        &mut state,
+        KernelStreamEvent::new(
+            KernelStreamEventType::ExecutionSummary,
+            KernelStreamEventData::ExecutionSummary(ExecutionSummaryStreamData {
+                text: "Kernel summary: answered directly without invoking tools.".to_string(),
+                round: None,
+            }),
+        ),
+    )
+    .expect("summary should map");
+    emit_kernel_timeline_events(
+        &mut timeline,
+        &mut state,
+        KernelStreamEvent::new(
+            KernelStreamEventType::AssistantTextStarted,
+            KernelStreamEventData::AssistantTextStarted(AssistantTextStartedStreamData {
+                item_key: KernelStreamItemKey {
+                    round: None,
+                    local_id: "final".to_string(),
+                },
+                phase: KernelAssistantTextPhase::FinalAnswer,
+                round: None,
+            }),
+        ),
+    )
+    .expect("final answer should start");
+
+    let err = emit_kernel_timeline_events(
+        &mut timeline,
+        &mut state,
+        KernelStreamEvent::new(
+            KernelStreamEventType::ThinkingDelta,
+            KernelStreamEventData::ThinkingDelta(ThinkingDeltaStreamData {
+                delta: "late reasoning".to_string(),
+                source: KernelThinkingSource::Provider,
+                stage: KernelThinkingStage::ModelReasoning,
+                round: None,
+            }),
+        ),
+    )
+    .expect_err("thinking after final answer should fail");
+
+    assert!(err.to_string().contains("after final answer"));
 }
 
 #[test]

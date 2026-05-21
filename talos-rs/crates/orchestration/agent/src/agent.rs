@@ -552,6 +552,7 @@ async fn emit_terminal_item_closures(
 struct KernelTimelineState {
     reasoning_item_id: Option<String>,
     final_answer_item_id: Option<String>,
+    execution_summary_seen: bool,
     assistant_text_items: HashMap<KernelStreamItemKey, String>,
     active_tool_items: HashMap<String, String>,
     tool_item_by_call_id: HashMap<String, String>,
@@ -587,6 +588,7 @@ fn emit_kernel_timeline_events(
 ) -> TalosResult<Vec<TalosTimelineEvent>> {
     match (event.event_type, event.data) {
         (KernelStreamEventType::ThinkingDelta, KernelStreamEventData::ThinkingDelta(data)) => {
+            reject_after_final_answer(state, "thinking delta")?;
             append_text_item_delta(timeline, &mut state.reasoning_item_id, data.delta)
         }
         (
@@ -604,6 +606,16 @@ fn emit_kernel_timeline_events(
             {
                 return Err(TalosError::ValidationError(
                     "timeline final answer item already started".to_string(),
+                ));
+            }
+            if matches!(data.phase, KernelAssistantTextPhase::Commentary) {
+                reject_after_final_answer(state, "commentary assistant text")?;
+            }
+            if matches!(data.phase, KernelAssistantTextPhase::FinalAnswer)
+                && !state.execution_summary_seen
+            {
+                return Err(TalosError::ValidationError(
+                    "timeline final answer requires execution summary first".to_string(),
                 ));
             }
             let started = match data.phase {
@@ -658,13 +670,25 @@ fn emit_kernel_timeline_events(
         (
             KernelStreamEventType::ExecutionSummary,
             KernelStreamEventData::ExecutionSummary(data),
-        ) => Ok(vec![timeline.start_item(
-            TalosTimelineItemKind::ExecutionSummary,
-            TalosTimelinePhase::System,
-            Some("Execution summary".to_string()),
-            TalosTimelineContent::ExecutionSummary { summary: data.text },
-        )]),
+        ) => {
+            reject_after_final_answer(state, "execution summary")?;
+            let mut events = close_active_reasoning_item(timeline, state)?;
+            let started = timeline.start_item(
+                TalosTimelineItemKind::ExecutionSummary,
+                TalosTimelinePhase::System,
+                Some("Execution summary".to_string()),
+                TalosTimelineContent::ExecutionSummary { summary: data.text },
+            );
+            let item_id = item_id_from_started(&started)?;
+            let completed =
+                timeline.complete_item(&item_id, TalosTimelineItemStatus::Completed, None)?;
+            state.execution_summary_seen = true;
+            events.push(started);
+            events.push(completed);
+            Ok(events)
+        }
         (KernelStreamEventType::ToolCallStart, KernelStreamEventData::ToolCallStart(data)) => {
+            reject_after_final_answer(state, "tool call start")?;
             let mut events = close_active_reasoning_item(timeline, state)?;
             let stream_key = ToolStreamKey {
                 round: data.round,
@@ -686,6 +710,7 @@ fn emit_kernel_timeline_events(
             Ok(events)
         }
         (KernelStreamEventType::ToolArgsDelta, KernelStreamEventData::ToolArgsDelta(data)) => {
+            reject_after_final_answer(state, "tool arguments delta")?;
             let mut events = close_active_reasoning_item(timeline, state)?;
             let (item_id, started) = ensure_tool_item(
                 timeline,
@@ -705,6 +730,7 @@ fn emit_kernel_timeline_events(
             Ok(events)
         }
         (KernelStreamEventType::ToolQueued, KernelStreamEventData::ToolQueued(data)) => {
+            reject_after_final_answer(state, "tool queued")?;
             let mut events = close_active_reasoning_item(timeline, state)?;
             let (item_id, started) = ensure_tool_item(
                 timeline,
@@ -724,6 +750,7 @@ fn emit_kernel_timeline_events(
             Ok(events)
         }
         (KernelStreamEventType::ToolExecuting, KernelStreamEventData::ToolExecuting(data)) => {
+            reject_after_final_answer(state, "tool executing")?;
             let mut events = close_active_reasoning_item(timeline, state)?;
             let (item_id, started) = ensure_tool_item(
                 timeline,
@@ -747,6 +774,7 @@ fn emit_kernel_timeline_events(
             KernelStreamEventType::ToolProgressDelta,
             KernelStreamEventData::ToolProgressDelta(data),
         ) => {
+            reject_after_final_answer(state, "tool progress delta")?;
             let mut events = close_active_reasoning_item(timeline, state)?;
             let (item_id, started) = ensure_tool_item(
                 timeline,
@@ -767,6 +795,7 @@ fn emit_kernel_timeline_events(
             Ok(events)
         }
         (KernelStreamEventType::ToolResult, KernelStreamEventData::ToolResult(data)) => {
+            reject_after_final_answer(state, "tool result")?;
             let mut events = close_active_reasoning_item(timeline, state)?;
             let (item_id, started) =
                 ensure_tool_item_for_call(timeline, state, &data.call_id, &data.tool_name);
@@ -810,6 +839,7 @@ fn emit_kernel_timeline_events(
                 arguments,
             }),
         ) => {
+            reject_after_final_answer(state, "confirmation request")?;
             let mut events = close_active_reasoning_item(timeline, state)?;
             let item_id = state
                 .tool_item_by_call_id
@@ -839,6 +869,7 @@ fn emit_kernel_timeline_events(
             KernelStreamEventType::DynamicToolRequest,
             KernelStreamEventData::DynamicToolRequest(data),
         ) => {
+            reject_after_final_answer(state, "dynamic tool request")?;
             let mut events = close_active_reasoning_item(timeline, state)?;
             let item_id = state
                 .tool_item_by_call_id
@@ -871,6 +902,15 @@ fn emit_kernel_timeline_events(
         }
         _ => Ok(Vec::new()),
     }
+}
+
+fn reject_after_final_answer(state: &KernelTimelineState, event_name: &str) -> TalosResult<()> {
+    if state.final_answer_item_id.is_some() {
+        return Err(TalosError::ValidationError(format!(
+            "timeline event after final answer is not allowed: {event_name}"
+        )));
+    }
+    Ok(())
 }
 
 fn close_active_reasoning_item(

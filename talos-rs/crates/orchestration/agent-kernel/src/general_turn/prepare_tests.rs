@@ -18,6 +18,7 @@ fn build_executed_turn_artifacts(
         tool_call_log,
         tool_result_log,
         final_answer_streamed: false,
+        execution_summary_streamed: false,
     }
 }
 

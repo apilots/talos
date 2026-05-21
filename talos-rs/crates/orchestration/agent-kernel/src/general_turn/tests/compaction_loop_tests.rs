@@ -242,6 +242,7 @@ async fn test_run_general_turn_updates_compaction_state_to_recovery_after_succes
         "{\"decision\":\"session_only\",\"rationale\":\"near-term continuity only\"}"
             .to_string(),
         "ok".to_string(),
+        "ok".to_string(),
     ]));
     let tool_registry = Arc::new(ToolRegistry::new());
     register_core_local_tools(tool_registry.as_ref());

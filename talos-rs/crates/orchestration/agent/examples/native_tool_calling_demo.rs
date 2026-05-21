@@ -3,9 +3,7 @@ use std::sync::Arc;
 use serde_json::json;
 use talos_agent::{AgentImpl, AgentOrchestrator, OrchestratorRequest};
 use talos_error::TalosResult;
-use talos_llm_provider::{
-    ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, ToolStream, Usage,
-};
+use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, Usage};
 use talos_tools::{ToolRegistry, WebSearchTool};
 use talos_tools_policy::ToolPolicy;
 use talos_types::talos::{TalosInputItem, TalosProvider, TalosSourceType};
@@ -62,12 +60,6 @@ impl LlmProvider for NativeToolMockProvider {
         let (tx, rx) = tokio::sync::mpsc::channel(10);
         drop(tx);
         Ok(ChatStream::new(rx))
-    }
-
-    async fn stream_with_tools(&self, _request: ChatRequest) -> TalosResult<ToolStream> {
-        let (tx, rx) = tokio::sync::mpsc::channel(10);
-        drop(tx);
-        Ok(ToolStream::new(rx))
     }
 }
 

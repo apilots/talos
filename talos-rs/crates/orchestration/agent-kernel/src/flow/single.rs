@@ -1,10 +1,11 @@
 use super::*;
 use crate::{
     general_turn::{
-        build_read_only_nudge_message, build_session_continuity, next_session_compaction_state,
-        run_forced_finalization_step, should_force_finalization_for_empty_response,
-        should_force_finalization_for_step, should_inject_read_only_nudge,
-        stage_session_state_update, stop_reason_for_forced_finalization, ForcedFinalizationCause,
+        build_execution_summary, build_read_only_nudge_message, build_session_continuity,
+        next_session_compaction_state, run_forced_finalization_step,
+        should_force_finalization_for_empty_response, should_force_finalization_for_step,
+        should_inject_read_only_nudge, stage_session_state_update,
+        stop_reason_for_forced_finalization, ForcedFinalizationCause, ModelFinishReason,
         SessionCompactionState, ToolLoopGuardState, LAST_PROMPT_DIAGNOSTICS_STATE_KEY,
         PROMPT_WARNING_STATE_KEY, SESSION_COMPACTION_STATE_KEY, SESSION_CONTINUITY_STATE_KEY,
     },
@@ -517,7 +518,12 @@ impl BaseLlmFlow for SingleFlow {
                     step_messages,
                     prepared.selected_model.clone(),
                     self.llm_provider.clone(),
+                    prepared.stream_tx.clone(),
                     step_native_thinking,
+                    Some(build_execution_summary(
+                        state.tool_call_count,
+                        state.tool_error_count,
+                    )),
                     cause.clone(),
                 )
                 .await?;
@@ -536,7 +542,12 @@ impl BaseLlmFlow for SingleFlow {
                     step_messages.clone(),
                     prepared.selected_model.clone(),
                     self.llm_provider.clone(),
+                    prepared.stream_tx.clone(),
                     step_native_thinking.clone(),
+                    Some(build_execution_summary(
+                        state.tool_call_count,
+                        state.tool_error_count,
+                    )),
                     ForcedFinalizationCause::EmptyFinalResponseAfterTools,
                 )
                 .await?;
@@ -570,6 +581,33 @@ impl BaseLlmFlow for SingleFlow {
                     break StopReason::ToolRoundLimit;
                 }
                 final_text = step.text.clone();
+                if self.kernel_config.finalization_required
+                    && !step.final_answer_streamed
+                    && !matches!(step.model_finish_reason, ModelFinishReason::Length)
+                {
+                    let mut finalization_messages = step_messages.clone();
+                    finalization_messages.push(talos_llm_provider::ChatMessage::assistant(
+                        final_text.clone(),
+                    ));
+                    let forced_step = run_forced_finalization_step(
+                        finalization_messages,
+                        prepared.selected_model.clone(),
+                        self.llm_provider.clone(),
+                        prepared.stream_tx.clone(),
+                        step_native_thinking.clone(),
+                        Some(build_execution_summary(
+                            state.tool_call_count,
+                            state.tool_error_count,
+                        )),
+                        ForcedFinalizationCause::LoopTerminal,
+                    )
+                    .await?;
+                    apply_general_turn_step(&mut state, &forced_step);
+                    final_text = forced_step.text.clone();
+                    break stop_reason_for_forced_finalization(
+                        ForcedFinalizationCause::LoopTerminal,
+                    );
+                }
                 stage_kernel_transcript_event(
                     ctx,
                     KernelTranscriptEvent::new(
@@ -609,7 +647,12 @@ impl BaseLlmFlow for SingleFlow {
                             step_messages.clone(),
                             prepared.selected_model.clone(),
                             self.llm_provider.clone(),
+                            prepared.stream_tx.clone(),
                             step_native_thinking.clone(),
+                            Some(build_execution_summary(
+                                state.tool_call_count,
+                                state.tool_error_count,
+                            )),
                             ForcedFinalizationCause::RepeatedReadOnlyInvestigation,
                         )
                         .await?;
@@ -848,7 +891,12 @@ impl BaseLlmFlow for SingleFlow {
                     forced_request.messages.clone(),
                     prepared.selected_model.clone(),
                     self.llm_provider.clone(),
+                    prepared.stream_tx.clone(),
                     forced_request.native_thinking.clone(),
+                    Some(build_execution_summary(
+                        state.tool_call_count,
+                        state.tool_error_count,
+                    )),
                     ForcedFinalizationCause::ToolRoundBudget,
                 )
                 .await?;

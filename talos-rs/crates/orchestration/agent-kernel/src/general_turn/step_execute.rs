@@ -1,5 +1,8 @@
 use super::*;
-use crate::{ToolArgsDeltaStreamData, ToolExecutionOutput, ToolStreamKey};
+use crate::{
+    ToolArgsDeltaStreamData, ToolExecutionOutput, ToolProgressDeltaStreamData, ToolProgressKind,
+    ToolStreamKey,
+};
 
 pub(crate) async fn emit_stream_event(
     stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
@@ -19,6 +22,18 @@ struct PendingToolCall {
     final_arguments: Option<Value>,
 }
 
+#[derive(Debug, Clone)]
+enum ActiveModelBlock {
+    Reasoning,
+    AssistantText {
+        item_key: KernelStreamItemKey,
+        phase: KernelAssistantTextPhase,
+    },
+    ToolCall {
+        index: usize,
+    },
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct StreamRound {
     pub(crate) content: String,
@@ -27,6 +42,9 @@ pub(crate) struct StreamRound {
     pub(crate) streamed_tool_outputs: Vec<ToolExecutionOutput>,
     pub(crate) finish_reason: Option<String>,
     pub(crate) usage: TalosUsage,
+    pub(crate) assistant_text_streamed: bool,
+    pub(crate) final_answer_streamed: bool,
+    pub(crate) execution_summary_streamed: bool,
 }
 
 fn finalize_tool_calls(
@@ -71,20 +89,119 @@ fn talos_usage_from_provider_usage(usage: &talos_llm_provider::Usage) -> TalosUs
     }
 }
 
+fn map_assistant_text_phase(
+    call_mode: KernelModelCallMode,
+    phase_hint: Option<AssistantTextPhaseHint>,
+) -> KernelAssistantTextPhase {
+    match call_mode {
+        KernelModelCallMode::Finalization => KernelAssistantTextPhase::FinalAnswer,
+        KernelModelCallMode::WorkingLoop => match phase_hint {
+            Some(AssistantTextPhaseHint::FinalAnswer) => KernelAssistantTextPhase::FinalAnswer,
+            Some(AssistantTextPhaseHint::Commentary) | None => KernelAssistantTextPhase::Commentary,
+        },
+    }
+}
+
+fn provider_protocol_violation(message: impl Into<String>) -> TalosError {
+    TalosError::InternalError(format!("provider protocol violation: {}", message.into()))
+}
+
+fn ensure_not_after_final(final_answer_started: bool, event: &str) -> TalosResult<()> {
+    if final_answer_started {
+        return Err(provider_protocol_violation(format!(
+            "{event} received after final answer started"
+        )));
+    }
+    Ok(())
+}
+
+async fn emit_execution_summary_before_final(
+    round: u32,
+    pre_final_execution_summary: Option<&String>,
+    execution_summary_streamed: &mut bool,
+    stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
+) -> TalosResult<()> {
+    if *execution_summary_streamed {
+        return Ok(());
+    }
+    if let Some(execution_summary) = pre_final_execution_summary {
+        emit_stream_event(
+            stream_tx,
+            KernelStreamEventType::ExecutionSummary,
+            KernelStreamEventData::ExecutionSummary(ExecutionSummaryStreamData {
+                text: execution_summary.clone(),
+                round: Some(round),
+            }),
+        )
+        .await;
+        *execution_summary_streamed = true;
+        return Ok(());
+    }
+    if stream_tx.is_some() {
+        return Err(provider_protocol_violation(
+            "final answer stream requires a pre-final execution summary",
+        ));
+    }
+    Ok(())
+}
+
+async fn close_active_non_final_blocks_before_final(
+    active_blocks: &mut BTreeMap<String, ActiveModelBlock>,
+    stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
+) -> TalosResult<()> {
+    let active_tool = active_blocks.iter().find_map(|(id, block)| {
+        matches!(block, ActiveModelBlock::ToolCall { .. }).then_some(id.clone())
+    });
+    if let Some(model_item_id) = active_tool {
+        return Err(provider_protocol_violation(format!(
+            "final answer started with active tool call block {model_item_id}"
+        )));
+    }
+
+    let active_ids: Vec<String> = active_blocks.keys().cloned().collect();
+    for model_item_id in active_ids {
+        let Some(block) = active_blocks.remove(&model_item_id) else {
+            continue;
+        };
+        if let ActiveModelBlock::AssistantText {
+            item_key,
+            phase: KernelAssistantTextPhase::Commentary,
+        } = block
+        {
+            emit_stream_event(
+                stream_tx,
+                KernelStreamEventType::AssistantTextCompleted,
+                KernelStreamEventData::AssistantTextCompleted(AssistantTextCompletedStreamData {
+                    item_key,
+                }),
+            )
+            .await;
+        }
+    }
+    Ok(())
+}
+
 pub(crate) async fn stream_round(
     llm_provider: Arc<dyn LlmProvider>,
     request: ChatRequest,
     round: u32,
+    call_mode: KernelModelCallMode,
+    pre_final_execution_summary: Option<String>,
     stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
     streaming_tool_execution: Option<StreamingToolExecutionConfig>,
 ) -> TalosResult<StreamRound> {
-    let mut stream = llm_provider.stream_with_tools(request).await?;
+    let mut stream = llm_provider.stream_model_blocks(request).await?;
     let mut content = String::new();
     let mut reasoning = String::new();
     let mut finish_reason = None;
     let mut pending_calls: BTreeMap<usize, PendingToolCall> = BTreeMap::new();
+    let mut active_blocks = BTreeMap::<String, ActiveModelBlock>::new();
     let mut streamed_tool_outputs = Vec::new();
     let mut usage = TalosUsage::default();
+    let mut assistant_text_streamed = false;
+    let mut final_answer_streamed = false;
+    let mut execution_summary_streamed = false;
+    let mut final_answer_started = false;
     let mut scheduler = streaming_tool_execution.map(|config| {
         crate::tool_execution::StreamingToolScheduler::new(
             config.execution_mode,
@@ -96,102 +213,279 @@ pub(crate) async fn stream_round(
 
     while let Some(event) = stream.next().await {
         match event? {
-            ToolStreamEvent::TextDelta { delta } => {
-                content.push_str(&delta);
-            }
-            ToolStreamEvent::ReasoningSignature { .. } => {
-                // thinking block integrity signature — no action needed at kernel level
-            }
-            ToolStreamEvent::ReasoningDelta { delta } => {
-                reasoning.push_str(&delta);
-                emit_stream_event(
-                    stream_tx,
-                    KernelStreamEventType::ThinkingDelta,
-                    KernelStreamEventData::ThinkingDelta(ThinkingDeltaStreamData {
-                        delta,
-                        source: KernelThinkingSource::Provider,
-                        stage: KernelThinkingStage::ModelReasoning,
+            ModelBlockStreamEvent::BlockStarted(started) => match started.kind {
+                ModelBlockKind::Reasoning => {
+                    ensure_not_after_final(final_answer_started, "reasoning block")?;
+                    if active_blocks.contains_key(&started.model_item_id) {
+                        return Err(provider_protocol_violation(format!(
+                            "duplicate active model block {}",
+                            started.model_item_id
+                        )));
+                    }
+                    active_blocks.insert(started.model_item_id, ActiveModelBlock::Reasoning);
+                }
+                ModelBlockKind::AssistantText => {
+                    let phase =
+                        map_assistant_text_phase(call_mode, started.assistant_text_phase_hint);
+                    let model_item_id = started.model_item_id;
+                    if active_blocks.contains_key(&model_item_id) {
+                        return Err(provider_protocol_violation(format!(
+                            "duplicate active model block {model_item_id}"
+                        )));
+                    }
+                    let item_key = KernelStreamItemKey {
                         round: Some(round),
-                    }),
-                )
-                .await;
-            }
-            ToolStreamEvent::ToolCallStart { index, id, name } => {
-                let entry = pending_calls.entry(index).or_default();
-                if id.is_some() {
-                    entry.id = id;
-                }
-                if name.is_some() {
-                    entry.name = name;
-                }
-            }
-            ToolStreamEvent::ToolCallDelta {
-                index,
-                arguments_delta,
-            } => {
-                let entry = pending_calls.entry(index).or_default();
-                entry.arguments_buffer.push_str(&arguments_delta);
-                emit_stream_event(
-                    stream_tx,
-                    KernelStreamEventType::ToolArgsDelta,
-                    KernelStreamEventData::ToolArgsDelta(ToolArgsDeltaStreamData {
-                        stream_key: ToolStreamKey { round, index },
-                        call_id: entry.id.clone(),
-                        tool_name: entry.name.clone(),
-                        delta: arguments_delta,
-                    }),
-                )
-                .await;
-            }
-            ToolStreamEvent::ToolCallEnd {
-                index,
-                id,
-                name,
-                arguments,
-            } => {
-                let entry = pending_calls.entry(index).or_default();
-                if id.is_some() {
-                    entry.id = id;
-                }
-                if name.is_some() {
-                    entry.name = name;
-                }
-                let arguments_copy = arguments.clone();
-                let stable_call_id = normalized_tool_call_id(round, index, entry.id.clone());
-                entry.id = Some(stable_call_id.clone());
-                entry.final_arguments = Some(arguments);
-                emit_stream_event(
-                    stream_tx,
-                    KernelStreamEventType::ToolCallStart,
-                    KernelStreamEventData::ToolCallStart(ToolCallStartStreamData {
-                        index,
-                        call_id: Some(stable_call_id.clone()),
-                        tool_name: entry.name.clone(),
-                        arguments: arguments_copy.clone(),
-                        round,
-                    }),
-                )
-                .await;
-                if let Some(scheduler) = scheduler.as_mut() {
-                    scheduler
-                        .push_call(
-                            ToolStreamKey { round, index },
-                            ToolExecutionInput {
-                                call_id: stable_call_id,
-                                tool_name: entry
-                                    .name
-                                    .clone()
-                                    .unwrap_or_else(|| "unknown".to_string()),
-                                arguments: arguments_copy,
-                            },
+                        local_id: model_item_id.clone(),
+                    };
+
+                    if matches!(phase, KernelAssistantTextPhase::FinalAnswer) {
+                        if final_answer_started {
+                            return Err(provider_protocol_violation(
+                                "multiple final answer blocks in one stream",
+                            ));
+                        }
+                        if !pending_calls.is_empty() {
+                            return Err(provider_protocol_violation(
+                                "final answer started after tool call was emitted in same round",
+                            ));
+                        }
+                        close_active_non_final_blocks_before_final(&mut active_blocks, stream_tx)
+                            .await?;
+                        emit_execution_summary_before_final(
+                            round,
+                            pre_final_execution_summary.as_ref(),
+                            &mut execution_summary_streamed,
+                            stream_tx,
                         )
                         .await?;
+                        final_answer_started = true;
+                        final_answer_streamed = true;
+                    } else {
+                        ensure_not_after_final(final_answer_started, "commentary assistant text")?;
+                    }
+
+                    assistant_text_streamed = true;
+                    active_blocks.insert(
+                        model_item_id,
+                        ActiveModelBlock::AssistantText {
+                            item_key: item_key.clone(),
+                            phase,
+                        },
+                    );
+                    emit_stream_event(
+                        stream_tx,
+                        KernelStreamEventType::AssistantTextStarted,
+                        KernelStreamEventData::AssistantTextStarted(
+                            AssistantTextStartedStreamData {
+                                item_key,
+                                phase,
+                                round: Some(round),
+                            },
+                        ),
+                    )
+                    .await;
+                }
+                ModelBlockKind::ToolCall => {
+                    ensure_not_after_final(final_answer_started, "tool call block")?;
+                    if active_blocks.contains_key(&started.model_item_id) {
+                        return Err(provider_protocol_violation(format!(
+                            "duplicate active model block {}",
+                            started.model_item_id
+                        )));
+                    }
+                    let Some(tool_call) = started.tool_call else {
+                        return Err(provider_protocol_violation(
+                            "tool call model block started without tool metadata",
+                        ));
+                    };
+                    let entry = pending_calls.entry(tool_call.index).or_default();
+                    if tool_call.call_id.is_some() {
+                        entry.id = tool_call.call_id;
+                    }
+                    if tool_call.tool_name.is_some() {
+                        entry.name = tool_call.tool_name;
+                    }
+                    active_blocks.insert(
+                        started.model_item_id,
+                        ActiveModelBlock::ToolCall {
+                            index: tool_call.index,
+                        },
+                    );
+                }
+                ModelBlockKind::ToolResult | ModelBlockKind::SystemNotice => {
+                    ensure_not_after_final(final_answer_started, "non-final model block")?;
+                }
+            },
+            ModelBlockStreamEvent::BlockDelta {
+                model_item_id,
+                delta,
+            } => match delta {
+                ModelBlockDelta::AssistantText { delta } => {
+                    let Some(ActiveModelBlock::AssistantText { item_key, .. }) =
+                        active_blocks.get(&model_item_id)
+                    else {
+                        return Err(provider_protocol_violation(format!(
+                            "assistant text delta received without active assistant block {model_item_id}"
+                        )));
+                    };
+                    content.push_str(&delta);
+                    emit_stream_event(
+                        stream_tx,
+                        KernelStreamEventType::AssistantTextDelta,
+                        KernelStreamEventData::AssistantTextDelta(AssistantTextDeltaStreamData {
+                            item_key: item_key.clone(),
+                            delta,
+                        }),
+                    )
+                    .await;
+                }
+                ModelBlockDelta::ReasoningText { delta } => {
+                    ensure_not_after_final(final_answer_started, "reasoning delta")?;
+                    if !matches!(
+                        active_blocks.get(&model_item_id),
+                        Some(ActiveModelBlock::Reasoning)
+                    ) {
+                        return Err(provider_protocol_violation(format!(
+                            "reasoning delta received without active reasoning block {model_item_id}"
+                        )));
+                    }
+                    reasoning.push_str(&delta);
+                    emit_stream_event(
+                        stream_tx,
+                        KernelStreamEventType::ThinkingDelta,
+                        KernelStreamEventData::ThinkingDelta(ThinkingDeltaStreamData {
+                            delta,
+                            source: KernelThinkingSource::Provider,
+                            stage: KernelThinkingStage::ModelReasoning,
+                            round: Some(round),
+                        }),
+                    )
+                    .await;
+                }
+                ModelBlockDelta::ToolArguments { delta } => {
+                    ensure_not_after_final(final_answer_started, "tool arguments delta")?;
+                    let Some(ActiveModelBlock::ToolCall { index }) =
+                        active_blocks.get(&model_item_id)
+                    else {
+                        return Err(provider_protocol_violation(format!(
+                            "tool arguments delta received without active tool block {model_item_id}"
+                        )));
+                    };
+                    let index = *index;
+                    let entry = pending_calls.entry(index).or_default();
+                    entry.arguments_buffer.push_str(&delta);
+                    emit_stream_event(
+                        stream_tx,
+                        KernelStreamEventType::ToolArgsDelta,
+                        KernelStreamEventData::ToolArgsDelta(ToolArgsDeltaStreamData {
+                            stream_key: ToolStreamKey { round, index },
+                            call_id: entry.id.clone(),
+                            tool_name: entry.name.clone(),
+                            delta,
+                        }),
+                    )
+                    .await;
+                }
+                ModelBlockDelta::ToolProgress { delta } => {
+                    ensure_not_after_final(final_answer_started, "tool progress delta")?;
+                    let Some(ActiveModelBlock::ToolCall { index }) =
+                        active_blocks.get(&model_item_id)
+                    else {
+                        return Err(provider_protocol_violation(format!(
+                            "tool progress delta received without active tool block {model_item_id}"
+                        )));
+                    };
+                    let index = *index;
+                    let entry = pending_calls.entry(index).or_default();
+                    let call_id = normalized_tool_call_id(round, index, entry.id.clone());
+                    entry.id = Some(call_id.clone());
+                    let tool_name = entry.name.clone().unwrap_or_else(|| "unknown".to_string());
+                    emit_stream_event(
+                        stream_tx,
+                        KernelStreamEventType::ToolProgressDelta,
+                        KernelStreamEventData::ToolProgressDelta(ToolProgressDeltaStreamData {
+                            stream_key: ToolStreamKey { round, index },
+                            call_id,
+                            tool_name,
+                            message: delta,
+                            progress_kind: ToolProgressKind::Status,
+                        }),
+                    )
+                    .await;
+                }
+            },
+            ModelBlockStreamEvent::BlockCompleted(completed) => {
+                let Some(active_block) = active_blocks.remove(&completed.model_item_id) else {
+                    return Err(provider_protocol_violation(format!(
+                        "model block completed without active block {}",
+                        completed.model_item_id
+                    )));
+                };
+                match active_block {
+                    ActiveModelBlock::Reasoning => {}
+                    ActiveModelBlock::AssistantText { item_key, .. } => {
+                        emit_stream_event(
+                            stream_tx,
+                            KernelStreamEventType::AssistantTextCompleted,
+                            KernelStreamEventData::AssistantTextCompleted(
+                                AssistantTextCompletedStreamData { item_key },
+                            ),
+                        )
+                        .await;
+                    }
+                    ActiveModelBlock::ToolCall { index } => {
+                        ensure_not_after_final(final_answer_started, "tool call completion")?;
+                        let entry = pending_calls.entry(index).or_default();
+                        let arguments = if entry.arguments_buffer.trim().is_empty() {
+                            serde_json::json!({})
+                        } else {
+                            serde_json::from_str::<Value>(&entry.arguments_buffer)
+                                .unwrap_or_else(|_| Value::String(entry.arguments_buffer.clone()))
+                        };
+                        let stable_call_id =
+                            normalized_tool_call_id(round, index, entry.id.clone());
+                        entry.id = Some(stable_call_id.clone());
+                        entry.final_arguments = Some(arguments.clone());
+                        emit_stream_event(
+                            stream_tx,
+                            KernelStreamEventType::ToolCallStart,
+                            KernelStreamEventData::ToolCallStart(ToolCallStartStreamData {
+                                index,
+                                call_id: Some(stable_call_id.clone()),
+                                tool_name: entry.name.clone(),
+                                arguments: arguments.clone(),
+                                round,
+                            }),
+                        )
+                        .await;
+                        if let Some(scheduler) = scheduler.as_mut() {
+                            scheduler
+                                .push_call(
+                                    ToolStreamKey { round, index },
+                                    ToolExecutionInput {
+                                        call_id: stable_call_id,
+                                        tool_name: entry
+                                            .name
+                                            .clone()
+                                            .unwrap_or_else(|| "unknown".to_string()),
+                                        arguments,
+                                    },
+                                )
+                                .await?;
+                        }
+                    }
                 }
             }
-            ToolStreamEvent::Done {
+            ModelBlockStreamEvent::Done {
                 finish_reason: final_reason,
                 usage: final_usage,
             } => {
+                if !active_blocks.is_empty() {
+                    let active_ids = active_blocks.keys().cloned().collect::<Vec<_>>().join(", ");
+                    return Err(provider_protocol_violation(format!(
+                        "provider stream completed with active model blocks: {active_ids}"
+                    )));
+                }
                 finish_reason = final_reason;
                 if let Some(final_usage) = final_usage {
                     usage = talos_usage_from_provider_usage(&final_usage);
@@ -229,6 +523,9 @@ pub(crate) async fn stream_round(
         streamed_tool_outputs,
         finish_reason,
         usage,
+        assistant_text_streamed,
+        final_answer_streamed,
+        execution_summary_streamed,
     })
 }
 
@@ -245,6 +542,9 @@ async fn chat_round(
         streamed_tool_outputs: Vec::new(),
         finish_reason: response.finish_reason,
         usage: talos_usage_from_provider_usage(&response.usage),
+        assistant_text_streamed: false,
+        final_answer_streamed: false,
+        execution_summary_streamed: false,
     })
 }
 
@@ -317,13 +617,17 @@ pub async fn execute_general_turn_step(
     llm_provider: Arc<dyn LlmProvider>,
 ) -> TalosResult<GeneralTurnStepResult> {
     let round = step.round;
+    let call_mode = step.call_mode;
     let stream_tx = step.stream_tx.clone();
     let streaming_tool_execution = step.streaming_tool_execution.clone();
+    let pre_final_execution_summary = step.pre_final_execution_summary.clone();
     let round_response = if stream_tx.is_some() {
         stream_round(
             llm_provider,
             step.into_chat_request(),
             round,
+            call_mode,
+            pre_final_execution_summary,
             stream_tx.as_ref(),
             streaming_tool_execution,
         )
@@ -355,14 +659,18 @@ pub async fn execute_general_turn_step(
     } else {
         GeneralTurnStepDisposition::ContinueWithTools
     };
-    let final_answer_streamed = emit_assistant_text_for_step(
-        stream_tx.as_ref(),
-        round,
-        &round_response.content,
-        disposition,
-    )
-    .await
-        && matches!(disposition, GeneralTurnStepDisposition::FinalResponse);
+    let final_answer_streamed = if round_response.assistant_text_streamed {
+        round_response.final_answer_streamed
+    } else {
+        emit_assistant_text_for_step(
+            stream_tx.as_ref(),
+            round,
+            &round_response.content,
+            disposition,
+        )
+        .await
+            && matches!(disposition, GeneralTurnStepDisposition::FinalResponse)
+    };
     let model_finish_reason = ModelFinishReason::from_provider(
         round_response.finish_reason.as_deref(),
         !round_response.tool_calls.is_empty(),
@@ -377,12 +685,15 @@ pub async fn execute_general_turn_step(
         output_items,
         usage: round_response.usage,
         final_answer_streamed,
+        execution_summary_streamed: round_response.execution_summary_streamed,
         disposition,
     })
 }
 
 pub fn apply_general_turn_step(state: &mut GeneralTurnLoopState, step: &GeneralTurnStepResult) {
     state.final_answer_streamed = state.final_answer_streamed || step.final_answer_streamed;
+    state.execution_summary_streamed =
+        state.execution_summary_streamed || step.execution_summary_streamed;
     state.usage.accumulate(&step.usage);
     state.output_items.extend(step.output_items.clone());
     state.reasoning_log.extend(step.reasoning.clone());

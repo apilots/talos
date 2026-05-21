@@ -11,7 +11,7 @@ pub(crate) fn to_api_stop_reason(reason: StopReason) -> TalosApiStopReason {
     }
 }
 
-fn build_execution_summary(tool_call_count: usize, tool_error_count: usize) -> String {
+pub(crate) fn build_execution_summary(tool_call_count: usize, tool_error_count: usize) -> String {
     if tool_call_count == 0 {
         "Kernel summary: answered directly without invoking tools.".to_string()
     } else if tool_error_count == 0 {
@@ -62,6 +62,7 @@ pub fn finalize_general_turn_artifacts(
         tool_call_log: state.tool_call_log,
         tool_result_log: state.tool_result_log,
         final_answer_streamed: state.final_answer_streamed,
+        execution_summary_streamed: state.execution_summary_streamed,
     }
 }
 
@@ -69,6 +70,20 @@ pub async fn emit_general_turn_finalization_stream(
     prepared: &PreparedGeneralTurn,
     executed: &ExecutedTurnArtifacts,
 ) {
+    if !executed.execution_summary_streamed {
+        if let Some(execution_summary) = executed.reasoning_log.last() {
+            emit_stream_event(
+                prepared.stream_tx.as_ref(),
+                KernelStreamEventType::ExecutionSummary,
+                KernelStreamEventData::ExecutionSummary(ExecutionSummaryStreamData {
+                    text: execution_summary.clone(),
+                    round: None,
+                }),
+            )
+            .await;
+        }
+    }
+
     if !executed.final_answer_streamed && !executed.output_text.trim().is_empty() {
         emit_assistant_text_stream_item(
             prepared.stream_tx.as_ref(),
@@ -79,18 +94,6 @@ pub async fn emit_general_turn_finalization_stream(
             KernelAssistantTextPhase::FinalAnswer,
             None,
             &executed.output_text,
-        )
-        .await;
-    }
-
-    if let Some(execution_summary) = executed.reasoning_log.last() {
-        emit_stream_event(
-            prepared.stream_tx.as_ref(),
-            KernelStreamEventType::ExecutionSummary,
-            KernelStreamEventData::ExecutionSummary(ExecutionSummaryStreamData {
-                text: execution_summary.clone(),
-                round: None,
-            }),
         )
         .await;
     }

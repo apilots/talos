@@ -492,7 +492,7 @@ async fn collect_events(
     expected_count: usize,
 ) -> Result<Vec<TimelineEventEnvelope>> {
     let mut events = Vec::new();
-    for _ in 0..64 {
+    for _ in 0..expected_count.saturating_add(16).max(64) {
         let event = next_event_with_timeout(client).await?;
         events.push(event);
         if events.len() >= expected_count {

@@ -10,6 +10,8 @@ Response contract:
 - Do not output JSON/function-call/XML/tool tags/placeholders.
 - Put the complete answer in the assistant response body, not only in private reasoning or thinking.
 - Start directly with the answer; do not say you will analyze, inspect, continue, or call tools.
+- If the user requested an exact phrase, marker, or acknowledgement token, output that exact text without paraphrase or extra explanation.
+- If a previous visible assistant response already satisfies an exact-output request, repeat that response exactly.
 - If evidence is incomplete, state the limitation briefly and still summarize what is known."#;
 const SALVAGE_FINALIZATION_INSTRUCTION: &str = r#"The previous finalization attempt did not produce a usable user-visible final answer.
 
@@ -19,6 +21,7 @@ Response contract:
 - Do not call tools or emit tool-call syntax of any form.
 - Do not place the answer only in private reasoning/thinking; write it in the assistant response body.
 - Do not answer with a planning sentence such as "I will analyze..." or "I will continue...".
+- Preserve exact requested phrases, markers, or acknowledgement tokens without paraphrase.
 - If tool evidence is incomplete, say what is incomplete and give the best next step."#;
 const FALLBACK_SALVAGE_RESPONSE: &str = "I could not produce a full final answer after tool execution. Based on the available tool results, at least one required step failed or returned insufficient evidence. Review the tool errors and continue with a narrower follow-up step.";
 const LOW_GAIN_READ_ONLY_NUDGE: &str = "You are repeating a similar read-only investigation. Prefer answering now with verified evidence already collected. If one more read is essential, read only the single most relevant file; otherwise produce the final answer in the assistant response body.";
@@ -83,6 +86,7 @@ pub(crate) fn build_read_only_nudge_message() -> ChatMessage {
 
 pub(crate) fn stop_reason_for_forced_finalization(_cause: ForcedFinalizationCause) -> StopReason {
     match _cause {
+        ForcedFinalizationCause::LoopTerminal => StopReason::EndTurn,
         ForcedFinalizationCause::EmptyFinalResponseAfterTools => StopReason::EndTurn,
         ForcedFinalizationCause::ToolRoundBudget
         | ForcedFinalizationCause::RepeatedReadOnlyInvestigation => StopReason::ToolRoundLimit,
@@ -102,10 +106,15 @@ pub(crate) async fn run_forced_finalization_step(
     mut messages: Vec<ChatMessage>,
     model: String,
     llm_provider: Arc<dyn LlmProvider>,
+    stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
     _native_thinking: Option<NativeThinkingConfig>,
+    pre_final_execution_summary: Option<String>,
     cause: ForcedFinalizationCause,
 ) -> TalosResult<GeneralTurnStepResult> {
     let cause_note = match cause {
+        ForcedFinalizationCause::LoopTerminal => {
+            "Reason: the agent loop has completed and no further tool call is pending."
+        }
         ForcedFinalizationCause::ToolRoundBudget => {
             "Reason: the tool round budget has been exhausted."
         }
@@ -124,13 +133,15 @@ pub(crate) async fn run_forced_finalization_step(
     let step = execute_general_turn_step(
         GeneralTurnStepRequest {
             round: 0,
+            call_mode: KernelModelCallMode::Finalization,
             model: model.clone(),
             max_tokens: None,
             messages: messages.clone(),
             tool_definitions: Vec::new(),
             parallel_tool_calls: false,
             native_thinking: None,
-            stream_tx: None,
+            pre_final_execution_summary: pre_final_execution_summary.clone(),
+            stream_tx: stream_tx.clone(),
             streaming_tool_execution: None,
         },
         llm_provider.clone(),
@@ -141,7 +152,15 @@ pub(crate) async fn run_forced_finalization_step(
         return Ok(step);
     }
 
-    run_salvage_finalization_step(messages, step, model, llm_provider).await
+    run_salvage_finalization_step(
+        messages,
+        step,
+        model,
+        llm_provider,
+        stream_tx,
+        pre_final_execution_summary,
+    )
+    .await
 }
 
 async fn run_salvage_finalization_step(
@@ -149,6 +168,8 @@ async fn run_salvage_finalization_step(
     prior_step: GeneralTurnStepResult,
     model: String,
     llm_provider: Arc<dyn LlmProvider>,
+    stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
+    pre_final_execution_summary: Option<String>,
 ) -> TalosResult<GeneralTurnStepResult> {
     messages.push(ChatMessage::user(SALVAGE_FINALIZATION_INSTRUCTION));
     if !prior_step.text.trim().is_empty() {
@@ -158,13 +179,19 @@ async fn run_salvage_finalization_step(
     let mut salvage_step = execute_general_turn_step(
         GeneralTurnStepRequest {
             round: 0,
+            call_mode: KernelModelCallMode::Finalization,
             model,
             max_tokens: None,
             messages,
             tool_definitions: Vec::new(),
             parallel_tool_calls: false,
             native_thinking: None,
-            stream_tx: None,
+            pre_final_execution_summary: if prior_step.execution_summary_streamed {
+                None
+            } else {
+                pre_final_execution_summary
+            },
+            stream_tx,
             streaming_tool_execution: None,
         },
         llm_provider,
@@ -330,10 +357,12 @@ mod tests {
             vec![ChatMessage::user("Analyze the project.")],
             "mock-model".to_string(),
             provider.clone(),
+            None,
             Some(NativeThinkingConfig {
                 effort: NativeThinkingEffort::High,
                 budget_tokens: Some(1024),
             }),
+            None,
             ForcedFinalizationCause::ToolRoundBudget,
         )
         .await

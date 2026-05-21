@@ -3,10 +3,10 @@ use crate::{
     warnings::derive_prompt_warnings, AssistantTextCompletedStreamData,
     AssistantTextDeltaStreamData, AssistantTextStartedStreamData, ExecutionSummaryStreamData,
     InvocationContext, KernelAssistantTextPhase, KernelEvent, KernelEventData, KernelEventLabel,
-    KernelEventType, KernelStreamEvent, KernelStreamEventData, KernelStreamEventType,
-    KernelStreamItemKey, KernelThinkingSource, KernelThinkingStage, KernelWarning,
-    PromptWarningEventData, StopReason, ThinkingDeltaStreamData, ToolCallStartStreamData,
-    ToolExecutionInput, ToolExecutor, ToolResultStreamData,
+    KernelEventType, KernelModelCallMode, KernelStreamEvent, KernelStreamEventData,
+    KernelStreamEventType, KernelStreamItemKey, KernelThinkingSource, KernelThinkingStage,
+    KernelWarning, PromptWarningEventData, StopReason, ThinkingDeltaStreamData,
+    ToolCallStartStreamData, ToolExecutionInput, ToolExecutor, ToolResultStreamData,
 };
 use chrono::Utc;
 use serde_json::Value;
@@ -15,8 +15,8 @@ use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
-    ChatMessage, ChatRequest, FunctionCall, LlmProvider, NativeThinkingConfig, ToolChoice,
-    ToolDefinition, ToolStreamEvent,
+    AssistantTextPhaseHint, ChatMessage, ChatRequest, FunctionCall, LlmProvider, ModelBlockDelta,
+    ModelBlockKind, ModelBlockStreamEvent, NativeThinkingConfig, ToolChoice, ToolDefinition,
 };
 use talos_memory::{
     strip_json_fences, Memory, MemoryGetResult, MemorySearchResponse, MemoryStore, RecordHeader,
@@ -72,6 +72,7 @@ mod tests;
 mod tool_batch;
 mod types;
 
+pub(crate) use finalize::build_execution_summary;
 pub(crate) use finalize::to_api_stop_reason;
 pub use finalize::{emit_general_turn_finalization_stream, finalize_general_turn_artifacts};
 pub(crate) use guard::{

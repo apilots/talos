@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     ContextStateBags, InvocationExecutionState, InvocationLimits, KernelEventData,
-    KernelStreamEventData, KernelStreamEventType, ToolExecutionMode, TurnPhase,
+    KernelStreamEventData, KernelStreamEventType, ToolExecutionMode, ToolProgressKind, TurnPhase,
 };
 use async_trait::async_trait;
 use chrono::Utc;
@@ -10,8 +10,9 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use talos_llm_provider::{
-    ChatChunk, ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, ToolStream,
-    ToolStreamEvent, Usage,
+    ChatChunk, ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider,
+    ModelBlockCompleted, ModelBlockDelta, ModelBlockStarted, ModelBlockStream,
+    ModelBlockStreamEvent, Usage,
 };
 use talos_tools::{register_core_local_tools, ToolRegistry};
 use tokio::sync::mpsc;
@@ -123,6 +124,45 @@ impl LlmProvider for NoopLlmProvider {
         .await
         .expect("noop stream chunk should send");
         Ok(ChatStream::new(rx))
+    }
+
+    async fn stream_model_blocks(&self, _request: ChatRequest) -> TalosResult<ModelBlockStream> {
+        let (tx, rx) = mpsc::channel::<TalosResult<ModelBlockStreamEvent>>(4);
+        tokio::spawn(async move {
+            tx.send(Ok(ModelBlockStreamEvent::BlockStarted(
+                ModelBlockStarted::assistant_text(None, None),
+            )))
+            .await
+            .expect("assistant start should send");
+            tx.send(Ok(ModelBlockStreamEvent::BlockDelta {
+                model_item_id: "assistant_text".to_string(),
+                delta: ModelBlockDelta::AssistantText {
+                    delta: "ok".to_string(),
+                },
+            }))
+            .await
+            .expect("assistant delta should send");
+            tx.send(Ok(ModelBlockStreamEvent::BlockCompleted(
+                ModelBlockCompleted {
+                    model_item_id: "assistant_text".to_string(),
+                },
+            )))
+            .await
+            .expect("assistant completed should send");
+            tx.send(Ok(ModelBlockStreamEvent::Done {
+                finish_reason: Some("stop".to_string()),
+                usage: Some(Usage {
+                    prompt_tokens: 1,
+                    completion_tokens: 1,
+                    total_tokens: 2,
+                    cache_creation_input_tokens: None,
+                    cache_read_input_tokens: None,
+                }),
+            }))
+            .await
+            .expect("done should send");
+        });
+        Ok(ModelBlockStream::new(rx))
     }
 
     fn default_model(&self) -> String {
@@ -326,32 +366,41 @@ impl LlmProvider for StreamingToolCallIdProvider {
         Ok(ChatStream::new(rx))
     }
 
-    async fn stream_with_tools(&self, _request: ChatRequest) -> TalosResult<ToolStream> {
-        let (tx, rx) = mpsc::channel::<TalosResult<ToolStreamEvent>>(8);
+    async fn stream_model_blocks(&self, _request: ChatRequest) -> TalosResult<ModelBlockStream> {
+        let (tx, rx) = mpsc::channel::<TalosResult<ModelBlockStreamEvent>>(8);
         tokio::spawn(async move {
-            tx.send(Ok(ToolStreamEvent::ToolCallStart {
-                index: 0,
-                id: Some(String::new()),
-                name: Some("MemorySearch".to_string()),
-            }))
+            tx.send(Ok(ModelBlockStreamEvent::BlockStarted(
+                ModelBlockStarted::tool_call(
+                    0,
+                    Some(String::new()),
+                    Some("MemorySearch".to_string()),
+                ),
+            )))
             .await
             .expect("tool start should send");
-            tx.send(Ok(ToolStreamEvent::ToolCallEnd {
-                index: 0,
-                id: Some(String::new()),
-                name: Some("MemorySearch".to_string()),
-                arguments: json!({ "query": "talos项目" }),
+            tx.send(Ok(ModelBlockStreamEvent::BlockDelta {
+                model_item_id: "tool_call_0".to_string(),
+                delta: ModelBlockDelta::ToolArguments {
+                    delta: json!({ "query": "talos项目" }).to_string(),
+                },
             }))
             .await
-            .expect("tool end should send");
-            tx.send(Ok(ToolStreamEvent::Done {
+            .expect("tool args should send");
+            tx.send(Ok(ModelBlockStreamEvent::BlockCompleted(
+                ModelBlockCompleted {
+                    model_item_id: "tool_call_0".to_string(),
+                },
+            )))
+            .await
+            .expect("tool completed should send");
+            tx.send(Ok(ModelBlockStreamEvent::Done {
                 finish_reason: Some("tool_calls".to_string()),
                 usage: None,
             }))
             .await
             .expect("done event should send");
         });
-        Ok(ToolStream::new(rx))
+        Ok(ModelBlockStream::new(rx))
     }
 
     fn default_model(&self) -> String {
@@ -374,44 +423,62 @@ impl LlmProvider for StreamingToolExecutionProvider {
         Ok(ChatStream::new(rx))
     }
 
-    async fn stream_with_tools(&self, _request: ChatRequest) -> TalosResult<ToolStream> {
-        let (tx, rx) = mpsc::channel::<TalosResult<ToolStreamEvent>>(8);
+    async fn stream_model_blocks(&self, _request: ChatRequest) -> TalosResult<ModelBlockStream> {
+        let (tx, rx) = mpsc::channel::<TalosResult<ModelBlockStreamEvent>>(8);
         let path = self.path.clone();
         tokio::spawn(async move {
-            tx.send(Ok(ToolStreamEvent::TextDelta {
-                delta: "Inspecting a file.".to_string(),
+            tx.send(Ok(ModelBlockStreamEvent::BlockStarted(
+                ModelBlockStarted::assistant_text(None, None),
+            )))
+            .await
+            .expect("assistant start should send");
+            tx.send(Ok(ModelBlockStreamEvent::BlockDelta {
+                model_item_id: "assistant_text".to_string(),
+                delta: ModelBlockDelta::AssistantText {
+                    delta: "Inspecting a file.".to_string(),
+                },
             }))
             .await
             .expect("text delta should send");
-            tx.send(Ok(ToolStreamEvent::ToolCallStart {
-                index: 0,
-                id: Some("call_read".to_string()),
-                name: Some("read".to_string()),
-            }))
+            tx.send(Ok(ModelBlockStreamEvent::BlockCompleted(
+                ModelBlockCompleted {
+                    model_item_id: "assistant_text".to_string(),
+                },
+            )))
+            .await
+            .expect("assistant completed should send");
+            tx.send(Ok(ModelBlockStreamEvent::BlockStarted(
+                ModelBlockStarted::tool_call(
+                    0,
+                    Some("call_read".to_string()),
+                    Some("read".to_string()),
+                ),
+            )))
             .await
             .expect("tool start should send");
-            tx.send(Ok(ToolStreamEvent::ToolCallDelta {
-                index: 0,
-                arguments_delta: format!("{{\"path\":\"{}\"}}", path),
+            tx.send(Ok(ModelBlockStreamEvent::BlockDelta {
+                model_item_id: "tool_call_0".to_string(),
+                delta: ModelBlockDelta::ToolArguments {
+                    delta: format!("{{\"path\":\"{}\"}}", path),
+                },
             }))
             .await
             .expect("tool delta should send");
-            tx.send(Ok(ToolStreamEvent::ToolCallEnd {
-                index: 0,
-                id: Some("call_read".to_string()),
-                name: Some("read".to_string()),
-                arguments: json!({ "path": path }),
-            }))
+            tx.send(Ok(ModelBlockStreamEvent::BlockCompleted(
+                ModelBlockCompleted {
+                    model_item_id: "tool_call_0".to_string(),
+                },
+            )))
             .await
-            .expect("tool end should send");
-            tx.send(Ok(ToolStreamEvent::Done {
+            .expect("tool completed should send");
+            tx.send(Ok(ModelBlockStreamEvent::Done {
                 finish_reason: Some("tool_calls".to_string()),
                 usage: None,
             }))
             .await
             .expect("done event should send");
         });
-        Ok(ToolStream::new(rx))
+        Ok(ModelBlockStream::new(rx))
     }
 
     fn default_model(&self) -> String {

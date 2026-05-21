@@ -493,7 +493,7 @@ mod tests {
     use talos_error::TalosResult;
     use talos_llm_provider::{
         ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, NativeThinkingSupport,
-        ToolStream, Usage,
+        Usage,
     };
     use tempfile::TempDir;
 
@@ -541,10 +541,6 @@ mod tests {
 
         fn native_thinking_support(&self, _model: &str) -> NativeThinkingSupport {
             NativeThinkingSupport::Unsupported
-        }
-
-        async fn stream_with_tools(&self, _request: ChatRequest) -> TalosResult<ToolStream> {
-            unreachable!("tool stream is not used in tests")
         }
     }
 
