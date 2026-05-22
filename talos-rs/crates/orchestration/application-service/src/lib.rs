@@ -280,21 +280,6 @@ impl TalosApplicationService {
         self.access.cancel_active_turn(actor, session_id).await
     }
 
-    pub async fn submit_tool_approval(
-        &self,
-        actor: &Actor,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-        approved: bool,
-        reason: Option<String>,
-    ) -> ApplicationResult<()> {
-        let session = self.access.get_session(actor, session_id).await?;
-        self.turns
-            .submit_tool_approval(session, call_id, tool_name, approved, reason)
-            .await
-    }
-
     pub async fn submit_dynamic_tool_result(
         &self,
         actor: &Actor,

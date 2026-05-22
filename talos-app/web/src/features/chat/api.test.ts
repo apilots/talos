@@ -5,7 +5,6 @@ import {
   createSession,
   retryTimelineEvents,
   sendTimelineEvents,
-  updateSessionApprovalMode,
 } from "./api";
 import {
   resetTalosClientFactory,
@@ -13,19 +12,15 @@ import {
   type TalosWebClient,
 } from "@/shared/api/client";
 
-describe("chat api approval mode wiring", () => {
+describe("chat api session creation", () => {
   afterEach(() => {
     resetTalosClientFactory();
   });
 
-  it("sends session approval mode in create request", async () => {
+  it("does not send removed tool permission configuration in create request", async () => {
     const create = vi.fn(async () => ({
       context: { session_id: "session-1" },
-      conf: {
-        tools: {
-          approval_policy: "always",
-        },
-      },
+      conf: {},
     }));
     setTalosClientFactory(() => ({
       sessions: {
@@ -33,38 +28,15 @@ describe("chat api approval mode wiring", () => {
       },
     } as unknown as TalosWebClient));
 
-    const session = await createSession("user-1", "qwen-max", undefined, "needs_approval");
+    const session = await createSession("user-1", "qwen-max", undefined);
 
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         model: "qwen-max",
-        conf: {
-          tools: {
-            approval_policy: "always",
-          },
-        },
+        conf: {},
       }),
     );
-    expect(session.conf?.tools?.approval_policy).toBe("always");
-  });
-
-  it("maps skip approval mode to never policy", async () => {
-    const patch = vi.fn(async () => undefined);
-    setTalosClientFactory(() => ({
-      sessions: {
-        patch,
-      },
-    } as unknown as TalosWebClient));
-
-    await updateSessionApprovalMode("session-2", "skip");
-
-    expect(patch).toHaveBeenCalledWith("session-2", {
-      conf: {
-        tools: {
-          approval_policy: "never",
-        },
-      },
-    });
+    expect(session.conf).toEqual({});
   });
 });
 

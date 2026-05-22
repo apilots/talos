@@ -38,17 +38,6 @@ pub(crate) fn latest_branch_event<'a>(
         .find(|event| event.branch == branch && predicate(event))
 }
 
-pub(crate) fn latest_event<'a>(
-    ctx: &'a InvocationContext,
-    predicate: impl Fn(&'a KernelTranscriptEvent) -> bool,
-) -> Option<&'a KernelTranscriptEvent> {
-    ctx.session
-        .events
-        .iter()
-        .rev()
-        .find(|event| predicate(event))
-}
-
 #[derive(Default)]
 pub struct RequestProcessorPipeline {
     processors: Vec<Arc<dyn RequestProcessor>>,
@@ -71,7 +60,6 @@ impl RequestProcessorPipeline {
         let mut pipeline = Self::new()
             .with_processor(Arc::new(BasicRequestProcessor))
             .with_processor(Arc::new(AuthRequestProcessor))
-            .with_processor(Arc::new(RequestConfirmationRequestProcessor))
             .with_processor(Arc::new(DynamicToolReplayRequestProcessor))
             .with_processor(Arc::new(InstructionsRequestProcessor))
             .with_processor(Arc::new(IdentityRequestProcessor::new(

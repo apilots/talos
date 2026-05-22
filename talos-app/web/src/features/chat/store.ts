@@ -1,7 +1,5 @@
 import type {
-  ApprovalMode,
   ChatTimelineItem,
-  PendingApproval,
   PendingInput,
   SessionUiStatus,
   StreamSessionState,
@@ -11,12 +9,10 @@ type StreamTextKind = "assistant" | "thinking" | "system";
 
 export interface ChatSlice {
   sessionAliases: Record<string, string>;
-  sessionApprovalModes: Record<string, ApprovalMode>;
   transientStatuses: Record<string, SessionUiStatus>;
   streams: Record<string, StreamSessionState>;
   renameSessionLocal: (sessionId: string, title: string) => void;
   deleteSessionAlias: (sessionId: string) => void;
-  setSessionApprovalMode: (sessionId: string, mode: ApprovalMode) => void;
   setSessionStatus: (sessionId: string, status: SessionUiStatus | undefined) => void;
   resetStream: (sessionId: string) => void;
   resetLiveResponse: (sessionId: string) => void;
@@ -67,7 +63,6 @@ export interface ChatSlice {
     sessionId: string,
     pendingUserAction?: StreamSessionState["pendingUserAction"],
   ) => void;
-  setPendingApproval: (sessionId: string, approval?: PendingApproval) => void;
   setStreamError: (sessionId: string, error?: string) => void;
   setStreamMeta: (
     sessionId: string,
@@ -122,7 +117,7 @@ function mergeTimelineItem(
 ): ChatTimelineItem {
   if (current.kind === "tool_call" && next.kind === "tool_call") {
     const status =
-      current.status === "waiting_approval" && next.status === "running"
+      current.status === "waiting_dynamic_input" && next.status === "running"
         ? current.status
         : next.status;
     return {
@@ -155,7 +150,6 @@ function isTextTimelineItem(item: ChatTimelineItem): item is TextTimelineItem {
 export function createChatSlice(set: ChatSliceSetter): ChatSlice {
   return {
     sessionAliases: {},
-    sessionApprovalModes: {},
     transientStatuses: {},
     streams: {},
     renameSessionLocal: (sessionId, title) =>
@@ -171,13 +165,6 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
         delete aliases[sessionId];
         return { sessionAliases: aliases };
       }),
-    setSessionApprovalMode: (sessionId, mode) =>
-      set((state) => ({
-        sessionApprovalModes: {
-          ...state.sessionApprovalModes,
-          [sessionId]: mode,
-        },
-      })),
     setSessionStatus: (sessionId, status) =>
       set((state) => {
         const next = { ...state.transientStatuses };
@@ -206,7 +193,6 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
               isStreaming: false,
               connectionState: "idle",
               blocks: [],
-              pendingApproval: undefined,
               pendingUserAction: undefined,
               awaitingFinalResponse: false,
               error: undefined,
@@ -312,7 +298,7 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
               (payload.status as
                 | "queued"
                 | "running"
-                | "waiting_approval"
+                | "waiting_dynamic_input"
                 | "done"
                 | "error"
                 | undefined) ?? "queued",
@@ -486,16 +472,6 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
           streams: {
             ...state.streams,
             [sessionId]: { ...stream, pendingUserAction },
-          },
-        };
-      }),
-    setPendingApproval: (sessionId, pendingApproval) =>
-      set((state) => {
-        const stream = ensureStreamState(state, sessionId);
-        return {
-          streams: {
-            ...state.streams,
-            [sessionId]: { ...stream, pendingApproval },
           },
         };
       }),

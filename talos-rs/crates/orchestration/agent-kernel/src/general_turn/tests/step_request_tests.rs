@@ -1,4 +1,5 @@
 use super::*;
+use talos_llm_provider::ChatMessage;
 use talos_prompt::{PromptMode, PromptWindowUsage};
 
 #[test]
@@ -12,7 +13,7 @@ fn test_build_general_turn_step_request_respects_parallel_flag() {
         selected_model: "model".to_string(),
         max_output_tokens: Some(2_048),
         prompt_prefix_messages: Vec::new(),
-        messages: Vec::new(),
+        messages: vec![ChatMessage::user("current user input")],
         tool_definitions: Vec::new(),
         prompt_diagnostics: PromptDiagnostics {
             mode: PromptMode::Full,
@@ -33,6 +34,8 @@ fn test_build_general_turn_step_request_respects_parallel_flag() {
 
     let sequential_request = build_general_turn_step_request(&prepared, &state, false);
     assert!(!sequential_request.parallel_tool_calls);
+    assert_eq!(sequential_request.messages.len(), 1);
+    assert_eq!(sequential_request.messages[0].content, "current user input");
     assert_eq!(
         sequential_request.into_chat_request().max_tokens,
         Some(2_048)

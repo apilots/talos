@@ -107,9 +107,6 @@ from pathlib import Path
 config_path = Path(os.environ["CONFIG_PATH"])
 text = config_path.read_text()
 
-# Integration tests should avoid planner-selector quota variance.
-text = text.replace('planner_selection: "auto"', 'planner_selection: "static"', 1)
-
 if os.environ.get("TALOS_TEST_ENABLE_JWT_AUTH", "").strip() == "1":
     text = text.replace('token: "talos-local-test-token"', 'token: ~', 1)
     text = text.replace('jwt_secret: ${TALOS_GATEWAY_JWT_SECRET}', 'jwt_secret: "talos-test-jwt-secret"', 1)
@@ -567,10 +564,33 @@ def parse_json(raw: str):
     except Exception:
         return {"raw": raw}
 
+SECRET_KEY_PARTS = (
+    "api_key",
+    "apikey",
+    "token",
+    "secret",
+    "password",
+    "authorization",
+)
+
+def redact(value):
+    if isinstance(value, dict):
+        redacted = {}
+        for key, child in value.items():
+            normalized = str(key).lower().replace("-", "_")
+            if any(part in normalized for part in SECRET_KEY_PARTS):
+                redacted[key] = "<redacted>" if child is not None else None
+            else:
+                redacted[key] = redact(child)
+        return redacted
+    if isinstance(value, list):
+        return [redact(item) for item in value]
+    return value
+
 record = {
     "case": case_name,
-    "request": parse_json(request_raw),
-    "response": parse_json(response_raw),
+    "request": redact(parse_json(request_raw)),
+    "response": redact(parse_json(response_raw)),
 }
 print("DETAIL_JSON " + json.dumps(record, ensure_ascii=False))
 PY

@@ -315,9 +315,8 @@ fn apply_history_delta(item: &mut TalosTimelineItem, delta: TalosTimelineDelta) 
                 *result = Some(TalosToolResult { content, is_error });
             }
         }
-        TalosTimelineDelta::ToolApprovalRequest { .. }
-        | TalosTimelineDelta::ToolDynamicRequest { .. } => {
-            item.status = TalosTimelineItemStatus::WaitingApproval;
+        TalosTimelineDelta::ToolDynamicRequest { .. } => {
+            item.status = TalosTimelineItemStatus::WaitingDynamicInput;
         }
         TalosTimelineDelta::Status { status } => {
             item.status = status;

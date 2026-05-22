@@ -202,7 +202,7 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEventEnvel
       timelineItemsBySession.delete(sessionId);
       state.setSessionStatus(
         sessionId,
-        stream?.pendingApproval ? "waiting_approval" : stream?.pendingUserAction ? "running" : undefined,
+        stream?.pendingUserAction ? "running" : undefined,
       );
       state.setStreamMeta(sessionId, {
         isStreaming: false,
@@ -213,7 +213,6 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEventEnvel
     case "turn_error":
       timelineItemsBySession.delete(sessionId);
       state.setPendingUserAction(sessionId, undefined);
-      state.setPendingApproval(sessionId, undefined);
       state.setSessionStatus(sessionId, "error");
       state.setStreamError(sessionId, event.payload.error || "Unknown stream error.");
       state.setStreamMeta(sessionId, {
@@ -284,29 +283,6 @@ function applyItemDelta(
         });
         state.setStreamMeta(sessionId, { awaitingFinalResponse: true });
       }
-      return;
-    case "tool_approval_request":
-      state.setPendingUserAction(sessionId, {
-        type: "tool_approval",
-        call_id: delta.call_id,
-        tool_name: delta.tool_name,
-        prompt: delta.prompt,
-        arguments: unwrapJsonValue(delta.arguments),
-      });
-      ensureTimelineToolForRequest(sessionId, itemId, item, delta.call_id, delta.tool_name);
-      state.updateTimelineTool(sessionId, itemId, {
-        toolName: delta.tool_name,
-        arguments: unwrapJsonValue(delta.arguments),
-        prompt: delta.prompt,
-        status: "waiting_approval",
-      });
-      state.setPendingApproval(sessionId, {
-        callId: delta.call_id,
-        toolName: delta.tool_name,
-        prompt: delta.prompt,
-        arguments: unwrapJsonValue(delta.arguments),
-      });
-      state.setSessionStatus(sessionId, "waiting_approval");
       return;
     case "tool_dynamic_request":
       state.setPendingUserAction(sessionId, {
@@ -498,7 +474,6 @@ export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TalosActi
     const stream = state.streams[sessionId];
     markPendingInputCompleted(sessionId, activeTurn.message_id ?? undefined);
     state.setPendingUserAction(sessionId, undefined);
-    state.setPendingApproval(sessionId, undefined);
     state.setSessionStatus(sessionId, undefined);
     state.setStreamMeta(sessionId, {
       activeMessageId: activeTurn.message_id ?? undefined,
@@ -517,7 +492,6 @@ export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TalosActi
     const state = useAppStore.getState();
     const stream = state.streams[sessionId];
     state.setPendingUserAction(sessionId, undefined);
-    state.setPendingApproval(sessionId, undefined);
     state.setSessionStatus(sessionId, "error");
     state.setStreamMeta(sessionId, {
       lastEventId: activeTurn.last_event_id ?? stream?.lastEventId,
@@ -577,33 +551,6 @@ export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TalosActi
     connectionState: "detached",
   });
 
-  if (pending.type === "tool_approval") {
-    const itemId = pending.item_id ?? `pending-${pending.call_id}`;
-    state.upsertTimelineItem(sessionId, {
-      itemId,
-      sourceItemId: itemId,
-      kind: "tool_call",
-      phase: "acting",
-      status: "waiting_approval",
-      title: pending.tool_name,
-      callId: pending.call_id,
-      toolName: pending.tool_name,
-      arguments: pending.arguments,
-      prompt: pending.prompt,
-      progress: [],
-      startedAtMs: Date.now(),
-      completedAtMs: null,
-    });
-    state.setPendingApproval(sessionId, {
-      callId: pending.call_id,
-      toolName: pending.tool_name,
-      prompt: pending.prompt,
-      arguments: pending.arguments,
-    });
-    state.setSessionStatus(sessionId, "waiting_approval");
-    return;
-  }
-
   const itemId = pending.item_id ?? `pending-${pending.call_id}`;
   state.upsertTimelineItem(sessionId, {
     itemId,
@@ -625,7 +572,6 @@ export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TalosActi
 export function clearInactiveTurnSnapshot(sessionId: string) {
   const state = useAppStore.getState();
   state.setPendingUserAction(sessionId, undefined);
-  state.setPendingApproval(sessionId, undefined);
   state.setSessionStatus(sessionId, undefined);
   state.setStreamMeta(sessionId, {
     isStreaming: false,

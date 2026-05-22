@@ -1,12 +1,11 @@
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
     Frame,
 };
 
-use crate::types::{AppState, ChatRole, PendingApprovalState};
+use crate::types::AppState;
 use crate::utils::APP_VERSION;
 use crate::TuiApp;
 
@@ -132,16 +131,12 @@ impl TuiApp {
         f.render_widget(input_panel, left_chunks[2]);
         self.input_area = Some(input_inner);
 
-        if let Some(approval) = &self.pending_approval {
-            self.render_approval_card(f, input_inner, approval);
-        } else {
-            let input_bg_style = Style::default().bg(Color::Rgb(72, 76, 88));
-            f.render_widget(Block::default().style(input_bg_style), input_inner);
-            let content_lines =
-                self.input_lines(input_inner.width as usize, input_inner.height as usize);
-            let input_row = Paragraph::new(content_lines).style(input_bg_style);
-            f.render_widget(input_row, input_inner);
-        }
+        let input_bg_style = Style::default().bg(Color::Rgb(72, 76, 88));
+        f.render_widget(Block::default().style(input_bg_style), input_inner);
+        let content_lines =
+            self.input_lines(input_inner.width as usize, input_inner.height as usize);
+        let input_row = Paragraph::new(content_lines).style(input_bg_style);
+        f.render_widget(input_row, input_inner);
 
         let wait_style = if self.in_flight {
             Style::default().bg(Color::Rgb(36, 39, 46)).fg(Color::Cyan)
@@ -157,115 +152,5 @@ impl TuiApp {
 
         let bottom_gap = Block::default().style(Style::default().bg(Color::Rgb(33, 38, 49)));
         f.render_widget(bottom_gap, left_chunks[4]);
-    }
-
-    pub(crate) async fn submit_approval(&mut self, approved: bool) {
-        let Some(approval) = self.pending_approval.take() else {
-            return;
-        };
-        let Some(client) = self.gateway_client.clone() else {
-            self.push_block(ChatRole::System, "Gateway client unavailable.".to_string());
-            return;
-        };
-        let Some(session_id) = self.session_id.clone() else {
-            self.push_block(ChatRole::System, "No active session.".to_string());
-            return;
-        };
-        let label = if approved { "approved" } else { "rejected" };
-        self.push_right_event(format!(
-            "tool approval {}: {}",
-            label,
-            crate::utils::display_tool_name(&approval.tool_name)
-        ));
-
-        if let Err(err) = client
-            .submit_tool_approval(
-                &session_id,
-                &approval.call_id,
-                &approval.tool_name,
-                approved,
-                None,
-            )
-            .await
-        {
-            self.push_block(
-                ChatRole::System,
-                format!("Failed to submit approval: {}", err),
-            );
-            return;
-        }
-
-        // Re-invoke session to continue execution after approval
-        let continuation = if approved {
-            String::new()
-        } else {
-            format!(
-                "[Tool `{}` was rejected by user.]",
-                crate::utils::display_tool_name(&approval.tool_name)
-            )
-        };
-        if let Err(err) = self.start_stream_for_message(continuation).await {
-            self.push_block(
-                ChatRole::System,
-                format!("Failed to continue after approval: {}", err),
-            );
-        }
-    }
-
-    pub(crate) fn render_approval_card(
-        &self,
-        f: &mut Frame,
-        area: Rect,
-        approval: &PendingApprovalState,
-    ) {
-        let card_style = Style::default().bg(Color::Rgb(50, 35, 20)).fg(Color::White);
-        f.render_widget(Block::default().style(card_style), area);
-        let title = format!(
-            " ⚠  {} — 需要确认 ",
-            crate::utils::display_tool_name(&approval.tool_name)
-        );
-        let card = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Yellow))
-            .title(Span::styled(
-                title,
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ))
-            .style(card_style);
-        let inner = card.inner(area);
-        f.render_widget(card, area);
-        let prompt_text = if approval.prompt.is_empty() {
-            format!(
-                "执行工具: {}",
-                crate::utils::display_tool_name(&approval.tool_name)
-            )
-        } else {
-            approval.prompt.clone()
-        };
-        let lines = vec![
-            Line::from(Span::styled(prompt_text, Style::default().fg(Color::White))),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled(
-                    " [y / Enter: 批准] ",
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::Green)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw("  "),
-                Span::styled(
-                    " [n / Esc: 拒绝] ",
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::Red)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]),
-        ];
-        let para = Paragraph::new(lines).style(card_style);
-        f.render_widget(para, inner);
     }
 }

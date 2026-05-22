@@ -175,35 +175,6 @@ describe("timeline stream events", () => {
     ]));
   });
 
-  it("restores pending approval on the original timeline item id", () => {
-    applyActiveTurnSnapshot("sess-1", activeTurn({
-      status: "waiting_user_action",
-      pending_user_action: {
-        type: "tool_approval",
-        item_id: "tool-1",
-        call_id: "call-1",
-        tool_name: "Shell",
-        prompt: "Approve command?",
-        arguments: { command: "pwd" },
-      },
-    }));
-    applyStreamEvent("sess-1", itemStarted("tool-1", "tool_call", "acting", 10));
-
-    const timeline = useAppStore.getState().streams["sess-1"]?.blocks.find((block) => block.kind === "timeline");
-    expect(timeline).toMatchObject({
-      kind: "timeline",
-      items: [
-        expect.objectContaining({
-          itemId: "tool-1",
-          callId: "call-1",
-          status: "waiting_approval",
-          prompt: "Approve command?",
-        }),
-      ],
-    });
-    expect(timeline?.kind === "timeline" ? timeline.items : []).toHaveLength(1);
-  });
-
   it("restores pending dynamic tool result on the original timeline item id", () => {
     applyActiveTurnSnapshot("sess-1", activeTurn({
       status: "waiting_user_action",

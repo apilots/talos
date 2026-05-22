@@ -64,7 +64,6 @@ async fn execute_app_server_smoke_with_client(
     match cmd.scenario.as_str() {
         "smoke" => run_app_server_smoke(client).await?,
         "turn-smoke" => run_app_server_turn_smoke(client).await?,
-        "approval-resume" => run_app_server_approval_resume(client).await?,
         other => return Err(format!("unsupported app-server smoke scenario: {other}").into()),
     }
     println!("App-server scenario passed: {}", cmd.scenario);
@@ -154,135 +153,6 @@ async fn run_app_server_turn_smoke(
         }
     }
     Err("app-server turn smoke did not receive a complete event flow".into())
-}
-
-async fn run_app_server_approval_resume(
-    client: &mut AppServerClient,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let session = client
-        .create_session(SessionCreateParams {
-            context: default_chat_context("cli-app-server-approval"),
-            model: None,
-            project_id: None,
-            current_directory: current_cli_directory(),
-        })
-        .await?;
-    let session_id = session.context.session_id;
-    let setup_subscription = client
-        .subscribe_events(EventSubscribeParams {
-            session_id: session_id.clone(),
-            since_event_id: None,
-            replay_limit: Some(128),
-            close_when_idle: None,
-            close_on_terminal: None,
-        })
-        .await?;
-
-    client
-        .start_turn(
-            &session_id,
-            TalosMessageRequest {
-                input: vec![TalosInputItem::Text {
-                    text: "Call the Bash tool exactly once with command `echo APPROVAL_RESUME_OK`, timeout 10, and dangerously_disable_sandbox true. Do not answer directly before calling the tool.".to_string(),
-                }],
-                workspace_id: None,
-            },
-            Some(format!(
-                "cli-app-server-approval-pending-{}",
-                uuid::Uuid::new_v4().simple()
-            )),
-        )
-        .await?;
-
-    let mut pending_call_id = None;
-    let mut pending_tool_name = None;
-    let mut pending_event_id = None;
-    for _ in 0..1024 {
-        let envelope = client.next_event().await?;
-        if envelope.session_id != session_id {
-            continue;
-        }
-        match envelope.event.payload {
-            TalosTimelineEventPayload::ItemDelta(payload) => {
-                if let TalosTimelineDelta::ToolApprovalRequest {
-                    call_id, tool_name, ..
-                } = payload.delta
-                {
-                    pending_call_id = Some(call_id);
-                    pending_tool_name = Some(tool_name);
-                    pending_event_id = Some(envelope.event_id.clone());
-                }
-            }
-            TalosTimelineEventPayload::TurnCompleted(_) if pending_call_id.is_some() => {
-                break;
-            }
-            TalosTimelineEventPayload::TurnError(payload) => {
-                return Err(format!("app-server approval setup failed: {}", payload.error).into());
-            }
-            _ => {}
-        }
-    }
-
-    let call_id = pending_call_id.ok_or("missing pending approval call_id")?;
-    let tool_name = pending_tool_name.ok_or("missing pending approval tool_name")?;
-    let event_id = pending_event_id.ok_or("missing pending approval event_id")?;
-    client
-        .unsubscribe_events(&setup_subscription.subscription_id)
-        .await?;
-    client
-        .submit_tool_approval(
-            &session_id,
-            &call_id,
-            &tool_name,
-            true,
-            Some("approved by cli regression".to_string()),
-        )
-        .await?;
-    client
-        .subscribe_events(EventSubscribeParams {
-            session_id: session_id.clone(),
-            since_event_id: Some(event_id),
-            replay_limit: Some(512),
-            close_when_idle: None,
-            close_on_terminal: None,
-        })
-        .await?;
-
-    let mut saw_tool_completed = false;
-    for _ in 0..1024 {
-        let envelope = client.next_event().await?;
-        if envelope.session_id != session_id {
-            continue;
-        }
-        match envelope.event.payload {
-            TalosTimelineEventPayload::ItemDelta(payload) => {
-                if matches!(payload.delta, TalosTimelineDelta::ToolResult { .. }) {
-                    saw_tool_completed = true;
-                }
-            }
-            TalosTimelineEventPayload::ItemCompleted(payload) => {
-                if timeline_tool_call_id(payload.final_content.as_ref()).as_deref()
-                    == Some(call_id.as_str())
-                {
-                    saw_tool_completed = true;
-                }
-            }
-            TalosTimelineEventPayload::TurnCompleted(_) if saw_tool_completed => return Ok(()),
-            TalosTimelineEventPayload::TurnError(payload) => {
-                return Err(format!("app-server approval resume failed: {}", payload.error).into());
-            }
-            _ => {}
-        }
-    }
-
-    Err("app-server approval resume did not complete approved tool call".into())
-}
-
-fn timeline_tool_call_id(content: Option<&TalosTimelineContent>) -> Option<String> {
-    match content {
-        Some(TalosTimelineContent::ToolCall { call_id, .. }) => Some(call_id.clone()),
-        _ => None,
-    }
 }
 
 async fn execute_app_server_chat_command(
@@ -418,25 +288,6 @@ async fn execute_app_server_session_command(
             }
             println!("Exited interactive mode");
         }
-        SessionCommands::ApproveTool {
-            session_id,
-            call_id,
-            tool_name,
-            approved,
-            reason,
-        } => {
-            client
-                .submit_tool_approval(&session_id, &call_id, &tool_name, approved, reason)
-                .await?;
-            let verdict = if approved { "approved" } else { "rejected" };
-            println!(
-                "Tool call {} ({}) {}: {}",
-                display_tool_name(&tool_name),
-                tool_name,
-                verdict,
-                call_id
-            );
-        }
     }
     Ok(())
 }
@@ -567,16 +418,6 @@ fn render_event(
                     payload.item_id, is_error
                 );
             }
-            TalosTimelineDelta::ToolApprovalRequest {
-                call_id, tool_name, ..
-            } => {
-                eprintln!(
-                    "TOOL_CALL_APPROVAL tool={} internal={} call_id={}",
-                    display_tool_name(tool_name),
-                    tool_name,
-                    call_id
-                );
-            }
             TalosTimelineDelta::ToolDynamicRequest {
                 call_id, tool_name, ..
             } => {
@@ -693,41 +534,5 @@ mod tests {
         let args = vec!["talos", "chat", "in", "sess-1", "hello", "--stream"];
         let cli = Cli::try_parse_from(args);
         assert!(cli.is_ok());
-    }
-
-    #[test]
-    fn test_cli_approve_tool_can_parse_rejection() {
-        let args = vec![
-            "talos",
-            "session",
-            "approve-tool",
-            "sess-1",
-            "--call-id",
-            "call-1",
-            "--tool-name",
-            "bash",
-            "--approved",
-            "false",
-            "--reason",
-            "deny",
-        ];
-        let cli = Cli::try_parse_from(args).expect("CLI should parse approval rejection");
-
-        let Commands::Session(SessionCommands::ApproveTool {
-            session_id,
-            call_id,
-            tool_name,
-            approved,
-            reason,
-        }) = cli.command
-        else {
-            panic!("expected approve-tool command");
-        };
-
-        assert_eq!(session_id, "sess-1");
-        assert_eq!(call_id, "call-1");
-        assert_eq!(tool_name, "bash");
-        assert!(!approved);
-        assert_eq!(reason.as_deref(), Some("deny"));
     }
 }

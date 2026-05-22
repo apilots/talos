@@ -32,8 +32,6 @@ impl ContentsBuilder {
                 KernelTranscriptPayload::StateOnly
                 | KernelTranscriptPayload::Transfer { .. }
                 | KernelTranscriptPayload::Auth { .. }
-                | KernelTranscriptPayload::Confirmation { .. }
-                | KernelTranscriptPayload::ApprovalResponse { .. }
                 | KernelTranscriptPayload::DynamicToolRequest { .. }
                 | KernelTranscriptPayload::DynamicToolResponse { .. } => None,
             })
@@ -46,7 +44,6 @@ impl ContentsBuilder {
             .filter(|event| !event.partial)
             .filter(|event| !Self::is_framework_event(event))
             .filter(|event| !Self::is_auth_event(event))
-            .filter(|event| !Self::is_confirmation_event(event))
             .filter(|event| !Self::contains_empty_content(event))
             .collect()
     }
@@ -134,10 +131,6 @@ impl ContentsBuilder {
 
     fn is_auth_event(event: &KernelTranscriptEvent) -> bool {
         matches!(event.payload, KernelTranscriptPayload::Auth { .. })
-    }
-
-    fn is_confirmation_event(event: &KernelTranscriptEvent) -> bool {
-        matches!(event.payload, KernelTranscriptPayload::Confirmation { .. })
     }
 
     fn rearrange_latest_tool_results(
@@ -250,7 +243,7 @@ mod tests {
     use crate::execution::EventCompaction;
     use crate::session::{
         KernelTranscriptAuthPayload, KernelTranscriptCompactionPayload,
-        KernelTranscriptConfirmationPayload, KernelTranscriptTransferPayload,
+        KernelTranscriptTransferPayload,
     };
     use crate::{EventAuthor, SessionState};
     use talos_llm_provider::FunctionCall;
@@ -480,25 +473,6 @@ mod tests {
                         payload: KernelTranscriptAuthPayload {
                             provider: "github".to_string(),
                             prompt: "auth required".to_string(),
-                        },
-                    },
-                    actions: crate::EventActions::default(),
-                    partial: false,
-                    timestamp: now,
-                },
-                KernelTranscriptEvent {
-                    id: "confirm".to_string(),
-                    session_id: "s1".to_string(),
-                    invocation_id: "i1".to_string(),
-                    branch: ExecutionBranch::ReactiveLoop,
-                    author: EventAuthor::System,
-                    kind: KernelTranscriptEventKind::SystemMessage,
-                    payload: KernelTranscriptPayload::Confirmation {
-                        payload: KernelTranscriptConfirmationPayload {
-                            tool_name: "rm".to_string(),
-                            call_id: "call_1".to_string(),
-                            prompt: "confirm".to_string(),
-                            arguments: serde_json::json!({}).into(),
                         },
                     },
                     actions: crate::EventActions::default(),

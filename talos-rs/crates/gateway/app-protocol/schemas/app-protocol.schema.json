@@ -444,17 +444,6 @@
       ],
       "type": "object"
     },
-    "ClientApprovalRequestParams": {
-      "properties": {
-        "prompt": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "prompt"
-      ],
-      "type": "object"
-    },
     "ClientCapabilities": {
       "properties": {
         "protocol_version": {
@@ -520,7 +509,6 @@
         "turn.retry",
         "event.subscribe",
         "event.unsubscribe",
-        "tool.approval.submit",
         "tool.dynamic_result.submit",
         "admin.session.list",
         "admin.project.list",
@@ -960,24 +948,6 @@
             },
             "params": {
               "$ref": "#/definitions/EventUnsubscribeParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "tool.approval.submit"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/ToolApprovalSubmitParams"
             }
           },
           "required": [
@@ -2382,24 +2352,6 @@
             "params"
           ],
           "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "client.approval.request"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/ClientApprovalRequestParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
         }
       ]
     },
@@ -2652,6 +2604,7 @@
         "end_turn",
         "model_output_limit",
         "tool_round_limit",
+        "waiting_dynamic_input",
         "transfer_unresolved",
         "before_model_callback_stopped",
         "after_model_callback_stopped",
@@ -2948,36 +2901,6 @@
           "required": [
             "content",
             "is_error",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "arguments": {
-              "$ref": "#/definitions/TalosJsonValue"
-            },
-            "call_id": {
-              "type": "string"
-            },
-            "prompt": {
-              "type": "string"
-            },
-            "tool_name": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "tool_approval_request"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "arguments",
-            "call_id",
-            "prompt",
-            "tool_name",
             "type"
           ],
           "type": "object"
@@ -3372,7 +3295,7 @@
       "description": "Lifecycle status for a timeline item.",
       "enum": [
         "running",
-        "waiting_approval",
+        "waiting_dynamic_input",
         "completed",
         "failed",
         "cancelled"
@@ -3601,43 +3524,6 @@
       "oneOf": [
         {
           "properties": {
-            "arguments": {
-              "$ref": "#/definitions/TalosJsonValue"
-            },
-            "call_id": {
-              "type": "string"
-            },
-            "item_id": {
-              "default": null,
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "prompt": {
-              "type": "string"
-            },
-            "tool_name": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "tool_approval"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "arguments",
-            "call_id",
-            "prompt",
-            "tool_name",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
             "call_id": {
               "type": "string"
             },
@@ -3751,36 +3637,6 @@
       "required": [
         "event",
         "subscription_id"
-      ],
-      "type": "object"
-    },
-    "ToolApprovalSubmitParams": {
-      "properties": {
-        "approved": {
-          "type": "boolean"
-        },
-        "call_id": {
-          "type": "string"
-        },
-        "reason": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "session_id": {
-          "type": "string"
-        },
-        "tool_name": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "approved",
-        "call_id",
-        "session_id",
-        "tool_name"
       ],
       "type": "object"
     },

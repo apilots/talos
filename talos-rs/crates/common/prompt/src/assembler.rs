@@ -448,10 +448,6 @@ fn build_appended_system_context(builder: &PromptBuilder<'_>) -> Option<String> 
         "- sandbox_mode: {}",
         sandbox_mode_label(&builder.config.tools.sandbox_policy.default_mode)
     ));
-    lines.push(format!(
-        "- approval_policy: {}",
-        approval_policy_label(&builder.config.tools.approval_policy)
-    ));
 
     if let Some(environment) = builder.session_environment.as_ref() {
         lines.push(format!(
@@ -538,14 +534,6 @@ fn sandbox_mode_label(mode: &talos_config::ToolSandboxModeConfig) -> &'static st
         talos_config::ToolSandboxModeConfig::ReadOnly => "read_only",
         talos_config::ToolSandboxModeConfig::WorkspaceWrite => "workspace_write",
         talos_config::ToolSandboxModeConfig::DangerFullAccess => "danger_full_access",
-    }
-}
-
-fn approval_policy_label(policy: &talos_config::ToolApprovalPolicy) -> &'static str {
-    match policy {
-        talos_config::ToolApprovalPolicy::OnRequest => "on_request",
-        talos_config::ToolApprovalPolicy::Always => "always",
-        talos_config::ToolApprovalPolicy::Never => "never",
     }
 }
 

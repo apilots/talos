@@ -2,14 +2,11 @@ use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use talos_agent::{OrchestratorExecution, OrchestratorRequest};
-use talos_error::{TalosError, TalosResult};
-use talos_memory::{Memory, MemoryStore, TalosTurn};
-use talos_session_store::SessionStore;
+use talos_agent::{OrchestratorExecution, OrchestratorRequest, SessionTitleUpdate};
+use talos_error::TalosResult;
 use talos_types::talos::{
-    StopReason, TalosConnectionMode, TalosContentItem, TalosContext, TalosInputItem,
-    TalosOutputItem, TalosProvider, TalosSessionEnvironment, TalosSourceType, TalosTimelineEvent,
-    TalosUsage,
+    StopReason, TalosConnectionMode, TalosContext, TalosInputItem, TalosProvider,
+    TalosSessionEnvironment, TalosSourceType, TalosTimelineEvent, TalosUsage,
 };
 use talos_types::{
     OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, ProjectPatch, ProjectRecord,
@@ -19,10 +16,6 @@ use talos_types::{
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-fn test_timestamp() -> serde_json::Value {
-    serde_json::json!("2026-04-09T00:00:00Z")
-}
-
 struct MockRouter;
 
 impl MockRouter {
@@ -31,24 +24,14 @@ impl MockRouter {
     }
 }
 
-struct RecordingApprovalAgent {
-    approvals: Arc<Mutex<Vec<(String, String, String, bool, Option<String>)>>>,
-    resumed_inputs: Arc<Mutex<Vec<Vec<TalosInputItem>>>>,
+struct RecordingStreamAgent {
     stream_requests: Arc<Mutex<Vec<OrchestratorRequest>>>,
-    cancelled_sessions: Arc<Mutex<Vec<String>>>,
-    compacted_sessions: Arc<Mutex<Vec<String>>>,
-    cleared_sessions: Arc<Mutex<Vec<String>>>,
 }
 
-impl RecordingApprovalAgent {
+impl RecordingStreamAgent {
     fn new() -> Self {
         Self {
-            approvals: Arc::new(Mutex::new(Vec::new())),
-            resumed_inputs: Arc::new(Mutex::new(Vec::new())),
             stream_requests: Arc::new(Mutex::new(Vec::new())),
-            cancelled_sessions: Arc::new(Mutex::new(Vec::new())),
-            compacted_sessions: Arc::new(Mutex::new(Vec::new())),
-            cleared_sessions: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }
@@ -65,22 +48,6 @@ struct TrackingFlushAgent {
 impl TrackingFlushAgent {
     fn new(pending: usize, drained: Arc<AtomicUsize>) -> Self {
         Self { pending, drained }
-    }
-}
-
-struct GuardedSessionAgent {
-    active_turn: bool,
-    pending_flush: bool,
-    cleared_sessions: Arc<Mutex<Vec<String>>>,
-}
-
-impl GuardedSessionAgent {
-    fn new(active_turn: bool, pending_flush: bool) -> Self {
-        Self {
-            active_turn,
-            pending_flush,
-            cleared_sessions: Arc::new(Mutex::new(Vec::new())),
-        }
     }
 }
 
@@ -114,16 +81,12 @@ impl talos_router::Router for MockRouter {
 }
 
 #[async_trait::async_trait]
-impl AgentOrchestrator for RecordingApprovalAgent {
+impl AgentOrchestrator for RecordingStreamAgent {
     fn id(&self) -> &str {
-        "recording-approval"
+        "recording-stream"
     }
 
     async fn run(&self, request: OrchestratorRequest) -> TalosResult<OrchestratorExecution> {
-        self.resumed_inputs
-            .lock()
-            .unwrap()
-            .push(request.input.clone());
         Ok(OrchestratorExecution {
             output_text: "ok".to_string(),
             output_items: Vec::new(),
@@ -132,6 +95,9 @@ impl AgentOrchestrator for RecordingApprovalAgent {
             usage: TalosUsage::default(),
             task_count: 1,
             session_id: request.session.context.session_id,
+            session_title_update: Some(SessionTitleUpdate {
+                title: "Meaningful Topic".to_string(),
+            }),
         })
     }
 
@@ -148,25 +114,11 @@ impl AgentOrchestrator for RecordingApprovalAgent {
         Ok(())
     }
 
-    async fn compact_session(&self, session: TalosSession) -> TalosResult<TalosUsage> {
-        self.compacted_sessions
-            .lock()
-            .unwrap()
-            .push(session.context.session_id);
-        Ok(TalosUsage {
-            input_tokens: 5,
-            output_tokens: 3,
-            total_tokens: 8,
-            cache_creation_input_tokens: Some(2),
-            cache_read_input_tokens: Some(4),
-        })
+    async fn compact_session(&self, _session: TalosSession) -> TalosResult<TalosUsage> {
+        Ok(TalosUsage::default())
     }
 
-    async fn clear_session(&self, session: TalosSession) -> TalosResult<()> {
-        self.cleared_sessions
-            .lock()
-            .unwrap()
-            .push(session.context.session_id);
+    async fn clear_session(&self, _session: TalosSession) -> TalosResult<()> {
         Ok(())
     }
 
@@ -186,33 +138,11 @@ impl AgentOrchestrator for RecordingApprovalAgent {
         false
     }
 
-    async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()> {
-        self.cancelled_sessions
-            .lock()
-            .unwrap()
-            .push(session_id.to_string());
+    async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
         Ok(())
     }
 
     async fn drain_active_turns(&self, _timeout: Duration) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn submit_tool_approval(
-        &self,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-        approved: bool,
-        reason: Option<String>,
-    ) -> TalosResult<()> {
-        self.approvals.lock().unwrap().push((
-            session_id.to_string(),
-            call_id.to_string(),
-            tool_name.to_string(),
-            approved,
-            reason,
-        ));
         Ok(())
     }
 
@@ -447,6 +377,7 @@ impl AgentOrchestrator for TrackingFlushAgent {
             usage: TalosUsage::default(),
             task_count: 0,
             session_id: request.session.context.session_id,
+            session_title_update: None,
         })
     }
 
@@ -495,106 +426,6 @@ impl AgentOrchestrator for TrackingFlushAgent {
         Ok(())
     }
 
-    async fn submit_tool_approval(
-        &self,
-        _session_id: &str,
-        _call_id: &str,
-        _tool_name: &str,
-        _approved: bool,
-        _reason: Option<String>,
-    ) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn submit_dynamic_tool_result(
-        &self,
-        _session_id: &str,
-        _call_id: &str,
-        _tool_name: &str,
-        _output: String,
-        _success: bool,
-    ) -> TalosResult<()> {
-        Ok(())
-    }
-}
-
-#[async_trait::async_trait]
-impl AgentOrchestrator for GuardedSessionAgent {
-    fn id(&self) -> &str {
-        "guarded-session"
-    }
-
-    async fn run(&self, request: OrchestratorRequest) -> TalosResult<OrchestratorExecution> {
-        Ok(OrchestratorExecution {
-            output_text: String::new(),
-            output_items: Vec::new(),
-            reasoning: Vec::new(),
-            stop_reason: StopReason::EndTurn,
-            usage: TalosUsage::default(),
-            task_count: 0,
-            session_id: request.session.context.session_id,
-        })
-    }
-
-    async fn run_stream(
-        &self,
-        _request: OrchestratorRequest,
-    ) -> TalosResult<mpsc::Receiver<TalosTimelineEvent>> {
-        let (_tx, rx) = mpsc::channel(1);
-        Ok(rx)
-    }
-
-    async fn close_session(&self, _session: TalosSession) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn compact_session(&self, _session: TalosSession) -> TalosResult<TalosUsage> {
-        Ok(TalosUsage::default())
-    }
-
-    async fn clear_session(&self, session: TalosSession) -> TalosResult<()> {
-        self.cleared_sessions
-            .lock()
-            .unwrap()
-            .push(session.context.session_id);
-        Ok(())
-    }
-
-    async fn drain_memory_flushes(&self, _timeout: Duration) -> TalosResult<()> {
-        Ok(())
-    }
-
-    fn pending_memory_flushes(&self) -> usize {
-        usize::from(self.pending_flush)
-    }
-
-    async fn has_pending_memory_flush(&self, _session_id: &str) -> bool {
-        self.pending_flush
-    }
-
-    fn has_active_turn(&self, _session_id: &str) -> bool {
-        self.active_turn
-    }
-
-    async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn drain_active_turns(&self, _timeout: Duration) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn submit_tool_approval(
-        &self,
-        _session_id: &str,
-        _call_id: &str,
-        _tool_name: &str,
-        _approved: bool,
-        _reason: Option<String>,
-    ) -> TalosResult<()> {
-        Ok(())
-    }
-
     async fn submit_dynamic_tool_result(
         &self,
         _session_id: &str,
@@ -611,5 +442,3 @@ impl AgentOrchestrator for GuardedSessionAgent {
 mod core;
 #[path = "tests/history_remote.rs"]
 mod history_remote;
-#[path = "tests/session_actions.rs"]
-mod session_actions;

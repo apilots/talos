@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use talos_agent::{AgentImpl, AgentOrchestrator, OrchestratorRequest};
+use talos_agent::{AgentHarness, AgentOrchestrator, OrchestratorRequest};
 use talos_error::TalosResult;
 use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, ModelBlockCompleted,
@@ -328,7 +328,7 @@ impl LlmProvider for IntegrationMockProvider {
     }
 }
 
-fn create_agent_with_tool(state: Arc<IntegrationState>) -> AgentImpl {
+fn create_agent_with_tool(state: Arc<IntegrationState>) -> AgentHarness {
     let provider = Arc::new(IntegrationMockProvider {
         state: state.clone(),
     });
@@ -337,7 +337,7 @@ fn create_agent_with_tool(state: Arc<IntegrationState>) -> AgentImpl {
     registry.register(Arc::new(EchoTool {
         state: state.clone(),
     }));
-    AgentImpl::new(
+    AgentHarness::new(
         "integration_agent".to_string(),
         "Integration Agent".to_string(),
         "Agent for integration tests".to_string(),

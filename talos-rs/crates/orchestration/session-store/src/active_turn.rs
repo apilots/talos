@@ -2,7 +2,6 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use talos_error::{TalosError, TalosResult};
 use talos_storage::Row;
-use talos_types::talos::TalosJsonValue;
 
 use crate::events::TimelineEventId;
 use crate::DatabaseSessionStore;
@@ -32,18 +31,7 @@ impl ActiveTurnStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PendingUserAction {
-    ToolApproval(PendingToolApproval),
     DynamicToolResult(PendingDynamicToolResult),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct PendingToolApproval {
-    #[serde(default)]
-    pub item_id: Option<String>,
-    pub call_id: String,
-    pub tool_name: String,
-    pub prompt: String,
-    pub arguments: TalosJsonValue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

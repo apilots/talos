@@ -34,7 +34,6 @@ import type {
   TalosMessageRetryRequest,
   TalosSession,
   TimelineRecoverySnapshot,
-  ToolApprovalRequest,
   WorkspaceDocDetail,
   WorkspaceDocKind,
   WorkspaceDocSummary,
@@ -475,13 +474,6 @@ export class TalosClient {
     },
   };
 
-  toolApprovals = {
-    submit: (sessionId: string, request: ToolApprovalRequest) =>
-      this.http.request<void>(this.url(`/v1/sessions/${sessionId}/tool-approvals`), {
-        method: "POST",
-        body: JSON.stringify(request),
-      }),
-  };
 }
 
 function createIdempotencyKey() {

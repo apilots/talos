@@ -94,7 +94,6 @@ fn build_tool_result_payload(
     match outcome {
         ToolDispatchOutcome::Pending { pending, .. } => {
             let error = match pending {
-                ToolPending::Approval { prompt, .. } => prompt.clone(),
                 ToolPending::Dynamic { .. } => "dynamic tool response is pending".to_string(),
             };
             (
@@ -263,7 +262,6 @@ pub(crate) fn collect_general_turn_tool_batch(
 ) -> GeneralTurnToolBatch {
     let mut output_items = Vec::new();
     let mut tool_messages = Vec::new();
-    let mut pending_confirmations = Vec::new();
     let mut pending_dynamic_requests = Vec::new();
     let mut retrieved_memories = Vec::new();
     let mut logs = Vec::new();
@@ -272,18 +270,6 @@ pub(crate) fn collect_general_turn_tool_batch(
     for output in outputs {
         let reduced = reduce_tool_execution_output(&output);
         if let ToolDispatchOutcome::Pending {
-            pending: ToolPending::Approval { prompt, .. },
-            ..
-        } = &output.outcome
-        {
-            pending_confirmations.push(PendingToolConfirmation {
-                tool_name: output.tool_name.clone(),
-                call_id: output.call_id.clone(),
-                prompt: prompt.clone(),
-                arguments: reduced.pending_arguments.unwrap_or(Value::Null),
-            });
-            continue;
-        } else if let ToolDispatchOutcome::Pending {
             pending: ToolPending::Dynamic { .. },
             ..
         } = &output.outcome
@@ -338,7 +324,6 @@ pub(crate) fn collect_general_turn_tool_batch(
     GeneralTurnToolBatch {
         output_items,
         tool_messages,
-        pending_confirmations,
         pending_dynamic_requests,
         retrieved_memories,
         logs,
@@ -354,7 +339,6 @@ pub async fn execute_general_turn_tool_batch(
     kernel_config: Arc<AgentKernelConfig>,
     user_id: &str,
     tool_calls: &[FunctionCall],
-    pre_approved_call_ids: std::collections::HashSet<String>,
     replay_dynamic_tool_results: std::collections::HashMap<String, ReplayDynamicToolResult>,
     stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
 ) -> TalosResult<GeneralTurnToolBatch> {
@@ -364,7 +348,6 @@ pub async fn execute_general_turn_tool_batch(
         project_root: prepared.project_root.clone(),
         kernel_config,
         memory_store,
-        pre_approved_call_ids,
         dynamic_tool_results: replay_dynamic_tool_results,
     };
     let inputs = tool_calls
@@ -395,6 +378,7 @@ pub fn apply_general_turn_tool_batch(
     state.output_items.extend(batch.output_items.clone());
     state.tool_result_log.extend(batch.logs.clone());
     state.tool_error_count += batch.error_count;
+    state.pending_dynamic_requests = batch.pending_dynamic_requests.clone();
     state
         .retrieved_memories
         .extend(batch.retrieved_memories.clone());
@@ -471,7 +455,7 @@ mod tests {
                     "error": "authorization denied",
                     "error_kind": "permission_rejection",
                     "retryable": false,
-                    "suggested_action": "request approval or choose a less privileged tool",
+                    "suggested_action": "choose a less privileged tool or provide a dynamic tool result",
                     "gate_source": "allow_list"
                 })),
             }),
@@ -503,49 +487,6 @@ mod tests {
             }
             other => panic!("expected tool result event, got {other:?}"),
         }
-    }
-
-    #[tokio::test]
-    async fn emit_tool_result_stream_event_skips_pending_approval() {
-        let output = ToolExecutionOutput {
-            call_id: "call-approval".to_string(),
-            tool_name: "Bash".to_string(),
-            outcome: ToolDispatchOutcome::pending_approval(
-                "Bash",
-                "Approve command?",
-                serde_json::json!({"command": "date"}),
-            ),
-            is_error: false,
-        };
-        let (tx, mut rx) = mpsc::channel(4);
-
-        emit_tool_result_stream_event(Some(&tx), &output).await;
-
-        assert!(
-            rx.try_recv().is_err(),
-            "pending approval should not emit a terminal tool result"
-        );
-    }
-
-    #[test]
-    fn collect_general_turn_tool_batch_excludes_pending_approval_from_results() {
-        let batch = collect_general_turn_tool_batch(vec![ToolExecutionOutput {
-            call_id: "call-approval".to_string(),
-            tool_name: "Bash".to_string(),
-            outcome: ToolDispatchOutcome::pending_approval(
-                "Bash",
-                "Approve command?",
-                serde_json::json!({"command": "date"}),
-            ),
-            is_error: false,
-        }]);
-
-        assert!(batch.output_items.is_empty());
-        assert!(batch.tool_messages.is_empty());
-        assert_eq!(batch.logs.len(), 0);
-        assert_eq!(batch.error_count, 0);
-        assert_eq!(batch.pending_confirmations.len(), 1);
-        assert_eq!(batch.pending_confirmations[0].call_id, "call-approval");
     }
 
     #[test]

@@ -12,10 +12,9 @@ use talos_error::TalosResult;
 use talos_llm_provider::{ChatMessage, FunctionCall};
 use talos_memory::SessionTranscriptPayload;
 use talos_memory::{
-    Memory, MemoryStore, SessionTranscriptActions, SessionTranscriptApprovalResponsePayload,
-    SessionTranscriptAuthPayload, SessionTranscriptAuthor, SessionTranscriptBranch,
-    SessionTranscriptCompaction, SessionTranscriptCompactionPayload,
-    SessionTranscriptConfirmationPayload, SessionTranscriptDynamicToolRequestPayload,
+    Memory, MemoryStore, SessionTranscriptActions, SessionTranscriptAuthPayload,
+    SessionTranscriptAuthor, SessionTranscriptBranch, SessionTranscriptCompaction,
+    SessionTranscriptCompactionPayload, SessionTranscriptDynamicToolRequestPayload,
     SessionTranscriptDynamicToolResponsePayload, SessionTranscriptEventKind,
     SessionTranscriptHeader, SessionTranscriptMapper, SessionTranscriptRecord,
     SessionTranscriptStateDelta, SessionTranscriptStateNamespace, SessionTranscriptTransferPayload,
@@ -48,12 +47,6 @@ pub enum KernelTranscriptPayload {
     Auth {
         payload: KernelTranscriptAuthPayload,
     },
-    Confirmation {
-        payload: KernelTranscriptConfirmationPayload,
-    },
-    ApprovalResponse {
-        payload: KernelTranscriptApprovalResponsePayload,
-    },
     DynamicToolRequest {
         payload: KernelTranscriptDynamicToolRequestPayload,
     },
@@ -72,8 +65,6 @@ impl KernelTranscriptPayload {
             Self::Compaction { payload } => Some(&payload.summary_message),
             Self::Transfer { .. }
             | Self::Auth { .. }
-            | Self::Confirmation { .. }
-            | Self::ApprovalResponse { .. }
             | Self::DynamicToolRequest { .. }
             | Self::DynamicToolResponse { .. }
             | Self::StateOnly => None,
@@ -90,22 +81,6 @@ pub struct KernelTranscriptTransferPayload {
 pub struct KernelTranscriptAuthPayload {
     pub provider: String,
     pub prompt: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct KernelTranscriptConfirmationPayload {
-    pub tool_name: String,
-    pub call_id: String,
-    pub prompt: String,
-    pub arguments: TalosJsonValue,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct KernelTranscriptApprovalResponsePayload {
-    pub call_id: String,
-    pub tool_name: String,
-    pub approved: bool,
-    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -216,26 +191,6 @@ impl KernelTranscriptEvent {
                     prompt: payload.prompt.clone(),
                 },
             },
-            EventPayload::ConfirmationRequest { payload } => {
-                KernelTranscriptPayload::Confirmation {
-                    payload: KernelTranscriptConfirmationPayload {
-                        tool_name: payload.tool_name.clone(),
-                        call_id: payload.call_id.clone(),
-                        prompt: payload.prompt.clone(),
-                        arguments: payload.arguments.clone().into(),
-                    },
-                }
-            }
-            EventPayload::ApprovalResponse { payload } => {
-                KernelTranscriptPayload::ApprovalResponse {
-                    payload: KernelTranscriptApprovalResponsePayload {
-                        call_id: payload.call_id.clone(),
-                        tool_name: payload.tool_name.clone(),
-                        approved: payload.approved,
-                        reason: payload.reason.clone(),
-                    },
-                }
-            }
             EventPayload::DynamicToolRequest { payload } => {
                 KernelTranscriptPayload::DynamicToolRequest {
                     payload: KernelTranscriptDynamicToolRequestPayload {
@@ -277,7 +232,6 @@ impl KernelTranscriptEvent {
                     KernelTranscriptPayload::StateOnly
                 }
             }
-            EventPayload::PlannerSelection { .. } => KernelTranscriptPayload::StateOnly,
         };
 
         let kind = match event.kind {
@@ -550,26 +504,6 @@ impl KernelSessionTranscriptMapper {
                     prompt: payload.prompt.clone(),
                 },
             },
-            KernelTranscriptPayload::Confirmation { payload } => {
-                SessionTranscriptPayload::Confirmation {
-                    payload: SessionTranscriptConfirmationPayload {
-                        tool_name: payload.tool_name.clone(),
-                        call_id: payload.call_id.clone(),
-                        prompt: payload.prompt.clone(),
-                        arguments: payload.arguments.clone().into(),
-                    },
-                }
-            }
-            KernelTranscriptPayload::ApprovalResponse { payload } => {
-                SessionTranscriptPayload::ApprovalResponse {
-                    payload: SessionTranscriptApprovalResponsePayload {
-                        call_id: payload.call_id.clone(),
-                        tool_name: payload.tool_name.clone(),
-                        approved: payload.approved,
-                        reason: payload.reason.clone(),
-                    },
-                }
-            }
             KernelTranscriptPayload::DynamicToolRequest { payload } => {
                 SessionTranscriptPayload::DynamicToolRequest {
                     payload: SessionTranscriptDynamicToolRequestPayload {
@@ -616,26 +550,6 @@ impl KernelSessionTranscriptMapper {
                     prompt: payload.prompt,
                 },
             },
-            SessionTranscriptPayload::Confirmation { payload } => {
-                KernelTranscriptPayload::Confirmation {
-                    payload: KernelTranscriptConfirmationPayload {
-                        tool_name: payload.tool_name,
-                        call_id: payload.call_id,
-                        prompt: payload.prompt,
-                        arguments: payload.arguments,
-                    },
-                }
-            }
-            SessionTranscriptPayload::ApprovalResponse { payload } => {
-                KernelTranscriptPayload::ApprovalResponse {
-                    payload: KernelTranscriptApprovalResponsePayload {
-                        call_id: payload.call_id,
-                        tool_name: payload.tool_name,
-                        approved: payload.approved,
-                        reason: payload.reason,
-                    },
-                }
-            }
             SessionTranscriptPayload::DynamicToolRequest { payload } => {
                 KernelTranscriptPayload::DynamicToolRequest {
                     payload: KernelTranscriptDynamicToolRequestPayload {

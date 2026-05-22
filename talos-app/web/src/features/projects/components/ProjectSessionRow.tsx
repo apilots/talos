@@ -9,9 +9,6 @@ function statusTone(status: SessionUiStatus) {
   if (status === "running") {
     return "success";
   }
-  if (status === "waiting_approval") {
-    return "warning";
-  }
   if (status === "error") {
     return "danger";
   }

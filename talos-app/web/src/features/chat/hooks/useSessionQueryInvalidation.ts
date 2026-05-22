@@ -46,6 +46,10 @@ export function useSessionQueryInvalidation(sessionId: string) {
       });
       updateCachedSessionLists(session);
       await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
+      await queryClient.invalidateQueries({
+        queryKey: [...chatKeys.all, connectionKey, "projectSessions"],
+      });
+      await queryClient.invalidateQueries({ queryKey: ["admin-sessions", connectionKey] });
       await queryClient.refetchQueries({
         queryKey: chatKeys.sessions(connectionKey),
         type: "active",
@@ -60,6 +64,13 @@ export function useSessionQueryInvalidation(sessionId: string) {
   function updateCachedSessionLists(session: TalosSession) {
     queryClient.setQueriesData<TalosSession[]>(
       { queryKey: chatKeys.sessions(connectionKey) },
+      (sessions) =>
+        sessions?.map((entry) =>
+          entry.context.session_id === session.context.session_id ? session : entry,
+        ),
+    );
+    queryClient.setQueriesData<TalosSession[]>(
+      { queryKey: [...chatKeys.all, connectionKey, "projectSessions"] },
       (sessions) =>
         sessions?.map((entry) =>
           entry.context.session_id === session.context.session_id ? session : entry,

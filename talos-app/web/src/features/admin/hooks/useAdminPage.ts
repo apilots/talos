@@ -124,12 +124,6 @@ export function useAdminPage() {
         trend: t("metrics.configuredModelsTrend"),
       },
       {
-        id: "pending-approvals",
-        label: t("metrics.pendingApprovalsLabel"),
-        value: "2",
-        trend: t("metrics.pendingApprovalsTrend"),
-      },
-      {
         id: "operational-risk",
         label: t("metrics.operationalRiskLabel"),
         value: t("states.low"),

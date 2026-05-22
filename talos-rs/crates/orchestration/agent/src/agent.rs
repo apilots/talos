@@ -14,38 +14,45 @@ mod request;
 mod session;
 #[cfg(test)]
 mod tests;
-mod tooling;
 
 pub use mock::MockAgent;
 
 use crate::{
-    flush_manager::MemoryFlushManager, Agent, AgentOrchestrator, AgentResponse,
-    OrchestratorExecution, OrchestratorRequest,
+    flush_manager::MemoryFlushManager, AgentOrchestrator, OrchestratorExecution,
+    OrchestratorRequest, SessionTitleUpdate,
 };
 use talos_agent_kernel::{
-    ConfirmationRequestStreamData, KernelAssistantTextPhase, KernelRuntime, KernelStreamEvent,
-    KernelStreamEventData, KernelStreamEventType, KernelStreamItemKey, RunRequest, TimelineBuilder,
-    ToolProgressKind, ToolStreamKey,
+    default_plugin_manager, run_general_turn_with_resume, ContextStateBags,
+    DynamicToolResultResume, GeneralTurnOutcome, GeneralTurnResult, GeneralTurnResume,
+    InvocationContext, InvocationExecutionState, InvocationLimits, InvocationSession,
+    KernelAssistantTextPhase, KernelEvent, KernelEventData, KernelEventLabel, KernelEventType,
+    KernelStreamEvent, KernelStreamEventData, KernelStreamEventType, KernelStreamItemKey,
+    ResumeToolCall, StopReason as KernelStopReason, TimelineBuilder, ToolProgressKind,
+    ToolStreamKey, UserInputEventData,
 };
 use talos_config::{AgentKernelConfig, PlannerMode};
 use talos_error::{TalosError, TalosResult};
-use talos_llm_provider::LlmProvider;
-use talos_memory::MemoryStore;
+use talos_llm_provider::{ChatMessage, ChatRequest, LlmProvider};
+use talos_memory::{Memory, MemoryStore, SessionTranscriptBranch, SessionTranscriptPayload};
 use talos_tools::ToolRegistry;
 use talos_types::gateway::GatewayResumeContext;
+use talos_types::normalize_session_title;
 use talos_types::talos::{
     StopReason as TalosStopReason, TalosContentItem, TalosOutputItem, TalosTimelineContent,
     TalosTimelineDelta, TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineItemKind,
     TalosTimelineItemStatus, TalosTimelinePhase, TalosToolProgressKind, TalosUsage,
 };
+use tracing::warn;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum KernelExecutionMode {
-    Single,
-    Sequential,
-    Parallel,
-    Loop,
-}
+const SESSION_TITLE_PROMPT: &str = r#"Generate a concise session title for the conversation.
+
+Rules:
+- Return only the title text.
+- One line only.
+- No markdown, no quotes, no trailing punctuation.
+- Prefer 3-8 words.
+- Focus on the core task topic.
+"#;
 
 #[derive(Clone)]
 pub(crate) enum ActiveTurnHandle {
@@ -65,7 +72,7 @@ pub(crate) enum QueuedTurn {
 }
 
 #[derive(Clone)]
-pub struct AgentImpl {
+pub struct AgentHarness {
     pub id: String,
     pub name: String,
     pub description: String,
@@ -74,13 +81,13 @@ pub struct AgentImpl {
     pub memory_store: Arc<MemoryStore>,
     pub tool_registry: Arc<ToolRegistry>,
     kernel_config: AgentKernelConfig,
-    pub kernel_runtime: Arc<KernelRuntime>,
     active_turns: Arc<DashMap<String, ActiveTurnHandle>>,
+    completed_title_updates: Arc<DashMap<String, SessionTitleUpdate>>,
     session_backlogs: Arc<Mutex<HashMap<String, VecDeque<QueuedTurn>>>>,
     memory_flush_manager: Arc<MemoryFlushManager>,
 }
 
-impl AgentImpl {
+impl AgentHarness {
     pub fn new(
         id: String,
         name: String,
@@ -105,8 +112,8 @@ impl AgentImpl {
             memory_store,
             tool_registry,
             kernel_config,
-            kernel_runtime: Arc::new(KernelRuntime::new_default()),
             active_turns: Arc::new(DashMap::new()),
+            completed_title_updates: Arc::new(DashMap::new()),
             session_backlogs: Arc::new(Mutex::new(HashMap::new())),
             memory_flush_manager: Arc::new(MemoryFlushManager::new()),
         }
@@ -149,6 +156,172 @@ After receiving tool outputs, continue reasoning and provide the final response.
             self.description,
             available_tools.join(", ")
         )
+    }
+
+    fn build_invocation_context(
+        &self,
+        agent_request: &crate::service::AgentRequest,
+        input: String,
+        invocation_id: String,
+        stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
+        kernel_config: &AgentKernelConfig,
+    ) -> InvocationContext {
+        let session_id = agent_request.session.context.session_id.clone();
+        let message_id = agent_request.session.context.message_id.clone();
+        let workspace_id = agent_request
+            .session
+            .context
+            .workspace_id
+            .clone()
+            .unwrap_or_default();
+
+        InvocationContext {
+            session_id: session_id.clone(),
+            message_id,
+            invocation_id,
+            agent_id: self.id.clone(),
+            workspace_id,
+            project_root: agent_request.session.context.project_root.clone(),
+            input,
+            selected_model_info: self.resolve_selected_model_info(&agent_request.session),
+            phase: agent_request.phase.clone(),
+            planning_instruction: agent_request.planning_instruction.clone(),
+            transfer_to: agent_request.transfer_to.clone(),
+            execution_state: InvocationExecutionState::default(),
+            session: InvocationSession {
+                session_id: session_id.clone(),
+                ..InvocationSession::default()
+            },
+            session_environment: agent_request.session.context.environment.clone(),
+            state: HashMap::new(),
+            state_bags: ContextStateBags::default(),
+            limits: InvocationLimits::from(kernel_config),
+            events: vec![KernelEvent::new(
+                KernelEventType::UserInput,
+                KernelEventLabel::UserInputReceived,
+                KernelEventData::UserInput(UserInputEventData {
+                    session_id,
+                    agent_id: self.id.clone(),
+                }),
+            )],
+            plugin_manager: default_plugin_manager(),
+            transcript_service: None,
+            stream_tx,
+        }
+    }
+
+    async fn build_general_turn_resume(
+        &self,
+        session_id: &str,
+        resume_context: Option<GatewayResumeContext>,
+    ) -> TalosResult<Option<GeneralTurnResume>> {
+        let Some(tool_call) = resume_context.and_then(|context| context.tool_call) else {
+            return Ok(None);
+        };
+
+        let records = self
+            .memory_store
+            .load_transcript_records(session_id, None, SessionTranscriptBranch::ReactiveLoop)
+            .await?;
+        let mut request = None;
+        let mut response = None;
+        for record in records {
+            match record.payload {
+                SessionTranscriptPayload::DynamicToolRequest { payload }
+                    if payload.call_id.as_str() == tool_call.call_id.as_str()
+                        && payload.tool_name.as_str() == tool_call.tool_name.as_str() =>
+                {
+                    if request
+                        .as_ref()
+                        .is_none_or(|(timestamp, _)| record.header.timestamp > *timestamp)
+                    {
+                        request = Some((record.header.timestamp, payload));
+                    }
+                }
+                SessionTranscriptPayload::DynamicToolResponse { payload }
+                    if payload.call_id.as_str() == tool_call.call_id.as_str()
+                        && payload.tool_name.as_str() == tool_call.tool_name.as_str() =>
+                {
+                    if response
+                        .as_ref()
+                        .is_none_or(|(timestamp, _)| record.header.timestamp > *timestamp)
+                    {
+                        response = Some((record.header.timestamp, payload));
+                    }
+                }
+                _ => {}
+            }
+        }
+        let response = response.map(|(_, payload)| payload).ok_or_else(|| {
+            TalosError::ToolError(format!(
+                "dynamic tool call `{}` has no submitted result for session `{}`",
+                tool_call.call_id, session_id
+            ))
+        })?;
+        let original_arguments = request
+            .map(|(_, payload)| payload.arguments)
+            .unwrap_or_else(|| serde_json::Value::Null.into());
+
+        Ok(Some(GeneralTurnResume::DynamicToolResult(
+            DynamicToolResultResume {
+                call_id: tool_call.call_id.clone(),
+                tool_name: tool_call.tool_name.clone(),
+                output: response.output,
+                success: response.success,
+                original_call: Some(ResumeToolCall {
+                    item_id: Some(tool_call.item_id),
+                    call_id: tool_call.call_id,
+                    tool_name: tool_call.tool_name,
+                    arguments: original_arguments,
+                }),
+                replay_dynamic_tool_results: HashMap::new(),
+            },
+        )))
+    }
+
+    async fn generate_session_title_update(
+        &self,
+        session: &talos_types::TalosSession,
+        first_user_text: &str,
+        first_assistant_text: &str,
+    ) -> Option<SessionTitleUpdate> {
+        if session.has_real_title()
+            || session.state.message_count != 0
+            || first_user_text.trim().is_empty()
+            || first_assistant_text.trim().is_empty()
+        {
+            return None;
+        }
+
+        let request = ChatRequest::builder()
+            .model(session.config.llm.model.clone())
+            .messages(vec![
+                ChatMessage::system(SESSION_TITLE_PROMPT),
+                ChatMessage::user(format!(
+                    "First user message:\n{}\n\nFirst assistant response:\n{}",
+                    first_user_text.trim(),
+                    first_assistant_text.trim()
+                )),
+            ])
+            .build();
+
+        match self.llm_provider.chat(request).await {
+            Ok(response) => {
+                normalize_session_title(&response.content).map(|title| SessionTitleUpdate { title })
+            }
+            Err(error) => {
+                warn!(
+                    session_id = %session.context.session_id,
+                    ?error,
+                    "failed to generate session title"
+                );
+                None
+            }
+        }
+    }
+
+    fn title_update_key(session_id: &str, turn_id: &str) -> String {
+        format!("{session_id}:{turn_id}")
     }
 
     async fn reserve_or_enqueue_unary_turn(
@@ -212,55 +385,45 @@ After receiving tool outputs, continue reasoning and provide the final response.
         &self,
         request: OrchestratorRequest,
     ) -> TalosResult<OrchestratorExecution> {
+        let resume_context = request.resume_context.clone();
         let agent_request = self.to_agent_request(request);
         let input = Self::extract_text_input(&agent_request.input);
         let invocation_id = format!("inv-{}", Utc::now().timestamp_millis());
         let session_id = agent_request.session.context.session_id.clone();
-        let message_id = agent_request.session.context.message_id.clone();
-        let selected_model_info = self.resolve_selected_model_info(&agent_request.session);
-        let phase = agent_request.phase.clone();
-        let planning_instruction = agent_request.planning_instruction.clone();
-        let transfer_to = agent_request.transfer_to.clone();
-        let kernel_config = agent_request.session.config.agent.kernel.clone();
-        let kernel_agent = match self.build_kernel_agent_for_request(&kernel_config) {
-            Ok(agent) => agent,
-            Err(err) => {
-                self.finish_active_turn_and_resume(&session_id).await;
-                return Err(err);
-            }
-        };
-        let runtime = self.kernel_runtime.clone();
-        let agent_id = self.id.clone();
-        let run_session_id = session_id.clone();
+        let kernel_config =
+            Self::normalized_kernel_config(agent_request.session.config.agent.kernel.clone());
+        let mut ctx = self.build_invocation_context(
+            &agent_request,
+            input.clone(),
+            invocation_id,
+            None,
+            &kernel_config,
+        );
+        let resume = self
+            .build_general_turn_resume(&session_id, resume_context)
+            .await?;
+        let llm_provider = self.llm_provider.clone();
+        let tool_registry = self.tool_registry.clone();
+        let memory_store = self.memory_store.clone();
+        let agent_name = self.name.clone();
+        let agent_description = self.description.clone();
+        let title_input = input.clone();
+        let kernel_input = input;
         let run_handle = tokio::spawn({
             async move {
-                runtime
-                    .run_turn(
-                        kernel_agent,
-                        RunRequest {
-                            session_id: run_session_id,
-                            message_id,
-                            invocation_id,
-                            agent_id,
-                            workspace_id: agent_request
-                                .session
-                                .context
-                                .workspace_id
-                                .clone()
-                                .unwrap_or_default(),
-                            project_root: agent_request.session.context.project_root.clone(),
-                            input,
-                            selected_model_info,
-                            phase,
-                            planning_instruction,
-                            transfer_to,
-                            initial_state_bags: None,
-                            session_environment: agent_request.session.context.environment.clone(),
-                            kernel_config: Some(kernel_config),
-                            stream_tx: None,
-                        },
-                    )
-                    .await
+                run_general_turn_with_resume(
+                    &mut ctx,
+                    &agent_name,
+                    &agent_description,
+                    &kernel_input,
+                    llm_provider,
+                    tool_registry.clone(),
+                    tool_registry,
+                    memory_store,
+                    &kernel_config,
+                    resume,
+                )
+                .await
             }
         });
         let abort_handle = run_handle.abort_handle();
@@ -272,15 +435,25 @@ After receiving tool outputs, continue reasoning and provide the final response.
 
         let result = match run_handle.await {
             Ok(Ok(result)) => {
-                let reasoning = Self::collect_reasoning(&result.output_items);
+                let (output_text, output_items, stop_reason, usage) =
+                    execution_from_general_turn_result(&result);
+                let reasoning = Self::collect_reasoning(&output_items);
+                let session_title_update = self
+                    .generate_session_title_update(
+                        &agent_request.session,
+                        &title_input,
+                        &output_text,
+                    )
+                    .await;
                 Ok(OrchestratorExecution {
-                    output_text: result.output_text,
-                    output_items: result.output_items,
+                    output_text,
+                    output_items,
                     reasoning,
-                    stop_reason: kernel::map_stop_reason(result.stop_reason),
-                    usage: result.usage,
-                    task_count: result.task_results.len() as u32,
+                    stop_reason,
+                    usage,
+                    task_count: 1,
                     session_id: session_id.clone(),
+                    session_title_update,
                 })
             }
             Ok(Err(err)) => Err(err),
@@ -292,6 +465,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
                 usage: TalosUsage::default(),
                 task_count: 0,
                 session_id: session_id.clone(),
+                session_title_update: None,
             }),
             Err(err) => Err(TalosError::InternalError(format!(
                 "kernel task join failed: {}",
@@ -318,6 +492,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
             let session_id = agent_request.session.context.session_id.clone();
             let message_id = agent_request.session.context.message_id.clone();
             let turn_id = request_turn_id.unwrap_or_else(|| request_id.clone());
+            let title_turn_id = turn_id.clone();
             let mut timeline = TimelineBuilder::new(
                 request_id.clone(),
                 turn_id,
@@ -325,43 +500,27 @@ After receiving tool outputs, continue reasoning and provide the final response.
                 session_id.clone(),
             );
             let mut timeline_state = KernelTimelineState::default();
-            seed_resume_context(&mut timeline, &mut timeline_state, resume_context);
-            let selected_model_info = this.resolve_selected_model_info(&agent_request.session);
-            let phase = agent_request.phase.clone();
-            let planning_instruction = agent_request.planning_instruction.clone();
-            let transfer_to = agent_request.transfer_to.clone();
-            let kernel_config = agent_request.session.config.agent.kernel.clone();
-            let kernel_agent = match this.build_kernel_agent_for_request(&kernel_config) {
-                Ok(agent) => agent,
+            seed_resume_context(&mut timeline, &mut timeline_state, resume_context.clone());
+            let kernel_config =
+                Self::normalized_kernel_config(agent_request.session.config.agent.kernel.clone());
+            let (kernel_tx, mut kernel_rx) = mpsc::channel(256);
+            let mut kernel_ctx = this.build_invocation_context(
+                &agent_request,
+                input.clone(),
+                invocation_id,
+                Some(kernel_tx),
+                &kernel_config,
+            );
+            let resume = match this
+                .build_general_turn_resume(&session_id, resume_context.clone())
+                .await
+            {
+                Ok(resume) => resume,
                 Err(err) => {
                     let _ = tx.send(timeline.fail_turn(err.to_string())).await;
                     this.finish_active_turn_and_resume(&session_id).await;
                     return;
                 }
-            };
-            let (kernel_tx, mut kernel_rx) = mpsc::channel(256);
-            let runtime = this.kernel_runtime.clone();
-            let kernel_input = RunRequest {
-                session_id: agent_request.session.context.session_id.clone(),
-                message_id,
-                invocation_id,
-                agent_id: this.id.clone(),
-                workspace_id: agent_request
-                    .session
-                    .context
-                    .workspace_id
-                    .clone()
-                    .unwrap_or_default(),
-                project_root: agent_request.session.context.project_root.clone(),
-                input: input.clone(),
-                selected_model_info,
-                phase,
-                planning_instruction,
-                transfer_to,
-                initial_state_bags: None,
-                session_environment: agent_request.session.context.environment.clone(),
-                kernel_config: Some(kernel_config),
-                stream_tx: Some(kernel_tx),
             };
 
             let _ = tx.send(timeline.start_turn()).await;
@@ -380,8 +539,28 @@ After receiving tool outputs, continue reasoning and provide the final response.
                 }
             }
 
-            let run_handle =
-                tokio::spawn(async move { runtime.run_turn(kernel_agent, kernel_input).await });
+            let llm_provider = this.llm_provider.clone();
+            let tool_registry = this.tool_registry.clone();
+            let memory_store = this.memory_store.clone();
+            let agent_name = this.name.clone();
+            let agent_description = this.description.clone();
+            let title_input = input.clone();
+            let kernel_input = input;
+            let run_handle = tokio::spawn(async move {
+                run_general_turn_with_resume(
+                    &mut kernel_ctx,
+                    &agent_name,
+                    &agent_description,
+                    &kernel_input,
+                    llm_provider,
+                    tool_registry.clone(),
+                    tool_registry,
+                    memory_store,
+                    &kernel_config,
+                    resume,
+                )
+                .await
+            });
             let abort_handle = run_handle.abort_handle();
             if let Err(err) = this.activate_reserved_turn(&session_id, abort_handle) {
                 run_handle.abort();
@@ -436,18 +615,32 @@ After receiving tool outputs, continue reasoning and provide the final response.
                             return;
                         }
                     }
-                    emit_terminal_item_closures(
-                        &mut timeline,
-                        &tx,
-                        TalosTimelineItemStatus::Completed,
-                    )
-                    .await;
+                    if matches!(result.outcome, GeneralTurnOutcome::Completed { .. }) {
+                        emit_terminal_item_closures(
+                            &mut timeline,
+                            &tx,
+                            TalosTimelineItemStatus::Completed,
+                        )
+                        .await;
+                    }
                     let _ = tx
                         .send(timeline.complete_turn(
-                            kernel::map_stop_reason(result.stop_reason),
-                            result.usage,
+                            kernel::map_stop_reason(outcome_stop_reason(&result.outcome)),
+                            outcome_usage(&result.outcome),
                         ))
                         .await;
+                    let (output_text, _, _, _) = execution_from_general_turn_result(&result);
+                    if let Some(update) = this
+                        .generate_session_title_update(
+                            &agent_request.session,
+                            &title_input,
+                            &output_text,
+                        )
+                        .await
+                    {
+                        this.completed_title_updates
+                            .insert(Self::title_update_key(&session_id, &title_turn_id), update);
+                    }
                 }
                 Err(err) if err.is_cancelled() => {
                     emit_terminal_item_closures(
@@ -559,6 +752,50 @@ struct KernelTimelineState {
     completed_tool_call_ids: HashSet<String>,
 }
 
+fn execution_from_general_turn_result(
+    result: &GeneralTurnResult,
+) -> (String, Vec<TalosOutputItem>, TalosStopReason, TalosUsage) {
+    match &result.outcome {
+        GeneralTurnOutcome::Completed {
+            output_text,
+            output_items,
+            stop_reason,
+            usage,
+        } => (
+            output_text.clone(),
+            output_items.clone(),
+            kernel::map_stop_reason(*stop_reason),
+            usage.clone(),
+        ),
+        GeneralTurnOutcome::Waiting {
+            output_items,
+            stop_reason,
+            usage,
+            ..
+        } => (
+            String::new(),
+            output_items.clone(),
+            kernel::map_stop_reason(*stop_reason),
+            usage.clone(),
+        ),
+    }
+}
+
+fn outcome_stop_reason(outcome: &GeneralTurnOutcome) -> KernelStopReason {
+    match outcome {
+        GeneralTurnOutcome::Completed { stop_reason, .. }
+        | GeneralTurnOutcome::Waiting { stop_reason, .. } => *stop_reason,
+    }
+}
+
+fn outcome_usage(outcome: &GeneralTurnOutcome) -> TalosUsage {
+    match outcome {
+        GeneralTurnOutcome::Completed { usage, .. } | GeneralTurnOutcome::Waiting { usage, .. } => {
+            usage.clone()
+        }
+    }
+}
+
 fn seed_resume_context(
     timeline: &mut TimelineBuilder,
     state: &mut KernelTimelineState,
@@ -571,7 +808,7 @@ fn seed_resume_context(
         tool_call.item_id.clone(),
         tool_call.call_id.clone(),
         tool_call.tool_name,
-        tool_call.arguments.to_string(),
+        String::new(),
     );
     state
         .tool_item_by_call_id
@@ -831,41 +1068,6 @@ fn emit_kernel_timeline_events(
             Ok(events)
         }
         (
-            KernelStreamEventType::ConfirmationRequest,
-            KernelStreamEventData::ConfirmationRequest(ConfirmationRequestStreamData {
-                call_id,
-                tool_name,
-                prompt,
-                arguments,
-            }),
-        ) => {
-            reject_after_final_answer(state, "confirmation request")?;
-            let mut events = close_active_reasoning_item(timeline, state)?;
-            let item_id = state
-                .tool_item_by_call_id
-                .get(&call_id)
-                .cloned()
-                .ok_or_else(|| {
-                    TalosError::ValidationError(format!(
-                        "timeline tool item not found for approval: {call_id}"
-                    ))
-                })?;
-            let delta = TalosTimelineDelta::ToolApprovalRequest {
-                call_id: call_id.clone(),
-                tool_name: tool_name.clone(),
-                prompt: prompt.clone(),
-                arguments: arguments.clone().into(),
-            };
-            events.push(timeline.append_delta(
-                &item_id,
-                TalosTimelineDelta::Status {
-                    status: TalosTimelineItemStatus::WaitingApproval,
-                },
-            )?);
-            events.push(timeline.append_delta(&item_id, delta)?);
-            Ok(events)
-        }
-        (
             KernelStreamEventType::DynamicToolRequest,
             KernelStreamEventData::DynamicToolRequest(data),
         ) => {
@@ -884,7 +1086,7 @@ fn emit_kernel_timeline_events(
             events.push(timeline.append_delta(
                 &item_id,
                 TalosTimelineDelta::Status {
-                    status: TalosTimelineItemStatus::WaitingApproval,
+                    status: TalosTimelineItemStatus::WaitingDynamicInput,
                 },
             )?);
             events.push(timeline.append_delta(
@@ -1121,24 +1323,19 @@ fn stream_key_key(stream_key: &ToolStreamKey) -> String {
 }
 
 #[async_trait]
-impl Agent for AgentImpl {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    async fn execute_tool(
-        &self,
-        tool_name: &str,
-        args: serde_json::Value,
-    ) -> TalosResult<AgentResponse> {
-        self.execute_tool_internal(tool_name, args).await
-    }
-}
-
-#[async_trait]
-impl AgentOrchestrator for AgentImpl {
+impl AgentOrchestrator for AgentHarness {
     fn id(&self) -> &str {
         &self.id
+    }
+
+    fn take_session_title_update(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+    ) -> Option<SessionTitleUpdate> {
+        self.completed_title_updates
+            .remove(&Self::title_update_key(session_id, turn_id))
+            .map(|(_, update)| update)
     }
 
     async fn run(&self, request: OrchestratorRequest) -> TalosResult<OrchestratorExecution> {
@@ -1189,11 +1386,11 @@ impl AgentOrchestrator for AgentImpl {
     }
 
     async fn has_pending_memory_flush(&self, session_id: &str) -> bool {
-        AgentImpl::has_pending_memory_flush(self, session_id).await
+        AgentHarness::has_pending_memory_flush(self, session_id).await
     }
 
     fn has_active_turn(&self, session_id: &str) -> bool {
-        AgentImpl::has_active_turn(self, session_id)
+        AgentHarness::has_active_turn(self, session_id)
     }
 
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()> {
@@ -1207,19 +1404,7 @@ impl AgentOrchestrator for AgentImpl {
     }
 
     async fn drain_active_turns(&self, timeout: Duration) -> TalosResult<()> {
-        AgentImpl::drain_active_turns(self, timeout).await
-    }
-
-    async fn submit_tool_approval(
-        &self,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-        approved: bool,
-        reason: Option<String>,
-    ) -> TalosResult<()> {
-        self.submit_tool_approval(session_id, call_id, tool_name, approved, reason)
-            .await
+        AgentHarness::drain_active_turns(self, timeout).await
     }
 
     async fn submit_dynamic_tool_result(

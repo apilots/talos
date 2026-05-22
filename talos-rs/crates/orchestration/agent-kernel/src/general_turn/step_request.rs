@@ -5,12 +5,15 @@ pub fn build_general_turn_step_request(
     state: &GeneralTurnLoopState,
     parallel_tool_calls: bool,
 ) -> GeneralTurnStepRequest {
+    let mut messages = prepared.messages.clone();
+    messages.extend(state.messages.clone());
+
     GeneralTurnStepRequest {
         round: state.round,
         call_mode: KernelModelCallMode::WorkingLoop,
         model: prepared.selected_model.clone(),
         max_tokens: prepared.max_output_tokens,
-        messages: state.messages.clone(),
+        messages,
         tool_definitions: prepared.tool_definitions.clone(),
         parallel_tool_calls,
         native_thinking: None,

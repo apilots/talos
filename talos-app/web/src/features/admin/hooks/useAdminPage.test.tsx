@@ -59,7 +59,6 @@ vi.mock("@/features/connection", () => ({
       authToken: "",
       userId: "web-user",
       runtimeMode: "cloud",
-      defaultApprovalMode: "needs_approval",
     },
   }),
 }));
@@ -103,7 +102,7 @@ describe("useAdminPage", () => {
     const { result } = renderHook(() => useAdminPage(), { wrapper: createWrapper() });
 
     await waitFor(() => {
-      expect(result.current.metrics).toHaveLength(4);
+      expect(result.current.metrics).toHaveLength(3);
       expect(result.current.metrics[0]?.value).toBe("42");
       expect(result.current.metrics[1]?.value).toBe("1");
     });

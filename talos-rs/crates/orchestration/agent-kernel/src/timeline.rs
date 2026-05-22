@@ -278,9 +278,8 @@ impl TimelineBuilder {
             TalosTimelineDelta::ToolResult { content, is_error } => {
                 set_tool_result(&mut state.item.content, content.clone(), *is_error)
             }
-            TalosTimelineDelta::ToolApprovalRequest { .. }
-            | TalosTimelineDelta::ToolDynamicRequest { .. } => {
-                state.item.status = TalosTimelineItemStatus::WaitingApproval;
+            TalosTimelineDelta::ToolDynamicRequest { .. } => {
+                state.item.status = TalosTimelineItemStatus::WaitingDynamicInput;
                 Ok(())
             }
             TalosTimelineDelta::Status { status } => {
@@ -344,7 +343,9 @@ impl TimelineBuilder {
 fn should_close_item(current: TalosTimelineItemStatus, terminal: TalosTimelineItemStatus) -> bool {
     match current {
         TalosTimelineItemStatus::Running => true,
-        TalosTimelineItemStatus::WaitingApproval => terminal != TalosTimelineItemStatus::Completed,
+        TalosTimelineItemStatus::WaitingDynamicInput => {
+            terminal != TalosTimelineItemStatus::Completed
+        }
         TalosTimelineItemStatus::Completed
         | TalosTimelineItemStatus::Failed
         | TalosTimelineItemStatus::Cancelled => false,

@@ -62,7 +62,6 @@ export const useAppStore = create<AppState>()(
           threadFilter: "all",
           projects,
           activeProjectId: activeProjectExists ? typedState?.activeProjectId ?? projects[0].id : projects[0].id,
-          sessionApprovalModes: typedState?.sessionApprovalModes ?? {},
           transientStatuses: {},
           streams: {},
           memoryItems: mergeById(currentState.memoryItems, typedState?.memoryItems),
@@ -70,7 +69,6 @@ export const useAppStore = create<AppState>()(
           connection: {
             ...currentState.connection,
             ...typedState?.connection,
-            defaultApprovalMode: typedState?.connection?.defaultApprovalMode ?? currentState.connection.defaultApprovalMode,
           },
         };
       },
@@ -82,7 +80,6 @@ export const useAppStore = create<AppState>()(
         activeProjectId: state.activeProjectId,
         projects: state.projects,
         sessionAliases: state.sessionAliases,
-        sessionApprovalModes: state.sessionApprovalModes,
         memoryItems: state.memoryItems,
         fileItems: state.fileItems,
       }),

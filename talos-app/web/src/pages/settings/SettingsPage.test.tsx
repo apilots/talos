@@ -36,7 +36,6 @@ function buildSettingsState(
       userId: `${authRole}-1`,
       serverUrl: "http://127.0.0.1:8080",
       runtimeMode: "cloud",
-      defaultApprovalMode: "needs_approval",
     },
     setConnection: vi.fn(),
     uiTheme: "light",
@@ -46,7 +45,6 @@ function buildSettingsState(
     draft: {
       serverUrl: "http://127.0.0.1:8080",
       runtimeMode: "cloud",
-      defaultApprovalMode: "needs_approval",
     },
     setDraft: vi.fn(),
     desktopNotifications: true,
@@ -55,8 +53,6 @@ function buildSettingsState(
     setSafeFileReads: vi.fn(),
     safeFileWrites: false,
     setSafeFileWrites: vi.fn(),
-    terminalApproval: true,
-    setTerminalApproval: vi.fn(),
     models: { refetch: vi.fn() },
   };
 }

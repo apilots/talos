@@ -25,34 +25,9 @@ pub type PlannerKind = talos_config::PlannerMode;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum FlowKind {
-    #[default]
-    Single,
-    Auto,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
 pub enum FlowProfile {
     DirectAnswer,
     ModelThinking,
-    #[default]
-    ReactiveLoop,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum ThinkingMode {
-    Disabled,
-    #[default]
-    PlanningProcessor,
-    ModelNative,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum ExecutionPath {
-    DirectAnswer,
     #[default]
     ReactiveLoop,
 }
@@ -63,27 +38,6 @@ pub enum ToolExecutionMode {
     Sequential,
     #[default]
     Parallel,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum KernelExecutionKind {
-    #[default]
-    Single,
-    Sequential,
-    Parallel,
-    Loop,
-}
-
-impl KernelExecutionKind {
-    pub fn from_mode(value: talos_config::ExecutionMode) -> Self {
-        match value {
-            talos_config::ExecutionMode::Single => Self::Single,
-            talos_config::ExecutionMode::Sequential => Self::Sequential,
-            talos_config::ExecutionMode::Parallel => Self::Parallel,
-            talos_config::ExecutionMode::Loop => Self::Loop,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -229,7 +183,6 @@ pub enum KernelStreamEventType {
     ToolProgressDelta,
     ToolResult,
     PromptWarning,
-    ConfirmationRequest,
     DynamicToolRequest,
 }
 
@@ -265,7 +218,6 @@ pub enum KernelStreamEventData {
     ToolProgressDelta(ToolProgressDeltaStreamData),
     ToolResult(ToolResultStreamData),
     PromptWarning(PromptWarningEventData),
-    ConfirmationRequest(ConfirmationRequestStreamData),
     DynamicToolRequest(DynamicToolRequestStreamData),
 }
 
@@ -311,14 +263,6 @@ pub struct AssistantTextCompletedStreamData {
 pub struct ToolStreamKey {
     pub round: u32,
     pub index: usize,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConfirmationRequestStreamData {
-    pub call_id: String,
-    pub tool_name: String,
-    pub prompt: String,
-    pub arguments: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -428,6 +372,7 @@ pub enum StopReason {
     EndTurn,
     ModelOutputLimit,
     ToolRoundLimit,
+    WaitingDynamicInput,
     TransferUnresolved,
     BeforeModelCallbackStopped,
     AfterModelCallbackStopped,
@@ -577,10 +522,7 @@ pub struct InvocationExecutionState {
 /// extracted from AgentKernelConfig.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InvocationLimits {
-    pub max_iters: u32,
-    pub max_task_per_turn: u32,
     pub tool_parallelism: usize,
-    pub max_llm_calls: u32,
     pub context_compaction_max_bytes: usize,
     pub dynamic_tool_timeout_ms: u64,
     pub dynamic_tool_timeout_behavior: talos_config::DynamicToolTimeoutBehavior,
@@ -590,10 +532,7 @@ impl Default for InvocationLimits {
     fn default() -> Self {
         let config = talos_config::AgentKernelConfig::default();
         Self {
-            max_iters: config.max_iters,
-            max_task_per_turn: config.max_task_per_turn as u32,
             tool_parallelism: config.tool_parallelism,
-            max_llm_calls: config.max_llm_calls,
             context_compaction_max_bytes: config.context_compaction_max_bytes,
             dynamic_tool_timeout_ms: config.tools.dynamic.response_timeout_ms,
             dynamic_tool_timeout_behavior: config.tools.dynamic.on_timeout,
@@ -604,10 +543,6 @@ impl Default for InvocationLimits {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct KernelExecutionSettings {
     pub planner_kind: PlannerKind,
-    pub execution_kind: KernelExecutionKind,
-    pub flow_kind: FlowKind,
-    pub thinking_mode: ThinkingMode,
-    pub default_path: ExecutionPath,
     pub tool_execution_mode: ToolExecutionMode,
 }
 
@@ -615,10 +550,6 @@ impl Default for KernelExecutionSettings {
     fn default() -> Self {
         Self {
             planner_kind: PlannerKind::BuiltIn,
-            execution_kind: KernelExecutionKind::Single,
-            flow_kind: FlowKind::Single,
-            thinking_mode: ThinkingMode::PlanningProcessor,
-            default_path: ExecutionPath::ReactiveLoop,
             tool_execution_mode: ToolExecutionMode::Parallel,
         }
     }
@@ -629,19 +560,6 @@ impl TryFrom<&talos_config::AgentKernelConfig> for KernelExecutionSettings {
 
     fn try_from(config: &talos_config::AgentKernelConfig) -> TalosResult<Self> {
         let planner_kind = config.planner_mode;
-        let execution_kind = KernelExecutionKind::from_mode(config.execution_mode);
-        let flow_kind = match execution_kind {
-            KernelExecutionKind::Single => FlowKind::Single,
-            _ => FlowKind::Auto,
-        };
-        let thinking_mode = match planner_kind {
-            PlannerKind::BuiltIn => ThinkingMode::ModelNative,
-            PlannerKind::PlanReAct => ThinkingMode::PlanningProcessor,
-        };
-        let default_path = match planner_kind {
-            PlannerKind::BuiltIn => ExecutionPath::DirectAnswer,
-            PlannerKind::PlanReAct => ExecutionPath::ReactiveLoop,
-        };
         let tool_execution_mode = if config.tool_parallelism > 1 {
             ToolExecutionMode::Parallel
         } else {
@@ -650,10 +568,6 @@ impl TryFrom<&talos_config::AgentKernelConfig> for KernelExecutionSettings {
 
         Ok(Self {
             planner_kind,
-            execution_kind,
-            flow_kind,
-            thinking_mode,
-            default_path,
             tool_execution_mode,
         })
     }
@@ -662,55 +576,12 @@ impl TryFrom<&talos_config::AgentKernelConfig> for KernelExecutionSettings {
 impl From<&talos_config::AgentKernelConfig> for InvocationLimits {
     fn from(config: &talos_config::AgentKernelConfig) -> Self {
         Self {
-            max_iters: config.max_iters,
-            max_task_per_turn: config.max_task_per_turn as u32,
             tool_parallelism: config.tool_parallelism,
-            max_llm_calls: config.max_llm_calls,
             context_compaction_max_bytes: config.context_compaction_max_bytes,
             dynamic_tool_timeout_ms: config.tools.dynamic.response_timeout_ms,
             dynamic_tool_timeout_behavior: config.tools.dynamic.on_timeout,
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RunRequest {
-    pub session_id: String,
-    pub message_id: String,
-    pub invocation_id: String,
-    pub agent_id: String,
-    pub workspace_id: String,
-    #[serde(default)]
-    pub project_root: Option<PathBuf>,
-    pub input: String,
-    pub selected_model_info: ModelInfo,
-    #[serde(default)]
-    pub phase: TurnPhase,
-    pub planning_instruction: Option<String>,
-    pub transfer_to: Option<String>,
-    pub initial_state_bags: Option<ContextStateBags>,
-    #[serde(default)]
-    pub session_environment: Option<TalosSessionEnvironment>,
-    pub kernel_config: Option<talos_config::AgentKernelConfig>,
-    #[serde(skip)]
-    pub stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RunResponse {
-    pub output_text: String,
-    #[serde(default)]
-    pub output_items: Vec<TalosOutputItem>,
-    pub stop_reason: StopReason,
-    #[serde(default)]
-    pub usage: TalosUsage,
-    #[serde(default)]
-    pub warnings: Vec<KernelWarning>,
-    pub model: String,
-    pub task_results: Vec<TaskResult>,
-    pub transfer_to: Option<String>,
-    pub iterations: u32,
-    pub events: Vec<KernelEvent>,
 }
 
 #[cfg(test)]
@@ -767,30 +638,5 @@ mod tests {
         assert!(ctx.transfer_consumed());
         assert!(ctx.set_user_state("k3", json!("v3")).is_err());
         assert!(ctx.set_workspace_state("k4", json!("v4")).is_err());
-    }
-
-    #[test]
-    fn test_kernel_execution_settings_follow_planner_defaults() {
-        let built_in = talos_config::AgentKernelConfig {
-            planner_mode: talos_config::PlannerMode::BuiltIn,
-            ..talos_config::AgentKernelConfig::default()
-        };
-        let built_in_settings = KernelExecutionSettings::try_from(&built_in).unwrap();
-        assert_eq!(built_in_settings.thinking_mode, ThinkingMode::ModelNative);
-        assert_eq!(built_in_settings.default_path, ExecutionPath::DirectAnswer);
-
-        let plan_react = talos_config::AgentKernelConfig {
-            planner_mode: talos_config::PlannerMode::PlanReAct,
-            ..talos_config::AgentKernelConfig::default()
-        };
-        let plan_react_settings = KernelExecutionSettings::try_from(&plan_react).unwrap();
-        assert_eq!(
-            plan_react_settings.thinking_mode,
-            ThinkingMode::PlanningProcessor
-        );
-        assert_eq!(
-            plan_react_settings.default_path,
-            ExecutionPath::ReactiveLoop
-        );
     }
 }

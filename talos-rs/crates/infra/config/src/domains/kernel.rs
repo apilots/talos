@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     default_timezone, AgentKernelMcpConfig, AgentKernelMemoryConfig, AgentKernelPromptConfig,
-    ExecutionMode, PlanReActPolicy, PlannerMode, PlannerSelection, ToolsRuntimeConfig,
+    PlanReActPolicy, PlannerMode, ToolsRuntimeConfig,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -299,21 +299,9 @@ impl Default for AgentKernelCompactionConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentKernelConfig {
-    /// Maximum loop iterations in a single turn
-    #[serde(default = "default_kernel_max_iters")]
-    pub max_iters: u32,
-
-    /// Maximum tasks allowed in a single turn
-    #[serde(default = "default_kernel_max_task_per_turn")]
-    pub max_task_per_turn: usize,
-
     /// Maximum parallel tool executions
     #[serde(default = "default_kernel_tool_parallelism")]
     pub tool_parallelism: usize,
-
-    /// Maximum LLM calls in a turn
-    #[serde(default = "default_kernel_max_llm_calls")]
-    pub max_llm_calls: u32,
 
     /// Maximum tool-calling rounds in a general turn
     #[serde(default = "default_kernel_max_tool_rounds")]
@@ -339,25 +327,9 @@ pub struct AgentKernelConfig {
     #[serde(default = "default_workspace_id")]
     pub default_workspace_id: String,
 
-    /// Planner mode used directly (Static) or as fallback (Auto).
+    /// Planner mode used by the general turn policy.
     #[serde(default = "default_kernel_planner_mode")]
     pub planner_mode: PlannerMode,
-
-    /// Planner selection strategy: Static uses planner_mode directly; Auto uses LLM inference.
-    #[serde(default)]
-    pub planner_selection: PlannerSelection,
-
-    /// Kernel execution mode: single, sequential, parallel, or loop.
-    #[serde(default = "default_kernel_execution_mode")]
-    pub execution_mode: ExecutionMode,
-
-    /// Child agent count used by sequential/parallel execution mode.
-    #[serde(default = "default_kernel_execution_children")]
-    pub execution_children: usize,
-
-    /// Iteration count used by loop execution mode.
-    #[serde(default = "default_kernel_execution_loop_iters")]
-    pub execution_loop_iters: u32,
 
     /// Prompt builder defaults
     #[serde(default)]
@@ -392,20 +364,8 @@ pub struct AgentKernelConfig {
     pub plan_react: PlanReActPolicy,
 }
 
-fn default_kernel_max_iters() -> u32 {
-    1
-}
-
-fn default_kernel_max_task_per_turn() -> usize {
-    3
-}
-
 fn default_kernel_tool_parallelism() -> usize {
     1
-}
-
-fn default_kernel_max_llm_calls() -> u32 {
-    8
 }
 
 fn default_kernel_max_tool_rounds() -> u32 {
@@ -432,25 +392,10 @@ fn default_kernel_planner_mode() -> PlannerMode {
     PlannerMode::BuiltIn
 }
 
-fn default_kernel_execution_mode() -> ExecutionMode {
-    ExecutionMode::Single
-}
-
-fn default_kernel_execution_children() -> usize {
-    2
-}
-
-fn default_kernel_execution_loop_iters() -> u32 {
-    3
-}
-
 impl Default for AgentKernelConfig {
     fn default() -> Self {
         Self {
-            max_iters: default_kernel_max_iters(),
-            max_task_per_turn: default_kernel_max_task_per_turn(),
             tool_parallelism: default_kernel_tool_parallelism(),
-            max_llm_calls: default_kernel_max_llm_calls(),
             max_tool_rounds: default_kernel_max_tool_rounds(),
             finalization_required: default_kernel_finalization_required(),
             tool_result_max_bytes: default_kernel_tool_result_max_bytes(),
@@ -458,10 +403,6 @@ impl Default for AgentKernelConfig {
             timezone: default_timezone(),
             default_workspace_id: default_workspace_id(),
             planner_mode: default_kernel_planner_mode(),
-            planner_selection: PlannerSelection::Static,
-            execution_mode: default_kernel_execution_mode(),
-            execution_children: default_kernel_execution_children(),
-            execution_loop_iters: default_kernel_execution_loop_iters(),
             prompt: AgentKernelPromptConfig::default(),
             output: AgentKernelOutputConfig::default(),
             compaction: AgentKernelCompactionConfig::default(),

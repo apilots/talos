@@ -1,8 +1,7 @@
 //! Demo to validate Agent with Tool Integration
 
-use serde_json::json;
 use std::sync::Arc;
-use talos_agent::{Agent, AgentImpl, AgentOrchestrator, OrchestratorRequest};
+use talos_agent::{AgentHarness, AgentOrchestrator, OrchestratorRequest};
 use talos_error::TalosResult;
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
 use talos_tools::{ToolRegistry, WebSearchTool};
@@ -60,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create an agent with a mock provider
     let llm_provider = Arc::new(DemoLlmProvider {});
-    let agent = AgentImpl::new(
+    let agent = AgentHarness::new(
         "demo_agent_1".to_string(),
         "Demo Agent".to_string(),
         "An agent for demonstration purposes".to_string(),
@@ -82,26 +81,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         agent.tool_registry.list_allowed_tool_names()
     );
 
-    // Test tool execution directly through the agent
-    println!("\n3. Testing tool execution via agent.execute_tool():");
-    match agent
-        .execute_tool("WebSearch", json!({"query": "Rust programming"}))
-        .await
-    {
-        Ok(result) => {
-            println!("   ✓ Tool executed successfully");
-            println!(
-                "   Result: {}",
-                result.output_text.chars().take(100).collect::<String>()
-            );
-        }
-        Err(e) => {
-            println!("   ✗ Tool execution failed: {}", e);
-        }
-    }
-
     // Test the agent's message handling
-    println!("\n4. Testing agent message handling:");
+    println!("\n3. Testing agent message handling:");
     match agent
         .run(OrchestratorRequest {
             session: TalosSession {
@@ -148,7 +129,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!("\n5. Demonstrating the agent's system prompt generation:");
+    println!("\n4. Demonstrating the agent's system prompt generation:");
     let system_prompt = agent.generate_system_prompt();
     println!(
         "   System prompt length: {} characters",
@@ -161,7 +142,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\n=== Agent Tool Integration Validation Complete ===");
     println!("\nThe agent has been enhanced with:");
-    println!("- Tool call processing (process_tool_calls method)");
     println!("- System prompt generation with available tools");
     println!("- Tool execution result handling and memory storage");
     println!("- Memory integration for storing conversation history and tool results");

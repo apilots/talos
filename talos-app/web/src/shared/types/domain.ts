@@ -1,7 +1,6 @@
 import { i18n } from "@/shared/i18n/setup";
 import type { TalosContentItem, TalosSession } from "./protocol";
 import type {
-  ApprovalMode,
   FileRecord,
   MemoryRecord,
   ProjectRecord,
@@ -16,10 +15,6 @@ export function getEffectiveSessionStatus(
   transientStatus?: SessionUiStatus,
   streamState?: StreamSessionState,
 ): SessionUiStatus {
-  if (streamState?.pendingApproval) {
-    return "waiting_approval";
-  }
-
   if (streamState?.pendingUserAction) {
     return "running";
   }
@@ -79,25 +74,6 @@ export function resolveProjectRecord(projects: ProjectRecord[], projectId?: stri
 
 export function isUnboundProject(projectId?: string | null) {
   return !projectId || projectId === UNBOUND_PROJECT_ID;
-}
-
-export function getApprovalModeLabel(mode: ApprovalMode) {
-  return mode === "skip" ? i18n.t("chat:fullAccess") : i18n.t("chat:defaultPermissions");
-}
-
-export function getApprovalModeHint(mode: ApprovalMode) {
-  return mode === "skip"
-    ? i18n.t("settings:fields.skipHint")
-    : i18n.t("settings:fields.needsApprovalHint");
-}
-
-export function approvalModeToPolicy(mode: ApprovalMode) {
-  return mode === "skip" ? "never" : "always";
-}
-
-export function getSessionApprovalMode(session?: TalosSession | null): ApprovalMode {
-  const policy = session?.conf?.tools?.approval_policy;
-  return policy === "always" ? "needs_approval" : "skip";
 }
 
 export function createDefaultMemory(): MemoryRecord[] {

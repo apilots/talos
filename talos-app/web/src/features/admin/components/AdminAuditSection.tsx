@@ -14,7 +14,7 @@ export function AdminAuditSection() {
         time: "14:32:11",
         actor: "xujiang",
         event: "Bash",
-        result: t("states.approved"),
+        result: t("states.allowed"),
         detail: "cargo build --release",
       },
       {
@@ -30,7 +30,7 @@ export function AdminAuditSection() {
         time: "14:20:03",
         actor: "alice",
         event: "WebSearch",
-        result: t("states.autoAllowed"),
+        result: t("states.allowed"),
         detail: "rust async runtime",
       },
     ],

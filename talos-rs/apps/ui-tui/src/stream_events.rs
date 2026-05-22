@@ -5,7 +5,7 @@ use talos_sdk::{
     TimelineRecoverySnapshot,
 };
 
-use crate::types::{ChatRole, PendingApprovalState, ToolCallStatus};
+use crate::types::{ChatRole, ToolCallStatus};
 use crate::TuiApp;
 
 impl TuiApp {
@@ -360,38 +360,6 @@ impl TuiApp {
                     self.update_stored_tool_result(item_id, content, is_error);
                 }
             }
-            TalosTimelineDelta::ToolApprovalRequest {
-                call_id,
-                tool_name,
-                prompt,
-                arguments,
-            } => {
-                self.transcript.note_visible_activity();
-                self.push_right_event(format!(
-                    "approval needed: {} ({})",
-                    crate::utils::display_tool_name(&tool_name),
-                    call_id
-                ));
-                self.upsert_tool_event(
-                    call_id.clone(),
-                    format!("approval: {}", crate::utils::display_tool_name(&tool_name)),
-                );
-                self.pending_approval = Some(PendingApprovalState {
-                    call_id: call_id.clone(),
-                    tool_name: tool_name.clone(),
-                    prompt: prompt.clone(),
-                    arguments: arguments.clone(),
-                });
-                self.push_tool_call_block(call_id.clone(), tool_name, arguments, 0, 0, None);
-                self.update_tool_call_status(&call_id, ToolCallStatus::PendingApproval);
-                self.append_tool_call_progress(
-                    &call_id,
-                    Self::format_tool_progress_line(
-                        TalosToolProgressKind::Status,
-                        "waiting for approval",
-                    ),
-                );
-            }
             TalosTimelineDelta::ToolDynamicRequest {
                 call_id,
                 tool_name,
@@ -408,7 +376,7 @@ impl TuiApp {
                     format!("running: {}", crate::utils::display_tool_name(&tool_name)),
                 );
                 self.push_tool_call_block(call_id.clone(), tool_name, arguments, 0, 0, None);
-                self.update_tool_call_status(&call_id, ToolCallStatus::Running);
+                self.update_tool_call_status(&call_id, ToolCallStatus::PendingDynamicInput);
             }
             TalosTimelineDelta::Status { status } => {
                 if let Some(call_id) = self.tool_call_id(item_id) {
@@ -541,7 +509,7 @@ fn parse_tool_arguments(arguments: &str) -> TalosJsonValue {
 fn timeline_tool_status(status: TalosTimelineItemStatus) -> ToolCallStatus {
     match status {
         TalosTimelineItemStatus::Running => ToolCallStatus::Running,
-        TalosTimelineItemStatus::WaitingApproval => ToolCallStatus::PendingApproval,
+        TalosTimelineItemStatus::WaitingDynamicInput => ToolCallStatus::PendingDynamicInput,
         TalosTimelineItemStatus::Completed => ToolCallStatus::Completed { exit_ok: true },
         TalosTimelineItemStatus::Failed => ToolCallStatus::Completed { exit_ok: false },
         TalosTimelineItemStatus::Cancelled => ToolCallStatus::Completed { exit_ok: false },

@@ -24,13 +24,13 @@ export function AdminToolsSection() {
       {
         id: "t-3",
         name: t("toolRows.writeFilesName"),
-        policy: t("states.needsApproval"),
+        policy: t("states.allowed"),
         detail: t("toolRows.writeFilesDetail"),
       },
       {
         id: "t-4",
         name: t("toolRows.terminalName"),
-        policy: t("states.needsApproval"),
+        policy: t("states.allowed"),
         detail: t("toolRows.terminalDetail"),
       },
       {

@@ -17,8 +17,8 @@ use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usa
 use talos_session_store::{
     ActiveTurnRecord, ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, IdempotencyRecord,
     IdempotencyReservation, IdempotencyStatus, MessageCommandAck, MessageIdempotencyStore,
-    PendingDynamicToolResult, PendingToolApproval, PendingUserAction, SessionStore,
-    TimelineEventId, TimelineEventRetentionConfig, TimelineEventService, TimelineEventStore,
+    PendingDynamicToolResult, PendingUserAction, SessionStore, TimelineEventId,
+    TimelineEventRetentionConfig, TimelineEventService, TimelineEventStore,
 };
 use talos_types::talos::{
     StopReason, TalosContext, TalosInputItem, TalosItemDeltaEvent, TalosItemStartedEvent,
@@ -264,19 +264,6 @@ impl SessionRuntime for SessionServiceRuntimeAdapter {
 
     async fn cancel_active_turn(&self, session_id: &str) -> talos_error::TalosResult<()> {
         self.service.cancel_active_turn(session_id).await
-    }
-
-    async fn submit_tool_approval(
-        &self,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-        approved: bool,
-        reason: Option<String>,
-    ) -> talos_error::TalosResult<()> {
-        self.service
-            .submit_tool_approval(session_id, call_id, tool_name, approved, reason)
-            .await
     }
 
     async fn submit_dynamic_tool_result(

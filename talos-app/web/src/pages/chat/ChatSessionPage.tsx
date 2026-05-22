@@ -4,7 +4,6 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import {
   ChatComposer,
-  useUpdateSessionApprovalModeMutation,
   useChatSession,
   useModelsQuery,
   useProjectsQuery,
@@ -13,7 +12,7 @@ import {
   useUpdateSessionProjectMutation,
 } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
-import { getSessionApprovalMode, getSessionModel, UNBOUND_PROJECT_ID } from "@/shared/types/domain";
+import { getSessionModel, UNBOUND_PROJECT_ID } from "@/shared/types/domain";
 import { MessageList } from "@/widgets/message-list/MessageList";
 import { ChatContextBar } from "@/widgets/chat-context-bar/ChatContextBar";
 import { Panel } from "@/shared/ui/Panel";
@@ -48,10 +47,8 @@ export function ChatSessionPage() {
     setDraft,
     sendMessage,
     sendText,
-    submitApproval,
     isStreaming,
     isCancelling,
-    pendingApproval,
     canRetryResponse,
     retryResponse,
     retryStream,
@@ -61,19 +58,11 @@ export function ChatSessionPage() {
   } = useChatSession(sessionId, session?.state.message_count, session?.title);
   const updateModel = useUpdateSessionModelMutation(sessionId);
   const updateProject = useUpdateSessionProjectMutation(sessionId);
-  const updateApprovalMode = useUpdateSessionApprovalModeMutation(sessionId);
   const connection = useAppStore((state) => state.connection);
   const setConnection = useAppStore((state) => state.setConnection);
   const projects = useAppStore((state) => state.projects);
   const activeProjectId = useAppStore((state) => state.activeProjectId);
   const setActiveProjectId = useAppStore((state) => state.setActiveProjectId);
-  const approvalMode = useAppStore(
-    (state) =>
-      state.sessionApprovalModes[sessionId]
-      ?? getSessionApprovalMode(session)
-      ?? state.connection.defaultApprovalMode,
-  );
-  const setSessionApprovalMode = useAppStore((state) => state.setSessionApprovalMode);
   const currentModel = session ? getSessionModel(session) : models?.[0]?.id;
 
   useEffect(() => {
@@ -124,13 +113,6 @@ export function ChatSessionPage() {
   }, [location.pathname, locationState?.initialPrompt, navigate, sendText, session, sessionId]);
 
   useEffect(() => {
-    if (!session) {
-      return;
-    }
-    setSessionApprovalMode(sessionId, getSessionApprovalMode(session));
-  }, [session, sessionId, setSessionApprovalMode]);
-
-  useEffect(() => {
     stickToBottomRef.current = true;
   }, [sessionId]);
 
@@ -176,7 +158,7 @@ export function ChatSessionPage() {
       window.cancelAnimationFrame(frameId);
       window.clearTimeout(timeoutId);
     };
-  }, [blocks, pendingApproval, streamError, sessionId]);
+  }, [blocks, streamError, sessionId]);
 
   if (!sessionId) {
     navigate("/");
@@ -220,21 +202,6 @@ export function ChatSessionPage() {
             emptyDetail={t("chat:emptyReadyDetail")}
             emptyTitle={t("chat:emptyReadyTitle")}
           />
-          {pendingApproval ? (
-            <Panel className="rounded-[1.5rem] border-warning/30 bg-warning/5 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="text-xs uppercase tracking-[0.16em] text-warning">{t("chat:approvalRequired")}</div>
-                  <div className="mt-2 text-base font-medium">{pendingApproval.toolName}</div>
-                  <p className="mt-2 text-sm text-muted">{pendingApproval.prompt}</p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Button onClick={() => void submitApproval(false)} variant="danger">{t("common:reject")}</Button>
-                  <Button onClick={() => void submitApproval(true)}>{t("common:approve")}</Button>
-                </div>
-              </div>
-            </Panel>
-          ) : null}
           {streamError ? (
             <Panel className="rounded-[1.5rem] border-danger/30 bg-danger/5 p-4">
               <div className="text-sm text-danger">{streamError}</div>
@@ -285,17 +252,12 @@ export function ChatSessionPage() {
         <div className="mx-auto w-full max-w-[920px] px-7 pb-5">
           <ChatComposer
             activeProjectId={selectedProjectId}
-            approvalMode={approvalMode}
             disabled={!session}
             draft={draft}
             inputHistory={inputHistory}
             isCancelling={isCancelling}
             isStreaming={isStreaming}
             models={(models ?? []).map((model) => ({ id: model.id, name: model.name }))}
-            onApprovalModeChange={(mode) => {
-              setSessionApprovalMode(sessionId, mode);
-              updateApprovalMode.mutate(mode);
-            }}
             onCancel={() => void stopResponse()}
             onDraftChange={setDraft}
             onModelChange={(model) => updateModel.mutate(model)}

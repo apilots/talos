@@ -5,6 +5,7 @@ pub(crate) fn to_api_stop_reason(reason: StopReason) -> TalosApiStopReason {
         StopReason::EndTurn => TalosApiStopReason::EndTurn,
         StopReason::ModelOutputLimit => TalosApiStopReason::ModelOutputLimit,
         StopReason::ToolRoundLimit => TalosApiStopReason::ToolRoundLimit,
+        StopReason::WaitingDynamicInput => TalosApiStopReason::WaitingDynamicInput,
         StopReason::TransferUnresolved => TalosApiStopReason::TransferUnresolved,
         StopReason::BeforeModelCallbackStopped => TalosApiStopReason::BeforeModelCallbackStopped,
         StopReason::AfterModelCallbackStopped => TalosApiStopReason::AfterModelCallbackStopped,
@@ -36,7 +37,9 @@ pub fn finalize_general_turn_artifacts(
     let mut reasoning_log = state.reasoning_log;
     let mut final_output = final_text;
 
-    if final_output.trim().is_empty() {
+    if matches!(stop_reason, StopReason::WaitingDynamicInput) {
+        final_output.clear();
+    } else if final_output.trim().is_empty() {
         final_output = if state.tool_call_count > 0 {
             "Tool execution completed.".to_string()
         } else {
@@ -48,9 +51,11 @@ pub fn finalize_general_turn_artifacts(
     output_items.push(TalosOutputItem::ExecutionSummary {
         text: execution_summary.clone(),
     });
-    output_items.push(TalosOutputItem::OutputText {
-        text: final_output.clone(),
-    });
+    if !matches!(stop_reason, StopReason::WaitingDynamicInput) {
+        output_items.push(TalosOutputItem::OutputText {
+            text: final_output.clone(),
+        });
+    }
     reasoning_log.push(execution_summary);
 
     ExecutedTurnArtifacts {
@@ -61,6 +66,7 @@ pub fn finalize_general_turn_artifacts(
         reasoning_log,
         tool_call_log: state.tool_call_log,
         tool_result_log: state.tool_result_log,
+        pending_dynamic_requests: state.pending_dynamic_requests,
         final_answer_streamed: state.final_answer_streamed,
         execution_summary_streamed: state.execution_summary_streamed,
     }
@@ -82,6 +88,10 @@ pub async fn emit_general_turn_finalization_stream(
             )
             .await;
         }
+    }
+
+    if matches!(executed.stop_reason, StopReason::WaitingDynamicInput) {
+        return;
     }
 
     if !executed.final_answer_streamed && !executed.output_text.trim().is_empty() {

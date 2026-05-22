@@ -15,17 +15,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create a mock agent instance to focus on tool integration
     let _agent = MockAgent::new();
 
-    // This demo focuses on demonstrating the agent's interface and tool integration
+    // This demo focuses on demonstrating orchestration and tool registry integration.
     // In a real implementation, you would create a real agent with a proper LLM provider
 
     println!("1. Mock agent created successfully");
 
-    // We can't test the actual agent implementation with tools without a real LLM provider
-    // because the Agent trait implementation has async methods that need proper implementation
+    // We can't test the actual agent implementation with tools without a real LLM provider.
 
     println!("2. This demo shows that the agent crate compiles correctly with all its components");
     println!("3. The agent has been enhanced to support:");
-    println!("   - Tool call processing with process_tool_calls()");
     println!("   - System prompt generation with available tools");
     println!("   - Tool execution result handling and memory storage");
     println!("   - Better integration between agent and tool registry");

@@ -38,7 +38,6 @@ export function useSessionStreaming(
     },
     onSuccess: async () => {
       useAppStore.getState().setPendingUserAction(sessionId, undefined);
-      useAppStore.getState().setPendingApproval(sessionId, undefined);
       useAppStore.getState().setSessionStatus(sessionId, undefined);
       useAppStore.getState().setStreamError(sessionId, undefined);
       useAppStore.getState().setStreamMeta(sessionId, {
@@ -91,10 +90,6 @@ export function useSessionStreaming(
     onSuccess: async () => {
       await invalidateSessionQueries();
       const currentStream = useAppStore.getState().streams[sessionId];
-      if (currentStream?.pendingApproval) {
-        setSessionStatus(sessionId, "waiting_approval");
-        return;
-      }
       if (currentStream?.pendingUserAction) {
         setSessionStatus(sessionId, "running");
         return;
@@ -173,10 +168,6 @@ export function useSessionStreaming(
     onSuccess: async () => {
       await invalidateSessionQueries();
       const currentStream = useAppStore.getState().streams[sessionId];
-      if (currentStream?.pendingApproval) {
-        setSessionStatus(sessionId, "waiting_approval");
-        return;
-      }
       if (currentStream?.pendingUserAction) {
         setSessionStatus(sessionId, "running");
         return;
@@ -228,8 +219,6 @@ export function useSessionStreaming(
       }
       return sendMutation.mutateAsync({ text: content, appendUserInput: true });
     },
-    continueAfterApproval: (text: string) =>
-      sendMutation.mutateAsync({ text, appendUserInput: false }),
     isStreaming: streamState?.isStreaming ?? false,
     isCancelling:
       stopMutation.isPending ||

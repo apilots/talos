@@ -1077,7 +1077,6 @@ async fn test_stream_round_executes_tools_during_stream_and_emits_lifecycle_even
         project_root: None,
         kernel_config: Arc::new(AgentKernelConfig::default()),
         memory_store,
-        pre_approved_call_ids: std::collections::HashSet::new(),
         dynamic_tool_results: std::collections::HashMap::new(),
     };
     let (tx, mut rx) = mpsc::channel(16);

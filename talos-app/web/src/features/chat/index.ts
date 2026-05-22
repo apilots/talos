@@ -15,8 +15,6 @@ export {
   sendMessage,
   sendTimelineEvents,
   retryTimelineEvents,
-  submitToolApproval,
-  updateSessionApprovalMode,
   updateSessionModel,
   updateSessionProject,
 } from "./api";
@@ -36,11 +34,9 @@ export {
   useActiveTurnQuery,
   useSessionQuery,
   useSessionsQuery,
-  useUpdateSessionApprovalModeMutation,
   useUpdateSessionModelMutation,
   useUpdateSessionProjectMutation,
 } from "./hooks/useChatQueries";
-export { useSessionApproval } from "./hooks/useSessionApproval";
 export { useSessionBlocks } from "./hooks/useSessionBlocks";
 export { useSessionMessageStream } from "./hooks/useSessionMessageStream";
 export { useSessionReconnect } from "./hooks/useSessionReconnect";

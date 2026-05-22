@@ -20,9 +20,9 @@ export type ToolErrorData = { tool_name: string, reason: string, };
 
 export type ConfigErrorData = { path: string, reason: string, };
 
-export type ClientMethod = "initialize" | "session.create" | "session.list" | "session.read" | "session.patch" | "session.delete" | "session.close" | "session.compact" | "session.clear" | "session.active_turn" | "session.history" | "session.recover" | "project.create" | "project.list" | "project.read" | "project.patch" | "project.delete" | "turn.start" | "turn.interrupt" | "turn.retry" | "event.subscribe" | "event.unsubscribe" | "tool.approval.submit" | "tool.dynamic_result.submit" | "admin.session.list" | "admin.project.list" | "admin.user.list" | "admin.user.create" | "admin.user.patch" | "admin.user.delete" | "model.list" | "config.read" | "config.value.write" | "config.batch.write" | "config.reload" | "memory.file.list" | "memory.file.read" | "memory.file.write" | "workspace.doc.list" | "workspace.doc.read" | "workspace.doc.write" | "skill.list" | "app.list" | "tool.list" | "account.get" | "auth.register" | "auth.login" | "auth.logout" | "user.current" | "user.update" | "user.token.list" | "user.token.create" | "user.token.delete" | "memory.search";
+export type ClientMethod = "initialize" | "session.create" | "session.list" | "session.read" | "session.patch" | "session.delete" | "session.close" | "session.compact" | "session.clear" | "session.active_turn" | "session.history" | "session.recover" | "project.create" | "project.list" | "project.read" | "project.patch" | "project.delete" | "turn.start" | "turn.interrupt" | "turn.retry" | "event.subscribe" | "event.unsubscribe" | "tool.dynamic_result.submit" | "admin.session.list" | "admin.project.list" | "admin.user.list" | "admin.user.create" | "admin.user.patch" | "admin.user.delete" | "model.list" | "config.read" | "config.value.write" | "config.batch.write" | "config.reload" | "memory.file.list" | "memory.file.read" | "memory.file.write" | "workspace.doc.list" | "workspace.doc.read" | "workspace.doc.write" | "skill.list" | "app.list" | "tool.list" | "account.get" | "auth.register" | "auth.login" | "auth.logout" | "user.current" | "user.update" | "user.token.list" | "user.token.create" | "user.token.delete" | "memory.search";
 
-export type ClientRequestParams = { "method": "initialize", "params": InitializeParams } | { "method": "session.create", "params": SessionCreateParams } | { "method": "session.list", "params": SessionListParams } | { "method": "session.read", "params": SessionReadParams } | { "method": "session.patch", "params": SessionPatchParams } | { "method": "session.delete", "params": SessionDeleteParams } | { "method": "session.close", "params": SessionCloseParams } | { "method": "session.compact", "params": SessionCompactParams } | { "method": "session.clear", "params": SessionClearParams } | { "method": "session.active_turn", "params": SessionActiveTurnParams } | { "method": "session.history", "params": SessionHistoryParams } | { "method": "session.recover", "params": TimelineRecoveryParams } | { "method": "project.create", "params": ProjectCreateParams } | { "method": "project.list", "params": ProjectListParams } | { "method": "project.read", "params": ProjectReadParams } | { "method": "project.patch", "params": ProjectPatchParams } | { "method": "project.delete", "params": ProjectDeleteParams } | { "method": "turn.start", "params": TurnStartParams } | { "method": "turn.interrupt", "params": TurnInterruptParams } | { "method": "turn.retry", "params": TurnRetryParams } | { "method": "event.subscribe", "params": EventSubscribeParams } | { "method": "event.unsubscribe", "params": EventUnsubscribeParams } | { "method": "tool.approval.submit", "params": ToolApprovalSubmitParams } | { "method": "tool.dynamic_result.submit", "params": ToolDynamicResultSubmitParams } | { "method": "admin.session.list", "params": AdminSessionListParams } | { "method": "admin.project.list", "params": AdminProjectListParams } | { "method": "admin.user.list", "params": AdminUserListParams } | { "method": "admin.user.create", "params": AdminUserCreateParams } | { "method": "admin.user.patch", "params": AdminUserPatchParams } | { "method": "admin.user.delete", "params": AdminUserDeleteParams } | { "method": "model.list", "params": ModelListParams } | { "method": "config.read", "params": ConfigReadParams } | { "method": "config.value.write", "params": ConfigValueWriteParams } | { "method": "config.batch.write", "params": ConfigBatchWriteParams } | { "method": "config.reload", "params": ConfigReloadParams } | { "method": "memory.file.list", "params": MemoryFileListParams } | { "method": "memory.file.read", "params": MemoryFileReadParams } | { "method": "memory.file.write", "params": MemoryFileWriteParams } | { "method": "workspace.doc.list", "params": WorkspaceDocListParams } | { "method": "workspace.doc.read", "params": WorkspaceDocReadParams } | { "method": "workspace.doc.write", "params": WorkspaceDocWriteParams } | { "method": "skill.list", "params": SkillListParams } | { "method": "app.list", "params": AppListParams } | { "method": "tool.list", "params": ToolListParams } | { "method": "account.get", "params": AccountGetParams } | { "method": "auth.register", "params": RegisterRequest } | { "method": "auth.login", "params": LoginRequest } | { "method": "auth.logout", "params": AuthLogoutParams } | { "method": "user.current", "params": UserCurrentParams } | { "method": "user.update", "params": UpdateCurrentUserRequest } | { "method": "user.token.list", "params": UserTokenListParams } | { "method": "user.token.create", "params": CreateUserTokenRequest } | { "method": "user.token.delete", "params": UserTokenDeleteParams } | { "method": "memory.search", "params": MemorySearchParams };
+export type ClientRequestParams = { "method": "initialize", "params": InitializeParams } | { "method": "session.create", "params": SessionCreateParams } | { "method": "session.list", "params": SessionListParams } | { "method": "session.read", "params": SessionReadParams } | { "method": "session.patch", "params": SessionPatchParams } | { "method": "session.delete", "params": SessionDeleteParams } | { "method": "session.close", "params": SessionCloseParams } | { "method": "session.compact", "params": SessionCompactParams } | { "method": "session.clear", "params": SessionClearParams } | { "method": "session.active_turn", "params": SessionActiveTurnParams } | { "method": "session.history", "params": SessionHistoryParams } | { "method": "session.recover", "params": TimelineRecoveryParams } | { "method": "project.create", "params": ProjectCreateParams } | { "method": "project.list", "params": ProjectListParams } | { "method": "project.read", "params": ProjectReadParams } | { "method": "project.patch", "params": ProjectPatchParams } | { "method": "project.delete", "params": ProjectDeleteParams } | { "method": "turn.start", "params": TurnStartParams } | { "method": "turn.interrupt", "params": TurnInterruptParams } | { "method": "turn.retry", "params": TurnRetryParams } | { "method": "event.subscribe", "params": EventSubscribeParams } | { "method": "event.unsubscribe", "params": EventUnsubscribeParams } | { "method": "tool.dynamic_result.submit", "params": ToolDynamicResultSubmitParams } | { "method": "admin.session.list", "params": AdminSessionListParams } | { "method": "admin.project.list", "params": AdminProjectListParams } | { "method": "admin.user.list", "params": AdminUserListParams } | { "method": "admin.user.create", "params": AdminUserCreateParams } | { "method": "admin.user.patch", "params": AdminUserPatchParams } | { "method": "admin.user.delete", "params": AdminUserDeleteParams } | { "method": "model.list", "params": ModelListParams } | { "method": "config.read", "params": ConfigReadParams } | { "method": "config.value.write", "params": ConfigValueWriteParams } | { "method": "config.batch.write", "params": ConfigBatchWriteParams } | { "method": "config.reload", "params": ConfigReloadParams } | { "method": "memory.file.list", "params": MemoryFileListParams } | { "method": "memory.file.read", "params": MemoryFileReadParams } | { "method": "memory.file.write", "params": MemoryFileWriteParams } | { "method": "workspace.doc.list", "params": WorkspaceDocListParams } | { "method": "workspace.doc.read", "params": WorkspaceDocReadParams } | { "method": "workspace.doc.write", "params": WorkspaceDocWriteParams } | { "method": "skill.list", "params": SkillListParams } | { "method": "app.list", "params": AppListParams } | { "method": "tool.list", "params": ToolListParams } | { "method": "account.get", "params": AccountGetParams } | { "method": "auth.register", "params": RegisterRequest } | { "method": "auth.login", "params": LoginRequest } | { "method": "auth.logout", "params": AuthLogoutParams } | { "method": "user.current", "params": UserCurrentParams } | { "method": "user.update", "params": UpdateCurrentUserRequest } | { "method": "user.token.list", "params": UserTokenListParams } | { "method": "user.token.create", "params": CreateUserTokenRequest } | { "method": "user.token.delete", "params": UserTokenDeleteParams } | { "method": "memory.search", "params": MemorySearchParams };
 
 export type ClientRequest = { method: ClientMethod, params: ClientRequestParams, };
 
@@ -76,9 +76,7 @@ export type TimelineActiveTurnSnapshot = { session_id: string, turn_id: string |
 
 export type TimelineActiveTurnStatus = "running" | "waiting_user_action" | "cancelling" | "completed" | "failed";
 
-export type TimelinePendingUserAction = { "type": "tool_approval" } & TimelinePendingToolApproval | { "type": "dynamic_tool_result" } & TimelinePendingDynamicToolResult;
-
-export type TimelinePendingToolApproval = { item_id: string | null, call_id: string, tool_name: string, prompt: string, arguments: TalosJsonValue, };
+export type TimelinePendingUserAction = { "type": "dynamic_tool_result" } & TimelinePendingDynamicToolResult;
 
 export type TimelinePendingDynamicToolResult = { item_id: string | null, call_id: string, tool_name: string, };
 
@@ -109,8 +107,6 @@ export type EventSubscribeResponse = { subscription_id: string, session_id: stri
 export type EventUnsubscribeParams = { subscription_id: string, };
 
 export type EventUnsubscribeResponse = { subscription_id: string, unsubscribed: boolean, };
-
-export type ToolApprovalSubmitParams = { session_id: string, call_id: string, tool_name: string, approved: boolean, reason: string | null, };
 
 export type ToolDynamicResultSubmitParams = { session_id: string, call_id: string, tool_name: string, output: string, success: boolean, };
 
@@ -212,13 +208,13 @@ export type TalosTimelineItemKind = "user_input" | "reasoning" | "assistant_text
 
 export type TalosTimelinePhase = "input" | "thinking" | "acting" | "commentary" | "final_answer" | "system";
 
-export type TalosTimelineItemStatus = "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
+export type TalosTimelineItemStatus = "running" | "waiting_dynamic_input" | "completed" | "failed" | "cancelled";
 
 export type TalosTimelineNoticeLevel = "info" | "warning" | "error";
 
 export type TalosTimelineContent = { "type": "empty" } | { "type": "text", text: string, } | { "type": "tool_call", call_id: string, name: string, arguments: string, progress: Array<TalosToolProgressEntry>, result: TalosToolResult | null, } | { "type": "execution_summary", summary: string, } | { "type": "system_notice", level: TalosTimelineNoticeLevel, message: string, };
 
-export type TalosTimelineDelta = { "type": "text", text: string, } | { "type": "tool_arguments", arguments_delta: string, } | { "type": "tool_progress", progress_kind: TalosToolProgressKind, text_delta: string, } | { "type": "tool_result", content: Array<TalosContentItem>, is_error: boolean, } | { "type": "tool_approval_request", call_id: string, tool_name: string, prompt: string, arguments: TalosJsonValue, } | { "type": "tool_dynamic_request", call_id: string, tool_name: string, arguments: TalosJsonValue, } | { "type": "status", status: TalosTimelineItemStatus, };
+export type TalosTimelineDelta = { "type": "text", text: string, } | { "type": "tool_arguments", arguments_delta: string, } | { "type": "tool_progress", progress_kind: TalosToolProgressKind, text_delta: string, } | { "type": "tool_result", content: Array<TalosContentItem>, is_error: boolean, } | { "type": "tool_dynamic_request", call_id: string, tool_name: string, arguments: TalosJsonValue, } | { "type": "status", status: TalosTimelineItemStatus, };
 
 export type TalosToolProgressEntry = { progress_kind: TalosToolProgressKind, text: string, timestamp_ms: bigint, };
 
@@ -242,7 +238,7 @@ export type TalosContentItem = { "type": "text", text: string, } | { "type": "js
 
 export type TalosUsage = { input_tokens: number, output_tokens: number, total_tokens: number, cache_creation_input_tokens: number | null, cache_read_input_tokens: number | null, };
 
-export type StopReason = "end_turn" | "model_output_limit" | "tool_round_limit" | "transfer_unresolved" | "before_model_callback_stopped" | "after_model_callback_stopped" | "cancelled";
+export type StopReason = "end_turn" | "model_output_limit" | "tool_round_limit" | "waiting_dynamic_input" | "transfer_unresolved" | "before_model_callback_stopped" | "after_model_callback_stopped" | "cancelled";
 
 export type TalosToolProgressKind = "status" | "stdout" | "stderr";
 
@@ -260,7 +256,7 @@ export type ServerNotification = { "method": "initialized", "params": Initialize
 
 export type InitializedNotification = { protocol_version: ProtocolVersion, };
 
-export type ServerRequest = { "method": "client.user_input.request", "params": RequestUserInputParams } | { "method": "client.auth.refresh", "params": AuthRefreshParams } | { "method": "client.approval.request", "params": ClientApprovalRequestParams };
+export type ServerRequest = { "method": "client.user_input.request", "params": RequestUserInputParams } | { "method": "client.auth.refresh", "params": AuthRefreshParams };
 
 export type RequestUserInputParams = { prompt: string, };
 
@@ -269,10 +265,6 @@ export type RequestUserInputResponse = { text: string, };
 export type AuthRefreshParams = { reason: string, };
 
 export type AuthRefreshResponse = { token: string, };
-
-export type ClientApprovalRequestParams = { prompt: string, };
-
-export type ClientApprovalRequestResponse = { approved: boolean, reason: string | null, };
 
 export type JsonRpcRequest = { jsonrpc: string, id: RequestId, method: string, actor_credentials: ActorCredentials | null, params: unknown, };
 

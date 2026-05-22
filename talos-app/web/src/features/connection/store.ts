@@ -1,4 +1,4 @@
-import type { ApprovalMode, RuntimeMode } from "@/shared/types/ui";
+import type { RuntimeMode } from "@/shared/types/ui";
 
 const defaultServerUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 type UserRole = "user" | "admin";
@@ -12,7 +12,6 @@ export interface ConnectionState {
   authUsername: string;
   userId: string;
   runtimeMode: RuntimeMode;
-  defaultApprovalMode: ApprovalMode;
 }
 
 export interface ConnectionSlice {
@@ -34,7 +33,6 @@ export function createConnectionSlice(set: ConnectionSliceSetter): ConnectionSli
       authUsername: "Anonymous",
       userId: "anonymous",
       runtimeMode: "cloud",
-      defaultApprovalMode: "needs_approval",
     },
     setConnection: (patch) =>
       set((state) => {

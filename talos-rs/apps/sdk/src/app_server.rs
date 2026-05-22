@@ -19,9 +19,8 @@ use talos_app_protocol::requests::{
     ProjectReadParams, ProtocolInputItem, SessionActiveTurnParams, SessionCloseParams,
     SessionCreateParams, SessionDeleteParams, SessionHistoryParams, SessionListParams,
     SessionPatchParams, SessionReadParams, TimelineActiveTurnSnapshot, TimelineRecoveryParams,
-    TimelineRecoverySnapshot, ToolApprovalSubmitParams, ToolDynamicResultSubmitParams,
-    TurnInterruptParams, TurnStartParams, TurnStartResponse, WorkspaceDocListParams,
-    WorkspaceDocReadParams, WorkspaceDocWriteParams,
+    TimelineRecoverySnapshot, ToolDynamicResultSubmitParams, TurnInterruptParams, TurnStartParams,
+    TurnStartResponse, WorkspaceDocListParams, WorkspaceDocReadParams, WorkspaceDocWriteParams,
 };
 use talos_app_protocol::version::ProtocolVersion;
 use talos_auth::{AdminCreateUserRequest, AdminPatchUserRequest, UserDto};
@@ -567,29 +566,6 @@ impl AppServerClient {
                 "turn.interrupt",
                 TurnInterruptParams {
                     session_id: session_id.to_string(),
-                },
-            )
-            .await?;
-        Ok(())
-    }
-
-    pub async fn submit_tool_approval(
-        &mut self,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-        approved: bool,
-        reason: Option<String>,
-    ) -> TalosResult<()> {
-        let _: Value = self
-            .request_typed(
-                "tool.approval.submit",
-                ToolApprovalSubmitParams {
-                    session_id: session_id.to_string(),
-                    call_id: call_id.to_string(),
-                    tool_name: tool_name.to_string(),
-                    approved,
-                    reason,
                 },
             )
             .await?;

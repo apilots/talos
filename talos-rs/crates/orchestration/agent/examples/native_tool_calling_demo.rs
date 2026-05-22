@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use serde_json::json;
-use talos_agent::{AgentImpl, AgentOrchestrator, OrchestratorRequest};
+use talos_agent::{AgentHarness, AgentOrchestrator, OrchestratorRequest};
 use talos_error::TalosResult;
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, Usage};
 use talos_tools::{ToolRegistry, WebSearchTool};
@@ -70,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let registry = Arc::new(ToolRegistry::new_with_policy(policy));
     registry.register(Arc::new(WebSearchTool));
 
-    let agent = AgentImpl::new(
+    let agent = AgentHarness::new(
         "demo-native-tool-agent".to_string(),
         "NativeToolAgent".to_string(),
         "Demonstrates native tool calling flow".to_string(),

@@ -39,7 +39,6 @@ describe("useSettingsPage", () => {
         authToken: "",
         userId: "web-user",
         runtimeMode: "cloud",
-        defaultApprovalMode: "needs_approval",
       },
       locale: "en",
       uiTheme: "light",

@@ -32,6 +32,7 @@ pub enum StopReason {
     EndTurn,
     ModelOutputLimit,
     ToolRoundLimit,
+    WaitingDynamicInput,
     TransferUnresolved,
     BeforeModelCallbackStopped,
     AfterModelCallbackStopped,
@@ -465,7 +466,7 @@ pub enum TalosTimelinePhase {
 #[serde(rename_all = "snake_case")]
 pub enum TalosTimelineItemStatus {
     Running,
-    WaitingApproval,
+    WaitingDynamicInput,
     Completed,
     Failed,
     Cancelled,
@@ -535,12 +536,6 @@ pub enum TalosTimelineDelta {
     ToolResult {
         content: Vec<TalosContentItem>,
         is_error: bool,
-    },
-    ToolApprovalRequest {
-        call_id: String,
-        tool_name: String,
-        prompt: String,
-        arguments: TalosJsonValue,
     },
     ToolDynamicRequest {
         call_id: String,

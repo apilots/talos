@@ -8,7 +8,7 @@ function resolveTone(status: string) {
   if (status === "done") {
     return "success";
   }
-  if (status === "waiting_approval") {
+  if (status === "waiting_dynamic_input") {
     return "warning";
   }
   if (status === "error") {
@@ -33,13 +33,13 @@ export function ToolCallBlock({
   output?: string;
   progress: Array<{ kind: string; message: string }>;
   prompt?: string;
-  status: "queued" | "running" | "waiting_approval" | "done" | "error";
+  status: "queued" | "running" | "waiting_dynamic_input" | "done" | "error";
   timingMs?: number | null;
   toolName: string;
   variant?: "default" | "timeline";
 }) {
   const { t } = useTranslation("chat");
-  const [open, setOpen] = useState(status === "waiting_approval");
+  const [open, setOpen] = useState(status === "waiting_dynamic_input");
 
   return (
     <ToolCallCard.Root compact={variant === "timeline"}>
@@ -54,7 +54,7 @@ export function ToolCallBlock({
       {open ? (
         <ToolCallCard.Body>
           <ToolCallCard.Input content={argumentsText} title={t("arguments")} />
-          {prompt ? <ToolCallCard.ApprovalActions prompt={prompt} title={t("approvalPrompt")} /> : null}
+          {prompt ? <ToolCallCard.Prompt prompt={prompt} title={t("dynamicToolPrompt")} /> : null}
           {progress.length > 0 ? <ToolCallCard.Progress entries={progress} title={t("progress")} /> : null}
           {output ? <ToolCallCard.Output content={output} title={t("output")} /> : null}
           {timingMs !== null && timingMs !== undefined ? (

@@ -527,7 +527,14 @@ pub(crate) fn stage_session_state_update(
         key: key.to_string(),
         value,
     });
-    crate::flow::stage_kernel_transcript_event(ctx, event);
+    stage_kernel_transcript_event(ctx, event);
+}
+
+fn stage_kernel_transcript_event(ctx: &mut InvocationContext, event: KernelTranscriptEvent) {
+    for delta in &event.actions.state_delta {
+        ctx.session.state.apply_delta(delta);
+    }
+    ctx.session.events.push(event);
 }
 
 fn build_continuity_last_failure(executed: &ExecutedTurnArtifacts) -> Option<String> {

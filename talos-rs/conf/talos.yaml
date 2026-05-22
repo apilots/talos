@@ -13,10 +13,7 @@ agent:
   name: "talos"
   model: "kimi-k2.5"
   kernel:
-    max_iters: 1
-    max_task_per_turn: 3
     tool_parallelism: 1
-    max_llm_calls: 8
     max_tool_rounds: 8
     tool_result_max_bytes: 65536
     context_compaction_max_bytes: 262144
@@ -24,10 +21,6 @@ agent:
     tools:
       enable_collaboration_tools: true
     planner_mode: "built_in"
-    planner_selection: "auto"
-    execution_mode: "single"
-    execution_children: 2
-    execution_loop_iters: 3
     prompt:
       window:
         reserved_output_tokens:

@@ -7,9 +7,7 @@ use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::ToolDefinition;
 use talos_tools_policy::{ToolPolicy, ToolPolicyChecker};
-use talos_tools_sandbox::{
-    ToolApprovalRequirement, ToolGovernanceArgumentOverride, ToolGovernanceSpec, ToolSandboxMode,
-};
+use talos_tools_sandbox::{ToolGovernanceArgumentOverride, ToolGovernanceSpec, ToolSandboxMode};
 use tracing::warn;
 
 use crate::collaboration::CollaborationRuntime;
@@ -320,7 +318,6 @@ impl ToolRegistry {
     fn default_governance(name: &str) -> ToolGovernanceSpec {
         match name {
             "bash" => ToolGovernanceSpec {
-                default_approval: ToolApprovalRequirement::Skip,
                 preferred_sandbox: ToolSandboxMode::UseDefault,
                 argument_override: ToolGovernanceArgumentOverride::BashCommandPermissions,
                 retry_without_sandbox: true,

@@ -82,7 +82,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::TimelineActiveTurnSnapshot>());
     output.push_str(&export::<crate::requests::TimelineActiveTurnStatus>());
     output.push_str(&export::<crate::requests::TimelinePendingUserAction>());
-    output.push_str(&export::<crate::requests::TimelinePendingToolApproval>());
     output.push_str(&export::<crate::requests::TimelinePendingDynamicToolResult>());
     output.push_str(&export::<crate::requests::ProjectCreateParams>());
     output.push_str(&export::<crate::requests::ProjectListParams>());
@@ -98,7 +97,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::EventSubscribeResponse>());
     output.push_str(&export::<crate::requests::EventUnsubscribeParams>());
     output.push_str(&export::<crate::requests::EventUnsubscribeResponse>());
-    output.push_str(&export::<crate::requests::ToolApprovalSubmitParams>());
     output.push_str(&export::<crate::requests::ToolDynamicResultSubmitParams>());
     output.push_str(&export::<crate::requests::AdminSessionListParams>());
     output.push_str(&export::<crate::requests::AdminSessionPagination>());
@@ -178,10 +176,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::server_requests::RequestUserInputResponse>());
     output.push_str(&export::<crate::server_requests::AuthRefreshParams>());
     output.push_str(&export::<crate::server_requests::AuthRefreshResponse>());
-    output.push_str(&export::<crate::server_requests::ClientApprovalRequestParams>());
-    output.push_str(&export::<
-        crate::server_requests::ClientApprovalRequestResponse,
-    >());
     output.push_str(&export::<crate::jsonrpc::JsonRpcRequest>());
     output.push_str(&export::<crate::jsonrpc::JsonRpcResponse>());
     output.push_str(&export::<crate::jsonrpc::JsonRpcNotification>());

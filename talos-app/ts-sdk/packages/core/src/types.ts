@@ -27,7 +27,6 @@ export type {
   TimelineActiveTurnStatus,
   TimelineCursorStatus,
   TimelinePendingDynamicToolResult,
-  TimelinePendingToolApproval,
   TimelinePendingUserAction,
   TimelineRecoveryParams,
   SessionHistoryMessage,
@@ -306,15 +305,6 @@ export type TalosActiveTurnStatus =
   | "completed"
   | "failed";
 
-export interface TalosPendingToolApproval {
-  type: "tool_approval";
-  item_id?: string | null;
-  call_id: string;
-  tool_name: string;
-  prompt: string;
-  arguments: unknown;
-}
-
 export interface TalosPendingDynamicToolResult {
   type: "dynamic_tool_result";
   item_id?: string | null;
@@ -322,9 +312,7 @@ export interface TalosPendingDynamicToolResult {
   tool_name: string;
 }
 
-export type TalosPendingUserAction =
-  | TalosPendingToolApproval
-  | TalosPendingDynamicToolResult;
+export type TalosPendingUserAction = TalosPendingDynamicToolResult;
 
 export interface TalosActiveTurn {
   session_id: string;
@@ -417,15 +405,8 @@ export interface SessionAgentConf {
   model?: string | null;
 }
 
-export type ToolApprovalPolicy = "on_request" | "always" | "never";
-
-export interface SessionToolsConf {
-  approval_policy?: ToolApprovalPolicy | null;
-}
-
 export interface SessionConf {
   agent?: SessionAgentConf | null;
-  tools?: SessionToolsConf | null;
 }
 
 export type OptionalProjectIdPatch =
@@ -510,13 +491,6 @@ export interface WorkspaceDocSummary {
 
 export interface WorkspaceDocDetail extends WorkspaceDocSummary {
   content: string;
-}
-
-export interface ToolApprovalRequest {
-  call_id: string;
-  tool_name: string;
-  approved: boolean;
-  reason?: string | null;
 }
 
 export type ModelInputKind = "text" | "image" | "audio" | "video" | "file";

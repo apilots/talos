@@ -24,13 +24,13 @@ export function useSessionReconnect({
   const { invalidateSessionQueries } = useSessionQueryInvalidation(sessionId);
 
   useEffect(() => {
-    if (!streamState?.isStreaming || streamState.pendingUserAction || streamState.pendingApproval) {
+    if (!streamState?.isStreaming || streamState.pendingUserAction) {
       return;
     }
 
     const timeoutId = window.setTimeout(() => {
       const currentStream = useAppStore.getState().streams[sessionId];
-      if (!currentStream?.isStreaming || currentStream.pendingUserAction || currentStream.pendingApproval) {
+      if (!currentStream?.isStreaming || currentStream.pendingUserAction) {
         return;
       }
       if (currentStream.connectionState === "cancelling") {
@@ -55,7 +55,6 @@ export function useSessionReconnect({
     streamState?.connectionState,
     streamState?.isStreaming,
     streamState?.pendingUserAction,
-    streamState?.pendingApproval,
   ]);
 
   useEffect(() => {
@@ -91,8 +90,7 @@ export function useSessionReconnect({
       }
       if (
         currentStream.activeMessageId &&
-        !currentStream.pendingUserAction &&
-        !currentStream.pendingApproval
+        !currentStream.pendingUserAction
       ) {
         const nextAttempt = (currentStream.reconnectAttempt ?? 0) + 1;
         useAppStore.getState().setStreamMeta(sessionId, {

@@ -5,7 +5,6 @@ use super::*;
 pub enum RequestProcessorKind {
     Basic = 0,
     Auth = 1,
-    RequestConfirmation = 2,
     DynamicToolReplay = 3,
     Instructions = 4,
     Identity = 5,
@@ -23,7 +22,6 @@ pub struct BasicRequestProcessor;
 
 pub struct InstructionsRequestProcessor;
 pub struct AuthRequestProcessor;
-pub struct RequestConfirmationRequestProcessor;
 pub struct DynamicToolReplayRequestProcessor;
 pub struct ContextCacheRequestProcessor;
 pub struct InteractionsRequestProcessor;
@@ -105,125 +103,6 @@ impl RequestProcessor for AuthRequestProcessor {
         }
         Ok(RequestProcessorOutput::default())
     }
-}
-
-#[async_trait]
-impl RequestProcessor for RequestConfirmationRequestProcessor {
-    fn kind(&self) -> RequestProcessorKind {
-        RequestProcessorKind::RequestConfirmation
-    }
-
-    async fn run(
-        &self,
-        ctx: &mut InvocationContext,
-        request: &mut LlmRequestEnvelope,
-    ) -> TalosResult<RequestProcessorOutput> {
-        if let Some((confirmation_event, approval_event)) =
-            latest_confirmation_approval_pair(ctx, request.branch)
-        {
-            let KernelTranscriptPayload::Confirmation {
-                payload: confirmation,
-            } = &confirmation_event.payload
-            else {
-                return Ok(RequestProcessorOutput::default());
-            };
-            let KernelTranscriptPayload::ApprovalResponse { payload: approval } =
-                &approval_event.payload
-            else {
-                return Ok(RequestProcessorOutput::default());
-            };
-
-            if approval.approved {
-                request.replay_tool_invocations.push(ReplayToolInvocation {
-                    call_id: confirmation.call_id.clone(),
-                    tool_name: confirmation.tool_name.clone(),
-                    arguments: confirmation.arguments.clone().into(),
-                });
-            } else {
-                let reason = approval.reason.as_deref().unwrap_or("no reason given");
-                request.prompt_prefix_messages.push(ChatMessage::system(format!(
-                    "Tool `{}` (call `{}`) was rejected by the user: {}. Inform the user and continue.",
-                    approval.tool_name, approval.call_id, reason
-                )));
-            }
-            return Ok(RequestProcessorOutput::default());
-        }
-
-        let latest_confirmation = latest_branch_event(ctx, request.branch, |event| {
-            matches!(event.payload, KernelTranscriptPayload::Confirmation { .. })
-        })
-        .or_else(|| {
-            latest_event(ctx, |event| {
-                matches!(event.payload, KernelTranscriptPayload::Confirmation { .. })
-            })
-        });
-
-        let Some(confirmation_event) = latest_confirmation else {
-            return Ok(RequestProcessorOutput::default());
-        };
-
-        let KernelTranscriptPayload::Confirmation {
-            payload: confirmation,
-        } = &confirmation_event.payload
-        else {
-            return Ok(RequestProcessorOutput::default());
-        };
-
-        request.prompt_prefix_messages.push(ChatMessage::system(format!(
-            "A tool confirmation is pending for `{}` (call `{}`). Wait for explicit user approval before continuing. Prompt: {}",
-            confirmation.tool_name, confirmation.call_id, confirmation.prompt
-        )));
-
-        Ok(RequestProcessorOutput::default())
-    }
-}
-
-fn latest_confirmation_approval_pair<'a>(
-    ctx: &'a InvocationContext,
-    branch: crate::ExecutionBranch,
-) -> Option<(&'a KernelTranscriptEvent, &'a KernelTranscriptEvent)> {
-    let latest_branch_pair = ctx.session.events.iter().rev().find_map(|approval_event| {
-        if approval_event.branch != branch {
-            return None;
-        }
-        confirmation_for_approval(ctx, approval_event)
-    });
-    latest_branch_pair.or_else(|| {
-        ctx.session
-            .events
-            .iter()
-            .rev()
-            .find_map(|approval_event| confirmation_for_approval(ctx, approval_event))
-    })
-}
-
-fn confirmation_for_approval<'a>(
-    ctx: &'a InvocationContext,
-    approval_event: &'a KernelTranscriptEvent,
-) -> Option<(&'a KernelTranscriptEvent, &'a KernelTranscriptEvent)> {
-    let KernelTranscriptPayload::ApprovalResponse { payload: approval } = &approval_event.payload
-    else {
-        return None;
-    };
-    ctx.session
-        .events
-        .iter()
-        .rev()
-        .find(|candidate| {
-            if candidate.timestamp >= approval_event.timestamp {
-                return false;
-            }
-            if let KernelTranscriptPayload::Confirmation {
-                payload: confirmation,
-            } = &candidate.payload
-            {
-                confirmation.call_id == approval.call_id
-                    && confirmation.tool_name == approval.tool_name
-            } else {
-                false
-            }
-        })
-        .map(|confirmation_event| (confirmation_event, approval_event))
 }
 
 #[async_trait]

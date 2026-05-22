@@ -1,26 +1,10 @@
 use crate::{
-    AgentRunResult, CallbackControl, ExecutionEvent, ExecutionEventHandler, InvocationContext,
-    KernelExecutionSettings, LlmRequestEnvelope, LlmResponseEnvelope, PlannerKind,
-    PlanningRequestEffect, PlanningResponseEffect, RunRequest, RunResponse, TaskResult,
-    ToolCallbackPayload,
+    AgentRunResult, CallbackControl, ExecutionEvent, InvocationContext, KernelExecutionSettings,
+    LlmRequestEnvelope, LlmResponseEnvelope, PlannerKind, PlanningRequestEffect,
+    PlanningResponseEffect, TaskResult, ToolCallbackPayload,
 };
 use async_trait::async_trait;
-use std::sync::Arc;
 use talos_error::TalosResult;
-
-#[async_trait]
-pub trait Agent: Send + Sync {
-    fn id(&self) -> &str;
-    async fn run(
-        &self,
-        ctx: &mut InvocationContext,
-        event_handler: Option<&mut dyn ExecutionEventHandler>,
-    ) -> TalosResult<AgentRunResult>;
-}
-
-pub trait BaseKernelAgent: Agent {}
-
-impl<T: Agent + ?Sized> BaseKernelAgent for T {}
 
 #[async_trait]
 pub trait Planner: Send + Sync {
@@ -126,13 +110,4 @@ pub trait Plugin: Send + Sync {
     ) -> TalosResult<CallbackControl> {
         Ok(CallbackControl::Continue)
     }
-}
-
-#[async_trait]
-pub trait Runner: Send + Sync {
-    async fn run_turn(
-        &self,
-        agent: Arc<dyn Agent>,
-        request: RunRequest,
-    ) -> TalosResult<RunResponse>;
 }

@@ -138,24 +138,6 @@ pub(super) enum SessionCommands {
         #[arg(long, default_value_t = false)]
         stream: bool,
     },
-
-    /// Submit approval or rejection for a pending tool call
-    ApproveTool {
-        /// Session ID
-        session_id: String,
-        /// Tool call ID (from the pending confirmation)
-        #[arg(long)]
-        call_id: String,
-        /// Tool name
-        #[arg(long)]
-        tool_name: String,
-        /// Whether to approve the tool call
-        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
-        approved: bool,
-        /// Rejection reason (used when --approved=false)
-        #[arg(long)]
-        reason: Option<String>,
-    },
 }
 
 #[derive(Args)]

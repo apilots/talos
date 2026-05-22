@@ -29,12 +29,9 @@ export function AdminSessionsSection({
   const [actionError, setActionError] = useState("");
   const [hiddenSessionIds, setHiddenSessionIds] = useState<string[]>([]);
 
-  function sessionTone(status: "running" | "waiting_approval" | "done" | "error") {
+  function sessionTone(status: "running" | "done" | "error") {
     if (status === "running") {
       return "success";
-    }
-    if (status === "waiting_approval") {
-      return "warning";
     }
     if (status === "error") {
       return "danger";
@@ -42,10 +39,7 @@ export function AdminSessionsSection({
     return "default";
   }
 
-  function sessionLabel(status: "running" | "waiting_approval" | "done" | "error") {
-    if (status === "waiting_approval") {
-      return t("states.needsApproval");
-    }
+  function sessionLabel(status: "running" | "done" | "error") {
     if (status === "error") {
       return t("states.rejected");
     }

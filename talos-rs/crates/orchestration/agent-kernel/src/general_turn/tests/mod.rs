@@ -34,11 +34,6 @@ struct ExecLoopProvider {
     round: AtomicUsize,
 }
 
-#[derive(Default)]
-struct ApprovalLoopProvider {
-    round: AtomicUsize,
-}
-
 struct StreamingToolCallIdProvider;
 
 struct StreamingToolExecutionProvider {
@@ -305,49 +300,6 @@ impl LlmProvider for LengthFinishProvider {
 
     fn default_model(&self) -> String {
         "length-finish".to_string()
-    }
-}
-
-#[async_trait]
-impl LlmProvider for ApprovalLoopProvider {
-    fn name(&self) -> &str {
-        "approval-loop"
-    }
-
-    async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
-        self.chat_with_tools(request).await
-    }
-
-    async fn chat_with_tools(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
-        let round = self.round.fetch_add(1, Ordering::SeqCst);
-        match round {
-            0 => Ok(ChatResponse {
-                content: "Request escalated shell access.".to_string(),
-                reasoning: Vec::new(),
-                model: request.model,
-                usage: Usage::default(),
-                finish_reason: Some("tool_calls".to_string()),
-                tool_calls: Some(vec![FunctionCall::new(
-                    "call_bash",
-                    "Bash",
-                    json!({
-                        "command": "echo hi",
-                        "dangerously_disable_sandbox": true,
-                        "description": "Need unrestricted shell access."
-                    }),
-                )]),
-            }),
-            _ => panic!("approval flow should stop before a second model round"),
-        }
-    }
-
-    async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
-        let (_tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(1);
-        Ok(ChatStream::new(rx))
-    }
-
-    fn default_model(&self) -> String {
-        "approval-loop".to_string()
     }
 }
 

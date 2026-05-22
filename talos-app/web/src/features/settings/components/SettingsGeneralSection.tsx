@@ -1,8 +1,7 @@
-import { Globe2, ServerCog } from "lucide-react";
+import { Globe2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { SettingsPageState } from "../hooks/useSettingsPage";
-import { getApprovalModeHint, getApprovalModeLabel } from "@/shared/types/domain";
 import { Panel } from "@/shared/ui/Panel";
 import { FieldBlock, OverviewCard, SectionHeader } from "./SectionPrimitives";
 
@@ -17,16 +16,11 @@ export function SettingsGeneralSection({
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2">
         <OverviewCard
           detail={t("settings:fields.languageDetail")}
           title={t("common:language")}
           value={locale === "zh-CN" ? t("common:zhCn") : t("common:en")}
-        />
-        <OverviewCard
-          detail={t("settings:fields.defaultApprovalsDetail")}
-          title={t("settings:fields.defaultApprovals")}
-          value={getApprovalModeLabel(draft.defaultApprovalMode)}
         />
         <OverviewCard
           detail={t("settings:appearanceDetail")}
@@ -74,31 +68,6 @@ export function SettingsGeneralSection({
         </div>
       </Panel>
 
-      <Panel className="rounded-[1.45rem] border-border/80 bg-card/82 p-6">
-        <SectionHeader
-          icon={<ServerCog size={18} />}
-          subtitle={t("settings:fields.defaultApprovalsDetail")}
-          title={t("settings:fields.defaultApprovals")}
-        />
-        <div className="mt-6 max-w-sm">
-          <FieldBlock label={t("settings:fields.defaultApprovals")}>
-            <select
-              className="w-full rounded-2xl border border-border bg-surface/85 px-4 py-3 text-sm outline-none transition focus:border-brand/50"
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  defaultApprovalMode: event.target.value as typeof current.defaultApprovalMode,
-                }))
-              }
-              value={draft.defaultApprovalMode}
-            >
-              <option value="needs_approval">{getApprovalModeLabel("needs_approval")}</option>
-              <option value="skip">{getApprovalModeLabel("skip")}</option>
-            </select>
-            <p className="mt-2 text-xs text-muted">{getApprovalModeHint(draft.defaultApprovalMode)}</p>
-          </FieldBlock>
-        </div>
-      </Panel>
     </div>
   );
 }

@@ -1,4 +1,3 @@
-use std::collections::{HashMap, HashSet};
 use std::process::Stdio;
 
 use anyhow::{anyhow, Context, Result};
@@ -6,8 +5,7 @@ use serde_json::{json, Value};
 use talos_sdk::{
     canonical_method, AdminSessionListParams, AppServerClient, AppServerClientConfig,
     EventSubscribeParams, ExpectedFileVersion, ProjectPatch, ProtocolTalosContext,
-    SessionCreateParams, TalosError, TalosInputItem, TalosMessageRequest, TalosTimelineContent,
-    TalosTimelineDelta, TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelinePhase,
+    SessionCreateParams, TalosError, TalosInputItem, TalosMessageRequest, TalosTimelineEventType,
     TimelineEventEnvelope, WorkspaceDocKind,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -39,7 +37,6 @@ async fn main() -> Result<()> {
         Scenario::TurnSmoke => turn_smoke(&mut client).await?,
         Scenario::ActiveTurnConflict => active_turn_conflict(&mut client).await?,
         Scenario::ResourceMatrix => resource_matrix(&mut client).await?,
-        Scenario::ApprovalResume => approval_resume(&mut client).await?,
     }
     client.shutdown().await?;
     Ok(())
@@ -54,7 +51,6 @@ enum Scenario {
     TurnSmoke,
     ActiveTurnConflict,
     ResourceMatrix,
-    ApprovalResume,
 }
 
 impl Scenario {
@@ -67,7 +63,6 @@ impl Scenario {
             "turn-smoke" => Ok(Self::TurnSmoke),
             "active-turn-conflict" => Ok(Self::ActiveTurnConflict),
             "resource-matrix" => Ok(Self::ResourceMatrix),
-            "approval-resume" => Ok(Self::ApprovalResume),
             other => Err(anyhow!("unsupported scenario: {other}")),
         }
     }
@@ -171,60 +166,6 @@ async fn active_turn_conflict(client: &mut AppServerClient) -> Result<()> {
     } else {
         Err(anyhow!("expected active turn conflict, got {err}"))
     }
-}
-
-async fn approval_resume(client: &mut AppServerClient) -> Result<()> {
-    eprintln!("approval-resume session.create");
-    let session_id = create_session(client).await?;
-    eprintln!("approval-resume event.subscribe");
-    let subscription = subscribe_events_with_limit(client, &session_id, 128).await?;
-    eprintln!("approval-resume turn.start pending approval");
-    client
-        .start_turn(
-            &session_id,
-            message_request(
-                "Call the Bash tool exactly once with command `echo APPROVAL_RESUME_OK`, \
-                 timeout 10, and dangerously_disable_sandbox true. Do not answer directly \
-                 before calling the tool.",
-            ),
-            Some(format!(
-                "app-server-approval-pending-{}",
-                uuid::Uuid::new_v4().simple()
-            )),
-        )
-        .await?;
-    let pending =
-        collect_pending_approval_and_terminal(client, &subscription.subscription_id).await?;
-    if pending.session_id != session_id {
-        return Err(anyhow!("pending approval session_id mismatch"));
-    }
-    if pending.turn_id.is_empty() {
-        return Err(anyhow!("pending approval missing turn_id"));
-    }
-
-    eprintln!("approval-resume unsubscribe setup stream");
-    client
-        .unsubscribe_events(&subscription.subscription_id)
-        .await?;
-
-    eprintln!("approval-resume submit approval");
-    client
-        .submit_tool_approval(
-            &session_id,
-            &pending.call_id,
-            &pending.tool_name,
-            true,
-            Some("approved by protocol regression".to_string()),
-        )
-        .await?;
-
-    eprintln!("approval-resume replay subscription");
-    subscribe_events_since(client, &session_id, pending.event_id.clone(), 512).await?;
-
-    eprintln!("approval-resume collect resumed events");
-    let resumed_events = collect_approval_resume_events(client).await?;
-    assert_approval_resume_completed(&pending, &resumed_events)?;
-    assert_approval_resume_history(client, &pending).await
 }
 
 async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
@@ -375,12 +316,6 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     )?;
     expect_not_found(
         client
-            .submit_tool_approval("missing-session", "call-1", "Bash", false, None)
-            .await,
-        "missing tool approval session should map to not found",
-    )?;
-    expect_not_found(
-        client
             .submit_dynamic_tool_result(
                 "missing-session",
                 "call-1",
@@ -422,15 +357,6 @@ async fn subscribe_events_with_limit(
     replay_limit: usize,
 ) -> Result<talos_sdk::EventSubscribeResponse> {
     subscribe_events_with_cursor(client, session_id, None, replay_limit).await
-}
-
-async fn subscribe_events_since(
-    client: &mut AppServerClient,
-    session_id: &str,
-    since_event_id: String,
-    replay_limit: usize,
-) -> Result<talos_sdk::EventSubscribeResponse> {
-    subscribe_events_with_cursor(client, session_id, Some(since_event_id), replay_limit).await
 }
 
 async fn subscribe_events_with_cursor(
@@ -505,272 +431,11 @@ async fn collect_events(
     ))
 }
 
-struct PendingApprovalRecord {
-    session_id: String,
-    turn_id: String,
-    message_id: String,
-    event_id: String,
-    item_id: String,
-    call_id: String,
-    tool_name: String,
-    sequence: u64,
-}
-
-async fn collect_pending_approval_and_terminal(
-    client: &mut AppServerClient,
-    _subscription_id: &str,
-) -> Result<PendingApprovalRecord> {
-    let mut pending = None;
-    for _ in 0..1024 {
-        let event = next_event_with_timeout(client).await?;
-        match &event.event.payload {
-            TalosTimelineEventPayload::ItemDelta(payload) => {
-                if let TalosTimelineDelta::ToolApprovalRequest {
-                    call_id, tool_name, ..
-                } = &payload.delta
-                {
-                    pending = Some(PendingApprovalRecord {
-                        session_id: event.session_id.clone(),
-                        turn_id: event.turn_id.clone(),
-                        message_id: event.message_id.clone(),
-                        event_id: event.event_id.clone(),
-                        item_id: payload.item_id.clone(),
-                        call_id: call_id.clone(),
-                        tool_name: tool_name.clone(),
-                        sequence: event_sequence(&event)?,
-                    });
-                    continue;
-                }
-            }
-            TalosTimelineEventPayload::TurnCompleted(_) if pending.is_some() => {
-                return Ok(pending.expect("pending checked"));
-            }
-            TalosTimelineEventPayload::TurnError(payload) => {
-                return Err(anyhow!(
-                    "turn failed before pending approval event: {}",
-                    payload.error
-                ));
-            }
-            _ => {}
-        }
-    }
-    Err(anyhow!(
-        "timed out waiting for pending approval terminal event"
-    ))
-}
-
-async fn collect_approval_resume_events(
-    client: &mut AppServerClient,
-) -> Result<Vec<TimelineEventEnvelope>> {
-    let mut events = Vec::new();
-    let mut saw_tool_completed = false;
-    for _ in 0..1024 {
-        let event = next_event_with_timeout(client).await?;
-        match &event.event.payload {
-            TalosTimelineEventPayload::ItemDelta(payload)
-                if matches!(payload.delta, TalosTimelineDelta::ToolResult { .. }) =>
-            {
-                saw_tool_completed = true;
-            }
-            TalosTimelineEventPayload::ItemCompleted(payload)
-                if matches!(
-                    payload.final_content,
-                    Some(TalosTimelineContent::ToolCall { .. })
-                ) =>
-            {
-                saw_tool_completed = true;
-            }
-            TalosTimelineEventPayload::TurnCompleted(_) if saw_tool_completed => {
-                events.push(event);
-                return Ok(events);
-            }
-            TalosTimelineEventPayload::TurnError(_) => {
-                events.push(event);
-                return Ok(events);
-            }
-            _ => {}
-        }
-        events.push(event);
-    }
-    Err(anyhow!(
-        "timed out waiting for approval resume completion; events={:?}",
-        events.iter().map(event_projection).collect::<Vec<_>>()
-    ))
-}
-
 async fn next_event_with_timeout(client: &mut AppServerClient) -> Result<TimelineEventEnvelope> {
     tokio::time::timeout(std::time::Duration::from_secs(30), client.next_event())
         .await
         .map_err(|_| anyhow!("timed out waiting for app-server event"))?
         .map_err(Into::into)
-}
-
-fn assert_approval_resume_completed(
-    pending: &PendingApprovalRecord,
-    events: &[TimelineEventEnvelope],
-) -> Result<()> {
-    let mut saw_tool_completed = false;
-    let mut saw_completed = false;
-    let mut completed_call_ids = Vec::new();
-    let mut duplicate_tool_starts = Vec::new();
-    for event in events {
-        if event.session_id != pending.session_id {
-            return Err(anyhow!("resumed event session_id mismatch"));
-        }
-        if event.turn_id != pending.turn_id {
-            return Err(anyhow!(
-                "approval resume created a different turn: pending={} resumed={}",
-                pending.turn_id,
-                event.turn_id
-            ));
-        }
-        if event.message_id != pending.message_id {
-            return Err(anyhow!(
-                "approval resume created a different message: pending={} resumed={}",
-                pending.message_id,
-                event.message_id
-            ));
-        }
-        if event_sequence(event)? <= pending.sequence {
-            return Err(anyhow!("resumed event sequence did not advance"));
-        }
-        match &event.event.payload {
-            TalosTimelineEventPayload::ItemStarted(payload) => {
-                if let TalosTimelineContent::ToolCall { call_id, .. } = &payload.item.content {
-                    if call_id == &pending.call_id {
-                        duplicate_tool_starts.push(payload.item.item_id.clone());
-                    }
-                }
-            }
-            TalosTimelineEventPayload::ItemCompleted(payload) => {
-                if payload.item_id == pending.item_id {
-                    saw_tool_completed = true;
-                }
-                if let Some(TalosTimelineContent::ToolCall { call_id, .. }) = &payload.final_content
-                {
-                    completed_call_ids.push(call_id.clone());
-                    if call_id == &pending.call_id {
-                        saw_tool_completed = true;
-                    }
-                }
-            }
-            TalosTimelineEventPayload::ItemDelta(payload) => {
-                if matches!(payload.delta, TalosTimelineDelta::ToolResult { .. }) {
-                    saw_tool_completed = true;
-                }
-            }
-            TalosTimelineEventPayload::TurnCompleted(_) => {
-                saw_completed = true;
-            }
-            TalosTimelineEventPayload::TurnError(payload) => {
-                return Err(anyhow!("resumed turn failed: {}", payload.error));
-            }
-            _ => {}
-        }
-    }
-    if !saw_tool_completed {
-        return Err(anyhow!(
-            "resumed turn missing approved tool completion; pending_call_id={} completed_call_ids={:?}",
-            pending.call_id,
-            completed_call_ids
-        ));
-    }
-    if !duplicate_tool_starts.is_empty() {
-        return Err(anyhow!(
-            "approval resume started a duplicate tool item for call_id={}: {:?}",
-            pending.call_id,
-            duplicate_tool_starts
-        ));
-    }
-    if !saw_completed {
-        return Err(anyhow!("resumed turn missing turn_completed"));
-    }
-    Ok(())
-}
-
-async fn assert_approval_resume_history(
-    client: &mut AppServerClient,
-    pending: &PendingApprovalRecord,
-) -> Result<()> {
-    let snapshot = client.recover_session(&pending.session_id).await?;
-    let mut tool_item_messages: HashMap<String, String> = HashMap::new();
-    let mut result_item_ids = HashSet::new();
-    let mut tool_result_messages = Vec::new();
-    for envelope in &snapshot.replay.events {
-        match &envelope.event.payload {
-            TalosTimelineEventPayload::ItemStarted(payload) => match &payload.item.content {
-                TalosTimelineContent::Text { text }
-                    if payload.item.phase == TalosTimelinePhase::Input
-                        && text.trim().is_empty() =>
-                {
-                    return Err(anyhow!(
-                        "approval resume created an empty user input item: message_id={}",
-                        envelope.message_id
-                    ));
-                }
-                TalosTimelineContent::ToolCall { call_id, .. } if call_id == &pending.call_id => {
-                    tool_item_messages
-                        .insert(payload.item.item_id.clone(), envelope.message_id.clone());
-                }
-                _ => {}
-            },
-            TalosTimelineEventPayload::ItemCompleted(payload) => {
-                if let Some(TalosTimelineContent::ToolCall {
-                    call_id,
-                    result: Some(_),
-                    ..
-                }) = &payload.final_content
-                {
-                    if call_id == &pending.call_id
-                        && result_item_ids.insert(payload.item_id.clone())
-                    {
-                        tool_result_messages.push(envelope.message_id.clone());
-                    }
-                }
-            }
-            TalosTimelineEventPayload::ItemDelta(payload) => {
-                let TalosTimelineDelta::ToolResult { .. } = &payload.delta else {
-                    continue;
-                };
-                let Some(message_id) = tool_item_messages.get(&payload.item_id) else {
-                    continue;
-                };
-                if result_item_ids.insert(payload.item_id.clone()) {
-                    tool_result_messages.push(message_id.clone());
-                }
-            }
-            _ => {}
-        }
-    }
-    if tool_item_messages.len() != 1 {
-        return Err(anyhow!(
-            "approval resume expected exactly one tool call in history for {}, got {}",
-            pending.call_id,
-            tool_item_messages.len()
-        ));
-    }
-    if result_item_ids.len() != 1 {
-        return Err(anyhow!(
-            "approval resume expected exactly one tool result in history for {}, got {}",
-            pending.call_id,
-            result_item_ids.len()
-        ));
-    }
-    if tool_result_messages
-        .iter()
-        .any(|message_id| message_id != &pending.message_id)
-    {
-        return Err(anyhow!(
-            "approval resume wrote tool result to a different message: pending={} result_messages={:?}",
-            pending.message_id,
-            tool_result_messages
-        ));
-    }
-    Ok(())
-}
-
-fn event_sequence(event: &TimelineEventEnvelope) -> Result<u64> {
-    Ok(event.event_seq as u64)
 }
 
 async fn collect_two_subscriptions_until_terminal(

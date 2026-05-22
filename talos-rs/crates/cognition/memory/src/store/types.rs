@@ -165,12 +165,6 @@ pub enum SessionTranscriptPayload {
     Auth {
         payload: SessionTranscriptAuthPayload,
     },
-    Confirmation {
-        payload: SessionTranscriptConfirmationPayload,
-    },
-    ApprovalResponse {
-        payload: SessionTranscriptApprovalResponsePayload,
-    },
     DynamicToolRequest {
         payload: SessionTranscriptDynamicToolRequestPayload,
     },
@@ -191,22 +185,6 @@ pub struct SessionTranscriptTransferPayload {
 pub struct SessionTranscriptAuthPayload {
     pub provider: String,
     pub prompt: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SessionTranscriptConfirmationPayload {
-    pub tool_name: String,
-    pub call_id: String,
-    pub prompt: String,
-    pub arguments: TalosJsonValue,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SessionTranscriptApprovalResponsePayload {
-    pub call_id: String,
-    pub tool_name: String,
-    pub approved: bool,
-    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use talos_agent::{AgentImpl, AgentOrchestrator};
+use talos_agent::{AgentHarness, AgentOrchestrator};
 use talos_app_server::BackgroundTaskDrain;
 use talos_application_service::TalosApplicationService;
 use talos_auth::{
@@ -456,7 +456,7 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
     register_core_local_tools(tool_registry.as_ref());
     register_network_tools(tool_registry.as_ref());
 
-    let agent = AgentImpl::new(
+    let agent = AgentHarness::new(
         "default".to_string(),
         config.agent.name.clone(),
         "Default AI assistant".to_string(),
@@ -467,11 +467,9 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
     );
     let agent: Arc<dyn AgentOrchestrator> = Arc::new(agent);
 
-    let mut coordinator_builder =
-        CoordinatorImpl::new(router, session_store.clone(), config.clone())
-            .with_channel_dm_scope("telegram", config.channels.telegram.dm_scope.to_string())
-            .with_default_workspace_id(config.agent.kernel.default_workspace_id.clone());
-    coordinator_builder = coordinator_builder.with_session_title_generator(llm_provider.clone());
+    let coordinator_builder = CoordinatorImpl::new(router, session_store.clone(), config.clone())
+        .with_channel_dm_scope("telegram", config.channels.telegram.dm_scope.to_string())
+        .with_default_workspace_id(config.agent.kernel.default_workspace_id.clone());
     let coordinator = Arc::new(coordinator_builder);
 
     if config.agent.kernel.tools.enable_collaboration_tools {

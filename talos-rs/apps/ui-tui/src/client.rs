@@ -30,14 +30,6 @@ pub trait GatewayClient: Send + Sync {
         session_id: &str,
         request: &TalosMessageRequest,
     ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>>;
-    async fn submit_tool_approval(
-        &self,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-        approved: bool,
-        reason: Option<String>,
-    ) -> TalosResult<()>;
     async fn recover_session(
         &self,
         session_id: &str,
@@ -116,20 +108,6 @@ impl GatewayClient for Mutex<AppServerClient> {
         self.lock()
             .await
             .send_timeline_events(session_id, request.clone())
-            .await
-    }
-
-    async fn submit_tool_approval(
-        &self,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-        approved: bool,
-        reason: Option<String>,
-    ) -> TalosResult<()> {
-        self.lock()
-            .await
-            .submit_tool_approval(session_id, call_id, tool_name, approved, reason)
             .await
     }
 

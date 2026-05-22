@@ -11,14 +11,6 @@ pub enum ToolSandboxMode {
     DangerFullAccess,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ToolApprovalRequirement {
-    Skip,
-    NeedsApproval { reason: Option<String> },
-    Forbidden { reason: String },
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolGovernanceArgumentOverride {
@@ -29,7 +21,6 @@ pub enum ToolGovernanceArgumentOverride {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolGovernanceSpec {
-    pub default_approval: ToolApprovalRequirement,
     pub preferred_sandbox: ToolSandboxMode,
     pub argument_override: ToolGovernanceArgumentOverride,
     pub retry_without_sandbox: bool,
@@ -38,7 +29,6 @@ pub struct ToolGovernanceSpec {
 impl Default for ToolGovernanceSpec {
     fn default() -> Self {
         Self {
-            default_approval: ToolApprovalRequirement::Skip,
             preferred_sandbox: ToolSandboxMode::UseDefault,
             argument_override: ToolGovernanceArgumentOverride::None,
             retry_without_sandbox: false,
@@ -48,7 +38,6 @@ impl Default for ToolGovernanceSpec {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolExecutionPlan {
-    pub approval: ToolApprovalRequirement,
     pub sandbox_mode: ToolSandboxMode,
     pub retry_without_sandbox: bool,
 }
@@ -57,7 +46,6 @@ pub struct ToolExecutionPlan {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum GovernanceOutcome {
     Allowed,
-    PendingApproval { prompt: String },
     Forbidden { reason: String },
     Skipped,
 }
@@ -68,15 +56,6 @@ pub enum GovernanceDecisionReason {
     NoKernelConfig,
     PreApproved,
     ToolGovernanceSpec { override_applied: bool },
-    GlobalPolicy { policy: ToolApprovalPolicySnapshot },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolApprovalPolicySnapshot {
-    OnRequest,
-    Always,
-    Never,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,12 +88,6 @@ impl Default for ToolOrchestratorConfig {
 pub enum ToolPlanError {
     #[error("tool execution is forbidden: {reason}")]
     Forbidden { reason: String },
-    #[error("tool approval is required{reason_suffix}")]
-    ApprovalRequired { reason_suffix: String },
-}
-
-pub trait ApprovableTool<Request> {
-    fn approval_requirement(&self, request: &Request) -> ToolApprovalRequirement;
 }
 
 pub trait SandboxAwareTool<Request> {
@@ -145,39 +118,12 @@ impl ToolOrchestrator {
         request: &Request,
     ) -> Result<ToolExecutionPlan, ToolPlanError>
     where
-        Tool: ApprovableTool<Request> + SandboxAwareTool<Request>,
+        Tool: SandboxAwareTool<Request>,
     {
-        let approval = tool.approval_requirement(request);
-        if let ToolApprovalRequirement::Forbidden { reason } = &approval {
-            return Err(ToolPlanError::Forbidden {
-                reason: reason.clone(),
-            });
-        }
-
         Ok(ToolExecutionPlan {
-            approval,
             sandbox_mode: tool.sandbox_mode(request, &self.config),
             retry_without_sandbox: tool.retry_without_sandbox(),
         })
-    }
-}
-
-impl ToolExecutionPlan {
-    pub fn ensure_approved(&self) -> Result<(), ToolPlanError> {
-        match &self.approval {
-            ToolApprovalRequirement::Skip => Ok(()),
-            ToolApprovalRequirement::NeedsApproval { reason } => {
-                Err(ToolPlanError::ApprovalRequired {
-                    reason_suffix: reason
-                        .as_ref()
-                        .map(|value| format!(": {}", value))
-                        .unwrap_or_default(),
-                })
-            }
-            ToolApprovalRequirement::Forbidden { reason } => Err(ToolPlanError::Forbidden {
-                reason: reason.clone(),
-            }),
-        }
     }
 }
 
@@ -188,12 +134,6 @@ mod tests {
     #[derive(Debug)]
     struct ReadOnlyTool;
 
-    impl ApprovableTool<()> for ReadOnlyTool {
-        fn approval_requirement(&self, _request: &()) -> ToolApprovalRequirement {
-            ToolApprovalRequirement::Skip
-        }
-    }
-
     impl SandboxAwareTool<()> for ReadOnlyTool {
         fn sandbox_mode(&self, _request: &(), _config: &ToolOrchestratorConfig) -> ToolSandboxMode {
             ToolSandboxMode::ReadOnly
@@ -202,14 +142,6 @@ mod tests {
 
     #[derive(Debug)]
     struct EscalatingTool;
-
-    impl ApprovableTool<()> for EscalatingTool {
-        fn approval_requirement(&self, _request: &()) -> ToolApprovalRequirement {
-            ToolApprovalRequirement::NeedsApproval {
-                reason: Some("requires filesystem write".to_string()),
-            }
-        }
-    }
 
     impl SandboxAwareTool<()> for EscalatingTool {
         fn sandbox_mode(&self, _request: &(), _config: &ToolOrchestratorConfig) -> ToolSandboxMode {
@@ -221,23 +153,6 @@ mod tests {
         }
     }
 
-    #[derive(Debug)]
-    struct ForbiddenTool;
-
-    impl ApprovableTool<()> for ForbiddenTool {
-        fn approval_requirement(&self, _request: &()) -> ToolApprovalRequirement {
-            ToolApprovalRequirement::Forbidden {
-                reason: "dangerous command".to_string(),
-            }
-        }
-    }
-
-    impl SandboxAwareTool<()> for ForbiddenTool {
-        fn sandbox_mode(&self, _request: &(), _config: &ToolOrchestratorConfig) -> ToolSandboxMode {
-            ToolSandboxMode::DangerFullAccess
-        }
-    }
-
     #[test]
     fn test_orchestrator_builds_read_only_plan() {
         let orchestrator = ToolOrchestrator::new(ToolOrchestratorConfig::default());
@@ -245,59 +160,18 @@ mod tests {
             .plan(&ReadOnlyTool, &())
             .expect("read-only tool should be plannable");
 
-        assert_eq!(plan.approval, ToolApprovalRequirement::Skip);
         assert_eq!(plan.sandbox_mode, ToolSandboxMode::ReadOnly);
         assert!(!plan.retry_without_sandbox);
     }
 
     #[test]
-    fn test_orchestrator_preserves_approval_and_retry_preferences() {
+    fn test_orchestrator_preserves_sandbox_and_retry_preferences() {
         let orchestrator = ToolOrchestrator::new(ToolOrchestratorConfig::default());
         let plan = orchestrator
             .plan(&EscalatingTool, &())
             .expect("escalating tool should be plannable");
 
-        assert_eq!(
-            plan.approval,
-            ToolApprovalRequirement::NeedsApproval {
-                reason: Some("requires filesystem write".to_string()),
-            }
-        );
         assert_eq!(plan.sandbox_mode, ToolSandboxMode::WorkspaceWrite);
         assert!(plan.retry_without_sandbox);
-    }
-
-    #[test]
-    fn test_orchestrator_rejects_forbidden_tools() {
-        let orchestrator = ToolOrchestrator::new(ToolOrchestratorConfig::default());
-        let error = orchestrator
-            .plan(&ForbiddenTool, &())
-            .expect_err("forbidden tool should be rejected");
-
-        assert_eq!(
-            error,
-            ToolPlanError::Forbidden {
-                reason: "dangerous command".to_string(),
-            }
-        );
-    }
-
-    #[test]
-    fn test_execution_plan_requires_approval_before_execution() {
-        let orchestrator = ToolOrchestrator::new(ToolOrchestratorConfig::default());
-        let plan = orchestrator
-            .plan(&EscalatingTool, &())
-            .expect("escalating tool should be plannable");
-
-        let error = plan
-            .ensure_approved()
-            .expect_err("approval should be required");
-
-        assert_eq!(
-            error,
-            ToolPlanError::ApprovalRequired {
-                reason_suffix: ": requires filesystem write".to_string(),
-            }
-        );
     }
 }

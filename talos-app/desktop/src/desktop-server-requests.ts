@@ -1,5 +1,5 @@
 import type { AppProtocol } from "@talos/sdk-core";
-import { BrowserWindow, dialog, type MessageBoxOptions } from "electron";
+import { BrowserWindow } from "electron";
 
 export async function handleDesktopServerRequest(
   request: AppProtocol.JsonRpcRequest,
@@ -10,30 +10,9 @@ export async function handleDesktopServerRequest(
       return { token: launchToken };
     case "client.user_input.request":
       return requestDesktopUserInput(request.params as AppProtocol.RequestUserInputParams);
-    case "client.approval.request":
-      return requestDesktopApproval(request.params as AppProtocol.ClientApprovalRequestParams);
     default:
       throw new Error(`Unsupported desktop server request: ${request.method}`);
   }
-}
-
-function requestDesktopApproval(
-  params: AppProtocol.ClientApprovalRequestParams,
-): Promise<AppProtocol.ClientApprovalRequestResponse> {
-  const options: MessageBoxOptions = {
-    type: "question",
-    title: "Talos approval request",
-    message: params.prompt,
-    buttons: ["Reject", "Approve"],
-    defaultId: 1,
-    cancelId: 0,
-  };
-  const parent = activeWindow();
-  const messageBox = parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options);
-  return messageBox.then((result) => ({
-    approved: result.response === 1,
-    reason: null,
-  }));
 }
 
 function requestDesktopUserInput(

@@ -33,24 +33,6 @@ impl TuiApp {
     }
 
     pub async fn handle_input(&mut self, key_event: KeyEvent) -> Result<bool, Box<dyn Error>> {
-        // Approval mode intercepts y/n/Enter/Esc
-        if self.pending_approval.is_some() {
-            match key_event.code {
-                KeyCode::Char('y') | KeyCode::Enter => {
-                    self.submit_approval(true).await;
-                    return Ok(false);
-                }
-                KeyCode::Char('n') | KeyCode::Esc => {
-                    self.submit_approval(false).await;
-                    return Ok(false);
-                }
-                KeyCode::Char('c') if key_event.modifiers.intersects(KeyModifiers::CONTROL) => {
-                    return Ok(true);
-                }
-                _ => return Ok(false),
-            }
-        }
-
         if key_event.modifiers.intersects(KeyModifiers::CONTROL) {
             match key_event.code {
                 KeyCode::Char('c') => return Ok(true),

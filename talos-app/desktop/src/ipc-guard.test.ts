@@ -87,14 +87,15 @@ describe("desktop IPC guard", () => {
     expect(() => assertDesktopRendererInvoke("session.read", {})).toThrow(
       "Invalid desktop renderer params for method: session.read",
     );
+    expect(isDesktopRendererMethod("unsupported.method")).toBe(false);
     expect(() =>
-      assertDesktopRendererInvoke("tool.approval.submit", {
+      assertDesktopRendererInvoke("unsupported.method", {
         session_id: "session-1",
         call_id: "call-1",
         tool_name: "bash",
-        approved: "true",
+        approved: true,
       }),
-    ).toThrow("Invalid desktop renderer params for method: tool.approval.submit");
+    ).toThrow("Desktop renderer method is not allowed: unsupported.method");
     expect(() =>
       assertDesktopRendererInvoke("tool.dynamic_result.submit", {
         session_id: "session-1",

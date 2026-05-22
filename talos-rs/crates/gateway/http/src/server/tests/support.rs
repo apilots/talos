@@ -210,17 +210,6 @@ impl Gateway for MockGateway {
         Ok(())
     }
 
-    async fn submit_tool_approval(
-        &self,
-        _session_id: &str,
-        _call_id: &str,
-        _tool_name: &str,
-        _approved: bool,
-        _reason: Option<String>,
-    ) -> TalosResult<()> {
-        Ok(())
-    }
-
     async fn submit_dynamic_tool_result(
         &self,
         _session_id: &str,
@@ -259,17 +248,6 @@ impl Gateway for SilentGateway {
     }
 
     async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn submit_tool_approval(
-        &self,
-        _session_id: &str,
-        _call_id: &str,
-        _tool_name: &str,
-        _approved: bool,
-        _reason: Option<String>,
-    ) -> TalosResult<()> {
         Ok(())
     }
 
@@ -414,22 +392,6 @@ impl SessionService for MockSessionService {
     }
 
     async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn submit_tool_approval(
-        &self,
-        session_id: &str,
-        _call_id: &str,
-        _tool_name: &str,
-        _approved: bool,
-        _reason: Option<String>,
-    ) -> TalosResult<()> {
-        if session_id != "mock-session" {
-            return Err(talos_error::TalosError::ResourceNotFound(format!(
-                "session {session_id}"
-            )));
-        }
         Ok(())
     }
 

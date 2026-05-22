@@ -20,10 +20,8 @@ vi.mock("@/features/chat", () => ({
     setDraft: vi.fn(),
     sendMessage: vi.fn(),
     sendText: mocks.sendText,
-    submitApproval: vi.fn(),
     isStreaming: true,
     isCancelling: false,
-    pendingApproval: undefined,
     canRetryResponse: false,
     retryResponse: vi.fn(),
     retryStream: vi.fn(),
@@ -38,11 +36,10 @@ vi.mock("@/features/chat", () => ({
       context: { session_id: "sess-1" },
       title: "Session 1",
       project_id: null,
-      config: { llm: { model: "model-1" }, tools: { approval_policy: "never" } },
+      config: { llm: { model: "model-1" } },
       state: { message_count: 0 },
     },
   }),
-  useUpdateSessionApprovalModeMutation: () => ({ mutate: mocks.mutate }),
   useUpdateSessionModelMutation: () => ({ mutate: mocks.mutate }),
   useUpdateSessionProjectMutation: () => ({ mutate: mocks.mutate }),
 }));
@@ -52,14 +49,11 @@ vi.mock("@/shared/store/app-store", () => ({
     selector({
       activeProjectId: "__unbound_project__",
       connection: {
-        defaultApprovalMode: "skip",
         runtimeMode: "cloud",
       },
       projects: [],
-      sessionApprovalModes: {},
       setActiveProjectId: vi.fn(),
       setConnection: vi.fn(),
-      setSessionApprovalMode: vi.fn(),
     }),
 }));
 

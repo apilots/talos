@@ -811,17 +811,6 @@ impl GatewayClient for MockGatewayClient {
         Ok(rx)
     }
 
-    async fn submit_tool_approval(
-        &self,
-        _session_id: &str,
-        _call_id: &str,
-        _tool_name: &str,
-        _approved: bool,
-        _reason: Option<String>,
-    ) -> TalosResult<()> {
-        Ok(())
-    }
-
     async fn get_session_history(&self, session_id: &str) -> TalosResult<SessionHistorySnapshot> {
         Ok(SessionHistorySnapshot {
             session_id: session_id.to_string(),

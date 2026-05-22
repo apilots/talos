@@ -33,8 +33,8 @@ pub use request::{RequestProcessor, RequestProcessorOutput, RequestProcessorPipe
 pub use request_kinds::{
     AgentTransferRequestProcessor, AuthRequestProcessor, BasicRequestProcessor,
     ContextCacheRequestProcessor, DynamicToolReplayRequestProcessor, InstructionsRequestProcessor,
-    InteractionsRequestProcessor, OutputSchemaRequestProcessor,
-    RequestConfirmationRequestProcessor, RequestProcessorKind, ToolContextRequestProcessor,
+    InteractionsRequestProcessor, OutputSchemaRequestProcessor, RequestProcessorKind,
+    ToolContextRequestProcessor,
 };
 pub use response::{ResponseProcessor, ResponseProcessorOutput, ResponseProcessorPipeline};
 pub use response_kinds::ResponseProcessorKind;
@@ -43,4 +43,4 @@ pub use response_processors::{
     ToolCallExtractionProcessor,
 };
 
-pub(crate) use request::{latest_branch_event, latest_event};
+pub(crate) use request::latest_branch_event;

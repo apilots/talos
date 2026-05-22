@@ -67,4 +67,4 @@ export TALOS_LOCAL_LAUNCH_TOKEN=local-token
 
 Current app-server mode supports the main chat/session path, model listing,
 session create/list/get/delete, active turn interrupt, model update, event
-streaming, session turn history, and tool approval.
+streaming, session turn history, and dynamic tool results.

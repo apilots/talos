@@ -303,10 +303,6 @@ export class AppServerClient {
     return this.transport.request("event.unsubscribe", { subscription_id: subscriptionId });
   }
 
-  submitToolApproval(params: AppProtocol.ToolApprovalSubmitParams): Promise<unknown> {
-    return this.transport.request("tool.approval.submit", params);
-  }
-
   submitDynamicToolResult(params: AppProtocol.ToolDynamicResultSubmitParams): Promise<unknown> {
     return this.transport.request("tool.dynamic_result.submit", params);
   }

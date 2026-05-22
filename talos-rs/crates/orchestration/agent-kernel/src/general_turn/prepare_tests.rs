@@ -17,6 +17,7 @@ fn build_executed_turn_artifacts(
         reasoning_log: Vec::new(),
         tool_call_log,
         tool_result_log,
+        pending_dynamic_requests: Vec::new(),
         final_answer_streamed: false,
         execution_summary_streamed: false,
     }

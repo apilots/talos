@@ -2,33 +2,23 @@
 //!
 //! Tests verify default values and boundary conditions for kernel configuration.
 
-use talos_config::{AgentKernelConfig, PlannerMode, PlannerSelection};
+use talos_config::{AgentKernelConfig, PlannerMode};
 
 /// Tests that AgentKernelConfig default values match the specification.
 ///
 /// Default values per specification:
-/// - max_iters: 1
-/// - max_task_per_turn: 3
 /// - tool_parallelism: 1
-/// - max_llm_calls: 8
 /// - max_tool_rounds: 8
 /// - finalization_required: true
 /// - planner_mode: "built_in"
-/// - planner_selection: "static"
 #[test]
 fn test_default_values() {
     let config = AgentKernelConfig::default();
 
-    assert_eq!(config.max_iters, 1, "max_iters should default to 1");
-    assert_eq!(
-        config.max_task_per_turn, 3,
-        "max_task_per_turn should default to 3"
-    );
     assert_eq!(
         config.tool_parallelism, 1,
         "tool_parallelism should default to 1"
     );
-    assert_eq!(config.max_llm_calls, 8, "max_llm_calls should default to 8");
     assert_eq!(
         config.max_tool_rounds, 8,
         "max_tool_rounds should default to 8"
@@ -43,33 +33,19 @@ fn test_default_values() {
         PlannerMode::BuiltIn,
         "planner_mode should default to 'built_in'"
     );
-    assert_eq!(
-        config.planner_selection,
-        PlannerSelection::Static,
-        "planner_selection should default to 'static'"
-    );
 }
 
 /// Tests boundary validation for numeric configuration fields.
 ///
 /// Valid boundaries:
-/// - max_iters: must be > 0
-/// - max_task_per_turn: must be > 0
 /// - tool_parallelism: must be > 0
-/// - max_llm_calls: must be > 0
 /// - max_tool_rounds: must be > 0
 /// - planner_mode: must be "built_in" or "plan_react" (None removed)
 #[test]
 fn test_boundary_validation() {
     let config = AgentKernelConfig::default();
 
-    assert!(config.max_iters > 0, "max_iters must be > 0");
-    assert!(
-        config.max_task_per_turn > 0,
-        "max_task_per_turn must be > 0"
-    );
     assert!(config.tool_parallelism > 0, "tool_parallelism must be > 0");
-    assert!(config.max_llm_calls > 0, "max_llm_calls must be > 0");
     assert!(config.max_tool_rounds > 0, "max_tool_rounds must be > 0");
 
     assert!(
@@ -177,7 +153,5 @@ fn test_config_clone() {
     let original = AgentKernelConfig::default();
     let cloned = original.clone();
 
-    assert_eq!(original.max_iters, cloned.max_iters);
     assert_eq!(original.planner_mode, cloned.planner_mode);
-    assert_eq!(original.planner_selection, cloned.planner_selection);
 }

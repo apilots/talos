@@ -7,10 +7,9 @@ import type {
 } from "./protocol";
 
 export type RuntimeMode = "cloud" | "local";
-export type ApprovalMode = "needs_approval" | "skip";
 export type ReasoningLevel = "low" | "medium" | "high" | "extra_high";
-export type ThreadFilter = "all" | "running" | "waiting_approval" | "done" | "error";
-export type SessionUiStatus = "running" | "waiting_approval" | "done" | "error";
+export type ThreadFilter = "all" | "running" | "done" | "error";
+export type SessionUiStatus = "running" | "done" | "error";
 
 export interface ProjectRecord {
   id: string;
@@ -48,7 +47,7 @@ export interface AdminMetric {
 export type ChatToolStatus =
   | "queued"
   | "running"
-  | "waiting_approval"
+  | "waiting_dynamic_input"
   | "done"
   | "error";
 
@@ -125,13 +124,6 @@ export type ChatTimelineItem =
       completedAtMs?: number | null;
     };
 
-export interface PendingApproval {
-  callId: string;
-  toolName: string;
-  prompt: string;
-  arguments: unknown;
-}
-
 export type PendingInputPhase = "local" | "accepted" | "completed";
 
 export interface PendingInput {
@@ -167,6 +159,5 @@ export interface StreamSessionState {
   blocks: ChatRenderBlock[];
   pendingInput?: PendingInput;
   pendingUserAction?: TalosPendingUserAction;
-  pendingApproval?: PendingApproval;
   error?: string;
 }

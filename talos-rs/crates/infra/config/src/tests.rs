@@ -21,20 +21,11 @@ fn test_default_config() {
 #[test]
 fn test_kernel_defaults() {
     let config = Config::default();
-    assert_eq!(config.agent.kernel.max_iters, 1);
-    assert_eq!(config.agent.kernel.max_task_per_turn, 3);
     assert_eq!(config.agent.kernel.max_tool_rounds, 8);
     assert_eq!(config.agent.kernel.tool_result_max_bytes, 64 * 1024);
     assert_eq!(config.agent.kernel.context_compaction_max_bytes, 256 * 1024);
     assert_eq!(config.agent.kernel.default_workspace_id, "default");
     assert_eq!(config.agent.kernel.planner_mode, PlannerMode::BuiltIn);
-    assert_eq!(
-        config.agent.kernel.planner_selection,
-        PlannerSelection::Static
-    );
-    assert_eq!(config.agent.kernel.execution_mode, ExecutionMode::Single);
-    assert_eq!(config.agent.kernel.execution_children, 2);
-    assert_eq!(config.agent.kernel.execution_loop_iters, 3);
     assert_eq!(config.agent.kernel.output.max_tokens, 32_000);
     assert_eq!(config.agent.kernel.output.upper_limit, 64_000);
     assert_eq!(config.agent.kernel.output.effective_max_tokens(), 32_000);
@@ -558,12 +549,6 @@ llm:
     .expect("config without optional blocks should load");
     let _ = std::fs::remove_file(&temp_file);
 
-    assert_eq!(config.agent.kernel.max_iters, 1);
-    assert_eq!(config.agent.kernel.max_task_per_turn, 3);
-    assert_eq!(
-        config.agent.kernel.planner_selection,
-        PlannerSelection::Static
-    );
     assert_eq!(config.logging.level, "info");
     assert_eq!(config.logging.format, "text");
     assert!(config.logging.stdout);

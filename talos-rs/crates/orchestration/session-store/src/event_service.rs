@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::active_turn::{
     ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, PendingDynamicToolResult,
-    PendingToolApproval, PendingUserAction,
+    PendingUserAction,
 };
 use crate::events::TimelineEventStore;
 
@@ -124,21 +124,6 @@ impl TimelineEventService {
             }
             TalosTimelineEventPayload::TurnError(_) => Some((ActiveTurnStatus::Failed, None)),
             TalosTimelineEventPayload::ItemDelta(payload) => match &payload.delta {
-                TalosTimelineDelta::ToolApprovalRequest {
-                    call_id,
-                    tool_name,
-                    prompt,
-                    arguments,
-                } => Some((
-                    ActiveTurnStatus::WaitingUserAction,
-                    Some(PendingUserAction::ToolApproval(PendingToolApproval {
-                        item_id: Some(payload.item_id.clone()),
-                        call_id: call_id.clone(),
-                        tool_name: tool_name.clone(),
-                        prompt: prompt.clone(),
-                        arguments: arguments.clone(),
-                    })),
-                )),
                 TalosTimelineDelta::ToolDynamicRequest {
                     call_id, tool_name, ..
                 } => Some((
@@ -161,8 +146,10 @@ impl TimelineEventService {
                 }
             },
             TalosTimelineEventPayload::ItemCompleted(payload)
-                if payload.status
-                    == talos_types::talos::TalosTimelineItemStatus::WaitingApproval =>
+                if matches!(
+                    payload.status,
+                    talos_types::talos::TalosTimelineItemStatus::WaitingDynamicInput
+                ) =>
             {
                 None
             }
@@ -267,10 +254,6 @@ impl TimelineEventService {
             return Ok(Some((ActiveTurnStatus::Running, None)));
         }
         let resolves_pending = match active.pending_user_action.as_ref() {
-            Some(PendingUserAction::ToolApproval(pending)) => pending
-                .item_id
-                .as_deref()
-                .is_none_or(|pending_item_id| pending_item_id == item_id),
             Some(PendingUserAction::DynamicToolResult(pending)) => pending
                 .item_id
                 .as_deref()
@@ -333,9 +316,8 @@ mod tests {
     use std::sync::Arc;
     use talos_storage::SqliteStorage;
     use talos_types::talos::{
-        StopReason, TalosContentItem, TalosItemCompletedEvent, TalosItemDeltaEvent,
-        TalosTimelineDelta, TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType,
-        TalosTimelineItemStatus, TalosTurnCompletedEvent, TalosUsage,
+        StopReason, TalosItemDeltaEvent, TalosTimelineDelta, TalosTimelineEvent,
+        TalosTimelineEventPayload, TalosTimelineEventType, TalosTurnCompletedEvent, TalosUsage,
     };
 
     async fn service() -> (TimelineEventService, Arc<DatabaseSessionStore>) {
@@ -385,24 +367,6 @@ mod tests {
         )
     }
 
-    fn approval_event(sequence: u64) -> TalosTimelineEvent {
-        timeline_event(
-            sequence,
-            TalosTimelineEventType::ItemDelta,
-            TalosTimelineEventPayload::ItemDelta(TalosItemDeltaEvent {
-                request_id: "req_1".to_string(),
-                turn_id: "turn_1".to_string(),
-                item_id: "tool-1".to_string(),
-                delta: TalosTimelineDelta::ToolApprovalRequest {
-                    call_id: "call_1".to_string(),
-                    tool_name: "Bash".to_string(),
-                    prompt: "Approve?".to_string(),
-                    arguments: serde_json::json!({"cmd": "date"}).into(),
-                },
-            }),
-        )
-    }
-
     fn dynamic_event(sequence: u64) -> TalosTimelineEvent {
         timeline_event(
             sequence,
@@ -416,58 +380,6 @@ mod tests {
                     tool_name: "ExternalTool".to_string(),
                     arguments: serde_json::json!({"query": "input"}).into(),
                 },
-            }),
-        )
-    }
-
-    fn text_delta_event(sequence: u64) -> TalosTimelineEvent {
-        timeline_event(
-            sequence,
-            TalosTimelineEventType::ItemDelta,
-            TalosTimelineEventPayload::ItemDelta(TalosItemDeltaEvent {
-                request_id: "req_1".to_string(),
-                turn_id: "turn_1".to_string(),
-                item_id: "assistant-1".to_string(),
-                delta: TalosTimelineDelta::Text {
-                    text: "Tool confirmation pending.".to_string(),
-                },
-            }),
-        )
-    }
-
-    fn tool_result_event(sequence: u64, item_id: &str) -> TalosTimelineEvent {
-        timeline_event(
-            sequence,
-            TalosTimelineEventType::ItemDelta,
-            TalosTimelineEventPayload::ItemDelta(TalosItemDeltaEvent {
-                request_id: "req_1".to_string(),
-                turn_id: "turn_1".to_string(),
-                item_id: item_id.to_string(),
-                delta: TalosTimelineDelta::ToolResult {
-                    content: vec![TalosContentItem::Text {
-                        text: "ok".to_string(),
-                    }],
-                    is_error: false,
-                },
-            }),
-        )
-    }
-
-    fn item_completed_event(
-        sequence: u64,
-        item_id: &str,
-        status: TalosTimelineItemStatus,
-    ) -> TalosTimelineEvent {
-        timeline_event(
-            sequence,
-            TalosTimelineEventType::ItemCompleted,
-            TalosTimelineEventPayload::ItemCompleted(TalosItemCompletedEvent {
-                request_id: "req_1".to_string(),
-                turn_id: "turn_1".to_string(),
-                item_id: item_id.to_string(),
-                status,
-                completed_at_ms: 1000,
-                final_content: None,
             }),
         )
     }
@@ -489,22 +401,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pending_approval_event_updates_active_turn_user_action() {
-        let (service, store) = service().await;
-        service.record_talos_event(approval_event(1)).await.unwrap();
-
-        let active = store.get_active_turn("s1").await.unwrap().unwrap();
-        assert_eq!(active.status, ActiveTurnStatus::WaitingUserAction);
-        assert!(matches!(
-            active.pending_user_action,
-            Some(PendingUserAction::ToolApproval(ref pending))
-                if pending.item_id.as_deref() == Some("tool-1")
-                    && pending.call_id == "call_1"
-                    && pending.tool_name == "Bash"
-        ));
-    }
-
-    #[tokio::test]
     async fn pending_dynamic_event_updates_active_turn_user_action() {
         let (service, store) = service().await;
         service.record_talos_event(dynamic_event(1)).await.unwrap();
@@ -517,112 +413,6 @@ mod tests {
                 if pending.item_id.as_deref() == Some("tool-1")
                     && pending.call_id == "call_1"
                     && pending.tool_name == "ExternalTool"
-        ));
-    }
-
-    #[tokio::test]
-    async fn tool_result_for_pending_approval_clears_pending_user_action() {
-        let (service, store) = service().await;
-        service.record_talos_event(approval_event(1)).await.unwrap();
-        let result = service
-            .record_talos_event(tool_result_event(2, "tool-1"))
-            .await
-            .unwrap();
-
-        let active = store.get_active_turn("s1").await.unwrap().unwrap();
-        assert_eq!(active.status, ActiveTurnStatus::Running);
-        assert_eq!(active.pending_user_action, None);
-        assert_eq!(
-            active.last_event_id,
-            Some(TimelineEventId::from(result.event_id))
-        );
-    }
-
-    #[tokio::test]
-    async fn item_completed_for_pending_approval_clears_pending_user_action() {
-        let (service, store) = service().await;
-        service.record_talos_event(approval_event(1)).await.unwrap();
-        let completed = service
-            .record_talos_event(item_completed_event(
-                2,
-                "tool-1",
-                TalosTimelineItemStatus::Completed,
-            ))
-            .await
-            .unwrap();
-
-        let active = store.get_active_turn("s1").await.unwrap().unwrap();
-        assert_eq!(active.status, ActiveTurnStatus::Running);
-        assert_eq!(active.pending_user_action, None);
-        assert_eq!(
-            active.last_event_id,
-            Some(TimelineEventId::from(completed.event_id))
-        );
-    }
-
-    #[tokio::test]
-    async fn turn_completed_after_resolved_approval_marks_completed_without_pending() {
-        let (service, store) = service().await;
-        service.record_talos_event(approval_event(1)).await.unwrap();
-        service
-            .record_talos_event(tool_result_event(2, "tool-1"))
-            .await
-            .unwrap();
-        let completed = service
-            .record_talos_event(completed_event(3))
-            .await
-            .unwrap();
-
-        let active = store.get_active_turn("s1").await.unwrap().unwrap();
-        assert_eq!(active.status, ActiveTurnStatus::Completed);
-        assert_eq!(active.pending_user_action, None);
-        assert_eq!(
-            active.last_event_id,
-            Some(TimelineEventId::from(completed.event_id))
-        );
-    }
-
-    #[tokio::test]
-    async fn completed_event_preserves_pending_approval_active_turn() {
-        let (service, store) = service().await;
-        service.record_talos_event(approval_event(1)).await.unwrap();
-        let completed = service
-            .record_talos_event(completed_event(2))
-            .await
-            .unwrap();
-
-        let active = store.get_active_turn("s1").await.unwrap().unwrap();
-        assert_eq!(active.status, ActiveTurnStatus::WaitingUserAction);
-        assert_eq!(
-            active.last_event_id,
-            Some(TimelineEventId::from(completed.event_id))
-        );
-        assert!(matches!(
-            active.pending_user_action,
-            Some(PendingUserAction::ToolApproval(ref pending))
-                if pending.call_id == "call_1" && pending.tool_name == "Bash"
-        ));
-    }
-
-    #[tokio::test]
-    async fn non_terminal_events_preserve_pending_approval_active_turn_for_same_turn() {
-        let (service, store) = service().await;
-        service.record_talos_event(approval_event(1)).await.unwrap();
-        let text_delta = service
-            .record_talos_event(text_delta_event(2))
-            .await
-            .unwrap();
-
-        let active = store.get_active_turn("s1").await.unwrap().unwrap();
-        assert_eq!(active.status, ActiveTurnStatus::WaitingUserAction);
-        assert_eq!(
-            active.last_event_id,
-            Some(TimelineEventId::from(text_delta.event_id))
-        );
-        assert!(matches!(
-            active.pending_user_action,
-            Some(PendingUserAction::ToolApproval(ref pending))
-                if pending.call_id == "call_1" && pending.tool_name == "Bash"
         ));
     }
 

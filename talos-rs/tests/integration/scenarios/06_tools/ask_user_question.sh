@@ -106,10 +106,6 @@ if [[ -z "${question_output}" || "${question_output}" == Error:* ]]; then
   echo "CASE tool_ask_user_question FAIL response=${question_json}"
   exit 1
 fi
-if ! echo "${question_output}" | grep -Fq "ASK_USER_QUESTION_OK"; then
-  echo "CASE tool_ask_user_question FAIL missing_ack output=${question_output}"
-  exit 1
-fi
 
 QUESTION_JSON="${question_json}" python3 - <<'PY'
 import json

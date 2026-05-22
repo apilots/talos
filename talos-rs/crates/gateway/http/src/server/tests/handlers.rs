@@ -359,10 +359,10 @@ async fn test_put_and_get_memory_file_handlers_roundtrip() {
 
 #[tokio::test]
 async fn test_http_and_app_server_adapters_share_application_service_contract() {
-    use talos_app_protocol::errors::{NOT_FOUND, VALIDATION_FAILED};
+    use talos_app_protocol::errors::VALIDATION_FAILED;
     use talos_app_protocol::requests::{
         ClientMethod, ClientRequest, ClientRequestParams, ConfigReadParams, MemoryFileReadParams,
-        ModelListParams, ToolApprovalSubmitParams, WorkspaceDocReadParams,
+        ModelListParams, WorkspaceDocReadParams,
     };
     use talos_app_server::{AppServerApplication, TalosApplicationAdapter};
 
@@ -443,24 +443,6 @@ async fn test_http_and_app_server_adapters_share_application_service_contract() 
         .await
         .expect("app-server config read should use shared config service");
     assert!(config["config"]["provider"].is_string());
-
-    let missing_approval = adapter
-        .dispatch(
-            &actor,
-            ClientRequest {
-                method: ClientMethod::ToolApprovalSubmit,
-                params: ClientRequestParams::ToolApprovalSubmit(ToolApprovalSubmitParams {
-                    session_id: "missing-session".to_string(),
-                    call_id: "call-1".to_string(),
-                    tool_name: "Bash".to_string(),
-                    approved: false,
-                    reason: None,
-                }),
-            },
-        )
-        .await
-        .expect_err("app-server missing approval session should fail");
-    assert_eq!(missing_approval.code, NOT_FOUND);
 
     let invalid_workspace_kind = adapter
         .dispatch(
