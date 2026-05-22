@@ -1,6 +1,6 @@
 # Runtime Env And First-Run Bootstrap Design
 
-Status: Completed
+Status: Archived
 Owner: agent
 Created: 2026-05-08
 Updated: 2026-05-08

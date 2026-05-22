@@ -1,6 +1,6 @@
 # Provider Neutral Agent Stream Design
 
-Status: draft
+Status: Archived
 Owner: agent
 Created: 2026-05-21
 Updated: 2026-05-21

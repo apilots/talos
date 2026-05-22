@@ -1,6 +1,6 @@
 # Message Timeline Model Design
 
-Status: Completed
+Status: Archived
 Owner: agent
 Created: 2026-05-12
 Updated: 2026-05-12
