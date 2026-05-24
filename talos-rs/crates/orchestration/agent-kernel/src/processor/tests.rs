@@ -87,7 +87,6 @@ async fn test_planning_response_processor_emits_typed_branch_override_event() {
     let output = processor.run(&mut ctx, &mut response).await.unwrap();
     let events = output.events;
 
-    assert_eq!(output.disposition, ResponseDisposition::Continue);
     assert_eq!(
         ctx.execution_state.planning_response.as_deref(),
         Some("answer")
@@ -144,64 +143,13 @@ async fn test_planning_response_processor_rewrites_plan_react_tagged_response() 
         allow_final_projection: true,
     };
 
-    let output = processor.run(&mut ctx, &mut response).await.unwrap();
+    processor.run(&mut ctx, &mut response).await.unwrap();
 
-    assert_eq!(output.disposition, ResponseDisposition::Continue);
     assert_eq!(response.output_text, "done");
     assert!(ctx.execution_state.plan_react_has_final_answer);
     assert!(response.output_items.iter().any(
         |item| matches!(item, TalosOutputItem::Reasoning { text } if text.contains("/*PLANNING*/"))
     ));
-}
-
-#[tokio::test]
-async fn test_final_answer_extraction_emits_final_event_and_marks_final() {
-    let mut ctx = mock_ctx();
-    let mut response = LlmResponseEnvelope {
-        output_text: "done".to_string(),
-        output_items: vec![TalosOutputItem::OutputText {
-            text: "done".to_string(),
-        }],
-        branch: ExecutionBranch::DirectAnswer,
-        actions: EventActions::default(),
-        allow_final_projection: true,
-    };
-    let output = FinalAnswerExtractionProcessor
-        .run(&mut ctx, &mut response)
-        .await
-        .unwrap();
-    let events = output.events;
-
-    assert_eq!(output.disposition, ResponseDisposition::Final);
-    assert_eq!(events.len(), 1);
-    assert!(events[0].is_final_response());
-    assert_eq!(events[0].branch, ExecutionBranch::DirectAnswer);
-}
-
-#[tokio::test]
-async fn test_tool_call_extraction_emits_tool_call_events() {
-    let mut ctx = mock_ctx();
-    let mut response = LlmResponseEnvelope {
-        output_text: String::new(),
-        output_items: vec![TalosOutputItem::ToolCall {
-            call_id: "call-1".to_string(),
-            name: "read".to_string(),
-            arguments: json!({"path": "README.md"}).into(),
-        }],
-        branch: ExecutionBranch::ReactiveLoop,
-        actions: EventActions::default(),
-        allow_final_projection: true,
-    };
-    let output = ToolCallExtractionProcessor
-        .run(&mut ctx, &mut response)
-        .await
-        .unwrap();
-    let events = output.events;
-
-    assert_eq!(output.disposition, ResponseDisposition::Continue);
-    assert_eq!(events.len(), 1);
-    assert!(matches!(events[0].kind, ExecutionEventKind::ToolCall));
-    assert_eq!(events[0].branch, ExecutionBranch::ReactiveLoop);
 }
 
 #[tokio::test]
@@ -516,154 +464,4 @@ async fn test_compaction_processor_skips_current_invocation_events() {
         .unwrap();
 
     assert!(output.events.is_empty());
-}
-
-fn make_confirmation_event(
-    call_id: &str,
-    tool_name: &str,
-    ts_offset_ms: i64,
-) -> crate::KernelTranscriptEvent {
-    let timestamp = chrono::Utc::now() + chrono::Duration::milliseconds(ts_offset_ms);
-    crate::KernelTranscriptEvent {
-        id: format!("conf-{}", call_id),
-        session_id: "s1".to_string(),
-        invocation_id: "i0".to_string(),
-        branch: ExecutionBranch::ReactiveLoop,
-        author: crate::EventAuthor::System,
-        kind: crate::KernelTranscriptEventKind::SystemMessage,
-        payload: crate::KernelTranscriptPayload::Confirmation {
-            payload: crate::KernelTranscriptConfirmationPayload {
-                call_id: call_id.to_string(),
-                tool_name: tool_name.to_string(),
-                prompt: "Need approval.".to_string(),
-                arguments: json!({"cmd": "echo hi"}).into(),
-            },
-        },
-        actions: crate::EventActions::default(),
-        partial: false,
-        timestamp,
-    }
-}
-
-fn make_approval_event(
-    call_id: &str,
-    tool_name: &str,
-    approved: bool,
-    ts_offset_ms: i64,
-) -> crate::KernelTranscriptEvent {
-    let timestamp = chrono::Utc::now() + chrono::Duration::milliseconds(ts_offset_ms);
-    crate::KernelTranscriptEvent {
-        id: format!("approval-{}", call_id),
-        session_id: "s1".to_string(),
-        invocation_id: "i1".to_string(),
-        branch: ExecutionBranch::ReactiveLoop,
-        author: crate::EventAuthor::System,
-        kind: crate::KernelTranscriptEventKind::SystemMessage,
-        payload: crate::KernelTranscriptPayload::ApprovalResponse {
-            payload: crate::KernelTranscriptApprovalResponsePayload {
-                call_id: call_id.to_string(),
-                tool_name: tool_name.to_string(),
-                approved,
-                reason: if approved {
-                    None
-                } else {
-                    Some("user denied".to_string())
-                },
-            },
-        },
-        actions: crate::EventActions::default(),
-        partial: false,
-        timestamp,
-    }
-}
-
-#[tokio::test]
-async fn test_confirmation_processor_injects_replay_when_approved() {
-    let mut ctx = mock_ctx();
-    ctx.session.events = vec![
-        make_confirmation_event("call-1", "Bash", -100),
-        make_approval_event("call-1", "Bash", true, 0),
-    ];
-    let mut request = LlmRequestEnvelope {
-        branch: ExecutionBranch::ReactiveLoop,
-        ..LlmRequestEnvelope::default()
-    };
-
-    RequestConfirmationRequestProcessor
-        .run(&mut ctx, &mut request)
-        .await
-        .unwrap();
-
-    assert_eq!(request.replay_tool_invocations.len(), 1);
-    assert_eq!(request.replay_tool_invocations[0].call_id, "call-1");
-    assert_eq!(request.replay_tool_invocations[0].tool_name, "Bash");
-    assert!(request.prompt_prefix_messages.is_empty());
-}
-
-#[tokio::test]
-async fn test_confirmation_processor_replays_approval_across_branches() {
-    let mut ctx = mock_ctx();
-    let confirmation = make_confirmation_event("call-cross", "Bash", -100);
-    let mut approval = make_approval_event("call-cross", "Bash", true, 0);
-    approval.branch = ExecutionBranch::ReactiveLoop;
-    ctx.session.events = vec![confirmation, approval];
-    let mut request = LlmRequestEnvelope {
-        branch: ExecutionBranch::DirectAnswer,
-        ..LlmRequestEnvelope::default()
-    };
-
-    RequestConfirmationRequestProcessor
-        .run(&mut ctx, &mut request)
-        .await
-        .unwrap();
-
-    assert_eq!(request.replay_tool_invocations.len(), 1);
-    assert_eq!(request.replay_tool_invocations[0].call_id, "call-cross");
-    assert_eq!(request.replay_tool_invocations[0].tool_name, "Bash");
-    assert!(request.prompt_prefix_messages.is_empty());
-}
-
-#[tokio::test]
-async fn test_confirmation_processor_still_blocks_when_no_response() {
-    let mut ctx = mock_ctx();
-    ctx.session.events = vec![make_confirmation_event("call-2", "Bash", -100)];
-    let mut request = LlmRequestEnvelope {
-        branch: ExecutionBranch::ReactiveLoop,
-        ..LlmRequestEnvelope::default()
-    };
-
-    RequestConfirmationRequestProcessor
-        .run(&mut ctx, &mut request)
-        .await
-        .unwrap();
-
-    assert!(request.replay_tool_invocations.is_empty());
-    assert!(request
-        .prompt_prefix_messages
-        .iter()
-        .any(|m| { m.content.contains("call-2") && m.content.contains("pending") }));
-}
-
-#[tokio::test]
-async fn test_confirmation_processor_handles_rejection() {
-    let mut ctx = mock_ctx();
-    ctx.session.events = vec![
-        make_confirmation_event("call-3", "Bash", -100),
-        make_approval_event("call-3", "Bash", false, 0),
-    ];
-    let mut request = LlmRequestEnvelope {
-        branch: ExecutionBranch::ReactiveLoop,
-        ..LlmRequestEnvelope::default()
-    };
-
-    RequestConfirmationRequestProcessor
-        .run(&mut ctx, &mut request)
-        .await
-        .unwrap();
-
-    assert!(request.replay_tool_invocations.is_empty());
-    assert!(request
-        .prompt_prefix_messages
-        .iter()
-        .any(|m| { m.content.contains("rejected") || m.content.contains("denied") }));
 }

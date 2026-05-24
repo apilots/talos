@@ -19,9 +19,8 @@ use talos_app_protocol::requests::{
     ProjectReadParams, ProtocolInputItem, SessionActiveTurnParams, SessionCloseParams,
     SessionCreateParams, SessionDeleteParams, SessionHistoryParams, SessionListParams,
     SessionPatchParams, SessionReadParams, TimelineActiveTurnSnapshot, TimelineRecoveryParams,
-    TimelineRecoverySnapshot, ToolApprovalSubmitParams, ToolDynamicResultSubmitParams,
-    TurnInterruptParams, TurnStartParams, TurnStartResponse, WorkspaceDocListParams,
-    WorkspaceDocReadParams, WorkspaceDocWriteParams,
+    TimelineRecoverySnapshot, ToolDynamicResultSubmitParams, TurnInterruptParams, TurnStartParams,
+    TurnStartResponse, WorkspaceDocListParams, WorkspaceDocReadParams, WorkspaceDocWriteParams,
 };
 use talos_app_protocol::version::ProtocolVersion;
 use talos_auth::{AdminCreateUserRequest, AdminPatchUserRequest, UserDto};
@@ -58,7 +57,7 @@ impl AppServerClientConfig {
         })?;
         Ok(Self {
             app_server_bin: std::env::var("TALOS_APP_SERVER_BIN")
-                .unwrap_or_else(|_| "talos".to_string()),
+                .unwrap_or_else(|_| "app-server".to_string()),
             launch_token,
             client_name: "talos-rust-sdk".to_string(),
             client_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -118,17 +117,13 @@ impl AppServerClient {
 
     async fn spawn(config: &AppServerClientConfig) -> TalosResult<Self> {
         let mut child = Command::new(&config.app_server_bin)
-            .arg("app-server")
             .env("TALOS_LOCAL_LAUNCH_TOKEN", &config.launch_token)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()
             .map_err(|error| {
-                TalosError::ClientError(format!(
-                    "spawn {} app-server: {error}",
-                    config.app_server_bin
-                ))
+                TalosError::ClientError(format!("spawn {}: {error}", config.app_server_bin))
             })?;
         let stdin = child
             .stdin
@@ -571,29 +566,6 @@ impl AppServerClient {
                 "turn.interrupt",
                 TurnInterruptParams {
                     session_id: session_id.to_string(),
-                },
-            )
-            .await?;
-        Ok(())
-    }
-
-    pub async fn submit_tool_approval(
-        &mut self,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-        approved: bool,
-        reason: Option<String>,
-    ) -> TalosResult<()> {
-        let _: Value = self
-            .request_typed(
-                "tool.approval.submit",
-                ToolApprovalSubmitParams {
-                    session_id: session_id.to_string(),
-                    call_id: call_id.to_string(),
-                    tool_name: tool_name.to_string(),
-                    approved,
-                    reason,
                 },
             )
             .await?;

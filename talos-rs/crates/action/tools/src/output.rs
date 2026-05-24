@@ -90,7 +90,6 @@ pub struct ToolResultEnvelope {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolPending {
-    Approval { prompt: String, arguments: Value },
     Dynamic { arguments: Value },
 }
 
@@ -335,20 +334,6 @@ impl ToolDispatchOutcome {
         Self::Executed { payload }
     }
 
-    pub fn pending_approval(
-        tool_name: impl Into<String>,
-        prompt: impl Into<String>,
-        arguments: Value,
-    ) -> Self {
-        Self::Pending {
-            tool_name: tool_name.into(),
-            pending: ToolPending::Approval {
-                prompt: prompt.into(),
-                arguments,
-            },
-        }
-    }
-
     pub fn pending_dynamic(tool_name: impl Into<String>, arguments: Value) -> Self {
         Self::Pending {
             tool_name: tool_name.into(),
@@ -384,13 +369,6 @@ impl ToolDispatchOutcome {
 
     pub fn render_progress_message(&self, tool_name: &str) -> Option<ToolRenderMessage> {
         match self {
-            Self::Pending {
-                pending: ToolPending::Approval { prompt, .. },
-                ..
-            } => Some(ToolRenderMessage {
-                kind: ToolRenderKind::Progress,
-                text: format!("{tool_name}: waiting for approval ({prompt})"),
-            }),
             Self::Pending {
                 pending: ToolPending::Dynamic { .. },
                 ..
@@ -451,11 +429,6 @@ impl ToolDispatchOutcome {
             Self::Executed { payload } => payload.envelope(),
             Self::Pending { pending, .. } => {
                 let pending = match pending {
-                    ToolPending::Approval { prompt, arguments } => ToolResultPendingMeta {
-                        pending_kind: "approval".to_string(),
-                        prompt: Some(prompt.clone()),
-                        arguments: Some(arguments.clone()),
-                    },
                     ToolPending::Dynamic { arguments } => ToolResultPendingMeta {
                         pending_kind: "dynamic".to_string(),
                         prompt: None,
@@ -606,7 +579,7 @@ fn classify_error_kind(error: &str) -> ToolFailureKind {
         || normalized.contains("permission denied")
     {
         ToolFailureKind::PermissionRejection
-    } else if normalized.contains("approval") || normalized.contains("governance") {
+    } else if normalized.contains("governance") {
         ToolFailureKind::GovernanceRejection
     } else if normalized.contains("stale") {
         ToolFailureKind::StaleWriteFailure
@@ -641,7 +614,7 @@ fn suggested_action_for_error(kind: ToolFailureKind) -> &'static str {
     match kind {
         ToolFailureKind::ValidationFailure => "fix the arguments and retry",
         ToolFailureKind::PermissionRejection | ToolFailureKind::GovernanceRejection => {
-            "request approval or choose a less privileged tool"
+            "choose a less privileged tool or adjust the configured tool policy"
         }
         ToolFailureKind::StaleWriteFailure => "re-read the target file before retrying",
         ToolFailureKind::DeferredToolUnavailable => {
@@ -712,17 +685,16 @@ mod tests {
 
     #[test]
     fn tool_dispatch_outcome_pending_maps_to_pending_meta() {
-        let outcome = ToolDispatchOutcome::pending_approval(
-            "Bash",
-            "need approval",
-            serde_json::json!({"command": "echo hi"}),
+        let outcome = ToolDispatchOutcome::pending_dynamic(
+            "ask_user",
+            serde_json::json!({"question": "continue?"}),
         );
 
         let envelope = outcome.envelope();
         assert_eq!(envelope.status, ToolResultStatus::Pending);
         let pending = envelope.pending.expect("pending metadata should exist");
-        assert_eq!(pending.pending_kind, "approval");
-        assert_eq!(pending.prompt.as_deref(), Some("need approval"));
+        assert_eq!(pending.pending_kind, "dynamic");
+        assert_eq!(pending.prompt, None);
     }
 
     #[test]

@@ -96,7 +96,6 @@ impl ResponseProcessor for PlanningResponseProcessor {
             );
             event.actions = response.actions.clone();
             return Ok(ResponseProcessorOutput {
-                disposition: ResponseDisposition::Continue,
                 events: vec![event],
             });
         }

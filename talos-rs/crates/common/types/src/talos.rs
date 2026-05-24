@@ -32,6 +32,7 @@ pub enum StopReason {
     EndTurn,
     ModelOutputLimit,
     ToolRoundLimit,
+    WaitingDynamicInput,
     TransferUnresolved,
     BeforeModelCallbackStopped,
     AfterModelCallbackStopped,
@@ -401,6 +402,19 @@ impl TalosUsage {
     }
 }
 
+/// Kernel-owned execution metrics for a turn.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct TurnExecutionMetrics {
+    pub model_rounds: u32,
+    pub tool_calls: u32,
+    pub tool_successes: u32,
+    pub tool_errors: u32,
+    pub stop_reason: StopReason,
+    pub usage: TalosUsage,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+}
+
 fn sum_optional_tokens(left: Option<u32>, right: Option<u32>) -> Option<u32> {
     match (left, right) {
         (Some(left), Some(right)) => Some(left.saturating_add(right)),
@@ -432,6 +446,7 @@ pub enum TalosTimelineEventType {
     ItemStarted,
     ItemDelta,
     ItemCompleted,
+    AssistantTextCommitted,
     TurnCompleted,
     TurnError,
 }
@@ -455,6 +470,7 @@ pub enum TalosTimelinePhase {
     Input,
     Thinking,
     Acting,
+    Unknown,
     Commentary,
     FinalAnswer,
     System,
@@ -465,7 +481,7 @@ pub enum TalosTimelinePhase {
 #[serde(rename_all = "snake_case")]
 pub enum TalosTimelineItemStatus {
     Running,
-    WaitingApproval,
+    WaitingDynamicInput,
     Completed,
     Failed,
     Cancelled,
@@ -536,12 +552,6 @@ pub enum TalosTimelineDelta {
         content: Vec<TalosContentItem>,
         is_error: bool,
     },
-    ToolApprovalRequest {
-        call_id: String,
-        tool_name: String,
-        prompt: String,
-        arguments: TalosJsonValue,
-    },
     ToolDynamicRequest {
         call_id: String,
         tool_name: String,
@@ -602,12 +612,22 @@ pub struct TalosItemCompletedEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct TalosAssistantTextCommittedEvent {
+    pub request_id: String,
+    pub turn_id: String,
+    pub item_id: String,
+    pub phase: TalosTimelinePhase,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 pub struct TalosTurnCompletedEvent {
     pub request_id: String,
     pub turn_id: String,
     pub completed_at_ms: u64,
     pub stop_reason: StopReason,
     pub usage: TalosUsage,
+    #[serde(default)]
+    pub metrics: Option<TurnExecutionMetrics>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
@@ -625,6 +645,7 @@ pub enum TalosTimelineEventPayload {
     ItemStarted(TalosItemStartedEvent),
     ItemDelta(TalosItemDeltaEvent),
     ItemCompleted(TalosItemCompletedEvent),
+    AssistantTextCommitted(TalosAssistantTextCommittedEvent),
     TurnCompleted(TalosTurnCompletedEvent),
     TurnError(TalosTurnErrorEvent),
 }
@@ -690,6 +711,8 @@ pub struct SessionHistoryMessage {
     pub items: Vec<TalosTimelineItem>,
     pub stop_reason: StopReason,
     pub usage: TalosUsage,
+    #[serde(default)]
+    pub metrics: Option<TurnExecutionMetrics>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]

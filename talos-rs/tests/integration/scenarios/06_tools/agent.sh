@@ -134,8 +134,6 @@ from pathlib import Path
 
 path = Path(os.environ["AGENT_EVENTS_LOG"])
 tool_item_id = None
-saw_waiting_approval = False
-saw_approval_request = False
 saw_terminal_result = False
 
 for line in path.read_text(encoding="utf-8").splitlines():
@@ -153,17 +151,11 @@ for line in path.read_text(encoding="utf-8").splitlines():
         delta = payload.get("delta") or {}
         if payload.get("item_id") != tool_item_id:
             continue
-        if delta.get("type") == "status" and delta.get("status") == "waiting_approval":
-            saw_waiting_approval = True
-        elif delta.get("type") == "tool_approval_request":
-            saw_approval_request = True
-        elif delta.get("type") == "tool_result":
+        if delta.get("type") == "tool_result":
             saw_terminal_result = True
 
 assert tool_item_id, "missing Agent tool item"
-assert saw_waiting_approval, "missing waiting_approval status"
-assert saw_approval_request, "missing tool approval request delta"
-assert not saw_terminal_result, "pending approval must not emit terminal tool_result"
+assert saw_terminal_result, "Agent tool should emit terminal tool_result"
 PY
 
 echo "CASE tool_agent PASS"

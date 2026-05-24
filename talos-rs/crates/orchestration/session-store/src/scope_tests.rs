@@ -212,59 +212,6 @@ async fn test_delete_session_record_removes_session() {
 }
 
 #[tokio::test]
-async fn test_patch_session_record_merges_tool_approval_policy() {
-    let storage = Arc::new(SqliteStorage::new("sqlite::memory:").await.unwrap());
-    let store = DatabaseSessionStore::new(storage).await.unwrap();
-
-    let session = store
-        .create_session(
-            &sample_context(),
-            "agent-a",
-            "qwen-max",
-            Some("gpt-5.3"),
-            None,
-            None,
-            None,
-            None,
-        )
-        .await
-        .expect("create session should succeed");
-
-    let ack = store
-        .patch_session_record(
-            &session.id,
-            &SessionPatch {
-                conf: Some(SessionConf {
-                    agent: None,
-                    tools: Some(talos_types::SessionToolsConf {
-                        approval_policy: Some(talos_types::ToolApprovalPolicy::Always),
-                    }),
-                }),
-                project_id: None,
-                current_directory: None,
-            },
-        )
-        .await
-        .expect("patch session should succeed");
-    assert!(ack.success);
-
-    let loaded = store
-        .get_session_record(&session.id)
-        .await
-        .expect("load session should succeed")
-        .expect("session should exist");
-
-    assert_eq!(
-        SessionConfigOverridePolicy::extract_agent_model(&loaded.conf).unwrap(),
-        Some("gpt-5.3".to_string())
-    );
-    assert_eq!(
-        SessionConfigOverridePolicy::extract_tool_approval_policy(&loaded.conf).unwrap(),
-        Some(talos_types::ToolApprovalPolicy::Always)
-    );
-}
-
-#[tokio::test]
 async fn test_resolve_or_create_session_preserves_existing_project_binding_fields() {
     let storage = Arc::new(SqliteStorage::new("sqlite::memory:").await.unwrap());
     let store = DatabaseSessionStore::new(storage).await.unwrap();

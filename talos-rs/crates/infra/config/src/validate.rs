@@ -94,24 +94,9 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             "agent.model is empty or unresolved placeholder".to_string(),
         ));
     }
-    if config.agent.kernel.max_iters == 0 {
-        return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.max_iters must be > 0".to_string(),
-        ));
-    }
-    if config.agent.kernel.max_task_per_turn == 0 {
-        return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.max_task_per_turn must be > 0".to_string(),
-        ));
-    }
     if config.agent.kernel.tool_parallelism == 0 {
         return Err(TalosError::InvalidConfiguration(
             "agent.kernel.tool_parallelism must be > 0".to_string(),
-        ));
-    }
-    if config.agent.kernel.max_llm_calls == 0 {
-        return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.max_llm_calls must be > 0".to_string(),
         ));
     }
     if config.agent.kernel.max_tool_rounds == 0 {
@@ -134,16 +119,6 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
     {
         return Err(TalosError::InvalidConfiguration(
             "agent.kernel.default_workspace_id is empty or unresolved placeholder".to_string(),
-        ));
-    }
-    if config.agent.kernel.execution_children == 0 {
-        return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.execution_children must be > 0".to_string(),
-        ));
-    }
-    if config.agent.kernel.execution_loop_iters == 0 {
-        return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.execution_loop_iters must be > 0".to_string(),
         ));
     }
     if config.agent.kernel.memory.workspace_dir.trim().is_empty()

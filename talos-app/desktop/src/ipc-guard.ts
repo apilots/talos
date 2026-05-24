@@ -67,11 +67,6 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "session.read": sessionParams,
   "session.recover": sessionParams,
   "skill.list": emptyParams,
-  "tool.approval.submit": (params) =>
-    hasString(params, "session_id") &&
-    hasString(params, "call_id") &&
-    hasString(params, "tool_name") &&
-    hasBoolean(params, "approved"),
   "tool.dynamic_result.submit": (params) =>
     hasString(params, "session_id") &&
     hasString(params, "call_id") &&

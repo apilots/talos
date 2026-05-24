@@ -7,7 +7,6 @@ import { Panel } from "@/shared/ui/Panel";
 import { Textarea } from "@/shared/ui/Input";
 import { describeProjectDirectory, isUnboundProject } from "@/shared/types/domain";
 import type {
-  ApprovalMode,
   ProjectRecord,
   ReasoningLevel,
   RuntimeMode,
@@ -32,8 +31,6 @@ interface ChatComposerProps {
   onCreateProject?: (path: string) => Promise<void>;
   runtimeMode: RuntimeMode;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
-  approvalMode: ApprovalMode;
-  onApprovalModeChange: (mode: ApprovalMode) => void;
   reasoningLevel?: ReasoningLevel;
   onReasoningLevelChange?: (level: ReasoningLevel) => void;
   showProjectSelector?: boolean;
@@ -107,36 +104,6 @@ function ComposerDropdown({ header, items, value, onChange, triggerIcon, classNa
   );
 }
 
-// ─── inline text select (no border) ─────────────────────────────────────────
-
-function InlineSelect({
-  value,
-  onChange,
-  children,
-  className,
-  "aria-label": ariaLabel,
-}: {
-  value: string | undefined;
-  onChange: (v: string) => void;
-  children: React.ReactNode;
-  className?: string;
-  "aria-label"?: string;
-}) {
-  return (
-    <div className={cn("relative inline-flex items-center", className)}>
-      <select
-        aria-label={ariaLabel}
-        className="appearance-none border-0 bg-transparent py-1 pl-0 pr-4 text-[12px] font-medium outline-none focus:outline-none focus:ring-0"
-        onChange={(e) => onChange(e.target.value)}
-        value={value}
-      >
-        {children}
-      </select>
-      <ChevronDown className="pointer-events-none absolute right-0 text-current" size={11} />
-    </div>
-  );
-}
-
 const EMPTY_INPUT_HISTORY_ITEMS: InputHistoryNavigationItem[] = [];
 
 interface InputHistoryNavigationItem {
@@ -164,8 +131,6 @@ export function ChatComposer({
   onCreateProject,
   runtimeMode,
   onRuntimeModeChange,
-  approvalMode,
-  onApprovalModeChange,
   reasoningLevel = "medium",
   onReasoningLevelChange,
   showProjectSelector = true,
@@ -389,6 +354,9 @@ export function ChatComposer({
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
+                if (isBusy) {
+                  return;
+                }
                 void handleSend();
                 return;
               }
@@ -407,16 +375,6 @@ export function ChatComposer({
           >
             <Plus size={13} />
           </button>
-
-          <InlineSelect
-            aria-label="Approval mode"
-            className={cn("ml-1", approvalMode === "skip" ? "text-brand" : "text-muted")}
-            onChange={(v) => onApprovalModeChange(v as ApprovalMode)}
-            value={approvalMode}
-          >
-            <option value="needs_approval">{t("chat:defaultPermissions")}</option>
-            <option value="skip">{t("chat:fullAccess")}</option>
-          </InlineSelect>
 
           <div className="min-w-4 flex-1" />
 

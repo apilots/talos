@@ -190,20 +190,6 @@ impl ResourceAccessService {
         self.cancel_runtime_turn(session_id).await
     }
 
-    pub async fn submit_tool_approval(
-        &self,
-        actor: &Actor,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-        approved: bool,
-        reason: Option<String>,
-    ) -> TalosResult<()> {
-        let _session = self.get_session(actor, session_id).await?;
-        self.submit_runtime_tool_approval(session_id, call_id, tool_name, approved, reason)
-            .await
-    }
-
     pub async fn submit_dynamic_tool_result(
         &self,
         actor: &Actor,
@@ -389,19 +375,6 @@ impl ResourceAccessService {
         self.session_runtime.cancel_active_turn(session_id).await
     }
 
-    async fn submit_runtime_tool_approval(
-        &self,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-        approved: bool,
-        reason: Option<String>,
-    ) -> TalosResult<()> {
-        self.session_runtime
-            .submit_tool_approval(session_id, call_id, tool_name, approved, reason)
-            .await
-    }
-
     async fn submit_runtime_dynamic_tool_result(
         &self,
         session_id: &str,
@@ -455,19 +428,6 @@ impl SessionRuntime for RuntimeSessionAdapter {
 
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()> {
         self.0.cancel_active_turn(session_id).await
-    }
-
-    async fn submit_tool_approval(
-        &self,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-        approved: bool,
-        reason: Option<String>,
-    ) -> TalosResult<()> {
-        self.0
-            .submit_tool_approval(session_id, call_id, tool_name, approved, reason)
-            .await
     }
 
     async fn submit_dynamic_tool_result(
@@ -731,17 +691,6 @@ mod tests {
         }
 
         async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
-            Ok(())
-        }
-
-        async fn submit_tool_approval(
-            &self,
-            _session_id: &str,
-            _call_id: &str,
-            _tool_name: &str,
-            _approved: bool,
-            _reason: Option<String>,
-        ) -> TalosResult<()> {
             Ok(())
         }
 

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { TalosHttpError } from "@talos/sdk-browser";
 
-import { useSessionApproval } from "./useSessionApproval";
 import { useSessionBlocks } from "./useSessionBlocks";
 import { useSessionReconnect } from "./useSessionReconnect";
 import { useSessionStreaming } from "./useSessionStreaming";
@@ -44,7 +43,6 @@ export function useChatSession(
     canRetryResponse,
   } =
     useSessionStreaming(sessionId, serverMessageCount, sessionTitle);
-  const { pendingApproval, submitApproval } = useSessionApproval(sessionId);
   const { retryStream } = useSessionReconnect({
     hasActiveConnection,
     reconnectMessage,
@@ -98,7 +96,6 @@ export function useChatSession(
     if (
       !activeMessageId ||
       streamState.isStreaming ||
-      streamState.pendingApproval ||
       streamState.pendingUserAction
     ) {
       return;
@@ -133,7 +130,6 @@ export function useChatSession(
     sessionId,
     streamState?.activeMessageId,
     streamState?.isStreaming,
-    streamState?.pendingApproval,
     streamState?.pendingUserAction,
     pendingInput,
     pendingInputServerMessageId,
@@ -159,12 +155,10 @@ export function useChatSession(
     retryResponse,
     canRetryResponse,
     stopResponse,
-    submitApproval,
     isStreaming,
     isCancelling,
     streamConnectionState: streamState?.connectionState ?? "idle",
     showReconnectControls: streamState?.showReconnectControls ?? false,
-    pendingApproval,
     streamError: streamState?.error,
     sessionHistoryQuery,
   };

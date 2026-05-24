@@ -1,15 +1,11 @@
-use super::AgentImpl;
+use super::AgentHarness;
 use crate::{
     service::{OrchestratorExecution, OrchestratorRequest},
-    Agent, AgentOrchestrator, AgentResponse,
+    AgentOrchestrator,
 };
 use async_trait::async_trait;
-use std::collections::HashMap;
 use std::time::Duration;
-use talos_agent_kernel::{
-    Agent as KernelAgent, AgentRunResult, InvocationContext, StopReason, TaskKind, TaskResult,
-    TaskStatus, TimelineBuilder,
-};
+use talos_agent_kernel::TimelineBuilder;
 use talos_error::TalosResult;
 use talos_types::talos::{
     TalosOutputItem, TalosTimelineDelta, TalosTimelineEvent, TalosTimelineItemStatus,
@@ -27,76 +23,13 @@ impl MockAgent {
 }
 
 #[async_trait]
-impl Agent for MockAgent {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
-    async fn execute_tool(
-        &self,
-        _tool_name: &str,
-        _args: serde_json::Value,
-    ) -> TalosResult<AgentResponse> {
-        Ok(AgentResponse {
-            output_text: "Mock tool execution".to_string(),
-            output_items: vec![TalosOutputItem::OutputText {
-                text: "Mock tool execution".to_string(),
-            }],
-            reasoning: Vec::new(),
-            tool_calls: vec![],
-        })
-    }
-}
-
-#[async_trait]
-impl KernelAgent for MockAgent {
-    fn id(&self) -> &str {
-        "mock"
-    }
-
-    async fn run(
-        &self,
-        _ctx: &mut InvocationContext,
-        _event_handler: Option<&mut dyn talos_agent_kernel::ExecutionEventHandler>,
-    ) -> TalosResult<AgentRunResult> {
-        Ok(AgentRunResult {
-            output_text: "Mock response".to_string(),
-            output_items: vec![TalosOutputItem::OutputText {
-                text: "Mock response".to_string(),
-            }],
-            stop_reason: StopReason::EndTurn,
-            usage: TalosUsage::default(),
-            warnings: Vec::new(),
-            task_results: vec![TaskResult {
-                task_id: "mock-task".to_string(),
-                kind: TaskKind::General,
-                goal: "mock".to_string(),
-                status: TaskStatus::Success,
-                output: "Mock response".to_string(),
-                output_items: vec![TalosOutputItem::OutputText {
-                    text: "Mock response".to_string(),
-                }],
-                usage: TalosUsage::default(),
-                warnings: Vec::new(),
-                tool_traces: Vec::new(),
-                state_delta: HashMap::new(),
-                error: None,
-            }],
-            state_delta: HashMap::new(),
-            continue_loop: false,
-            requested_transfer: None,
-        })
-    }
-}
-
-#[async_trait]
 impl AgentOrchestrator for MockAgent {
     fn id(&self) -> &str {
         "mock"
     }
 
     async fn run(&self, request: OrchestratorRequest) -> TalosResult<OrchestratorExecution> {
-        let input = AgentImpl::extract_text_input(&request.input);
+        let input = AgentHarness::extract_text_input(&request.input);
         let output = format!("Mock response to: {}", input);
         Ok(OrchestratorExecution {
             output_text: output,
@@ -108,6 +41,7 @@ impl AgentOrchestrator for MockAgent {
             usage: TalosUsage::default(),
             task_count: 1,
             session_id: request.session.context.session_id,
+            session_title_update: None,
         })
     }
 
@@ -172,7 +106,7 @@ impl AgentOrchestrator for MockAgent {
                 let _ = tx.send(completed).await;
             }
             let _ = tx
-                .send(timeline.complete_turn(execution.stop_reason, execution.usage))
+                .send(timeline.complete_turn(execution.stop_reason, execution.usage, None))
                 .await;
         });
         Ok(rx)
@@ -214,17 +148,6 @@ impl AgentOrchestrator for MockAgent {
     }
 
     async fn drain_active_turns(&self, _timeout: Duration) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn submit_tool_approval(
-        &self,
-        _session_id: &str,
-        _call_id: &str,
-        _tool_name: &str,
-        _approved: bool,
-        _reason: Option<String>,
-    ) -> TalosResult<()> {
         Ok(())
     }
 

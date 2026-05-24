@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use talos_error::TalosResult;
+use talos_error::{TalosError, TalosResult};
 use thiserror::Error;
 use tokio::sync::mpsc;
 
@@ -159,44 +159,12 @@ pub trait LlmProvider: Send + Sync {
         self.chat(request).await
     }
 
-    /// Tool-aware stream. Default implementation wraps text chunks into text events.
-    async fn stream_with_tools(&self, request: ChatRequest) -> TalosResult<ToolStream> {
-        let mut stream = self.stream(request).await?;
-        let (tx, rx) = mpsc::channel::<TalosResult<ToolStreamEvent>>(100);
-
-        tokio::spawn(async move {
-            while let Some(result) = stream.next().await {
-                match result {
-                    Ok(chunk) => {
-                        if !chunk.delta.is_empty() {
-                            if tx
-                                .send(Ok(ToolStreamEvent::TextDelta { delta: chunk.delta }))
-                                .await
-                                .is_err()
-                            {
-                                return;
-                            }
-                        }
-
-                        if chunk.finish_reason.is_some() {
-                            let _ = tx
-                                .send(Ok(ToolStreamEvent::Done {
-                                    finish_reason: chunk.finish_reason,
-                                    usage: None,
-                                }))
-                                .await;
-                            return;
-                        }
-                    }
-                    Err(err) => {
-                        let _ = tx.send(Err(err)).await;
-                        return;
-                    }
-                }
-            }
-        });
-
-        Ok(ToolStream::new(rx))
+    /// Provider-neutral model block stream.
+    async fn stream_model_blocks(&self, _request: ChatRequest) -> TalosResult<ModelBlockStream> {
+        Err(TalosError::InternalError(format!(
+            "{} provider must implement stream_model_blocks directly",
+            self.name()
+        )))
     }
 }
 
@@ -428,34 +396,116 @@ impl ChatStream {
     }
 }
 
-/// Tool-aware stream event.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelBlockKind {
+    Reasoning,
+    AssistantText,
+    ToolCall,
+    ToolResult,
+    SystemNotice,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AssistantTextPhaseHint {
+    Commentary,
+    FinalAnswer,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AssistantTextPhaseHintSource {
+    ExplicitProviderPhase,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModelToolCallStart {
+    pub index: usize,
+    pub call_id: Option<String>,
+    pub tool_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModelBlockStarted {
+    pub model_item_id: String,
+    pub provider_item_id: Option<String>,
+    pub kind: ModelBlockKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assistant_text_phase_hint: Option<AssistantTextPhaseHint>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assistant_text_phase_hint_source: Option<AssistantTextPhaseHintSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call: Option<ModelToolCallStart>,
+}
+
+impl ModelBlockStarted {
+    pub fn reasoning(provider_item_id: Option<String>) -> Self {
+        Self {
+            model_item_id: "reasoning".to_string(),
+            provider_item_id,
+            kind: ModelBlockKind::Reasoning,
+            assistant_text_phase_hint: None,
+            assistant_text_phase_hint_source: None,
+            tool_call: None,
+        }
+    }
+
+    pub fn assistant_text(
+        provider_item_id: Option<String>,
+        phase_hint: Option<AssistantTextPhaseHint>,
+    ) -> Self {
+        Self {
+            model_item_id: "assistant_text".to_string(),
+            provider_item_id,
+            kind: ModelBlockKind::AssistantText,
+            assistant_text_phase_hint: phase_hint,
+            assistant_text_phase_hint_source: phase_hint
+                .map(|_| AssistantTextPhaseHintSource::ExplicitProviderPhase),
+            tool_call: None,
+        }
+    }
+
+    pub fn tool_call(index: usize, call_id: Option<String>, tool_name: Option<String>) -> Self {
+        let model_item_id = format!("tool_call_{index}");
+        Self {
+            model_item_id,
+            provider_item_id: call_id.clone(),
+            kind: ModelBlockKind::ToolCall,
+            assistant_text_phase_hint: None,
+            assistant_text_phase_hint_source: None,
+            tool_call: Some(ModelToolCallStart {
+                index,
+                call_id,
+                tool_name,
+            }),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ModelBlockDelta {
+    ReasoningText { delta: String },
+    AssistantText { delta: String },
+    ToolArguments { delta: String },
+    ToolProgress { delta: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModelBlockCompleted {
+    pub model_item_id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum ToolStreamEvent {
-    TextDelta {
-        delta: String,
+pub enum ModelBlockStreamEvent {
+    BlockStarted(ModelBlockStarted),
+    BlockDelta {
+        model_item_id: String,
+        delta: ModelBlockDelta,
     },
-    ReasoningDelta {
-        delta: String,
-    },
-    ReasoningSignature {
-        signature: String,
-    },
-    ToolCallStart {
-        index: usize,
-        id: Option<String>,
-        name: Option<String>,
-    },
-    ToolCallDelta {
-        index: usize,
-        arguments_delta: String,
-    },
-    ToolCallEnd {
-        index: usize,
-        id: Option<String>,
-        name: Option<String>,
-        arguments: Value,
-    },
+    BlockCompleted(ModelBlockCompleted),
     Done {
         finish_reason: Option<String>,
         #[serde(default)]
@@ -463,18 +513,51 @@ pub enum ToolStreamEvent {
     },
 }
 
-/// Tool-aware streaming response.
-pub struct ToolStream {
-    pub rx: mpsc::Receiver<TalosResult<ToolStreamEvent>>,
+pub struct ModelBlockStream {
+    pub rx: mpsc::Receiver<TalosResult<ModelBlockStreamEvent>>,
 }
 
-impl ToolStream {
-    pub fn new(rx: mpsc::Receiver<TalosResult<ToolStreamEvent>>) -> Self {
+impl ModelBlockStream {
+    pub fn new(rx: mpsc::Receiver<TalosResult<ModelBlockStreamEvent>>) -> Self {
         Self { rx }
     }
 
-    pub async fn next(&mut self) -> Option<TalosResult<ToolStreamEvent>> {
+    pub async fn next(&mut self) -> Option<TalosResult<ModelBlockStreamEvent>> {
         self.rx.recv().await
+    }
+}
+
+/// Incrementally decodes complete SSE lines from arbitrary byte chunks.
+#[derive(Debug, Default)]
+pub struct SseLineDecoder {
+    buffer: Vec<u8>,
+}
+
+impl SseLineDecoder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn push(&mut self, bytes: &[u8]) -> Vec<TalosResult<String>> {
+        self.buffer.extend_from_slice(bytes);
+        let mut lines = Vec::new();
+        while let Some(pos) = self.buffer.iter().position(|byte| *byte == b'\n') {
+            let mut line_bytes: Vec<u8> = self.buffer.drain(..=pos).collect();
+            if line_bytes.last() == Some(&b'\n') {
+                line_bytes.pop();
+            }
+            if line_bytes.last() == Some(&b'\r') {
+                line_bytes.pop();
+            }
+            lines.push(String::from_utf8(line_bytes).map_err(|err| {
+                TalosError::InternalError(format!("SSE line is not valid UTF-8: {err}"))
+            }));
+        }
+        lines
+    }
+
+    pub fn has_pending_fragment(&self) -> bool {
+        !self.buffer.is_empty()
     }
 }
 

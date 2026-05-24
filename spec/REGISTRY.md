@@ -8,17 +8,15 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | --- | ---: |
 | `feat` | 020 |
 | `fix` | 004 |
-| `refactor` | 022 |
+| `refactor` | 025 |
 | `docs` | 001 |
 
 ## Active Specs
 
 | ID | Directory | Status |
 | --- | --- | --- |
-| refactor-021 | `refactor-021-kernel-stream-phase-ownership` | implemented |
-| refactor-020 | `refactor-020-application-timeline-recovery-stream` | active |
-| refactor-019 | `refactor-019-message-timeline-model` | active |
-| refactor-018 | `refactor-018-runtime-env-bootstrap` | draft |
+| refactor-023 | `refactor-023-agent-kernel-simplification` | draft |
+| refactor-024 | `refactor-024-agent-kernel-final-answer-simplification` | draft |
 
 ## Archived Specs
 
@@ -65,3 +63,8 @@ Historical root specs were reorganized on 2026-05-08.
 | refactor-015 | `archive/2026/refactor-015-unified-access-control-model` | archived |
 | refactor-016 | `archive/2026/refactor-016-unified-server-quiesce-and-shutdown` | archived |
 | refactor-017 | `archive/2026/refactor-017-web-ui-frontend-arch` | archived |
+| refactor-018 | `archive/2026/refactor-018-runtime-env-bootstrap` | archived |
+| refactor-019 | `archive/2026/refactor-019-message-timeline-model` | archived |
+| refactor-020 | `archive/2026/refactor-020-application-timeline-recovery-stream` | archived |
+| refactor-021 | `archive/2026/refactor-021-kernel-stream-phase-ownership` | archived |
+| refactor-022 | `archive/2026/refactor-022-provider-neutral-agent-stream` | archived |

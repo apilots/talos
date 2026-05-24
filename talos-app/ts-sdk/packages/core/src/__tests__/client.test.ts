@@ -63,6 +63,7 @@ describe("TalosClient", () => {
           completed_at_ms: 1 as never,
           stop_reason: "end_turn",
           usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, cache_creation_input_tokens: null, cache_read_input_tokens: null },
+          metrics: null,
         },
         created_at_ms: 1,
       })));
@@ -134,6 +135,7 @@ describe("TalosClient", () => {
           completed_at_ms: 2 as never,
           stop_reason: "end_turn",
           usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, cache_creation_input_tokens: null, cache_read_input_tokens: null },
+          metrics: null,
         },
         created_at_ms: 2,
       })));

@@ -37,7 +37,7 @@ Web 应用需要连接 Talos 后端（默认端口 `8080`）。在另一个终�
 
 ```bash
 cd talos-rs
-cargo run --bin talos-server
+cargo run -p talos-server --bin talos-server
 # 或使用 make
 make run
 ```
@@ -66,7 +66,7 @@ pnpm dev
 
 ## Desktop / 本地 app-server
 
-Desktop 通过 Electron main process 启动 `talos app-server` 子进程，使用
+Desktop 通过 Electron main process 启动 `app-server` 子进程，使用
 JSON-RPC over stdio JSONL 通信，不占用本地端口。Renderer 只能通过 preload
 暴露的 typed IPC bridge 使用 `@talos/sdk-app-server/desktop`，不直接访问 Node
 或文件系统能力。
@@ -83,10 +83,10 @@ pnpm desktop:check
 
 ```bash
 cd talos-rs
-cargo build -p talos
+cargo build -p app-server --bin app-server
 
 cd ../talos-app
-TALOS_APP_SERVER_BIN=../talos-rs/target/debug/talos \
+TALOS_APP_SERVER_BIN=../talos-rs/target/debug/app-server \
 TALOS_APP_SERVER_CWD=../talos-rs \
 TALOS_LOCAL_LAUNCH_TOKEN=local-token \
 pnpm --filter @talos/sdk-app-server test:integration

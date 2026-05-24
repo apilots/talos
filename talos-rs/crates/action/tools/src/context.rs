@@ -20,7 +20,6 @@ pub struct ToolContext {
     project_root: Option<PathBuf>,
     dynamic_tool_results: Arc<DashMap<String, StoredDynamicToolResult>>,
     kernel_config: Option<Arc<AgentKernelConfig>>,
-    pre_approved: bool,
     collaboration_runtime: Option<Arc<CollaborationRuntime>>,
     memory_store: Option<Arc<MemoryStore>>,
     session_state: Arc<SessionToolState>,
@@ -43,20 +42,10 @@ impl ToolContext {
             project_root: None,
             dynamic_tool_results: Arc::new(DashMap::new()),
             kernel_config,
-            pre_approved: false,
             collaboration_runtime: None,
             memory_store: None,
             session_state: get_session_tool_state(&session_id),
         }
-    }
-
-    pub fn with_pre_approved(mut self) -> Self {
-        self.pre_approved = true;
-        self
-    }
-
-    pub fn pre_approved(&self) -> bool {
-        self.pre_approved
     }
 
     pub fn with_collaboration_runtime(mut self, runtime: Arc<CollaborationRuntime>) -> Self {

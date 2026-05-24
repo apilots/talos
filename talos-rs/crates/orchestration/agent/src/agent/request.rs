@@ -1,10 +1,10 @@
-use super::AgentImpl;
+use super::AgentHarness;
 use crate::service::{AgentRequest, OrchestratorRequest};
 use talos_agent_kernel::TurnPhase;
 use talos_types::talos::{TalosInputItem, TalosOutputItem, TalosReasoning};
 use talos_types::{ModelInfo, TalosSession};
 
-impl AgentImpl {
+impl AgentHarness {
     pub(crate) fn resolve_selected_model_info(&self, session: &TalosSession) -> ModelInfo {
         let selected_model = if session.config.llm.model.trim().is_empty() {
             self.model.clone()

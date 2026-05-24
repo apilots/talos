@@ -17,6 +17,34 @@ pub async fn run_general_turn(
     memory_store: Arc<MemoryStore>,
     kernel_config: &AgentKernelConfig,
 ) -> TalosResult<GeneralTurnResult> {
+    run_general_turn_with_resume(
+        ctx,
+        agent_name,
+        agent_description,
+        input,
+        llm_provider,
+        tool_definition_provider,
+        tool_executor_port,
+        memory_store,
+        kernel_config,
+        None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn run_general_turn_with_resume(
+    ctx: &mut InvocationContext,
+    agent_name: &str,
+    agent_description: &str,
+    input: &str,
+    llm_provider: Arc<dyn LlmProvider>,
+    tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
+    tool_executor_port: Arc<dyn ToolExecutorPort>,
+    memory_store: Arc<MemoryStore>,
+    kernel_config: &AgentKernelConfig,
+    resume: Option<GeneralTurnResume>,
+) -> TalosResult<GeneralTurnResult> {
     let prepared = prepare_general_turn(
         ctx,
         agent_name,
@@ -55,13 +83,14 @@ pub async fn run_general_turn(
         }
         return Err(blocked_compaction_error(&prepared.session_id));
     }
-    let executed = execute_general_turn_loop(
+    let executed = execute_general_turn_loop_with_resume(
         prepared.clone(),
         agent_name,
         llm_provider.clone(),
         tool_executor_port,
         memory_store.clone(),
         kernel_config,
+        resume,
     )
     .await?;
     prompt_diagnostics.window_usage.cache_read_input_tokens =
@@ -115,13 +144,40 @@ pub async fn run_general_turn(
             );
         }
     }
+    let outcome = general_turn_outcome_from_artifacts(&executed);
 
     Ok(GeneralTurnResult {
-        output_text: executed.output_text,
-        output_items: executed.output_items,
+        output_text: executed.output_text.clone(),
+        output_items: executed.output_items.clone(),
         stop_reason: executed.stop_reason,
-        usage: executed.usage,
+        usage: executed.usage.clone(),
+        metrics: executed.metrics.clone(),
         prompt_diagnostics,
         warnings,
+        outcome,
     })
+}
+
+pub(crate) fn general_turn_outcome_from_artifacts(
+    executed: &ExecutedTurnArtifacts,
+) -> GeneralTurnOutcome {
+    if matches!(executed.stop_reason, StopReason::WaitingDynamicInput) {
+        if let Some(pending) = executed.pending_dynamic_requests.first().cloned() {
+            return GeneralTurnOutcome::Waiting {
+                output_items: executed.output_items.clone(),
+                pending_action: PendingGeneralTurnAction::DynamicToolResult(pending),
+                stop_reason: executed.stop_reason,
+                usage: executed.usage.clone(),
+                metrics: executed.metrics.clone(),
+            };
+        }
+    }
+
+    GeneralTurnOutcome::Completed {
+        output_text: executed.output_text.clone(),
+        output_items: executed.output_items.clone(),
+        stop_reason: executed.stop_reason,
+        usage: executed.usage.clone(),
+        metrics: executed.metrics.clone(),
+    }
 }

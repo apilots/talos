@@ -189,15 +189,24 @@ except Exception as e:
 events = data.get("replay", {}).get("events", [])
 has_user_input = False
 has_final_answer = False
+assistant_items = {}
 for envelope in events:
-    payload = envelope.get("event", {}).get("payload", {})
-    if payload.get("type") != "item_started":
-        continue
-    item = payload.get("item", {})
-    if item.get("kind") == "user_input" and item.get("phase") == "input":
-        has_user_input = True
-    if item.get("kind") == "assistant_text" and item.get("phase") == "final_answer":
-        has_final_answer = True
+    event = envelope.get("event", {})
+    payload = event.get("payload", {})
+    payload_type = payload.get("type")
+    if payload_type == "item_started":
+        item = payload.get("item", {})
+        item_id = item.get("item_id", "")
+        if item.get("kind") == "user_input" and item.get("phase") == "input":
+            has_user_input = True
+        if item.get("kind") == "assistant_text" and item_id:
+            assistant_items[item_id] = item.get("phase", "")
+            if item.get("phase") == "final_answer":
+                has_final_answer = True
+    elif payload_type == "assistant_text_committed":
+        item_id = payload.get("item_id", "")
+        if item_id in assistant_items and payload.get("phase") == "final_answer":
+            has_final_answer = True
 if len(events) < 1 or not has_user_input or not has_final_answer:
     print(f"CASE session_recovery FAIL event_count={len(events)} has_user_input={has_user_input} has_final_answer={has_final_answer}")
     sys.exit(1)

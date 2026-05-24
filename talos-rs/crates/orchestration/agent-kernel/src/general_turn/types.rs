@@ -72,8 +72,10 @@ pub struct GeneralTurnResult {
     pub output_items: Vec<TalosOutputItem>,
     pub stop_reason: StopReason,
     pub usage: TalosUsage,
+    pub metrics: TurnExecutionMetrics,
     pub prompt_diagnostics: PromptDiagnostics,
     pub warnings: Vec<KernelWarning>,
+    pub outcome: GeneralTurnOutcome,
 }
 
 #[derive(Debug, Clone)]
@@ -85,6 +87,7 @@ pub struct PreparedGeneralTurn {
     pub project_root: Option<PathBuf>,
     pub selected_model: String,
     pub max_output_tokens: Option<u32>,
+    pub native_thinking: Option<NativeThinkingConfig>,
     pub prompt_prefix_messages: Vec<ChatMessage>,
     pub messages: Vec<ChatMessage>,
     pub tool_definitions: Vec<ToolDefinition>,
@@ -100,10 +103,153 @@ pub struct ExecutedTurnArtifacts {
     pub output_items: Vec<TalosOutputItem>,
     pub stop_reason: StopReason,
     pub usage: TalosUsage,
+    pub metrics: TurnExecutionMetrics,
     pub reasoning_log: Vec<String>,
     pub tool_call_log: Vec<ToolCallRecord>,
     pub tool_result_log: Vec<ToolResultLog>,
+    pub pending_dynamic_requests: Vec<PendingDynamicToolRequest>,
     pub final_answer_streamed: bool,
+    pub execution_summary_streamed: bool,
+}
+
+#[derive(Debug, Clone)]
+pub enum GeneralTurnOutcome {
+    Completed {
+        output_text: String,
+        output_items: Vec<TalosOutputItem>,
+        stop_reason: StopReason,
+        usage: TalosUsage,
+        metrics: TurnExecutionMetrics,
+    },
+    Waiting {
+        output_items: Vec<TalosOutputItem>,
+        pending_action: PendingGeneralTurnAction,
+        stop_reason: StopReason,
+        usage: TalosUsage,
+        metrics: TurnExecutionMetrics,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum PendingGeneralTurnAction {
+    DynamicToolResult(PendingDynamicToolRequest),
+}
+
+#[derive(Debug, Clone)]
+pub enum GeneralTurnResume {
+    DynamicToolResult(DynamicToolResultResume),
+}
+
+#[derive(Debug, Clone)]
+pub struct DynamicToolResultResume {
+    pub call_id: String,
+    pub tool_name: String,
+    pub output: String,
+    pub success: bool,
+    pub original_call: Option<ResumeToolCall>,
+    pub replay_dynamic_tool_results:
+        std::collections::HashMap<String, crate::execution::ReplayDynamicToolResult>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResumeToolCall {
+    pub item_id: Option<String>,
+    pub call_id: String,
+    pub tool_name: String,
+    pub arguments: TalosJsonValue,
+}
+
+#[derive(Debug, Clone)]
+pub struct GeneralTurnPolicyStop {
+    pub output_text: String,
+    pub stop_reason: StopReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneralTurnPolicyFinalAcceptance {
+    Accept,
+    Reject,
+}
+
+pub trait GeneralTurnPolicy: Send + Sync {
+    fn before_step_request(&self, _request: &mut GeneralTurnStepRequest) -> TalosResult<()> {
+        Ok(())
+    }
+
+    fn after_step_result(
+        &self,
+        _result: &mut GeneralTurnStepResult,
+    ) -> TalosResult<Option<GeneralTurnPolicyStop>> {
+        Ok(None)
+    }
+
+    fn accepts_final_response(&self, _text: &str) -> GeneralTurnPolicyFinalAcceptance {
+        GeneralTurnPolicyFinalAcceptance::Accept
+    }
+
+    fn before_dynamic_resume(&self, _resume: &mut DynamicToolResultResume) -> TalosResult<()> {
+        Ok(())
+    }
+
+    fn after_tool_batch(
+        &self,
+        _batch: &mut GeneralTurnToolBatch,
+    ) -> TalosResult<Option<GeneralTurnPolicyStop>> {
+        Ok(None)
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct BuiltInGeneralTurnPolicy;
+
+impl GeneralTurnPolicy for BuiltInGeneralTurnPolicy {}
+
+#[derive(Debug, Clone)]
+pub struct PlanReActGeneralTurnPolicy {
+    require_final_answer_tag: bool,
+}
+
+impl PlanReActGeneralTurnPolicy {
+    pub fn new(require_final_answer_tag: bool) -> Self {
+        Self {
+            require_final_answer_tag,
+        }
+    }
+}
+
+impl GeneralTurnPolicy for PlanReActGeneralTurnPolicy {
+    fn after_step_result(
+        &self,
+        result: &mut GeneralTurnStepResult,
+    ) -> TalosResult<Option<GeneralTurnPolicyStop>> {
+        if !self.require_final_answer_tag
+            || !matches!(
+                result.disposition,
+                GeneralTurnStepDisposition::FinalResponse
+            )
+        {
+            return Ok(None);
+        }
+
+        const FINAL_ANSWER_TAG: &str = "/*FINAL_ANSWER*/";
+        let Some(index) = result.text.rfind(FINAL_ANSWER_TAG) else {
+            result.disposition = GeneralTurnStepDisposition::ContinueWithTools;
+            result.text.clear();
+            return Ok(None);
+        };
+        result.text = result.text[index + FINAL_ANSWER_TAG.len()..]
+            .trim()
+            .to_string();
+        Ok(None)
+    }
+
+    fn accepts_final_response(&self, text: &str) -> GeneralTurnPolicyFinalAcceptance {
+        if !self.require_final_answer_tag || text.contains("/*FINAL_ANSWER*/") {
+            GeneralTurnPolicyFinalAcceptance::Accept
+        } else {
+            GeneralTurnPolicyFinalAcceptance::Reject
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,7 +292,9 @@ pub struct GeneralTurnLoopState {
     pub retrieved_memories: Vec<RetrievedMemoryItem>,
     pub tool_call_count: usize,
     pub tool_error_count: usize,
+    pub pending_dynamic_requests: Vec<PendingDynamicToolRequest>,
     pub final_answer_streamed: bool,
+    pub execution_summary_streamed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -195,7 +343,9 @@ impl GeneralTurnLoopState {
             retrieved_memories: Vec::new(),
             tool_call_count: 0,
             tool_error_count: 0,
+            pending_dynamic_requests: Vec::new(),
             final_answer_streamed: false,
+            execution_summary_streamed: false,
         }
     }
 }
@@ -203,12 +353,15 @@ impl GeneralTurnLoopState {
 #[derive(Debug, Clone)]
 pub struct GeneralTurnStepRequest {
     pub round: u32,
+    pub call_mode: KernelModelCallMode,
     pub model: String,
     pub max_tokens: Option<u32>,
     pub messages: Vec<ChatMessage>,
     pub tool_definitions: Vec<ToolDefinition>,
     pub parallel_tool_calls: bool,
     pub native_thinking: Option<NativeThinkingConfig>,
+    pub pre_final_execution_summary: Option<String>,
+    pub defer_no_hint_final_projection: bool,
     pub stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
     pub streaming_tool_execution: Option<StreamingToolExecutionConfig>,
 }
@@ -248,6 +401,7 @@ pub struct GeneralTurnStepResult {
     pub output_items: Vec<TalosOutputItem>,
     pub usage: TalosUsage,
     pub final_answer_streamed: bool,
+    pub execution_summary_streamed: bool,
     pub disposition: GeneralTurnStepDisposition,
 }
 
@@ -272,19 +426,10 @@ impl fmt::Debug for StreamingToolExecutionConfig {
 pub struct GeneralTurnToolBatch {
     pub output_items: Vec<TalosOutputItem>,
     pub tool_messages: Vec<ChatMessage>,
-    pub pending_confirmations: Vec<PendingToolConfirmation>,
     pub pending_dynamic_requests: Vec<PendingDynamicToolRequest>,
     pub retrieved_memories: Vec<RetrievedMemoryItem>,
     pub logs: Vec<ToolResultLog>,
     pub error_count: usize,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct PendingToolConfirmation {
-    pub tool_name: String,
-    pub call_id: String,
-    pub prompt: String,
-    pub arguments: Value,
 }
 
 #[derive(Debug, Clone, PartialEq)]

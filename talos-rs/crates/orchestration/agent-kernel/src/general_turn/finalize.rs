@@ -5,25 +5,27 @@ pub(crate) fn to_api_stop_reason(reason: StopReason) -> TalosApiStopReason {
         StopReason::EndTurn => TalosApiStopReason::EndTurn,
         StopReason::ModelOutputLimit => TalosApiStopReason::ModelOutputLimit,
         StopReason::ToolRoundLimit => TalosApiStopReason::ToolRoundLimit,
+        StopReason::WaitingDynamicInput => TalosApiStopReason::WaitingDynamicInput,
         StopReason::TransferUnresolved => TalosApiStopReason::TransferUnresolved,
         StopReason::BeforeModelCallbackStopped => TalosApiStopReason::BeforeModelCallbackStopped,
         StopReason::AfterModelCallbackStopped => TalosApiStopReason::AfterModelCallbackStopped,
     }
 }
 
-fn build_execution_summary(tool_call_count: usize, tool_error_count: usize) -> String {
-    if tool_call_count == 0 {
-        "Kernel summary: answered directly without invoking tools.".to_string()
-    } else if tool_error_count == 0 {
-        format!(
-            "Kernel summary: executed {} tool call(s) successfully before final response.",
-            tool_call_count
-        )
-    } else {
-        format!(
-            "Kernel summary: executed {} tool call(s), {} call(s) returned errors; final response generated with available results.",
-            tool_call_count, tool_error_count
-        )
+pub(crate) fn build_turn_execution_metrics(
+    state: &GeneralTurnLoopState,
+    stop_reason: StopReason,
+) -> TurnExecutionMetrics {
+    let tool_calls = state.tool_call_count as u32;
+    let tool_errors = state.tool_error_count as u32;
+    TurnExecutionMetrics {
+        model_rounds: state.round.saturating_add(1),
+        tool_calls,
+        tool_successes: tool_calls.saturating_sub(tool_errors),
+        tool_errors,
+        stop_reason: to_api_stop_reason(stop_reason),
+        usage: state.usage.clone(),
+        duration_ms: None,
     }
 }
 
@@ -32,11 +34,14 @@ pub fn finalize_general_turn_artifacts(
     final_text: String,
     stop_reason: StopReason,
 ) -> ExecutedTurnArtifacts {
+    let metrics = build_turn_execution_metrics(&state, stop_reason);
     let mut output_items = state.output_items;
-    let mut reasoning_log = state.reasoning_log;
+    let reasoning_log = state.reasoning_log;
     let mut final_output = final_text;
 
-    if final_output.trim().is_empty() {
+    if matches!(stop_reason, StopReason::WaitingDynamicInput) {
+        final_output.clear();
+    } else if final_output.trim().is_empty() {
         final_output = if state.tool_call_count > 0 {
             "Tool execution completed.".to_string()
         } else {
@@ -44,24 +49,23 @@ pub fn finalize_general_turn_artifacts(
         };
     }
 
-    let execution_summary = build_execution_summary(state.tool_call_count, state.tool_error_count);
-    output_items.push(TalosOutputItem::ExecutionSummary {
-        text: execution_summary.clone(),
-    });
-    output_items.push(TalosOutputItem::OutputText {
-        text: final_output.clone(),
-    });
-    reasoning_log.push(execution_summary);
-
+    if !matches!(stop_reason, StopReason::WaitingDynamicInput) {
+        output_items.push(TalosOutputItem::OutputText {
+            text: final_output.clone(),
+        });
+    }
     ExecutedTurnArtifacts {
         output_text: final_output,
         output_items,
         stop_reason,
         usage: state.usage,
+        metrics,
         reasoning_log,
         tool_call_log: state.tool_call_log,
         tool_result_log: state.tool_result_log,
+        pending_dynamic_requests: state.pending_dynamic_requests,
         final_answer_streamed: state.final_answer_streamed,
+        execution_summary_streamed: state.execution_summary_streamed,
     }
 }
 
@@ -69,6 +73,10 @@ pub async fn emit_general_turn_finalization_stream(
     prepared: &PreparedGeneralTurn,
     executed: &ExecutedTurnArtifacts,
 ) {
+    if matches!(executed.stop_reason, StopReason::WaitingDynamicInput) {
+        return;
+    }
+
     if !executed.final_answer_streamed && !executed.output_text.trim().is_empty() {
         emit_assistant_text_stream_item(
             prepared.stream_tx.as_ref(),
@@ -79,18 +87,6 @@ pub async fn emit_general_turn_finalization_stream(
             KernelAssistantTextPhase::FinalAnswer,
             None,
             &executed.output_text,
-        )
-        .await;
-    }
-
-    if let Some(execution_summary) = executed.reasoning_log.last() {
-        emit_stream_event(
-            prepared.stream_tx.as_ref(),
-            KernelStreamEventType::ExecutionSummary,
-            KernelStreamEventData::ExecutionSummary(ExecutionSummaryStreamData {
-                text: execution_summary.clone(),
-                round: None,
-            }),
         )
         .await;
     }

@@ -212,28 +212,6 @@ impl TurnService {
         Ok(ack)
     }
 
-    pub async fn submit_tool_approval(
-        &self,
-        session: TalosSession,
-        call_id: &str,
-        tool_name: &str,
-        approved: bool,
-        reason: Option<String>,
-    ) -> TalosResult<()> {
-        let session_id = session.context.session_id.clone();
-        let resume = self
-            .pending_resume_context(&session_id, call_id, tool_name)
-            .await?;
-        self.gateway
-            .submit_tool_approval(&session_id, call_id, tool_name, approved, reason)
-            .await?;
-        self.event_service
-            .resolve_pending_user_action(&session_id)
-            .await
-            .map_err(|err| TalosError::StorageError(format!("active turn update failed: {err}")))?;
-        self.resume_after_user_action(session, resume).await
-    }
-
     pub async fn submit_dynamic_tool_result(
         &self,
         session: TalosSession,
@@ -413,54 +391,6 @@ impl TurnService {
         Ok(())
     }
 
-    async fn pending_resume_context(
-        &self,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-    ) -> TalosResult<ActiveResumeContext> {
-        let active = self
-            .event_service
-            .get_active_turn(session_id)
-            .await
-            .map_err(|err| TalosError::StorageError(format!("active turn lookup failed: {err}")))?
-            .ok_or_else(|| {
-                TalosError::Conflict("No pending user action for this session.".to_string())
-            })?;
-        if active.status != ActiveTurnStatus::WaitingUserAction {
-            return Err(TalosError::Conflict(
-                "The active turn is not waiting for user action.".to_string(),
-            ));
-        }
-        let message_id = active.message_id.clone().ok_or_else(|| {
-            TalosError::ValidationError(
-                "Pending user action is missing its original message id.".to_string(),
-            )
-        })?;
-        let Some(PendingUserAction::ToolApproval(pending)) = active.pending_user_action else {
-            return Err(TalosError::Conflict(
-                "The pending user action is not a tool approval.".to_string(),
-            ));
-        };
-        if pending.call_id != call_id || pending.tool_name != tool_name {
-            return Err(TalosError::Conflict(format!(
-                "Pending approval mismatch: expected {} {}, got {} {}",
-                pending.tool_name, pending.call_id, tool_name, call_id
-            )));
-        }
-        let tool_call = pending.item_id.map(|item_id| GatewayResumeToolCall {
-            item_id,
-            call_id: pending.call_id,
-            tool_name: pending.tool_name,
-            arguments: pending.arguments,
-        });
-        Ok(ActiveResumeContext {
-            turn_id: active.turn_id,
-            message_id,
-            gateway_resume: Some(GatewayResumeContext { tool_call }),
-        })
-    }
-
     async fn pending_dynamic_resume_context(
         &self,
         session_id: &str,
@@ -500,7 +430,6 @@ impl TurnService {
             item_id,
             call_id: pending.call_id,
             tool_name: pending.tool_name,
-            arguments: serde_json::Value::Null.into(),
         });
         Ok(ActiveResumeContext {
             turn_id: active.turn_id,
@@ -643,7 +572,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use talos_gateway::GatewayResponse;
     use talos_session_store::{
-        ActiveTurnStore, ActiveTurnUpdate, DatabaseSessionStore, PendingToolApproval,
+        ActiveTurnStore, ActiveTurnUpdate, DatabaseSessionStore, PendingDynamicToolResult,
         TimelineEventId, TimelineEventRetentionConfig, TimelineEventStore,
     };
     use talos_storage::SqliteStorage;
@@ -655,7 +584,6 @@ mod tests {
     #[derive(Default)]
     struct RecordingGateway {
         stream_request: Mutex<Option<GatewayRequest>>,
-        approvals: Mutex<Vec<(String, String, String, bool)>>,
     }
 
     #[async_trait]
@@ -695,6 +623,7 @@ mod tests {
                     completed_at_ms: 1,
                     stop_reason: StopReason::EndTurn,
                     usage: TalosUsage::default(),
+                    metrics: None,
                 }),
             };
             tx.send(event).await.unwrap();
@@ -702,23 +631,6 @@ mod tests {
         }
 
         async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
-            Ok(())
-        }
-
-        async fn submit_tool_approval(
-            &self,
-            session_id: &str,
-            call_id: &str,
-            tool_name: &str,
-            approved: bool,
-            _reason: Option<String>,
-        ) -> TalosResult<()> {
-            self.approvals.lock().unwrap().push((
-                session_id.to_string(),
-                call_id.to_string(),
-                tool_name.to_string(),
-                approved,
-            ));
             Ok(())
         }
 
@@ -795,7 +707,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn submit_tool_approval_resumes_original_turn_and_message() {
+    async fn submit_dynamic_tool_result_resumes_original_turn_and_message() {
         let gateway = Arc::new(RecordingGateway::default());
         let (service, _event_service, store) = test_service(gateway.clone()).await;
         store
@@ -805,20 +717,20 @@ mod tests {
                 message_id: Some("msg-original".to_string()),
                 status: ActiveTurnStatus::WaitingUserAction,
                 last_event_id: Some(TimelineEventId::from_seq(9)),
-                pending_user_action: Some(PendingUserAction::ToolApproval(PendingToolApproval {
-                    item_id: Some("tool-original".to_string()),
-                    call_id: "call-1".to_string(),
-                    tool_name: "Bash".to_string(),
-                    prompt: "Approve Bash?".to_string(),
-                    arguments: serde_json::json!({"command":"pwd"}).into(),
-                })),
+                pending_user_action: Some(PendingUserAction::DynamicToolResult(
+                    PendingDynamicToolResult {
+                        item_id: Some("tool-original".to_string()),
+                        call_id: "call-1".to_string(),
+                        tool_name: "AskUser".to_string(),
+                    },
+                )),
                 updated_at: 1,
             })
             .await
             .unwrap();
 
         service
-            .submit_tool_approval(test_session(), "call-1", "Bash", true, None)
+            .submit_dynamic_tool_result(test_session(), "call-1", "AskUser", "ok".to_string(), true)
             .await
             .unwrap();
 
@@ -837,7 +749,7 @@ mod tests {
             .expect("resume tool call should be present");
         assert_eq!(tool_call.item_id, "tool-original");
         assert_eq!(tool_call.call_id, "call-1");
-        assert_eq!(tool_call.tool_name, "Bash");
+        assert_eq!(tool_call.tool_name, "AskUser");
 
         let active = store.get_active_turn("s1").await.unwrap().unwrap();
         assert_eq!(active.status, ActiveTurnStatus::Completed);

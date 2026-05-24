@@ -466,35 +466,9 @@ mod tests {
             &context,
         )
         .await
-        .expect("direct runtime execution no longer applies approval policy");
+        .expect("direct runtime execution should allow explicit sandbox escalation");
 
         assert!(result.output.contains("hi") || result.status == TaskStatus::Exited);
-    }
-
-    #[tokio::test]
-    async fn test_pre_approved_context_bypasses_escalation_check() {
-        let context = crate::ToolContext::default()
-            .with_project_root(std::env::current_dir().expect("cwd should exist"))
-            .with_pre_approved();
-        let result = run_bash_command(
-            &BashCommandRequest {
-                cmd: "echo approved".to_string(),
-                workdir: None,
-                shell: Some("sh".to_string()),
-                login: false,
-                tty: false,
-                yield_time_ms: 200,
-                max_output_tokens: None,
-                sandbox_permissions: SandboxPermissions::RequireEscalated,
-                justification: Some("pre-approved via replay".to_string()),
-                prefix_rule: None,
-            },
-            &context,
-        )
-        .await
-        .expect("pre-approved context should bypass escalation check");
-
-        assert!(result.output.contains("approved") || result.status == TaskStatus::Exited);
     }
 
     #[tokio::test]

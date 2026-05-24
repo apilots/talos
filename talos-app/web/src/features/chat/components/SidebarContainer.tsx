@@ -69,7 +69,6 @@ export function SidebarContainer() {
         const model = models?.[0]?.id;
         const session = await createSession.mutateAsync({
           model,
-          approvalMode: connection.defaultApprovalMode,
         });
         navigate(`/sessions/${session.context.session_id}`);
       }}
@@ -77,9 +76,7 @@ export function SidebarContainer() {
         setThreadFilter(
           threadFilter === "all"
             ? "running"
-            : threadFilter === "running"
-              ? "waiting_approval"
-              : "all",
+            : "all",
         )
       }
       onSelectThread={(sessionId) => navigate(`/sessions/${sessionId}`)}

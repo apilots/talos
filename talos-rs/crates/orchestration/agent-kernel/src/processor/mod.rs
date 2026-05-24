@@ -4,7 +4,7 @@ use crate::{
     CompactionSummaryPayload, ContentsBuilder, EventActions, EventAuthor, EventPayload,
     ExecutionEvent, ExecutionEventKind, FlowProfile, InvocationContext, KernelTranscriptEvent,
     KernelTranscriptPayload, LlmRequestEnvelope, LlmResponseEnvelope, Planner,
-    RequestOutputContract, ResponseDisposition,
+    RequestOutputContract,
 };
 use async_trait::async_trait;
 use chrono::Utc;
@@ -33,14 +33,11 @@ pub use request::{RequestProcessor, RequestProcessorOutput, RequestProcessorPipe
 pub use request_kinds::{
     AgentTransferRequestProcessor, AuthRequestProcessor, BasicRequestProcessor,
     ContextCacheRequestProcessor, DynamicToolReplayRequestProcessor, InstructionsRequestProcessor,
-    InteractionsRequestProcessor, OutputSchemaRequestProcessor,
-    RequestConfirmationRequestProcessor, RequestProcessorKind, ToolContextRequestProcessor,
+    InteractionsRequestProcessor, OutputSchemaRequestProcessor, RequestProcessorKind,
+    ToolContextRequestProcessor,
 };
 pub use response::{ResponseProcessor, ResponseProcessorOutput, ResponseProcessorPipeline};
 pub use response_kinds::ResponseProcessorKind;
-pub use response_processors::{
-    EventProjectionProcessor, FinalAnswerExtractionProcessor, StateDeltaResponseProcessor,
-    ToolCallExtractionProcessor,
-};
+pub use response_processors::{EventProjectionProcessor, StateDeltaResponseProcessor};
 
-pub(crate) use request::{latest_branch_event, latest_event};
+pub(crate) use request::latest_branch_event;

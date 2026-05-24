@@ -172,47 +172,6 @@ fn test_talos_session_from_record_applies_conf_override() {
 }
 
 #[test]
-fn test_talos_session_from_record_applies_tool_approval_override() {
-    let record = SessionRecord {
-        id: "session-approval".to_string(),
-        title: "Untitled Session".to_string(),
-        user_id: "user-1".to_string(),
-        context: talos::TalosContext {
-            source_type: talos::TalosSourceType::Http,
-            provider: talos::TalosProvider::Http,
-            user_id: "user-1".to_string(),
-            message_id: "message-1".to_string(),
-            trace_id: "trace-1".to_string(),
-            channel_id: Some("default".to_string()),
-            thread_id: None,
-            project_root: None,
-            environment: None,
-        },
-        model: "qwen-max".to_string(),
-        created_at: 100,
-        last_activity: 200,
-        message_count: 3,
-        usage: talos::TalosUsage::default(),
-        conf: SessionConf {
-            agent: None,
-            tools: Some(SessionToolsConf {
-                approval_policy: Some(talos_config::ToolApprovalPolicy::Always),
-            }),
-        },
-        project_id: None,
-        current_directory: None,
-    };
-
-    let session = TalosSession::from_record(&record, &TalosConfig::default(), None)
-        .expect("talos session restore should succeed");
-
-    assert_eq!(
-        session.config.agent.kernel.tools.approval_policy,
-        talos_config::ToolApprovalPolicy::Always
-    );
-}
-
-#[test]
 fn test_talos_session_apply_turn_progress_updates_state_and_model() {
     let record = SessionRecord {
         id: "session-progress".to_string(),
@@ -275,9 +234,6 @@ fn test_session_override_policy_rejects_unknown_keys() {
         agent: Some(SessionAgentConf {
             model: Some("gpt-4o".to_string()),
         }),
-        tools: Some(SessionToolsConf {
-            approval_policy: Some(talos_config::ToolApprovalPolicy::OnRequest),
-        }),
     };
     SessionConfigOverridePolicy::validate_conf(&conf)
         .expect("known strong typed conf should be accepted");
@@ -307,28 +263,6 @@ fn test_session_title_policy_falls_back_to_first_user_text() {
     let title = session_title_or_fallback("Untitled Session".to_string(), "  migrate phase one\n");
 
     assert_eq!(title, "migrate phase one");
-}
-
-#[test]
-fn test_session_override_policy_merges_tools_conf_without_dropping_model() {
-    let base = SessionConfigOverridePolicy::single_model_conf("gpt-4o");
-    let patch = SessionConf {
-        agent: None,
-        tools: Some(SessionToolsConf {
-            approval_policy: Some(talos_config::ToolApprovalPolicy::Always),
-        }),
-    };
-
-    let merged = SessionConfigOverridePolicy::merge_conf(&base, &patch);
-
-    assert_eq!(
-        SessionConfigOverridePolicy::extract_agent_model(&merged).unwrap(),
-        Some("gpt-4o".to_string())
-    );
-    assert_eq!(
-        SessionConfigOverridePolicy::extract_tool_approval_policy(&merged).unwrap(),
-        Some(talos_config::ToolApprovalPolicy::Always)
-    );
 }
 
 #[test]

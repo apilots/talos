@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use talos_client::{AuthResponse, UserRole};
 use talos_config::TalosPaths;
 use talos_error::{TalosError, TalosResult};
+use talos_sdk::{AuthResponse, UserRole};
 
 const AUTH_FILE_NAME: &str = "auth.json";
 const FILE_PERMISSIONS: u32 = 0o600;

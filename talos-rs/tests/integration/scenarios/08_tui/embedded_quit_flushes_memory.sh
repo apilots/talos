@@ -20,7 +20,7 @@ cleanup() {
 }
 export TALOS_HOME="${TEST_TALOS_HOME}"
 
-export TALOS_APP_SERVER_BIN="${ROOT_DIR}/target/debug/talos"
+export TALOS_APP_SERVER_BIN="${ROOT_DIR}/target/debug/app-server"
 export TALOS_LOCAL_LAUNCH_TOKEN="${TALOS_LOCAL_LAUNCH_TOKEN:-embedded-tui-quit-token}"
 
 prepare_talos_home
@@ -127,7 +127,7 @@ if [[ -f "${DAY_FILE}" ]]; then
 fi
 
 tmux new-session -d -s "${TUI_SESSION_NAME}" \
-  "cd '${ROOT_DIR}' && TALOS_HOME='${TALOS_HOME}' TALOS_APP_SERVER_BIN='${TALOS_APP_SERVER_BIN}' TALOS_LOCAL_LAUNCH_TOKEN='${TALOS_LOCAL_LAUNCH_TOKEN}' ./target/debug/talos-ui-tui --app-server-bin ./target/debug/talos"
+  "cd '${ROOT_DIR}' && TALOS_HOME='${TALOS_HOME}' TALOS_APP_SERVER_BIN='${TALOS_APP_SERVER_BIN}' TALOS_LOCAL_LAUNCH_TOKEN='${TALOS_LOCAL_LAUNCH_TOKEN}' ./target/debug/talos --app-server-bin ./target/debug/app-server"
 wait_for_tui_ready
 
 for _ in $(seq 1 160); do

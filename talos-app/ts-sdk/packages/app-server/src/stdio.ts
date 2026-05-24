@@ -70,7 +70,7 @@ export class JsonRpcStdioTransport implements AppServerTransport {
       return;
     }
 
-    const child = spawn(this.options.command ?? "talos", this.options.args ?? ["app-server"], {
+    const child = spawn(this.options.command ?? "app-server", this.options.args ?? [], {
       cwd: this.options.cwd,
       env: buildAppServerEnvironment(process.env, this.options.env),
       stdio: ["pipe", "pipe", "pipe"],
@@ -319,7 +319,7 @@ export class StdioAppServerClient extends AppServerClient {
   constructor(private readonly options: AppServerClientOptions) {
     const transport = new JsonRpcStdioTransport({
       command: options.command,
-      args: options.args ?? ["app-server"],
+      args: options.args ?? [],
       cwd: options.cwd,
       getActorCredentials: options.getActorCredentials,
       env: {

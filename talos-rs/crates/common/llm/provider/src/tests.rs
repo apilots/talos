@@ -1,4 +1,5 @@
 use super::*;
+use talos_error::TalosResult;
 
 #[test]
 fn test_chat_message() {
@@ -74,4 +75,72 @@ fn test_chat_response_tool_calls_helper() {
 
     assert!(response.has_tool_calls());
     assert_eq!(response.get_tool_calls().len(), 1);
+}
+
+#[tokio::test]
+async fn model_block_started_can_carry_explicit_assistant_phase_hint() {
+    let started = ModelBlockStarted::assistant_text(
+        Some("provider_msg_1".to_string()),
+        Some(AssistantTextPhaseHint::FinalAnswer),
+    );
+
+    assert_eq!(started.kind, ModelBlockKind::AssistantText);
+    assert_eq!(
+        started.assistant_text_phase_hint,
+        Some(AssistantTextPhaseHint::FinalAnswer)
+    );
+    assert_eq!(
+        started.assistant_text_phase_hint_source,
+        Some(AssistantTextPhaseHintSource::ExplicitProviderPhase)
+    );
+}
+
+#[test]
+fn sse_line_decoder_buffers_split_lines() {
+    let mut decoder = SseLineDecoder::new();
+    assert!(decoder.push(br#"data: {"cho"#).is_empty());
+    assert!(decoder.push(br#"ices":[]}"#).is_empty());
+    let lines = decoder
+        .push(b"\r\n\r\n")
+        .into_iter()
+        .collect::<TalosResult<Vec<_>>>()
+        .expect("lines should decode");
+    assert_eq!(
+        lines,
+        vec![r#"data: {"choices":[]}"#.to_string(), String::new()]
+    );
+    assert!(!decoder.has_pending_fragment());
+}
+
+#[test]
+fn sse_line_decoder_preserves_split_utf8_codepoints() {
+    let line = r#"data: {"choices":[{"delta":{"content":"中文"}}]}"#;
+    let bytes = line.as_bytes();
+    let split_at = line.find("文").expect("test fixture should contain text") + 1;
+
+    let mut decoder = SseLineDecoder::new();
+    assert!(decoder.push(&bytes[..split_at]).is_empty());
+    let lines = decoder
+        .push(&bytes[split_at..])
+        .into_iter()
+        .collect::<TalosResult<Vec<_>>>()
+        .expect("line should not be decoded until UTF-8 is complete");
+    assert!(lines.is_empty());
+
+    let lines = decoder
+        .push(b"\n")
+        .into_iter()
+        .collect::<TalosResult<Vec<_>>>()
+        .expect("complete line should decode");
+    assert_eq!(lines, vec![line.to_string()]);
+    assert!(!decoder.has_pending_fragment());
+}
+
+#[test]
+fn sse_line_decoder_rejects_invalid_utf8_line() {
+    let mut decoder = SseLineDecoder::new();
+    let lines = decoder.push(b"data: \xff\n");
+    assert_eq!(lines.len(), 1);
+    assert!(lines.into_iter().next().unwrap().is_err());
+    assert!(!decoder.has_pending_fragment());
 }

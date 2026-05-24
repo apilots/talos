@@ -5,6 +5,7 @@ import type {
   TimelineEventEnvelope as ProtocolTimelineEventEnvelope,
   TimelineRecoverySnapshot as ProtocolTimelineRecoverySnapshot,
   TimelineReplay as ProtocolTimelineReplay,
+  TurnExecutionMetrics as ProtocolTurnExecutionMetrics,
   SessionHistoryMessage as ProtocolSessionHistoryMessage,
   SessionHistorySnapshot as ProtocolSessionHistorySnapshot,
 } from "./generated/app-protocol";
@@ -27,7 +28,6 @@ export type {
   TimelineActiveTurnStatus,
   TimelineCursorStatus,
   TimelinePendingDynamicToolResult,
-  TimelinePendingToolApproval,
   TimelinePendingUserAction,
   TimelineRecoveryParams,
   SessionHistoryMessage,
@@ -39,6 +39,7 @@ export type {
   TalosTurnCompletedEvent,
   TalosTurnErrorEvent,
   TalosTurnStartedEvent,
+  TurnExecutionMetrics,
 } from "./generated/app-protocol";
 
 export type TalosConnectionMode = "embedded" | "remote";
@@ -284,11 +285,30 @@ export type TalosHistoryTimelineItem = Omit<
   completed_at_ms?: number | null;
 };
 
+export type TalosTurnExecutionMetrics = Omit<
+  ProtocolTurnExecutionMetrics,
+  | "model_rounds"
+  | "tool_calls"
+  | "tool_successes"
+  | "tool_errors"
+  | "usage"
+  | "duration_ms"
+> & {
+  model_rounds: number;
+  tool_calls: number;
+  tool_successes: number;
+  tool_errors: number;
+  usage: TalosUsage;
+  duration_ms: number | null;
+};
+
 export type TalosSessionHistoryMessage = Omit<
   ProtocolSessionHistoryMessage,
-  "items"
+  "items" | "usage" | "metrics"
 > & {
   items: TalosHistoryTimelineItem[];
+  usage: TalosUsage;
+  metrics: TalosTurnExecutionMetrics | null;
 };
 
 export type TalosSessionHistorySnapshot = Omit<
@@ -306,15 +326,6 @@ export type TalosActiveTurnStatus =
   | "completed"
   | "failed";
 
-export interface TalosPendingToolApproval {
-  type: "tool_approval";
-  item_id?: string | null;
-  call_id: string;
-  tool_name: string;
-  prompt: string;
-  arguments: unknown;
-}
-
 export interface TalosPendingDynamicToolResult {
   type: "dynamic_tool_result";
   item_id?: string | null;
@@ -322,9 +333,7 @@ export interface TalosPendingDynamicToolResult {
   tool_name: string;
 }
 
-export type TalosPendingUserAction =
-  | TalosPendingToolApproval
-  | TalosPendingDynamicToolResult;
+export type TalosPendingUserAction = TalosPendingDynamicToolResult;
 
 export interface TalosActiveTurn {
   session_id: string;
@@ -417,15 +426,8 @@ export interface SessionAgentConf {
   model?: string | null;
 }
 
-export type ToolApprovalPolicy = "on_request" | "always" | "never";
-
-export interface SessionToolsConf {
-  approval_policy?: ToolApprovalPolicy | null;
-}
-
 export interface SessionConf {
   agent?: SessionAgentConf | null;
-  tools?: SessionToolsConf | null;
 }
 
 export type OptionalProjectIdPatch =
@@ -510,13 +512,6 @@ export interface WorkspaceDocSummary {
 
 export interface WorkspaceDocDetail extends WorkspaceDocSummary {
   content: string;
-}
-
-export interface ToolApprovalRequest {
-  call_id: string;
-  tool_name: string;
-  approved: boolean;
-  reason?: string | null;
 }
 
 export type ModelInputKind = "text" | "image" | "audio" | "video" | "file";

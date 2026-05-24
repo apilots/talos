@@ -14,10 +14,13 @@ fn build_executed_turn_artifacts(
         output_items: Vec::new(),
         stop_reason: StopReason::EndTurn,
         usage: TalosUsage::default(),
+        metrics: TurnExecutionMetrics::default(),
         reasoning_log: Vec::new(),
         tool_call_log,
         tool_result_log,
+        pending_dynamic_requests: Vec::new(),
         final_answer_streamed: false,
+        execution_summary_streamed: false,
     }
 }
 

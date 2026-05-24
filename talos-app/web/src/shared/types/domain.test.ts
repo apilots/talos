@@ -3,13 +3,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import "@/shared/i18n/setup";
 import { i18n } from "@/shared/i18n/setup";
 import {
-  approvalModeToPolicy,
   createDefaultProjects,
   describeProjectDirectory,
-  getApprovalModeHint,
-  getApprovalModeLabel,
   resolveProjectRecord,
-  getSessionApprovalMode,
   hasRealSessionTitle,
   UNBOUND_PROJECT_ID,
 } from "@/shared/types/domain";
@@ -17,40 +13,6 @@ import {
 describe("domain helpers", () => {
   beforeEach(async () => {
     await i18n.changeLanguage("en");
-  });
-
-  it("localizes approval labels and hints", async () => {
-    expect(getApprovalModeLabel("needs_approval")).toBe("Default permissions");
-    expect(getApprovalModeHint("skip")).toBe("Allow all tools without per-call confirmation.");
-    expect(approvalModeToPolicy("needs_approval")).toBe("always");
-    expect(approvalModeToPolicy("skip")).toBe("never");
-
-    await i18n.changeLanguage("zh-CN");
-
-    expect(getApprovalModeLabel("needs_approval")).toBe("默认权限");
-    expect(getApprovalModeHint("skip")).toBe("所有工具可直接执行，无需逐次确认。");
-  });
-
-  it("derives approval mode from persisted session configuration", () => {
-    expect(
-      getSessionApprovalMode({
-        conf: {
-          tools: {
-            approval_policy: "always",
-          },
-        },
-      } as never),
-    ).toBe("needs_approval");
-
-    expect(
-      getSessionApprovalMode({
-        conf: {
-          tools: {
-            approval_policy: "on_request",
-          },
-        },
-      } as never),
-    ).toBe("skip");
   });
 
   it("localizes the unbound project display name", async () => {

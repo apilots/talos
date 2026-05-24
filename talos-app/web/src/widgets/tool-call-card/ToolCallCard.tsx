@@ -133,7 +133,7 @@ export const ToolCallCard = {
       </Section>
     );
   },
-  ApprovalActions({
+  Prompt({
     children,
     prompt,
     title,

@@ -27,7 +27,7 @@ impl TuiApp {
         let (icon_str, icon_color) = match block.tool_status {
             Some(ToolCallStatus::Queued) => ("◌", Color::Blue),
             Some(ToolCallStatus::Running) => ("⏳", Color::Yellow),
-            Some(ToolCallStatus::PendingApproval) => ("! ", Color::LightYellow),
+            Some(ToolCallStatus::PendingDynamicInput) => ("? ", Color::LightYellow),
             Some(ToolCallStatus::Completed { exit_ok: true }) => ("●", Color::Green),
             Some(ToolCallStatus::Completed { exit_ok: false }) => ("●", Color::Red),
             None => ("●", Color::Gray),
@@ -51,7 +51,7 @@ impl TuiApp {
         let (summary_text, summary_color) = match block.tool_status {
             Some(ToolCallStatus::Queued) => (render_data.summary, Color::Blue),
             Some(ToolCallStatus::Running) => (render_data.summary, Color::Yellow),
-            Some(ToolCallStatus::PendingApproval) => (render_data.summary, Color::LightYellow),
+            Some(ToolCallStatus::PendingDynamicInput) => (render_data.summary, Color::LightYellow),
             Some(ToolCallStatus::Completed { exit_ok: true }) => {
                 (render_data.summary, Color::Green)
             }
@@ -253,7 +253,7 @@ impl TuiApp {
         let summary = match block.tool_status {
             Some(ToolCallStatus::Queued) => "Queued…".to_string(),
             Some(ToolCallStatus::Running) => "Running…".to_string(),
-            Some(ToolCallStatus::PendingApproval) => "Approval needed".to_string(),
+            Some(ToolCallStatus::PendingDynamicInput) => "Input needed".to_string(),
             Some(ToolCallStatus::Completed { exit_ok: true }) => {
                 format!("Done ({} hits{})", hit_count, timing)
             }
@@ -336,7 +336,7 @@ impl TuiApp {
         let summary = match block.tool_status {
             Some(ToolCallStatus::Queued) => "Queued…".to_string(),
             Some(ToolCallStatus::Running) => "Running…".to_string(),
-            Some(ToolCallStatus::PendingApproval) => "Approval needed".to_string(),
+            Some(ToolCallStatus::PendingDynamicInput) => "Input needed".to_string(),
             Some(ToolCallStatus::Completed { exit_ok: true }) => {
                 if let Some(exit) = exit_code {
                     format!("Done (exit:{}{})", exit, timing)
@@ -414,7 +414,7 @@ impl TuiApp {
         let summary = match block.tool_status {
             Some(ToolCallStatus::Queued) => "Queued…".to_string(),
             Some(ToolCallStatus::Running) => "Running…".to_string(),
-            Some(ToolCallStatus::PendingApproval) => "Approval needed".to_string(),
+            Some(ToolCallStatus::PendingDynamicInput) => "Input needed".to_string(),
             Some(ToolCallStatus::Completed { exit_ok: true }) => {
                 format!("Done ({} lines{})", line_count, timing)
             }
@@ -463,7 +463,7 @@ impl TuiApp {
         let summary = match block.tool_status {
             Some(ToolCallStatus::Queued) => "Queued…".to_string(),
             Some(ToolCallStatus::Running) => "Running…".to_string(),
-            Some(ToolCallStatus::PendingApproval) => "Approval needed".to_string(),
+            Some(ToolCallStatus::PendingDynamicInput) => "Input needed".to_string(),
             Some(ToolCallStatus::Completed { exit_ok: true }) => {
                 format!("Done ({} paths{})", entries.len(), timing)
             }
@@ -512,7 +512,7 @@ impl TuiApp {
         let summary = match block.tool_status {
             Some(ToolCallStatus::Queued) => "Queued…".to_string(),
             Some(ToolCallStatus::Running) => "Running…".to_string(),
-            Some(ToolCallStatus::PendingApproval) => "Approval needed".to_string(),
+            Some(ToolCallStatus::PendingDynamicInput) => "Input needed".to_string(),
             Some(ToolCallStatus::Completed { exit_ok: true }) => {
                 format!("Done ({} matches{})", matches_found, timing)
             }
@@ -552,7 +552,7 @@ impl TuiApp {
         let summary = match block.tool_status {
             Some(ToolCallStatus::Queued) => "Queued…".to_string(),
             Some(ToolCallStatus::Running) => "Running…".to_string(),
-            Some(ToolCallStatus::PendingApproval) => "Approval needed".to_string(),
+            Some(ToolCallStatus::PendingDynamicInput) => "Input needed".to_string(),
             Some(ToolCallStatus::Completed { exit_ok: true }) => format!("Done{}", timing),
             Some(ToolCallStatus::Completed { exit_ok: false }) => format!("Error{}", timing),
             None => "Unknown".to_string(),
@@ -598,7 +598,9 @@ impl TuiApp {
         matches!(
             status,
             Some(
-                ToolCallStatus::Queued | ToolCallStatus::Running | ToolCallStatus::PendingApproval
+                ToolCallStatus::Queued
+                    | ToolCallStatus::Running
+                    | ToolCallStatus::PendingDynamicInput
             )
         )
     }

@@ -35,6 +35,31 @@ describe("timeline stream events", () => {
     ]));
   });
 
+  it("moves unknown assistant text to the answer block when committed as final", () => {
+    applyStreamEvent("sess-1", itemStarted("answer-1", "assistant_text", "unknown", 1));
+    applyStreamEvent("sess-1", textDelta("answer-1", "final text", 2));
+    applyStreamEvent("sess-1", itemCompleted("answer-1", 3));
+    applyStreamEvent("sess-1", assistantTextCommitted("answer-1", "final_answer", 4));
+
+    const blocks = useAppStore.getState().streams["sess-1"]?.blocks ?? [];
+    expect(blocks.find((block) => block.kind === "timeline")).toBeUndefined();
+    expect(blocks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "assistant", text: "final text" }),
+    ]));
+  });
+
+  it("keeps unknown assistant text in the timeline when committed as commentary", () => {
+    applyStreamEvent("sess-1", itemStarted("thinking-1", "assistant_text", "unknown", 1));
+    applyStreamEvent("sess-1", textDelta("thinking-1", "checking", 2));
+    applyStreamEvent("sess-1", assistantTextCommitted("thinking-1", "commentary", 3));
+
+    const timeline = useAppStore.getState().streams["sess-1"]?.blocks.find((block) => block.kind === "timeline");
+    expect(timeline).toMatchObject({
+      kind: "timeline",
+      items: [expect.objectContaining({ itemId: "thinking-1", phase: "commentary", text: "checking" })],
+    });
+  });
+
   it("updates tool progress on the same tool block", () => {
     applyStreamEvent("sess-1", itemStarted("tool-1", "tool_call", "acting", 1));
     applyStreamEvent("sess-1", toolProgress("tool-1", "running", 2));
@@ -175,35 +200,6 @@ describe("timeline stream events", () => {
     ]));
   });
 
-  it("restores pending approval on the original timeline item id", () => {
-    applyActiveTurnSnapshot("sess-1", activeTurn({
-      status: "waiting_user_action",
-      pending_user_action: {
-        type: "tool_approval",
-        item_id: "tool-1",
-        call_id: "call-1",
-        tool_name: "Shell",
-        prompt: "Approve command?",
-        arguments: { command: "pwd" },
-      },
-    }));
-    applyStreamEvent("sess-1", itemStarted("tool-1", "tool_call", "acting", 10));
-
-    const timeline = useAppStore.getState().streams["sess-1"]?.blocks.find((block) => block.kind === "timeline");
-    expect(timeline).toMatchObject({
-      kind: "timeline",
-      items: [
-        expect.objectContaining({
-          itemId: "tool-1",
-          callId: "call-1",
-          status: "waiting_approval",
-          prompt: "Approve command?",
-        }),
-      ],
-    });
-    expect(timeline?.kind === "timeline" ? timeline.items : []).toHaveLength(1);
-  });
-
   it("restores pending dynamic tool result on the original timeline item id", () => {
     applyActiveTurnSnapshot("sess-1", activeTurn({
       status: "waiting_user_action",
@@ -324,7 +320,7 @@ function baseEvent(payload: TalosTimelineEvent["payload"], sequence: number): Ti
 function itemStarted(
   itemId: string,
   kind: "assistant_text" | "tool_call" | "user_input",
-  phase: "commentary" | "final_answer" | "acting" | "input",
+  phase: "commentary" | "final_answer" | "unknown" | "acting" | "input",
   sequence: number,
 ): TimelineEventEnvelope {
   return baseEvent({
@@ -351,6 +347,20 @@ function itemStarted(
           }
         : { type: "text", text: "" },
     },
+  }, sequence);
+}
+
+function assistantTextCommitted(
+  itemId: string,
+  phase: "commentary" | "final_answer",
+  sequence: number,
+): TimelineEventEnvelope {
+  return baseEvent({
+    type: "assistant_text_committed",
+    request_id: "req-1",
+    turn_id: "turn-1",
+    item_id: itemId,
+    phase,
   }, sequence);
 }
 
@@ -420,6 +430,7 @@ function sessionHistory(
         items,
         stop_reason: "end_turn",
         usage: usage(),
+        metrics: null,
       },
     ],
     generated_at_ms: 1,
@@ -430,7 +441,7 @@ function sessionHistory(
 function historyTextItem(
   itemId: string,
   kind: "assistant_text" | "user_input",
-  phase: "commentary" | "final_answer" | "input",
+  phase: "commentary" | "final_answer" | "unknown" | "input",
   text: string,
 ): TalosSessionHistorySnapshot["messages"][number]["items"][number] {
   return {

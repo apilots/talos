@@ -27,7 +27,7 @@ describe("resolveAppServerCommand", () => {
   });
 
   it("requires packaged resources in production runtime", () => {
-    const resourcesPath = createResourcesWithBinary("talos");
+    const resourcesPath = createResourcesWithBinary("app-server");
 
     expect(
       resolveAppServerCommand({
@@ -36,7 +36,7 @@ describe("resolveAppServerCommand", () => {
         platform: "darwin",
         resourcesPath,
       }),
-    ).toBe(path.join(resourcesPath, "app-server", "talos"));
+    ).toBe(path.join(resourcesPath, "app-server", "app-server"));
   });
 
   it("fails fast when the packaged app-server binary is missing", () => {
@@ -49,7 +49,7 @@ describe("resolveAppServerCommand", () => {
         platform: "linux",
         resourcesPath,
       }),
-    ).toThrow(`Packaged app-server binary is missing: ${path.join(resourcesPath, "app-server", "talos")}`);
+    ).toThrow(`Packaged app-server binary is missing: ${path.join(resourcesPath, "app-server", "app-server")}`);
   });
 });
 

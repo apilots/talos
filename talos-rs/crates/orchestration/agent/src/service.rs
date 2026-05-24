@@ -21,6 +21,11 @@ pub struct OrchestratorRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionTitleUpdate {
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrchestratorExecution {
     pub output_text: String,
     #[serde(default)]
@@ -32,6 +37,8 @@ pub struct OrchestratorExecution {
     pub usage: TalosUsage,
     pub task_count: u32,
     pub session_id: String,
+    #[serde(default)]
+    pub session_title_update: Option<SessionTitleUpdate>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +59,13 @@ pub trait AgentOrchestrator: Send + Sync {
         &self,
         request: OrchestratorRequest,
     ) -> TalosResult<mpsc::Receiver<TalosTimelineEvent>>;
+    fn take_session_title_update(
+        &self,
+        _session_id: &str,
+        _turn_id: &str,
+    ) -> Option<SessionTitleUpdate> {
+        None
+    }
     async fn compact_session(&self, session: TalosSession) -> TalosResult<TalosUsage>;
     async fn clear_session(&self, session: TalosSession) -> TalosResult<()>;
     async fn close_session(&self, session: TalosSession) -> TalosResult<()>;
@@ -61,14 +75,6 @@ pub trait AgentOrchestrator: Send + Sync {
     fn has_active_turn(&self, session_id: &str) -> bool;
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()>;
     async fn drain_active_turns(&self, timeout: Duration) -> TalosResult<()>;
-    async fn submit_tool_approval(
-        &self,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-        approved: bool,
-        reason: Option<String>,
-    ) -> TalosResult<()>;
     async fn submit_dynamic_tool_result(
         &self,
         session_id: &str,

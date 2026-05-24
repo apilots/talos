@@ -17,10 +17,7 @@ use talos_error::TalosResult;
 use talos_router::Router;
 use talos_session_store::SessionStore;
 use talos_types::gateway::{GatewayRequest, GatewayResponse};
-use talos_types::talos::{
-    TalosContext, TalosTimelineDelta, TalosTimelineEvent, TalosTimelineEventPayload,
-    TalosTimelinePhase, TalosUsage,
-};
+use talos_types::talos::{TalosContext, TalosTimelineEvent, TalosTimelineEventPayload, TalosUsage};
 use talos_types::{
     ProjectPatch, ProjectRecord, RequestHandler, SessionConf, SessionPatch, SessionPatchAck,
     SessionQuery, SessionRuntime, SessionService, TalosConfig, TalosSession,
@@ -29,7 +26,7 @@ use tokio::sync::{mpsc, RwLock};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use self::session::{extract_first_user_text, SessionManager};
+use self::session::SessionManager;
 
 /// Implementation of the Coordinator trait
 pub struct CoordinatorImpl {
@@ -52,7 +49,7 @@ impl CoordinatorImpl {
     ) -> Self {
         Self {
             router,
-            sessions: Arc::new(SessionManager::new(session_store, base_config, None)),
+            sessions: Arc::new(SessionManager::new(session_store, base_config)),
             agents: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -126,8 +123,6 @@ impl RequestHandler for CoordinatorImpl {
 
         let session = self.sessions.resolve_session(&request).await?;
         let model_for_turn = session.config.llm.model.clone();
-        let first_user_text = extract_first_user_text(&request.input);
-        let should_assign_title = !session.has_real_title() && session.state.message_count == 0;
 
         let agents = self.agents.read().await;
         let agent = agents
@@ -160,23 +155,17 @@ impl RequestHandler for CoordinatorImpl {
                 &agent_response.usage,
             )
             .await?;
-        if should_assign_title {
-            if let Some(first_user_text) = first_user_text.as_deref() {
-                if let Err(error) = self
-                    .sessions
-                    .maybe_assign_session_title(
-                        &session.context.session_id,
-                        first_user_text,
-                        &agent_response.output_text,
-                    )
-                    .await
-                {
-                    warn!(
-                        session_id = %session.context.session_id,
-                        ?error,
-                        "failed to assign session title after non-stream turn"
-                    );
-                }
+        if let Some(title_update) = agent_response.session_title_update.as_ref() {
+            if let Err(error) = self
+                .sessions
+                .update_session_title(&session.context.session_id, &title_update.title)
+                .await
+            {
+                warn!(
+                    session_id = %session.context.session_id,
+                    ?error,
+                    "failed to persist session title after non-stream turn"
+                );
             }
         }
 
@@ -207,8 +196,6 @@ impl RequestHandler for CoordinatorImpl {
 
         let session = self.sessions.resolve_session(&request).await?;
         let model_for_turn = session.config.llm.model.clone();
-        let first_user_text = extract_first_user_text(&request.input);
-        let should_assign_title = !session.has_real_title() && session.state.message_count == 0;
 
         let agents = self.agents.read().await;
         let agent = agents
@@ -236,33 +223,27 @@ impl RequestHandler for CoordinatorImpl {
         let sessions = self.sessions.clone();
         let session_id = session.context.session_id.clone();
         let response_model = model_for_turn.clone();
-        let sessions_for_title = self.sessions.clone();
         let (tx, rx) = mpsc::channel(256);
         tokio::spawn(async move {
             let mut final_usage = TalosUsage::default();
             let mut final_message_delta = 2;
-            let mut final_output_text = String::new();
-            let mut item_phases = HashMap::new();
+            let mut final_turn_id = None;
+            let mut progress_recorded = false;
 
             while let Some(event) = orchestrator_stream.recv().await {
-                match &event.payload {
-                    TalosTimelineEventPayload::ItemStarted(payload) => {
-                        item_phases.insert(payload.item.item_id.clone(), payload.item.phase);
-                    }
-                    TalosTimelineEventPayload::ItemDelta(payload) => {
-                        if item_phases.get(&payload.item_id)
-                            == Some(&TalosTimelinePhase::FinalAnswer)
-                        {
-                            if let TalosTimelineDelta::Text { text } = &payload.delta {
-                                final_output_text.push_str(text);
-                            }
-                        }
-                    }
-                    TalosTimelineEventPayload::TurnCompleted(completed) => {
-                        final_usage = completed.usage.clone();
-                        final_message_delta = item_phases.len().max(1) as u64;
-                    }
-                    _ => {}
+                if let TalosTimelineEventPayload::TurnCompleted(completed) = &event.payload {
+                    final_usage = completed.usage.clone();
+                    final_message_delta = 2;
+                    final_turn_id = Some(completed.turn_id.clone());
+                    sessions
+                        .record_stream_completion(
+                            &session_id,
+                            &response_model,
+                            final_message_delta,
+                            &final_usage,
+                        )
+                        .await;
+                    progress_recorded = true;
                 }
 
                 if tx.send(event).await.is_err() {
@@ -270,23 +251,28 @@ impl RequestHandler for CoordinatorImpl {
                 }
             }
 
-            sessions
-                .record_stream_completion(
-                    &session_id,
-                    &response_model,
-                    final_message_delta,
-                    &final_usage,
-                )
-                .await;
-            if should_assign_title {
-                if let Some(first_user_text) = first_user_text.as_deref() {
-                    let _ = sessions_for_title
-                        .maybe_assign_session_title(
-                            &session_id,
-                            first_user_text,
-                            &final_output_text,
-                        )
-                        .await;
+            if !progress_recorded {
+                sessions
+                    .record_stream_completion(
+                        &session_id,
+                        &response_model,
+                        final_message_delta,
+                        &final_usage,
+                    )
+                    .await;
+            }
+            if let Some(turn_id) = final_turn_id.as_deref() {
+                if let Some(title_update) = agent.take_session_title_update(&session_id, turn_id) {
+                    if let Err(error) = sessions
+                        .update_session_title(&session_id, &title_update.title)
+                        .await
+                    {
+                        warn!(
+                            session_id = %session_id,
+                            ?error,
+                            "failed to persist session title after stream turn"
+                        );
+                    }
                 }
             }
         });
@@ -331,27 +317,6 @@ impl RequestHandler for CoordinatorImpl {
         };
         drop(agents);
         agent.cancel_active_turn(session_id).await
-    }
-
-    async fn submit_tool_approval(
-        &self,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-        approved: bool,
-        reason: Option<String>,
-    ) -> TalosResult<()> {
-        let session = self
-            .sessions
-            .get_session(session_id)
-            .await?
-            .ok_or_else(|| {
-                talos_error::TalosError::ResourceNotFound(format!("session {}", session_id))
-            })?;
-        let (_target_agent, agent) = self.resolve_session_agent(&session).await?;
-        agent
-            .submit_tool_approval(session_id, call_id, tool_name, approved, reason)
-            .await
     }
 
     async fn submit_dynamic_tool_result(
@@ -404,18 +369,6 @@ impl SessionRuntime for CoordinatorImpl {
 
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()> {
         SessionService::cancel_active_turn(self, session_id).await
-    }
-
-    async fn submit_tool_approval(
-        &self,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-        approved: bool,
-        reason: Option<String>,
-    ) -> TalosResult<()> {
-        SessionService::submit_tool_approval(self, session_id, call_id, tool_name, approved, reason)
-            .await
     }
 
     async fn submit_dynamic_tool_result(
@@ -584,28 +537,6 @@ impl SessionService for CoordinatorImpl {
 
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()> {
         RequestHandler::cancel_active_turn(self, session_id).await
-    }
-
-    async fn submit_tool_approval(
-        &self,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-        approved: bool,
-        reason: Option<String>,
-    ) -> TalosResult<()> {
-        let session = self
-            .sessions
-            .get_session(session_id)
-            .await?
-            .ok_or_else(|| {
-                talos_error::TalosError::ResourceNotFound(format!("session {}", session_id))
-            })?;
-        let (_target_agent, agent) = self.resolve_session_agent(&session).await?;
-        agent
-            .submit_tool_approval(session_id, call_id, tool_name, approved, reason)
-            .await?;
-        Ok(())
     }
 
     async fn submit_dynamic_tool_result(

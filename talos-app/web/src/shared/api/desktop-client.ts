@@ -21,7 +21,6 @@ import type {
   TalosSessionHistorySnapshot,
   TimelineEventEnvelope,
   TimelineRecoverySnapshot,
-  ToolApprovalRequest,
   UpdateCurrentUserRequest,
   WorkspaceDocKind,
 } from "@talos/sdk-core";
@@ -246,16 +245,6 @@ export function createDesktopTalosClient(
         client.writeWorkspaceDoc(kind, request.content, expectedVersionToken(request)),
     },
     messages,
-    toolApprovals: {
-      submit: (sessionId: string, request: ToolApprovalRequest) =>
-        client.submitToolApproval({
-          session_id: sessionId,
-          call_id: request.call_id,
-          tool_name: request.tool_name,
-          approved: request.approved,
-          reason: request.reason ?? null,
-        }).then(() => undefined),
-    },
   } as unknown as TalosWebClient;
 }
 

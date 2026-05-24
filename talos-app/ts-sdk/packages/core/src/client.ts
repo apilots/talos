@@ -26,6 +26,7 @@ import type {
   SessionQuery,
   SessionUpdate,
   TalosContext,
+  TalosUsage,
   TimelineEventEnvelope,
   TalosActiveTurn,
   TalosSessionHistorySnapshot,
@@ -33,8 +34,8 @@ import type {
   TalosMessageRequest,
   TalosMessageRetryRequest,
   TalosSession,
+  TalosTurnExecutionMetrics,
   TimelineRecoverySnapshot,
-  ToolApprovalRequest,
   WorkspaceDocDetail,
   WorkspaceDocKind,
   WorkspaceDocSummary,
@@ -475,13 +476,6 @@ export class TalosClient {
     },
   };
 
-  toolApprovals = {
-    submit: (sessionId: string, request: ToolApprovalRequest) =>
-      this.http.request<void>(this.url(`/v1/sessions/${sessionId}/tool-approvals`), {
-        method: "POST",
-        body: JSON.stringify(request),
-      }),
-  };
 }
 
 function createIdempotencyKey() {
@@ -544,7 +538,38 @@ function normalizeSessionHistorySnapshot(
         output_tokens: Number(message.usage.output_tokens),
         total_tokens: Number(message.usage.total_tokens),
       },
+      metrics: normalizeTurnExecutionMetrics(message.metrics),
     })),
+  };
+}
+
+function normalizeTurnExecutionMetrics(
+  metrics: ({
+    model_rounds: bigint | number;
+    tool_calls: bigint | number;
+    tool_successes: bigint | number;
+    tool_errors: bigint | number;
+    stop_reason: TalosTurnExecutionMetrics["stop_reason"];
+    usage: TalosUsage;
+    duration_ms: bigint | number | null;
+  }) | null,
+): TalosTurnExecutionMetrics | null {
+  if (metrics == null) {
+    return null;
+  }
+  return {
+    ...metrics,
+    model_rounds: Number(metrics.model_rounds),
+    tool_calls: Number(metrics.tool_calls),
+    tool_successes: Number(metrics.tool_successes),
+    tool_errors: Number(metrics.tool_errors),
+    duration_ms: metrics.duration_ms == null ? metrics.duration_ms : Number(metrics.duration_ms),
+    usage: {
+      ...metrics.usage,
+      input_tokens: Number(metrics.usage.input_tokens),
+      output_tokens: Number(metrics.usage.output_tokens),
+      total_tokens: Number(metrics.usage.total_tokens),
+    },
   };
 }
 

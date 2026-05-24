@@ -34,8 +34,8 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use talos_client::{ModelInfo, TalosSession, TalosTimelineItem, TimelineEventEnvelope};
 use talos_error::TalosResult;
+use talos_sdk::{ModelInfo, TalosSession, TalosTimelineItem, TimelineEventEnvelope};
 use talos_types::talos::{TalosConnectionMode, TalosUsage};
 use tokio::sync::mpsc;
 use transcript::TranscriptState;
@@ -134,7 +134,6 @@ pub struct TuiApp {
     pub(crate) stream_started_at: Option<Instant>,
     pub(crate) last_stream_event_at: Option<Instant>,
     pub(crate) gateway_client: Option<Arc<dyn GatewayClient>>,
-    pub(crate) pending_approval: Option<PendingApprovalState>,
     pub(crate) history_sessions: Vec<TalosSession>,
     pub(crate) history_selected: usize,
     pub(crate) show_model_picker: bool,

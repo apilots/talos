@@ -39,9 +39,7 @@ pub mod store;
 pub mod validate;
 
 pub type TalosTimezone = chrono_tz::Tz;
-pub use domains::agent::{
-    AgentConfig, ExecutionMode, PlanReActPolicy, PlannerMode, PlannerSelection,
-};
+pub use domains::agent::{AgentConfig, PlanReActPolicy, PlannerMode};
 pub use domains::kernel::{
     AgentKernelCompactionConfig, AgentKernelConfig, AgentKernelOutputConfig,
     AgentKernelTimelineEventsConfig,
@@ -60,8 +58,8 @@ pub use domains::prompt::{
 pub use domains::storage::{DatabaseType, StorageBackendConfig};
 pub use domains::tools::{
     AgentKernelMcpConfig, DynamicToolConfig, DynamicToolTimeoutBehavior, FileToolConfig,
-    LocalExecToolConfig, McpServerConfig, McpToolConfig, McpTransportConfig, ToolApprovalPolicy,
-    ToolSandboxModeConfig, ToolSandboxPolicy, ToolsRuntimeConfig,
+    LocalExecToolConfig, McpServerConfig, McpToolConfig, McpTransportConfig, ToolSandboxModeConfig,
+    ToolSandboxPolicy, ToolsRuntimeConfig,
 };
 pub use env::{EnvSecretStore, RuntimeEnv, TALOS_GATEWAY_JWT_SECRET};
 pub use paths::{

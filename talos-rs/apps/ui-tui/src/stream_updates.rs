@@ -28,7 +28,7 @@ impl TuiApp {
         ));
     }
 
-    fn apply_cleared_session_snapshot(&mut self, session: &talos_client::TalosSession) {
+    fn apply_cleared_session_snapshot(&mut self, session: &talos_sdk::TalosSession) {
         self.apply_session_snapshot(session);
         self.input_buffer.clear();
         self.cursor_index = 0;

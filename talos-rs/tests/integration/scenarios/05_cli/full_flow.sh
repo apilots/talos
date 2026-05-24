@@ -6,15 +6,15 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 source "${ROOT_DIR}/tests/integration/scripts/common.sh"
 
 load_env
-require_command "${ROOT_DIR}/target/debug/talos-client"
+require_command "${ROOT_DIR}/target/debug/talos-cli"
 
 build_binaries
 prepare_talos_home
 
-export TALOS_APP_SERVER_BIN="${ROOT_DIR}/target/debug/talos"
+export TALOS_APP_SERVER_BIN="${ROOT_DIR}/target/debug/app-server"
 export TALOS_LOCAL_LAUNCH_TOKEN="${TALOS_LOCAL_LAUNCH_TOKEN:-talos-cli-full-flow-token}"
 
-cli="${ROOT_DIR}/target/debug/talos-client"
+cli="${ROOT_DIR}/target/debug/talos-cli"
 
 run_cli() {
   "${cli}" "$@" 2>&1 | sed '/^Command executed successfully$/d'

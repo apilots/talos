@@ -20,9 +20,6 @@ function statusTone(status: string) {
   if (status === "running") {
     return "success";
   }
-  if (status === "waiting_approval") {
-    return "warning";
-  }
   if (status === "error") {
     return "danger";
   }
@@ -71,9 +68,7 @@ export function Sidebar({
   const filterLabel =
     threadFilter === "all"
       ? t("sidebar:allThreads")
-      : threadFilter === "waiting_approval"
-        ? t("sidebar:awaitingApproval")
-        : threadFilter.replaceAll("_", " ");
+      : threadFilter.replaceAll("_", " ");
   const roleLabel =
     connection.authStatus === "open" ? "Open" : connection.authRole === "admin" ? "Admin" : "Pro";
   const avatarLabel = connection.authUsername.trim().charAt(0).toUpperCase() || "U";

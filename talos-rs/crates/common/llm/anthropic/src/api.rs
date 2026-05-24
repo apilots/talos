@@ -11,8 +11,10 @@ use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
     CacheControl, ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall,
-    LlmProvider, NativeThinkingConfig, NativeThinkingSupport, PromptCacheSupport, Role, ToolChoice,
-    ToolDefinition, ToolStream, ToolStreamEvent, Usage,
+    LlmProvider, ModelBlockCompleted, ModelBlockDelta, ModelBlockKind, ModelBlockStarted,
+    ModelBlockStream, ModelBlockStreamEvent, ModelToolCallStart, NativeThinkingConfig,
+    NativeThinkingSupport, PromptCacheSupport, Role, SseLineDecoder, ToolChoice, ToolDefinition,
+    Usage,
 };
 use tokio::sync::mpsc;
 use tracing::{debug, error, info};
@@ -444,6 +446,17 @@ impl AnthropicProvider {
             || normalized.starts_with("claude-4")
     }
 
+    fn block_model_item_id(index: usize, kind: &str) -> String {
+        format!("anthropic-block-{index}-{kind}")
+    }
+
+    async fn send_model_block_event(
+        tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
+        event: ModelBlockStreamEvent,
+    ) -> bool {
+        tx.send(Ok(event)).await.is_ok()
+    }
+
     async fn send_chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
         let anthropic_req = Self::build_request(request, None);
         let url = format!("{}/messages", self.config.base_url);
@@ -573,17 +586,35 @@ impl LlmProvider for AnthropicProvider {
         tokio::spawn(async move {
             let mut stream = response.bytes_stream();
             let mut stop_reason: Option<String> = None;
-            let mut line_buf = String::new();
+            let mut decoder = SseLineDecoder::new();
             while let Some(chunk_result) = stream.next().await {
                 match chunk_result {
                     Ok(bytes) => {
-                        for line in drain_sse_lines(&mut line_buf, &bytes) {
+                        for line in decoder.push(&bytes) {
+                            let line = match line {
+                                Ok(line) => line,
+                                Err(err) => {
+                                    let _ = tx.send(Err(err)).await;
+                                    return;
+                                }
+                            };
                             let Some(data) = line.strip_prefix("data:") else {
                                 continue;
                             };
                             let data = data.trim_start();
-                            let Ok(event) = serde_json::from_str::<Value>(data) else {
+                            if data.is_empty() {
                                 continue;
+                            };
+                            let event = match serde_json::from_str::<Value>(data) {
+                                Ok(event) => event,
+                                Err(error) => {
+                                    let _ = tx
+                                        .send(Err(TalosError::InternalError(format!(
+                                            "Anthropic stream invalid SSE JSON: {error}"
+                                        ))))
+                                        .await;
+                                    return;
+                                }
                             };
 
                             let event_type =
@@ -659,35 +690,52 @@ impl LlmProvider for AnthropicProvider {
         Ok(ChatStream::new(rx))
     }
 
-    async fn stream_with_tools(&self, request: ChatRequest) -> TalosResult<ToolStream> {
+    async fn stream_model_blocks(&self, request: ChatRequest) -> TalosResult<ModelBlockStream> {
         let response = self.send_stream(request).await?;
-        let (tx, rx) = mpsc::channel::<TalosResult<ToolStreamEvent>>(100);
+        let (tx, rx) = mpsc::channel::<TalosResult<ModelBlockStreamEvent>>(100);
 
         tokio::spawn(async move {
-            #[derive(Default)]
-            struct ToolAcc {
-                id: Option<String>,
-                name: Option<String>,
-                arguments: String,
-                started: bool,
+            #[derive(Debug, Clone)]
+            enum ActiveAnthropicBlock {
+                Reasoning { model_item_id: String },
+                AssistantText { model_item_id: String },
+                ToolCall { model_item_id: String },
             }
 
             let mut stream = response.bytes_stream();
-            let mut tool_acc: HashMap<usize, ToolAcc> = HashMap::new();
+            let mut active_blocks: HashMap<usize, ActiveAnthropicBlock> = HashMap::new();
             let mut stop_reason: Option<String> = None;
             let mut output_tokens: Option<u32> = None;
-            let mut line_buf = String::new();
+            let mut decoder = SseLineDecoder::new();
 
             while let Some(chunk_result) = stream.next().await {
                 match chunk_result {
                     Ok(bytes) => {
-                        for line in drain_sse_lines(&mut line_buf, &bytes) {
+                        for line in decoder.push(&bytes) {
+                            let line = match line {
+                                Ok(line) => line,
+                                Err(err) => {
+                                    let _ = tx.send(Err(err)).await;
+                                    return;
+                                }
+                            };
                             let Some(data) = line.strip_prefix("data:") else {
                                 continue;
                             };
                             let data = data.trim_start();
-                            let Ok(event) = serde_json::from_str::<Value>(data) else {
+                            if data.is_empty() {
                                 continue;
+                            };
+                            let event = match serde_json::from_str::<Value>(data) {
+                                Ok(event) => event,
+                                Err(error) => {
+                                    let _ = tx
+                                        .send(Err(TalosError::InternalError(format!(
+                                            "Anthropic model block stream invalid SSE JSON: {error}"
+                                        ))))
+                                        .await;
+                                    return;
+                                }
                             };
 
                             let event_type =
@@ -712,33 +760,96 @@ impl LlmProvider for AnthropicProvider {
                                         event.get("index").and_then(|v| v.as_u64()).unwrap_or(0)
                                             as usize;
                                     let block = event.get("content_block");
+                                    let block_type = block
+                                        .and_then(|b| b.get("type"))
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("");
+                                    let provider_item_id = block
+                                        .and_then(|b| b.get("id"))
+                                        .and_then(|v| v.as_str())
+                                        .map(str::to_string)
+                                        .or_else(|| Some(format!("content_block:{index}")));
 
-                                    if block.and_then(|b| b.get("type")).and_then(|v| v.as_str())
-                                        == Some("tool_use")
-                                    {
-                                        let entry = tool_acc.entry(index).or_default();
-                                        entry.id = block
-                                            .and_then(|b| b.get("id"))
-                                            .and_then(|v| v.as_str())
-                                            .map(|v| v.to_string());
-                                        entry.name = block
-                                            .and_then(|b| b.get("name"))
-                                            .and_then(|v| v.as_str())
-                                            .map(|v| v.to_string());
-                                        if !entry.started {
-                                            entry.started = true;
-                                            if tx
-                                                .send(Ok(ToolStreamEvent::ToolCallStart {
-                                                    index,
-                                                    id: entry.id.clone(),
-                                                    name: entry.name.clone(),
-                                                }))
-                                                .await
-                                                .is_err()
-                                            {
-                                                return;
-                                            }
+                                    let (active, started) = match block_type {
+                                        "thinking" => {
+                                            let model_item_id =
+                                                AnthropicProvider::block_model_item_id(
+                                                    index, "thinking",
+                                                );
+                                            (
+                                                ActiveAnthropicBlock::Reasoning {
+                                                    model_item_id: model_item_id.clone(),
+                                                },
+                                                ModelBlockStarted {
+                                                    model_item_id,
+                                                    provider_item_id,
+                                                    kind: ModelBlockKind::Reasoning,
+                                                    assistant_text_phase_hint: None,
+                                                    assistant_text_phase_hint_source: None,
+                                                    tool_call: None,
+                                                },
+                                            )
                                         }
+                                        "text" => {
+                                            let model_item_id =
+                                                AnthropicProvider::block_model_item_id(
+                                                    index, "text",
+                                                );
+                                            (
+                                                ActiveAnthropicBlock::AssistantText {
+                                                    model_item_id: model_item_id.clone(),
+                                                },
+                                                ModelBlockStarted {
+                                                    model_item_id,
+                                                    provider_item_id,
+                                                    kind: ModelBlockKind::AssistantText,
+                                                    assistant_text_phase_hint: None,
+                                                    assistant_text_phase_hint_source: None,
+                                                    tool_call: None,
+                                                },
+                                            )
+                                        }
+                                        "tool_use" => {
+                                            let call_id = block
+                                                .and_then(|b| b.get("id"))
+                                                .and_then(|v| v.as_str())
+                                                .map(str::to_string);
+                                            let tool_name = block
+                                                .and_then(|b| b.get("name"))
+                                                .and_then(|v| v.as_str())
+                                                .map(str::to_string);
+                                            let model_item_id =
+                                                AnthropicProvider::block_model_item_id(
+                                                    index, "tool",
+                                                );
+                                            (
+                                                ActiveAnthropicBlock::ToolCall {
+                                                    model_item_id: model_item_id.clone(),
+                                                },
+                                                ModelBlockStarted {
+                                                    model_item_id,
+                                                    provider_item_id: call_id.clone(),
+                                                    kind: ModelBlockKind::ToolCall,
+                                                    assistant_text_phase_hint: None,
+                                                    assistant_text_phase_hint_source: None,
+                                                    tool_call: Some(ModelToolCallStart {
+                                                        index,
+                                                        call_id,
+                                                        tool_name,
+                                                    }),
+                                                },
+                                            )
+                                        }
+                                        _ => continue,
+                                    };
+                                    active_blocks.insert(index, active);
+                                    if !AnthropicProvider::send_model_block_event(
+                                        &tx,
+                                        ModelBlockStreamEvent::BlockStarted(started),
+                                    )
+                                    .await
+                                    {
+                                        return;
                                     }
                                 }
                                 "content_block_delta" => {
@@ -746,107 +857,96 @@ impl LlmProvider for AnthropicProvider {
                                         event.get("index").and_then(|v| v.as_u64()).unwrap_or(0)
                                             as usize;
                                     let delta = event.get("delta");
-
                                     let delta_type = delta
                                         .and_then(|d| d.get("type"))
                                         .and_then(|v| v.as_str())
                                         .unwrap_or("");
-
-                                    match delta_type {
-                                        "thinking_delta" => {
-                                            if let Some(thinking) = delta
-                                                .and_then(|d| d.get("thinking"))
-                                                .and_then(|v| v.as_str())
-                                            {
-                                                debug!(
-                                                    "stream_with_tools: thinking_delta len={}",
-                                                    thinking.len()
-                                                );
-                                                if tx
-                                                    .send(Ok(ToolStreamEvent::ReasoningDelta {
-                                                        delta: thinking.to_string(),
-                                                    }))
-                                                    .await
-                                                    .is_err()
-                                                {
-                                                    return;
-                                                }
-                                            }
-                                        }
-                                        "signature_delta" => {
-                                            if let Some(sig) = delta
-                                                .and_then(|d| d.get("signature"))
-                                                .and_then(|v| v.as_str())
-                                            {
-                                                if tx
-                                                    .send(Ok(ToolStreamEvent::ReasoningSignature {
-                                                        signature: sig.to_string(),
-                                                    }))
-                                                    .await
-                                                    .is_err()
-                                                {
-                                                    return;
-                                                }
-                                            }
-                                        }
-                                        "text_delta" => {
-                                            if let Some(text) = delta
-                                                .and_then(|d| d.get("text"))
-                                                .and_then(|v| v.as_str())
-                                            {
-                                                if tx
-                                                    .send(Ok(ToolStreamEvent::TextDelta {
+                                    let Some(active_block) = active_blocks.get(&index) else {
+                                        continue;
+                                    };
+                                    let mapped_delta = match (delta_type, active_block) {
+                                        (
+                                            "thinking_delta",
+                                            ActiveAnthropicBlock::Reasoning { model_item_id },
+                                        ) => delta
+                                            .and_then(|d| d.get("thinking"))
+                                            .and_then(|v| v.as_str())
+                                            .map(|text| {
+                                                (
+                                                    model_item_id.clone(),
+                                                    ModelBlockDelta::ReasoningText {
                                                         delta: text.to_string(),
-                                                    }))
-                                                    .await
-                                                    .is_err()
-                                                {
-                                                    return;
-                                                }
-                                            }
+                                                    },
+                                                )
+                                            }),
+                                        (
+                                            "text_delta",
+                                            ActiveAnthropicBlock::AssistantText { model_item_id },
+                                        ) => delta
+                                            .and_then(|d| d.get("text"))
+                                            .and_then(|v| v.as_str())
+                                            .map(|text| {
+                                                (
+                                                    model_item_id.clone(),
+                                                    ModelBlockDelta::AssistantText {
+                                                        delta: text.to_string(),
+                                                    },
+                                                )
+                                            }),
+                                        (
+                                            "input_json_delta",
+                                            ActiveAnthropicBlock::ToolCall { model_item_id },
+                                        ) => delta
+                                            .and_then(|d| d.get("partial_json"))
+                                            .and_then(|v| v.as_str())
+                                            .map(|partial_json| {
+                                                (
+                                                    model_item_id.clone(),
+                                                    ModelBlockDelta::ToolArguments {
+                                                        delta: partial_json.to_string(),
+                                                    },
+                                                )
+                                            }),
+                                        _ => None,
+                                    };
+
+                                    if let Some((model_item_id, delta)) = mapped_delta {
+                                        if !AnthropicProvider::send_model_block_event(
+                                            &tx,
+                                            ModelBlockStreamEvent::BlockDelta {
+                                                model_item_id,
+                                                delta,
+                                            },
+                                        )
+                                        .await
+                                        {
+                                            return;
                                         }
-                                        "input_json_delta" => {
-                                            if let Some(partial_json) = delta
-                                                .and_then(|d| d.get("partial_json"))
-                                                .and_then(|v| v.as_str())
-                                            {
-                                                let entry = tool_acc.entry(index).or_default();
-                                                entry.arguments.push_str(partial_json);
-                                                if tx
-                                                    .send(Ok(ToolStreamEvent::ToolCallDelta {
-                                                        index,
-                                                        arguments_delta: partial_json.to_string(),
-                                                    }))
-                                                    .await
-                                                    .is_err()
-                                                {
-                                                    return;
-                                                }
-                                            }
-                                        }
-                                        _ => {}
                                     }
                                 }
                                 "content_block_stop" => {
                                     let index =
                                         event.get("index").and_then(|v| v.as_u64()).unwrap_or(0)
                                             as usize;
-                                    if let Some(acc) = tool_acc.remove(&index) {
-                                        let arguments =
-                                            serde_json::from_str::<Value>(&acc.arguments)
-                                                .unwrap_or_else(|_| Value::String(acc.arguments));
-                                        if tx
-                                            .send(Ok(ToolStreamEvent::ToolCallEnd {
-                                                index,
-                                                id: acc.id,
-                                                name: acc.name,
-                                                arguments,
-                                            }))
-                                            .await
-                                            .is_err()
-                                        {
-                                            return;
+                                    let Some(active_block) = active_blocks.remove(&index) else {
+                                        continue;
+                                    };
+                                    let model_item_id = match active_block {
+                                        ActiveAnthropicBlock::Reasoning { model_item_id }
+                                        | ActiveAnthropicBlock::AssistantText { model_item_id }
+                                        | ActiveAnthropicBlock::ToolCall { model_item_id } => {
+                                            model_item_id
                                         }
+                                    };
+                                    if !AnthropicProvider::send_model_block_event(
+                                        &tx,
+                                        ModelBlockStreamEvent::BlockCompleted(
+                                            ModelBlockCompleted { model_item_id },
+                                        ),
+                                    )
+                                    .await
+                                    {
+                                        return;
                                     }
                                 }
                                 "message_delta" => {
@@ -866,6 +966,15 @@ impl LlmProvider for AnthropicProvider {
                                     }
                                 }
                                 "message_stop" => {
+                                    if !active_blocks.is_empty() {
+                                        let _ = tx
+                                            .send(Err(TalosError::InternalError(
+                                                "Anthropic stream stopped with active content blocks"
+                                                    .to_string(),
+                                            )))
+                                            .await;
+                                        return;
+                                    }
                                     let usage = output_tokens.map(|out| Usage {
                                         prompt_tokens: 0,
                                         completion_tokens: out,
@@ -874,7 +983,7 @@ impl LlmProvider for AnthropicProvider {
                                         cache_read_input_tokens: None,
                                     });
                                     let _ = tx
-                                        .send(Ok(ToolStreamEvent::Done {
+                                        .send(Ok(ModelBlockStreamEvent::Done {
                                             finish_reason: stop_reason
                                                 .take()
                                                 .or_else(|| Some("stop".to_string())),
@@ -900,19 +1009,6 @@ impl LlmProvider for AnthropicProvider {
             }
         });
 
-        Ok(ToolStream::new(rx))
+        Ok(ModelBlockStream::new(rx))
     }
-}
-
-/// Accumulates raw SSE bytes into `buf` and returns all complete lines,
-/// retaining any trailing incomplete fragment in `buf` for the next call.
-fn drain_sse_lines(buf: &mut String, bytes: &[u8]) -> Vec<String> {
-    buf.push_str(&String::from_utf8_lossy(bytes));
-    let mut lines = Vec::new();
-    while let Some(pos) = buf.find('\n') {
-        let line = buf[..pos].trim_end_matches('\r').to_string();
-        buf.drain(..=pos);
-        lines.push(line);
-    }
-    lines
 }

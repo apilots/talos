@@ -79,9 +79,9 @@ impl Tool for BashTool {
         Ok(())
     }
 
-    fn check_permissions(&self, input: &Value, context: &ToolContext) -> TalosResult<()> {
+    fn check_permissions(&self, input: &Value, _context: &ToolContext) -> TalosResult<()> {
         let input = parse_bash_input(input)?;
-        if input.dangerously_disable_sandbox && !context.pre_approved() {
+        if input.dangerously_disable_sandbox {
             return Err(TalosError::AuthorizationDenied);
         }
         Ok(())
@@ -148,7 +148,7 @@ mod tests {
     }
 
     #[test]
-    fn check_permissions_rejects_escalation_without_preapproval() {
+    fn check_permissions_rejects_sandbox_escalation() {
         let tool = BashTool;
         let context = ToolContext::default();
         let input = serde_json::json!({
@@ -158,17 +158,5 @@ mod tests {
 
         let error = tool.check_permissions(&input, &context).unwrap_err();
         assert!(matches!(error, TalosError::AuthorizationDenied));
-    }
-
-    #[test]
-    fn check_permissions_allows_escalation_with_preapproval() {
-        let tool = BashTool;
-        let context = ToolContext::default().with_pre_approved();
-        let input = serde_json::json!({
-            "command": "echo hi",
-            "dangerously_disable_sandbox": true
-        });
-
-        assert!(tool.check_permissions(&input, &context).is_ok());
     }
 }

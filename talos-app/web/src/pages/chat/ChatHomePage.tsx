@@ -10,7 +10,7 @@ import {
   useProjectsQuery,
 } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
-import { getApprovalModeLabel, resolveProjectRecord } from "@/shared/types/domain";
+import { resolveProjectRecord } from "@/shared/types/domain";
 
 export function ChatHomePage() {
   const { t } = useTranslation(["chat"]);
@@ -47,7 +47,6 @@ export function ChatHomePage() {
   async function handleCreateSession(initialPrompt?: string) {
     const session = await createSession.mutateAsync({
       model: selectedModel ?? models?.[0]?.id,
-      approvalMode: connection.defaultApprovalMode,
     });
     navigate(`/sessions/${session.context.session_id}`, {
       state: initialPrompt?.trim() ? { initialPrompt } : undefined,
@@ -68,12 +67,10 @@ export function ChatHomePage() {
         <div className="space-y-2">
           <ChatComposer
             activeProjectId={activeProject?.id ?? activeProjectId}
-            approvalMode={connection.defaultApprovalMode}
             disabled={false}
             draft={draft}
             isStreaming={false}
             models={(models ?? []).map((model) => ({ id: model.id, name: model.name }))}
-            onApprovalModeChange={(mode) => setConnection({ defaultApprovalMode: mode })}
             onCreateProject={handleCreateProject}
             onDraftChange={setDraft}
             onModelChange={setSelectedModel}
@@ -89,9 +86,6 @@ export function ChatHomePage() {
             selectedModel={selectedModel}
             showProjectSelector
           />
-          <div className="pl-2 text-[10px] text-muted">
-            {t("chat:firstSessionUses", { mode: getApprovalModeLabel(connection.defaultApprovalMode) })}
-          </div>
         </div>
       </div>
     </div>

@@ -179,11 +179,11 @@ function TimelineBlock({
   items: Extract<ChatRenderBlock, { kind: "timeline" }>["items"];
   live: boolean;
 }) {
-  const hasRunningItem = items.some((item) => item.status === "running" || item.status === "waiting_approval");
+  const hasRunningItem = items.some((item) => item.status === "running" || item.status === "waiting_dynamic_input");
+  const hasFinalAnswerItem = items.some((item) => item.phase === "final_answer");
   const hasActiveTimeline = live || hasRunningItem;
   const isAwaitingTimelineDelta =
-    items.some((item) => item.status === "running") &&
-    !items.some((item) => item.phase === "final_answer");
+    (live || items.some((item) => item.status === "running")) && !hasFinalAnswerItem;
   const [nowMs, setNowMs] = useState(() => Date.now());
   const totalDuration = timelineDuration(items, nowMs);
   const activitySignature = timelineActivitySignature(items);
@@ -424,8 +424,8 @@ function timelineToolStatus(item: Extract<ChatRenderBlock, { kind: "timeline" }>
   if (item.status === "failed") {
     return "error";
   }
-  if (item.status === "waiting_approval") {
-    return "waiting_approval";
+  if (item.status === "waiting_dynamic_input") {
+    return "waiting_dynamic_input";
   }
   return "running";
 }
@@ -451,7 +451,7 @@ function toolBlockToMarkdown(block: Extract<ChatRenderBlock, { kind: "tool" }>) 
   sections.push("#### Arguments", fencedMarkdown(JSON.stringify(block.arguments, null, 2), "json"));
 
   if (block.prompt) {
-    sections.push("#### Approval Prompt", block.prompt);
+    sections.push("#### Dynamic Tool Prompt", block.prompt);
   }
 
   if (block.progress.length > 0) {

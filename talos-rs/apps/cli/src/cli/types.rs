@@ -2,12 +2,12 @@ use clap::{Args, Parser, Subcommand};
 
 /// Command-line interface for Talos AI system - Full-featured command set for system access
 #[derive(Parser)]
-#[command(name = "talos")]
-#[command(bin_name = "talos")]
+#[command(name = "talos-cli")]
+#[command(bin_name = "talos-cli")]
 #[command(version = "1.0")]
 #[command(about = "Talos AI System CLI - Full-stack access to AI assistant capabilities", long_about = None)]
 pub struct Cli {
-    /// App-server host binary; invoked as `<binary> app-server`
+    /// App-server host binary.
     #[arg(long)]
     pub(super) app_server_bin: Option<String>,
 
@@ -138,24 +138,6 @@ pub(super) enum SessionCommands {
         #[arg(long, default_value_t = false)]
         stream: bool,
     },
-
-    /// Submit approval or rejection for a pending tool call
-    ApproveTool {
-        /// Session ID
-        session_id: String,
-        /// Tool call ID (from the pending confirmation)
-        #[arg(long)]
-        call_id: String,
-        /// Tool name
-        #[arg(long)]
-        tool_name: String,
-        /// Whether to approve the tool call
-        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
-        approved: bool,
-        /// Rejection reason (used when --approved=false)
-        #[arg(long)]
-        reason: Option<String>,
-    },
 }
 
 #[derive(Args)]
@@ -174,7 +156,7 @@ pub(super) struct AppServerSmokeCmd {
     #[arg(long, default_value = "turn-smoke")]
     pub(super) scenario: String,
 
-    /// App-server host binary; the test client invokes it as `<binary> app-server`
+    /// App-server host binary.
     #[arg(long)]
     pub(super) app_server_bin: Option<String>,
 

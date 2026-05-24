@@ -110,22 +110,6 @@ pub struct AuthRequestPayload {
     pub prompt: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ConfirmationRequestPayload {
-    pub tool_name: String,
-    pub call_id: String,
-    pub prompt: String,
-    pub arguments: Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ApprovalResponsePayload {
-    pub call_id: String,
-    pub tool_name: String,
-    pub approved: bool,
-    pub reason: Option<String>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DynamicToolRequestPayload {
     pub call_id: String,
@@ -167,12 +151,6 @@ pub enum EventPayload {
     AuthRequest {
         payload: AuthRequestPayload,
     },
-    ConfirmationRequest {
-        payload: ConfirmationRequestPayload,
-    },
-    ApprovalResponse {
-        payload: ApprovalResponsePayload,
-    },
     DynamicToolRequest {
         payload: DynamicToolRequestPayload,
     },
@@ -181,9 +159,6 @@ pub enum EventPayload {
     },
     CompactionSummary {
         payload: CompactionSummaryPayload,
-    },
-    PlannerSelection {
-        payload: crate::planner_selector::PlannerSelectionResponse,
     },
     Empty,
 }
@@ -391,12 +366,6 @@ impl Default for LlmResponseEnvelope {
             allow_final_projection: true,
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResponseDisposition {
-    Continue,
-    Final,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

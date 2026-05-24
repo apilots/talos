@@ -79,42 +79,11 @@ pub(super) async fn submit_message_command(
 }
 
 #[derive(Deserialize)]
-pub(super) struct ToolApprovalRequest {
-    call_id: String,
-    tool_name: String,
-    approved: bool,
-    reason: Option<String>,
-}
-
-#[derive(Deserialize)]
 pub(super) struct DynamicToolResultRequest {
     call_id: String,
     tool_name: String,
     output: String,
     success: bool,
-}
-
-pub(super) async fn submit_tool_approval_handler(
-    State(state): State<Arc<HttpApiState>>,
-    actor: axum::extract::Extension<RequestIdentity>,
-    Path(session_id): Path<String>,
-    Json(body): Json<ToolApprovalRequest>,
-) -> impl IntoResponse {
-    match state
-        .app
-        .submit_tool_approval(
-            &shared_actor(&actor.0),
-            &session_id,
-            &body.call_id,
-            &body.tool_name,
-            body.approved,
-            body.reason,
-        )
-        .await
-    {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => map_turn_submit_error(e).into_response(),
-    }
 }
 
 pub(super) async fn submit_dynamic_tool_result_handler(

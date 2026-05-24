@@ -107,9 +107,6 @@ from pathlib import Path
 config_path = Path(os.environ["CONFIG_PATH"])
 text = config_path.read_text()
 
-# Integration tests should avoid planner-selector quota variance.
-text = text.replace('planner_selection: "auto"', 'planner_selection: "static"', 1)
-
 if os.environ.get("TALOS_TEST_ENABLE_JWT_AUTH", "").strip() == "1":
     text = text.replace('token: "talos-local-test-token"', 'token: ~', 1)
     text = text.replace('jwt_secret: ${TALOS_GATEWAY_JWT_SECRET}', 'jwt_secret: "talos-test-jwt-secret"', 1)
@@ -154,7 +151,7 @@ start_server() {
   mkdir -p "${SCENARIO_REPORT_DIR}"
   prepare_talos_home
   : > "${SERVER_LOG}"
-  "${ROOT_DIR}/target/debug/talos" >>"${SERVER_LOG}" 2>&1 &
+  "${ROOT_DIR}/target/debug/talos-server" >>"${SERVER_LOG}" 2>&1 &
   export TALOS_SERVER_PID=$!
   if ! wait_for_health 90; then
     echo "Server failed to start. See log: ${SERVER_LOG}" >&2
@@ -177,15 +174,16 @@ stop_server() {
 
 build_binaries() {
   if [[ "${TALOS_BINARIES_READY:-}" == "1" ]] \
-    && [[ -x "${ROOT_DIR}/target/debug/talos" ]] \
-    && [[ -x "${ROOT_DIR}/target/debug/talos-client" ]] \
+    && [[ -x "${ROOT_DIR}/target/debug/talos-server" ]] \
+    && [[ -x "${ROOT_DIR}/target/debug/app-server" ]] \
+    && [[ -x "${ROOT_DIR}/target/debug/talos-cli" ]] \
     && [[ -x "${ROOT_DIR}/target/debug/talos-app-server-test-client" ]] \
-    && [[ -x "${ROOT_DIR}/target/debug/talos-ui-tui" ]]; then
+    && [[ -x "${ROOT_DIR}/target/debug/talos" ]]; then
     return 0
   fi
 
   mkdir -p "${REPORT_ROOT}"
-  (cd "${ROOT_DIR}" && cargo build -p talos -p talos-cli -p talos-app-server-test-client -p talos-ui-tui >/dev/null)
+  (cd "${ROOT_DIR}" && cargo build -p talos-server -p app-server -p talos-cli -p talos-app-server-test-client -p talos-ui-tui >/dev/null)
   export TALOS_BINARIES_READY=1
 }
 
@@ -381,6 +379,7 @@ reasoning_text = ""
 output = []
 items = {}
 tool_results = {}
+error_text = ""
 usage = {
     "input_tokens": 0,
     "output_tokens": 0,
@@ -427,10 +426,6 @@ with open(events_path, "r", encoding="utf-8") as handle:
             if delta_type == "text":
                 text = delta.get("text", "")
                 item["text"] = item.get("text", "") + text
-                if phase == "final_answer":
-                    output_text += text
-                elif phase == "thinking":
-                    reasoning_text += text
             elif delta_type == "tool_arguments":
                 item["arguments"] = item.get("arguments", "") + delta.get("arguments_delta", "")
             elif delta_type == "tool_result":
@@ -448,13 +443,32 @@ with open(events_path, "r", encoding="utf-8") as handle:
                     "content": delta.get("content") or [],
                     "is_error": bool(delta.get("is_error", False)),
                 }
+        elif event_type == "assistant_text_committed":
+            item_id = payload.get("item_id", "")
+            if item_id:
+                item = items.setdefault(item_id, {"kind": "assistant_text", "phase": "", "content": {}, "text": "", "arguments": ""})
+                item["kind"] = item.get("kind") or "assistant_text"
+                item["phase"] = payload.get("phase", item.get("phase", ""))
         elif event_type == "turn_completed":
             stop_reason = payload.get("stop_reason", stop_reason)
             usage = payload.get("usage") or usage
         elif event_type == "turn_error":
             stop_reason = "error"
-            output_text = "Error: " + payload.get("error", "")
+            error_text = "Error: " + payload.get("error", "")
 
+if error_text:
+    output_text = error_text
+else:
+    output_text = "".join(
+        item.get("text", "")
+        for item in items.values()
+        if item.get("kind") == "assistant_text" and item.get("phase") == "final_answer"
+    )
+    reasoning_text = "".join(
+        item.get("text", "")
+        for item in items.values()
+        if item.get("kind") == "reasoning" or item.get("phase") == "thinking"
+    )
 if output_text:
     output.append({"type": "output_text", "text": output_text})
 
@@ -566,10 +580,33 @@ def parse_json(raw: str):
     except Exception:
         return {"raw": raw}
 
+SECRET_KEY_PARTS = (
+    "api_key",
+    "apikey",
+    "token",
+    "secret",
+    "password",
+    "authorization",
+)
+
+def redact(value):
+    if isinstance(value, dict):
+        redacted = {}
+        for key, child in value.items():
+            normalized = str(key).lower().replace("-", "_")
+            if any(part in normalized for part in SECRET_KEY_PARTS):
+                redacted[key] = "<redacted>" if child is not None else None
+            else:
+                redacted[key] = redact(child)
+        return redacted
+    if isinstance(value, list):
+        return [redact(item) for item in value]
+    return value
+
 record = {
     "case": case_name,
-    "request": parse_json(request_raw),
-    "response": parse_json(response_raw),
+    "request": redact(parse_json(request_raw)),
+    "response": redact(parse_json(response_raw)),
 }
 print("DETAIL_JSON " + json.dumps(record, ensure_ascii=False))
 PY

@@ -1,6 +1,5 @@
 use crate::talos::{
-    StopReason, TalosContext, TalosInputItem, TalosJsonValue, TalosOutputItem, TalosReasoning,
-    TalosUsage,
+    StopReason, TalosContext, TalosInputItem, TalosOutputItem, TalosReasoning, TalosUsage,
 };
 use serde::{Deserialize, Serialize};
 
@@ -29,7 +28,6 @@ pub struct GatewayResumeToolCall {
     pub item_id: String,
     pub call_id: String,
     pub tool_name: String,
-    pub arguments: TalosJsonValue,
 }
 
 /// Response from the gateway.

@@ -4,8 +4,6 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolsRuntimeConfig {
     #[serde(default)]
-    pub approval_policy: ToolApprovalPolicy,
-    #[serde(default)]
     pub sandbox_policy: ToolSandboxPolicy,
     #[serde(default)]
     pub local_exec: LocalExecToolConfig,
@@ -28,7 +26,6 @@ pub struct ToolsRuntimeConfig {
 impl Default for ToolsRuntimeConfig {
     fn default() -> Self {
         Self {
-            approval_policy: ToolApprovalPolicy::default(),
             sandbox_policy: ToolSandboxPolicy::default(),
             local_exec: LocalExecToolConfig::default(),
             file: FileToolConfig::default(),
@@ -40,15 +37,6 @@ impl Default for ToolsRuntimeConfig {
             enable_collaboration_tools: true,
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolApprovalPolicy {
-    #[default]
-    OnRequest,
-    Always,
-    Never,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

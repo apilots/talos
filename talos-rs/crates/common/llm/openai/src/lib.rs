@@ -6,15 +6,23 @@ use reqwest::{header, Client};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
     ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider,
-    NativeThinkingConfig, NativeThinkingEffort, NativeThinkingSupport, Role, ToolChoice,
-    ToolDefinition, ToolStream, ToolStreamEvent, Usage,
+    ModelBlockCompleted, ModelBlockDelta, ModelBlockKind, ModelBlockStarted, ModelBlockStream,
+    ModelBlockStreamEvent, ModelToolCallStart, NativeThinkingConfig, NativeThinkingEffort,
+    NativeThinkingSupport, Role, SseLineDecoder, ToolChoice, ToolDefinition, Usage,
 };
 use tokio::sync::mpsc;
 use tracing::{debug, error, info};
+use uuid::Uuid;
+
+static CODEX_INSTALLATION_ID: LazyLock<String> =
+    LazyLock::new(|| format!("talos-codex-{}", Uuid::new_v4().simple()));
+static CODEX_CONVERSATION_ID: LazyLock<String> =
+    LazyLock::new(|| format!("talos-session-{}", Uuid::new_v4().simple()));
 
 /// OpenAI API configuration.
 #[derive(Debug, Clone)]
@@ -129,6 +137,20 @@ struct OpenAIStreamOptions {
     include_usage: bool,
 }
 
+#[derive(Debug, Default)]
+struct OpenAIModelBlockStreamState {
+    reasoning_started: HashMap<usize, bool>,
+    assistant_started: HashMap<usize, bool>,
+    tool_started: HashMap<usize, bool>,
+}
+
+#[derive(Debug, Default)]
+struct OpenAIModelToolAcc {
+    id: Option<String>,
+    name: Option<String>,
+    arguments: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct OpenAIResponse {
     #[allow(dead_code)]
@@ -166,6 +188,12 @@ struct OpenAIUsage {
     total_tokens: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OpenAIEndpointKind {
+    AliyunCodingPlan,
+    Compatible,
+}
+
 /// OpenAI LLM provider.
 pub struct OpenAIProvider {
     config: OpenAIConfig,
@@ -174,12 +202,42 @@ pub struct OpenAIProvider {
 
 impl OpenAIProvider {
     pub fn new(config: OpenAIConfig) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(config.timeout_secs))
-            .build()
-            .expect("Failed to build HTTP client");
+        let mut builder = Client::builder().timeout(Duration::from_secs(config.timeout_secs));
+
+        if Self::endpoint_kind_for_base_url(&config.base_url)
+            == OpenAIEndpointKind::AliyunCodingPlan
+        {
+            builder = builder.no_gzip().no_brotli().no_zstd().no_deflate();
+        }
+
+        let client = builder.build().expect("Failed to build HTTP client");
 
         Self { config, client }
+    }
+
+    fn endpoint_kind_for_base_url(base_url: &str) -> OpenAIEndpointKind {
+        let base_url = base_url.trim_end_matches('/');
+        if base_url.contains("coding.dashscope.aliyuncs.com")
+            || base_url.contains("coding-intl.dashscope.aliyuncs.com")
+        {
+            OpenAIEndpointKind::AliyunCodingPlan
+        } else {
+            OpenAIEndpointKind::Compatible
+        }
+    }
+
+    fn endpoint_kind(&self) -> OpenAIEndpointKind {
+        Self::endpoint_kind_for_base_url(&self.config.base_url)
+    }
+
+    fn insert_header_value(
+        headers: &mut header::HeaderMap,
+        name: &'static str,
+        value: impl AsRef<str>,
+    ) {
+        if let Ok(header_value) = header::HeaderValue::from_str(value.as_ref()) {
+            headers.insert(name, header_value);
+        }
     }
 
     fn build_headers(&self) -> header::HeaderMap {
@@ -192,6 +250,32 @@ impl OpenAIProvider {
             header::CONTENT_TYPE,
             header::HeaderValue::from_static("application/json"),
         );
+
+        if self.endpoint_kind() == OpenAIEndpointKind::AliyunCodingPlan {
+            let conversation_id = CODEX_CONVERSATION_ID.as_str();
+            let window_id = format!("{conversation_id}-1");
+            let user_agent = format!("codex_cli_rs/{}", env!("CARGO_PKG_VERSION"));
+
+            headers.insert(header::ACCEPT, header::HeaderValue::from_static("*/*"));
+            headers.insert(
+                "originator",
+                header::HeaderValue::from_static("codex_cli_rs"),
+            );
+            Self::insert_header_value(&mut headers, header::USER_AGENT.as_str(), user_agent);
+            headers.insert(
+                "version",
+                header::HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
+            );
+            Self::insert_header_value(
+                &mut headers,
+                "x-codex-installation-id",
+                CODEX_INSTALLATION_ID.as_str(),
+            );
+            Self::insert_header_value(&mut headers, "x-codex-window-id", &window_id);
+            Self::insert_header_value(&mut headers, "session_id", conversation_id);
+            Self::insert_header_value(&mut headers, "x-client-request-id", conversation_id);
+        }
+
         headers
     }
 
@@ -311,6 +395,169 @@ impl OpenAIProvider {
             }
         }
         None
+    }
+
+    fn choice_index(choice: Option<&Value>) -> usize {
+        choice
+            .and_then(|c| c.get("index"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize
+    }
+
+    fn reasoning_model_item_id(choice_index: usize) -> String {
+        format!("openai-choice-{choice_index}-reasoning")
+    }
+
+    fn assistant_model_item_id(choice_index: usize) -> String {
+        format!("openai-choice-{choice_index}-assistant")
+    }
+
+    fn tool_model_item_id(index: usize) -> String {
+        format!("openai-tool-{index}")
+    }
+
+    async fn send_model_block_event(
+        tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
+        event: ModelBlockStreamEvent,
+    ) -> bool {
+        tx.send(Ok(event)).await.is_ok()
+    }
+
+    async fn ensure_reasoning_model_block(
+        tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
+        state: &mut OpenAIModelBlockStreamState,
+        choice_index: usize,
+    ) -> bool {
+        if state.reasoning_started.get(&choice_index) == Some(&true) {
+            return true;
+        }
+        state.reasoning_started.insert(choice_index, true);
+        Self::send_model_block_event(
+            tx,
+            ModelBlockStreamEvent::BlockStarted(ModelBlockStarted {
+                model_item_id: Self::reasoning_model_item_id(choice_index),
+                provider_item_id: Some(format!("choice:{choice_index}:reasoning")),
+                kind: ModelBlockKind::Reasoning,
+                assistant_text_phase_hint: None,
+                assistant_text_phase_hint_source: None,
+                tool_call: None,
+            }),
+        )
+        .await
+    }
+
+    async fn ensure_assistant_model_block(
+        tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
+        state: &mut OpenAIModelBlockStreamState,
+        choice_index: usize,
+    ) -> bool {
+        if state.assistant_started.get(&choice_index) == Some(&true) {
+            return true;
+        }
+        state.assistant_started.insert(choice_index, true);
+        Self::send_model_block_event(
+            tx,
+            ModelBlockStreamEvent::BlockStarted(ModelBlockStarted {
+                model_item_id: Self::assistant_model_item_id(choice_index),
+                provider_item_id: Some(format!("choice:{choice_index}:message")),
+                kind: ModelBlockKind::AssistantText,
+                assistant_text_phase_hint: None,
+                assistant_text_phase_hint_source: None,
+                tool_call: None,
+            }),
+        )
+        .await
+    }
+
+    async fn ensure_tool_model_block(
+        tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
+        state: &mut OpenAIModelBlockStreamState,
+        index: usize,
+        acc: &OpenAIModelToolAcc,
+    ) -> bool {
+        if state.tool_started.get(&index) == Some(&true) {
+            return true;
+        }
+        state.tool_started.insert(index, true);
+        Self::send_model_block_event(
+            tx,
+            ModelBlockStreamEvent::BlockStarted(ModelBlockStarted {
+                model_item_id: Self::tool_model_item_id(index),
+                provider_item_id: acc.id.clone(),
+                kind: ModelBlockKind::ToolCall,
+                assistant_text_phase_hint: None,
+                assistant_text_phase_hint_source: None,
+                tool_call: Some(ModelToolCallStart {
+                    index,
+                    call_id: acc.id.clone(),
+                    tool_name: acc.name.clone(),
+                }),
+            }),
+        )
+        .await
+    }
+
+    async fn complete_open_model_blocks(
+        tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
+        state: &mut OpenAIModelBlockStreamState,
+    ) -> bool {
+        let reasoning_ids: Vec<_> = state
+            .reasoning_started
+            .iter()
+            .filter_map(|(index, started)| started.then_some(*index))
+            .collect();
+        for index in reasoning_ids {
+            state.reasoning_started.insert(index, false);
+            if !Self::send_model_block_event(
+                tx,
+                ModelBlockStreamEvent::BlockCompleted(ModelBlockCompleted {
+                    model_item_id: Self::reasoning_model_item_id(index),
+                }),
+            )
+            .await
+            {
+                return false;
+            }
+        }
+
+        let assistant_ids: Vec<_> = state
+            .assistant_started
+            .iter()
+            .filter_map(|(index, started)| started.then_some(*index))
+            .collect();
+        for index in assistant_ids {
+            state.assistant_started.insert(index, false);
+            if !Self::send_model_block_event(
+                tx,
+                ModelBlockStreamEvent::BlockCompleted(ModelBlockCompleted {
+                    model_item_id: Self::assistant_model_item_id(index),
+                }),
+            )
+            .await
+            {
+                return false;
+            }
+        }
+
+        let tool_ids: Vec<_> = state
+            .tool_started
+            .iter()
+            .filter_map(|(index, started)| started.then_some(*index))
+            .collect();
+        for index in tool_ids {
+            state.tool_started.insert(index, false);
+            if !Self::send_model_block_event(
+                tx,
+                ModelBlockStreamEvent::BlockCompleted(ModelBlockCompleted {
+                    model_item_id: Self::tool_model_item_id(index),
+                }),
+            )
+            .await
+            {
+                return false;
+            }
+        }
+        true
     }
 
     fn build_request(request: ChatRequest, stream: bool) -> OpenAIRequest {
@@ -482,17 +729,27 @@ impl LlmProvider for OpenAIProvider {
 
         tokio::spawn(async move {
             let mut stream = response.bytes_stream();
+            let mut decoder = SseLineDecoder::new();
             let mut final_finish_reason: Option<String> = None;
             while let Some(chunk_result) = stream.next().await {
                 match chunk_result {
                     Ok(bytes) => {
-                        let text = String::from_utf8_lossy(&bytes);
-                        for line in text.lines() {
-                            if !line.starts_with("data: ") {
+                        for line in decoder.push(&bytes) {
+                            let line = match line {
+                                Ok(line) => line,
+                                Err(err) => {
+                                    let _ = tx.send(Err(err)).await;
+                                    return;
+                                }
+                            };
+                            let Some(data) = line.strip_prefix("data:") else {
+                                continue;
+                            };
+
+                            let data = data.trim_start();
+                            if data.is_empty() {
                                 continue;
                             }
-
-                            let data = &line[6..];
                             if data == "[DONE]" {
                                 let _ = tx
                                     .send(Ok(ChatChunk {
@@ -505,31 +762,40 @@ impl LlmProvider for OpenAIProvider {
                                 return;
                             }
 
-                            if let Ok(event) = serde_json::from_str::<Value>(data) {
-                                let choice = event
-                                    .get("choices")
-                                    .and_then(|c| c.as_array())
-                                    .and_then(|arr| arr.first());
-
-                                if let Some(delta) = choice
-                                    .and_then(|c| c.get("delta"))
-                                    .and_then(|d| d.get("content"))
-                                    .and_then(|t| t.as_str())
-                                {
+                            let event = match serde_json::from_str::<Value>(data) {
+                                Ok(event) => event,
+                                Err(error) => {
                                     let _ = tx
-                                        .send(Ok(ChatChunk {
-                                            delta: delta.to_string(),
-                                            finish_reason: None,
-                                        }))
+                                        .send(Err(TalosError::InternalError(format!(
+                                            "OpenAI stream invalid SSE JSON: {error}"
+                                        ))))
                                         .await;
+                                    return;
                                 }
+                            };
+                            let choice = event
+                                .get("choices")
+                                .and_then(|c| c.as_array())
+                                .and_then(|arr| arr.first());
 
-                                if let Some(finish_reason) = choice
-                                    .and_then(|c| c.get("finish_reason"))
-                                    .and_then(|r| r.as_str())
-                                {
-                                    final_finish_reason = Some(finish_reason.to_string());
-                                }
+                            if let Some(delta) = choice
+                                .and_then(|c| c.get("delta"))
+                                .and_then(|d| d.get("content"))
+                                .and_then(|t| t.as_str())
+                            {
+                                let _ = tx
+                                    .send(Ok(ChatChunk {
+                                        delta: delta.to_string(),
+                                        finish_reason: None,
+                                    }))
+                                    .await;
+                            }
+
+                            if let Some(finish_reason) = choice
+                                .and_then(|c| c.get("finish_reason"))
+                                .and_then(|r| r.as_str())
+                            {
+                                final_finish_reason = Some(finish_reason.to_string());
                             }
                         }
                     }
@@ -549,37 +815,44 @@ impl LlmProvider for OpenAIProvider {
         Ok(ChatStream::new(rx))
     }
 
-    async fn stream_with_tools(&self, request: ChatRequest) -> TalosResult<ToolStream> {
+    async fn stream_model_blocks(&self, request: ChatRequest) -> TalosResult<ModelBlockStream> {
         let response = self.send_stream(request).await?;
-        let (tx, rx) = mpsc::channel::<TalosResult<ToolStreamEvent>>(100);
+        let (tx, rx) = mpsc::channel::<TalosResult<ModelBlockStreamEvent>>(100);
 
         tokio::spawn(async move {
-            #[derive(Default)]
-            struct Acc {
-                id: Option<String>,
-                name: Option<String>,
-                arguments: String,
-                started: bool,
-            }
-
             let mut stream = response.bytes_stream();
-            let mut accumulators: HashMap<usize, Acc> = HashMap::new();
+            let mut decoder = SseLineDecoder::new();
+            let mut state = OpenAIModelBlockStreamState::default();
+            let mut tool_acc: HashMap<usize, OpenAIModelToolAcc> = HashMap::new();
             let mut final_finish_reason: Option<String> = None;
             let mut final_usage: Option<Usage> = None;
 
             while let Some(chunk_result) = stream.next().await {
                 match chunk_result {
                     Ok(bytes) => {
-                        let text = String::from_utf8_lossy(&bytes);
-                        for line in text.lines() {
-                            if !line.starts_with("data: ") {
+                        for line in decoder.push(&bytes) {
+                            let line = match line {
+                                Ok(line) => line,
+                                Err(err) => {
+                                    let _ = tx.send(Err(err)).await;
+                                    return;
+                                }
+                            };
+                            let Some(data) = line.strip_prefix("data:") else {
+                                continue;
+                            };
+
+                            let data = data.trim_start();
+                            if data.is_empty() {
                                 continue;
                             }
-                            let data = &line[6..];
 
                             if data == "[DONE]" {
+                                if !Self::complete_open_model_blocks(&tx, &mut state).await {
+                                    return;
+                                }
                                 let _ = tx
-                                    .send(Ok(ToolStreamEvent::Done {
+                                    .send(Ok(ModelBlockStreamEvent::Done {
                                         finish_reason: final_finish_reason
                                             .clone()
                                             .or_else(|| Some("stop".to_string())),
@@ -589,8 +862,16 @@ impl LlmProvider for OpenAIProvider {
                                 return;
                             }
 
-                            let Ok(event) = serde_json::from_str::<Value>(data) else {
-                                continue;
+                            let event = match serde_json::from_str::<Value>(data) {
+                                Ok(event) => event,
+                                Err(error) => {
+                                    let _ = tx
+                                        .send(Err(TalosError::InternalError(format!(
+                                            "OpenAI model block stream invalid SSE JSON: {error}"
+                                        ))))
+                                        .await;
+                                    return;
+                                }
                             };
 
                             if let Some(usage) = event.get("usage").and_then(|value| {
@@ -609,17 +890,30 @@ impl LlmProvider for OpenAIProvider {
                                 .get("choices")
                                 .and_then(|c| c.as_array())
                                 .and_then(|arr| arr.first());
-
+                            let choice_index = Self::choice_index(choice);
                             let delta_object = choice.and_then(|c| c.get("delta"));
+
                             if let Some(reasoning_delta) =
                                 delta_object.and_then(Self::extract_reasoning_delta)
                             {
-                                if tx
-                                    .send(Ok(ToolStreamEvent::ReasoningDelta {
-                                        delta: reasoning_delta,
-                                    }))
+                                if !Self::ensure_reasoning_model_block(
+                                    &tx,
+                                    &mut state,
+                                    choice_index,
+                                )
+                                .await
+                                    || !Self::send_model_block_event(
+                                        &tx,
+                                        ModelBlockStreamEvent::BlockDelta {
+                                            model_item_id: Self::reasoning_model_item_id(
+                                                choice_index,
+                                            ),
+                                            delta: ModelBlockDelta::ReasoningText {
+                                                delta: reasoning_delta,
+                                            },
+                                        },
+                                    )
                                     .await
-                                    .is_err()
                                 {
                                     return;
                                 }
@@ -629,19 +923,30 @@ impl LlmProvider for OpenAIProvider {
                                 .and_then(|d| d.get("content"))
                                 .and_then(|t| t.as_str())
                             {
-                                if tx
-                                    .send(Ok(ToolStreamEvent::TextDelta {
-                                        delta: delta.to_string(),
-                                    }))
+                                if !Self::ensure_assistant_model_block(
+                                    &tx,
+                                    &mut state,
+                                    choice_index,
+                                )
+                                .await
+                                    || !Self::send_model_block_event(
+                                        &tx,
+                                        ModelBlockStreamEvent::BlockDelta {
+                                            model_item_id: Self::assistant_model_item_id(
+                                                choice_index,
+                                            ),
+                                            delta: ModelBlockDelta::AssistantText {
+                                                delta: delta.to_string(),
+                                            },
+                                        },
+                                    )
                                     .await
-                                    .is_err()
                                 {
                                     return;
                                 }
                             }
 
-                            if let Some(tool_calls) = choice
-                                .and_then(|c| c.get("delta"))
+                            if let Some(tool_calls) = delta_object
                                 .and_then(|d| d.get("tool_calls"))
                                 .and_then(|t| t.as_array())
                             {
@@ -651,53 +956,61 @@ impl LlmProvider for OpenAIProvider {
                                         .and_then(|v| v.as_u64())
                                         .unwrap_or(0)
                                         as usize;
-                                    let entry = accumulators.entry(index).or_default();
-
-                                    if let Some(id) = tool_call_delta
-                                        .get("id")
-                                        .and_then(|v| v.as_str())
-                                        .map(|s| s.to_string())
+                                    let mut should_start = false;
                                     {
-                                        entry.id = Some(id);
+                                        let entry = tool_acc.entry(index).or_default();
+                                        if let Some(id) = tool_call_delta
+                                            .get("id")
+                                            .and_then(|v| v.as_str())
+                                            .map(str::to_string)
+                                        {
+                                            entry.id = Some(id);
+                                            should_start = true;
+                                        }
+                                        if let Some(name) = tool_call_delta
+                                            .get("function")
+                                            .and_then(|f| f.get("name"))
+                                            .and_then(|v| v.as_str())
+                                            .map(str::to_string)
+                                        {
+                                            entry.name = Some(name);
+                                            should_start = true;
+                                        }
                                     }
 
-                                    if let Some(name) = tool_call_delta
+                                    let arguments_delta = tool_call_delta
                                         .get("function")
-                                        .and_then(|f| f.get("name"))
+                                        .and_then(|f| f.get("arguments"))
                                         .and_then(|v| v.as_str())
-                                        .map(|s| s.to_string())
-                                    {
-                                        entry.name = Some(name);
+                                        .map(str::to_string);
+                                    if arguments_delta.is_some() {
+                                        should_start = true;
                                     }
 
-                                    if !entry.started {
-                                        entry.started = true;
-                                        if tx
-                                            .send(Ok(ToolStreamEvent::ToolCallStart {
-                                                index,
-                                                id: entry.id.clone(),
-                                                name: entry.name.clone(),
-                                            }))
-                                            .await
-                                            .is_err()
+                                    if should_start {
+                                        let entry = tool_acc.entry(index).or_default();
+                                        if !Self::ensure_tool_model_block(
+                                            &tx, &mut state, index, entry,
+                                        )
+                                        .await
                                         {
                                             return;
                                         }
                                     }
 
-                                    if let Some(arguments_delta) = tool_call_delta
-                                        .get("function")
-                                        .and_then(|f| f.get("arguments"))
-                                        .and_then(|v| v.as_str())
-                                    {
-                                        entry.arguments.push_str(arguments_delta);
-                                        if tx
-                                            .send(Ok(ToolStreamEvent::ToolCallDelta {
-                                                index,
-                                                arguments_delta: arguments_delta.to_string(),
-                                            }))
-                                            .await
-                                            .is_err()
+                                    if let Some(arguments_delta) = arguments_delta {
+                                        let entry = tool_acc.entry(index).or_default();
+                                        entry.arguments.push_str(&arguments_delta);
+                                        if !Self::send_model_block_event(
+                                            &tx,
+                                            ModelBlockStreamEvent::BlockDelta {
+                                                model_item_id: Self::tool_model_item_id(index),
+                                                delta: ModelBlockDelta::ToolArguments {
+                                                    delta: arguments_delta,
+                                                },
+                                            },
+                                        )
+                                        .await
                                         {
                                             return;
                                         }
@@ -710,21 +1023,8 @@ impl LlmProvider for OpenAIProvider {
                                 .and_then(|r| r.as_str())
                             {
                                 final_finish_reason = Some(finish_reason.to_string());
-                                for (index, acc) in accumulators.drain() {
-                                    let arguments = serde_json::from_str::<Value>(&acc.arguments)
-                                        .unwrap_or_else(|_| Value::String(acc.arguments.clone()));
-                                    if tx
-                                        .send(Ok(ToolStreamEvent::ToolCallEnd {
-                                            index,
-                                            id: acc.id,
-                                            name: acc.name,
-                                            arguments,
-                                        }))
-                                        .await
-                                        .is_err()
-                                    {
-                                        return;
-                                    }
+                                if !Self::complete_open_model_blocks(&tx, &mut state).await {
+                                    return;
                                 }
                             }
                         }
@@ -742,7 +1042,7 @@ impl LlmProvider for OpenAIProvider {
             }
         });
 
-        Ok(ToolStream::new(rx))
+        Ok(ModelBlockStream::new(rx))
     }
 }
 
@@ -750,6 +1050,64 @@ impl LlmProvider for OpenAIProvider {
 mod tests {
     use super::*;
     use talos_llm_provider::{CacheControl, CacheControlKind, PromptCacheSupport};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    async fn spawn_sse_server(body: String) -> String {
+        spawn_sse_server_chunks(vec![body]).await
+    }
+
+    async fn spawn_sse_server_chunks(chunks: Vec<String>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test server should bind");
+        let addr = listener
+            .local_addr()
+            .expect("test server addr should exist");
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("request should arrive");
+            let mut buf = vec![0; 4096];
+            let _ = socket.read(&mut buf).await.expect("request should read");
+            let content_length: usize = chunks.iter().map(|chunk| chunk.len()).sum();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                content_length
+            );
+            socket
+                .write_all(response.as_bytes())
+                .await
+                .expect("headers should write");
+            for chunk in chunks {
+                socket
+                    .write_all(chunk.as_bytes())
+                    .await
+                    .expect("chunk should write");
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    async fn collect_model_events(mut stream: ModelBlockStream) -> Vec<ModelBlockStreamEvent> {
+        let mut events = Vec::new();
+        while let Some(event) = stream.next().await {
+            let event = event.expect("model block event should succeed");
+            let done = matches!(event, ModelBlockStreamEvent::Done { .. });
+            events.push(event);
+            if done {
+                break;
+            }
+        }
+        events
+    }
+
+    async fn collect_first_model_error(mut stream: ModelBlockStream) -> TalosError {
+        while let Some(event) = stream.next().await {
+            if let Err(err) = event {
+                return err;
+            }
+        }
+        panic!("stream should emit an error");
+    }
 
     #[test]
     fn test_openai_config_builder() {
@@ -760,6 +1118,113 @@ mod tests {
         assert_eq!(config.api_key, "test-api-key");
         assert_eq!(config.base_url, "https://custom.openai.com/v1");
         assert_eq!(config.timeout_secs, 120);
+    }
+
+    #[tokio::test]
+    async fn test_stream_model_blocks_maps_chat_completion_chunks() {
+        let body = concat!(
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\"think\"}}]}\n\n",
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hello\"}}]}\n\n",
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"path\\\"\"}}]}}]}\n\n",
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\":\\\"/tmp/a\\\"}\"}}]}}]}\n\n",
+            "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}\n\n",
+            "data: [DONE]\n\n"
+        )
+        .to_string();
+        let base_url = spawn_sse_server(body).await;
+        let provider =
+            OpenAIProvider::new(OpenAIConfig::new("test-api-key").with_base_url(base_url));
+        let stream = provider
+            .stream_model_blocks(ChatRequest::new_user("test", "gpt-test"))
+            .await
+            .expect("stream should start");
+
+        let events = collect_model_events(stream).await;
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ModelBlockStreamEvent::BlockStarted(started)
+                if started.model_item_id == "openai-choice-0-reasoning"
+                    && started.kind == ModelBlockKind::Reasoning
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ModelBlockStreamEvent::BlockDelta { model_item_id, delta: ModelBlockDelta::AssistantText { delta } }
+                if model_item_id == "openai-choice-0-assistant" && delta == "hello"
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ModelBlockStreamEvent::BlockStarted(started)
+                if started.model_item_id == "openai-tool-0"
+                    && started.provider_item_id.as_deref() == Some("call_1")
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ModelBlockStreamEvent::BlockCompleted(completed)
+                if completed.model_item_id == "openai-tool-0"
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ModelBlockStreamEvent::Done { usage: Some(usage), .. }
+                if usage.total_tokens == 3
+        )));
+    }
+
+    #[tokio::test]
+    async fn test_stream_model_blocks_buffers_split_sse_lines() {
+        let chunks = vec![
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"he".to_string(),
+            "llo\"}}]}\n\n".to_string(),
+            "data: [DONE]\n\n".to_string(),
+        ];
+        let base_url = spawn_sse_server_chunks(chunks).await;
+        let provider =
+            OpenAIProvider::new(OpenAIConfig::new("test-api-key").with_base_url(base_url));
+        let stream = provider
+            .stream_model_blocks(ChatRequest::new_user("test", "gpt-test"))
+            .await
+            .expect("stream should start");
+
+        let events = collect_model_events(stream).await;
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ModelBlockStreamEvent::BlockDelta { model_item_id, delta: ModelBlockDelta::AssistantText { delta } }
+                if model_item_id == "openai-choice-0-assistant" && delta == "hello"
+        )));
+    }
+
+    #[tokio::test]
+    async fn test_stream_model_blocks_fails_invalid_sse_json() {
+        let base_url = spawn_sse_server("data: {not-json}\n\n".to_string()).await;
+        let provider =
+            OpenAIProvider::new(OpenAIConfig::new("test-api-key").with_base_url(base_url));
+        let stream = provider
+            .stream_model_blocks(ChatRequest::new_user("test", "gpt-test"))
+            .await
+            .expect("stream should start");
+
+        let err = collect_first_model_error(stream).await;
+
+        assert!(format!("{err}").contains("invalid SSE JSON"));
+    }
+
+    #[test]
+    fn test_coding_plan_endpoint_detection() {
+        assert_eq!(
+            OpenAIProvider::endpoint_kind_for_base_url("https://coding.dashscope.aliyuncs.com/v1"),
+            OpenAIEndpointKind::AliyunCodingPlan
+        );
+        assert_eq!(
+            OpenAIProvider::endpoint_kind_for_base_url(
+                "https://coding-intl.dashscope.aliyuncs.com/v1/"
+            ),
+            OpenAIEndpointKind::AliyunCodingPlan
+        );
+        assert_eq!(
+            OpenAIProvider::endpoint_kind_for_base_url("https://api.openai.com/v1"),
+            OpenAIEndpointKind::Compatible
+        );
     }
 
     #[test]
@@ -920,6 +1385,39 @@ mod tests {
 
         let auth_header = headers.get("authorization").unwrap();
         assert_eq!(auth_header.to_str().unwrap(), "Bearer test-api-key");
+        assert!(!headers.contains_key("originator"));
+        assert!(!headers.contains_key("x-codex-installation-id"));
+    }
+
+    #[test]
+    fn test_build_headers_adds_coding_plan_fingerprint() {
+        let config = OpenAIConfig::new("test-api-key")
+            .with_base_url("https://coding.dashscope.aliyuncs.com/v1");
+        let provider = OpenAIProvider::new(config);
+        let headers = provider.build_headers();
+
+        assert_eq!(
+            headers
+                .get("originator")
+                .and_then(|value| value.to_str().ok()),
+            Some("codex_cli_rs")
+        );
+        assert_eq!(
+            headers.get("accept").and_then(|value| value.to_str().ok()),
+            Some("*/*")
+        );
+        assert_eq!(
+            headers.get("version").and_then(|value| value.to_str().ok()),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+        assert!(headers
+            .get("user-agent")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("codex_cli_rs/")));
+        assert!(headers.contains_key("x-codex-installation-id"));
+        assert!(headers.contains_key("x-codex-window-id"));
+        assert!(headers.contains_key("session_id"));
+        assert!(headers.contains_key("x-client-request-id"));
     }
 
     #[test]

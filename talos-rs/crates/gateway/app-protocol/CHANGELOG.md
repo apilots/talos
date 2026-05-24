@@ -17,7 +17,7 @@
 ## 0.1
 
 - Establish JSON-RPC 2.0 base message types.
-- Add initial client request params for initialize, session, turn, event, tool approval, model, config, memory, workspace docs, skills, apps, tools, account, and memory search methods.
+- Add initial client request params for initialize, session, turn, event, dynamic tool results, model, config, memory, workspace docs, skills, apps, tools, account, and memory search methods.
 - Add canonical server notification and server request method types.
 - Add strong JSON-RPC business error data.
 - Add JSON Schema and TypeScript generated fixtures.

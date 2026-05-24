@@ -1,100 +1,5 @@
 use super::*;
 
-pub struct ToolCallExtractionProcessor;
-
-#[async_trait]
-impl ResponseProcessor for ToolCallExtractionProcessor {
-    fn kind(&self) -> ResponseProcessorKind {
-        ResponseProcessorKind::ToolCallExtraction
-    }
-
-    async fn run(
-        &self,
-        ctx: &mut InvocationContext,
-        response: &mut LlmResponseEnvelope,
-    ) -> TalosResult<ResponseProcessorOutput> {
-        let mut events = Vec::new();
-        for item in &response.output_items {
-            if let TalosOutputItem::ToolCall {
-                call_id,
-                name,
-                arguments,
-            } = item
-            {
-                events.push(ExecutionEvent::tool_call(
-                    ctx,
-                    response.branch,
-                    call_id.clone(),
-                    name.clone(),
-                    arguments.clone().into(),
-                ));
-            }
-        }
-
-        Ok(ResponseProcessorOutput {
-            disposition: ResponseDisposition::Continue,
-            events,
-        })
-    }
-}
-
-pub struct FinalAnswerExtractionProcessor;
-
-#[async_trait]
-impl ResponseProcessor for FinalAnswerExtractionProcessor {
-    fn kind(&self) -> ResponseProcessorKind {
-        ResponseProcessorKind::FinalAnswerExtraction
-    }
-
-    async fn run(
-        &self,
-        ctx: &mut InvocationContext,
-        response: &mut LlmResponseEnvelope,
-    ) -> TalosResult<ResponseProcessorOutput> {
-        if !response.allow_final_projection {
-            return Ok(ResponseProcessorOutput::default());
-        }
-        let has_tool_calls = response
-            .output_items
-            .iter()
-            .any(|item| matches!(item, TalosOutputItem::ToolCall { .. }));
-        if has_tool_calls {
-            return Ok(ResponseProcessorOutput::default());
-        }
-        let mut emitted = false;
-        let mut events = Vec::new();
-
-        for item in &response.output_items {
-            if let TalosOutputItem::OutputText { text } = item {
-                events.push(ExecutionEvent::final_response(
-                    ctx,
-                    response.branch,
-                    text.clone(),
-                ));
-                emitted = true;
-            }
-        }
-
-        if !emitted && !response.output_text.trim().is_empty() {
-            events.push(ExecutionEvent::final_response(
-                ctx,
-                response.branch,
-                response.output_text.clone(),
-            ));
-            emitted = true;
-        }
-
-        if emitted {
-            Ok(ResponseProcessorOutput {
-                disposition: ResponseDisposition::Final,
-                events,
-            })
-        } else {
-            Ok(ResponseProcessorOutput::default())
-        }
-    }
-}
-
 pub struct EventProjectionProcessor;
 
 #[async_trait]
@@ -160,10 +65,7 @@ impl ResponseProcessor for EventProjectionProcessor {
             }
         }
 
-        Ok(ResponseProcessorOutput {
-            disposition: ResponseDisposition::Continue,
-            events,
-        })
+        Ok(ResponseProcessorOutput { events })
     }
 }
 

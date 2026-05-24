@@ -14,8 +14,8 @@ use tracing::error;
 use talos_app_protocol::events::canonical_method;
 use talos_app_protocol::requests::{
     TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
-    TimelinePendingDynamicToolResult, TimelinePendingToolApproval, TimelinePendingUserAction,
-    TimelineRecoverySnapshot, TimelineReplay,
+    TimelinePendingDynamicToolResult, TimelinePendingUserAction, TimelineRecoverySnapshot,
+    TimelineReplay,
 };
 use talos_application_service::{
     TimelineCursorStatus as ApplicationTimelineCursorStatus, TimelineSubscribeParams,
@@ -285,15 +285,6 @@ fn map_active_turn_status(status: ActiveTurnStatus) -> TimelineActiveTurnStatus 
 
 fn map_pending_user_action(action: PendingUserAction) -> TimelinePendingUserAction {
     match action {
-        PendingUserAction::ToolApproval(pending) => {
-            TimelinePendingUserAction::ToolApproval(TimelinePendingToolApproval {
-                item_id: pending.item_id,
-                call_id: pending.call_id,
-                tool_name: pending.tool_name,
-                prompt: pending.prompt,
-                arguments: pending.arguments,
-            })
-        }
         PendingUserAction::DynamicToolResult(pending) => {
             TimelinePendingUserAction::DynamicToolResult(TimelinePendingDynamicToolResult {
                 item_id: pending.item_id,

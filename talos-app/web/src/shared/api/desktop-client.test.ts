@@ -140,6 +140,7 @@ function eventEnvelope(
               completed_at_ms: 2n,
               stop_reason: "end_turn",
               usage: usage(),
+              metrics: null,
             },
     },
   };

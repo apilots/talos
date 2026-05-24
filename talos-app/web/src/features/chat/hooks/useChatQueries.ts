@@ -17,12 +17,10 @@ import {
   listProjects,
   listSessions,
   updateSessionModel,
-  updateSessionApprovalMode,
   updateSessionProject,
 } from "../api";
 import { useAppStore } from "@/shared/store/app-store";
 import { getEffectiveSessionStatus, resolveProjectRecord } from "@/shared/types/domain";
-import type { ApprovalMode } from "@/shared/types/ui";
 
 export const chatKeys = {
   all: ["talos"] as const,
@@ -148,22 +146,14 @@ export function useCreateSessionMutation() {
   const connectionKey = useConnectionKey();
   const queryClient = useQueryClient();
   const userId = useAppStore((state) => state.connection.userId);
-  const defaultApprovalMode = useAppStore((state) => state.connection.defaultApprovalMode);
   const activeProjectId = useAppStore((state) => state.activeProjectId);
   const projects = useAppStore((state) => state.projects);
   return useMutation({
-    mutationFn: ({
-      model,
-      approvalMode = defaultApprovalMode,
-    }: {
-      model: string | undefined;
-      approvalMode?: ApprovalMode;
-    }) =>
+    mutationFn: ({ model }: { model: string | undefined }) =>
       createSession(
         userId,
         model,
         resolveProjectRecord(projects, activeProjectId),
-        approvalMode,
       ),
     onSuccess: async (session) => {
       await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
@@ -213,18 +203,6 @@ export function useUpdateSessionModelMutation(sessionId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: updateSessionModel.bind(null, sessionId),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
-      await queryClient.invalidateQueries({ queryKey: chatKeys.session(connectionKey, sessionId) });
-    },
-  });
-}
-
-export function useUpdateSessionApprovalModeMutation(sessionId: string) {
-  const connectionKey = useConnectionKey();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (approvalMode: ApprovalMode) => updateSessionApprovalMode(sessionId, approvalMode),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
       await queryClient.invalidateQueries({ queryKey: chatKeys.session(connectionKey, sessionId) });

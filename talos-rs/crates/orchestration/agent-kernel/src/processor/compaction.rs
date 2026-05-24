@@ -16,7 +16,6 @@ fn is_context_visible_event(event: &KernelTranscriptEvent) -> bool {
             KernelTranscriptPayload::StateOnly
                 | KernelTranscriptPayload::Transfer { .. }
                 | KernelTranscriptPayload::Auth { .. }
-                | KernelTranscriptPayload::Confirmation { .. }
         )
         && event.payload.message().is_some_and(|message| {
             !message.content.trim().is_empty() || message.tool_calls.is_some()

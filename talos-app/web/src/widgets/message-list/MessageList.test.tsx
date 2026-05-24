@@ -311,6 +311,40 @@ describe("MessageList", () => {
     expect(queryByLabelText("Waiting for timeline update")).toBeNull();
   });
 
+  it("shows the timeline waiting indicator while a live turn is between completed tool work and the next server item", async () => {
+    const { getByLabelText } = render(
+      <MessageList
+        blocks={[
+          {
+            id: "timeline-awaiting-next-item",
+            kind: "timeline",
+            live: true,
+            items: [
+              {
+                itemId: "tool-1",
+                kind: "tool_call",
+                phase: "acting",
+                status: "completed",
+                title: "Read",
+                callId: "call-1",
+                toolName: "Read",
+                arguments: { path: "README.md" },
+                output: "ok",
+                progress: [],
+                startedAtMs: Date.now() - 1200,
+                completedAtMs: Date.now() - 200,
+              },
+            ],
+          },
+        ]}
+        emptyDetail=""
+        emptyTitle=""
+      />,
+    );
+
+    expect(getByLabelText("Waiting for timeline update")).not.toBeNull();
+  });
+
   it("keeps live timeline open across idle gaps and reopens after manual collapse when new events arrive", async () => {
     const runningBlock = {
       id: "timeline-3",

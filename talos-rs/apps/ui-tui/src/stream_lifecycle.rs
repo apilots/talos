@@ -1,7 +1,7 @@
 use std::time::Instant;
 
-use talos_client::{TalosInputItem, TalosMessageRequest};
 use talos_error::{TalosError, TalosResult};
+use talos_sdk::{TalosInputItem, TalosMessageRequest};
 use tokio::sync::mpsc;
 use tracing::error;
 

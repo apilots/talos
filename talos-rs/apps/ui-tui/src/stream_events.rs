@@ -1,11 +1,11 @@
-use talos_client::{
+use talos_sdk::{
     SessionHistorySnapshot, TalosContentItem, TalosJsonValue, TalosTimelineContent,
     TalosTimelineDelta, TalosTimelineEventPayload, TalosTimelineItem, TalosTimelineItemKind,
     TalosTimelineItemStatus, TalosTimelinePhase, TalosToolProgressKind, TimelineEventEnvelope,
     TimelineRecoverySnapshot,
 };
 
-use crate::types::{ChatRole, PendingApprovalState, ToolCallStatus};
+use crate::types::{ChatRole, ToolCallStatus};
 use crate::TuiApp;
 
 impl TuiApp {
@@ -64,6 +64,9 @@ impl TuiApp {
                     payload.completed_at_ms,
                     payload.final_content,
                 );
+            }
+            TalosTimelineEventPayload::AssistantTextCommitted(payload) => {
+                self.handle_assistant_text_committed(&payload.item_id, payload.phase);
             }
             TalosTimelineEventPayload::TurnCompleted(payload) => {
                 self.session_usage.accumulate(&payload.usage);
@@ -154,7 +157,7 @@ impl TuiApp {
             }
             (
                 TalosTimelineItemKind::AssistantText,
-                TalosTimelinePhase::Commentary,
+                TalosTimelinePhase::Unknown | TalosTimelinePhase::Commentary,
                 TalosTimelineContent::Text { text },
             ) => {
                 if text.trim().is_empty() {
@@ -257,7 +260,7 @@ impl TuiApp {
             }
             (
                 TalosTimelineItemKind::AssistantText,
-                TalosTimelinePhase::Commentary,
+                TalosTimelinePhase::Unknown | TalosTimelinePhase::Commentary,
                 TalosTimelineContent::Text { text },
             ) => {
                 if !text.is_empty() {
@@ -360,38 +363,6 @@ impl TuiApp {
                     self.update_stored_tool_result(item_id, content, is_error);
                 }
             }
-            TalosTimelineDelta::ToolApprovalRequest {
-                call_id,
-                tool_name,
-                prompt,
-                arguments,
-            } => {
-                self.transcript.note_visible_activity();
-                self.push_right_event(format!(
-                    "approval needed: {} ({})",
-                    crate::utils::display_tool_name(&tool_name),
-                    call_id
-                ));
-                self.upsert_tool_event(
-                    call_id.clone(),
-                    format!("approval: {}", crate::utils::display_tool_name(&tool_name)),
-                );
-                self.pending_approval = Some(PendingApprovalState {
-                    call_id: call_id.clone(),
-                    tool_name: tool_name.clone(),
-                    prompt: prompt.clone(),
-                    arguments: arguments.clone(),
-                });
-                self.push_tool_call_block(call_id.clone(), tool_name, arguments, 0, 0, None);
-                self.update_tool_call_status(&call_id, ToolCallStatus::PendingApproval);
-                self.append_tool_call_progress(
-                    &call_id,
-                    Self::format_tool_progress_line(
-                        TalosToolProgressKind::Status,
-                        "waiting for approval",
-                    ),
-                );
-            }
             TalosTimelineDelta::ToolDynamicRequest {
                 call_id,
                 tool_name,
@@ -408,7 +379,7 @@ impl TuiApp {
                     format!("running: {}", crate::utils::display_tool_name(&tool_name)),
                 );
                 self.push_tool_call_block(call_id.clone(), tool_name, arguments, 0, 0, None);
-                self.update_tool_call_status(&call_id, ToolCallStatus::Running);
+                self.update_tool_call_status(&call_id, ToolCallStatus::PendingDynamicInput);
             }
             TalosTimelineDelta::Status { status } => {
                 if let Some(call_id) = self.tool_call_id(item_id) {
@@ -459,12 +430,73 @@ impl TuiApp {
         self.clear_live_tool_progress(&call_id);
     }
 
+    fn handle_assistant_text_committed(&mut self, item_id: &str, phase: TalosTimelinePhase) {
+        let Some(item) = self.timeline_items.get_mut(item_id) else {
+            return;
+        };
+        let previous_phase = item.phase;
+        item.phase = phase;
+        if !matches!(
+            (previous_phase, phase),
+            (TalosTimelinePhase::Unknown, TalosTimelinePhase::FinalAnswer)
+        ) {
+            return;
+        }
+        let TalosTimelineContent::Text { text } = &item.content else {
+            return;
+        };
+        let text = text.clone();
+        if text.trim().is_empty() {
+            return;
+        }
+        self.remove_text_from_live_thinking(&text);
+        self.transcript.note_visible_activity();
+        self.append_assistant(&text);
+        self.received_output_delta = true;
+    }
+
+    fn remove_text_from_live_thinking(&mut self, text: &str) {
+        let Some(idx) = self.transcript.live_thinking_idx else {
+            return;
+        };
+        let Some(block) = self.chat_blocks.get_mut(idx) else {
+            self.transcript.live_thinking_idx = None;
+            return;
+        };
+        if block.content == text {
+            self.remove_chat_block(idx);
+            self.rebuild_chat_history();
+            self.transcript.live_thinking_idx = None;
+            return;
+        }
+        if let Some(start) = block.content.rfind(text) {
+            let end = start + text.len();
+            block.content.replace_range(start..end, "");
+        }
+        let should_remove = self
+            .chat_blocks
+            .get(idx)
+            .map(|block| block.content.trim().is_empty())
+            .unwrap_or(false);
+        if should_remove {
+            self.remove_chat_block(idx);
+            self.rebuild_chat_history();
+            self.transcript.live_thinking_idx = None;
+        } else {
+            self.sync_history_entry(idx);
+        }
+    }
+
     fn handle_text_delta(&mut self, item: &TalosTimelineItem, text: &str) {
         if text.is_empty() {
             return;
         }
         match item.phase {
             TalosTimelinePhase::Thinking => {
+                self.transcript.note_visible_activity();
+                self.append_thinking(text);
+            }
+            TalosTimelinePhase::Unknown => {
                 self.transcript.note_visible_activity();
                 self.append_thinking(text);
             }
@@ -518,7 +550,7 @@ impl TuiApp {
     ) {
         if let Some(item) = self.timeline_items.get_mut(item_id) {
             if let TalosTimelineContent::ToolCall { result, .. } = &mut item.content {
-                *result = Some(talos_client::TalosToolResult { content, is_error });
+                *result = Some(talos_sdk::TalosToolResult { content, is_error });
             }
         }
     }
@@ -541,7 +573,7 @@ fn parse_tool_arguments(arguments: &str) -> TalosJsonValue {
 fn timeline_tool_status(status: TalosTimelineItemStatus) -> ToolCallStatus {
     match status {
         TalosTimelineItemStatus::Running => ToolCallStatus::Running,
-        TalosTimelineItemStatus::WaitingApproval => ToolCallStatus::PendingApproval,
+        TalosTimelineItemStatus::WaitingDynamicInput => ToolCallStatus::PendingDynamicInput,
         TalosTimelineItemStatus::Completed => ToolCallStatus::Completed { exit_ok: true },
         TalosTimelineItemStatus::Failed => ToolCallStatus::Completed { exit_ok: false },
         TalosTimelineItemStatus::Cancelled => ToolCallStatus::Completed { exit_ok: false },

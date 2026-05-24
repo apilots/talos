@@ -1,8 +1,68 @@
 use super::*;
+use talos_error::TalosError;
 use talos_llm_provider::{
-    CacheControl, CacheControlKind, ChatMessage, ChatRequest, LlmProvider, NativeThinkingConfig,
+    CacheControl, CacheControlKind, ChatMessage, ChatRequest, LlmProvider, ModelBlockDelta,
+    ModelBlockKind, ModelBlockStream, ModelBlockStreamEvent, NativeThinkingConfig,
     NativeThinkingEffort, NativeThinkingSupport, PromptCacheSupport, ToolDefinition,
 };
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+
+async fn spawn_sse_server(body: String) -> String {
+    spawn_sse_server_chunks(vec![body]).await
+}
+
+async fn spawn_sse_server_chunks(chunks: Vec<String>) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("test server should bind");
+    let addr = listener
+        .local_addr()
+        .expect("test server addr should exist");
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.expect("request should arrive");
+        let mut buf = vec![0; 4096];
+        let _ = socket.read(&mut buf).await.expect("request should read");
+        let content_length: usize = chunks.iter().map(|chunk| chunk.len()).sum();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+            content_length
+        );
+        socket
+            .write_all(response.as_bytes())
+            .await
+            .expect("headers should write");
+        for chunk in chunks {
+            socket
+                .write_all(chunk.as_bytes())
+                .await
+                .expect("chunk should write");
+        }
+    });
+    format!("http://{addr}")
+}
+
+async fn collect_model_events(mut stream: ModelBlockStream) -> Vec<ModelBlockStreamEvent> {
+    let mut events = Vec::new();
+    while let Some(event) = stream.next().await {
+        let event = event.expect("model block event should succeed");
+        let done = matches!(event, ModelBlockStreamEvent::Done { .. });
+        events.push(event);
+        if done {
+            break;
+        }
+    }
+    events
+}
+
+async fn collect_first_model_error(mut stream: ModelBlockStream) -> TalosError {
+    while let Some(event) = stream.next().await {
+        if let Err(err) = event {
+            return err;
+        }
+    }
+    panic!("stream should emit an error");
+}
 
 #[test]
 fn test_anthropic_config_builder() {
@@ -13,6 +73,103 @@ fn test_anthropic_config_builder() {
     assert_eq!(config.api_key, "test-api-key");
     assert_eq!(config.base_url, "https://custom.anthropic.com/v1");
     assert_eq!(config.timeout_secs, 120);
+}
+
+#[tokio::test]
+async fn test_stream_model_blocks_maps_content_block_lifecycle() {
+    let body = concat!(
+        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\"}}\n\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"think\"}}\n\n",
+        "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+        "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\"}}\n\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n",
+        "data: {\"type\":\"content_block_stop\",\"index\":1}\n\n",
+        "data: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_1\",\"name\":\"read\"}}\n\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"/tmp/a\\\"}\"}}\n\n",
+        "data: {\"type\":\"content_block_stop\",\"index\":2}\n\n",
+        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":2}}\n\n",
+        "data: {\"type\":\"message_stop\"}\n\n"
+    )
+    .to_string();
+    let base_url = spawn_sse_server(body).await;
+    let provider =
+        AnthropicProvider::new(AnthropicConfig::new("test-api-key").with_base_url(base_url));
+    let stream = provider
+        .stream_model_blocks(ChatRequest::new_user("test", "claude-test"))
+        .await
+        .expect("stream should start");
+
+    let events = collect_model_events(stream).await;
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::BlockStarted(started)
+            if started.model_item_id == "anthropic-block-0-thinking"
+                && started.kind == ModelBlockKind::Reasoning
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::BlockDelta { model_item_id, delta: ModelBlockDelta::AssistantText { delta } }
+            if model_item_id == "anthropic-block-1-text" && delta == "hello"
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::BlockStarted(started)
+            if started.model_item_id == "anthropic-block-2-tool"
+                && started.provider_item_id.as_deref() == Some("call_1")
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::BlockCompleted(completed)
+            if completed.model_item_id == "anthropic-block-2-tool"
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::Done { usage: Some(usage), .. }
+            if usage.completion_tokens == 2
+    )));
+}
+
+#[tokio::test]
+async fn test_stream_model_blocks_buffers_split_sse_lines() {
+    let chunks = vec![
+        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\n"
+            .to_string(),
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"he".to_string(),
+        "llo\"}}\n\n".to_string(),
+        "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n".to_string(),
+        "data: {\"type\":\"message_stop\"}\n\n".to_string(),
+    ];
+    let base_url = spawn_sse_server_chunks(chunks).await;
+    let provider =
+        AnthropicProvider::new(AnthropicConfig::new("test-api-key").with_base_url(base_url));
+    let stream = provider
+        .stream_model_blocks(ChatRequest::new_user("test", "claude-test"))
+        .await
+        .expect("stream should start");
+
+    let events = collect_model_events(stream).await;
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::BlockDelta { model_item_id, delta: ModelBlockDelta::AssistantText { delta } }
+            if model_item_id == "anthropic-block-0-text" && delta == "hello"
+    )));
+}
+
+#[tokio::test]
+async fn test_stream_model_blocks_fails_invalid_sse_json() {
+    let base_url = spawn_sse_server("data: {not-json}\n\n".to_string()).await;
+    let provider =
+        AnthropicProvider::new(AnthropicConfig::new("test-api-key").with_base_url(base_url));
+    let stream = provider
+        .stream_model_blocks(ChatRequest::new_user("test", "claude-test"))
+        .await
+        .expect("stream should start");
+
+    let err = collect_first_model_error(stream).await;
+
+    assert!(format!("{err}").contains("invalid SSE JSON"));
 }
 
 #[test]

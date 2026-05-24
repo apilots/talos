@@ -1,8 +1,8 @@
 use ratatui::text::Line;
-use talos_client::{
+use talos_error::TalosResult;
+use talos_sdk::{
     ModelInfo, SessionHistorySnapshot, TalosJsonValue, TalosSession, TimelineRecoverySnapshot,
 };
-use talos_error::TalosResult;
 
 // ── Suggestions ──────────────────────────────────────────────────────────────
 
@@ -129,7 +129,7 @@ impl ChatRole {
 pub(crate) enum ToolCallStatus {
     Queued,
     Running,
-    PendingApproval,
+    PendingDynamicInput,
     Completed { exit_ok: bool },
 }
 
@@ -257,7 +257,7 @@ pub(crate) struct ChatSelection {
     pub(crate) focus: SelectionPoint,
 }
 
-// ── Queue / approval types ───────────────────────────────────────────────────
+// ── Queue types ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub(crate) struct QueuedMessage {
@@ -272,15 +272,6 @@ impl QueuedMessage {
             dispatch_attempts: 0,
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct PendingApprovalState {
-    pub(crate) call_id: String,
-    pub(crate) tool_name: String,
-    pub(crate) prompt: String,
-    #[allow(dead_code)]
-    pub(crate) arguments: TalosJsonValue,
 }
 
 pub(crate) struct SessionHistoryLoad {

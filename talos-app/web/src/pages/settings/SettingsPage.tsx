@@ -52,8 +52,6 @@ export function SettingsPage() {
     setSafeFileReads,
     safeFileWrites,
     setSafeFileWrites,
-    terminalApproval,
-    setTerminalApproval,
     models,
   } = useSettingsPage();
   const requestedSection = params.section;
@@ -130,8 +128,6 @@ export function SettingsPage() {
                 safeFileWrites={safeFileWrites}
                 setSafeFileReads={setSafeFileReads}
                 setSafeFileWrites={setSafeFileWrites}
-                setTerminalApproval={setTerminalApproval}
-                terminalApproval={terminalApproval}
               />
             ) : null}
 

@@ -1,22 +1,27 @@
 import type {
-  ApprovalMode,
   ChatTimelineItem,
-  PendingApproval,
   PendingInput,
   SessionUiStatus,
   StreamSessionState,
 } from "@/shared/types/ui";
+import type { TalosTimelinePhase } from "@talos/sdk-core";
+import {
+  appendTimelineItemTextInStream,
+  commitTimelineAssistantTextInStream,
+  completeTimelineItemInStream,
+  setTimelineLiveInStream,
+  updateTimelineToolInStream,
+  upsertTimelineItemInStream,
+} from "./timeline-state";
 
 type StreamTextKind = "assistant" | "thinking" | "system";
 
 export interface ChatSlice {
   sessionAliases: Record<string, string>;
-  sessionApprovalModes: Record<string, ApprovalMode>;
   transientStatuses: Record<string, SessionUiStatus>;
   streams: Record<string, StreamSessionState>;
   renameSessionLocal: (sessionId: string, title: string) => void;
   deleteSessionAlias: (sessionId: string) => void;
-  setSessionApprovalMode: (sessionId: string, mode: ApprovalMode) => void;
   setSessionStatus: (sessionId: string, status: SessionUiStatus | undefined) => void;
   resetStream: (sessionId: string) => void;
   resetLiveResponse: (sessionId: string) => void;
@@ -52,6 +57,11 @@ export interface ChatSlice {
   ) => void;
   upsertTimelineItem: (sessionId: string, item: ChatTimelineItem) => void;
   appendTimelineItemText: (sessionId: string, item: ChatTimelineItem, chunk: string, sequence?: number) => void;
+  commitTimelineAssistantText: (
+    sessionId: string,
+    itemId: string,
+    phase: TalosTimelinePhase,
+  ) => void;
   updateTimelineTool: (
     sessionId: string,
     itemId: string,
@@ -63,11 +73,11 @@ export interface ChatSlice {
     status: ChatTimelineItem["status"],
     completedAtMs: number,
   ) => void;
+  setTimelineLive: (sessionId: string, live: boolean) => void;
   setPendingUserAction: (
     sessionId: string,
     pendingUserAction?: StreamSessionState["pendingUserAction"],
   ) => void;
-  setPendingApproval: (sessionId: string, approval?: PendingApproval) => void;
   setStreamError: (sessionId: string, error?: string) => void;
   setStreamMeta: (
     sessionId: string,
@@ -102,60 +112,9 @@ function ensureStreamState(state: Pick<ChatSlice, "streams">, sessionId: string)
   );
 }
 
-function ensureTimelineBlock(blocks: StreamSessionState["blocks"], sessionId: string) {
-  const existingIndex = blocks.findIndex((block) => block.kind === "timeline");
-  if (existingIndex >= 0) {
-    return existingIndex;
-  }
-  blocks.push({
-    id: `timeline-${sessionId}`,
-    kind: "timeline",
-    items: [],
-    live: true,
-  });
-  return blocks.length - 1;
-}
-
-function mergeTimelineItem(
-  current: ChatTimelineItem,
-  next: ChatTimelineItem,
-): ChatTimelineItem {
-  if (current.kind === "tool_call" && next.kind === "tool_call") {
-    const status =
-      current.status === "waiting_approval" && next.status === "running"
-        ? current.status
-        : next.status;
-    return {
-      ...current,
-      ...next,
-      status,
-      progress: next.progress.length > 0 ? next.progress : current.progress,
-      output: next.output ?? current.output,
-      prompt: next.prompt ?? current.prompt,
-      completedAtMs: next.completedAtMs ?? current.completedAtMs,
-    };
-  }
-  if (current.kind !== "tool_call" && next.kind !== "tool_call") {
-    return {
-      ...current,
-      ...next,
-      text: next.text || current.text,
-      completedAtMs: next.completedAtMs ?? current.completedAtMs,
-    };
-  }
-  return next;
-}
-
-type TextTimelineItem = Extract<ChatTimelineItem, { text: string }>;
-
-function isTextTimelineItem(item: ChatTimelineItem): item is TextTimelineItem {
-  return item.kind !== "tool_call";
-}
-
 export function createChatSlice(set: ChatSliceSetter): ChatSlice {
   return {
     sessionAliases: {},
-    sessionApprovalModes: {},
     transientStatuses: {},
     streams: {},
     renameSessionLocal: (sessionId, title) =>
@@ -171,13 +130,6 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
         delete aliases[sessionId];
         return { sessionAliases: aliases };
       }),
-    setSessionApprovalMode: (sessionId, mode) =>
-      set((state) => ({
-        sessionApprovalModes: {
-          ...state.sessionApprovalModes,
-          [sessionId]: mode,
-        },
-      })),
     setSessionStatus: (sessionId, status) =>
       set((state) => {
         const next = { ...state.transientStatuses };
@@ -206,7 +158,6 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
               isStreaming: false,
               connectionState: "idle",
               blocks: [],
-              pendingApproval: undefined,
               pendingUserAction: undefined,
               awaitingFinalResponse: false,
               error: undefined,
@@ -312,7 +263,7 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
               (payload.status as
                 | "queued"
                 | "running"
-                | "waiting_approval"
+                | "waiting_dynamic_input"
                 | "done"
                 | "error"
                 | undefined) ?? "queued",
@@ -373,109 +324,66 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
     upsertTimelineItem: (sessionId, item) =>
       set((state) => {
         const stream = ensureStreamState(state, sessionId);
-        const blocks = [...stream.blocks];
-        const timelineIndex = ensureTimelineBlock(blocks, sessionId);
-        const timeline = blocks[timelineIndex];
-        if (timeline.kind !== "timeline") {
-          return {};
-        }
-        const existingIndex = timeline.items.findIndex((entry) => entry.itemId === item.itemId);
-        const items = [...timeline.items];
-        if (existingIndex >= 0) {
-          items[existingIndex] = mergeTimelineItem(items[existingIndex], item);
-        } else {
-          items.push(item);
-        }
-        blocks[timelineIndex] = { ...timeline, items, live: true };
         return {
           streams: {
             ...state.streams,
-            [sessionId]: { ...stream, isStreaming: true, blocks },
+            [sessionId]: upsertTimelineItemInStream(stream, sessionId, item),
           },
         };
       }),
     appendTimelineItemText: (sessionId, sourceItem, chunk, sequence) =>
       set((state) => {
         const stream = ensureStreamState(state, sessionId);
-        const blocks = [...stream.blocks];
-        const timelineIndex = ensureTimelineBlock(blocks, sessionId);
-        const timeline = blocks[timelineIndex];
-        if (timeline.kind !== "timeline") {
-          return {};
-        }
-        const sourceItemId = sourceItem.sourceItemId ?? sourceItem.itemId;
-        const sameSource = (item: ChatTimelineItem): item is TextTimelineItem =>
-          isTextTimelineItem(item) && (item.sourceItemId ?? item.itemId) === sourceItemId;
-        const items = timeline.items.filter((item) => !sameSource(item) || item.text.trim() !== "");
-        const lastItem = items.at(-1);
-        if (lastItem && sameSource(lastItem)) {
-          items[items.length - 1] = { ...lastItem, text: lastItem.text + chunk };
-        } else if (sourceItem.kind !== "tool_call") {
-          const hasExistingSegment = items.some(sameSource);
-          items.push({
-            ...sourceItem,
-            itemId: hasExistingSegment ? `${sourceItemId}::segment-${sequence ?? items.length}` : sourceItemId,
-            sourceItemId,
-            text: chunk,
-          });
-        }
-        blocks[timelineIndex] = { ...timeline, items, live: true };
         return {
           streams: {
             ...state.streams,
-            [sessionId]: { ...stream, isStreaming: true, blocks },
+            [sessionId]: appendTimelineItemTextInStream(
+              stream,
+              sessionId,
+              sourceItem,
+              chunk,
+              sequence,
+            ),
+          },
+        };
+      }),
+    commitTimelineAssistantText: (sessionId, itemId, phase) =>
+      set((state) => {
+        const stream = ensureStreamState(state, sessionId);
+        return {
+          streams: {
+            ...state.streams,
+            [sessionId]: commitTimelineAssistantTextInStream(stream, itemId, phase),
           },
         };
       }),
     updateTimelineTool: (sessionId, itemId, payload) =>
       set((state) => {
         const stream = ensureStreamState(state, sessionId);
-        const blocks = stream.blocks.map((block) => {
-          if (block.kind !== "timeline") {
-            return block;
-          }
-          return {
-            ...block,
-            live: true,
-            items: block.items.map((item) => {
-              if (item.itemId !== itemId || item.kind !== "tool_call") {
-                return item;
-              }
-              return {
-                ...item,
-                ...payload,
-                progress: payload.progress ?? item.progress,
-              };
-            }),
-          };
-        });
         return {
           streams: {
             ...state.streams,
-            [sessionId]: { ...stream, isStreaming: true, blocks },
+            [sessionId]: updateTimelineToolInStream(stream, itemId, payload),
           },
         };
       }),
     completeTimelineItem: (sessionId, itemId, status, completedAtMs) =>
       set((state) => {
         const stream = ensureStreamState(state, sessionId);
-        const blocks = stream.blocks.map((block) => {
-          if (block.kind !== "timeline") {
-            return block;
-          }
-          return {
-            ...block,
-            items: block.items.map((item) =>
-              (item.itemId === itemId || item.sourceItemId === itemId)
-                ? { ...item, status, completedAtMs }
-                : item,
-            ),
-          };
-        });
         return {
           streams: {
             ...state.streams,
-            [sessionId]: { ...stream, blocks },
+            [sessionId]: completeTimelineItemInStream(stream, itemId, status, completedAtMs),
+          },
+        };
+      }),
+    setTimelineLive: (sessionId, live) =>
+      set((state) => {
+        const stream = ensureStreamState(state, sessionId);
+        return {
+          streams: {
+            ...state.streams,
+            [sessionId]: setTimelineLiveInStream(stream, live),
           },
         };
       }),
@@ -486,16 +394,6 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
           streams: {
             ...state.streams,
             [sessionId]: { ...stream, pendingUserAction },
-          },
-        };
-      }),
-    setPendingApproval: (sessionId, pendingApproval) =>
-      set((state) => {
-        const stream = ensureStreamState(state, sessionId);
-        return {
-          streams: {
-            ...state.streams,
-            [sessionId]: { ...stream, pendingApproval },
           },
         };
       }),

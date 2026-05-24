@@ -16,7 +16,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint src vite.config.ts vite.preload.config.ts --ext .ts",
     "test": "vitest run --passWithNoTests",
-    "smoke": "pnpm build && (cd ../../talos-rs && cargo build -p talos) && node scripts/desktop-smoke.mjs",
+    "smoke": "pnpm build && (cd ../../talos-rs && cargo build -p app-server --bin app-server) && node scripts/desktop-smoke.mjs",
     "check": "pnpm lint && pnpm test && pnpm typecheck && pnpm build"
   },
   "dependencies": {

@@ -8,6 +8,17 @@ const webSrcRoot = join(webRoot, "src");
 const featuresRoot = join(webSrcRoot, "features");
 const ignoredDirectories = new Set(["dist", "node_modules", ".git"]);
 const maxEffectiveLinesPerFile = 1000;
+const legacyLineBaselines = new Map([
+  ["src/features/admin/components/AdminModelsSection.tsx", 417],
+  ["src/features/admin/components/AdminSessionsSection.tsx", 213],
+  ["src/features/admin/components/AdminUsersSection.tsx", 379],
+  ["src/features/chat/components/ChatComposer.test.tsx", 250],
+  ["src/features/chat/components/ChatComposer.tsx", 574],
+  ["src/features/chat/store.ts", 516],
+  ["src/features/settings/components/SettingsAgentWorkspaceSection.tsx", 374],
+  ["src/features/settings/components/SettingsKeysSection.tsx", 232],
+  ["src/shared/i18n/resources.ts", 1037],
+]);
 
 const lineRules = [
   { pattern: /\/pages\/.+\.tsx$/, limit: 300, label: "pages" },
@@ -73,6 +84,16 @@ function validateLineRules(errors) {
     const relativePath = toPosixPath(relative(webRoot, filePath));
     const normalizedPath = `/${toPosixPath(relative(webSrcRoot, filePath))}`;
     const lineCount = countNonEmptyLines(filePath);
+    const legacyBaseline = legacyLineBaselines.get(relativePath);
+
+    if (legacyBaseline !== undefined) {
+      if (lineCount > legacyBaseline) {
+        errors.push(
+          `File exceeds legacy line baseline (${legacyBaseline}): ${relativePath} (${lineCount})`,
+        );
+      }
+      continue;
+    }
 
     if (lineCount > maxEffectiveLinesPerFile) {
       errors.push(

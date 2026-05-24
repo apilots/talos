@@ -9,10 +9,10 @@ load_env
 build_binaries
 prepare_talos_home
 
-export TALOS_APP_SERVER_BIN="${ROOT_DIR}/target/debug/talos"
+export TALOS_APP_SERVER_BIN="${ROOT_DIR}/target/debug/app-server"
 export TALOS_LOCAL_LAUNCH_TOKEN="${TALOS_LOCAL_LAUNCH_TOKEN:-talos-cli-app-server-test-token}"
 
-cli="${ROOT_DIR}/target/debug/talos-client"
+cli="${ROOT_DIR}/target/debug/talos-cli"
 
 run_cli() {
   "${cli}" "$@" 2>&1 | sed '/^Command executed successfully$/d'

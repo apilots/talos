@@ -17,14 +17,6 @@ pub trait Gateway: Send + Sync {
         request: GatewayRequest,
     ) -> TalosResult<mpsc::Receiver<TalosTimelineEvent>>;
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()>;
-    async fn submit_tool_approval(
-        &self,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-        approved: bool,
-        reason: Option<String>,
-    ) -> TalosResult<()>;
     async fn submit_dynamic_tool_result(
         &self,
         session_id: &str,

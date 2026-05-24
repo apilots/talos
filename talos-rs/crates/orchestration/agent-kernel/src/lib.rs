@@ -1,16 +1,10 @@
 mod callbacks;
-mod composite;
 mod contents_builder;
 mod execution;
-mod flow;
 mod general_turn;
-mod llm_agent;
 mod planner;
-mod planner_selector;
 mod plugin;
 mod processor;
-mod runner;
-mod runtime;
 mod session;
 mod timeline;
 mod tool_execution;
@@ -24,50 +18,43 @@ pub use callbacks::{
     AfterModelCallback, AfterToolCallback, BeforeModelCallback, BeforeToolCallback,
     CallbackControl, CallbackKind, CallbackRegistry, ToolCallbackPayload,
 };
-pub use composite::{
-    LoopKernelAgent, ParallelKernelAgent, RoutingKernelAgent, SequentialKernelAgent,
-};
 pub use contents_builder::ContentsBuilder;
 pub use execution::ReplayToolInvocation;
 pub use execution::{
-    AuthRequestPayload, CompactionSummaryPayload, ConfirmationRequestPayload, EventActions,
-    EventAuthor, EventPayload, EventSink, ExecutionBranch, ExecutionEvent, ExecutionEventBuffer,
-    ExecutionEventHandler, ExecutionEventKind, LlmRequestEnvelope, LlmResponseEnvelope,
-    PlanningRequestEffect, PlanningResponseEffect, PlanningResponseSegment,
-    PlanningResponseSegmentKind, RequestCacheContext, RequestInteractionContext,
-    RequestOutputContract, ResponseDisposition, StateDelta, StateNamespace, VecEventSink,
+    AuthRequestPayload, CompactionSummaryPayload, EventActions, EventAuthor, EventPayload,
+    EventSink, ExecutionBranch, ExecutionEvent, ExecutionEventBuffer, ExecutionEventHandler,
+    ExecutionEventKind, LlmRequestEnvelope, LlmResponseEnvelope, PlanningRequestEffect,
+    PlanningResponseEffect, PlanningResponseSegment, PlanningResponseSegmentKind,
+    RequestCacheContext, RequestInteractionContext, RequestOutputContract, StateDelta,
+    StateNamespace, VecEventSink,
 };
-pub use flow::{AutoFlow, BaseLlmFlow, FlowExecution, FlowFactory, FlowRunSummary, SingleFlow};
 pub use general_turn::{
     apply_general_turn_step, apply_general_turn_tool_batch, build_general_turn_step_request,
-    emit_general_turn_finalization_stream, execute_general_turn_loop, execute_general_turn_step,
-    execute_general_turn_tool_batch, finalize_general_turn_artifacts, flush_session_memory,
-    flush_session_memory_with_report, persist_general_turn_artifacts, prepare_general_turn,
-    run_general_turn, ExecutedTurnArtifacts, GeneralTurnLoopState, GeneralTurnResult,
+    emit_general_turn_finalization_stream, execute_general_turn_loop,
+    execute_general_turn_loop_with_policy, execute_general_turn_loop_with_resume,
+    execute_general_turn_step, execute_general_turn_tool_batch, finalize_general_turn_artifacts,
+    flush_session_memory, flush_session_memory_with_report, persist_general_turn_artifacts,
+    prepare_general_turn, run_general_turn, run_general_turn_with_resume, BuiltInGeneralTurnPolicy,
+    DynamicToolResultResume, ExecutedTurnArtifacts, GeneralTurnLoopState, GeneralTurnOutcome,
+    GeneralTurnPolicy, GeneralTurnPolicyStop, GeneralTurnResult, GeneralTurnResume,
     GeneralTurnStepDisposition, GeneralTurnStepRequest, GeneralTurnStepResult,
     GeneralTurnToolBatch, MemoryFlushPolicy, MemoryFlushUsageReport, ModelFinishReason,
-    PlanReActLoopState, PreparedGeneralTurn, StreamingToolExecutionConfig,
+    PendingGeneralTurnAction, PlanReActGeneralTurnPolicy, PlanReActLoopState, PreparedGeneralTurn,
+    ResumeToolCall, StreamingToolExecutionConfig,
 };
-pub use llm_agent::LlmKernelAgent;
 pub use planner::{BuiltInPlanner, PlanReActPlanner};
-pub use planner_selector::{
-    LlmCallError, LlmCallStatus, PlannerSelectionRequest, PlannerSelectionResponse, PlannerSelector,
-};
 pub use plugin::{InvocationPluginManager, PluginRegistry};
 pub use processor::{
     AgentTransferRequestProcessor, BasicRequestProcessor, ContentsRequestProcessor,
-    EventProjectionProcessor, FinalAnswerExtractionProcessor, InstructionsRequestProcessor,
-    PlanningRequestProcessor, PlanningResponseProcessor, RequestProcessor, RequestProcessorKind,
-    RequestProcessorPipeline, ResponseProcessor, ResponseProcessorKind, ResponseProcessorPipeline,
-    StateDeltaResponseProcessor, ToolCallExtractionProcessor, ToolContextRequestProcessor,
+    EventProjectionProcessor, InstructionsRequestProcessor, PlanningRequestProcessor,
+    PlanningResponseProcessor, RequestProcessor, RequestProcessorKind, RequestProcessorPipeline,
+    ResponseProcessor, ResponseProcessorKind, ResponseProcessorPipeline,
+    StateDeltaResponseProcessor, ToolContextRequestProcessor,
 };
-pub use runner::DefaultRunner;
-pub use runtime::{KernelBuilder, KernelOutput, KernelRuntime};
 pub use session::{
-    InvocationSession, KernelTranscriptApprovalResponsePayload,
-    KernelTranscriptConfirmationPayload, KernelTranscriptEvent, KernelTranscriptEventKind,
-    KernelTranscriptFilter, KernelTranscriptPayload, KernelTranscriptService,
-    MemoryBackedKernelTranscriptService, SessionState,
+    InvocationSession, KernelTranscriptEvent, KernelTranscriptEventKind, KernelTranscriptFilter,
+    KernelTranscriptPayload, KernelTranscriptService, MemoryBackedKernelTranscriptService,
+    SessionState,
 };
 pub use timeline::TimelineBuilder;
 pub use tool_execution::{
@@ -75,18 +62,17 @@ pub use tool_execution::{
     StreamingToolScheduler, ToolExecutionContext, ToolExecutionInput, ToolExecutionOutput,
     ToolExecutor, ToolExecutorFactory,
 };
-pub use traits::{Agent, BaseKernelAgent, Planner, Plugin, Runner};
+pub use traits::{Planner, Plugin};
 pub use types::{
-    AgentRunResult, AssistantTextCompletedStreamData, AssistantTextDeltaStreamData,
-    AssistantTextStartedStreamData, ConfirmationRequestStreamData, ContextStateBags,
-    DynamicToolRequestStreamData, ExecutionPath, ExecutionSummaryStreamData,
-    FinalResponseEventData, FlowKind, FlowProfile, InvocationContext, InvocationExecutionState,
-    InvocationLimits, IterationEventData, KernelAssistantTextPhase, KernelEvent, KernelEventData,
-    KernelEventLabel, KernelEventType, KernelExecutionKind, KernelExecutionSettings,
-    KernelStreamEvent, KernelStreamEventData, KernelStreamEventType, KernelStreamItemKey,
-    KernelThinkingSource, KernelThinkingStage, PlannerKind, PromptWarningEventData, RunRequest,
-    RunResponse, StopReason, TaskCompletedEventData, TaskKind, TaskResult, TaskStatus,
-    ThinkingDeltaStreamData, ThinkingMode, ToolArgsDeltaStreamData, ToolCallStartStreamData,
+    AgentRunResult, AssistantTextCommittedStreamData, AssistantTextCompletedStreamData,
+    AssistantTextDeltaStreamData, AssistantTextStartedStreamData, ContextStateBags,
+    DynamicToolRequestStreamData, ExecutionSummaryStreamData, FinalResponseEventData, FlowProfile,
+    InvocationContext, InvocationExecutionState, InvocationLimits, IterationEventData,
+    KernelAssistantTextPhase, KernelEvent, KernelEventData, KernelEventLabel, KernelEventType,
+    KernelExecutionSettings, KernelModelCallMode, KernelStreamEvent, KernelStreamEventData,
+    KernelStreamEventType, KernelStreamItemKey, KernelThinkingSource, KernelThinkingStage,
+    PlannerKind, PromptWarningEventData, StopReason, TaskCompletedEventData, TaskKind, TaskResult,
+    TaskStatus, ThinkingDeltaStreamData, ToolArgsDeltaStreamData, ToolCallStartStreamData,
     ToolExecutingStreamData, ToolExecutionMode, ToolProgressDeltaStreamData, ToolProgressKind,
     ToolQueuedStreamData, ToolResultStreamData, ToolStreamKey, TransferRequestedEventData,
     TurnPhase, UserInputEventData,

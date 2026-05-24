@@ -23,7 +23,7 @@ mod scope_tests;
 
 pub use active_turn::{
     ActiveTurnRecord, ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate,
-    PendingDynamicToolResult, PendingToolApproval, PendingUserAction,
+    PendingDynamicToolResult, PendingUserAction,
 };
 pub use event_service::{TimelineEventRetentionConfig, TimelineEventService};
 pub use events::{TimelineEventId, TimelineEventStore};

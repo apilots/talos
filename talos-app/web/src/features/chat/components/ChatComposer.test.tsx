@@ -15,11 +15,9 @@ function renderComposer(overrides: Partial<React.ComponentProps<typeof ChatCompo
   return render(
     <ChatComposer
       activeProjectId={UNBOUND_PROJECT_ID}
-      approvalMode="skip"
       draft=""
       isStreaming={false}
       models={[{ id: "model-1", name: "Model 1" }]}
-      onApprovalModeChange={vi.fn()}
       onCancel={vi.fn()}
       onDraftChange={vi.fn()}
       onModelChange={vi.fn()}
@@ -45,12 +43,10 @@ function renderControlledComposer({
     return (
       <ChatComposer
         activeProjectId={UNBOUND_PROJECT_ID}
-        approvalMode="skip"
         disabled={false}
         draft={draft}
         isStreaming={false}
         models={[{ id: "model-1", name: "Model 1" }]}
-        onApprovalModeChange={vi.fn()}
         onCancel={vi.fn()}
         onDraftChange={setDraft}
         onModelChange={vi.fn()}
@@ -76,13 +72,11 @@ function renderControlledComposerWithRebuiltHistory(texts: string[]) {
     return (
       <ChatComposer
         activeProjectId={UNBOUND_PROJECT_ID}
-        approvalMode="skip"
         disabled={false}
         draft={draft}
         inputHistory={committedHistory(...texts)}
         isStreaming={false}
         models={[{ id: "model-1", name: "Model 1" }]}
-        onApprovalModeChange={vi.fn()}
         onCancel={vi.fn()}
         onDraftChange={setDraft}
         onModelChange={vi.fn()}
@@ -285,7 +279,7 @@ describe("ChatComposer", () => {
     expect(textarea).toHaveValue("");
   });
 
-  it("keeps Enter send behavior separate from history navigation", () => {
+  it("keeps Enter send behavior separate from history navigation and streaming state", () => {
     const onSend = vi.fn();
     renderControlledComposer({
       initialDraft: "send this",
@@ -296,6 +290,11 @@ describe("ChatComposer", () => {
 
     fireEvent.keyDown(textarea, { key: "Enter" });
 
+    expect(onSend).toHaveBeenCalledTimes(1);
+
+    cleanup();
+    renderComposer({ draft: "send this later", isStreaming: true, onSend });
+    fireEvent.keyDown(getComposerInput(), { key: "Enter" });
     expect(onSend).toHaveBeenCalledTimes(1);
   });
 });

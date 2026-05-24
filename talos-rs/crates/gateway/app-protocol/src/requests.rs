@@ -11,7 +11,7 @@ use ts_rs::TS;
 
 use crate::errors::AppServerErrorBody;
 use crate::version::ProtocolVersion;
-use talos_types::talos::{SessionHistorySnapshot, TalosJsonValue, TimelineEventEnvelope};
+use talos_types::talos::{SessionHistorySnapshot, TimelineEventEnvelope};
 
 pub const DEFERRED_CLIENT_METHODS: &[DeferredClientMethod] = &[];
 
@@ -67,8 +67,6 @@ pub enum ClientMethod {
     EventSubscribe,
     #[serde(rename = "event.unsubscribe")]
     EventUnsubscribe,
-    #[serde(rename = "tool.approval.submit")]
-    ToolApprovalSubmit,
     #[serde(rename = "tool.dynamic_result.submit")]
     ToolDynamicResultSubmit,
     #[serde(rename = "admin.session.list")]
@@ -158,7 +156,6 @@ impl ClientMethod {
             Self::TurnRetry => "turn.retry",
             Self::EventSubscribe => "event.subscribe",
             Self::EventUnsubscribe => "event.unsubscribe",
-            Self::ToolApprovalSubmit => "tool.approval.submit",
             Self::ToolDynamicResultSubmit => "tool.dynamic_result.submit",
             Self::AdminSessionList => "admin.session.list",
             Self::AdminProjectList => "admin.project.list",
@@ -227,7 +224,6 @@ impl FromStr for ClientMethod {
             "turn.retry" => Ok(Self::TurnRetry),
             "event.subscribe" => Ok(Self::EventSubscribe),
             "event.unsubscribe" => Ok(Self::EventUnsubscribe),
-            "tool.approval.submit" => Ok(Self::ToolApprovalSubmit),
             "tool.dynamic_result.submit" => Ok(Self::ToolDynamicResultSubmit),
             "admin.session.list" => Ok(Self::AdminSessionList),
             "admin.project.list" => Ok(Self::AdminProjectList),
@@ -311,8 +307,6 @@ pub enum ClientRequestParams {
     EventSubscribe(EventSubscribeParams),
     #[serde(rename = "event.unsubscribe")]
     EventUnsubscribe(EventUnsubscribeParams),
-    #[serde(rename = "tool.approval.submit")]
-    ToolApprovalSubmit(ToolApprovalSubmitParams),
     #[serde(rename = "tool.dynamic_result.submit")]
     ToolDynamicResultSubmit(ToolDynamicResultSubmitParams),
     #[serde(rename = "admin.session.list")]
@@ -434,9 +428,6 @@ impl ClientRequest {
             }
             ClientMethod::EventUnsubscribe => {
                 ClientRequestParams::EventUnsubscribe(decode(params_value)?)
-            }
-            ClientMethod::ToolApprovalSubmit => {
-                ClientRequestParams::ToolApprovalSubmit(decode(params_value)?)
             }
             ClientMethod::ToolDynamicResultSubmit => {
                 ClientRequestParams::ToolDynamicResultSubmit(decode(params_value)?)
@@ -693,18 +684,7 @@ pub enum TimelineActiveTurnStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TimelinePendingUserAction {
-    ToolApproval(TimelinePendingToolApproval),
     DynamicToolResult(TimelinePendingDynamicToolResult),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct TimelinePendingToolApproval {
-    #[serde(default)]
-    pub item_id: Option<String>,
-    pub call_id: String,
-    pub tool_name: String,
-    pub prompt: String,
-    pub arguments: TalosJsonValue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
@@ -815,16 +795,6 @@ pub struct EventUnsubscribeParams {
 pub struct EventUnsubscribeResponse {
     pub subscription_id: String,
     pub unsubscribed: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct ToolApprovalSubmitParams {
-    pub session_id: String,
-    pub call_id: String,
-    pub tool_name: String,
-    pub approved: bool,
-    #[serde(default)]
-    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]

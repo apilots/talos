@@ -1,0 +1,12 @@
+[package]
+name = "talos-server"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "talos-server"
+path = "src/main.rs"
+
+[dependencies]
+talos-base = { workspace = true }
+tokio = { workspace = true }

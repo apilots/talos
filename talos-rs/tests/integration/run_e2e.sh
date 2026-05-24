@@ -132,8 +132,8 @@ fail_count=0
   echo
   echo "- 执行时间: $(date '+%Y-%m-%d %H:%M:%S %z')"
   echo "- 工作目录: ${ROOT_DIR}"
-  echo "- 服务端: target/debug/talos"
-  echo "- 客户端 CLI: target/debug/talos-client"
+  echo "- 服务端: target/debug/talos-server"
+  echo "- 客户端 CLI: target/debug/talos-cli"
   echo
   echo "## 场景执行结果"
   echo

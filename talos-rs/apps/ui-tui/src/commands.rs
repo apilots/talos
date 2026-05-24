@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use talos_client::SessionCreateParams;
 use talos_error::{TalosError, TalosResult};
+use talos_sdk::SessionCreateParams;
 use tokio::sync::mpsc;
 use tracing::error;
 
@@ -10,7 +10,7 @@ use crate::client::GatewayClient;
 use crate::types::{AppState, ChatRole, QueuedMessage, RemoteCommandUpdate, SessionHistoryLoad};
 use crate::utils::summarize_for_queue;
 use crate::{TuiApp, MAX_QUEUE_LEN, SESSION_CLOSE_TIMEOUT};
-use talos_client::{TalosSession, TimelineActiveTurnStatus};
+use talos_sdk::{TalosSession, TimelineActiveTurnStatus};
 
 impl TuiApp {
     pub(crate) async fn submit_input(&mut self) -> TalosResult<bool> {

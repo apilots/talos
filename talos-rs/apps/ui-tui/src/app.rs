@@ -8,7 +8,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
-use talos_client::{ProtocolTalosContext, TalosSession};
+use talos_sdk::{ProtocolTalosContext, TalosSession};
 use talos_types::talos::{TalosConnectionMode, TalosUsage};
 
 use crate::client::GatewayClient;
@@ -78,7 +78,6 @@ impl TuiApp {
             stream_started_at: None,
             last_stream_event_at: None,
             gateway_client,
-            pending_approval: None,
             history_sessions: vec![],
             history_selected: 0,
             show_model_picker: false,
@@ -294,7 +293,6 @@ impl TuiApp {
         self.right_panel_events.clear();
         self.rendered_round_footer_buttons.clear();
         self.chat_selection = None;
-        self.pending_approval = None;
         self.active_message = None;
         self.active_message_raw = None;
         self.active_user_idx = None;

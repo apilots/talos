@@ -217,7 +217,6 @@ async fn test_appended_system_context_includes_runtime_policy_and_git_state() {
     assert!(appended_context.contains("- git_status_summary: modified 1 file(s)"));
     assert!(appended_context.contains("- has_uncommitted_changes: true"));
     assert!(appended_context.contains("- sandbox_mode: use_default"));
-    assert!(appended_context.contains("- approval_policy: on_request"));
     assert!(!appended_context.contains("- session_mode:"));
     assert!(!appended_context.contains("- network_access:"));
 }

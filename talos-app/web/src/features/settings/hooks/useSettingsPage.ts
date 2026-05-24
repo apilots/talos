@@ -32,7 +32,6 @@ export function useSettingsPage() {
   const [desktopNotifications, setDesktopNotifications] = useState(true);
   const [safeFileReads, setSafeFileReads] = useState(true);
   const [safeFileWrites, setSafeFileWrites] = useState(false);
-  const [terminalApproval, setTerminalApproval] = useState(true);
   const models = useModelsQuery();
 
   useEffect(() => {
@@ -54,8 +53,6 @@ export function useSettingsPage() {
     setSafeFileReads,
     safeFileWrites,
     setSafeFileWrites,
-    terminalApproval,
-    setTerminalApproval,
     models,
   };
 }

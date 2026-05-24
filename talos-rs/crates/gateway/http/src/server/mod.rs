@@ -40,7 +40,6 @@ use self::memory_files::{
 };
 use self::messages::{
     retry_message_attempt_handler, session_message_handler, submit_dynamic_tool_result_handler,
-    submit_tool_approval_handler,
 };
 use self::misc::{
     get_llm_handler, health_handler, list_models_handler, put_llm_handler, shutdown_signal,
@@ -267,10 +266,6 @@ impl HttpServer {
             .route(
                 "/v1/sessions/:session_id/message-attempts",
                 post(retry_message_attempt_handler),
-            )
-            .route(
-                "/v1/sessions/:session_id/tool-approvals",
-                post(submit_tool_approval_handler),
             )
             .route(
                 "/v1/sessions/:session_id/dynamic-tool-results",

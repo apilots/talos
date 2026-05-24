@@ -87,7 +87,6 @@ export function buildSessionBlocks({
   );
   const shouldShowWaitingPlaceholder =
     Boolean(streamState?.isStreaming) &&
-    !streamState?.pendingApproval &&
     !streamState?.pendingUserAction &&
     !streamState?.error &&
     !hasLiveResponse &&
@@ -107,7 +106,6 @@ export function buildSessionBlocks({
   if (
     streamState?.awaitingFinalResponse &&
     !historyHasActiveMessage &&
-    !streamState.pendingApproval &&
     !streamState.pendingUserAction &&
     !streamState.error
   ) {

@@ -4,70 +4,15 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use talos_config::{provider_config_for_llm, resolve_runtime_path, LlmConfig};
 use talos_error::{TalosError, TalosResult};
-use talos_llm_provider::{ChatMessage, ChatRequest, LlmProvider};
 use talos_session_store::SessionStore;
 use talos_types::gateway::GatewayRequest;
-use talos_types::talos::{
-    TalosConnectionMode, TalosContext, TalosInputItem, TalosProvider, TalosUsage,
-};
+use talos_types::talos::{TalosConnectionMode, TalosContext, TalosProvider, TalosUsage};
 use talos_types::{
     connection_mode_from_context, normalize_current_directory, resolve_effective_project_root,
-    session_title_or_fallback, validate_project_directory, OptionalCurrentDirectoryPatch,
-    OptionalProjectIdPatch, ProjectPatch, ProjectRecord, SessionConf, SessionConfigOverridePolicy,
-    SessionPatch, SessionPatchAck, SessionQuery, SessionRecord, TalosConfig, TalosSession,
+    validate_project_directory, OptionalCurrentDirectoryPatch, OptionalProjectIdPatch,
+    ProjectPatch, ProjectRecord, SessionConf, SessionConfigOverridePolicy, SessionPatch,
+    SessionPatchAck, SessionQuery, SessionRecord, TalosConfig, TalosSession,
 };
-
-const SESSION_TITLE_PROMPT: &str = r#"Generate a concise session title for the user's first question.
-
-Rules:
-- Return only the title text.
-- One line only.
-- No markdown, no quotes, no trailing punctuation.
-- Prefer 3-8 words.
-- Focus on the core task topic.
-"#;
-
-#[derive(Clone)]
-pub(super) struct SessionTitleGenerator {
-    llm_provider: Arc<dyn LlmProvider>,
-}
-
-impl SessionTitleGenerator {
-    fn new(llm_provider: Arc<dyn LlmProvider>) -> Self {
-        Self { llm_provider }
-    }
-
-    async fn generate(
-        &self,
-        model: &str,
-        first_user_text: &str,
-        first_assistant_text: &str,
-    ) -> TalosResult<String> {
-        let request = ChatRequest::builder()
-            .model(model.to_string())
-            .messages(vec![
-                ChatMessage::system(SESSION_TITLE_PROMPT),
-                ChatMessage::user(format!(
-                    "First user message:\n{}\n\nFirst assistant response:\n{}",
-                    first_user_text.trim(),
-                    first_assistant_text.trim()
-                )),
-            ])
-            .build();
-        let response = self.llm_provider.chat(request).await?;
-        Ok(response.content)
-    }
-}
-
-pub(super) fn extract_first_user_text(input: &[TalosInputItem]) -> Option<String> {
-    input.iter().find_map(|item| match item {
-        TalosInputItem::Text { text } => {
-            let normalized = text.trim();
-            (!normalized.is_empty()).then(|| text.clone())
-        }
-        _ => None,
-    })
-}
 
 #[derive(Clone)]
 pub(super) struct SessionManager {
@@ -76,22 +21,16 @@ pub(super) struct SessionManager {
     base_config: Arc<RwLock<TalosConfig>>,
     default_workspace_id: String,
     channel_dm_scopes: HashMap<String, String>,
-    session_title_generator: Option<Arc<SessionTitleGenerator>>,
 }
 
 impl SessionManager {
-    pub(super) fn new(
-        session_store: Arc<dyn SessionStore>,
-        base_config: TalosConfig,
-        session_title_generator: Option<Arc<SessionTitleGenerator>>,
-    ) -> Self {
+    pub(super) fn new(session_store: Arc<dyn SessionStore>, base_config: TalosConfig) -> Self {
         Self {
             session_store,
             session_cache: Arc::new(RwLock::new(HashMap::new())),
             base_config: Arc::new(RwLock::new(base_config)),
             default_workspace_id: "default".to_string(),
             channel_dm_scopes: HashMap::new(),
-            session_title_generator,
         }
     }
 
@@ -107,14 +46,6 @@ impl SessionManager {
     ) -> Self {
         self.channel_dm_scopes
             .insert(channel_id.into(), dm_scope.into());
-        self
-    }
-
-    pub(super) fn with_session_title_generator(
-        mut self,
-        llm_provider: Arc<dyn LlmProvider>,
-    ) -> Self {
-        self.session_title_generator = Some(Arc::new(SessionTitleGenerator::new(llm_provider)));
         self
     }
 
@@ -318,10 +249,17 @@ impl SessionManager {
         message_delta: u64,
         usage: &TalosUsage,
     ) {
-        let _ = self
+        if let Err(error) = self
             .session_store
             .record_session_progress(session_id, message_delta, usage, Some(assistant_model))
-            .await;
+            .await
+        {
+            tracing::warn!(
+                session_id = %session_id,
+                ?error,
+                "failed to persist stream session progress"
+            );
+        }
         self.update_cached_session_after_turn(session_id, assistant_model, message_delta, usage)
             .await;
     }
@@ -480,40 +418,16 @@ impl SessionManager {
         Ok(patch)
     }
 
-    async fn update_session_title(&self, session_id: &str, title: &str) -> TalosResult<()> {
+    pub(super) async fn update_session_title(
+        &self,
+        session_id: &str,
+        title: &str,
+    ) -> TalosResult<()> {
         self.session_store
             .update_session_title(session_id, title)
             .await?;
         self.update_cached_session_title(session_id, title).await;
         Ok(())
-    }
-
-    pub(super) async fn maybe_assign_session_title(
-        &self,
-        session_id: &str,
-        first_user_text: &str,
-        first_assistant_text: &str,
-    ) -> TalosResult<()> {
-        let Some(session) = self.get_session(session_id).await? else {
-            return Ok(());
-        };
-        if session.has_real_title() {
-            return Ok(());
-        }
-
-        let generated = match self.session_title_generator.as_ref() {
-            Some(generator) => generator
-                .generate(
-                    session.config.llm.model.as_str(),
-                    first_user_text,
-                    first_assistant_text,
-                )
-                .await
-                .unwrap_or_default(),
-            None => String::new(),
-        };
-        let title = session_title_or_fallback(generated, first_user_text);
-        self.update_session_title(session_id, &title).await
     }
 
     pub(super) async fn load_session_for_close(
@@ -579,16 +493,6 @@ impl CoordinatorImpl {
         self.sessions.update_base_llm(llm);
     }
 
-    pub fn with_session_title_generator(mut self, llm_provider: Arc<dyn LlmProvider>) -> Self {
-        self.sessions = Arc::new(
-            self.sessions
-                .as_ref()
-                .clone()
-                .with_session_title_generator(llm_provider),
-        );
-        self
-    }
-
     pub fn with_default_workspace_id(mut self, workspace_id: impl Into<String>) -> Self {
         self.sessions = Arc::new(
             self.sessions
@@ -652,7 +556,7 @@ mod tests {
         let mut base_config = talos_types::TalosConfig::default();
         base_config.llm.provider = "anthropic".to_string();
         base_config.llm.model = "old-model".to_string();
-        let manager = SessionManager::new(Arc::new(MockSessionStore::new()), base_config, None);
+        let manager = SessionManager::new(Arc::new(MockSessionStore::new()), base_config);
         let mut llm = talos_config::LlmConfig::default();
         llm.provider = "openai".to_string();
         llm.model = "new-model".to_string();
@@ -676,7 +580,7 @@ mod tests {
             provider_model("old-default"),
             provider_model("session-model"),
         ];
-        let manager = SessionManager::new(Arc::new(MockSessionStore::new()), base_config, None);
+        let manager = SessionManager::new(Arc::new(MockSessionStore::new()), base_config);
         let original = manager
             .create_session(
                 context(),
@@ -712,7 +616,7 @@ mod tests {
         base_config.llm.provider = "anthropic".to_string();
         base_config.llm.model = "old-default".to_string();
         base_config.llm.anthropic.models = vec![provider_model("old-default")];
-        let manager = SessionManager::new(Arc::new(MockSessionStore::new()), base_config, None);
+        let manager = SessionManager::new(Arc::new(MockSessionStore::new()), base_config);
         let mut llm = talos_config::LlmConfig::default();
         llm.provider = "anthropic".to_string();
         llm.model = "new-default".to_string();

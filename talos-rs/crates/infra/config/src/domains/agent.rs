@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use talos_error::TalosResult;
 
 use crate::AgentKernelConfig;
@@ -73,24 +72,6 @@ impl PlannerMode {
     }
 }
 
-/// Controls how the planner is selected for each turn.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum PlannerSelection {
-    /// Always use the configured `planner_mode` value. No LLM inference.
-    #[default]
-    Static,
-    /// Use an LLM classifier to select the planner each turn.
-    /// Falls back to `planner_mode` on classifier failure.
-    Auto,
-}
-
-impl fmt::Display for PlannerMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
 /// Loop control policy for PlanReAct mode.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PlanReActPolicy {
@@ -125,44 +106,4 @@ fn default_plan_react_max_replans() -> u32 {
 
 fn default_plan_react_max_no_progress_rounds() -> u32 {
     2
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum ExecutionMode {
-    #[default]
-    Single,
-    Sequential,
-    Parallel,
-    Loop,
-}
-
-impl ExecutionMode {
-    pub fn parse(value: &str) -> TalosResult<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "single" => Ok(Self::Single),
-            "sequential" => Ok(Self::Sequential),
-            "parallel" => Ok(Self::Parallel),
-            "loop" => Ok(Self::Loop),
-            other => Err(talos_error::TalosError::ValidationError(format!(
-                "invalid execution mode: {}",
-                other
-            ))),
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Single => "single",
-            Self::Sequential => "sequential",
-            Self::Parallel => "parallel",
-            Self::Loop => "loop",
-        }
-    }
-}
-
-impl fmt::Display for ExecutionMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
 }

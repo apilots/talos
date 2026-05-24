@@ -3,7 +3,7 @@ use crate::ToolExecutionMode;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
@@ -20,7 +20,6 @@ pub struct ToolExecutionContext {
     pub project_root: Option<PathBuf>,
     pub kernel_config: Arc<AgentKernelConfig>,
     pub memory_store: Arc<MemoryStore>,
-    pub pre_approved_call_ids: HashSet<String>,
     pub dynamic_tool_results: HashMap<String, ReplayDynamicToolResult>,
 }
 
@@ -60,7 +59,6 @@ pub struct SequentialToolExecutor;
 fn build_tool_context(
     execution_context: &ToolExecutionContext,
     registry: &dyn ToolExecutorPort,
-    pre_approved: bool,
     call_id: &str,
 ) -> talos_tools::ToolContext {
     let ctx = registry.build_context(
@@ -83,11 +81,7 @@ fn build_tool_context(
             },
         );
     }
-    if pre_approved {
-        ctx.with_pre_approved()
-    } else {
-        ctx
-    }
+    ctx
 }
 
 async fn execute_single_tool_call(
@@ -95,15 +89,7 @@ async fn execute_single_tool_call(
     execution_context: &ToolExecutionContext,
     call: ToolExecutionInput,
 ) -> ToolExecutionOutput {
-    let pre_approved = execution_context
-        .pre_approved_call_ids
-        .contains(&call.call_id);
-    let tool_context = build_tool_context(
-        execution_context,
-        registry.as_ref(),
-        pre_approved,
-        &call.call_id,
-    );
+    let tool_context = build_tool_context(execution_context, registry.as_ref(), &call.call_id);
     let invocation = call.to_invocation();
     let result = registry
         .execute_invocation_with_context(invocation, tool_context)
@@ -188,15 +174,8 @@ impl ToolExecutor for ParallelToolExecutor {
         let mut join_set = JoinSet::new();
         for (index, call) in calls.iter().cloned().enumerate() {
             let registry = registry.clone();
-            let pre_approved = execution_context
-                .pre_approved_call_ids
-                .contains(&call.call_id);
-            let tool_context = build_tool_context(
-                execution_context,
-                registry.as_ref(),
-                pre_approved,
-                &call.call_id,
-            );
+            let tool_context =
+                build_tool_context(execution_context, registry.as_ref(), &call.call_id);
             join_set.spawn(async move {
                 let invocation = call.to_invocation();
                 let result = registry
@@ -620,7 +599,6 @@ mod tests {
             memory_store: Arc::new(MemoryStore::new(
                 std::env::temp_dir().join("tool-executor-1"),
             )),
-            pre_approved_call_ids: HashSet::new(),
             dynamic_tool_results: HashMap::new(),
         };
         let calls = vec![
@@ -680,7 +658,6 @@ mod tests {
             memory_store: Arc::new(MemoryStore::new(
                 std::env::temp_dir().join("tool-executor-2"),
             )),
-            pre_approved_call_ids: HashSet::new(),
             dynamic_tool_results: HashMap::new(),
         };
         let calls = vec![

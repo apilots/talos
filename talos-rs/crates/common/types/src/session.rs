@@ -3,7 +3,6 @@ use crate::talos;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use talos_config::ToolApprovalPolicy;
 use talos_error::TalosError;
 
 /// Session record stored by the gateway.
@@ -193,16 +192,6 @@ impl SessionConfigOverridePolicy {
         Ok(conf.agent.as_ref().and_then(|agent| agent.model.clone()))
     }
 
-    pub fn extract_tool_approval_policy(
-        conf: &SessionConf,
-    ) -> crate::TalosResult<Option<ToolApprovalPolicy>> {
-        Self::validate_conf(conf)?;
-        Ok(conf
-            .tools
-            .as_ref()
-            .and_then(|tools| tools.approval_policy.clone()))
-    }
-
     pub fn build_conf_for_model(base_model: &str, effective_model: &str) -> SessionConf {
         if effective_model == base_model {
             return SessionConf::default();
@@ -215,7 +204,6 @@ impl SessionConfigOverridePolicy {
             agent: Some(SessionAgentConf {
                 model: Some(model.to_string()),
             }),
-            tools: None,
         }
     }
 
@@ -226,13 +214,6 @@ impl SessionConfigOverridePolicy {
             let agent = merged.agent.get_or_insert_with(SessionAgentConf::default);
             if let Some(model) = agent_patch.model.clone() {
                 agent.model = Some(model);
-            }
-        }
-
-        if let Some(tools_patch) = patch.tools.as_ref() {
-            let tools = merged.tools.get_or_insert_with(SessionToolsConf::default);
-            if let Some(approval_policy) = tools_patch.approval_policy.clone() {
-                tools.approval_policy = Some(approval_policy);
             }
         }
 
@@ -248,9 +229,6 @@ impl SessionConfigOverridePolicy {
         let model = Self::extract_agent_model(conf)?.unwrap_or_else(|| record_model.to_string());
         config.agent.model = model.clone();
         config.llm.model = model;
-        if let Some(approval_policy) = Self::extract_tool_approval_policy(conf)? {
-            config.agent.kernel.tools.approval_policy = approval_policy;
-        }
         Ok(config)
     }
 }
@@ -351,17 +329,9 @@ pub struct SessionAgentConf {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SessionToolsConf {
-    #[serde(default)]
-    pub approval_policy: Option<ToolApprovalPolicy>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionConf {
     #[serde(default)]
     pub agent: Option<SessionAgentConf>,
-    #[serde(default)]
-    pub tools: Option<SessionToolsConf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -490,15 +460,6 @@ pub trait SessionRuntime: Send + Sync {
 
     async fn cancel_active_turn(&self, session_id: &str) -> crate::TalosResult<()>;
 
-    async fn submit_tool_approval(
-        &self,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-        approved: bool,
-        reason: Option<String>,
-    ) -> crate::TalosResult<()>;
-
     async fn submit_dynamic_tool_result(
         &self,
         session_id: &str,
@@ -552,15 +513,6 @@ pub trait SessionService: Send + Sync {
     async fn delete_session(&self, session_id: &str) -> crate::TalosResult<SessionPatchAck>;
 
     async fn cancel_active_turn(&self, session_id: &str) -> crate::TalosResult<()>;
-
-    async fn submit_tool_approval(
-        &self,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-        approved: bool,
-        reason: Option<String>,
-    ) -> crate::TalosResult<()>;
 
     async fn submit_dynamic_tool_result(
         &self,

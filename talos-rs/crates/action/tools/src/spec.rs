@@ -1,9 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use talos_llm_provider::ToolDefinition;
-use talos_tools_sandbox::{
-    ToolApprovalRequirement, ToolGovernanceArgumentOverride, ToolGovernanceSpec, ToolSandboxMode,
-};
+use talos_tools_sandbox::ToolGovernanceSpec;
 
 use crate::state::PermissionMode;
 
@@ -314,14 +312,7 @@ impl ToolCatalog {
 
 pub fn default_governance_for_source(source: ToolSource) -> ToolGovernanceSpec {
     match source {
-        ToolSource::Collaboration | ToolSource::Skill => ToolGovernanceSpec {
-            default_approval: ToolApprovalRequirement::NeedsApproval {
-                reason: Some("tool spawns sub-agent work and requires approval".to_string()),
-            },
-            preferred_sandbox: ToolSandboxMode::UseDefault,
-            argument_override: ToolGovernanceArgumentOverride::None,
-            retry_without_sandbox: false,
-        },
+        ToolSource::Collaboration | ToolSource::Skill => ToolGovernanceSpec::default(),
         ToolSource::Local | ToolSource::Mcp | ToolSource::Dynamic => ToolGovernanceSpec::default(),
     }
 }

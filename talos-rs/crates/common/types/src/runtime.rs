@@ -102,19 +102,6 @@ pub trait RequestHandler: Send + Sync {
 
     async fn cancel_active_turn(&self, session_id: &str) -> crate::TalosResult<()>;
 
-    async fn submit_tool_approval(
-        &self,
-        _session_id: &str,
-        _call_id: &str,
-        _tool_name: &str,
-        _approved: bool,
-        _reason: Option<String>,
-    ) -> crate::TalosResult<()> {
-        Err(crate::TalosError::InternalError(
-            "submit_tool_approval is not supported by this request handler".to_string(),
-        ))
-    }
-
     async fn submit_dynamic_tool_result(
         &self,
         _session_id: &str,
