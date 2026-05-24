@@ -3,7 +3,12 @@
 Status: draft
 Owner: agent
 Created: 2026-05-23
+Updated: 2026-05-24
 Related: `refactor-023-agent-kernel-simplification`
+
+## 当前实现更新
+
+截至 2026-05-24，PlanReAct 已作为历史遗留分支从实现与配置中移除；`planner_mode` 仅保留 `built_in`。本文后续关于 PlanReAct final tag policy 的设计内容仅作为历史上下文，不再代表当前实现目标。
 
 ## 背景
 

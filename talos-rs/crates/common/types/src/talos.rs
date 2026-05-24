@@ -447,6 +447,7 @@ pub enum TalosTimelineEventType {
     ItemDelta,
     ItemCompleted,
     AssistantTextCommitted,
+    TurnMetrics,
     TurnCompleted,
     TurnError,
 }
@@ -620,6 +621,13 @@ pub struct TalosAssistantTextCommittedEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct TalosTurnMetricsEvent {
+    pub request_id: String,
+    pub turn_id: String,
+    pub metrics: TurnExecutionMetrics,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 pub struct TalosTurnCompletedEvent {
     pub request_id: String,
     pub turn_id: String,
@@ -646,6 +654,7 @@ pub enum TalosTimelineEventPayload {
     ItemDelta(TalosItemDeltaEvent),
     ItemCompleted(TalosItemCompletedEvent),
     AssistantTextCommitted(TalosAssistantTextCommittedEvent),
+    TurnMetrics(TalosTurnMetricsEvent),
     TurnCompleted(TalosTurnCompletedEvent),
     TurnError(TalosTurnErrorEvent),
 }

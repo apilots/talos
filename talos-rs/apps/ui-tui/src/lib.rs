@@ -36,7 +36,7 @@ use std::{
 };
 use talos_error::TalosResult;
 use talos_sdk::{ModelInfo, TalosSession, TalosTimelineItem, TimelineEventEnvelope};
-use talos_types::talos::{TalosConnectionMode, TalosUsage};
+use talos_types::talos::{TalosConnectionMode, TalosUsage, TurnExecutionMetrics};
 use tokio::sync::mpsc;
 use transcript::TranscriptState;
 
@@ -91,6 +91,8 @@ pub struct TuiApp {
     pub(crate) connection_mode: TalosConnectionMode,
     pub(crate) current_model: String,
     pub(crate) session_usage: TalosUsage,
+    pub(crate) turn_metrics: Option<TurnExecutionMetrics>,
+    pub(crate) turn_metrics_live: bool,
     pub(crate) available_model_info: Vec<ModelInfo>,
     pub(crate) available_models: Vec<String>,
     pub(crate) session_id: Option<String>,
@@ -127,6 +129,7 @@ pub struct TuiApp {
     pub(crate) pending_close_task: Option<tokio::task::JoinHandle<()>>,
     pub(crate) active_stream_message_id: Option<String>,
     pub(crate) last_stream_sequence: Option<u64>,
+    pub(crate) last_stream_event_id: Option<String>,
     pub(crate) timeline_items: HashMap<String, TalosTimelineItem>,
     pub(crate) status_hint: Option<(String, Instant)>,
     pub(crate) spinner_index: usize,
@@ -140,7 +143,6 @@ pub struct TuiApp {
     pub(crate) model_picker_selected: usize,
     pub(crate) show_sessions_picker: bool,
     pub(crate) sessions_picker_selected: usize,
-    pub(crate) right_panel_visible: bool,
     pub(crate) sent_messages_history: VecDeque<String>,
     pub(crate) message_history_index: Option<usize>,
     pub(crate) show_command_autocomplete: bool,
@@ -157,6 +159,48 @@ pub struct TuiApp {
 }
 
 impl TuiApp {
+    pub(crate) fn displayed_usage(&self) -> TalosUsage {
+        let mut usage = self.session_usage.clone();
+        if self.turn_metrics_live {
+            if let Some(metrics) = &self.turn_metrics {
+                usage.accumulate(&metrics.usage);
+            }
+        }
+        usage
+    }
+
+    pub(crate) fn compact_turn_metrics_text(&self, width: usize) -> Option<String> {
+        let metrics = self.turn_metrics.as_ref()?;
+        let state = if self.turn_metrics_live {
+            "live"
+        } else {
+            "last"
+        };
+        let duration = metrics
+            .duration_ms
+            .map(format_duration_ms)
+            .unwrap_or_else(|| "--".to_string());
+        if width >= 92 {
+            Some(format!(
+                "{state} · {} rounds · {} tools · {} ok · {} err · {} tokens · {duration}",
+                metrics.model_rounds,
+                metrics.tool_calls,
+                metrics.tool_successes,
+                metrics.tool_errors,
+                format_metric_number(metrics.usage.total_tokens),
+            ))
+        } else {
+            Some(format!(
+                "{state} · {}r · {}t · {}ok · {}err · {} tok · {duration}",
+                metrics.model_rounds,
+                metrics.tool_calls,
+                metrics.tool_successes,
+                metrics.tool_errors,
+                format_metric_number(metrics.usage.total_tokens),
+            ))
+        }
+    }
+
     #[cfg(test)]
     fn input_line_plain(&self) -> String {
         let chars: Vec<char> = self.input_buffer.chars().collect();
@@ -171,6 +215,24 @@ impl TuiApp {
             out.push('█');
         }
         out
+    }
+}
+
+fn format_duration_ms(duration_ms: u64) -> String {
+    if duration_ms >= 1_000 {
+        format!("{:.1}s", duration_ms as f64 / 1_000.0)
+    } else {
+        format!("{duration_ms}ms")
+    }
+}
+
+fn format_metric_number(value: u32) -> String {
+    if value >= 1_000_000 {
+        format!("{:.1}m", value as f64 / 1_000_000.0)
+    } else if value >= 1_000 {
+        format!("{:.1}k", value as f64 / 1_000.0)
+    } else {
+        value.to_string()
     }
 }
 

@@ -128,7 +128,7 @@ impl TuiApp {
                         format!("in_flight: {}", self.in_flight),
                         format!("events: {}", self.trace_event_count),
                     ];
-                    Self::append_usage_lines(&mut lines, "local", &self.session_usage);
+                    Self::append_usage_lines(&mut lines, "local", &self.displayed_usage());
                     if let Some(info) = session_info {
                         self.apply_session_snapshot(&info);
                         lines.push(format!("server.model: {}", info.config.llm.model));

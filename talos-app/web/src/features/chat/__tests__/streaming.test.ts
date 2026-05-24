@@ -81,6 +81,45 @@ describe("timeline stream events", () => {
     });
   });
 
+  it("applies live turn metrics to the timeline block without advancing stream cursor", () => {
+    applyStreamEvent("sess-1", itemStarted("tool-1", "tool_call", "acting", 1));
+    applyStreamEvent("sess-1", turnMetrics(2, { model_rounds: 1, tool_calls: 1, total_tokens: 42 }));
+
+    const stream = useAppStore.getState().streams["sess-1"];
+    const timeline = stream?.blocks.find((block) => block.kind === "timeline");
+    expect(stream?.lastEventSeq).toBe(1);
+    expect(timeline).toMatchObject({
+      kind: "timeline",
+      metrics: expect.objectContaining({
+        state: "running",
+        model_rounds: 1,
+        tool_calls: 1,
+        usage: expect.objectContaining({ total_tokens: 42 }),
+      }),
+    });
+  });
+
+  it("keeps final metrics visible for a direct answer-only stream", () => {
+    applyStreamEvent("sess-1", itemStarted("answer-1", "assistant_text", "unknown", 1));
+    applyStreamEvent("sess-1", textDelta("answer-1", "final text", 2));
+    applyStreamEvent("sess-1", itemCompleted("answer-1", 3));
+    applyStreamEvent("sess-1", assistantTextCommitted("answer-1", "final_answer", 4));
+    applyStreamEvent("sess-1", turnCompleted(5, 46));
+
+    const blocks = useAppStore.getState().streams["sess-1"]?.blocks ?? [];
+    expect(blocks).toEqual([
+      expect.objectContaining({ kind: "assistant", text: "final text" }),
+      expect.objectContaining({
+        kind: "timeline",
+        items: [],
+        metrics: expect.objectContaining({
+          state: "completed",
+          usage: expect.objectContaining({ total_tokens: 46 }),
+        }),
+      }),
+    ]);
+  });
+
   it("renders text deltas in server event order around tool calls", () => {
     applyStreamEvent("sess-1", itemStarted("thinking-1", "assistant_text", "commentary", 1));
     applyStreamEvent("sess-1", textDelta("thinking-1", "Before tool.", 2));
@@ -258,6 +297,39 @@ describe("timeline stream events", () => {
     });
   });
 
+  it("rebuilds final-answer-only history with final metrics", () => {
+    const history = sessionHistory(
+      [
+        historyTextItem("input-1", "user_input", "input", "hello"),
+        historyTextItem("final-1", "assistant_text", "final_answer", "direct answer"),
+      ],
+      executionMetrics(46),
+    );
+
+    const blocks = buildSessionBlocks({
+      sessionId: "sess-1",
+      streamState: undefined,
+      sessionHistory: history,
+      waitingResponseDetail: "waiting detail",
+      waitingResponseTitle: "waiting title",
+      stoppingResponseDetail: "stopping detail",
+      stoppingResponseTitle: "stopping title",
+    });
+
+    expect(blocks).toEqual([
+      expect.objectContaining({ kind: "user", text: "hello" }),
+      expect.objectContaining({ kind: "assistant", text: "direct answer" }),
+      expect.objectContaining({
+        kind: "timeline",
+        items: [],
+        metrics: expect.objectContaining({
+          state: "completed",
+          usage: expect.objectContaining({ total_tokens: 46 }),
+        }),
+      }),
+    ]);
+  });
+
   it("renders live recovery from stream state without duplicating stable history", () => {
     const history = sessionHistory([
       historyTextItem("input-history", "user_input", "input", "previous question"),
@@ -418,8 +490,50 @@ function toolResult(itemId: string, text: string, sequence: number): TimelineEve
   }, sequence);
 }
 
+function turnMetrics(
+  sequence: number,
+  overrides: Partial<{
+    model_rounds: number;
+    tool_calls: number;
+    tool_successes: number;
+    tool_errors: number;
+    total_tokens: number;
+  }> = {},
+): TimelineEventEnvelope {
+  return baseEvent({
+    type: "turn_metrics",
+    request_id: "req-1",
+    turn_id: "turn-1",
+    metrics: {
+      model_rounds: overrides.model_rounds ?? 0,
+      tool_calls: overrides.tool_calls ?? 0,
+      tool_successes: overrides.tool_successes ?? 0,
+      tool_errors: overrides.tool_errors ?? 0,
+      stop_reason: "end_turn",
+      usage: {
+        ...usage(),
+        total_tokens: overrides.total_tokens ?? 0,
+      },
+      duration_ms: null,
+    },
+  }, sequence);
+}
+
+function turnCompleted(sequence: number, totalTokens = 0): TimelineEventEnvelope {
+  return baseEvent({
+    type: "turn_completed",
+    request_id: "req-1",
+    turn_id: "turn-1",
+    completed_at_ms: sequence,
+    stop_reason: "end_turn",
+    usage: { ...usage(), total_tokens: totalTokens },
+    metrics: executionMetrics(totalTokens),
+  }, sequence);
+}
+
 function sessionHistory(
   items: TalosSessionHistorySnapshot["messages"][number]["items"],
+  metrics: TalosSessionHistorySnapshot["messages"][number]["metrics"] = null,
 ): TalosSessionHistorySnapshot {
   return {
     session_id: "sess-1",
@@ -430,7 +544,7 @@ function sessionHistory(
         items,
         stop_reason: "end_turn",
         usage: usage(),
-        metrics: null,
+        metrics,
       },
     ],
     generated_at_ms: 1,
@@ -481,6 +595,18 @@ function historyToolItem(
         is_error: false,
       },
     },
+  };
+}
+
+function executionMetrics(totalTokens = 0) {
+  return {
+    model_rounds: 1,
+    tool_calls: 0,
+    tool_successes: 0,
+    tool_errors: 0,
+    stop_reason: "end_turn" as const,
+    usage: { ...usage(), total_tokens: totalTokens },
+    duration_ms: null,
   };
 }
 

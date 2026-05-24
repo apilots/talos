@@ -25,7 +25,7 @@ pub(crate) fn build_turn_execution_metrics(
         tool_errors,
         stop_reason: to_api_stop_reason(stop_reason),
         usage: state.usage.clone(),
-        duration_ms: None,
+        duration_ms: Some(state.started_at.elapsed().as_millis() as u64),
     }
 }
 
@@ -66,6 +66,36 @@ pub fn finalize_general_turn_artifacts(
         pending_dynamic_requests: state.pending_dynamic_requests,
         final_answer_streamed: state.final_answer_streamed,
         execution_summary_streamed: state.execution_summary_streamed,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn build_turn_execution_metrics_includes_elapsed_duration() {
+        let state = GeneralTurnLoopState {
+            started_at: Instant::now() - Duration::from_millis(5),
+            messages: Vec::new(),
+            round: 0,
+            output_items: Vec::new(),
+            usage: TalosUsage::default(),
+            reasoning_log: Vec::new(),
+            tool_call_log: Vec::new(),
+            tool_result_log: Vec::new(),
+            retrieved_memories: Vec::new(),
+            tool_call_count: 0,
+            tool_error_count: 0,
+            pending_dynamic_requests: Vec::new(),
+            final_answer_streamed: false,
+            execution_summary_streamed: false,
+        };
+
+        let metrics = build_turn_execution_metrics(&state, StopReason::EndTurn);
+
+        assert!(metrics.duration_ms.is_some());
     }
 }
 

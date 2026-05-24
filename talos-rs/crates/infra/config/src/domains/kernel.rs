@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     default_timezone, AgentKernelMcpConfig, AgentKernelMemoryConfig, AgentKernelPromptConfig,
-    PlanReActPolicy, PlannerMode, ToolsRuntimeConfig,
+    PlannerMode, ToolsRuntimeConfig,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -354,10 +354,6 @@ pub struct AgentKernelConfig {
     /// MCP server connections available to this kernel
     #[serde(default)]
     pub mcp: AgentKernelMcpConfig,
-
-    /// Loop control policy for PlanReAct mode.
-    #[serde(default)]
-    pub plan_react: PlanReActPolicy,
 }
 
 fn default_kernel_tool_parallelism() -> usize {
@@ -401,7 +397,6 @@ impl Default for AgentKernelConfig {
             memory: AgentKernelMemoryConfig::default(),
             tools: ToolsRuntimeConfig::default(),
             mcp: AgentKernelMcpConfig::default(),
-            plan_react: PlanReActPolicy::default(),
         }
     }
 }

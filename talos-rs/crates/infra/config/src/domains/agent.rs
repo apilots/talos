@@ -49,14 +49,12 @@ impl Default for AgentConfig {
 pub enum PlannerMode {
     #[default]
     BuiltIn,
-    PlanReAct,
 }
 
 impl PlannerMode {
     pub fn parse(value: &str) -> TalosResult<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "built_in" => Ok(Self::BuiltIn),
-            "plan_react" => Ok(Self::PlanReAct),
             other => Err(talos_error::TalosError::ValidationError(format!(
                 "invalid planner mode: {}",
                 other
@@ -67,43 +65,6 @@ impl PlannerMode {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::BuiltIn => "built_in",
-            Self::PlanReAct => "plan_react",
         }
     }
-}
-
-/// Loop control policy for PlanReAct mode.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PlanReActPolicy {
-    /// Maximum number of replanning iterations allowed per turn.
-    #[serde(default = "default_plan_react_max_replans")]
-    pub max_replans: u32,
-    /// Maximum consecutive no-progress rounds before aborting.
-    #[serde(default = "default_plan_react_max_no_progress_rounds")]
-    pub max_no_progress_rounds: u32,
-    /// Whether the model must output a FINAL_ANSWER tag to end the turn.
-    #[serde(default = "default_true")]
-    pub require_final_answer_tag: bool,
-}
-
-impl Default for PlanReActPolicy {
-    fn default() -> Self {
-        Self {
-            max_replans: default_plan_react_max_replans(),
-            max_no_progress_rounds: default_plan_react_max_no_progress_rounds(),
-            require_final_answer_tag: true,
-        }
-    }
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn default_plan_react_max_replans() -> u32 {
-    3
-}
-
-fn default_plan_react_max_no_progress_rounds() -> u32 {
-    2
 }

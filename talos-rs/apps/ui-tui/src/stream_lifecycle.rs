@@ -54,6 +54,7 @@ impl TuiApp {
         self.pending_stream_connect = None;
         self.active_stream_message_id = None;
         self.last_stream_sequence = None;
+        self.last_stream_event_id = None;
         self.timeline_items.clear();
 
         if reset_retry_state {
@@ -109,6 +110,7 @@ impl TuiApp {
         self.active_user_idx = None;
         self.active_stream_message_id = None;
         self.last_stream_sequence = None;
+        self.last_stream_event_id = None;
         self.timeline_items.clear();
         self.stream_started_at = None;
         self.last_stream_event_at = None;

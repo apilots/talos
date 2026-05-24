@@ -20,6 +20,8 @@ pub enum ServerNotification {
     TimelineItemCompleted(TimelineSubscriptionNotification),
     #[serde(rename = "timeline.assistant_text.committed")]
     TimelineAssistantTextCommitted(TimelineSubscriptionNotification),
+    #[serde(rename = "timeline.turn.metrics")]
+    TimelineTurnMetrics(TimelineSubscriptionNotification),
     #[serde(rename = "timeline.turn.completed")]
     TimelineTurnCompleted(TimelineSubscriptionNotification),
     #[serde(rename = "timeline.turn.error")]

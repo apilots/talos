@@ -68,7 +68,7 @@ impl TuiApp {
             "help" => {
                 self.push_block(
                     ChatRole::System,
-                    "Commands: /help /model /models /history /sessions /status /compact /clear /quit\nKeys: ↑/↓/PgUp/PgDn scroll, Ctrl+O expand tool, Ctrl+B toggle panel, Ctrl+Y copy, Ctrl+U clear input"
+                    "Commands: /help /model /models /history /sessions /status /compact /clear /quit\nKeys: ↑/↓/PgUp/PgDn scroll, Ctrl+O expand tool, Ctrl+Y copy, Ctrl+U clear input"
                         .to_string(),
                 );
                 Ok(false)
@@ -511,6 +511,8 @@ impl TuiApp {
         self.session_id = Some(session_id.clone());
         self.current_model = model;
         self.session_usage = session.state.usage.clone();
+        self.turn_metrics = None;
+        self.turn_metrics_live = false;
         // Reset chat and input history for the new session
         self.chat_blocks.clear();
         self.rendered_chat_lines.clear();

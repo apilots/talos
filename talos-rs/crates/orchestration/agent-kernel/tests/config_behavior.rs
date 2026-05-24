@@ -34,7 +34,7 @@ fn test_default_values() {
 /// Valid boundaries:
 /// - tool_parallelism: must be > 0
 /// - max_tool_rounds: must be > 0
-/// - planner_mode: must be "built_in" or "plan_react" (None removed)
+/// - planner_mode: must be "built_in"
 #[test]
 fn test_boundary_validation() {
     let config = AgentKernelConfig::default();
@@ -42,13 +42,7 @@ fn test_boundary_validation() {
     assert!(config.tool_parallelism > 0, "tool_parallelism must be > 0");
     assert!(config.max_tool_rounds > 0, "max_tool_rounds must be > 0");
 
-    assert!(
-        matches!(
-            config.planner_mode,
-            PlannerMode::BuiltIn | PlannerMode::PlanReAct
-        ),
-        "planner_mode must be a valid planner mode"
-    );
+    assert_eq!(config.planner_mode, PlannerMode::BuiltIn);
 
     assert!(
         config.tool_result_max_bytes > 0,

@@ -8,4 +8,5 @@ export type {
   TalosOutputItem,
   TalosSession,
   TalosToolProgressKind,
+  TalosTurnExecutionMetrics,
 } from "@talos/sdk-browser";

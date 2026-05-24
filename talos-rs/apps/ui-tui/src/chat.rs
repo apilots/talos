@@ -186,10 +186,6 @@ impl TuiApp {
         }
     }
 
-    pub(crate) fn toggle_right_panel(&mut self) {
-        self.right_panel_visible = !self.right_panel_visible;
-    }
-
     pub(crate) fn discard_active_pending_blocks(&mut self) {
         let mut remove_indices = vec![];
         if let Some(idx) = self.transcript.live_assistant_idx {

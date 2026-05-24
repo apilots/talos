@@ -178,6 +178,15 @@ impl TuiApp {
         Line::from(text)
     }
 
+    pub(crate) fn turn_metrics_status_line(&self, width: usize) -> Option<Line<'static>> {
+        let mut text = self.compact_turn_metrics_text(width)?;
+        let max = width.saturating_sub(1);
+        if text.chars().count() > max {
+            text = text.chars().take(max).collect();
+        }
+        Some(Line::from(text))
+    }
+
     pub(crate) fn token_left_percent(&self) -> Option<u8> {
         let context_window = self
             .available_model_info
@@ -188,7 +197,7 @@ impl TuiApp {
         if context_window == 0 {
             return None;
         }
-        let used = self.session_usage.total_tokens.min(context_window);
+        let used = self.displayed_usage().total_tokens.min(context_window);
         let used_percent = used
             .saturating_mul(100)
             .saturating_add(context_window.saturating_sub(1))

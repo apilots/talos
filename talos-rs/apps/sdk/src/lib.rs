@@ -25,15 +25,15 @@ pub use talos_auth::{
 pub use talos_config::LlmConfig;
 pub use talos_error::{TalosError, TalosResult};
 pub use talos_types::talos::{
-    SessionHistoryMessage, SessionHistorySnapshot, StopReason, TalosContentItem, TalosContext,
-    TalosAssistantTextCommittedEvent, TalosInputItem, TalosItemCompletedEvent,
-    TalosItemDeltaEvent, TalosItemStartedEvent, TalosJsonValue, TalosMessageRequest,
-    TalosMessageResponse, TalosOutputItem, TalosProvider, TalosSourceType, TalosTimelineContent,
-    TalosTimelineDelta, TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType,
-    TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelineNoticeLevel,
-    TalosTimelinePhase, TalosToolProgressEntry, TalosToolProgressKind, TalosToolResult,
-    TalosTurnCompletedEvent, TalosTurnErrorEvent, TalosTurnStartedEvent, TalosUsage,
-    TimelineEventEnvelope,
+    SessionHistoryMessage, SessionHistorySnapshot, StopReason, TalosAssistantTextCommittedEvent,
+    TalosContentItem, TalosContext, TalosInputItem, TalosItemCompletedEvent, TalosItemDeltaEvent,
+    TalosItemStartedEvent, TalosJsonValue, TalosMessageRequest, TalosMessageResponse,
+    TalosOutputItem, TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta,
+    TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItem,
+    TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelineNoticeLevel, TalosTimelinePhase,
+    TalosToolProgressEntry, TalosToolProgressKind, TalosToolResult, TalosTurnCompletedEvent,
+    TalosTurnErrorEvent, TalosTurnMetricsEvent, TalosTurnStartedEvent, TalosUsage,
+    TimelineEventEnvelope, TurnExecutionMetrics,
 };
 pub use talos_types::{
     DocUpdateRequest, ExpectedFileVersion, MemoryFileDetail, MemoryFileSummary, ModelInfo,

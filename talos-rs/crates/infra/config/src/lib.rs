@@ -39,7 +39,7 @@ pub mod store;
 pub mod validate;
 
 pub type TalosTimezone = chrono_tz::Tz;
-pub use domains::agent::{AgentConfig, PlanReActPolicy, PlannerMode};
+pub use domains::agent::{AgentConfig, PlannerMode};
 pub use domains::kernel::{
     AgentKernelCompactionConfig, AgentKernelConfig, AgentKernelOutputConfig,
     AgentKernelTimelineEventsConfig,

@@ -497,8 +497,29 @@ function normalizeTimelineEnvelope(value: unknown): TimelineEventEnvelope {
       event_seq: event.event_seq == null ? event.event_seq : Number(event.event_seq),
       created_at_ms: event.created_at_ms == null ? event.created_at_ms : Number(event.created_at_ms),
       sequence: Number(event.sequence),
+      payload: normalizeTimelinePayload(event.payload),
     },
   };
+}
+
+function normalizeTimelinePayload(
+  payload: TimelineEventEnvelope["event"]["payload"],
+): TimelineEventEnvelope["event"]["payload"] {
+  if (payload.type === "turn_metrics") {
+    return {
+      ...payload,
+      metrics: normalizeTurnExecutionMetrics(payload.metrics)!,
+    };
+  }
+  if (payload.type === "turn_completed") {
+    return {
+      ...payload,
+      completed_at_ms: Number(payload.completed_at_ms),
+      usage: normalizeUsage(payload.usage),
+      metrics: normalizeTurnExecutionMetrics(payload.metrics),
+    };
+  }
+  return payload;
 }
 
 function normalizeTimelineRecoverySnapshot(
@@ -533,10 +554,7 @@ function normalizeSessionHistorySnapshot(
           item.completed_at_ms == null ? item.completed_at_ms : Number(item.completed_at_ms),
       })),
       usage: {
-        ...message.usage,
-        input_tokens: Number(message.usage.input_tokens),
-        output_tokens: Number(message.usage.output_tokens),
-        total_tokens: Number(message.usage.total_tokens),
+        ...normalizeUsage(message.usage),
       },
       metrics: normalizeTurnExecutionMetrics(message.metrics),
     })),
@@ -565,11 +583,25 @@ function normalizeTurnExecutionMetrics(
     tool_errors: Number(metrics.tool_errors),
     duration_ms: metrics.duration_ms == null ? metrics.duration_ms : Number(metrics.duration_ms),
     usage: {
-      ...metrics.usage,
-      input_tokens: Number(metrics.usage.input_tokens),
-      output_tokens: Number(metrics.usage.output_tokens),
-      total_tokens: Number(metrics.usage.total_tokens),
+      ...normalizeUsage(metrics.usage),
     },
+  };
+}
+
+function normalizeUsage(usage: TalosUsage): TalosUsage {
+  return {
+    ...usage,
+    input_tokens: Number(usage.input_tokens),
+    output_tokens: Number(usage.output_tokens),
+    total_tokens: Number(usage.total_tokens),
+    cache_creation_input_tokens:
+      usage.cache_creation_input_tokens == null
+        ? usage.cache_creation_input_tokens
+        : Number(usage.cache_creation_input_tokens),
+    cache_read_input_tokens:
+      usage.cache_read_input_tokens == null
+        ? usage.cache_read_input_tokens
+        : Number(usage.cache_read_input_tokens),
   };
 }
 

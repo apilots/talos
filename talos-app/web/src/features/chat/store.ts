@@ -1,4 +1,5 @@
 import type {
+  ChatTurnMetrics,
   ChatTimelineItem,
   PendingInput,
   SessionUiStatus,
@@ -10,6 +11,7 @@ import {
   commitTimelineAssistantTextInStream,
   completeTimelineItemInStream,
   setTimelineLiveInStream,
+  setTurnMetricsInStream,
   updateTimelineToolInStream,
   upsertTimelineItemInStream,
 } from "./timeline-state";
@@ -74,6 +76,7 @@ export interface ChatSlice {
     completedAtMs: number,
   ) => void;
   setTimelineLive: (sessionId: string, live: boolean) => void;
+  setTurnMetrics: (sessionId: string, metrics: ChatTurnMetrics) => void;
   setPendingUserAction: (
     sessionId: string,
     pendingUserAction?: StreamSessionState["pendingUserAction"],
@@ -384,6 +387,16 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
           streams: {
             ...state.streams,
             [sessionId]: setTimelineLiveInStream(stream, live),
+          },
+        };
+      }),
+    setTurnMetrics: (sessionId, metrics) =>
+      set((state) => {
+        const stream = ensureStreamState(state, sessionId);
+        return {
+          streams: {
+            ...state.streams,
+            [sessionId]: setTurnMetricsInStream(stream, sessionId, metrics),
           },
         };
       }),

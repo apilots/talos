@@ -16,7 +16,7 @@ pub(crate) use talos_sdk::{
     TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItem, TalosTimelineItemKind,
     TalosTimelineItemStatus, TalosTimelinePhase, TimelineActiveTurnSnapshot,
     TimelineActiveTurnStatus, TimelineCursorStatus, TimelineEventEnvelope,
-    TimelineRecoverySnapshot, TimelineReplay,
+    TimelineRecoverySnapshot, TimelineReplay, TurnExecutionMetrics,
 };
 
 #[derive(Default)]
@@ -40,6 +40,9 @@ pub(crate) struct MockGatewayState {
     pub(crate) session_usage: talos_types::talos::TalosUsage,
     pub(crate) compact_calls: usize,
     pub(crate) clear_calls: usize,
+    pub(crate) reconnect_calls: usize,
+    pub(crate) reconnect_since_event_ids: Vec<Option<String>>,
+    pub(crate) reconnect_events: Vec<TimelineEventEnvelope>,
 }
 
 pub(crate) struct MockGatewayClient {
@@ -298,6 +301,48 @@ pub(crate) fn completed_event(
     )
 }
 
+pub(crate) fn completed_event_with_metrics(
+    message_id: impl Into<String>,
+    session_id: impl Into<String>,
+    sequence: u64,
+    usage: TalosUsage,
+    metrics: TurnExecutionMetrics,
+) -> TimelineEventEnvelope {
+    timeline_event(
+        message_id.into(),
+        session_id.into(),
+        sequence,
+        TalosTimelineEventType::TurnCompleted,
+        TalosTimelineEventPayload::TurnCompleted(talos_sdk::TalosTurnCompletedEvent {
+            request_id: "req-test".to_string(),
+            turn_id: "turn-test".to_string(),
+            completed_at_ms: sequence,
+            stop_reason: StopReason::EndTurn,
+            usage,
+            metrics: Some(metrics),
+        }),
+    )
+}
+
+pub(crate) fn turn_metrics_event_with_metrics(
+    message_id: impl Into<String>,
+    session_id: impl Into<String>,
+    sequence: u64,
+    metrics: TurnExecutionMetrics,
+) -> TimelineEventEnvelope {
+    timeline_event(
+        message_id.into(),
+        session_id.into(),
+        sequence,
+        TalosTimelineEventType::TurnMetrics,
+        TalosTimelineEventPayload::TurnMetrics(talos_sdk::TalosTurnMetricsEvent {
+            request_id: "req-test".to_string(),
+            turn_id: "turn-test".to_string(),
+            metrics,
+        }),
+    )
+}
+
 pub(crate) fn execution_summary_event(
     message_id: impl Into<String>,
     session_id: impl Into<String>,
@@ -468,6 +513,9 @@ impl MockGatewayClient {
                 session_usage: talos_types::talos::TalosUsage::default(),
                 compact_calls: 0,
                 clear_calls: 0,
+                reconnect_calls: 0,
+                reconnect_since_event_ids: Vec::new(),
+                reconnect_events: Vec::new(),
             })),
         }
     }
@@ -504,6 +552,12 @@ impl MockGatewayClient {
     pub(crate) fn with_stream_failures(stream_failures_remaining: u8) -> Self {
         let client = Self::new();
         client.state.lock().unwrap().stream_failures_remaining = stream_failures_remaining;
+        client
+    }
+
+    pub(crate) fn with_active_reconnect_events(events: Vec<TimelineEventEnvelope>) -> Self {
+        let client = Self::new();
+        client.state.lock().unwrap().reconnect_events = events;
         client
     }
 
@@ -880,6 +934,30 @@ impl GatewayClient for MockGatewayClient {
         .await
         .unwrap();
 
+        drop(tx);
+        Ok(rx)
+    }
+
+    async fn reconnect_active_timeline_events(
+        &self,
+        _session_id: &str,
+        since_event_id: Option<String>,
+    ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>> {
+        let events = {
+            let mut state = self.state.lock().unwrap();
+            state.reconnect_calls = state.reconnect_calls.saturating_add(1);
+            state.reconnect_since_event_ids.push(since_event_id.clone());
+            state.reconnect_events.clone()
+        };
+        if events.is_empty() {
+            return Err(TalosError::Conflict(
+                "No active turn stream is available for this session.".to_string(),
+            ));
+        }
+        let (tx, rx) = mpsc::channel(32);
+        for event in events {
+            tx.send(event).await.unwrap();
+        }
         drop(tx);
         Ok(rx)
     }

@@ -274,8 +274,9 @@ fn history_message_from_completed_turn_events(
                 stop_reason = turn_completed.stop_reason;
                 completed = true;
             }
-            TalosTimelineEventPayload::TurnStarted(_) | TalosTimelineEventPayload::TurnError(_) => {
-            }
+            TalosTimelineEventPayload::TurnStarted(_)
+            | TalosTimelineEventPayload::TurnMetrics(_)
+            | TalosTimelineEventPayload::TurnError(_) => {}
         }
     }
 

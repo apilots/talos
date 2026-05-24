@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    BuiltInPlanner, ContextStateBags, ExecutionBranch, InvocationLimits, PlanReActPlanner,
-    PlannerKind, PlanningResponseEffect, TurnPhase,
+    BuiltInPlanner, ContextStateBags, ExecutionBranch, InvocationLimits, PlannerKind,
+    PlanningResponseEffect, TurnPhase,
 };
 use serde_json::json;
 use std::collections::HashMap;
@@ -10,7 +10,7 @@ struct BranchingPlanner;
 
 impl Planner for BranchingPlanner {
     fn mode(&self) -> crate::PlannerKind {
-        PlannerKind::PlanReAct
+        PlannerKind::BuiltIn
     }
 
     fn process_response_effect(
@@ -29,7 +29,6 @@ impl Planner for BranchingPlanner {
                 value: json!(true),
             }],
             branch_override: Some(ExecutionBranch::DirectAnswer),
-            has_final_answer: false,
         }
     }
 }
@@ -128,28 +127,6 @@ async fn test_planning_request_processor_applies_built_in_native_thinking() {
 
     assert!(request.native_thinking.is_some());
     assert!(request.planning_instruction.is_none());
-}
-
-#[tokio::test]
-async fn test_planning_response_processor_rewrites_plan_react_tagged_response() {
-    let planner: Arc<dyn Planner> = Arc::new(PlanReActPlanner::new());
-    let processor = PlanningResponseProcessor::new(planner);
-    let mut ctx = mock_ctx();
-    let mut response = LlmResponseEnvelope {
-        output_text: "/*PLANNING*/ collect facts\n/*FINAL_ANSWER*/done".to_string(),
-        branch: ExecutionBranch::ReactiveLoop,
-        actions: EventActions::default(),
-        output_items: Vec::new(),
-        allow_final_projection: true,
-    };
-
-    processor.run(&mut ctx, &mut response).await.unwrap();
-
-    assert_eq!(response.output_text, "done");
-    assert!(ctx.execution_state.plan_react_has_final_answer);
-    assert!(response.output_items.iter().any(
-        |item| matches!(item, TalosOutputItem::Reasoning { text } if text.contains("/*PLANNING*/"))
-    ));
 }
 
 #[tokio::test]

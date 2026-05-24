@@ -1,4 +1,5 @@
 use super::*;
+use ratatui::{backend::TestBackend, Terminal};
 
 #[test]
 fn test_request_follow_bottom_updates_scroll_only_when_auto_following() {
@@ -18,8 +19,8 @@ fn test_request_follow_bottom_updates_scroll_only_when_auto_following() {
 #[test]
 fn test_input_status_line_uses_dynamic_token_left_percent() {
     let mut app = create_embedded_app();
-    set_test_model_info(&mut app, "qwen-max", 32_768);
-    app.current_model = "qwen-max".to_string();
+    set_test_model_info(&mut app, "kimi-k2.5", 32_768);
+    app.current_model = "kimi-k2.5".to_string();
     app.session_usage = TalosUsage {
         input_tokens: 964,
         output_tokens: 16,
@@ -37,8 +38,8 @@ fn test_input_status_line_uses_dynamic_token_left_percent() {
 async fn test_turn_completed_updates_session_usage() {
     let mut app = create_remote_app();
     app.initialize_remote().await;
-    set_test_model_info(&mut app, "qwen-max", 32_768);
-    app.current_model = "qwen-max".to_string();
+    set_test_model_info(&mut app, "kimi-k2.5", 32_768);
+    app.current_model = "kimi-k2.5".to_string();
     app.in_flight = true;
     app.received_output_delta = false;
     app.transcript.live_assistant_idx = Some(app.push_block(ChatRole::Assistant, String::new()));
@@ -61,6 +62,183 @@ async fn test_turn_completed_updates_session_usage() {
     assert_eq!(app.session_usage.cache_creation_input_tokens, Some(7));
     assert_eq!(app.session_usage.cache_read_input_tokens, Some(13));
     assert_eq!(app.token_left_percent(), Some(97));
+}
+
+#[tokio::test]
+async fn test_live_metrics_do_not_overwrite_session_usage_before_turn_completed() {
+    let mut app = create_remote_app();
+    app.initialize_remote().await;
+    set_test_model_info(&mut app, "kimi-k2.5", 1_000);
+    app.current_model = "kimi-k2.5".to_string();
+    app.session_id = Some("sess-test".to_string());
+    app.session_usage = TalosUsage {
+        input_tokens: 80,
+        output_tokens: 20,
+        total_tokens: 100,
+        cache_creation_input_tokens: Some(3),
+        cache_read_input_tokens: Some(5),
+    };
+
+    let turn_usage = TalosUsage {
+        input_tokens: 30,
+        output_tokens: 10,
+        total_tokens: 40,
+        cache_creation_input_tokens: Some(2),
+        cache_read_input_tokens: Some(4),
+    };
+    let live_metrics = TurnExecutionMetrics {
+        model_rounds: 2,
+        tool_calls: 3,
+        tool_successes: 2,
+        tool_errors: 1,
+        stop_reason: StopReason::EndTurn,
+        usage: turn_usage.clone(),
+        duration_ms: Some(1_250),
+    };
+    let final_metrics = TurnExecutionMetrics {
+        duration_ms: Some(1_500),
+        ..live_metrics.clone()
+    };
+
+    app.handle_stream_event(turn_metrics_event_with_metrics(
+        "msg-usage",
+        "sess-test",
+        1,
+        live_metrics.clone(),
+    ));
+
+    assert_eq!(app.session_usage.total_tokens, 100);
+    assert_eq!(app.turn_metrics, Some(live_metrics));
+    assert!(app.turn_metrics_live);
+    assert_eq!(app.displayed_usage().total_tokens, 140);
+    assert_eq!(app.displayed_usage().cache_creation_input_tokens, Some(5));
+    assert_eq!(app.displayed_usage().cache_read_input_tokens, Some(9));
+    assert_eq!(app.token_left_percent(), Some(86));
+    let live_metrics_line = app
+        .turn_metrics_status_line(180)
+        .map(|line| line_plain_text(&line))
+        .unwrap();
+    assert!(
+        live_metrics_line.contains("live · 2 rounds · 3 tools · 2 ok · 1 err · 40 tokens · 1.2s")
+    );
+    let input_status = line_plain_text(&app.input_status_line(180));
+    assert!(!input_status.contains("rounds"));
+    assert!(!input_status.contains("tools"));
+
+    app.handle_stream_event(completed_event_with_metrics(
+        "msg-usage",
+        "sess-test",
+        2,
+        turn_usage,
+        final_metrics.clone(),
+    ));
+
+    assert_eq!(app.session_usage.total_tokens, 140);
+    assert_eq!(app.session_usage.cache_creation_input_tokens, Some(5));
+    assert_eq!(app.session_usage.cache_read_input_tokens, Some(9));
+    assert_eq!(app.turn_metrics, Some(final_metrics));
+    assert!(!app.turn_metrics_live);
+    assert_eq!(app.token_left_percent(), Some(86));
+    let final_metrics_line = app
+        .turn_metrics_status_line(180)
+        .map(|line| line_plain_text(&line))
+        .unwrap();
+    assert!(
+        final_metrics_line.contains("last · 2 rounds · 3 tools · 2 ok · 1 err · 40 tokens · 1.5s")
+    );
+}
+
+#[tokio::test]
+async fn test_completed_without_final_metrics_preserves_last_live_metrics() {
+    let mut app = create_remote_app();
+    app.initialize_remote().await;
+    set_test_model_info(&mut app, "kimi-k2.5", 1_000);
+    app.current_model = "kimi-k2.5".to_string();
+    app.session_id = Some("sess-test".to_string());
+
+    let turn_usage = TalosUsage {
+        input_tokens: 30,
+        output_tokens: 10,
+        total_tokens: 40,
+        ..TalosUsage::default()
+    };
+    let live_metrics = TurnExecutionMetrics {
+        model_rounds: 2,
+        tool_calls: 3,
+        tool_successes: 2,
+        tool_errors: 1,
+        stop_reason: StopReason::EndTurn,
+        usage: turn_usage.clone(),
+        duration_ms: Some(1_250),
+    };
+
+    app.handle_stream_event(turn_metrics_event_with_metrics(
+        "msg-usage",
+        "sess-test",
+        1,
+        live_metrics.clone(),
+    ));
+    app.handle_stream_event(completed_event("msg-usage", "sess-test", 2, turn_usage));
+
+    assert_eq!(app.turn_metrics, Some(live_metrics));
+    assert!(!app.turn_metrics_live);
+    let final_metrics_line = app
+        .turn_metrics_status_line(180)
+        .map(|line| line_plain_text(&line))
+        .unwrap();
+    assert!(final_metrics_line.contains("last · 2 rounds · 3 tools · 2 ok · 1 err"));
+}
+
+#[test]
+fn test_metrics_line_renders_above_input_without_border() {
+    let mut app = create_embedded_app();
+    app.current_model = "kimi-k2.5".to_string();
+    app.turn_metrics = Some(TurnExecutionMetrics {
+        model_rounds: 2,
+        tool_calls: 3,
+        tool_successes: 2,
+        tool_errors: 1,
+        stop_reason: StopReason::EndTurn,
+        usage: TalosUsage {
+            total_tokens: 4_200,
+            ..TalosUsage::default()
+        },
+        duration_ms: Some(12_300),
+    });
+    app.turn_metrics_live = true;
+    app.input_buffer = "Ask Talos".to_string();
+    app.cursor_index = app.input_buffer.chars().count();
+
+    let backend = TestBackend::new(110, 28);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| app.render_ui(frame)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let lines = buffer_lines(buffer);
+    let metrics_index = lines
+        .iter()
+        .position(|line| {
+            line.contains("live · 2 rounds · 3 tools · 2 ok · 1 err · 4.2k tokens · 12.3s")
+        })
+        .unwrap();
+    let input_index = lines
+        .iter()
+        .position(|line| line.contains("❯ Ask Talos"))
+        .unwrap();
+
+    assert!(metrics_index < input_index);
+    assert!(!lines[metrics_index].contains('┌'));
+    let inner_metrics = lines[metrics_index].trim_matches('│');
+    assert!(!inner_metrics.contains('│'));
+}
+
+fn buffer_lines(buffer: &ratatui::buffer::Buffer) -> Vec<String> {
+    (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect()
 }
 
 #[test]

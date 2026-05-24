@@ -160,6 +160,7 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<
         talos_types::talos::TalosAssistantTextCommittedEvent,
     >());
+    output.push_str(&export::<talos_types::talos::TalosTurnMetricsEvent>());
     output.push_str(&export::<talos_types::talos::TalosTurnCompletedEvent>());
     output.push_str(&export::<talos_types::talos::TalosTurnErrorEvent>());
     output.push_str(&export::<talos_types::talos::TalosJsonValue>());

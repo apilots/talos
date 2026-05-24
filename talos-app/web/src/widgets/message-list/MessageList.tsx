@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Check, Clock3, Copy, LoaderCircle, Sparkles, Wrench } from "lucide-react";
+import { Activity, Check, Clock3, Copy, LoaderCircle, Sparkles, Wrench } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -74,7 +74,7 @@ export function MessageList({ blocks, emptyTitle, emptyDetail, actions }: Messag
         if (block.kind === "timeline") {
           return (
             <CopyableBlock copyLabel={copyBlockLabel} copyText={copyText} copiedLabel={copiedBlockLabel} key={block.id}>
-              <TimelineBlock items={block.items} live={Boolean(block.live)} />
+              <TurnBlock block={block} />
             </CopyableBlock>
           );
         }
@@ -172,7 +172,25 @@ function blockToMarkdown(block: ChatRenderBlock) {
   }
 }
 
-function TimelineBlock({
+function TurnBlock({
+  block,
+}: {
+  block: Extract<ChatRenderBlock, { kind: "timeline" }>;
+}) {
+  return (
+    <div className="flex items-start gap-3.5 md:gap-4">
+      <div className="mt-1.5 flex size-7.5 shrink-0 items-center justify-center rounded-[0.95rem] border border-brand/18 bg-brand/6 text-brand md:size-8">
+        <Sparkles size={16} />
+      </div>
+      <div className="min-w-0 flex-1 overflow-hidden rounded-[1.1rem] border border-border/70 bg-background/38 text-ink shadow-[0_10px_26px_rgba(95,84,64,0.035)]">
+        <MessageTimelineBlock items={block.items} live={Boolean(block.live)} />
+        <TurnMetricsBlock metrics={block.metrics ?? null} />
+      </div>
+    </div>
+  );
+}
+
+function MessageTimelineBlock({
   items,
   live,
 }: {
@@ -212,88 +230,130 @@ function TimelineBlock({
   }, [activitySignature, hasActiveTimeline]);
 
   return (
-    <div className="flex items-start gap-3.5 md:gap-4">
-      <div className="mt-1.5 flex size-7.5 shrink-0 items-center justify-center rounded-[0.95rem] border border-brand/18 bg-brand/6 text-brand md:size-8">
-        <Sparkles size={16} />
-      </div>
-      <details
-        className="group/timeline flex-1 rounded-[1.1rem] border border-border/70 bg-background/38 text-ink shadow-[0_10px_26px_rgba(95,84,64,0.035)]"
-        open={open}
+    <details
+      className="group/timeline text-ink"
+      open={open}
+    >
+      <summary
+        className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-medium marker:hidden"
+        onClick={(event) => {
+          event.preventDefault();
+          setOpen((current) => !current);
+        }}
       >
-        <summary
-          className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-medium marker:hidden"
-          onClick={(event) => {
-            event.preventDefault();
-            setOpen((current) => !current);
-          }}
-        >
-          <span className="flex min-w-0 items-center gap-2">
-            <span>Thinking / Acting</span>
-            <span className="rounded-full border border-border/70 px-2 py-0.5 text-[11px] font-normal text-muted">
-              {items.length}
-            </span>
+        <span className="flex min-w-0 items-center gap-2">
+          <span>Thinking / Acting</span>
+          <span className="rounded-full border border-border/70 px-2 py-0.5 text-[11px] font-normal text-muted">
+            {items.length}
           </span>
-          {totalDuration !== null ? (
-            <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-normal text-muted">
-              <Clock3 size={13} />
-              {formatDuration(totalDuration)}
-            </span>
-          ) : null}
-        </summary>
-        <ol className="space-y-3 border-t border-border/60 px-3 py-3">
-          {items.map((item, index) => {
-            const statusLabel = visibleTimelineItemStatus(item);
-            return (
-              <li className="relative grid grid-cols-[1.55rem_minmax(0,1fr)] gap-2.5" key={item.itemId}>
-                {index < items.length - 1 || isAwaitingTimelineDelta ? (
-                  <span className="absolute left-[0.72rem] top-8 h-[calc(100%-1.25rem)] w-px bg-border/70" />
-                ) : null}
-                <span className="relative z-[1] mt-2 flex size-6 items-center justify-center rounded-full border border-brand/18 bg-card text-brand shadow-[0_3px_10px_rgba(95,84,64,0.05)]">
-                  <TimelineItemIcon kind={item.kind} />
-                </span>
-                <article className="min-w-0 rounded-[0.9rem] border border-border/65 bg-card/72">
-                  <header className="flex items-center justify-between gap-3 px-3 py-2.5">
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="truncate text-sm font-medium">{timelineItemTitle(item)}</span>
-                    </span>
-                    {statusLabel ? <span className="shrink-0 text-[11px] text-muted">{statusLabel}</span> : null}
-                  </header>
-                  <div className="border-t border-border/55 px-3 py-3">
-                    {item.kind === "tool_call" ? (
-                      <ToolCallBlock
-                        argumentsText={formatArguments(item.arguments)}
-                        callId={item.callId}
-                        output={item.output}
-                        progress={item.progress}
-                        prompt={item.prompt}
-                        status={timelineToolStatus(item)}
-                        timingMs={timelineItemDuration(item)}
-                        toolName={item.toolName}
-                        variant="timeline"
-                      />
-                    ) : (
-                      <TimelineThoughtLines text={item.text} />
-                    )}
-                  </div>
-                </article>
-              </li>
-            );
-          })}
-          {isAwaitingTimelineDelta ? (
-            <li className="relative grid grid-cols-[1.55rem_minmax(0,1fr)] gap-2.5" key="timeline-waiting-indicator">
-              <span
-                aria-label="Waiting for timeline update"
-                className="relative z-[1] mt-1 flex size-6 items-center justify-center rounded-full border border-brand/18 bg-card text-brand shadow-[0_3px_10px_rgba(95,84,64,0.05)]"
-              >
-                <LoaderCircle className="animate-spin" size={13} />
+        </span>
+        {totalDuration !== null ? (
+          <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-normal text-muted">
+            <Clock3 size={13} />
+            {formatDuration(totalDuration)}
+          </span>
+        ) : null}
+      </summary>
+      <ol className="space-y-3 border-t border-border/60 px-3 py-3">
+        {items.map((item, index) => {
+          const statusLabel = visibleTimelineItemStatus(item);
+          return (
+            <li className="relative grid grid-cols-[1.55rem_minmax(0,1fr)] gap-2.5" key={item.itemId}>
+              {index < items.length - 1 || isAwaitingTimelineDelta ? (
+                <span className="absolute left-[0.72rem] top-8 h-[calc(100%-1.25rem)] w-px bg-border/70" />
+              ) : null}
+              <span className="relative z-[1] mt-2 flex size-6 items-center justify-center rounded-full border border-brand/18 bg-card text-brand shadow-[0_3px_10px_rgba(95,84,64,0.05)]">
+                <TimelineItemIcon kind={item.kind} />
               </span>
-              <span className="min-h-7" />
+              <article className="min-w-0 rounded-[0.9rem] border border-border/65 bg-card/72">
+                <header className="flex items-center justify-between gap-3 px-3 py-2.5">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-sm font-medium">{timelineItemTitle(item)}</span>
+                  </span>
+                  {statusLabel ? <span className="shrink-0 text-[11px] text-muted">{statusLabel}</span> : null}
+                </header>
+                <div className="border-t border-border/55 px-3 py-3">
+                  {item.kind === "tool_call" ? (
+                    <ToolCallBlock
+                      argumentsText={formatArguments(item.arguments)}
+                      callId={item.callId}
+                      output={item.output}
+                      progress={item.progress}
+                      prompt={item.prompt}
+                      status={timelineToolStatus(item)}
+                      timingMs={timelineItemDuration(item)}
+                      toolName={item.toolName}
+                      variant="timeline"
+                    />
+                  ) : (
+                    <TimelineThoughtLines text={item.text} />
+                  )}
+                </div>
+              </article>
             </li>
-          ) : null}
-        </ol>
-      </details>
+          );
+        })}
+        {isAwaitingTimelineDelta ? (
+          <li className="relative grid grid-cols-[1.55rem_minmax(0,1fr)] gap-2.5" key="timeline-waiting-indicator">
+            <span
+              aria-label="Waiting for timeline update"
+              className="relative z-[1] mt-1 flex size-6 items-center justify-center rounded-full border border-brand/18 bg-card text-brand shadow-[0_3px_10px_rgba(95,84,64,0.05)]"
+            >
+              <LoaderCircle className="animate-spin" size={13} />
+            </span>
+            <span className="min-h-7" />
+          </li>
+        ) : null}
+      </ol>
+    </details>
+  );
+}
+
+function TurnMetricsBlock({
+  metrics,
+}: {
+  metrics: Extract<ChatRenderBlock, { kind: "timeline" }>["metrics"] | null;
+}) {
+  if (!metrics) {
+    return null;
+  }
+  const label =
+    metrics.state === "completed"
+      ? "Completed"
+      : metrics.state === "failed"
+        ? "Failed"
+        : "Running";
+  const items = [
+    `${metrics.model_rounds} rounds`,
+    `${metrics.tool_calls} tools`,
+    `${metrics.tool_successes} ok`,
+    `${metrics.tool_errors} errors`,
+    `${formatMetricNumber(metrics.usage.total_tokens)} tokens`,
+  ];
+  if (metrics.duration_ms != null) {
+    items.push(formatDuration(metrics.duration_ms));
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/60 px-4 py-2.5 text-[11px] text-muted">
+      <span className="flex items-center gap-1.5 font-medium text-ink/72">
+        <Activity size={13} />
+        {label}
+      </span>
+      {items.map((item) => (
+        <span className="whitespace-nowrap" key={item}>{item}</span>
+      ))}
     </div>
   );
+}
+
+function formatMetricNumber(value: number) {
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(1)}m`;
+  }
+  if (value >= 1_000) {
+    return `${(value / 1_000).toFixed(1)}k`;
+  }
+  return String(value);
 }
 
 function TimelineItemIcon({

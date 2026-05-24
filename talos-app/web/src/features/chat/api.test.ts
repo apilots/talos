@@ -61,7 +61,7 @@ describe("chat message api", () => {
         type: "turn_completed",
         request_id: "req-1",
         turn_id: "turn-1",
-        completed_at_ms: 1n,
+        completed_at_ms: 1,
         stop_reason: "end_turn",
         usage: {
           input_tokens: 0,

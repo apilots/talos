@@ -204,54 +204,6 @@ pub struct BuiltInGeneralTurnPolicy;
 
 impl GeneralTurnPolicy for BuiltInGeneralTurnPolicy {}
 
-#[derive(Debug, Clone)]
-pub struct PlanReActGeneralTurnPolicy {
-    require_final_answer_tag: bool,
-}
-
-impl PlanReActGeneralTurnPolicy {
-    pub fn new(require_final_answer_tag: bool) -> Self {
-        Self {
-            require_final_answer_tag,
-        }
-    }
-}
-
-impl GeneralTurnPolicy for PlanReActGeneralTurnPolicy {
-    fn after_step_result(
-        &self,
-        result: &mut GeneralTurnStepResult,
-    ) -> TalosResult<Option<GeneralTurnPolicyStop>> {
-        if !self.require_final_answer_tag
-            || !matches!(
-                result.disposition,
-                GeneralTurnStepDisposition::FinalResponse
-            )
-        {
-            return Ok(None);
-        }
-
-        const FINAL_ANSWER_TAG: &str = "/*FINAL_ANSWER*/";
-        let Some(index) = result.text.rfind(FINAL_ANSWER_TAG) else {
-            result.disposition = GeneralTurnStepDisposition::ContinueWithTools;
-            result.text.clear();
-            return Ok(None);
-        };
-        result.text = result.text[index + FINAL_ANSWER_TAG.len()..]
-            .trim()
-            .to_string();
-        Ok(None)
-    }
-
-    fn accepts_final_response(&self, text: &str) -> GeneralTurnPolicyFinalAcceptance {
-        if !self.require_final_answer_tag || text.contains("/*FINAL_ANSWER*/") {
-            GeneralTurnPolicyFinalAcceptance::Accept
-        } else {
-            GeneralTurnPolicyFinalAcceptance::Reject
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelFinishReason {
     Stop,
@@ -282,6 +234,7 @@ pub enum GeneralTurnStepDisposition {
 
 #[derive(Debug, Clone)]
 pub struct GeneralTurnLoopState {
+    pub started_at: Instant,
     pub messages: Vec<ChatMessage>,
     pub round: u32,
     pub output_items: Vec<TalosOutputItem>,
@@ -321,18 +274,10 @@ pub struct ToolLoopGuardState {
     pub consecutive_equivalent_read_only_rounds: u32,
 }
 
-/// Per-turn loop control state for PlanReAct mode.
-/// Lives only within a single `general_turn` execution; not persisted to session.
-#[derive(Debug, Clone, Default)]
-pub struct PlanReActLoopState {
-    pub replan_count: u32,
-    pub consecutive_no_progress_rounds: u32,
-    pub consecutive_read_only_rounds: u32,
-}
-
 impl GeneralTurnLoopState {
     pub fn new(_prepared: &PreparedGeneralTurn) -> Self {
         Self {
+            started_at: Instant::now(),
             messages: Vec::new(),
             round: 0,
             output_items: Vec::new(),
@@ -361,7 +306,6 @@ pub struct GeneralTurnStepRequest {
     pub parallel_tool_calls: bool,
     pub native_thinking: Option<NativeThinkingConfig>,
     pub pre_final_execution_summary: Option<String>,
-    pub defer_no_hint_final_projection: bool,
     pub stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
     pub streaming_tool_execution: Option<StreamingToolExecutionConfig>,
 }

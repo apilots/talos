@@ -45,9 +45,6 @@ pub async fn execute_general_turn_loop_with_resume(
 fn general_turn_policy_for_config(kernel_config: &AgentKernelConfig) -> Arc<dyn GeneralTurnPolicy> {
     match kernel_config.planner_mode {
         talos_config::PlannerMode::BuiltIn => Arc::new(BuiltInGeneralTurnPolicy),
-        talos_config::PlannerMode::PlanReAct => Arc::new(PlanReActGeneralTurnPolicy::new(
-            kernel_config.plan_react.require_final_answer_tag,
-        )),
     }
 }
 
@@ -106,10 +103,6 @@ pub async fn execute_general_turn_loop_with_policy(
             });
         }
         policy.before_step_request(&mut step_request)?;
-        step_request.defer_no_hint_final_projection = matches!(
-            policy.accepts_final_response(""),
-            GeneralTurnPolicyFinalAcceptance::Reject
-        );
         let mut step = execute_general_turn_step(step_request, llm_provider.clone()).await?;
         if let Some(policy_stop) = policy.after_step_result(&mut step)? {
             apply_general_turn_step(&mut state, &step);
@@ -137,6 +130,7 @@ pub async fn execute_general_turn_loop_with_policy(
             );
         }
         apply_general_turn_step(&mut state, &step);
+        emit_turn_metrics_stream_event(&prepared, &state, StopReason::EndTurn).await;
 
         if should_force_finalization_for_empty_response(state.tool_call_count, &step) {
             let mut messages = prepared.messages.clone();
@@ -172,33 +166,6 @@ pub async fn execute_general_turn_loop_with_policy(
             break (step_text, stop_reason);
         }
 
-        if step.tool_calls.is_empty() {
-            state.round = state.round.saturating_add(1);
-            state.messages.push(ChatMessage::system(
-                "The previous PlanReAct response did not include a FINAL_ANSWER tag. Continue with a valid tool action or provide the final answer under /*FINAL_ANSWER*/.",
-            ));
-            if state.round >= max_tool_rounds {
-                let mut messages = prepared.messages.clone();
-                messages.extend(state.messages.clone());
-                let forced_step = run_forced_finalization_step(
-                    messages,
-                    prepared.selected_model.clone(),
-                    llm_provider.clone(),
-                    prepared.stream_tx.clone(),
-                    None,
-                    None,
-                    ForcedFinalizationCause::ToolRoundBudget,
-                )
-                .await?;
-                apply_general_turn_step(&mut state, &forced_step);
-                break (
-                    forced_step.text.clone(),
-                    stop_reason_for_forced_finalization(ForcedFinalizationCause::ToolRoundBudget),
-                );
-            }
-            continue;
-        }
-
         let mut tool_batch = if prepared.stream_tx.is_some() {
             super::tool_batch::collect_general_turn_tool_batch(step.streamed_tool_outputs.clone())
         } else {
@@ -218,6 +185,7 @@ pub async fn execute_general_turn_loop_with_policy(
         let policy_stop = policy.after_tool_batch(&mut tool_batch)?;
         emit_pending_user_action_stream_events(&prepared, &tool_batch).await;
         apply_general_turn_tool_batch(&mut state, &tool_batch, kernel_config.as_ref());
+        emit_turn_metrics_stream_event(&prepared, &state, StopReason::EndTurn).await;
         if let Some(message) = build_tool_failure_recovery_nudge_message(&tool_batch) {
             state.messages.push(message);
         }
@@ -257,6 +225,21 @@ pub async fn execute_general_turn_loop_with_policy(
     let executed = finalize_general_turn_artifacts(state, final_text, stop_reason);
     emit_general_turn_finalization_stream(&prepared, &executed).await;
     Ok(executed)
+}
+
+async fn emit_turn_metrics_stream_event(
+    prepared: &PreparedGeneralTurn,
+    state: &GeneralTurnLoopState,
+    stop_reason: StopReason,
+) {
+    emit_stream_event(
+        prepared.stream_tx.as_ref(),
+        KernelStreamEventType::TurnMetrics,
+        KernelStreamEventData::TurnMetrics(crate::TurnMetricsStreamData {
+            metrics: build_turn_execution_metrics(state, stop_reason),
+        }),
+    )
+    .await;
 }
 
 async fn apply_general_turn_resume(

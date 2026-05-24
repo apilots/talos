@@ -1,7 +1,9 @@
 import type {
   TalosTimelineItem as ProtocolTalosTimelineItem,
   TalosTimelineEvent as ProtocolTalosTimelineEvent,
-  TalosTimelineEventPayload,
+  TalosTimelineEventPayload as ProtocolTalosTimelineEventPayload,
+  TalosTurnCompletedEvent as ProtocolTalosTurnCompletedEvent,
+  TalosTurnMetricsEvent as ProtocolTalosTurnMetricsEvent,
   TimelineEventEnvelope as ProtocolTimelineEventEnvelope,
   TimelineRecoverySnapshot as ProtocolTimelineRecoverySnapshot,
   TimelineReplay as ProtocolTimelineReplay,
@@ -16,7 +18,6 @@ export type {
   TalosItemStartedEvent,
   TalosTimelineContent,
   TalosTimelineDelta,
-  TalosTimelineEventPayload,
   TalosTimelineEventType,
   TalosTimelineItem,
   TalosTimelineItemKind,
@@ -36,7 +37,6 @@ export type {
   TalosToolProgressKind,
   TalosToolProgressEntry,
   TalosToolResult,
-  TalosTurnCompletedEvent,
   TalosTurnErrorEvent,
   TalosTurnStartedEvent,
   TurnExecutionMetrics,
@@ -251,6 +251,30 @@ export type TalosTimelineEvent = Omit<
   sequence: number;
   payload: TalosTimelineEventPayload;
 };
+
+export type TalosTurnMetricsEvent = Omit<
+  ProtocolTalosTurnMetricsEvent,
+  "metrics"
+> & {
+  metrics: TalosTurnExecutionMetrics;
+};
+
+export type TalosTurnCompletedEvent = Omit<
+  ProtocolTalosTurnCompletedEvent,
+  "completed_at_ms" | "usage" | "metrics"
+> & {
+  completed_at_ms: number;
+  usage: TalosUsage;
+  metrics: TalosTurnExecutionMetrics | null;
+};
+
+export type TalosTimelineEventPayload =
+  | Exclude<
+      ProtocolTalosTimelineEventPayload,
+      { type: "turn_metrics" } | { type: "turn_completed" }
+    >
+  | ({ type: "turn_metrics" } & TalosTurnMetricsEvent)
+  | ({ type: "turn_completed" } & TalosTurnCompletedEvent);
 
 export type TimelineEventEnvelope = Omit<
   ProtocolTimelineEventEnvelope,

@@ -40,7 +40,7 @@ async fn test_prompt_blocks_follow_expected_order() {
 
     let assembly = PromptBuilder::new()
         .phase(PromptPhase::Planning)
-        .planner_mode("plan_react")
+        .planner_mode("built_in")
         .expect("planner mode should parse")
         .planning_instruction(Some("build a short plan first".to_string()))
         .tools(&registry)
@@ -66,7 +66,7 @@ async fn test_prompt_builder_includes_tool_summary_and_planning_instruction() {
     let blocks = render_prompt_blocks(
         &PromptBuilder::new()
             .phase(PromptPhase::Planning)
-            .planner_mode("plan_react")
+            .planner_mode("built_in")
             .expect("planner mode should parse")
             .planning_instruction(Some("build a short plan first".to_string()))
             .tools(&registry)

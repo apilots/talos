@@ -16,16 +16,7 @@ impl TuiApp {
                 self.render_history_panel(f, f.area());
             }
             AppState::Chat => {
-                if self.right_panel_visible {
-                    let chunks = Layout::default()
-                        .direction(Direction::Horizontal)
-                        .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])
-                        .split(f.area());
-                    self.render_left_panel(f, chunks[0]);
-                    self.render_right_panel(f, chunks[1]);
-                } else {
-                    self.render_left_panel(f, f.area());
-                }
+                self.render_left_panel(f, f.area());
                 if self.show_command_autocomplete {
                     self.render_command_autocomplete(f, f.area());
                 } else if self.show_model_picker {
@@ -55,12 +46,14 @@ impl TuiApp {
             .composer_line_count(left_inner.width as usize)
             .saturating_add(2)
             .clamp(3, 8) as u16;
+        let metrics_line_height = u16::from(self.turn_metrics.is_some());
         let bottom_gap_height = 3;
         let left_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Min(4),
                 Constraint::Length(if show_queue_panel { 5 } else { 0 }),
+                Constraint::Length(metrics_line_height),
                 Constraint::Length(input_panel_height),
                 Constraint::Length(1),
                 Constraint::Length(bottom_gap_height),
@@ -126,9 +119,24 @@ impl TuiApp {
             f.render_widget(queue, left_chunks[1]);
         }
 
+        if metrics_line_height > 0 {
+            let metrics_style = Style::default().bg(Color::Rgb(36, 39, 46)).fg(Color::White);
+            f.render_widget(
+                Block::default().style(Style::default().bg(Color::Rgb(36, 39, 46))),
+                left_chunks[2],
+            );
+            if let Some(metrics_line) = self.turn_metrics_status_line(left_chunks[2].width as usize)
+            {
+                let metrics_row = Paragraph::new(metrics_line)
+                    .style(metrics_style)
+                    .wrap(Wrap { trim: false });
+                f.render_widget(metrics_row, left_chunks[2]);
+            }
+        }
+
         let input_panel = Block::default();
-        let input_inner = input_panel.inner(left_chunks[2]);
-        f.render_widget(input_panel, left_chunks[2]);
+        let input_inner = input_panel.inner(left_chunks[3]);
+        f.render_widget(input_panel, left_chunks[3]);
         self.input_area = Some(input_inner);
 
         let input_bg_style = Style::default().bg(Color::Rgb(72, 76, 88));
@@ -144,13 +152,13 @@ impl TuiApp {
             Style::default().bg(Color::Rgb(36, 39, 46)).fg(Color::White)
         };
         let status_block = Block::default().style(Style::default().bg(Color::Rgb(36, 39, 46)));
-        f.render_widget(status_block, left_chunks[3]);
-        let wait_row = Paragraph::new(self.input_status_line(left_chunks[3].width as usize))
+        f.render_widget(status_block, left_chunks[4]);
+        let wait_row = Paragraph::new(self.input_status_line(left_chunks[4].width as usize))
             .style(wait_style)
             .wrap(Wrap { trim: false });
-        f.render_widget(wait_row, left_chunks[3]);
+        f.render_widget(wait_row, left_chunks[4]);
 
         let bottom_gap = Block::default().style(Style::default().bg(Color::Rgb(33, 38, 49)));
-        f.render_widget(bottom_gap, left_chunks[4]);
+        f.render_widget(bottom_gap, left_chunks[5]);
     }
 }

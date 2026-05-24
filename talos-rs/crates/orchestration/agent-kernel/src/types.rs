@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use talos_error::{TalosError, TalosResult};
 use talos_types::talos::TalosSessionEnvironment;
-use talos_types::talos::{TalosContentItem, TalosOutputItem, TalosUsage};
+use talos_types::talos::{TalosContentItem, TalosOutputItem, TalosUsage, TurnExecutionMetrics};
 use talos_types::ModelInfo;
 use tokio::sync::mpsc;
 
@@ -177,6 +177,7 @@ pub enum KernelStreamEventType {
     AssistantTextCompleted,
     AssistantTextCommitted,
     ExecutionSummary,
+    TurnMetrics,
     ToolCallStart,
     ToolArgsDelta,
     ToolQueued,
@@ -213,6 +214,7 @@ pub enum KernelStreamEventData {
     AssistantTextCompleted(AssistantTextCompletedStreamData),
     AssistantTextCommitted(AssistantTextCommittedStreamData),
     ExecutionSummary(ExecutionSummaryStreamData),
+    TurnMetrics(TurnMetricsStreamData),
     ToolCallStart(ToolCallStartStreamData),
     ToolArgsDelta(ToolArgsDeltaStreamData),
     ToolQueued(ToolQueuedStreamData),
@@ -266,6 +268,11 @@ pub struct AssistantTextCompletedStreamData {
 pub struct AssistantTextCommittedStreamData {
     pub item_key: KernelStreamItemKey,
     pub phase: KernelAssistantTextPhase,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TurnMetricsStreamData {
+    pub metrics: TurnExecutionMetrics,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -431,10 +438,6 @@ impl InvocationContext {
         self.execution_state.planning_response = Some(value.into());
     }
 
-    pub fn set_plan_react_has_final_answer(&mut self, value: bool) {
-        self.execution_state.plan_react_has_final_answer = value;
-    }
-
     pub fn mark_transfer_consumed(&mut self) {
         self.execution_state.transfer_consumed = true;
     }
@@ -521,9 +524,6 @@ pub struct InvocationExecutionState {
     pub planning_response: Option<String>,
     #[serde(default)]
     pub transfer_consumed: bool,
-    /// Set by PlanningResponseProcessor when PlanReAct mode detects a FINAL_ANSWER tag.
-    #[serde(default)]
-    pub plan_react_has_final_answer: bool,
 }
 
 /// Runtime limits for invocation execution.

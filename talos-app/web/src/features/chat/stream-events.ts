@@ -3,6 +3,7 @@ import type {
   TalosTimelineContent,
   TalosTimelineDelta,
   TalosTimelineItem,
+  TalosTurnExecutionMetrics,
   TimelineEventEnvelope,
   TalosHistoryTimelineItem,
   TalosSessionHistorySnapshot,
@@ -10,7 +11,7 @@ import type {
 
 import { useAppStore } from "@/shared/store/app-store";
 import { outputContentToText } from "@/shared/types/domain";
-import type { ChatRenderBlock, ChatTimelineItem } from "@/shared/types/ui";
+import type { ChatRenderBlock, ChatTimelineItem, ChatTurnMetrics } from "@/shared/types/ui";
 
 type TimelineItemSnapshot = {
   item: TalosTimelineItem;
@@ -27,16 +28,18 @@ export function buildBlocksFromHistorySnapshot(
   const messageIds = new Set<string>();
   let inputIndex = 0;
 
-  function ensureTimelineBlock(messageId: string) {
+  function ensureTimelineBlock(messageId: string, metrics?: ChatTurnMetrics) {
     const id = `timeline-${snapshot?.session_id ?? "history"}-${messageId}`;
     const existing = blocks.find((block) => block.id === id);
     if (existing?.kind === "timeline") {
+      existing.metrics = metrics ?? existing.metrics;
       return existing;
     }
     const block: ChatRenderBlock = {
       id,
       kind: "timeline",
       items: [],
+      metrics,
       live: false,
     };
     blocks.push(block);
@@ -63,6 +66,9 @@ export function buildBlocksFromHistorySnapshot(
 
   for (const message of snapshot?.messages ?? []) {
     messageIds.add(message.message_id);
+    const messageMetrics = message.metrics
+      ? toChatTurnMetrics(message.metrics, "completed")
+      : undefined;
     for (const item of message.items) {
       if (item.phase === "input") {
         const text = timelineText(item.content);
@@ -86,7 +92,7 @@ export function buildBlocksFromHistorySnapshot(
       if (chatItem.kind !== "tool_call" && !chatItem.text.trim()) {
         continue;
       }
-      const timeline = ensureTimelineBlock(message.message_id);
+      const timeline = ensureTimelineBlock(message.message_id, messageMetrics);
       const existingIndex = timeline.items.findIndex((entry) => entry.itemId === chatItem.itemId);
       if (existingIndex >= 0) {
         timeline.items[existingIndex] = mergeTimelineHistoryItem(
@@ -96,6 +102,9 @@ export function buildBlocksFromHistorySnapshot(
       } else {
         timeline.items.push(chatItem);
       }
+    }
+    if (messageMetrics) {
+      ensureTimelineBlock(message.message_id, messageMetrics);
     }
   }
 
@@ -138,6 +147,17 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEventEnvel
   const state = useAppStore.getState();
   const stream = state.streams[sessionId];
   const isSameMessage = stream?.activeMessageId === event.message_id;
+
+  if (event.payload.type === "turn_metrics") {
+    if (stream?.activeMessageId && !isSameMessage) {
+      return;
+    }
+    state.setTurnMetrics(
+      sessionId,
+      toChatTurnMetrics(event.payload.metrics as TalosTurnExecutionMetrics, "running"),
+    );
+    return;
+  }
 
   if (
     isSameMessage &&
@@ -200,6 +220,12 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEventEnvel
       applyAssistantTextCommitted(sessionId, event.payload.item_id, event.payload.phase);
       return;
     case "turn_completed":
+      if (event.payload.metrics) {
+        state.setTurnMetrics(
+          sessionId,
+          toChatTurnMetrics(event.payload.metrics as TalosTurnExecutionMetrics, "completed"),
+        );
+      }
       markPendingInputCompleted(sessionId, event.message_id);
       timelineItemsBySession.delete(sessionId);
       state.setSessionStatus(
@@ -223,6 +249,35 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEventEnvel
       });
       return;
   }
+}
+
+function toChatTurnMetrics(
+  metrics: TalosTurnExecutionMetrics,
+  state: ChatTurnMetrics["state"],
+): ChatTurnMetrics {
+  return {
+    ...metrics,
+    state,
+    model_rounds: Number(metrics.model_rounds),
+    tool_calls: Number(metrics.tool_calls),
+    tool_successes: Number(metrics.tool_successes),
+    tool_errors: Number(metrics.tool_errors),
+    duration_ms: metrics.duration_ms == null ? null : Number(metrics.duration_ms),
+    usage: {
+      ...metrics.usage,
+      input_tokens: Number(metrics.usage.input_tokens),
+      output_tokens: Number(metrics.usage.output_tokens),
+      total_tokens: Number(metrics.usage.total_tokens),
+      cache_creation_input_tokens:
+        metrics.usage.cache_creation_input_tokens == null
+          ? metrics.usage.cache_creation_input_tokens
+          : Number(metrics.usage.cache_creation_input_tokens),
+      cache_read_input_tokens:
+        metrics.usage.cache_read_input_tokens == null
+          ? metrics.usage.cache_read_input_tokens
+          : Number(metrics.usage.cache_read_input_tokens),
+    },
+  };
 }
 
 function applyItemStarted(sessionId: string, messageId: string, item: TalosTimelineItem) {

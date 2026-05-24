@@ -12,6 +12,7 @@ use chrono::Utc;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::Instant;
 use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
@@ -74,7 +75,7 @@ mod tests;
 mod tool_batch;
 mod types;
 
-pub(crate) use finalize::to_api_stop_reason;
+pub(crate) use finalize::{build_turn_execution_metrics, to_api_stop_reason};
 pub use finalize::{emit_general_turn_finalization_stream, finalize_general_turn_artifacts};
 pub(crate) use guard::{
     build_read_only_nudge_message, build_tool_failure_recovery_nudge_message,
@@ -111,11 +112,10 @@ pub(crate) use tool_batch::parse_retrieved_memory_items;
 pub use tool_batch::{apply_general_turn_tool_batch, execute_general_turn_tool_batch};
 pub use types::{
     BuiltInGeneralTurnPolicy, DynamicToolResultResume, ExecutedTurnArtifacts, GeneralTurnLoopState,
-    GeneralTurnOutcome, GeneralTurnPolicy, GeneralTurnPolicyFinalAcceptance, GeneralTurnPolicyStop,
-    GeneralTurnResult, GeneralTurnResume, GeneralTurnStepDisposition, GeneralTurnStepRequest,
-    GeneralTurnStepResult, GeneralTurnToolBatch, ModelFinishReason, PendingGeneralTurnAction,
-    PlanReActGeneralTurnPolicy, PlanReActLoopState, PreparedGeneralTurn, ResumeToolCall,
-    SessionCompactionState, StreamingToolExecutionConfig,
+    GeneralTurnOutcome, GeneralTurnPolicy, GeneralTurnPolicyStop, GeneralTurnResult,
+    GeneralTurnResume, GeneralTurnStepDisposition, GeneralTurnStepRequest, GeneralTurnStepResult,
+    GeneralTurnToolBatch, ModelFinishReason, PendingGeneralTurnAction, PreparedGeneralTurn,
+    ResumeToolCall, SessionCompactionState, StreamingToolExecutionConfig,
 };
 pub(crate) use types::{
     ForcedFinalizationCause, PendingDynamicToolRequest, ReadOnlyRoundFingerprint,

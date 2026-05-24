@@ -166,7 +166,6 @@ pub(crate) async fn run_forced_finalization_step(
             parallel_tool_calls: false,
             native_thinking: None,
             pre_final_execution_summary: pre_final_execution_summary.clone(),
-            defer_no_hint_final_projection: false,
             stream_tx: stream_tx.clone(),
             streaming_tool_execution: None,
         },
@@ -217,7 +216,6 @@ async fn run_salvage_finalization_step(
             } else {
                 pre_final_execution_summary
             },
-            defer_no_hint_final_projection: false,
             stream_tx,
             streaming_tool_execution: None,
         },

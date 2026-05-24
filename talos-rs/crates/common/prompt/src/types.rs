@@ -42,7 +42,6 @@ pub enum PlannerMode {
     None,
     #[default]
     BuiltIn,
-    PlanReAct,
 }
 
 impl PlannerMode {
@@ -50,7 +49,6 @@ impl PlannerMode {
         match value.trim().to_ascii_lowercase().as_str() {
             "none" => Ok(Self::None),
             "built_in" => Ok(Self::BuiltIn),
-            "plan_react" => Ok(Self::PlanReAct),
             other => Err(TalosError::ValidationError(format!(
                 "invalid planner mode: {}",
                 other
@@ -62,7 +60,6 @@ impl PlannerMode {
         match self {
             Self::None => "none",
             Self::BuiltIn => "built_in",
-            Self::PlanReAct => "plan_react",
         }
     }
 }

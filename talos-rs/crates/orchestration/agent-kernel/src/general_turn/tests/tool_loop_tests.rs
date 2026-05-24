@@ -166,47 +166,6 @@ impl GeneralTurnPolicy for RecordingStepPolicy {
 }
 
 #[tokio::test]
-async fn test_plan_react_policy_requires_final_answer_tag_for_no_tool_final() {
-    let policy = PlanReActGeneralTurnPolicy::new(true);
-    let mut step = GeneralTurnStepResult {
-        text: "/*REASONING*/ still thinking".to_string(),
-        reasoning: Vec::new(),
-        tool_calls: Vec::new(),
-        streamed_tool_outputs: Vec::new(),
-        model_finish_reason: ModelFinishReason::Stop,
-        output_items: Vec::new(),
-        usage: TalosUsage::default(),
-        final_answer_streamed: false,
-        execution_summary_streamed: false,
-        disposition: GeneralTurnStepDisposition::FinalResponse,
-    };
-
-    assert_eq!(
-        policy.accepts_final_response(&step.text),
-        GeneralTurnPolicyFinalAcceptance::Reject
-    );
-    policy
-        .after_step_result(&mut step)
-        .expect("PlanReAct no-final-tag response should be handled by policy");
-    assert!(step.text.is_empty());
-    assert!(matches!(
-        step.disposition,
-        GeneralTurnStepDisposition::ContinueWithTools
-    ));
-
-    step.text = "/*REASONING*/ done\n/*FINAL_ANSWER*/final text".to_string();
-    step.disposition = GeneralTurnStepDisposition::FinalResponse;
-    assert_eq!(
-        policy.accepts_final_response(&step.text),
-        GeneralTurnPolicyFinalAcceptance::Accept
-    );
-    policy
-        .after_step_result(&mut step)
-        .expect("PlanReAct final tag should be accepted");
-    assert_eq!(step.text, "final text");
-}
-
-#[tokio::test]
 
 async fn test_run_general_turn_bash_then_task_output() {
     let provider = Arc::new(ExecLoopProvider::default());

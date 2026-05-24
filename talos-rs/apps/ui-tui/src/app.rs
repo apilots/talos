@@ -36,6 +36,8 @@ impl TuiApp {
             connection_mode,
             current_model: String::new(),
             session_usage: TalosUsage::default(),
+            turn_metrics: None,
+            turn_metrics_live: false,
             available_model_info: vec![],
             available_models: vec![],
             session_id: None,
@@ -71,6 +73,7 @@ impl TuiApp {
             pending_close_task: None,
             active_stream_message_id: None,
             last_stream_sequence: None,
+            last_stream_event_id: None,
             timeline_items: HashMap::new(),
             status_hint: None,
             spinner_index: 0,
@@ -84,7 +87,6 @@ impl TuiApp {
             model_picker_selected: 0,
             show_sessions_picker: false,
             sessions_picker_selected: 0,
-            right_panel_visible: false,
             sent_messages_history: VecDeque::new(),
             message_history_index: None,
             show_command_autocomplete: false,
@@ -257,6 +259,8 @@ impl TuiApp {
         self.session_id = Some(session.context.session_id.clone());
         self.current_model = session.config.llm.model.clone();
         self.session_usage = session.state.usage.clone();
+        self.turn_metrics = None;
+        self.turn_metrics_live = false;
         self.current_project_root = session
             .current_directory
             .clone()
@@ -296,6 +300,8 @@ impl TuiApp {
         self.active_message = None;
         self.active_message_raw = None;
         self.active_user_idx = None;
+        self.turn_metrics = None;
+        self.turn_metrics_live = false;
         self.received_output_delta = false;
         self.chat_scroll = 0;
         self.chat_manual_scroll = false;

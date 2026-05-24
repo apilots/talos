@@ -1100,11 +1100,11 @@ async fn test_close_session_flushes_workspace_memory() {
 fn test_planner_mode_comes_from_kernel_config() {
     let mut agent = build_test_agent();
     agent
-        .set_default_planner_mode("plan_react")
+        .set_default_planner_mode("built_in")
         .expect("planner mode should parse");
     assert_eq!(
         agent.kernel_config.planner_mode,
-        talos_config::PlannerMode::PlanReAct
+        talos_config::PlannerMode::BuiltIn
     );
 }
 
@@ -1410,7 +1410,10 @@ async fn test_run_stream_emits_user_input_and_single_final_answer() {
 
     let user_input_item_id = user_input_item_id.expect("user input item should start");
     let final_answer_item_id = final_answer_item_id.expect("final answer item should start");
-    assert_eq!(unknown_answer_item_id.as_deref(), Some(final_answer_item_id.as_str()));
+    assert_eq!(
+        unknown_answer_item_id.as_deref(),
+        Some(final_answer_item_id.as_str())
+    );
     assert_eq!(commentary_count, 0);
     assert!(events.iter().any(|event| matches!(
         &event.payload,

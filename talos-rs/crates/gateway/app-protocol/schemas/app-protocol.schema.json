@@ -2281,6 +2281,24 @@
           "properties": {
             "method": {
               "enum": [
+                "timeline.turn.metrics"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/TimelineSubscriptionNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "timeline.turn.completed"
               ],
               "type": "string"
@@ -3202,6 +3220,32 @@
         },
         {
           "properties": {
+            "metrics": {
+              "$ref": "#/definitions/TurnExecutionMetrics"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "turn_metrics"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "metrics",
+            "request_id",
+            "turn_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
             "completed_at_ms": {
               "format": "uint64",
               "minimum": 0.0,
@@ -3289,6 +3333,7 @@
         "item_delta",
         "item_completed",
         "assistant_text_committed",
+        "turn_metrics",
         "turn_completed",
         "turn_error"
       ],

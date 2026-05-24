@@ -94,26 +94,35 @@ async fn replay(client: &mut AppServerClient) -> Result<()> {
     eprintln!("replay collect initial events");
     let initial_events =
         collect_until_terminal(client, &initial_subscription.subscription_id).await?;
-    let first_event_id = initial_events
+    let replayable_initial_events: Vec<_> = initial_events
+        .iter()
+        .filter(|event| is_replayable_event(event))
+        .cloned()
+        .collect();
+    let first_event_id = replayable_initial_events
         .first()
         .map(|event| event.event_id.clone())
         .ok_or_else(|| anyhow!("expected initial events before replay"))?;
     eprintln!("replay event.subscribe replay");
     let replay = subscribe_events_with_limit(client, &session_id, initial_events.len() + 8).await?;
     eprintln!("replay collect replay events");
-    let replay_events =
-        collect_events(client, &replay.subscription_id, initial_events.len()).await?;
-    if replay_events.len() != initial_events.len() {
+    let replay_events = collect_events(
+        client,
+        &replay.subscription_id,
+        replayable_initial_events.len(),
+    )
+    .await?;
+    if replay_events.len() != replayable_initial_events.len() {
         return Err(anyhow!(
             "replay event count mismatch: initial={} replay={}",
-            initial_events.len(),
+            replayable_initial_events.len(),
             replay_events.len()
         ));
     }
     if replay_events.first().map(|event| event.event_id.as_str()) != Some(first_event_id.as_str()) {
         return Err(anyhow!("replay did not start from first persisted event"));
     }
-    assert_matching_event_sequence(&initial_events, &replay_events)
+    assert_matching_event_sequence(&replayable_initial_events, &replay_events)
 }
 
 async fn multi_subscriber(client: &mut AppServerClient) -> Result<()> {
@@ -566,6 +575,10 @@ fn is_terminal_event(event: &TimelineEventEnvelope) -> bool {
         event.event.event_type,
         TalosTimelineEventType::TurnCompleted | TalosTimelineEventType::TurnError
     )
+}
+
+fn is_replayable_event(event: &TimelineEventEnvelope) -> bool {
+    event.event.event_type != TalosTimelineEventType::TurnMetrics
 }
 
 fn ensure_turn_event_flow(events: &[TimelineEventEnvelope]) -> Result<()> {

@@ -7,7 +7,7 @@ use talos_types::talos::{
     TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItem,
     TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase, TalosToolProgressEntry,
     TalosToolProgressKind, TalosToolResult, TalosTurnCompletedEvent, TalosTurnErrorEvent,
-    TalosTurnStartedEvent, TalosUsage, TurnExecutionMetrics,
+    TalosTurnMetricsEvent, TalosTurnStartedEvent, TalosUsage, TurnExecutionMetrics,
 };
 
 #[derive(Debug, Clone)]
@@ -68,6 +68,15 @@ impl TimelineBuilder {
             metrics,
         });
         self.event(TalosTimelineEventType::TurnCompleted, payload)
+    }
+
+    pub fn turn_metrics(&mut self, metrics: TurnExecutionMetrics) -> TalosTimelineEvent {
+        let payload = TalosTimelineEventPayload::TurnMetrics(TalosTurnMetricsEvent {
+            request_id: self.request_id.clone(),
+            turn_id: self.turn_id.clone(),
+            metrics,
+        });
+        self.event(TalosTimelineEventType::TurnMetrics, payload)
     }
 
     pub fn fail_turn(&mut self, error: impl Into<String>) -> TalosTimelineEvent {
@@ -273,10 +282,7 @@ impl TimelineBuilder {
                 item_id: item_id.to_string(),
                 phase,
             });
-        Ok(self.event(
-            TalosTimelineEventType::AssistantTextCommitted,
-            payload,
-        ))
+        Ok(self.event(TalosTimelineEventType::AssistantTextCommitted, payload))
     }
 
     pub fn close_active_items(

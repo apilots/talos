@@ -38,19 +38,23 @@ impl TuiApp {
 
         let event = envelope.event;
         if let Some(last_seq) = self.last_stream_sequence {
-            if event.sequence < last_seq {
+            if event.sequence <= last_seq {
                 self.push_right_event(format!(
-                    "ignored out-of-order event seq {} < {}",
+                    "ignored duplicate or out-of-order event seq {} <= {}",
                     event.sequence, last_seq
                 ));
                 return;
             }
         }
         self.last_stream_sequence = Some(event.sequence);
+        self.last_stream_event_id = Some(envelope.event_id);
         self.request_follow_bottom();
 
         match event.payload {
-            TalosTimelineEventPayload::TurnStarted(_) => {}
+            TalosTimelineEventPayload::TurnStarted(_) => {
+                self.turn_metrics = None;
+                self.turn_metrics_live = false;
+            }
             TalosTimelineEventPayload::ItemStarted(payload) => {
                 self.handle_item_started(payload.item);
             }
@@ -68,11 +72,20 @@ impl TuiApp {
             TalosTimelineEventPayload::AssistantTextCommitted(payload) => {
                 self.handle_assistant_text_committed(&payload.item_id, payload.phase);
             }
+            TalosTimelineEventPayload::TurnMetrics(payload) => {
+                self.turn_metrics = Some(payload.metrics);
+                self.turn_metrics_live = true;
+            }
             TalosTimelineEventPayload::TurnCompleted(payload) => {
                 self.session_usage.accumulate(&payload.usage);
+                if let Some(metrics) = payload.metrics {
+                    self.turn_metrics = Some(metrics);
+                }
+                self.turn_metrics_live = false;
                 self.finish_active_stream("stream completed", false, false);
             }
             TalosTimelineEventPayload::TurnError(payload) => {
+                self.turn_metrics_live = false;
                 self.push_block(ChatRole::System, format!("Stream error: {}", payload.error));
                 self.finish_active_stream("stream error", true, false);
             }
@@ -87,12 +100,14 @@ impl TuiApp {
             if self.active_stream_message_id.as_deref() != Some(envelope.message_id.as_str()) {
                 self.active_stream_message_id = None;
                 self.last_stream_sequence = None;
+                self.last_stream_event_id = None;
                 self.timeline_items.clear();
             }
             self.handle_stream_event(envelope);
         }
         self.active_stream_message_id = None;
         self.last_stream_sequence = None;
+        self.last_stream_event_id = None;
         self.timeline_items.clear();
         count
     }
@@ -101,6 +116,7 @@ impl TuiApp {
         let mut item_count = 0;
         self.active_stream_message_id = None;
         self.last_stream_sequence = None;
+        self.last_stream_event_id = None;
         self.timeline_items.clear();
         self.finish_live_text_blocks();
 

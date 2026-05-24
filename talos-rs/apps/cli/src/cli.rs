@@ -476,6 +476,7 @@ fn render_event(
         TalosTimelineEventPayload::TurnCompleted(_) => {
             return Ok(true);
         }
+        TalosTimelineEventPayload::TurnMetrics(_) => {}
         TalosTimelineEventPayload::TurnStarted(_) => {}
     }
     Ok(false)

@@ -4,6 +4,7 @@ import type {
   TalosTimelineItemStatus,
   TalosTimelinePhase,
   TalosToolProgressKind,
+  TalosTurnExecutionMetrics,
 } from "./protocol";
 
 export type RuntimeMode = "cloud" | "local";
@@ -91,8 +92,13 @@ export type ChatRenderBlock =
       id: string;
       kind: "timeline";
       items: ChatTimelineItem[];
+      metrics?: ChatTurnMetrics | null;
       live?: boolean;
     };
+
+export type ChatTurnMetrics = TalosTurnExecutionMetrics & {
+  state: "running" | "completed" | "failed";
+};
 
 export type ChatTimelineItem =
   | {
@@ -159,5 +165,6 @@ export interface StreamSessionState {
   blocks: ChatRenderBlock[];
   pendingInput?: PendingInput;
   pendingUserAction?: TalosPendingUserAction;
+  turnMetrics?: ChatTurnMetrics;
   error?: string;
 }

@@ -251,11 +251,20 @@ fn spawn_subscription_stream(
         loop {
             match live_events.recv().await {
                 Ok(record) => {
-                    let event_seq = record.event_seq;
-                    if record.session_id != session_id || event_seq <= last_sent_seq {
+                    if record.session_id != session_id {
                         continue;
                     }
-                    last_sent_seq = event_seq;
+                    let is_live_metrics = matches!(
+                        record.event.payload,
+                        talos_types::talos::TalosTimelineEventPayload::TurnMetrics(_)
+                    );
+                    if !is_live_metrics {
+                        let event_seq = record.event_seq;
+                        if event_seq <= last_sent_seq {
+                            continue;
+                        }
+                        last_sent_seq = event_seq;
+                    }
                     let is_terminal = is_terminal_event(&record);
                     if tx
                         .send(TimelineSubscriptionMessage::Event(record))
@@ -368,7 +377,8 @@ mod tests {
     };
     use talos_types::talos::{
         StopReason, TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType,
-        TalosTurnCompletedEvent, TalosTurnStartedEvent, TalosUsage,
+        TalosTurnCompletedEvent, TalosTurnMetricsEvent, TalosTurnStartedEvent, TalosUsage,
+        TurnExecutionMetrics,
     };
     use tokio::sync::mpsc;
 
@@ -455,6 +465,24 @@ mod tests {
         }
     }
 
+    fn metrics_event(sequence: u64) -> TalosTimelineEvent {
+        TalosTimelineEvent {
+            event_seq: None,
+            event_id: None,
+            created_at_ms: Some(100 + sequence as i64),
+            event_type: TalosTimelineEventType::TurnMetrics,
+            turn_id: "turn-1".to_string(),
+            message_id: "msg-1".to_string(),
+            session_id: "s1".to_string(),
+            sequence,
+            payload: TalosTimelineEventPayload::TurnMetrics(TalosTurnMetricsEvent {
+                request_id: "req-1".to_string(),
+                turn_id: "turn-1".to_string(),
+                metrics: TurnExecutionMetrics::default(),
+            }),
+        }
+    }
+
     fn service() -> (TimelineEventService, Arc<MockStore>) {
         let store = Arc::new(MockStore::default());
         let event_store: Arc<dyn TimelineEventStore> = store.clone();
@@ -510,6 +538,51 @@ mod tests {
         assert_eq!(replay.event_id, first_event_id);
         assert_eq!(live.event_id, second.event_id);
         assert!(live.event_seq > subscription.replay.last_replay_seq);
+    }
+
+    #[tokio::test]
+    async fn live_metrics_events_are_not_replayed_or_used_as_cursor_progress() {
+        let (timeline, _store) = service();
+        let events = EventService::new(Arc::new(timeline.clone()));
+        let first = timeline
+            .record_talos_event(unpersisted_event(1))
+            .await
+            .unwrap();
+
+        let mut subscription = events
+            .subscribe(TimelineSubscribeParams {
+                session_id: "s1".to_string(),
+                after_event_id: None,
+                replay_limit: 32,
+                close_when_idle: false,
+                close_on_terminal: false,
+            })
+            .await
+            .unwrap();
+
+        timeline.record_talos_event(metrics_event(2)).await.unwrap();
+        let second = timeline
+            .record_talos_event(unpersisted_event(3))
+            .await
+            .unwrap();
+
+        let replay = recv_event(&mut subscription.events).await;
+        let metrics = recv_event(&mut subscription.events).await;
+        let live = recv_event(&mut subscription.events).await;
+
+        assert_eq!(replay.event_id, first.event_id);
+        assert!(matches!(
+            metrics.event.payload,
+            TalosTimelineEventPayload::TurnMetrics(_)
+        ));
+        assert_eq!(live.event_id, second.event_id);
+
+        let recovered = events.recover_session("s1", None, 32).await.unwrap();
+        assert_eq!(recovered.replay.events.len(), 2);
+        assert!(recovered.replay.events.iter().all(|event| !matches!(
+            event.event.payload,
+            TalosTimelineEventPayload::TurnMetrics(_)
+        )));
     }
 
     #[tokio::test]

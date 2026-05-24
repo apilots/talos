@@ -68,9 +68,6 @@ pub struct PlanningResponseEffect {
     #[serde(default)]
     pub state_delta: Vec<StateDelta>,
     pub branch_override: Option<ExecutionBranch>,
-    /// True when the planner detected a completed FINAL_ANSWER in the response.
-    #[serde(default)]
-    pub has_final_answer: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

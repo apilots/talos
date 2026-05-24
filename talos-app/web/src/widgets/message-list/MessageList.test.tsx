@@ -158,6 +158,22 @@ describe("MessageList", () => {
           {
             id: "timeline-1",
             kind: "timeline",
+            metrics: {
+              state: "completed",
+              model_rounds: 2,
+              tool_calls: 1,
+              tool_successes: 1,
+              tool_errors: 0,
+              stop_reason: "end_turn",
+              usage: {
+                input_tokens: 12,
+                output_tokens: 34,
+                total_tokens: 46,
+                cache_creation_input_tokens: null,
+                cache_read_input_tokens: null,
+              },
+              duration_ms: null,
+            },
             items: [
               {
                 itemId: "thinking-1",
@@ -199,6 +215,8 @@ describe("MessageList", () => {
     );
 
     expect(getByText("Thinking / Acting")).not.toBeNull();
+    expect(getByText("Completed")).not.toBeNull();
+    expect(getByText("46 tokens")).not.toBeNull();
     expect(getByText((content) => content === "315ms")).not.toBeNull();
     fireEvent.click(getByText("Thinking / Acting"));
 

@@ -52,7 +52,6 @@ impl ResponseProcessor for PlanningResponseProcessor {
     ) -> TalosResult<ResponseProcessorOutput> {
         let effect = self.planner.process_response_effect(ctx, response);
 
-        ctx.set_plan_react_has_final_answer(effect.has_final_answer);
         if let Some(normalized) = effect.normalized_text {
             ctx.set_planning_response(normalized);
         }

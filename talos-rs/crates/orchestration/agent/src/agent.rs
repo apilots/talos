@@ -525,6 +525,9 @@ After receiving tool outputs, continue reasoning and provide the final response.
             };
 
             let _ = tx.send(timeline.start_turn()).await;
+            let _ = tx
+                .send(timeline.turn_metrics(TurnExecutionMetrics::default()))
+                .await;
             if !input.trim().is_empty() {
                 match emit_user_input_item(&mut timeline, &input) {
                     Ok(events) => {
@@ -624,6 +627,9 @@ After receiving tool outputs, continue reasoning and provide the final response.
                         )
                         .await;
                     }
+                    let _ = tx
+                        .send(timeline.turn_metrics(outcome_metrics(&result.outcome)))
+                        .await;
                     let _ = tx
                         .send(timeline.complete_turn(
                             kernel::map_stop_reason(outcome_stop_reason(&result.outcome)),
@@ -838,6 +844,9 @@ fn emit_kernel_timeline_events(
     event: KernelStreamEvent,
 ) -> TalosResult<Vec<TalosTimelineEvent>> {
     match (event.event_type, event.data) {
+        (KernelStreamEventType::TurnMetrics, KernelStreamEventData::TurnMetrics(data)) => {
+            Ok(vec![timeline.turn_metrics(data.metrics)])
+        }
         (KernelStreamEventType::ThinkingDelta, KernelStreamEventData::ThinkingDelta(data)) => {
             reject_after_final_answer(state, "thinking delta")?;
             append_text_item_delta(timeline, &mut state.reasoning_item_id, data.delta)
@@ -847,7 +856,9 @@ fn emit_kernel_timeline_events(
             KernelStreamEventData::AssistantTextStarted(data),
         ) => {
             if state.assistant_text_items.contains_key(&data.item_key)
-                || state.completed_assistant_text_items.contains_key(&data.item_key)
+                || state
+                    .completed_assistant_text_items
+                    .contains_key(&data.item_key)
             {
                 return Err(TalosError::ValidationError(format!(
                     "timeline assistant text item already started: {:?}",

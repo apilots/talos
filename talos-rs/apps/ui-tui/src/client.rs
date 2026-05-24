@@ -30,6 +30,11 @@ pub trait GatewayClient: Send + Sync {
         session_id: &str,
         request: &TalosMessageRequest,
     ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>>;
+    async fn reconnect_active_timeline_events(
+        &self,
+        session_id: &str,
+        since_event_id: Option<String>,
+    ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>>;
     async fn recover_session(
         &self,
         session_id: &str,
@@ -108,6 +113,17 @@ impl GatewayClient for Mutex<AppServerClient> {
         self.lock()
             .await
             .send_timeline_events(session_id, request.clone())
+            .await
+    }
+
+    async fn reconnect_active_timeline_events(
+        &self,
+        session_id: &str,
+        since_event_id: Option<String>,
+    ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>> {
+        self.lock()
+            .await
+            .reconnect_active_timeline_events(session_id, since_event_id)
             .await
     }
 

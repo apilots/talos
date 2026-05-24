@@ -8,6 +8,10 @@ use tokio::sync::mpsc::error::TryRecvError;
 use crate::types::ChatRole;
 use crate::{TuiApp, SPINNER_FRAMES, STREAM_STALL_TIMEOUT};
 
+fn is_active_turn_conflict(error: &TalosError) -> bool {
+    matches!(error, TalosError::Conflict(message) if message.contains("turn is already active"))
+}
+
 impl TuiApp {
     pub fn poll_stream_events(&mut self) {
         let mut should_drop_stream = false;
@@ -67,6 +71,11 @@ impl TuiApp {
                 self.push_right_event("stream channel connected".to_string());
             }
             Some(Err(err)) => {
+                if is_active_turn_conflict(&err) {
+                    if self.reconnect_active_stream().await {
+                        return;
+                    }
+                }
                 let retry_message = self.active_message_raw.clone();
                 let can_retry_once = self.active_retry_count == 0 && retry_message.is_some();
                 self.discard_active_pending_blocks();
@@ -165,30 +174,8 @@ impl TuiApp {
         if self.in_flight {
             if let Some(last_event_at) = self.last_stream_event_at {
                 if last_event_at.elapsed() > STREAM_STALL_TIMEOUT {
-                    let retry_message = self.active_message_raw.clone();
-                    let can_retry_once = self.active_retry_count == 0 && retry_message.is_some();
-                    self.finish_active_stream("stream stalled and timed out", true, true);
-
-                    if can_retry_once {
-                        if let Some(message) = retry_message {
-                            self.active_retry_count = 1;
-                            self.show_status_hint(
-                                "Current response timed out. Retrying once...",
-                                Duration::from_secs(3),
-                            );
-                            if let Err(err) =
-                                self.start_stream_for_message_internal(message, false).await
-                            {
-                                self.active_message_raw = None;
-                                self.active_retry_count = 0;
-                                self.push_block(ChatRole::System, format!("Retry failed: {}", err));
-                                self.show_status_hint(
-                                    "Retry failed. Moving to next queued message.",
-                                    Duration::from_secs(4),
-                                );
-                            }
-                        }
-                    } else {
+                    if !self.reconnect_active_stream().await {
+                        self.finish_active_stream("stream stalled and timed out", true, true);
                         self.active_message_raw = None;
                         self.active_retry_count = 0;
                         self.show_status_hint(
@@ -202,6 +189,34 @@ impl TuiApp {
 
         if !self.in_flight && !self.close_in_progress {
             self.dispatch_next_queued_message().await;
+        }
+    }
+
+    async fn reconnect_active_stream(&mut self) -> bool {
+        let (Some(client), Some(session_id)) =
+            (self.gateway_client.clone(), self.session_id.clone())
+        else {
+            return false;
+        };
+        let since_event_id = self.last_stream_event_id.clone();
+        match client
+            .reconnect_active_timeline_events(&session_id, since_event_id)
+            .await
+        {
+            Ok(receiver) => {
+                self.pending_stream_connect = None;
+                self.pending_stream_task = None;
+                self.pending_stream = Some(receiver);
+                self.last_stream_event_at = Some(Instant::now());
+                self.in_flight = true;
+                self.show_status_hint("Reconnected to active turn stream.", Duration::from_secs(3));
+                self.push_right_event("active turn stream reconnected".to_string());
+                true
+            }
+            Err(err) => {
+                self.push_right_event(format!("active turn reconnect failed: {}", err));
+                false
+            }
         }
     }
 }

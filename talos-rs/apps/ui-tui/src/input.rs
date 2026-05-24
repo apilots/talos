@@ -36,10 +36,6 @@ impl TuiApp {
         if key_event.modifiers.intersects(KeyModifiers::CONTROL) {
             match key_event.code {
                 KeyCode::Char('c') => return Ok(true),
-                KeyCode::Char('b') => {
-                    self.toggle_right_panel();
-                    return Ok(false);
-                }
                 KeyCode::Char('o') => {
                     self.toggle_last_tool_block();
                     self.rebuild_chat_render_state_if_rect();

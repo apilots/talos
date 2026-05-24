@@ -279,7 +279,6 @@ async fn assistant_delta_without_block_fails() {
         0,
         KernelModelCallMode::WorkingLoop,
         None,
-        false,
         None,
         None,
     )
@@ -309,7 +308,6 @@ async fn reasoning_delta_without_block_fails() {
         0,
         KernelModelCallMode::WorkingLoop,
         None,
-        false,
         None,
         None,
     )
@@ -339,7 +337,6 @@ async fn tool_args_delta_without_block_fails() {
         0,
         KernelModelCallMode::WorkingLoop,
         None,
-        false,
         None,
         None,
     )
@@ -372,7 +369,6 @@ async fn assistant_delta_with_wrong_model_item_id_fails() {
         0,
         KernelModelCallMode::WorkingLoop,
         None,
-        false,
         None,
         None,
     )
@@ -415,7 +411,6 @@ async fn multiple_assistant_blocks_keep_separate_lifecycle() {
         0,
         KernelModelCallMode::WorkingLoop,
         None,
-        false,
         None,
         None,
     )
@@ -452,7 +447,6 @@ async fn final_answer_then_tool_call_fails_in_kernel() {
         0,
         KernelModelCallMode::WorkingLoop,
         Some("Summary".to_string()),
-        false,
         None,
         None,
     )
@@ -487,7 +481,6 @@ async fn final_answer_then_commentary_fails_in_kernel() {
         0,
         KernelModelCallMode::WorkingLoop,
         Some("Summary".to_string()),
-        false,
         None,
         None,
     )
@@ -527,7 +520,6 @@ async fn final_answer_then_tool_args_fails_in_kernel() {
         0,
         KernelModelCallMode::WorkingLoop,
         Some("Summary".to_string()),
-        false,
         None,
         None,
     )
@@ -562,7 +554,6 @@ async fn final_answer_then_reasoning_fails_in_kernel() {
         0,
         KernelModelCallMode::WorkingLoop,
         Some("Summary".to_string()),
-        false,
         None,
         None,
     )
@@ -605,7 +596,6 @@ async fn explicit_final_after_reasoning_closes_reasoning_before_summary() {
         0,
         KernelModelCallMode::WorkingLoop,
         Some("Summary".to_string()),
-        false,
         Some(&tx),
         None,
     )
@@ -652,7 +642,6 @@ async fn explicit_final_with_pending_tool_args_fails_by_policy() {
         0,
         KernelModelCallMode::WorkingLoop,
         Some("Summary".to_string()),
-        false,
         None,
         None,
     )
@@ -695,7 +684,6 @@ async fn explicit_final_closes_active_commentary_before_summary() {
         0,
         KernelModelCallMode::WorkingLoop,
         Some("Summary".to_string()),
-        false,
         Some(&tx),
         None,
     )
@@ -753,7 +741,6 @@ async fn tool_progress_delta_maps_to_kernel_tool_progress() {
         0,
         KernelModelCallMode::WorkingLoop,
         None,
-        false,
         Some(&tx),
         None,
     )
@@ -792,7 +779,6 @@ async fn tool_progress_without_active_tool_fails() {
         0,
         KernelModelCallMode::WorkingLoop,
         None,
-        false,
         None,
         None,
     )
@@ -816,7 +802,6 @@ async fn test_stream_round_normalizes_empty_tool_call_id_before_emitting_start_e
         0,
         KernelModelCallMode::WorkingLoop,
         None,
-        false,
         Some(&tx),
         None,
     )
@@ -859,7 +844,6 @@ async fn test_execute_step_streams_tool_preface_as_commentary() {
             parallel_tool_calls: false,
             native_thinking: None,
             pre_final_execution_summary: None,
-            defer_no_hint_final_projection: false,
             stream_tx: Some(tx),
             streaming_tool_execution: None,
         },
@@ -912,7 +896,6 @@ async fn test_execute_step_streams_direct_answer_as_final_answer_after_round_don
             parallel_tool_calls: false,
             native_thinking: None,
             pre_final_execution_summary: None,
-            defer_no_hint_final_projection: false,
             stream_tx: Some(tx),
             streaming_tool_execution: None,
         },
@@ -968,7 +951,6 @@ async fn test_execute_step_maps_provider_explicit_final_phase_to_final_answer() 
             parallel_tool_calls: false,
             native_thinking: None,
             pre_final_execution_summary: None,
-            defer_no_hint_final_projection: false,
             stream_tx: Some(tx),
             streaming_tool_execution: None,
         },
@@ -1050,7 +1032,10 @@ async fn test_run_general_turn_ends_loop_terminal_without_extra_finalization() {
     }
 
     assert_eq!(phases, vec![KernelAssistantTextPhase::Unknown]);
-    assert_eq!(committed_phases, vec![KernelAssistantTextPhase::FinalAnswer]);
+    assert_eq!(
+        committed_phases,
+        vec![KernelAssistantTextPhase::FinalAnswer]
+    );
     assert_eq!(deltas, vec!["Working answer."]);
 }
 
@@ -1084,7 +1069,6 @@ async fn test_stream_round_executes_tools_during_stream_and_emits_lifecycle_even
         0,
         KernelModelCallMode::WorkingLoop,
         None,
-        false,
         Some(&tx),
         Some(StreamingToolExecutionConfig {
             execution_mode: ToolExecutionMode::Parallel,

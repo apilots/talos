@@ -19,6 +19,7 @@ pub fn canonical_method(event_type: &TalosTimelineEventType) -> &'static str {
         TalosTimelineEventType::ItemDelta => "timeline.item.delta",
         TalosTimelineEventType::ItemCompleted => "timeline.item.completed",
         TalosTimelineEventType::AssistantTextCommitted => "timeline.assistant_text.committed",
+        TalosTimelineEventType::TurnMetrics => "timeline.turn.metrics",
         TalosTimelineEventType::TurnCompleted => "timeline.turn.completed",
         TalosTimelineEventType::TurnError => "timeline.turn.error",
     }

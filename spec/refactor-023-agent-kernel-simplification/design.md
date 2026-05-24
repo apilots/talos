@@ -3,7 +3,7 @@
 Status: implemented
 Owner: agent
 Created: 2026-05-21
-Updated: 2026-05-22
+Updated: 2026-05-24
 
 ## 目标
 
@@ -37,7 +37,7 @@ agent-kernel/general_turn
 - `orchestration/agent` 作为 AgentHarness，主路径直接调用 `agent-kernel/general_turn`。
 - `KernelRuntime`、`DefaultRunner`、`LlmKernelAgent`、`FlowFactory`、`SingleFlow`、composite kernel agents 已从 Rust 主路径删除。
 - 交互式工具审批路径已删除；当前等待态只保留 dynamic tool result / user input。
-- `planner_mode` 仍保留 `BuiltIn` / `PlanReAct` 显式模式；已删除 `planner_selection=auto` selector。
+- `planner_mode` 仅保留 `BuiltIn`；`PlanReAct` 显式模式、policy、planner、配置字段和相关测试已删除。
 
 ## 原始代码现状（Historical）
 

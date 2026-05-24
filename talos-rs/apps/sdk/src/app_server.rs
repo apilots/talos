@@ -673,6 +673,40 @@ impl AppServerClient {
         Ok(rx)
     }
 
+    pub async fn reconnect_active_timeline_events(
+        &mut self,
+        session_id: &str,
+        since_event_id: Option<String>,
+    ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>> {
+        let active_turn = self.get_active_turn(session_id).await?;
+        let Some(turn_id) = active_turn.turn_id else {
+            return Err(TalosError::Conflict(
+                "No active turn stream is available for this session.".to_string(),
+            ));
+        };
+        let subscription = self
+            .subscribe_events(EventSubscribeParams {
+                session_id: session_id.to_string(),
+                since_event_id,
+                replay_limit: Some(256),
+                close_when_idle: Some(false),
+                close_on_terminal: Some(true),
+            })
+            .await?;
+        let subscription_id = subscription.subscription_id;
+        let (tx, rx) = mpsc::channel(256);
+        self.subscription_senders.lock().await.insert(
+            subscription_id,
+            SubscriptionStream {
+                session_id: session_id.to_string(),
+                sender: tx,
+                turn_id: Some(turn_id),
+                pending: Vec::new(),
+            },
+        );
+        Ok(rx)
+    }
+
     async fn activate_subscription_stream(
         &self,
         subscription_id: &str,

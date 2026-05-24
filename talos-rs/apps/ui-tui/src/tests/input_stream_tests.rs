@@ -655,6 +655,61 @@ async fn test_timeout_uses_status_hint_not_chat_block() {
 }
 
 #[tokio::test]
+async fn test_timeout_reconnects_active_stream_instead_of_retrying_turn() {
+    let events = vec![
+        started_event("msg-recovered", 0),
+        output_item_started_event("msg-recovered", "sess-test", 1),
+        output_delta_event("msg-recovered", "sess-test", 2, "recovered reply"),
+        completed_event(
+            "msg-recovered",
+            "sess-test",
+            3,
+            TalosUsage {
+                total_tokens: 25,
+                ..TalosUsage::default()
+            },
+        ),
+    ];
+    let client = Arc::new(MockGatewayClient::with_active_reconnect_events(events));
+    let mut app = TuiApp::new_with_gateway_client(client.clone(), TalosConnectionMode::Remote);
+    app.initialize_remote().await;
+    app.in_flight = true;
+    app.active_message_raw = Some("slow request".to_string());
+    app.active_user_idx = Some(app.push_block(ChatRole::User, "slow request".to_string()));
+    app.last_stream_event_id = Some("ev_2".to_string());
+    app.last_stream_event_at =
+        Some(Instant::now() - STREAM_STALL_TIMEOUT - Duration::from_millis(1));
+
+    app.on_tick().await;
+    assert_eq!(
+        client
+            .state
+            .lock()
+            .unwrap()
+            .reconnect_since_event_ids
+            .as_slice(),
+        &[Some("ev_2".to_string())]
+    );
+    assert!(app.in_flight);
+    assert!(app
+        .status_hint
+        .as_ref()
+        .map(|(msg, _)| msg.contains("Reconnected"))
+        .unwrap_or(false));
+
+    app.on_tick().await;
+
+    assert!(!app.in_flight);
+    assert!(app.chat_blocks.iter().any(
+        |block| block.role == ChatRole::Assistant && block.content.contains("recovered reply")
+    ));
+    assert!(!app
+        .chat_blocks
+        .iter()
+        .any(|block| block.content.contains("Failed to start stream")));
+}
+
+#[tokio::test]
 async fn test_stale_timeline_events_are_ignored() {
     let mut app = create_remote_app();
     app.initialize_remote().await;
@@ -687,6 +742,35 @@ async fn test_stale_timeline_events_are_ignored() {
         .right_panel_events
         .iter()
         .any(|line| line.contains("ignored stale event")));
+}
+
+#[tokio::test]
+async fn test_duplicate_stream_sequence_is_ignored() {
+    let mut app = create_remote_app();
+    app.initialize_remote().await;
+    app.in_flight = true;
+    app.session_id = Some("sess-test".to_string());
+    app.active_stream_message_id = Some("msg-current".to_string());
+    app.last_stream_sequence = Some(3);
+    app.last_stream_event_id = Some("ev_3".to_string());
+    app.transcript.live_assistant_idx = Some(app.push_block(ChatRole::Assistant, "hello".into()));
+
+    app.handle_stream_event(output_delta_event(
+        "msg-current",
+        "sess-test",
+        3,
+        " duplicate",
+    ));
+
+    let assistant = app
+        .chat_blocks
+        .iter()
+        .find(|b| b.role == ChatRole::Assistant)
+        .map(|b| b.content.clone())
+        .unwrap_or_default();
+    assert_eq!(assistant, "hello");
+    assert_eq!(app.last_stream_sequence, Some(3));
+    assert_eq!(app.last_stream_event_id.as_deref(), Some("ev_3"));
 }
 
 #[tokio::test]

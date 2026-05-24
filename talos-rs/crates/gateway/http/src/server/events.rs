@@ -94,6 +94,11 @@ pub(super) async fn subscribe_timeline_events_handler(
 
 fn timeline_sse_event(record: talos_types::talos::TimelineEventEnvelope) -> Event {
     let event_name = canonical_method(&record.event.event_type);
+    let event_id = record.event_id.clone();
+    let is_live_metrics = matches!(
+        record.event.payload,
+        talos_types::talos::TalosTimelineEventPayload::TurnMetrics(_)
+    );
     let data = match serde_json::to_string(&record) {
         Ok(data) => data,
         Err(err) => {
@@ -118,10 +123,12 @@ fn timeline_sse_event(record: talos_types::talos::TimelineEventEnvelope) -> Even
             .to_string()
         }
     };
-    Event::default()
-        .id(record.event_id)
-        .event(event_name)
-        .data(data)
+    let event = Event::default().event(event_name).data(data);
+    if is_live_metrics {
+        event
+    } else {
+        event.id(event_id)
+    }
 }
 
 pub(super) async fn recover_timeline_handler(

@@ -1,11 +1,12 @@
 import type {
+  ChatTurnMetrics,
   ChatRenderBlock,
   ChatTimelineItem,
   StreamSessionState,
 } from "@/shared/types/ui";
 import type { TalosTimelinePhase } from "@talos/sdk-core";
 
-function ensureTimelineBlock(blocks: StreamSessionState["blocks"], sessionId: string) {
+function ensureTimelineBlock(stream: StreamSessionState, blocks: StreamSessionState["blocks"], sessionId: string) {
   const existingIndex = blocks.findIndex((block) => block.kind === "timeline");
   if (existingIndex >= 0) {
     return existingIndex;
@@ -14,9 +15,22 @@ function ensureTimelineBlock(blocks: StreamSessionState["blocks"], sessionId: st
     id: `timeline-${sessionId}`,
     kind: "timeline",
     items: [],
+    metrics: stream.turnMetrics,
     live: true,
   });
   return blocks.length - 1;
+}
+
+function shouldCreateMetricsBlock(metrics: ChatTurnMetrics) {
+  return (
+    metrics.state !== "running" ||
+    metrics.model_rounds > 0 ||
+    metrics.tool_calls > 0 ||
+    metrics.tool_successes > 0 ||
+    metrics.tool_errors > 0 ||
+    metrics.usage.total_tokens > 0 ||
+    metrics.duration_ms != null
+  );
 }
 
 function mergeTimelineItem(current: ChatTimelineItem, next: ChatTimelineItem): ChatTimelineItem {
@@ -58,7 +72,7 @@ export function upsertTimelineItemInStream(
   item: ChatTimelineItem,
 ) {
   const blocks = [...stream.blocks];
-  const timelineIndex = ensureTimelineBlock(blocks, sessionId);
+  const timelineIndex = ensureTimelineBlock(stream, blocks, sessionId);
   const timeline = blocks[timelineIndex];
   if (timeline.kind !== "timeline") {
     return stream;
@@ -70,7 +84,7 @@ export function upsertTimelineItemInStream(
   } else {
     items.push(item);
   }
-  blocks[timelineIndex] = { ...timeline, items, live: true };
+  blocks[timelineIndex] = { ...timeline, items, metrics: stream.turnMetrics ?? timeline.metrics, live: true };
   return { ...stream, isStreaming: true, blocks };
 }
 
@@ -82,7 +96,7 @@ export function appendTimelineItemTextInStream(
   sequence?: number,
 ) {
   const blocks = [...stream.blocks];
-  const timelineIndex = ensureTimelineBlock(blocks, sessionId);
+  const timelineIndex = ensureTimelineBlock(stream, blocks, sessionId);
   const timeline = blocks[timelineIndex];
   if (timeline.kind !== "timeline") {
     return stream;
@@ -103,7 +117,7 @@ export function appendTimelineItemTextInStream(
       text: chunk,
     });
   }
-  blocks[timelineIndex] = { ...timeline, items, live: true };
+  blocks[timelineIndex] = { ...timeline, items, metrics: stream.turnMetrics ?? timeline.metrics, live: true };
   return { ...stream, isStreaming: true, blocks };
 }
 
@@ -133,7 +147,7 @@ export function commitTimelineAssistantTextInStream(
         items.push({ ...item, phase });
       }
     }
-    if (items.length === 0 && phase === "final_answer") {
+    if (items.length === 0 && phase === "final_answer" && !block.metrics) {
       continue;
     }
     blocks.push({ ...block, items, live: phase !== "final_answer" });
@@ -209,4 +223,33 @@ export function setTimelineLiveInStream(stream: StreamSessionState, live: boolea
     block.kind === "timeline" ? { ...block, live } : block,
   );
   return { ...stream, blocks };
+}
+
+export function setTurnMetricsInStream(
+  stream: StreamSessionState,
+  sessionId: string,
+  metrics: ChatTurnMetrics,
+) {
+  let foundTimeline = false;
+  const blocks = stream.blocks.map((block) => {
+    if (block.kind !== "timeline") {
+      return block;
+    }
+    foundTimeline = true;
+    return {
+      ...block,
+      metrics,
+      live: metrics.state === "running",
+    };
+  });
+  if (!foundTimeline && shouldCreateMetricsBlock(metrics)) {
+    blocks.push({
+      id: `timeline-${sessionId}-metrics`,
+      kind: "timeline",
+      items: [],
+      metrics,
+      live: metrics.state === "running",
+    });
+  }
+  return { ...stream, turnMetrics: metrics, blocks };
 }

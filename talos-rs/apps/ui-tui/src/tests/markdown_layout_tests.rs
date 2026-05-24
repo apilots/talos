@@ -82,12 +82,6 @@ fn test_chat_content_columns_apply_left_padding() {
     assert_eq!(scrollbar_rect, Rect::new(20, 1, 1, 6));
 }
 
-#[test]
-fn test_right_panel_hidden_by_default() {
-    let app = create_embedded_app();
-    assert!(!app.right_panel_visible);
-}
-
 // ── Phase 5: history + model picker ──────────────────────────────────
 
 #[tokio::test]
@@ -99,24 +93,6 @@ async fn test_ctrl_h_switches_to_history_state() {
     app.open_history();
 
     assert_eq!(app.current_state, AppState::History);
-}
-
-#[tokio::test]
-async fn test_ctrl_b_toggles_right_panel() {
-    let mut app = create_remote_app();
-    assert!(!app.right_panel_visible);
-
-    let _ = app
-        .handle_input(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL))
-        .await
-        .unwrap();
-    assert!(app.right_panel_visible);
-
-    let _ = app
-        .handle_input(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL))
-        .await
-        .unwrap();
-    assert!(!app.right_panel_visible);
 }
 
 #[test]

@@ -114,6 +114,12 @@ impl TimelineEventService {
         &self,
         event: TalosTimelineEvent,
     ) -> TalosResult<TimelineEventEnvelope> {
+        if matches!(event.payload, TalosTimelineEventPayload::TurnMetrics(_)) {
+            let envelope = live_only_event_envelope(event);
+            let _ = self.live_tx.send(envelope.clone());
+            return Ok(envelope);
+        }
+
         let session_id = event.session_id.clone();
         let message_id = event.message_id.clone();
         let turn_id = event.turn_id.clone();
@@ -306,6 +312,23 @@ impl TimelineEventService {
                 }
             }
         }
+    }
+}
+
+fn live_only_event_envelope(mut event: TalosTimelineEvent) -> TimelineEventEnvelope {
+    let now = chrono::Utc::now().timestamp_millis();
+    let event_id = format!("live_metrics_{}_{}_{}", event.turn_id, event.sequence, now);
+    event.event_id = Some(event_id.clone());
+    event.event_seq = Some(now);
+    event.created_at_ms = Some(now);
+    TimelineEventEnvelope {
+        event_id,
+        event_seq: now,
+        created_at_ms: now,
+        session_id: event.session_id.clone(),
+        turn_id: event.turn_id.clone(),
+        message_id: event.message_id.clone(),
+        event,
     }
 }
 
