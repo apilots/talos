@@ -279,7 +279,7 @@ describe("ChatComposer", () => {
     expect(textarea).toHaveValue("");
   });
 
-  it("keeps Enter send behavior separate from history navigation", () => {
+  it("keeps Enter send behavior separate from history navigation and streaming state", () => {
     const onSend = vi.fn();
     renderControlledComposer({
       initialDraft: "send this",
@@ -290,6 +290,11 @@ describe("ChatComposer", () => {
 
     fireEvent.keyDown(textarea, { key: "Enter" });
 
+    expect(onSend).toHaveBeenCalledTimes(1);
+
+    cleanup();
+    renderComposer({ draft: "send this later", isStreaming: true, onSend });
+    fireEvent.keyDown(getComposerInput(), { key: "Enter" });
     expect(onSend).toHaveBeenCalledTimes(1);
   });
 });

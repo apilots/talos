@@ -354,6 +354,9 @@ export function ChatComposer({
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
+                if (isBusy) {
+                  return;
+                }
                 void handleSend();
                 return;
               }
