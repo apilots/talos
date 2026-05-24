@@ -5,6 +5,7 @@ import type {
   TimelineEventEnvelope as ProtocolTimelineEventEnvelope,
   TimelineRecoverySnapshot as ProtocolTimelineRecoverySnapshot,
   TimelineReplay as ProtocolTimelineReplay,
+  TurnExecutionMetrics as ProtocolTurnExecutionMetrics,
   SessionHistoryMessage as ProtocolSessionHistoryMessage,
   SessionHistorySnapshot as ProtocolSessionHistorySnapshot,
 } from "./generated/app-protocol";
@@ -38,6 +39,7 @@ export type {
   TalosTurnCompletedEvent,
   TalosTurnErrorEvent,
   TalosTurnStartedEvent,
+  TurnExecutionMetrics,
 } from "./generated/app-protocol";
 
 export type TalosConnectionMode = "embedded" | "remote";
@@ -283,11 +285,30 @@ export type TalosHistoryTimelineItem = Omit<
   completed_at_ms?: number | null;
 };
 
+export type TalosTurnExecutionMetrics = Omit<
+  ProtocolTurnExecutionMetrics,
+  | "model_rounds"
+  | "tool_calls"
+  | "tool_successes"
+  | "tool_errors"
+  | "usage"
+  | "duration_ms"
+> & {
+  model_rounds: number;
+  tool_calls: number;
+  tool_successes: number;
+  tool_errors: number;
+  usage: TalosUsage;
+  duration_ms: number | null;
+};
+
 export type TalosSessionHistoryMessage = Omit<
   ProtocolSessionHistoryMessage,
-  "items"
+  "items" | "usage" | "metrics"
 > & {
   items: TalosHistoryTimelineItem[];
+  usage: TalosUsage;
+  metrics: TalosTurnExecutionMetrics | null;
 };
 
 export type TalosSessionHistorySnapshot = Omit<

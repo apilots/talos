@@ -9,7 +9,6 @@ use talos_config::{AgentKernelConfig, PlannerMode};
 /// Default values per specification:
 /// - tool_parallelism: 1
 /// - max_tool_rounds: 8
-/// - finalization_required: true
 /// - planner_mode: "built_in"
 #[test]
 fn test_default_values() {
@@ -23,11 +22,6 @@ fn test_default_values() {
         config.max_tool_rounds, 8,
         "max_tool_rounds should default to 8"
     );
-    assert!(
-        config.finalization_required,
-        "finalization_required should default to true"
-    );
-
     assert_eq!(
         config.planner_mode,
         PlannerMode::BuiltIn,

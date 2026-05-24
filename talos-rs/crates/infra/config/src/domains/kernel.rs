@@ -307,10 +307,6 @@ pub struct AgentKernelConfig {
     #[serde(default = "default_kernel_max_tool_rounds")]
     pub max_tool_rounds: u32,
 
-    /// Require an explicit finalization call when a loop ends without final-answer stream.
-    #[serde(default = "default_kernel_finalization_required")]
-    pub finalization_required: bool,
-
     /// Maximum bytes returned by each tool execution payload
     #[serde(default = "default_kernel_tool_result_max_bytes")]
     pub tool_result_max_bytes: usize,
@@ -372,10 +368,6 @@ fn default_kernel_max_tool_rounds() -> u32 {
     8
 }
 
-fn default_kernel_finalization_required() -> bool {
-    true
-}
-
 fn default_kernel_tool_result_max_bytes() -> usize {
     64 * 1024
 }
@@ -397,7 +389,6 @@ impl Default for AgentKernelConfig {
         Self {
             tool_parallelism: default_kernel_tool_parallelism(),
             max_tool_rounds: default_kernel_max_tool_rounds(),
-            finalization_required: default_kernel_finalization_required(),
             tool_result_max_bytes: default_kernel_tool_result_max_bytes(),
             context_compaction_max_bytes: default_kernel_context_compaction_max_bytes(),
             timezone: default_timezone(),

@@ -65,6 +65,9 @@ impl TuiApp {
                     payload.final_content,
                 );
             }
+            TalosTimelineEventPayload::AssistantTextCommitted(payload) => {
+                self.handle_assistant_text_committed(&payload.item_id, payload.phase);
+            }
             TalosTimelineEventPayload::TurnCompleted(payload) => {
                 self.session_usage.accumulate(&payload.usage);
                 self.finish_active_stream("stream completed", false, false);
@@ -154,7 +157,7 @@ impl TuiApp {
             }
             (
                 TalosTimelineItemKind::AssistantText,
-                TalosTimelinePhase::Commentary,
+                TalosTimelinePhase::Unknown | TalosTimelinePhase::Commentary,
                 TalosTimelineContent::Text { text },
             ) => {
                 if text.trim().is_empty() {
@@ -257,7 +260,7 @@ impl TuiApp {
             }
             (
                 TalosTimelineItemKind::AssistantText,
-                TalosTimelinePhase::Commentary,
+                TalosTimelinePhase::Unknown | TalosTimelinePhase::Commentary,
                 TalosTimelineContent::Text { text },
             ) => {
                 if !text.is_empty() {
@@ -427,12 +430,73 @@ impl TuiApp {
         self.clear_live_tool_progress(&call_id);
     }
 
+    fn handle_assistant_text_committed(&mut self, item_id: &str, phase: TalosTimelinePhase) {
+        let Some(item) = self.timeline_items.get_mut(item_id) else {
+            return;
+        };
+        let previous_phase = item.phase;
+        item.phase = phase;
+        if !matches!(
+            (previous_phase, phase),
+            (TalosTimelinePhase::Unknown, TalosTimelinePhase::FinalAnswer)
+        ) {
+            return;
+        }
+        let TalosTimelineContent::Text { text } = &item.content else {
+            return;
+        };
+        let text = text.clone();
+        if text.trim().is_empty() {
+            return;
+        }
+        self.remove_text_from_live_thinking(&text);
+        self.transcript.note_visible_activity();
+        self.append_assistant(&text);
+        self.received_output_delta = true;
+    }
+
+    fn remove_text_from_live_thinking(&mut self, text: &str) {
+        let Some(idx) = self.transcript.live_thinking_idx else {
+            return;
+        };
+        let Some(block) = self.chat_blocks.get_mut(idx) else {
+            self.transcript.live_thinking_idx = None;
+            return;
+        };
+        if block.content == text {
+            self.remove_chat_block(idx);
+            self.rebuild_chat_history();
+            self.transcript.live_thinking_idx = None;
+            return;
+        }
+        if let Some(start) = block.content.rfind(text) {
+            let end = start + text.len();
+            block.content.replace_range(start..end, "");
+        }
+        let should_remove = self
+            .chat_blocks
+            .get(idx)
+            .map(|block| block.content.trim().is_empty())
+            .unwrap_or(false);
+        if should_remove {
+            self.remove_chat_block(idx);
+            self.rebuild_chat_history();
+            self.transcript.live_thinking_idx = None;
+        } else {
+            self.sync_history_entry(idx);
+        }
+    }
+
     fn handle_text_delta(&mut self, item: &TalosTimelineItem, text: &str) {
         if text.is_empty() {
             return;
         }
         match item.phase {
             TalosTimelinePhase::Thinking => {
+                self.transcript.note_visible_activity();
+                self.append_thinking(text);
+            }
+            TalosTimelinePhase::Unknown => {
                 self.transcript.note_visible_activity();
                 self.append_thinking(text);
             }

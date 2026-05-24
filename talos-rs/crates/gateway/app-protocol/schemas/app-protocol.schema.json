@@ -2263,6 +2263,24 @@
           "properties": {
             "method": {
               "enum": [
+                "timeline.assistant_text.committed"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/TimelineSubscriptionNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "timeline.turn.completed"
               ],
               "type": "string"
@@ -2453,6 +2471,17 @@
         },
         "message_id": {
           "type": "string"
+        },
+        "metrics": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TurnExecutionMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "stop_reason": {
           "$ref": "#/definitions/StopReason"
@@ -3143,10 +3172,51 @@
         },
         {
           "properties": {
+            "item_id": {
+              "type": "string"
+            },
+            "phase": {
+              "$ref": "#/definitions/TalosTimelinePhase"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "assistant_text_committed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "item_id",
+            "phase",
+            "request_id",
+            "turn_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
             "completed_at_ms": {
               "format": "uint64",
               "minimum": 0.0,
               "type": "integer"
+            },
+            "metrics": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/TurnExecutionMetrics"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "request_id": {
               "type": "string"
@@ -3218,6 +3288,7 @@
         "item_started",
         "item_delta",
         "item_completed",
+        "assistant_text_committed",
         "turn_completed",
         "turn_error"
       ],
@@ -3316,6 +3387,7 @@
         "input",
         "thinking",
         "acting",
+        "unknown",
         "commentary",
         "final_answer",
         "system"
@@ -3668,6 +3740,55 @@
       "type": "object"
     },
     "ToolListParams": {
+      "type": "object"
+    },
+    "TurnExecutionMetrics": {
+      "description": "Kernel-owned execution metrics for a turn.",
+      "properties": {
+        "duration_ms": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "model_rounds": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "stop_reason": {
+          "$ref": "#/definitions/StopReason"
+        },
+        "tool_calls": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "tool_errors": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "tool_successes": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "usage": {
+          "$ref": "#/definitions/TalosUsage"
+        }
+      },
+      "required": [
+        "model_rounds",
+        "stop_reason",
+        "tool_calls",
+        "tool_errors",
+        "tool_successes",
+        "usage"
+      ],
       "type": "object"
     },
     "TurnInterruptParams": {

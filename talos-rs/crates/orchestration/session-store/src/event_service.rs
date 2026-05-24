@@ -363,6 +363,7 @@ mod tests {
                 completed_at_ms: 1000,
                 stop_reason: StopReason::EndTurn,
                 usage: TalosUsage::default(),
+                metrics: None,
             }),
         )
     }

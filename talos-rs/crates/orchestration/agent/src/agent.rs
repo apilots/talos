@@ -41,6 +41,7 @@ use talos_types::talos::{
     StopReason as TalosStopReason, TalosContentItem, TalosOutputItem, TalosTimelineContent,
     TalosTimelineDelta, TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineItemKind,
     TalosTimelineItemStatus, TalosTimelinePhase, TalosToolProgressKind, TalosUsage,
+    TurnExecutionMetrics,
 };
 use tracing::warn;
 
@@ -627,8 +628,10 @@ After receiving tool outputs, continue reasoning and provide the final response.
                         .send(timeline.complete_turn(
                             kernel::map_stop_reason(outcome_stop_reason(&result.outcome)),
                             outcome_usage(&result.outcome),
+                            Some(outcome_metrics(&result.outcome)),
                         ))
                         .await;
+                    this.finish_active_turn_and_resume(&session_id).await;
                     let (output_text, _, _, _) = execution_from_general_turn_result(&result);
                     if let Some(update) = this
                         .generate_session_title_update(
@@ -650,11 +653,13 @@ After receiving tool outputs, continue reasoning and provide the final response.
                     )
                     .await;
                     let _ = tx
-                        .send(
-                            timeline
-                                .complete_turn(TalosStopReason::Cancelled, TalosUsage::default()),
-                        )
+                        .send(timeline.complete_turn(
+                            TalosStopReason::Cancelled,
+                            TalosUsage::default(),
+                            None,
+                        ))
                         .await;
+                    this.finish_active_turn_and_resume(&session_id).await;
                 }
                 Ok(Err(err)) => {
                     emit_terminal_item_closures(
@@ -664,6 +669,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
                     )
                     .await;
                     let _ = tx.send(timeline.fail_turn(err.to_string())).await;
+                    this.finish_active_turn_and_resume(&session_id).await;
                 }
                 Err(err) => {
                     emit_terminal_item_closures(
@@ -677,9 +683,9 @@ After receiving tool outputs, continue reasoning and provide the final response.
                             timeline.fail_turn(format!("kernel stream task join failed: {}", err)),
                         )
                         .await;
+                    this.finish_active_turn_and_resume(&session_id).await;
                 }
             }
-            this.finish_active_turn_and_resume(&session_id).await;
         });
         drop(stream_task);
     }
@@ -745,8 +751,8 @@ async fn emit_terminal_item_closures(
 struct KernelTimelineState {
     reasoning_item_id: Option<String>,
     final_answer_item_id: Option<String>,
-    execution_summary_seen: bool,
     assistant_text_items: HashMap<KernelStreamItemKey, String>,
+    completed_assistant_text_items: HashMap<KernelStreamItemKey, String>,
     active_tool_items: HashMap<String, String>,
     tool_item_by_call_id: HashMap<String, String>,
     completed_tool_call_ids: HashSet<String>,
@@ -761,6 +767,7 @@ fn execution_from_general_turn_result(
             output_items,
             stop_reason,
             usage,
+            ..
         } => (
             output_text.clone(),
             output_items.clone(),
@@ -793,6 +800,13 @@ fn outcome_usage(outcome: &GeneralTurnOutcome) -> TalosUsage {
         GeneralTurnOutcome::Completed { usage, .. } | GeneralTurnOutcome::Waiting { usage, .. } => {
             usage.clone()
         }
+    }
+}
+
+fn outcome_metrics(outcome: &GeneralTurnOutcome) -> TurnExecutionMetrics {
+    match outcome {
+        GeneralTurnOutcome::Completed { metrics, .. }
+        | GeneralTurnOutcome::Waiting { metrics, .. } => metrics.clone(),
     }
 }
 
@@ -832,7 +846,9 @@ fn emit_kernel_timeline_events(
             KernelStreamEventType::AssistantTextStarted,
             KernelStreamEventData::AssistantTextStarted(data),
         ) => {
-            if state.assistant_text_items.contains_key(&data.item_key) {
+            if state.assistant_text_items.contains_key(&data.item_key)
+                || state.completed_assistant_text_items.contains_key(&data.item_key)
+            {
                 return Err(TalosError::ValidationError(format!(
                     "timeline assistant text item already started: {:?}",
                     data.item_key
@@ -848,14 +864,11 @@ fn emit_kernel_timeline_events(
             if matches!(data.phase, KernelAssistantTextPhase::Commentary) {
                 reject_after_final_answer(state, "commentary assistant text")?;
             }
-            if matches!(data.phase, KernelAssistantTextPhase::FinalAnswer)
-                && !state.execution_summary_seen
-            {
-                return Err(TalosError::ValidationError(
-                    "timeline final answer requires execution summary first".to_string(),
-                ));
-            }
             let started = match data.phase {
+                KernelAssistantTextPhase::Unknown => {
+                    reject_after_final_answer(state, "unknown assistant text")?;
+                    timeline.start_unknown_assistant_text()
+                }
                 KernelAssistantTextPhase::Commentary => timeline.start_commentary(),
                 KernelAssistantTextPhase::FinalAnswer => timeline.start_final_answer(),
             };
@@ -903,6 +916,54 @@ fn emit_kernel_timeline_events(
                 TalosTimelineItemStatus::Completed,
                 None,
             )?])
+            .map(|events| {
+                state
+                    .completed_assistant_text_items
+                    .insert(data.item_key, item_id);
+                events
+            })
+        }
+        (
+            KernelStreamEventType::AssistantTextCommitted,
+            KernelStreamEventData::AssistantTextCommitted(data),
+        ) => {
+            if matches!(data.phase, KernelAssistantTextPhase::Unknown) {
+                return Err(TalosError::ValidationError(
+                    "timeline assistant text commit phase cannot be unknown".to_string(),
+                ));
+            }
+            let item_id = state
+                .assistant_text_items
+                .get(&data.item_key)
+                .or_else(|| state.completed_assistant_text_items.get(&data.item_key))
+                .cloned()
+                .ok_or_else(|| {
+                    TalosError::ValidationError(format!(
+                        "timeline assistant text item not found for commit: {:?}",
+                        data.item_key
+                    ))
+                })?;
+            let phase = match data.phase {
+                KernelAssistantTextPhase::Unknown => unreachable!(),
+                KernelAssistantTextPhase::Commentary => {
+                    reject_after_final_answer(state, "commentary assistant text commit")?;
+                    TalosTimelinePhase::Commentary
+                }
+                KernelAssistantTextPhase::FinalAnswer => {
+                    if state
+                        .final_answer_item_id
+                        .as_ref()
+                        .is_some_and(|existing| existing != &item_id)
+                    {
+                        return Err(TalosError::ValidationError(
+                            "timeline final answer item already started".to_string(),
+                        ));
+                    }
+                    state.final_answer_item_id = Some(item_id.clone());
+                    TalosTimelinePhase::FinalAnswer
+                }
+            };
+            Ok(vec![timeline.commit_assistant_text(&item_id, phase)?])
         }
         (
             KernelStreamEventType::ExecutionSummary,
@@ -919,7 +980,6 @@ fn emit_kernel_timeline_events(
             let item_id = item_id_from_started(&started)?;
             let completed =
                 timeline.complete_item(&item_id, TalosTimelineItemStatus::Completed, None)?;
-            state.execution_summary_seen = true;
             events.push(started);
             events.push(completed);
             Ok(events)

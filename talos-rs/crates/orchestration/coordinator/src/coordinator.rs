@@ -228,12 +228,22 @@ impl RequestHandler for CoordinatorImpl {
             let mut final_usage = TalosUsage::default();
             let mut final_message_delta = 2;
             let mut final_turn_id = None;
+            let mut progress_recorded = false;
 
             while let Some(event) = orchestrator_stream.recv().await {
                 if let TalosTimelineEventPayload::TurnCompleted(completed) = &event.payload {
                     final_usage = completed.usage.clone();
                     final_message_delta = 2;
                     final_turn_id = Some(completed.turn_id.clone());
+                    sessions
+                        .record_stream_completion(
+                            &session_id,
+                            &response_model,
+                            final_message_delta,
+                            &final_usage,
+                        )
+                        .await;
+                    progress_recorded = true;
                 }
 
                 if tx.send(event).await.is_err() {
@@ -241,14 +251,16 @@ impl RequestHandler for CoordinatorImpl {
                 }
             }
 
-            sessions
-                .record_stream_completion(
-                    &session_id,
-                    &response_model,
-                    final_message_delta,
-                    &final_usage,
-                )
-                .await;
+            if !progress_recorded {
+                sessions
+                    .record_stream_completion(
+                        &session_id,
+                        &response_model,
+                        final_message_delta,
+                        &final_usage,
+                    )
+                    .await;
+            }
             if let Some(turn_id) = final_turn_id.as_deref() {
                 if let Some(title_update) = agent.take_session_title_update(&session_id, turn_id) {
                     if let Err(error) = sessions

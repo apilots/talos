@@ -511,7 +511,7 @@ fn test_dynamic_request_marks_timeline_item_waiting_dynamic_input() {
 }
 
 #[test]
-fn test_execution_summary_completes_before_final_answer() {
+fn test_legacy_execution_summary_does_not_gate_final_answer() {
     let mut timeline = TimelineBuilder::new(
         "request-summary-final",
         "turn-summary-final",
@@ -526,7 +526,7 @@ fn test_execution_summary_completes_before_final_answer() {
         KernelStreamEvent::new(
             KernelStreamEventType::ExecutionSummary,
             KernelStreamEventData::ExecutionSummary(ExecutionSummaryStreamData {
-                text: "Kernel summary: answered directly without invoking tools.".to_string(),
+                text: "Legacy execution summary.".to_string(),
                 round: None,
             }),
         ),
@@ -563,7 +563,7 @@ fn test_execution_summary_completes_before_final_answer() {
             }),
         ),
     )
-    .expect("final answer should start after summary");
+    .expect("final answer should start");
 
     assert!(summary_events[1].sequence < final_events[0].sequence);
 }
@@ -583,7 +583,7 @@ fn test_timeline_rejects_main_events_after_final_answer_started() {
         KernelStreamEvent::new(
             KernelStreamEventType::ExecutionSummary,
             KernelStreamEventData::ExecutionSummary(ExecutionSummaryStreamData {
-                text: "Kernel summary: answered directly without invoking tools.".to_string(),
+                text: "Legacy execution summary.".to_string(),
                 round: None,
             }),
         ),
@@ -904,7 +904,6 @@ async fn test_run_stream_replays_dynamic_resume_into_model_loop() {
         default_governance_for_source(ToolSource::Dynamic),
     ));
     let mut kernel_config = AgentKernelConfig::default();
-    kernel_config.finalization_required = false;
     kernel_config.prompt.bootstrap.enabled = false;
     kernel_config.memory.workspace_dir = temp_dir.path().display().to_string();
     let agent = AgentHarness::new(
@@ -970,7 +969,6 @@ async fn test_run_stream_replays_dynamic_resume_into_model_loop() {
         .expect("dynamic response record should append");
 
     let mut session = build_test_session(session_id, "workspace-1");
-    session.config.agent.kernel.finalization_required = false;
     session.config.agent.kernel.prompt.bootstrap.enabled = false;
     session.config.agent.kernel.memory.workspace_dir = temp_dir.path().display().to_string();
     session.config.agent.kernel.output.max_tokens = 256;
@@ -1376,6 +1374,7 @@ async fn test_run_stream_emits_user_input_and_single_final_answer() {
 
     let mut user_input_item_id = None;
     let mut final_answer_item_id = None;
+    let mut unknown_answer_item_id = None;
     let mut commentary_count = 0;
     for event in &events {
         match &event.payload {
@@ -1391,6 +1390,16 @@ async fn test_run_stream_emits_user_input_and_single_final_answer() {
                 final_answer_item_id = Some(payload.item.item_id.clone());
             }
             TalosTimelineEventPayload::ItemStarted(payload)
+                if payload.item.phase == TalosTimelinePhase::Unknown =>
+            {
+                unknown_answer_item_id = Some(payload.item.item_id.clone());
+            }
+            TalosTimelineEventPayload::AssistantTextCommitted(payload)
+                if payload.phase == TalosTimelinePhase::FinalAnswer =>
+            {
+                final_answer_item_id = Some(payload.item_id.clone());
+            }
+            TalosTimelineEventPayload::ItemStarted(payload)
                 if payload.item.phase == TalosTimelinePhase::Commentary =>
             {
                 commentary_count += 1;
@@ -1401,7 +1410,8 @@ async fn test_run_stream_emits_user_input_and_single_final_answer() {
 
     let user_input_item_id = user_input_item_id.expect("user input item should start");
     let final_answer_item_id = final_answer_item_id.expect("final answer item should start");
-    assert_eq!(commentary_count, 1);
+    assert_eq!(unknown_answer_item_id.as_deref(), Some(final_answer_item_id.as_str()));
+    assert_eq!(commentary_count, 0);
     assert!(events.iter().any(|event| matches!(
         &event.payload,
         TalosTimelineEventPayload::ItemCompleted(payload)

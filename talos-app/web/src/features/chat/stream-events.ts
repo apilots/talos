@@ -197,6 +197,9 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEventEnvel
         event.payload.final_content,
       );
       return;
+    case "assistant_text_committed":
+      applyAssistantTextCommitted(sessionId, event.payload.item_id, event.payload.phase);
+      return;
     case "turn_completed":
       markPendingInputCompleted(sessionId, event.message_id);
       timelineItemsBySession.delete(sessionId);
@@ -232,6 +235,7 @@ function applyItemStarted(sessionId: string, messageId: string, item: TalosTimel
     return;
   }
   if (item.phase === "final_answer") {
+    useAppStore.getState().setTimelineLive(sessionId, false);
     return;
   }
   useAppStore.getState().upsertTimelineItem(sessionId, toChatTimelineItem(item));
@@ -337,6 +341,22 @@ function applyItemCompleted(
     status: result.is_error ? "failed" : "completed",
     completedAtMs,
   });
+}
+
+function applyAssistantTextCommitted(
+  sessionId: string,
+  itemId: string,
+  phase: TalosTimelineItem["phase"],
+) {
+  const item = getTimelineItem(sessionId, itemId);
+  if (item) {
+    item.item.phase = phase;
+  }
+  const state = useAppStore.getState();
+  state.commitTimelineAssistantText(sessionId, itemId, phase);
+  if (phase === "final_answer") {
+    state.setTimelineLive(sessionId, false);
+  }
 }
 
 function rememberTimelineItem(sessionId: string, item: TalosTimelineItem) {

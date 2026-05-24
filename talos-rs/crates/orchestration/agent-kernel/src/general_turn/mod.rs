@@ -2,12 +2,11 @@ use crate::tool_execution::ToolExecutionContext;
 use crate::{
     warnings::derive_prompt_warnings, AssistantTextCompletedStreamData,
     AssistantTextDeltaStreamData, AssistantTextStartedStreamData, DynamicToolRequestStreamData,
-    ExecutionSummaryStreamData, InvocationContext, KernelAssistantTextPhase, KernelEvent,
-    KernelEventData, KernelEventLabel, KernelEventType, KernelModelCallMode, KernelStreamEvent,
-    KernelStreamEventData, KernelStreamEventType, KernelStreamItemKey, KernelThinkingSource,
-    KernelThinkingStage, KernelWarning, PromptWarningEventData, StopReason,
-    ThinkingDeltaStreamData, ToolCallStartStreamData, ToolExecutionInput, ToolExecutor,
-    ToolResultStreamData,
+    InvocationContext, KernelAssistantTextPhase, KernelEvent, KernelEventData, KernelEventLabel,
+    KernelEventType, KernelModelCallMode, KernelStreamEvent, KernelStreamEventData,
+    KernelStreamEventType, KernelStreamItemKey, KernelThinkingSource, KernelThinkingStage,
+    KernelWarning, PromptWarningEventData, StopReason, ThinkingDeltaStreamData,
+    ToolCallStartStreamData, ToolExecutionInput, ToolExecutor, ToolResultStreamData,
 };
 use chrono::Utc;
 use serde_json::Value;
@@ -17,7 +16,8 @@ use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
     AssistantTextPhaseHint, ChatMessage, ChatRequest, FunctionCall, LlmProvider, ModelBlockDelta,
-    ModelBlockKind, ModelBlockStreamEvent, NativeThinkingConfig, ToolChoice, ToolDefinition,
+    ModelBlockKind, ModelBlockStreamEvent, NativeThinkingConfig, NativeThinkingEffort, ToolChoice,
+    ToolDefinition,
 };
 use talos_memory::{
     strip_json_fences, Memory, MemoryGetResult, MemorySearchResponse, MemoryStore, RecordHeader,
@@ -34,7 +34,8 @@ use talos_tools::{
     ToolDefinitionProvider, ToolDispatchOutcome, ToolExecutorPort, ToolOutputPayload, ToolPending,
 };
 use talos_types::talos::{
-    StopReason as TalosApiStopReason, TalosContentItem, TalosJsonValue, TalosOutputItem, TalosUsage,
+    StopReason as TalosApiStopReason, TalosContentItem, TalosJsonValue, TalosOutputItem,
+    TalosUsage, TurnExecutionMetrics,
 };
 use tokio::sync::mpsc;
 use tracing::warn;
@@ -73,13 +74,13 @@ mod tests;
 mod tool_batch;
 mod types;
 
-pub(crate) use finalize::build_execution_summary;
 pub(crate) use finalize::to_api_stop_reason;
 pub use finalize::{emit_general_turn_finalization_stream, finalize_general_turn_artifacts};
 pub(crate) use guard::{
-    build_read_only_nudge_message, run_forced_finalization_step,
-    should_force_finalization_for_empty_response, should_force_finalization_for_step,
-    should_inject_read_only_nudge, stop_reason_for_forced_finalization,
+    build_read_only_nudge_message, build_tool_failure_recovery_nudge_message,
+    run_forced_finalization_step, should_force_finalization_for_empty_response,
+    should_force_finalization_for_step, should_inject_read_only_nudge,
+    stop_reason_for_forced_finalization,
 };
 pub use loop_run::{
     execute_general_turn_loop, execute_general_turn_loop_with_policy,
@@ -110,10 +111,11 @@ pub(crate) use tool_batch::parse_retrieved_memory_items;
 pub use tool_batch::{apply_general_turn_tool_batch, execute_general_turn_tool_batch};
 pub use types::{
     BuiltInGeneralTurnPolicy, DynamicToolResultResume, ExecutedTurnArtifacts, GeneralTurnLoopState,
-    GeneralTurnOutcome, GeneralTurnPolicy, GeneralTurnPolicyStop, GeneralTurnResult,
-    GeneralTurnResume, GeneralTurnStepDisposition, GeneralTurnStepRequest, GeneralTurnStepResult,
-    GeneralTurnToolBatch, ModelFinishReason, PendingGeneralTurnAction, PlanReActLoopState,
-    PreparedGeneralTurn, ResumeToolCall, SessionCompactionState, StreamingToolExecutionConfig,
+    GeneralTurnOutcome, GeneralTurnPolicy, GeneralTurnPolicyFinalAcceptance, GeneralTurnPolicyStop,
+    GeneralTurnResult, GeneralTurnResume, GeneralTurnStepDisposition, GeneralTurnStepRequest,
+    GeneralTurnStepResult, GeneralTurnToolBatch, ModelFinishReason, PendingGeneralTurnAction,
+    PlanReActGeneralTurnPolicy, PlanReActLoopState, PreparedGeneralTurn, ResumeToolCall,
+    SessionCompactionState, StreamingToolExecutionConfig,
 };
 pub(crate) use types::{
     ForcedFinalizationCause, PendingDynamicToolRequest, ReadOnlyRoundFingerprint,

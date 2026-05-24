@@ -8,7 +8,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | --- | ---: |
 | `feat` | 020 |
 | `fix` | 004 |
-| `refactor` | 024 |
+| `refactor` | 025 |
 | `docs` | 001 |
 
 ## Active Specs
@@ -16,6 +16,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | ID | Directory | Status |
 | --- | --- | --- |
 | refactor-023 | `refactor-023-agent-kernel-simplification` | draft |
+| refactor-024 | `refactor-024-agent-kernel-final-answer-simplification` | draft |
 
 ## Archived Specs
 

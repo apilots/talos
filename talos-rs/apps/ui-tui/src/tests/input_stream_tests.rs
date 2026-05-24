@@ -813,6 +813,80 @@ async fn test_commentary_stream_does_not_update_assistant_block() {
 }
 
 #[tokio::test]
+async fn test_unknown_stream_moves_to_assistant_when_committed_final() {
+    let mut app = create_remote_app();
+    app.initialize_remote().await;
+    app.in_flight = true;
+    app.session_id = Some("sess-test".to_string());
+
+    app.handle_stream_event(unknown_item_started_event("msg-unknown", "sess-test", 1));
+    app.handle_stream_event(unknown_delta_event(
+        "msg-unknown",
+        "sess-test",
+        2,
+        "Final answer text.",
+    ));
+
+    assert!(app
+        .chat_blocks
+        .iter()
+        .any(|b| b.role == ChatRole::Thinking && b.content.contains("Final answer text.")));
+    assert!(!app
+        .chat_blocks
+        .iter()
+        .any(|b| b.role == ChatRole::Assistant && b.content.contains("Final answer text.")));
+
+    app.handle_stream_event(assistant_text_committed_event(
+        "msg-unknown",
+        "sess-test",
+        3,
+        TalosTimelinePhase::FinalAnswer,
+    ));
+
+    assert!(!app
+        .chat_blocks
+        .iter()
+        .any(|b| b.role == ChatRole::Thinking && b.content.contains("Final answer text.")));
+    assert!(app
+        .chat_blocks
+        .iter()
+        .any(|b| b.role == ChatRole::Assistant && b.content.contains("Final answer text.")));
+    assert!(app.received_output_delta);
+}
+
+#[tokio::test]
+async fn test_unknown_stream_stays_thinking_when_committed_commentary() {
+    let mut app = create_remote_app();
+    app.initialize_remote().await;
+    app.in_flight = true;
+    app.session_id = Some("sess-test".to_string());
+
+    app.handle_stream_event(unknown_item_started_event("msg-unknown", "sess-test", 1));
+    app.handle_stream_event(unknown_delta_event(
+        "msg-unknown",
+        "sess-test",
+        2,
+        "I will inspect the workspace.",
+    ));
+    app.handle_stream_event(assistant_text_committed_event(
+        "msg-unknown",
+        "sess-test",
+        3,
+        TalosTimelinePhase::Commentary,
+    ));
+
+    assert!(app.chat_blocks.iter().any(
+        |b| b.role == ChatRole::Thinking && b.content.contains("I will inspect the workspace.")
+    ));
+    assert!(!app
+        .chat_blocks
+        .iter()
+        .any(|b| b.role == ChatRole::Assistant
+            && b.content.contains("I will inspect the workspace.")));
+    assert!(!app.received_output_delta);
+}
+
+#[tokio::test]
 async fn test_tool_using_stream_keeps_assistant_output_interleaved() {
     let mut app = create_remote_app();
     app.initialize_remote().await;

@@ -121,13 +121,8 @@ fi
 
 tool_call_name="$(python3 -c 'import json,sys; d=json.load(sys.stdin); calls=[i for i in d.get("output", []) if i.get("type")=="tool_call"]; print(calls[0].get("name","") if calls else "")' <<< "${tool_json}")"
 tool_result_tool="$(python3 -c 'import json,sys; d=json.load(sys.stdin); results=[i for i in d.get("output", []) if i.get("type")=="tool_result"]; print(results[0].get("tool_name","") if results else "")' <<< "${tool_json}")"
-execution_summary_count="$(python3 -c 'import json,sys; d=json.load(sys.stdin); print(sum(1 for i in d.get("output", []) if i.get("type")=="execution_summary"))' <<< "${tool_json}")"
 if [[ "${tool_call_name}" != "Bash" || "${tool_result_tool}" != "Bash" ]]; then
   echo "CASE messages_tool_exec FAIL unexpected_tool call=${tool_call_name} result=${tool_result_tool}"
-  exit 1
-fi
-if [[ "${execution_summary_count}" -lt 1 ]]; then
-  echo "CASE messages_tool_exec FAIL missing_execution_summary_in_output"
   exit 1
 fi
 
@@ -137,7 +132,6 @@ echo "DETAIL messages_tool_exec_tool_call_count=${tool_call_count}"
 echo "DETAIL messages_tool_exec_tool_result_count=${tool_result_count}"
 echo "DETAIL messages_tool_exec_tool_call_name=${tool_call_name}"
 echo "DETAIL messages_tool_exec_tool_result_tool=${tool_result_tool}"
-echo "DETAIL messages_tool_exec_execution_summary_count=${execution_summary_count}"
 
 stream_tool_session_payload="$(create_session "tool-user-stream")"
 stream_tool_session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \

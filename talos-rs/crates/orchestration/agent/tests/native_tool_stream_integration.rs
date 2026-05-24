@@ -406,7 +406,7 @@ async fn integration_tool_call_loop_executes_tool_and_returns_final_output() {
         .output_text
         .contains("Final answer after tool execution"));
     assert!(response.reasoning.is_empty());
-    assert!(response.output_items.iter().any(|item| matches!(
+    assert!(response.output_items.iter().all(|item| !matches!(
         item,
         talos_types::talos::TalosOutputItem::ExecutionSummary { .. }
     )));

@@ -25,6 +25,7 @@ Response contract:
 - If tool evidence is incomplete, say what is incomplete and give the best next step."#;
 const FALLBACK_SALVAGE_RESPONSE: &str = "I could not produce a full final answer after tool execution. Based on the available tool results, at least one required step failed or returned insufficient evidence. Review the tool errors and continue with a narrower follow-up step.";
 const LOW_GAIN_READ_ONLY_NUDGE: &str = "You are repeating a similar read-only investigation. Prefer answering now with verified evidence already collected. If one more read is essential, read only the single most relevant file; otherwise produce the final answer in the assistant response body.";
+const TOOL_FAILURE_RECOVERY_NUDGE: &str = "The previous tool batch included failed commands or failed file reads. Before calling another tool, revise the next step using only verified paths and successful outputs already observed. Do not retry the same missing path, command, or arguments unless a prior successful result proves that exact target exists. If the failure blocks the task, explain the limitation in the final answer instead of repeating the failed lookup.";
 
 pub(crate) fn is_read_only_tool_name(tool_name: &str) -> bool {
     matches!(
@@ -84,9 +85,36 @@ pub(crate) fn build_read_only_nudge_message() -> ChatMessage {
     ChatMessage::system(LOW_GAIN_READ_ONLY_NUDGE)
 }
 
+pub(crate) fn build_tool_failure_recovery_nudge_message(
+    batch: &GeneralTurnToolBatch,
+) -> Option<ChatMessage> {
+    batch_has_recoverable_tool_failure(batch)
+        .then(|| ChatMessage::system(TOOL_FAILURE_RECOVERY_NUDGE))
+}
+
+fn batch_has_recoverable_tool_failure(batch: &GeneralTurnToolBatch) -> bool {
+    batch.logs.iter().any(|log| {
+        log.is_error
+            || log
+                .payload
+                .pointer("/exit_code")
+                .and_then(Value::as_i64)
+                .is_some_and(|code| code != 0)
+            || log
+                .payload
+                .pointer("/value/exit_code")
+                .and_then(Value::as_i64)
+                .is_some_and(|code| code != 0)
+            || log
+                .payload
+                .pointer("/ok")
+                .and_then(Value::as_bool)
+                .is_some_and(|ok| !ok)
+    })
+}
+
 pub(crate) fn stop_reason_for_forced_finalization(_cause: ForcedFinalizationCause) -> StopReason {
     match _cause {
-        ForcedFinalizationCause::LoopTerminal => StopReason::EndTurn,
         ForcedFinalizationCause::EmptyFinalResponseAfterTools => StopReason::EndTurn,
         ForcedFinalizationCause::ToolRoundBudget
         | ForcedFinalizationCause::RepeatedReadOnlyInvestigation => StopReason::ToolRoundLimit,
@@ -112,9 +140,6 @@ pub(crate) async fn run_forced_finalization_step(
     cause: ForcedFinalizationCause,
 ) -> TalosResult<GeneralTurnStepResult> {
     let cause_note = match cause {
-        ForcedFinalizationCause::LoopTerminal => {
-            "Reason: the agent loop has completed and no further tool call is pending."
-        }
         ForcedFinalizationCause::ToolRoundBudget => {
             "Reason: the tool round budget has been exhausted."
         }
@@ -141,6 +166,7 @@ pub(crate) async fn run_forced_finalization_step(
             parallel_tool_calls: false,
             native_thinking: None,
             pre_final_execution_summary: pre_final_execution_summary.clone(),
+            defer_no_hint_final_projection: false,
             stream_tx: stream_tx.clone(),
             streaming_tool_execution: None,
         },
@@ -191,6 +217,7 @@ async fn run_salvage_finalization_step(
             } else {
                 pre_final_execution_summary
             },
+            defer_no_hint_final_projection: false,
             stream_tx,
             streaming_tool_execution: None,
         },
@@ -294,6 +321,36 @@ mod tests {
         assert!(LOW_GAIN_READ_ONLY_NUDGE.contains("verified evidence"));
         assert!(LOW_GAIN_READ_ONLY_NUDGE.contains("single most relevant file"));
         assert!(LOW_GAIN_READ_ONLY_NUDGE.contains("assistant response body"));
+    }
+
+    #[test]
+    fn tool_failure_recovery_nudge_rejects_repeating_failed_targets() {
+        let batch = GeneralTurnToolBatch {
+            output_items: Vec::new(),
+            tool_messages: Vec::new(),
+            pending_dynamic_requests: Vec::new(),
+            retrieved_memories: Vec::new(),
+            logs: vec![ToolResultLog {
+                call_id: "call-1".to_string(),
+                tool: "Bash".to_string(),
+                payload: serde_json::json!({ "value": { "exit_code": 1 } }),
+                envelope: Value::Null,
+                is_error: false,
+                truncated: false,
+                size_bytes: 0,
+                semantic_events: Vec::new(),
+                next_turn_failure: None,
+            }],
+            error_count: 0,
+        };
+
+        let message = build_tool_failure_recovery_nudge_message(&batch)
+            .expect("non-zero exit code should trigger recovery nudge");
+        assert_eq!(message.role, Role::System);
+        assert!(message.content.contains("verified paths"));
+        assert!(message
+            .content
+            .contains("Do not retry the same missing path"));
     }
 
     struct FinalizationNativeThinkingProvider {

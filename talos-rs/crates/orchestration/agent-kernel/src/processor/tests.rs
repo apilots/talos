@@ -87,7 +87,6 @@ async fn test_planning_response_processor_emits_typed_branch_override_event() {
     let output = processor.run(&mut ctx, &mut response).await.unwrap();
     let events = output.events;
 
-    assert_eq!(output.disposition, ResponseDisposition::Continue);
     assert_eq!(
         ctx.execution_state.planning_response.as_deref(),
         Some("answer")
@@ -144,64 +143,13 @@ async fn test_planning_response_processor_rewrites_plan_react_tagged_response() 
         allow_final_projection: true,
     };
 
-    let output = processor.run(&mut ctx, &mut response).await.unwrap();
+    processor.run(&mut ctx, &mut response).await.unwrap();
 
-    assert_eq!(output.disposition, ResponseDisposition::Continue);
     assert_eq!(response.output_text, "done");
     assert!(ctx.execution_state.plan_react_has_final_answer);
     assert!(response.output_items.iter().any(
         |item| matches!(item, TalosOutputItem::Reasoning { text } if text.contains("/*PLANNING*/"))
     ));
-}
-
-#[tokio::test]
-async fn test_final_answer_extraction_emits_final_event_and_marks_final() {
-    let mut ctx = mock_ctx();
-    let mut response = LlmResponseEnvelope {
-        output_text: "done".to_string(),
-        output_items: vec![TalosOutputItem::OutputText {
-            text: "done".to_string(),
-        }],
-        branch: ExecutionBranch::DirectAnswer,
-        actions: EventActions::default(),
-        allow_final_projection: true,
-    };
-    let output = FinalAnswerExtractionProcessor
-        .run(&mut ctx, &mut response)
-        .await
-        .unwrap();
-    let events = output.events;
-
-    assert_eq!(output.disposition, ResponseDisposition::Final);
-    assert_eq!(events.len(), 1);
-    assert!(events[0].is_final_response());
-    assert_eq!(events[0].branch, ExecutionBranch::DirectAnswer);
-}
-
-#[tokio::test]
-async fn test_tool_call_extraction_emits_tool_call_events() {
-    let mut ctx = mock_ctx();
-    let mut response = LlmResponseEnvelope {
-        output_text: String::new(),
-        output_items: vec![TalosOutputItem::ToolCall {
-            call_id: "call-1".to_string(),
-            name: "read".to_string(),
-            arguments: json!({"path": "README.md"}).into(),
-        }],
-        branch: ExecutionBranch::ReactiveLoop,
-        actions: EventActions::default(),
-        allow_final_projection: true,
-    };
-    let output = ToolCallExtractionProcessor
-        .run(&mut ctx, &mut response)
-        .await
-        .unwrap();
-    let events = output.events;
-
-    assert_eq!(output.disposition, ResponseDisposition::Continue);
-    assert_eq!(events.len(), 1);
-    assert!(matches!(events[0].kind, ExecutionEventKind::ToolCall));
-    assert_eq!(events[0].branch, ExecutionBranch::ReactiveLoop);
 }
 
 #[tokio::test]

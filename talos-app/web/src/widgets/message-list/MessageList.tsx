@@ -180,10 +180,10 @@ function TimelineBlock({
   live: boolean;
 }) {
   const hasRunningItem = items.some((item) => item.status === "running" || item.status === "waiting_dynamic_input");
+  const hasFinalAnswerItem = items.some((item) => item.phase === "final_answer");
   const hasActiveTimeline = live || hasRunningItem;
   const isAwaitingTimelineDelta =
-    items.some((item) => item.status === "running") &&
-    !items.some((item) => item.phase === "final_answer");
+    (live || items.some((item) => item.status === "running")) && !hasFinalAnswerItem;
   const [nowMs, setNowMs] = useState(() => Date.now());
   const totalDuration = timelineDuration(items, nowMs);
   const activitySignature = timelineActivitySignature(items);

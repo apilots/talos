@@ -63,6 +63,7 @@ fn turn_completed(turn_id: &str, message_id: &str, sequence: u64) -> TalosTimeli
             completed_at_ms: 2,
             stop_reason: StopReason::EndTurn,
             usage: TalosUsage::default(),
+            metrics: None,
         }),
     )
 }

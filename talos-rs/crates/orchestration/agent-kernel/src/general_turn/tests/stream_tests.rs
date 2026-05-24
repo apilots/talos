@@ -11,7 +11,7 @@ struct ScriptedModelBlockProvider {
     events: Vec<ModelBlockStreamEvent>,
 }
 #[derive(Default)]
-struct LoopTerminalFinalizationStreamingProvider {
+struct DirectTerminalStreamingProvider {
     calls: AtomicUsize,
 }
 
@@ -203,9 +203,9 @@ impl LlmProvider for ExplicitFinalModelBlockProvider {
 }
 
 #[async_trait]
-impl LlmProvider for LoopTerminalFinalizationStreamingProvider {
+impl LlmProvider for DirectTerminalStreamingProvider {
     fn name(&self) -> &str {
-        "loop-terminal-finalization-streaming"
+        "direct-loop-terminal-streaming"
     }
 
     async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
@@ -257,7 +257,7 @@ impl LlmProvider for LoopTerminalFinalizationStreamingProvider {
     }
 
     fn default_model(&self) -> String {
-        "loop-terminal-finalization-streaming".to_string()
+        "direct-loop-terminal-streaming".to_string()
     }
 }
 
@@ -279,6 +279,7 @@ async fn assistant_delta_without_block_fails() {
         0,
         KernelModelCallMode::WorkingLoop,
         None,
+        false,
         None,
         None,
     )
@@ -308,6 +309,7 @@ async fn reasoning_delta_without_block_fails() {
         0,
         KernelModelCallMode::WorkingLoop,
         None,
+        false,
         None,
         None,
     )
@@ -337,6 +339,7 @@ async fn tool_args_delta_without_block_fails() {
         0,
         KernelModelCallMode::WorkingLoop,
         None,
+        false,
         None,
         None,
     )
@@ -369,6 +372,7 @@ async fn assistant_delta_with_wrong_model_item_id_fails() {
         0,
         KernelModelCallMode::WorkingLoop,
         None,
+        false,
         None,
         None,
     )
@@ -411,6 +415,7 @@ async fn multiple_assistant_blocks_keep_separate_lifecycle() {
         0,
         KernelModelCallMode::WorkingLoop,
         None,
+        false,
         None,
         None,
     )
@@ -447,6 +452,7 @@ async fn final_answer_then_tool_call_fails_in_kernel() {
         0,
         KernelModelCallMode::WorkingLoop,
         Some("Summary".to_string()),
+        false,
         None,
         None,
     )
@@ -481,6 +487,7 @@ async fn final_answer_then_commentary_fails_in_kernel() {
         0,
         KernelModelCallMode::WorkingLoop,
         Some("Summary".to_string()),
+        false,
         None,
         None,
     )
@@ -489,7 +496,7 @@ async fn final_answer_then_commentary_fails_in_kernel() {
 
     assert!(err
         .to_string()
-        .contains("commentary assistant text received after final answer started"));
+        .contains("unknown assistant text received after final answer started"));
 }
 
 #[tokio::test]
@@ -520,6 +527,7 @@ async fn final_answer_then_tool_args_fails_in_kernel() {
         0,
         KernelModelCallMode::WorkingLoop,
         Some("Summary".to_string()),
+        false,
         None,
         None,
     )
@@ -554,6 +562,7 @@ async fn final_answer_then_reasoning_fails_in_kernel() {
         0,
         KernelModelCallMode::WorkingLoop,
         Some("Summary".to_string()),
+        false,
         None,
         None,
     )
@@ -596,6 +605,7 @@ async fn explicit_final_after_reasoning_closes_reasoning_before_summary() {
         0,
         KernelModelCallMode::WorkingLoop,
         Some("Summary".to_string()),
+        false,
         Some(&tx),
         None,
     )
@@ -606,16 +616,14 @@ async fn explicit_final_after_reasoning_closes_reasoning_before_summary() {
     while let Ok(event) = rx.try_recv() {
         event_types.push(event.event_type);
     }
-    let summary = event_types
-        .iter()
-        .position(|kind| matches!(kind, KernelStreamEventType::ExecutionSummary))
-        .expect("summary should stream");
     let final_started = event_types
         .iter()
         .rposition(|kind| matches!(kind, KernelStreamEventType::AssistantTextStarted))
         .expect("final should start");
 
-    assert!(summary < final_started);
+    assert!(event_types[..final_started]
+        .iter()
+        .all(|kind| !matches!(kind, KernelStreamEventType::ExecutionSummary)));
 }
 
 #[tokio::test]
@@ -644,6 +652,7 @@ async fn explicit_final_with_pending_tool_args_fails_by_policy() {
         0,
         KernelModelCallMode::WorkingLoop,
         Some("Summary".to_string()),
+        false,
         None,
         None,
     )
@@ -686,6 +695,7 @@ async fn explicit_final_closes_active_commentary_before_summary() {
         0,
         KernelModelCallMode::WorkingLoop,
         Some("Summary".to_string()),
+        false,
         Some(&tx),
         None,
     )
@@ -696,21 +706,14 @@ async fn explicit_final_closes_active_commentary_before_summary() {
     while let Ok(event) = rx.try_recv() {
         event_types.push(event.event_type);
     }
-    let commentary_completed = event_types
-        .iter()
-        .position(|kind| matches!(kind, KernelStreamEventType::AssistantTextCompleted))
-        .expect("commentary should complete");
-    let summary = event_types
-        .iter()
-        .position(|kind| matches!(kind, KernelStreamEventType::ExecutionSummary))
-        .expect("summary should stream");
     let final_started = event_types
         .iter()
         .rposition(|kind| matches!(kind, KernelStreamEventType::AssistantTextStarted))
         .expect("final should start");
 
-    assert!(commentary_completed < summary);
-    assert!(summary < final_started);
+    assert!(event_types[..final_started]
+        .iter()
+        .all(|kind| !matches!(kind, KernelStreamEventType::ExecutionSummary)));
 }
 
 #[tokio::test]
@@ -750,6 +753,7 @@ async fn tool_progress_delta_maps_to_kernel_tool_progress() {
         0,
         KernelModelCallMode::WorkingLoop,
         None,
+        false,
         Some(&tx),
         None,
     )
@@ -788,6 +792,7 @@ async fn tool_progress_without_active_tool_fails() {
         0,
         KernelModelCallMode::WorkingLoop,
         None,
+        false,
         None,
         None,
     )
@@ -811,6 +816,7 @@ async fn test_stream_round_normalizes_empty_tool_call_id_before_emitting_start_e
         0,
         KernelModelCallMode::WorkingLoop,
         None,
+        false,
         Some(&tx),
         None,
     )
@@ -853,6 +859,7 @@ async fn test_execute_step_streams_tool_preface_as_commentary() {
             parallel_tool_calls: false,
             native_thinking: None,
             pre_final_execution_summary: None,
+            defer_no_hint_final_projection: false,
             stream_tx: Some(tx),
             streaming_tool_execution: None,
         },
@@ -868,6 +875,7 @@ async fn test_execute_step_streams_tool_preface_as_commentary() {
     assert!(!step.final_answer_streamed);
 
     let mut started_phase = None;
+    let mut committed_phase = None;
     let mut text_delta = String::new();
     while let Ok(event) = rx.try_recv() {
         match event.data {
@@ -876,16 +884,20 @@ async fn test_execute_step_streams_tool_preface_as_commentary() {
                 assert_eq!(data.round, Some(3));
             }
             KernelStreamEventData::AssistantTextDelta(data) => text_delta.push_str(&data.delta),
+            KernelStreamEventData::AssistantTextCommitted(data) => {
+                committed_phase = Some(data.phase);
+            }
             _ => {}
         }
     }
 
-    assert_eq!(started_phase, Some(KernelAssistantTextPhase::Commentary));
+    assert_eq!(started_phase, Some(KernelAssistantTextPhase::Unknown));
+    assert_eq!(committed_phase, Some(KernelAssistantTextPhase::Commentary));
     assert_eq!(text_delta, "Inspecting a file.");
 }
 
 #[tokio::test]
-async fn test_execute_step_streams_direct_answer_as_working_loop_commentary() {
+async fn test_execute_step_streams_direct_answer_as_final_answer_after_round_done() {
     let provider = Arc::new(DirectStreamingAnswerProvider);
     let (tx, mut rx) = mpsc::channel(8);
 
@@ -900,6 +912,7 @@ async fn test_execute_step_streams_direct_answer_as_working_loop_commentary() {
             parallel_tool_calls: false,
             native_thinking: None,
             pre_final_execution_summary: None,
+            defer_no_hint_final_projection: false,
             stream_tx: Some(tx),
             streaming_tool_execution: None,
         },
@@ -912,9 +925,10 @@ async fn test_execute_step_streams_direct_answer_as_working_loop_commentary() {
         step.disposition,
         GeneralTurnStepDisposition::FinalResponse
     ));
-    assert!(!step.final_answer_streamed);
+    assert!(step.final_answer_streamed);
 
     let mut started_phase = None;
+    let mut committed_phase = None;
     let mut text_delta = String::new();
     let mut completed = false;
     while let Ok(event) = rx.try_recv() {
@@ -925,11 +939,15 @@ async fn test_execute_step_streams_direct_answer_as_working_loop_commentary() {
             }
             KernelStreamEventData::AssistantTextDelta(data) => text_delta.push_str(&data.delta),
             KernelStreamEventData::AssistantTextCompleted(_) => completed = true,
+            KernelStreamEventData::AssistantTextCommitted(data) => {
+                committed_phase = Some(data.phase);
+            }
             _ => {}
         }
     }
 
-    assert_eq!(started_phase, Some(KernelAssistantTextPhase::Commentary));
+    assert_eq!(started_phase, Some(KernelAssistantTextPhase::Unknown));
+    assert_eq!(committed_phase, Some(KernelAssistantTextPhase::FinalAnswer));
     assert_eq!(text_delta, "Direct answer.");
     assert!(completed);
 }
@@ -949,9 +967,8 @@ async fn test_execute_step_maps_provider_explicit_final_phase_to_final_answer() 
             tool_definitions: Vec::new(),
             parallel_tool_calls: false,
             native_thinking: None,
-            pre_final_execution_summary: Some(
-                "Kernel summary: answered directly without invoking tools.".to_string(),
-            ),
+            pre_final_execution_summary: None,
+            defer_no_hint_final_projection: false,
             stream_tx: Some(tx),
             streaming_tool_execution: None,
         },
@@ -968,34 +985,27 @@ async fn test_execute_step_maps_provider_explicit_final_phase_to_final_answer() 
 
     let mut started_phase = None;
     let mut text_delta = String::new();
-    let mut event_index = 0usize;
-    let mut summary_index = None;
-    let mut final_answer_index = None;
+    let mut final_answer_started = false;
     while let Ok(event) = rx.try_recv() {
         match event.data {
-            KernelStreamEventData::ExecutionSummary(_) => summary_index = Some(event_index),
             KernelStreamEventData::AssistantTextStarted(data) => {
                 started_phase = Some(data.phase);
                 assert_eq!(data.round, Some(5));
-                final_answer_index = Some(event_index);
+                final_answer_started = true;
             }
             KernelStreamEventData::AssistantTextDelta(data) => text_delta.push_str(&data.delta),
             _ => {}
         }
-        event_index += 1;
     }
 
     assert_eq!(started_phase, Some(KernelAssistantTextPhase::FinalAnswer));
     assert_eq!(text_delta, "Explicit final.");
-    assert!(
-        summary_index.expect("summary should stream before explicit final")
-            < final_answer_index.expect("final answer should start")
-    );
+    assert!(final_answer_started);
 }
 
 #[tokio::test]
-async fn test_run_general_turn_finalizes_loop_terminal_without_provider_phase() {
-    let provider = Arc::new(LoopTerminalFinalizationStreamingProvider::default());
+async fn test_run_general_turn_ends_loop_terminal_without_extra_finalization() {
+    let provider = Arc::new(DirectTerminalStreamingProvider::default());
     let tool_registry = Arc::new(ToolRegistry::new());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
@@ -1020,41 +1030,28 @@ async fn test_run_general_turn_finalizes_loop_terminal_without_provider_phase() 
     .await
     .expect("general turn should succeed");
 
-    assert_eq!(result.output_text, "Final summary.");
-    assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(result.output_text, "Working answer.");
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
 
     let mut phases = Vec::new();
+    let mut committed_phases = Vec::new();
     let mut deltas = Vec::new();
-    let mut event_index = 0usize;
-    let mut summary_index = None;
-    let mut final_answer_index = None;
     while let Ok(event) = rx.try_recv() {
         match event.data {
-            KernelStreamEventData::ExecutionSummary(_) => summary_index = Some(event_index),
             KernelStreamEventData::AssistantTextStarted(data) => {
-                if matches!(data.phase, KernelAssistantTextPhase::FinalAnswer) {
-                    final_answer_index = Some(event_index);
-                }
                 phases.push(data.phase);
             }
             KernelStreamEventData::AssistantTextDelta(data) => deltas.push(data.delta),
+            KernelStreamEventData::AssistantTextCommitted(data) => {
+                committed_phases.push(data.phase);
+            }
             _ => {}
         }
-        event_index += 1;
     }
 
-    assert_eq!(
-        phases,
-        vec![
-            KernelAssistantTextPhase::Commentary,
-            KernelAssistantTextPhase::FinalAnswer
-        ]
-    );
-    assert_eq!(deltas, vec!["Working answer.", "Final summary."]);
-    assert!(
-        summary_index.expect("summary should stream")
-            < final_answer_index.expect("final answer should start")
-    );
+    assert_eq!(phases, vec![KernelAssistantTextPhase::Unknown]);
+    assert_eq!(committed_phases, vec![KernelAssistantTextPhase::FinalAnswer]);
+    assert_eq!(deltas, vec!["Working answer."]);
 }
 
 #[tokio::test]
@@ -1087,6 +1084,7 @@ async fn test_stream_round_executes_tools_during_stream_and_emits_lifecycle_even
         0,
         KernelModelCallMode::WorkingLoop,
         None,
+        false,
         Some(&tx),
         Some(StreamingToolExecutionConfig {
             execution_mode: ToolExecutionMode::Parallel,

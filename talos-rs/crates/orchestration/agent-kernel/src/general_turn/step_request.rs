@@ -16,11 +16,9 @@ pub fn build_general_turn_step_request(
         messages,
         tool_definitions: prepared.tool_definitions.clone(),
         parallel_tool_calls,
-        native_thinking: None,
-        pre_final_execution_summary: Some(build_execution_summary(
-            state.tool_call_count,
-            state.tool_error_count,
-        )),
+        native_thinking: prepared.native_thinking.clone(),
+        pre_final_execution_summary: None,
+        defer_no_hint_final_projection: false,
         stream_tx: prepared.stream_tx.clone(),
         streaming_tool_execution: None,
     }

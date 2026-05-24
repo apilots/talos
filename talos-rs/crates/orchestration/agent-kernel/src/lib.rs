@@ -25,8 +25,8 @@ pub use execution::{
     EventSink, ExecutionBranch, ExecutionEvent, ExecutionEventBuffer, ExecutionEventHandler,
     ExecutionEventKind, LlmRequestEnvelope, LlmResponseEnvelope, PlanningRequestEffect,
     PlanningResponseEffect, PlanningResponseSegment, PlanningResponseSegmentKind,
-    RequestCacheContext, RequestInteractionContext, RequestOutputContract, ResponseDisposition,
-    StateDelta, StateNamespace, VecEventSink,
+    RequestCacheContext, RequestInteractionContext, RequestOutputContract, StateDelta,
+    StateNamespace, VecEventSink,
 };
 pub use general_turn::{
     apply_general_turn_step, apply_general_turn_tool_batch, build_general_turn_step_request,
@@ -39,17 +39,17 @@ pub use general_turn::{
     GeneralTurnPolicy, GeneralTurnPolicyStop, GeneralTurnResult, GeneralTurnResume,
     GeneralTurnStepDisposition, GeneralTurnStepRequest, GeneralTurnStepResult,
     GeneralTurnToolBatch, MemoryFlushPolicy, MemoryFlushUsageReport, ModelFinishReason,
-    PendingGeneralTurnAction, PlanReActLoopState, PreparedGeneralTurn, ResumeToolCall,
-    StreamingToolExecutionConfig,
+    PendingGeneralTurnAction, PlanReActGeneralTurnPolicy, PlanReActLoopState, PreparedGeneralTurn,
+    ResumeToolCall, StreamingToolExecutionConfig,
 };
 pub use planner::{BuiltInPlanner, PlanReActPlanner};
 pub use plugin::{InvocationPluginManager, PluginRegistry};
 pub use processor::{
     AgentTransferRequestProcessor, BasicRequestProcessor, ContentsRequestProcessor,
-    EventProjectionProcessor, FinalAnswerExtractionProcessor, InstructionsRequestProcessor,
-    PlanningRequestProcessor, PlanningResponseProcessor, RequestProcessor, RequestProcessorKind,
-    RequestProcessorPipeline, ResponseProcessor, ResponseProcessorKind, ResponseProcessorPipeline,
-    StateDeltaResponseProcessor, ToolCallExtractionProcessor, ToolContextRequestProcessor,
+    EventProjectionProcessor, InstructionsRequestProcessor, PlanningRequestProcessor,
+    PlanningResponseProcessor, RequestProcessor, RequestProcessorKind, RequestProcessorPipeline,
+    ResponseProcessor, ResponseProcessorKind, ResponseProcessorPipeline,
+    StateDeltaResponseProcessor, ToolContextRequestProcessor,
 };
 pub use session::{
     InvocationSession, KernelTranscriptEvent, KernelTranscriptEventKind, KernelTranscriptFilter,
@@ -64,15 +64,15 @@ pub use tool_execution::{
 };
 pub use traits::{Planner, Plugin};
 pub use types::{
-    AgentRunResult, AssistantTextCompletedStreamData, AssistantTextDeltaStreamData,
-    AssistantTextStartedStreamData, ContextStateBags, DynamicToolRequestStreamData,
-    ExecutionSummaryStreamData, FinalResponseEventData, FlowProfile, InvocationContext,
-    InvocationExecutionState, InvocationLimits, IterationEventData, KernelAssistantTextPhase,
-    KernelEvent, KernelEventData, KernelEventLabel, KernelEventType, KernelExecutionSettings,
-    KernelModelCallMode, KernelStreamEvent, KernelStreamEventData, KernelStreamEventType,
-    KernelStreamItemKey, KernelThinkingSource, KernelThinkingStage, PlannerKind,
-    PromptWarningEventData, StopReason, TaskCompletedEventData, TaskKind, TaskResult, TaskStatus,
-    ThinkingDeltaStreamData, ToolArgsDeltaStreamData, ToolCallStartStreamData,
+    AgentRunResult, AssistantTextCommittedStreamData, AssistantTextCompletedStreamData,
+    AssistantTextDeltaStreamData, AssistantTextStartedStreamData, ContextStateBags,
+    DynamicToolRequestStreamData, ExecutionSummaryStreamData, FinalResponseEventData, FlowProfile,
+    InvocationContext, InvocationExecutionState, InvocationLimits, IterationEventData,
+    KernelAssistantTextPhase, KernelEvent, KernelEventData, KernelEventLabel, KernelEventType,
+    KernelExecutionSettings, KernelModelCallMode, KernelStreamEvent, KernelStreamEventData,
+    KernelStreamEventType, KernelStreamItemKey, KernelThinkingSource, KernelThinkingStage,
+    PlannerKind, PromptWarningEventData, StopReason, TaskCompletedEventData, TaskKind, TaskResult,
+    TaskStatus, ThinkingDeltaStreamData, ToolArgsDeltaStreamData, ToolCallStartStreamData,
     ToolExecutingStreamData, ToolExecutionMode, ToolProgressDeltaStreamData, ToolProgressKind,
     ToolQueuedStreamData, ToolResultStreamData, ToolStreamKey, TransferRequestedEventData,
     TurnPhase, UserInputEventData,

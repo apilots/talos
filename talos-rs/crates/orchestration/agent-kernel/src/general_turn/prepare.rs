@@ -892,6 +892,13 @@ pub async fn prepare_general_turn(
     }
     emit_prompt_warning_events(ctx, &warnings).await;
     let max_output_tokens = Some(kernel_config.output.effective_max_tokens());
+    let native_thinking = ctx
+        .selected_model_info
+        .reasoning
+        .then_some(NativeThinkingConfig {
+            effort: NativeThinkingEffort::Medium,
+            budget_tokens: Some(2048),
+        });
 
     Ok(PreparedGeneralTurn {
         session_id: session_id.clone(),
@@ -901,6 +908,7 @@ pub async fn prepare_general_turn(
         project_root: ctx.project_root.clone(),
         selected_model,
         max_output_tokens,
+        native_thinking,
         prompt_prefix_messages: split_prompt_prefix_messages(
             &render_prompt_assembly(&prompt_assembly),
             input,

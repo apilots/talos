@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    ToolArgsDeltaStreamData, ToolExecutionOutput, ToolProgressDeltaStreamData, ToolProgressKind,
-    ToolStreamKey,
+    AssistantTextCommittedStreamData, ToolArgsDeltaStreamData, ToolExecutionOutput,
+    ToolProgressDeltaStreamData, ToolProgressKind, ToolStreamKey,
 };
 
 pub(crate) async fn emit_stream_event(
@@ -97,7 +97,8 @@ fn map_assistant_text_phase(
         KernelModelCallMode::Finalization => KernelAssistantTextPhase::FinalAnswer,
         KernelModelCallMode::WorkingLoop => match phase_hint {
             Some(AssistantTextPhaseHint::FinalAnswer) => KernelAssistantTextPhase::FinalAnswer,
-            Some(AssistantTextPhaseHint::Commentary) | None => KernelAssistantTextPhase::Commentary,
+            Some(AssistantTextPhaseHint::Commentary) => KernelAssistantTextPhase::Commentary,
+            None => KernelAssistantTextPhase::Unknown,
         },
     }
 }
@@ -111,36 +112,6 @@ fn ensure_not_after_final(final_answer_started: bool, event: &str) -> TalosResul
         return Err(provider_protocol_violation(format!(
             "{event} received after final answer started"
         )));
-    }
-    Ok(())
-}
-
-async fn emit_execution_summary_before_final(
-    round: u32,
-    pre_final_execution_summary: Option<&String>,
-    execution_summary_streamed: &mut bool,
-    stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
-) -> TalosResult<()> {
-    if *execution_summary_streamed {
-        return Ok(());
-    }
-    if let Some(execution_summary) = pre_final_execution_summary {
-        emit_stream_event(
-            stream_tx,
-            KernelStreamEventType::ExecutionSummary,
-            KernelStreamEventData::ExecutionSummary(ExecutionSummaryStreamData {
-                text: execution_summary.clone(),
-                round: Some(round),
-            }),
-        )
-        .await;
-        *execution_summary_streamed = true;
-        return Ok(());
-    }
-    if stream_tx.is_some() {
-        return Err(provider_protocol_violation(
-            "final answer stream requires a pre-final execution summary",
-        ));
     }
     Ok(())
 }
@@ -165,7 +136,7 @@ async fn close_active_non_final_blocks_before_final(
         };
         if let ActiveModelBlock::AssistantText {
             item_key,
-            phase: KernelAssistantTextPhase::Commentary,
+            phase: KernelAssistantTextPhase::Commentary | KernelAssistantTextPhase::Unknown,
         } = block
         {
             emit_stream_event(
@@ -186,7 +157,8 @@ pub(crate) async fn stream_round(
     request: ChatRequest,
     round: u32,
     call_mode: KernelModelCallMode,
-    pre_final_execution_summary: Option<String>,
+    _pre_final_execution_summary: Option<String>,
+    defer_no_hint_final_projection: bool,
     stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
     streaming_tool_execution: Option<StreamingToolExecutionConfig>,
 ) -> TalosResult<StreamRound> {
@@ -200,8 +172,9 @@ pub(crate) async fn stream_round(
     let mut usage = TalosUsage::default();
     let mut assistant_text_streamed = false;
     let mut final_answer_streamed = false;
-    let mut execution_summary_streamed = false;
+    let execution_summary_streamed = false;
     let mut final_answer_started = false;
+    let mut unknown_assistant_text_items = Vec::<KernelStreamItemKey>::new();
     let mut scheduler = streaming_tool_execution.map(|config| {
         crate::tool_execution::StreamingToolScheduler::new(
             config.execution_mode,
@@ -251,20 +224,18 @@ pub(crate) async fn stream_round(
                         }
                         close_active_non_final_blocks_before_final(&mut active_blocks, stream_tx)
                             .await?;
-                        emit_execution_summary_before_final(
-                            round,
-                            pre_final_execution_summary.as_ref(),
-                            &mut execution_summary_streamed,
-                            stream_tx,
-                        )
-                        .await?;
                         final_answer_started = true;
                         final_answer_streamed = true;
-                    } else {
+                    } else if matches!(phase, KernelAssistantTextPhase::Commentary) {
                         ensure_not_after_final(final_answer_started, "commentary assistant text")?;
+                    } else {
+                        ensure_not_after_final(final_answer_started, "unknown assistant text")?;
                     }
 
                     assistant_text_streamed = true;
+                    if matches!(phase, KernelAssistantTextPhase::Unknown) {
+                        unknown_assistant_text_items.push(item_key.clone());
+                    }
                     active_blocks.insert(
                         model_item_id,
                         ActiveModelBlock::AssistantText {
@@ -321,8 +292,9 @@ pub(crate) async fn stream_round(
                 delta,
             } => match delta {
                 ModelBlockDelta::AssistantText { delta } => {
-                    let Some(ActiveModelBlock::AssistantText { item_key, .. }) =
-                        active_blocks.get(&model_item_id)
+                    let Some(ActiveModelBlock::AssistantText {
+                        item_key, ..
+                    }) = active_blocks.get(&model_item_id)
                     else {
                         return Err(provider_protocol_violation(format!(
                             "assistant text delta received without active assistant block {model_item_id}"
@@ -332,10 +304,12 @@ pub(crate) async fn stream_round(
                     emit_stream_event(
                         stream_tx,
                         KernelStreamEventType::AssistantTextDelta,
-                        KernelStreamEventData::AssistantTextDelta(AssistantTextDeltaStreamData {
-                            item_key: item_key.clone(),
-                            delta,
-                        }),
+                        KernelStreamEventData::AssistantTextDelta(
+                            AssistantTextDeltaStreamData {
+                                item_key: item_key.clone(),
+                                delta,
+                            },
+                        ),
                     )
                     .await;
                 }
@@ -423,7 +397,9 @@ pub(crate) async fn stream_round(
                 };
                 match active_block {
                     ActiveModelBlock::Reasoning => {}
-                    ActiveModelBlock::AssistantText { item_key, .. } => {
+                    ActiveModelBlock::AssistantText {
+                        item_key, ..
+                    } => {
                         emit_stream_event(
                             stream_tx,
                             KernelStreamEventType::AssistantTextCompleted,
@@ -516,10 +492,53 @@ pub(crate) async fn stream_round(
         ));
     }
 
+    let tool_calls = finalize_tool_calls(round, pending_calls);
+    if !unknown_assistant_text_items.is_empty() {
+        let phase = if tool_calls.is_empty() && !defer_no_hint_final_projection {
+            KernelAssistantTextPhase::FinalAnswer
+        } else {
+            KernelAssistantTextPhase::Commentary
+        };
+        for item_key in unknown_assistant_text_items {
+            emit_stream_event(
+                stream_tx,
+                KernelStreamEventType::AssistantTextCommitted,
+                KernelStreamEventData::AssistantTextCommitted(AssistantTextCommittedStreamData {
+                    item_key,
+                    phase,
+                }),
+            )
+            .await;
+        }
+        if matches!(phase, KernelAssistantTextPhase::FinalAnswer) {
+            final_answer_streamed = true;
+        }
+    }
+    if !assistant_text_streamed && !content.trim().is_empty() {
+        let phase = if tool_calls.is_empty() && !defer_no_hint_final_projection {
+            KernelAssistantTextPhase::FinalAnswer
+        } else {
+            KernelAssistantTextPhase::Commentary
+        };
+        assistant_text_streamed = emit_assistant_text_stream_item(
+            stream_tx,
+            KernelStreamItemKey {
+                round: Some(round),
+                local_id: "round_terminal_output".to_string(),
+            },
+            phase,
+            Some(round),
+            &content,
+        )
+        .await;
+        final_answer_streamed =
+            assistant_text_streamed && matches!(phase, KernelAssistantTextPhase::FinalAnswer);
+    }
+
     Ok(StreamRound {
         content,
         reasoning,
-        tool_calls: finalize_tool_calls(round, pending_calls),
+        tool_calls,
         streamed_tool_outputs,
         finish_reason,
         usage,
@@ -621,6 +640,7 @@ pub async fn execute_general_turn_step(
     let stream_tx = step.stream_tx.clone();
     let streaming_tool_execution = step.streaming_tool_execution.clone();
     let pre_final_execution_summary = step.pre_final_execution_summary.clone();
+    let defer_no_hint_final_projection = step.defer_no_hint_final_projection;
     let round_response = if stream_tx.is_some() {
         stream_round(
             llm_provider,
@@ -628,6 +648,7 @@ pub async fn execute_general_turn_step(
             round,
             call_mode,
             pre_final_execution_summary,
+            defer_no_hint_final_projection,
             stream_tx.as_ref(),
             streaming_tool_execution,
         )

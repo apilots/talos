@@ -175,6 +175,7 @@ pub enum KernelStreamEventType {
     AssistantTextStarted,
     AssistantTextDelta,
     AssistantTextCompleted,
+    AssistantTextCommitted,
     ExecutionSummary,
     ToolCallStart,
     ToolArgsDelta,
@@ -210,6 +211,7 @@ pub enum KernelStreamEventData {
     AssistantTextStarted(AssistantTextStartedStreamData),
     AssistantTextDelta(AssistantTextDeltaStreamData),
     AssistantTextCompleted(AssistantTextCompletedStreamData),
+    AssistantTextCommitted(AssistantTextCommittedStreamData),
     ExecutionSummary(ExecutionSummaryStreamData),
     ToolCallStart(ToolCallStartStreamData),
     ToolArgsDelta(ToolArgsDeltaStreamData),
@@ -230,6 +232,7 @@ pub struct KernelStreamItemKey {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum KernelAssistantTextPhase {
+    Unknown,
     Commentary,
     FinalAnswer,
 }
@@ -257,6 +260,12 @@ pub struct AssistantTextDeltaStreamData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssistantTextCompletedStreamData {
     pub item_key: KernelStreamItemKey,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssistantTextCommittedStreamData {
+    pub item_key: KernelStreamItemKey,
+    pub phase: KernelAssistantTextPhase,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]

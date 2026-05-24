@@ -249,10 +249,17 @@ impl SessionManager {
         message_delta: u64,
         usage: &TalosUsage,
     ) {
-        let _ = self
+        if let Err(error) = self
             .session_store
             .record_session_progress(session_id, message_delta, usage, Some(assistant_model))
-            .await;
+            .await
+        {
+            tracing::warn!(
+                session_id = %session_id,
+                ?error,
+                "failed to persist stream session progress"
+            );
+        }
         self.update_cached_session_after_turn(session_id, assistant_model, message_delta, usage)
             .await;
     }

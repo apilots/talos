@@ -1,9 +1,11 @@
 import type {
+  ChatRenderBlock,
   ChatTimelineItem,
   PendingInput,
   SessionUiStatus,
   StreamSessionState,
 } from "@/shared/types/ui";
+import type { TalosTimelinePhase } from "@talos/sdk-core";
 
 type StreamTextKind = "assistant" | "thinking" | "system";
 
@@ -48,6 +50,11 @@ export interface ChatSlice {
   ) => void;
   upsertTimelineItem: (sessionId: string, item: ChatTimelineItem) => void;
   appendTimelineItemText: (sessionId: string, item: ChatTimelineItem, chunk: string, sequence?: number) => void;
+  commitTimelineAssistantText: (
+    sessionId: string,
+    itemId: string,
+    phase: TalosTimelinePhase,
+  ) => void;
   updateTimelineTool: (
     sessionId: string,
     itemId: string,
@@ -59,6 +66,7 @@ export interface ChatSlice {
     status: ChatTimelineItem["status"],
     completedAtMs: number,
   ) => void;
+  setTimelineLive: (sessionId: string, live: boolean) => void;
   setPendingUserAction: (
     sessionId: string,
     pendingUserAction?: StreamSessionState["pendingUserAction"],
@@ -413,6 +421,60 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
           },
         };
       }),
+    commitTimelineAssistantText: (sessionId, itemId, phase) =>
+      set((state) => {
+        const stream = ensureStreamState(state, sessionId);
+        let movedText = "";
+        const blocks: ChatRenderBlock[] = [];
+        for (const block of stream.blocks) {
+          if (block.kind !== "timeline") {
+            blocks.push(block);
+            continue;
+          }
+          const items: ChatTimelineItem[] = [];
+          for (const item of block.items) {
+            const sameSource = item.itemId === itemId || item.sourceItemId === itemId;
+            if (!sameSource) {
+              items.push(item);
+              continue;
+            }
+            if (item.kind !== "tool_call") {
+              movedText += item.text;
+            }
+            if (phase !== "final_answer") {
+              items.push({ ...item, phase });
+            }
+          }
+          if (items.length === 0 && phase === "final_answer") {
+            continue;
+          }
+          blocks.push({ ...block, items, live: phase !== "final_answer" });
+        }
+        const nextBlocks = [...blocks];
+        if (phase === "final_answer" && movedText.trim()) {
+          const lastBlock = nextBlocks.at(-1);
+          if (lastBlock?.kind === "assistant") {
+            nextBlocks[nextBlocks.length - 1] = {
+              ...lastBlock,
+              text: lastBlock.text + movedText,
+              live: true,
+            };
+          } else {
+            nextBlocks.push({
+              id: `assistant-${Date.now()}-${nextBlocks.length}`,
+              kind: "assistant",
+              text: movedText,
+              live: true,
+            });
+          }
+        }
+        return {
+          streams: {
+            ...state.streams,
+            [sessionId]: { ...stream, isStreaming: true, blocks: nextBlocks },
+          },
+        };
+      }),
     updateTimelineTool: (sessionId, itemId, payload) =>
       set((state) => {
         const stream = ensureStreamState(state, sessionId);
@@ -458,6 +520,19 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
             ),
           };
         });
+        return {
+          streams: {
+            ...state.streams,
+            [sessionId]: { ...stream, blocks },
+          },
+        };
+      }),
+    setTimelineLive: (sessionId, live) =>
+      set((state) => {
+        const stream = ensureStreamState(state, sessionId);
+        const blocks = stream.blocks.map((block) =>
+          block.kind === "timeline" ? { ...block, live } : block,
+        );
         return {
           streams: {
             ...state.streams,

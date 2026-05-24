@@ -62,7 +62,7 @@ export type SessionHistoryParams = { session_id: string, };
 
 export type SessionHistorySnapshot = { session_id: string, messages: Array<SessionHistoryMessage>, generated_at_ms: bigint, last_stable_event_id: string | null, };
 
-export type SessionHistoryMessage = { message_id: string, turn_id: string, items: Array<TalosTimelineItem>, stop_reason: StopReason, usage: TalosUsage, };
+export type SessionHistoryMessage = { message_id: string, turn_id: string, items: Array<TalosTimelineItem>, stop_reason: StopReason, usage: TalosUsage, metrics: TurnExecutionMetrics | null, };
 
 export type TimelineRecoveryParams = { session_id: string, after_event_id: string | null, replay_limit: number | null, };
 
@@ -198,15 +198,15 @@ export type TalosTimelineEvent = { event_seq: bigint | null, event_id: string | 
 
 export type TimelineEventEnvelope = { event_id: string, event_seq: bigint, created_at_ms: bigint, session_id: string, turn_id: string, message_id: string, event: TalosTimelineEvent, };
 
-export type TalosTimelineEventType = "turn_started" | "item_started" | "item_delta" | "item_completed" | "turn_completed" | "turn_error";
+export type TalosTimelineEventType = "turn_started" | "item_started" | "item_delta" | "item_completed" | "assistant_text_committed" | "turn_completed" | "turn_error";
 
-export type TalosTimelineEventPayload = { "type": "turn_started" } & TalosTurnStartedEvent | { "type": "item_started" } & TalosItemStartedEvent | { "type": "item_delta" } & TalosItemDeltaEvent | { "type": "item_completed" } & TalosItemCompletedEvent | { "type": "turn_completed" } & TalosTurnCompletedEvent | { "type": "turn_error" } & TalosTurnErrorEvent;
+export type TalosTimelineEventPayload = { "type": "turn_started" } & TalosTurnStartedEvent | { "type": "item_started" } & TalosItemStartedEvent | { "type": "item_delta" } & TalosItemDeltaEvent | { "type": "item_completed" } & TalosItemCompletedEvent | { "type": "assistant_text_committed" } & TalosAssistantTextCommittedEvent | { "type": "turn_completed" } & TalosTurnCompletedEvent | { "type": "turn_error" } & TalosTurnErrorEvent;
 
 export type TalosTimelineItem = { item_id: string, parent_item_id: string | null, kind: TalosTimelineItemKind, phase: TalosTimelinePhase, status: TalosTimelineItemStatus, title: string | null, started_at_ms: bigint, completed_at_ms: bigint | null, content: TalosTimelineContent, };
 
 export type TalosTimelineItemKind = "user_input" | "reasoning" | "assistant_text" | "tool_call" | "execution_summary" | "system_notice";
 
-export type TalosTimelinePhase = "input" | "thinking" | "acting" | "commentary" | "final_answer" | "system";
+export type TalosTimelinePhase = "input" | "thinking" | "acting" | "unknown" | "commentary" | "final_answer" | "system";
 
 export type TalosTimelineItemStatus = "running" | "waiting_dynamic_input" | "completed" | "failed" | "cancelled";
 
@@ -228,7 +228,9 @@ export type TalosItemDeltaEvent = { request_id: string, turn_id: string, item_id
 
 export type TalosItemCompletedEvent = { request_id: string, turn_id: string, item_id: string, status: TalosTimelineItemStatus, completed_at_ms: bigint, final_content: TalosTimelineContent | null, };
 
-export type TalosTurnCompletedEvent = { request_id: string, turn_id: string, completed_at_ms: bigint, stop_reason: StopReason, usage: TalosUsage, };
+export type TalosAssistantTextCommittedEvent = { request_id: string, turn_id: string, item_id: string, phase: TalosTimelinePhase, };
+
+export type TalosTurnCompletedEvent = { request_id: string, turn_id: string, completed_at_ms: bigint, stop_reason: StopReason, usage: TalosUsage, metrics: TurnExecutionMetrics | null, };
 
 export type TalosTurnErrorEvent = { request_id: string, turn_id: string, error: string, failed_at_ms: bigint, };
 
@@ -237,6 +239,8 @@ export type TalosJsonValue = { value: unknown, };
 export type TalosContentItem = { "type": "text", text: string, } | { "type": "json", value: TalosJsonValue, };
 
 export type TalosUsage = { input_tokens: number, output_tokens: number, total_tokens: number, cache_creation_input_tokens: number | null, cache_read_input_tokens: number | null, };
+
+export type TurnExecutionMetrics = { model_rounds: number, tool_calls: number, tool_successes: number, tool_errors: number, stop_reason: StopReason, usage: TalosUsage, duration_ms: bigint | null, };
 
 export type StopReason = "end_turn" | "model_output_limit" | "tool_round_limit" | "waiting_dynamic_input" | "transfer_unresolved" | "before_model_callback_stopped" | "after_model_callback_stopped" | "cancelled";
 
@@ -252,7 +256,7 @@ export type SubscriptionTerminatedEvent = { reason: SubscriptionTerminatedReason
 
 export type SubscriptionTerminatedReason = "completed" | "interrupted" | "server_shutdown" | "session_deleted" | "lagged" | "slow_consumer";
 
-export type ServerNotification = { "method": "initialized", "params": InitializedNotification } | { "method": "timeline.turn.started", "params": TimelineSubscriptionNotification } | { "method": "timeline.item.started", "params": TimelineSubscriptionNotification } | { "method": "timeline.item.delta", "params": TimelineSubscriptionNotification } | { "method": "timeline.item.completed", "params": TimelineSubscriptionNotification } | { "method": "timeline.turn.completed", "params": TimelineSubscriptionNotification } | { "method": "timeline.turn.error", "params": TimelineSubscriptionNotification } | { "method": "subscription.terminated", "params": SubscriptionTerminatedEnvelope };
+export type ServerNotification = { "method": "initialized", "params": InitializedNotification } | { "method": "timeline.turn.started", "params": TimelineSubscriptionNotification } | { "method": "timeline.item.started", "params": TimelineSubscriptionNotification } | { "method": "timeline.item.delta", "params": TimelineSubscriptionNotification } | { "method": "timeline.item.completed", "params": TimelineSubscriptionNotification } | { "method": "timeline.assistant_text.committed", "params": TimelineSubscriptionNotification } | { "method": "timeline.turn.completed", "params": TimelineSubscriptionNotification } | { "method": "timeline.turn.error", "params": TimelineSubscriptionNotification } | { "method": "subscription.terminated", "params": SubscriptionTerminatedEnvelope };
 
 export type InitializedNotification = { protocol_version: ProtocolVersion, };
 

@@ -166,6 +166,47 @@ impl GeneralTurnPolicy for RecordingStepPolicy {
 }
 
 #[tokio::test]
+async fn test_plan_react_policy_requires_final_answer_tag_for_no_tool_final() {
+    let policy = PlanReActGeneralTurnPolicy::new(true);
+    let mut step = GeneralTurnStepResult {
+        text: "/*REASONING*/ still thinking".to_string(),
+        reasoning: Vec::new(),
+        tool_calls: Vec::new(),
+        streamed_tool_outputs: Vec::new(),
+        model_finish_reason: ModelFinishReason::Stop,
+        output_items: Vec::new(),
+        usage: TalosUsage::default(),
+        final_answer_streamed: false,
+        execution_summary_streamed: false,
+        disposition: GeneralTurnStepDisposition::FinalResponse,
+    };
+
+    assert_eq!(
+        policy.accepts_final_response(&step.text),
+        GeneralTurnPolicyFinalAcceptance::Reject
+    );
+    policy
+        .after_step_result(&mut step)
+        .expect("PlanReAct no-final-tag response should be handled by policy");
+    assert!(step.text.is_empty());
+    assert!(matches!(
+        step.disposition,
+        GeneralTurnStepDisposition::ContinueWithTools
+    ));
+
+    step.text = "/*REASONING*/ done\n/*FINAL_ANSWER*/final text".to_string();
+    step.disposition = GeneralTurnStepDisposition::FinalResponse;
+    assert_eq!(
+        policy.accepts_final_response(&step.text),
+        GeneralTurnPolicyFinalAcceptance::Accept
+    );
+    policy
+        .after_step_result(&mut step)
+        .expect("PlanReAct final tag should be accepted");
+    assert_eq!(step.text, "final text");
+}
+
+#[tokio::test]
 
 async fn test_run_general_turn_bash_then_task_output() {
     let provider = Arc::new(ExecLoopProvider::default());
@@ -176,7 +217,6 @@ async fn test_run_general_turn_bash_then_task_output() {
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
     let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
     let mut config = AgentKernelConfig::default();
-    config.finalization_required = false;
     config.prompt.bootstrap.enabled = false;
     config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
     let mut ctx = build_ctx_with_stream(None);
@@ -276,7 +316,6 @@ async fn test_execute_general_turn_loop_uses_policy_step_hooks() {
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
     let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
     let mut config = AgentKernelConfig::default();
-    config.finalization_required = false;
     config.prompt.bootstrap.enabled = false;
     config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
     let provider = Arc::new(PolicyStepProvider::default());
@@ -289,6 +328,7 @@ async fn test_execute_general_turn_loop_uses_policy_step_hooks() {
         project_root: None,
         selected_model: "mock-model".to_string(),
         max_output_tokens: None,
+        native_thinking: None,
         prompt_prefix_messages: Vec::new(),
         messages: vec![ChatMessage::user("Stop from policy.")],
         tool_definitions: tool_registry.get_tool_definitions(),
@@ -354,7 +394,6 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
     let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
     let mut config = AgentKernelConfig::default();
-    config.finalization_required = false;
     config.prompt.bootstrap.enabled = false;
     config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
     let provider = Arc::new(DynamicResumeProvider::default());
@@ -366,6 +405,7 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
         project_root: None,
         selected_model: "mock-model".to_string(),
         max_output_tokens: None,
+        native_thinking: None,
         prompt_prefix_messages: Vec::new(),
         messages: vec![ChatMessage::user(
             "Continue after external dynamic tool result.",

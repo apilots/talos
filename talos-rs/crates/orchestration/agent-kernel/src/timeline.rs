@@ -2,12 +2,12 @@ use chrono::Utc;
 use std::collections::HashMap;
 use talos_error::{TalosError, TalosResult};
 use talos_types::talos::{
-    StopReason, TalosContentItem, TalosItemCompletedEvent, TalosItemDeltaEvent,
-    TalosItemStartedEvent, TalosTimelineContent, TalosTimelineDelta, TalosTimelineEvent,
-    TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItem, TalosTimelineItemKind,
-    TalosTimelineItemStatus, TalosTimelinePhase, TalosToolProgressEntry, TalosToolProgressKind,
-    TalosToolResult, TalosTurnCompletedEvent, TalosTurnErrorEvent, TalosTurnStartedEvent,
-    TalosUsage,
+    StopReason, TalosAssistantTextCommittedEvent, TalosContentItem, TalosItemCompletedEvent,
+    TalosItemDeltaEvent, TalosItemStartedEvent, TalosTimelineContent, TalosTimelineDelta,
+    TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItem,
+    TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase, TalosToolProgressEntry,
+    TalosToolProgressKind, TalosToolResult, TalosTurnCompletedEvent, TalosTurnErrorEvent,
+    TalosTurnStartedEvent, TalosUsage, TurnExecutionMetrics,
 };
 
 #[derive(Debug, Clone)]
@@ -57,6 +57,7 @@ impl TimelineBuilder {
         &mut self,
         stop_reason: StopReason,
         usage: TalosUsage,
+        metrics: Option<TurnExecutionMetrics>,
     ) -> TalosTimelineEvent {
         let payload = TalosTimelineEventPayload::TurnCompleted(TalosTurnCompletedEvent {
             request_id: self.request_id.clone(),
@@ -64,6 +65,7 @@ impl TimelineBuilder {
             completed_at_ms: now_ms(),
             stop_reason,
             usage,
+            metrics,
         });
         self.event(TalosTimelineEventType::TurnCompleted, payload)
     }
@@ -133,6 +135,17 @@ impl TimelineBuilder {
         self.start_item(
             TalosTimelineItemKind::AssistantText,
             TalosTimelinePhase::Commentary,
+            None,
+            TalosTimelineContent::Text {
+                text: String::new(),
+            },
+        )
+    }
+
+    pub fn start_unknown_assistant_text(&mut self) -> TalosTimelineEvent {
+        self.start_item(
+            TalosTimelineItemKind::AssistantText,
+            TalosTimelinePhase::Unknown,
             None,
             TalosTimelineContent::Text {
                 text: String::new(),
@@ -237,6 +250,33 @@ impl TimelineBuilder {
             final_content,
         });
         Ok(self.event(TalosTimelineEventType::ItemCompleted, payload))
+    }
+
+    pub fn commit_assistant_text(
+        &mut self,
+        item_id: &str,
+        phase: TalosTimelinePhase,
+    ) -> TalosResult<TalosTimelineEvent> {
+        let state = self.items.get_mut(item_id).ok_or_else(|| {
+            TalosError::ValidationError(format!("timeline item not found: {item_id}"))
+        })?;
+        if !matches!(state.item.kind, TalosTimelineItemKind::AssistantText) {
+            return Err(TalosError::ValidationError(format!(
+                "timeline item is not assistant text: {item_id}"
+            )));
+        }
+        state.item.phase = phase;
+        let payload =
+            TalosTimelineEventPayload::AssistantTextCommitted(TalosAssistantTextCommittedEvent {
+                request_id: self.request_id.clone(),
+                turn_id: self.turn_id.clone(),
+                item_id: item_id.to_string(),
+                phase,
+            });
+        Ok(self.event(
+            TalosTimelineEventType::AssistantTextCommitted,
+            payload,
+        ))
     }
 
     pub fn close_active_items(

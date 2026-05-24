@@ -195,6 +195,7 @@ impl Gateway for MockGateway {
                     completed_at_ms: 5,
                     stop_reason: StopReason::EndTurn,
                     usage: TalosUsage::default(),
+                    metrics: None,
                 }),
             );
             let _ = tx.send(completed).await;

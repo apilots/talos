@@ -379,6 +379,7 @@ reasoning_text = ""
 output = []
 items = {}
 tool_results = {}
+error_text = ""
 usage = {
     "input_tokens": 0,
     "output_tokens": 0,
@@ -425,10 +426,6 @@ with open(events_path, "r", encoding="utf-8") as handle:
             if delta_type == "text":
                 text = delta.get("text", "")
                 item["text"] = item.get("text", "") + text
-                if phase == "final_answer":
-                    output_text += text
-                elif phase == "thinking":
-                    reasoning_text += text
             elif delta_type == "tool_arguments":
                 item["arguments"] = item.get("arguments", "") + delta.get("arguments_delta", "")
             elif delta_type == "tool_result":
@@ -446,13 +443,32 @@ with open(events_path, "r", encoding="utf-8") as handle:
                     "content": delta.get("content") or [],
                     "is_error": bool(delta.get("is_error", False)),
                 }
+        elif event_type == "assistant_text_committed":
+            item_id = payload.get("item_id", "")
+            if item_id:
+                item = items.setdefault(item_id, {"kind": "assistant_text", "phase": "", "content": {}, "text": "", "arguments": ""})
+                item["kind"] = item.get("kind") or "assistant_text"
+                item["phase"] = payload.get("phase", item.get("phase", ""))
         elif event_type == "turn_completed":
             stop_reason = payload.get("stop_reason", stop_reason)
             usage = payload.get("usage") or usage
         elif event_type == "turn_error":
             stop_reason = "error"
-            output_text = "Error: " + payload.get("error", "")
+            error_text = "Error: " + payload.get("error", "")
 
+if error_text:
+    output_text = error_text
+else:
+    output_text = "".join(
+        item.get("text", "")
+        for item in items.values()
+        if item.get("kind") == "assistant_text" and item.get("phase") == "final_answer"
+    )
+    reasoning_text = "".join(
+        item.get("text", "")
+        for item in items.values()
+        if item.get("kind") == "reasoning" or item.get("phase") == "thinking"
+    )
 if output_text:
     output.append({"type": "output_text", "text": output_text})
 

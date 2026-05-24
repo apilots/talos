@@ -356,11 +356,13 @@ async fn send_and_render_app_server_message(
     let mut output_stream = std::io::stdout();
     let mut events = client.send_timeline_events(session_id, request).await?;
     let mut item_phases = HashMap::new();
+    let mut item_texts = HashMap::new();
 
     while let Some(envelope) = events.recv().await {
         if render_event(
             &envelope,
             &mut item_phases,
+            &mut item_texts,
             &mut output_text,
             &mut output_stream,
         )? {
@@ -378,6 +380,7 @@ async fn send_and_render_app_server_message(
 fn render_event(
     envelope: &TimelineEventEnvelope,
     item_phases: &mut HashMap<String, TalosTimelinePhase>,
+    item_texts: &mut HashMap<String, String>,
     output_text: &mut String,
     output_stream: &mut std::io::Stdout,
 ) -> Result<bool, Box<dyn std::error::Error>> {
@@ -385,10 +388,17 @@ fn render_event(
     match &event.payload {
         TalosTimelineEventPayload::ItemStarted(payload) => {
             item_phases.insert(payload.item.item_id.clone(), payload.item.phase);
+            if let TalosTimelineContent::Text { text } = &payload.item.content {
+                item_texts.insert(payload.item.item_id.clone(), text.clone());
+            }
             render_started_item(&payload.item);
         }
         TalosTimelineEventPayload::ItemDelta(payload) => match &payload.delta {
             TalosTimelineDelta::Text { text } => {
+                item_texts
+                    .entry(payload.item_id.clone())
+                    .or_default()
+                    .push_str(text);
                 if item_phases.get(&payload.item_id) == Some(&TalosTimelinePhase::FinalAnswer) {
                     output_text.push_str(text);
                     write!(output_stream, "{}", text)?;
@@ -432,6 +442,16 @@ fn render_event(
                 eprintln!("ITEM_STATUS item={} status={:?}", payload.item_id, status);
             }
         },
+        TalosTimelineEventPayload::AssistantTextCommitted(payload) => {
+            item_phases.insert(payload.item_id.clone(), payload.phase);
+            if payload.phase == TalosTimelinePhase::FinalAnswer {
+                if let Some(text) = item_texts.get(&payload.item_id) {
+                    output_text.push_str(text);
+                    write!(output_stream, "{}", text)?;
+                    output_stream.flush()?;
+                }
+            }
+        }
         TalosTimelineEventPayload::ItemCompleted(payload) => {
             if let Some(TalosTimelineContent::ToolCall {
                 call_id,

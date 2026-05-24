@@ -234,6 +234,7 @@ fn history_message_from_completed_turn_events(
 ) -> Option<SessionHistoryMessage> {
     let mut items: Vec<TalosTimelineItem> = Vec::new();
     let mut usage = TalosUsage::default();
+    let mut metrics = None;
     let mut stop_reason = StopReason::EndTurn;
     let mut completed = false;
 
@@ -259,8 +260,17 @@ fn history_message_from_completed_turn_events(
                     }
                 }
             }
+            TalosTimelineEventPayload::AssistantTextCommitted(committed) => {
+                if let Some(item) = items
+                    .iter_mut()
+                    .find(|item| item.item_id == committed.item_id)
+                {
+                    item.phase = committed.phase;
+                }
+            }
             TalosTimelineEventPayload::TurnCompleted(turn_completed) => {
                 usage = turn_completed.usage;
+                metrics = turn_completed.metrics;
                 stop_reason = turn_completed.stop_reason;
                 completed = true;
             }
@@ -279,6 +289,7 @@ fn history_message_from_completed_turn_events(
         items,
         stop_reason,
         usage,
+        metrics,
     })
 }
 
@@ -335,6 +346,7 @@ fn map_turns_to_history_messages(turns: Vec<TalosTurn>) -> Vec<SessionHistoryMes
                 items,
                 stop_reason: turn.stop_reason,
                 usage: turn.usage,
+                metrics: None,
             }
         })
         .collect()
@@ -609,6 +621,7 @@ mod tests {
                 ),
             ],
             usage: TalosUsage::default(),
+            metrics: None,
             stop_reason: StopReason::EndTurn,
         }];
         let timeline_message = SessionHistoryMessage {
@@ -631,6 +644,7 @@ mod tests {
                 ),
             ],
             usage: TalosUsage::default(),
+            metrics: None,
             stop_reason: StopReason::EndTurn,
         };
 
@@ -663,6 +677,7 @@ mod tests {
                 100,
             )],
             usage: TalosUsage::default(),
+            metrics: None,
             stop_reason: StopReason::EndTurn,
         }
     }

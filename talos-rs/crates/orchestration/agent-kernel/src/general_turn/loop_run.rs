@@ -37,9 +37,18 @@ pub async fn execute_general_turn_loop_with_resume(
         memory_store,
         kernel_config,
         resume,
-        Arc::new(BuiltInGeneralTurnPolicy),
+        general_turn_policy_for_config(kernel_config),
     )
     .await
+}
+
+fn general_turn_policy_for_config(kernel_config: &AgentKernelConfig) -> Arc<dyn GeneralTurnPolicy> {
+    match kernel_config.planner_mode {
+        talos_config::PlannerMode::BuiltIn => Arc::new(BuiltInGeneralTurnPolicy),
+        talos_config::PlannerMode::PlanReAct => Arc::new(PlanReActGeneralTurnPolicy::new(
+            kernel_config.plan_react.require_final_answer_tag,
+        )),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -97,6 +106,10 @@ pub async fn execute_general_turn_loop_with_policy(
             });
         }
         policy.before_step_request(&mut step_request)?;
+        step_request.defer_no_hint_final_projection = matches!(
+            policy.accepts_final_response(""),
+            GeneralTurnPolicyFinalAcceptance::Reject
+        );
         let mut step = execute_general_turn_step(step_request, llm_provider.clone()).await?;
         if let Some(policy_stop) = policy.after_step_result(&mut step)? {
             apply_general_turn_step(&mut state, &step);
@@ -113,10 +126,7 @@ pub async fn execute_general_turn_loop_with_policy(
                 llm_provider.clone(),
                 prepared.stream_tx.clone(),
                 None,
-                Some(build_execution_summary(
-                    state.tool_call_count,
-                    state.tool_error_count,
-                )),
+                None,
                 cause.clone(),
             )
             .await?;
@@ -137,10 +147,7 @@ pub async fn execute_general_turn_loop_with_policy(
                 llm_provider.clone(),
                 prepared.stream_tx.clone(),
                 None,
-                Some(build_execution_summary(
-                    state.tool_call_count,
-                    state.tool_error_count,
-                )),
+                None,
                 ForcedFinalizationCause::EmptyFinalResponseAfterTools,
             )
             .await?;
@@ -157,10 +164,20 @@ pub async fn execute_general_turn_loop_with_policy(
             state
                 .messages
                 .push(ChatMessage::assistant(step_text.clone()));
-            if kernel_config.finalization_required
-                && !step.final_answer_streamed
-                && !matches!(step.model_finish_reason, ModelFinishReason::Length)
-            {
+            let stop_reason = match step.model_finish_reason {
+                ModelFinishReason::Length => StopReason::ModelOutputLimit,
+                ModelFinishReason::Stop | ModelFinishReason::Other => StopReason::EndTurn,
+                ModelFinishReason::ToolCalls => StopReason::EndTurn,
+            };
+            break (step_text, stop_reason);
+        }
+
+        if step.tool_calls.is_empty() {
+            state.round = state.round.saturating_add(1);
+            state.messages.push(ChatMessage::system(
+                "The previous PlanReAct response did not include a FINAL_ANSWER tag. Continue with a valid tool action or provide the final answer under /*FINAL_ANSWER*/.",
+            ));
+            if state.round >= max_tool_rounds {
                 let mut messages = prepared.messages.clone();
                 messages.extend(state.messages.clone());
                 let forced_step = run_forced_finalization_step(
@@ -169,25 +186,17 @@ pub async fn execute_general_turn_loop_with_policy(
                     llm_provider.clone(),
                     prepared.stream_tx.clone(),
                     None,
-                    Some(build_execution_summary(
-                        state.tool_call_count,
-                        state.tool_error_count,
-                    )),
-                    ForcedFinalizationCause::LoopTerminal,
+                    None,
+                    ForcedFinalizationCause::ToolRoundBudget,
                 )
                 .await?;
                 apply_general_turn_step(&mut state, &forced_step);
                 break (
                     forced_step.text.clone(),
-                    stop_reason_for_forced_finalization(ForcedFinalizationCause::LoopTerminal),
+                    stop_reason_for_forced_finalization(ForcedFinalizationCause::ToolRoundBudget),
                 );
             }
-            let stop_reason = match step.model_finish_reason {
-                ModelFinishReason::Length => StopReason::ModelOutputLimit,
-                ModelFinishReason::Stop | ModelFinishReason::Other => StopReason::EndTurn,
-                ModelFinishReason::ToolCalls => StopReason::EndTurn,
-            };
-            break (step_text, stop_reason);
+            continue;
         }
 
         let mut tool_batch = if prepared.stream_tx.is_some() {
@@ -209,6 +218,9 @@ pub async fn execute_general_turn_loop_with_policy(
         let policy_stop = policy.after_tool_batch(&mut tool_batch)?;
         emit_pending_user_action_stream_events(&prepared, &tool_batch).await;
         apply_general_turn_tool_batch(&mut state, &tool_batch, kernel_config.as_ref());
+        if let Some(message) = build_tool_failure_recovery_nudge_message(&tool_batch) {
+            state.messages.push(message);
+        }
         if should_inject_read_only_nudge(&tool_loop_guard) {
             state.messages.push(build_read_only_nudge_message());
         }
@@ -230,10 +242,7 @@ pub async fn execute_general_turn_loop_with_policy(
                 llm_provider.clone(),
                 prepared.stream_tx.clone(),
                 None,
-                Some(build_execution_summary(
-                    state.tool_call_count,
-                    state.tool_error_count,
-                )),
+                None,
                 ForcedFinalizationCause::ToolRoundBudget,
             )
             .await?;

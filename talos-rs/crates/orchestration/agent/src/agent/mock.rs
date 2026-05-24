@@ -106,7 +106,7 @@ impl AgentOrchestrator for MockAgent {
                 let _ = tx.send(completed).await;
             }
             let _ = tx
-                .send(timeline.complete_turn(execution.stop_reason, execution.usage))
+                .send(timeline.complete_turn(execution.stop_reason, execution.usage, None))
                 .await;
         });
         Ok(rx)
