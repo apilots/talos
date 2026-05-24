@@ -182,7 +182,6 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEventEnvel
       state.setSessionStatus(sessionId, "running");
       return;
     case "item_started":
-      rememberTimelineItem(sessionId, event.payload.item);
       applyItemStarted(sessionId, event.message_id, event.payload.item);
       return;
     case "item_delta":
@@ -227,6 +226,7 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEventEnvel
 }
 
 function applyItemStarted(sessionId: string, messageId: string, item: TalosTimelineItem) {
+  rememberTimelineItem(sessionId, item);
   if (item.phase === "input") {
     const text = timelineText(item.content);
     if (text.trim()) {
