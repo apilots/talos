@@ -8,7 +8,6 @@ source "${ROOT_DIR}/tests/integration/scripts/common.sh"
 load_env
 require_command curl
 
-export TALOS_TEST_ENABLE_JWT_AUTH=1
 export TALOS_HOME="$(scenario_report_path talos-home)"
 rm -rf "${TALOS_HOME}"
 
@@ -37,40 +36,24 @@ request_json() {
 start_server
 trap stop_server EXIT
 
-# Register admin and user
-admin_payload='{"username":"admin-llm","password":"password123","email":"admin-llm@example.com"}'
-request_json POST "${GATEWAY_URL}/v1/auth/register" "${admin_payload}"
-admin_token="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["access_token"])' <<< "${HTTP_BODY}")"
-
-user_payload='{"username":"user-llm","password":"password123","email":"user-llm@example.com"}'
-request_json POST "${GATEWAY_URL}/v1/auth/register" "${user_payload}"
-user_token="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["access_token"])' <<< "${HTTP_BODY}")"
-
-# CASE: regular user can access user-scoped llm config
-request_json GET "${GATEWAY_URL}/v1/llm" "" "${user_token}"
-log_case_json "user_get_llm_config" "{}" "${HTTP_BODY}"
+# CASE: anonymous auth-disabled mode can access llm config in local integration tests
+request_json GET "${GATEWAY_URL}/v1/llm"
+log_case_json "anonymous_get_llm_config" "{}" "${HTTP_BODY}"
 if [[ "${HTTP_STATUS}" != "200" ]]; then
-  echo "CASE user_get_llm_config FAIL expected=200 actual=${HTTP_STATUS} body=${HTTP_BODY}"
+  echo "CASE anonymous_get_llm_config FAIL expected=200 actual=${HTTP_STATUS} body=${HTTP_BODY}"
   exit 1
 fi
-echo "CASE user_get_llm_config PASS status=${HTTP_STATUS}"
+echo "CASE anonymous_get_llm_config PASS status=${HTTP_STATUS}"
 
-# CASE: admin can also GET /v1/llm
-request_json GET "${GATEWAY_URL}/v1/llm" "" "${admin_token}"
-log_case_json "admin_get_llm_config" "{}" "${HTTP_BODY}"
-if [[ "${HTTP_STATUS}" != "200" ]]; then
-  echo "CASE admin_get_llm_config FAIL expected=200 actual=${HTTP_STATUS} body=${HTTP_BODY}"
-  exit 1
-fi
-llm_provider="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("provider",""))' <<< "${HTTP_BODY}")"
+llm_provider="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("config",{}).get("provider",""))' <<< "${HTTP_BODY}")"
 if [[ -z "${llm_provider}" ]]; then
-  echo "CASE admin_get_llm_config FAIL missing provider field body=${HTTP_BODY}"
+  echo "CASE anonymous_get_llm_config FAIL missing provider field body=${HTTP_BODY}"
   exit 1
 fi
-echo "CASE admin_get_llm_config PASS provider=${llm_provider}"
+echo "CASE anonymous_get_llm_config_provider PASS provider=${llm_provider}"
 
 # CASE: PUT adds a model and GET /v1/models reflects it
-current_llm="${HTTP_BODY}"
+current_llm="$(python3 -c 'import json,sys; print(json.dumps(json.loads(sys.stdin.read()).get("config",{})))' <<< "${HTTP_BODY}")"
 
 # Use python to inject a test model into the current config
 new_llm="$(CURRENT_LLM="${current_llm}" python3 - <<'PYEOF'
@@ -94,23 +77,23 @@ print(json.dumps(llm))
 PYEOF
 )"
 
-request_json PUT "${GATEWAY_URL}/v1/llm" "${new_llm}" "${user_token}"
-log_case_json "user_put_llm_adds_model" "${new_llm}" "${HTTP_BODY}"
+request_json PUT "${GATEWAY_URL}/v1/llm" "${new_llm}"
+log_case_json "anonymous_put_llm_adds_model" "${new_llm}" "${HTTP_BODY}"
 if [[ "${HTTP_STATUS}" != "200" ]]; then
-  echo "CASE user_put_llm_adds_model FAIL expected=200 actual=${HTTP_STATUS} body=${HTTP_BODY}"
+  echo "CASE anonymous_put_llm_adds_model FAIL expected=200 actual=${HTTP_STATUS} body=${HTTP_BODY}"
   exit 1
 fi
-echo "CASE user_put_llm_adds_model PASS"
+echo "CASE anonymous_put_llm_adds_model PASS"
 
 # Verify /v1/models now includes the test model
-request_json GET "${GATEWAY_URL}/v1/models" "" "${admin_token}"
-log_case_json "user_llm_model_catalog_updated" "{}" "${HTTP_BODY}"
+request_json GET "${GATEWAY_URL}/v1/models"
+log_case_json "anonymous_llm_model_catalog_updated" "{}" "${HTTP_BODY}"
 found="$(python3 -c 'import json,sys; data=json.loads(sys.stdin.read()).get("data",[]); print(any(m.get("id")=="test-model-e2e" for m in data))' <<< "${HTTP_BODY}")"
 if [[ "${found}" != "True" ]]; then
-  echo "CASE user_llm_model_catalog_updated FAIL test-model-e2e not found body=${HTTP_BODY}"
+  echo "CASE anonymous_llm_model_catalog_updated FAIL test-model-e2e not found body=${HTTP_BODY}"
   exit 1
 fi
-echo "CASE user_llm_model_catalog_updated PASS"
+echo "CASE anonymous_llm_model_catalog_updated PASS"
 
 # CASE: PUT removes the test model
 current_llm="$(NEW_LLM="${new_llm}" python3 - <<'PYEOF'
@@ -123,17 +106,17 @@ print(json.dumps(llm))
 PYEOF
 )"
 
-request_json PUT "${GATEWAY_URL}/v1/llm" "${current_llm}" "${user_token}"
-log_case_json "user_put_llm_removes_model" "${current_llm}" "${HTTP_BODY}"
+request_json PUT "${GATEWAY_URL}/v1/llm" "${current_llm}"
+log_case_json "anonymous_put_llm_removes_model" "${current_llm}" "${HTTP_BODY}"
 if [[ "${HTTP_STATUS}" != "200" ]]; then
-  echo "CASE user_put_llm_removes_model FAIL expected=200 actual=${HTTP_STATUS} body=${HTTP_BODY}"
+  echo "CASE anonymous_put_llm_removes_model FAIL expected=200 actual=${HTTP_STATUS} body=${HTTP_BODY}"
   exit 1
 fi
 
-request_json GET "${GATEWAY_URL}/v1/models" "" "${admin_token}"
+request_json GET "${GATEWAY_URL}/v1/models"
 found="$(python3 -c 'import json,sys; data=json.loads(sys.stdin.read()).get("data",[]); print(any(m.get("id")=="test-model-e2e" for m in data))' <<< "${HTTP_BODY}")"
 if [[ "${found}" != "False" ]]; then
-  echo "CASE user_put_llm_removes_model FAIL test-model-e2e still present"
+  echo "CASE anonymous_put_llm_removes_model FAIL test-model-e2e still present"
   exit 1
 fi
-echo "CASE user_put_llm_removes_model PASS"
+echo "CASE anonymous_put_llm_removes_model PASS"

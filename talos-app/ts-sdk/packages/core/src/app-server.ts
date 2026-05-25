@@ -8,10 +8,6 @@ import type {
   ModelInfo,
   ProjectPatch,
   ProjectRecord,
-  AdminCreateUserRequest,
-  AdminPatchUserRequest,
-  CreateUserTokenRequest,
-  CreateUserTokenResult,
   TalosActiveTurn,
   TalosMessageAck,
   TalosSessionHistorySnapshot,
@@ -19,9 +15,7 @@ import type {
   TalosTurnExecutionMetrics,
   TalosUsage,
   TimelineRecoverySnapshot,
-  UpdateCurrentUserRequest,
   UserDto,
-  UserTokenMeta,
   WorkspaceDocDetail,
   WorkspaceDocKind,
   WorkspaceDocSummary,
@@ -118,24 +112,6 @@ export class AppServerClient {
     return this.transport.request("user.current", {});
   }
 
-  updateCurrentUser(request: UpdateCurrentUserRequest): Promise<UserDto> {
-    return this.transport.request("user.update", request);
-  }
-
-  listUserTokens(): Promise<UserTokenMeta[]> {
-    return this.transport
-      .request<ListResponse<UserTokenMeta>>("user.token.list", {})
-      .then((response) => response.data);
-  }
-
-  createUserToken(request: CreateUserTokenRequest): Promise<CreateUserTokenResult> {
-    return this.transport.request("user.token.create", request);
-  }
-
-  deleteUserToken(tokenId: string): Promise<unknown> {
-    return this.transport.request("user.token.delete", { token_id: tokenId });
-  }
-
   listSkills(): Promise<unknown[]> {
     return this.transport
       .request<ListResponse<unknown>>("skill.list", {})
@@ -228,27 +204,6 @@ export class AppServerClient {
     return this.transport
       .request<ListResponse<ProjectRecord>>("admin.project.list", {})
       .then((response) => response.data);
-  }
-
-  listAdminUsers(): Promise<UserDto[]> {
-    return this.transport
-      .request<ListResponse<UserDto>>("admin.user.list", {})
-      .then((response) => response.data);
-  }
-
-  createAdminUser(request: AdminCreateUserRequest): Promise<UserDto> {
-    return this.transport.request("admin.user.create", request);
-  }
-
-  patchAdminUser(userId: string, request: AdminPatchUserRequest): Promise<UserDto> {
-    return this.transport.request("admin.user.patch", {
-      user_id: userId,
-      ...request,
-    });
-  }
-
-  deleteAdminUser(userId: string): Promise<unknown> {
-    return this.transport.request("admin.user.delete", { user_id: userId });
   }
 
   getProject(projectId: string): Promise<ProjectRecord> {

@@ -107,15 +107,9 @@ from pathlib import Path
 config_path = Path(os.environ["CONFIG_PATH"])
 text = config_path.read_text()
 
-if os.environ.get("TALOS_TEST_ENABLE_JWT_AUTH", "").strip() == "1":
-    text = text.replace('token: "talos-local-test-token"', 'token: ~', 1)
-    text = text.replace('jwt_secret: ${TALOS_GATEWAY_JWT_SECRET}', 'jwt_secret: "talos-test-jwt-secret"', 1)
-    text = text.replace('auth: false', 'auth: true', 1)
-    text = text.replace('allow_register: true', 'allow_register: true', 1)
-else:
-    # Most integration scenarios exercise product flows, not auth.
-    # Keep gateway auth disabled unless a scenario explicitly opts into JWT auth.
-    text = text.replace('auth: true', 'auth: false', 1)
+# Talos integration scenarios exercise local product flows. Authentication
+# product coverage lives in talos-cloud e2e; keep local tests anonymous.
+text = text.replace('auth: true', 'auth: false', 1)
 
 config_path.write_text(text)
 PY

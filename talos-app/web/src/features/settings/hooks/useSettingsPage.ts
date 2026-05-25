@@ -8,7 +8,6 @@ export type SettingsSection =
   | "models"
   | "agent-workspace"
   | "permissions"
-  | "account"
   | "appearance"
   | "advanced";
 
@@ -17,7 +16,6 @@ export const settingsSections: SettingsSection[] = [
   "models",
   "agent-workspace",
   "permissions",
-  "account",
   "appearance",
   "advanced",
 ];

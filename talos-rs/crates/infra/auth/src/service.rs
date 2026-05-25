@@ -1,11 +1,7 @@
 use async_trait::async_trait;
 use talos_error::TalosResult;
 
-use crate::{
-    AdminCreateUserRequest, AdminPatchUserRequest, AuthResponse, CreateUserTokenResult,
-    LoginRequest, RegisterRequest, RequestIdentity, UpdateCurrentUserRequest, UserDto,
-    UserTokenMeta,
-};
+use crate::{AuthResponse, LoginRequest, RegisterRequest, RequestIdentity, UserDto};
 
 const DEFAULT_AUTH_CACHE_TTL_SECONDS: u64 = 300;
 
@@ -29,35 +25,10 @@ pub trait AuthService: Send + Sync {
     async fn register(&self, input: RegisterRequest) -> TalosResult<AuthResponse>;
     async fn login(&self, input: LoginRequest) -> TalosResult<AuthResponse>;
     async fn logout(&self, actor: &RequestIdentity) -> TalosResult<()>;
-    async fn create_token(
-        &self,
-        actor: &RequestIdentity,
-        name: &str,
-    ) -> TalosResult<CreateUserTokenResult>;
-    async fn list_tokens(&self, actor: &RequestIdentity) -> TalosResult<Vec<UserTokenMeta>>;
-    async fn revoke_token(&self, actor: &RequestIdentity, token_id: &str) -> TalosResult<()>;
     async fn verify_access_token(&self, token: &str) -> TalosResult<RequestIdentity>;
 }
 
 #[async_trait]
 pub trait UserService: Send + Sync {
     async fn get_current_user(&self, actor: &RequestIdentity) -> TalosResult<UserDto>;
-    async fn patch_current_user(
-        &self,
-        actor: &RequestIdentity,
-        patch: UpdateCurrentUserRequest,
-    ) -> TalosResult<UserDto>;
-    async fn list_users(&self, actor: &RequestIdentity) -> TalosResult<Vec<UserDto>>;
-    async fn create_user(
-        &self,
-        actor: &RequestIdentity,
-        request: AdminCreateUserRequest,
-    ) -> TalosResult<UserDto>;
-    async fn patch_user(
-        &self,
-        actor: &RequestIdentity,
-        user_id: &str,
-        patch: AdminPatchUserRequest,
-    ) -> TalosResult<UserDto>;
-    async fn delete_user(&self, actor: &RequestIdentity, user_id: &str) -> TalosResult<()>;
 }

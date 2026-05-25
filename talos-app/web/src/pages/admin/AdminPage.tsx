@@ -1,15 +1,14 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Activity, Cpu, ListChecks, ShieldCheck, ShieldPlus, Users } from "lucide-react";
+import { Activity, Cpu, ListChecks, ShieldCheck, ShieldPlus } from "lucide-react";
 
 import {
   AdminAuditSection,
   AdminDashboardSection,
-    AdminNavigation,
+  AdminNavigation,
   AdminSessionsSection,
   AdminSystemSection,
   AdminToolsSection,
-  AdminUsersSection,
   adminSections,
   useAdminPage,
   type AdminSection,
@@ -32,7 +31,6 @@ export function AdminPage() {
   const sectionLabels = useMemo<Record<AdminSection, string>>(
     () => ({
       dashboard: t("admin:dashboard"),
-      users: t("admin:users"),
       sessions: t("admin:sessions"),
       tools: t("admin:tools"),
       audit: t("admin:audit"),
@@ -42,7 +40,6 @@ export function AdminPage() {
   );
   const sectionIcons: Record<AdminSection, typeof Activity> = {
     dashboard: Activity,
-    users: Users,
     sessions: ListChecks,
     tools: ShieldPlus,
     audit: ShieldCheck,
@@ -63,7 +60,6 @@ export function AdminPage() {
 
             <div className="space-y-5">
               {activeSection === "dashboard" ? <AdminDashboardSection connection={connection} metrics={metrics} sessions={sessions} /> : null}
-              {activeSection === "users" ? <AdminUsersSection /> : null}
               {activeSection === "sessions" ? (
                 <AdminSessionsSection
                   sessionRows={sessionRows}

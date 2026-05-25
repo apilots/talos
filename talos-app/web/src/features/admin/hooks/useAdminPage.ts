@@ -2,19 +2,17 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
-import { listUsers } from "@/features/auth";
 import { listAdminSessions, useConnectionKey, useModelsQuery } from "@/features/chat";
 import { useConnectionSettings } from "@/features/connection";
 import { useAppStore } from "@/shared/store/app-store";
 import { getEffectiveSessionStatus } from "@/shared/types/domain";
 
-export type AdminSection = "dashboard" | "users" | "sessions" | "tools" | "audit" | "system";
+export type AdminSection = "dashboard" | "sessions" | "tools" | "audit" | "system";
 
 const adminSessionsPageSize = 20;
 
 export const adminSections: AdminSection[] = [
   "dashboard",
-  "users",
   "sessions",
   "tools",
   "audit",
@@ -34,10 +32,6 @@ export function useAdminPage() {
         offset: sessionOffset,
       }),
   });
-  const users = useQuery({
-    queryKey: ["admin-users", connectionKey],
-    queryFn: listUsers,
-  });
   const models = useModelsQuery();
   const { connection } = useConnectionSettings();
   const metrics = useAppStore((state) => state.adminMetrics);
@@ -52,7 +46,6 @@ export function useAdminPage() {
 
   const sessionRows = useMemo(() => {
     const query = sessionSearch.trim().toLowerCase();
-    const ownerLabels = new Map((users.data ?? []).map((user) => [user.user_id, user.username]));
     return (sessions.data?.data ?? [])
       .map((session) => {
         const sessionId = session.context.session_id;
@@ -60,7 +53,7 @@ export function useAdminPage() {
           session,
           sessionId,
           ownerUserId: session.user_id ?? "",
-          ownerLabel: ownerLabels.get(session.user_id ?? "") ?? session.user_id ?? "",
+          ownerLabel: session.user_id ?? "",
           sourceUserId: session.context.user_id,
           label: sessionAliases[sessionId] ?? session.title,
           model: session.config.llm?.model ?? session.config.agent?.model ?? "unknown",
@@ -83,7 +76,7 @@ export function useAdminPage() {
           .toLowerCase()
           .includes(query);
       });
-  }, [sessionAliases, sessionSearch, sessions.data, statuses, streams, users.data]);
+  }, [sessionAliases, sessionSearch, sessions.data, statuses, streams]);
 
   useEffect(() => {
     if (sessions.data && sessionPage > sessionTotalPages) {

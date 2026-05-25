@@ -10,15 +10,9 @@ import type {
   MemorySearchResult,
   ModelInfo,
   UserDto,
-  UserTokenMeta,
   ProjectPatch,
   ProjectRecord,
   PaginatedResponse,
-  CreateUserTokenRequest,
-  CreateUserTokenResult,
-  UpdateCurrentUserRequest,
-  AdminCreateUserRequest,
-  AdminPatchUserRequest,
   SessionConf,
   SessionQuery,
   SessionUpdate,
@@ -100,55 +94,9 @@ export class TalosClient {
     current: async (): Promise<UserDto> => {
       return this.http.request<UserDto>(this.url("/v1/user"));
     },
-    update: async (request: UpdateCurrentUserRequest): Promise<UserDto> => {
-      return this.http.request<UserDto>(this.url("/v1/user"), {
-        method: "PATCH",
-        body: JSON.stringify(request),
-      });
-    },
-    tokens: {
-      list: async (): Promise<UserTokenMeta[]> => {
-        const response = await this.http.request<ListResponse<UserTokenMeta>>(this.url("/v1/user/tokens"));
-        return response.data;
-      },
-      create: async (request: CreateUserTokenRequest): Promise<CreateUserTokenResult> => {
-        return this.http.request<CreateUserTokenResult>(this.url("/v1/user/tokens"), {
-          method: "POST",
-          body: JSON.stringify(request),
-        });
-      },
-      delete: async (tokenId: string): Promise<void> => {
-        await this.http.request<void>(this.url(`/v1/user/tokens/${tokenId}`), {
-          method: "DELETE",
-        });
-      },
-    },
   };
 
   admin = {
-    users: {
-      list: async (): Promise<UserDto[]> => {
-        const response = await this.http.request<{ data: UserDto[] }>(this.url("/v1/admin/users"));
-        return response.data;
-      },
-      create: async (request: AdminCreateUserRequest): Promise<UserDto> => {
-        return this.http.request<UserDto>(this.url("/v1/admin/users"), {
-          method: "POST",
-          body: JSON.stringify(request),
-        });
-      },
-      patch: async (userId: string, request: AdminPatchUserRequest): Promise<UserDto> => {
-        return this.http.request<UserDto>(this.url(`/v1/admin/users/${userId}`), {
-          method: "PATCH",
-          body: JSON.stringify(request),
-        });
-      },
-      delete: async (userId: string): Promise<void> => {
-        await this.http.request<void>(this.url(`/v1/admin/users/${userId}`), {
-          method: "DELETE",
-        });
-      },
-    },
     sessions: {
       list: async (query?: SessionQuery): Promise<PaginatedResponse<TalosSession>> => {
         return this.http.request<PaginatedResponse<TalosSession>>(

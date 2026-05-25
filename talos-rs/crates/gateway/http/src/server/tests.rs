@@ -6,12 +6,9 @@ use axum::http::{HeaderMap, Request, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
 use serde_json::Value;
-use std::sync::Mutex;
 use talos_application_service::TalosApplicationService;
 use talos_auth::{
-    AdminCreateUserRequest, AdminPatchUserRequest, AuthResponse, AuthService,
-    CreateUserTokenRequest, CreateUserTokenResult, LoginRequest, RegisterRequest, RequestIdentity,
-    UpdateCurrentUserRequest, UserDto, UserService, UserTokenMeta,
+    AuthResponse, AuthService, LoginRequest, RegisterRequest, RequestIdentity, UserDto, UserService,
 };
 use talos_config::{InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService};
 use talos_error::{TalosError, TalosResult};
@@ -44,10 +41,7 @@ use crate::server::messages::{
     retry_message_attempt_handler, session_message_handler, submit_message_command,
 };
 use crate::server::misc::get_llm_handler;
-use crate::server::user_profile::{
-    create_user_token_handler, list_admin_users_handler, list_user_tokens_handler,
-    local_auth_removed_handler,
-};
+use crate::server::user_profile::local_auth_removed_handler;
 
 #[path = "tests/support.rs"]
 mod support;
@@ -690,9 +684,7 @@ impl MessageIdempotencyStore for RecordingEventStore {
 }
 
 #[derive(Default)]
-struct FakeAuthService {
-    tokens: Mutex<Vec<UserTokenMeta>>,
-}
+struct FakeAuthService;
 
 impl FakeAuthService {
     fn user_from_actor(actor: &RequestIdentity) -> UserDto {
@@ -729,41 +721,6 @@ impl AuthService for FakeAuthService {
         Ok(())
     }
 
-    async fn create_token(
-        &self,
-        _actor: &RequestIdentity,
-        name: &str,
-    ) -> TalosResult<CreateUserTokenResult> {
-        let token_id = format!("token-{}", self.tokens.lock().unwrap().len() + 1);
-        let raw_token = format!("tls_{}", "a".repeat(32));
-        let prefix = raw_token.chars().take(12).collect::<String>();
-        self.tokens.lock().unwrap().push(UserTokenMeta {
-            token_id: token_id.clone(),
-            name: name.to_string(),
-            prefix: prefix.clone(),
-            created_at: 1,
-            last_used_at: None,
-            expires_at: None,
-        });
-        Ok(CreateUserTokenResult {
-            token_id,
-            raw_token,
-            prefix,
-        })
-    }
-
-    async fn list_tokens(&self, _actor: &RequestIdentity) -> TalosResult<Vec<UserTokenMeta>> {
-        Ok(self.tokens.lock().unwrap().clone())
-    }
-
-    async fn revoke_token(&self, _actor: &RequestIdentity, token_id: &str) -> TalosResult<()> {
-        self.tokens
-            .lock()
-            .unwrap()
-            .retain(|token| token.token_id != token_id);
-        Ok(())
-    }
-
     async fn verify_access_token(&self, token: &str) -> TalosResult<RequestIdentity> {
         Ok(RequestIdentity::mock_admin(token))
     }
@@ -773,67 +730,6 @@ impl AuthService for FakeAuthService {
 impl UserService for FakeAuthService {
     async fn get_current_user(&self, actor: &RequestIdentity) -> TalosResult<UserDto> {
         Ok(Self::user_from_actor(actor))
-    }
-
-    async fn patch_current_user(
-        &self,
-        actor: &RequestIdentity,
-        patch: UpdateCurrentUserRequest,
-    ) -> TalosResult<UserDto> {
-        let mut user = Self::user_from_actor(actor);
-        if let Some(username) = patch.username {
-            user.username = username;
-        }
-        Ok(user)
-    }
-
-    async fn list_users(&self, actor: &RequestIdentity) -> TalosResult<Vec<UserDto>> {
-        if actor.auth_disabled {
-            return Ok(Vec::new());
-        }
-        Ok(vec![Self::user_from_actor(actor)])
-    }
-
-    async fn create_user(
-        &self,
-        _actor: &RequestIdentity,
-        request: AdminCreateUserRequest,
-    ) -> TalosResult<UserDto> {
-        Ok(UserDto {
-            user_id: format!("user-{}", request.username),
-            username: request.username,
-            email: request.email,
-            role: request.role,
-            disabled: request.disabled.unwrap_or(false),
-            created_at: 1,
-            updated_at: 1,
-        })
-    }
-
-    async fn patch_user(
-        &self,
-        actor: &RequestIdentity,
-        _user_id: &str,
-        patch: AdminPatchUserRequest,
-    ) -> TalosResult<UserDto> {
-        let mut user = Self::user_from_actor(actor);
-        if let Some(username) = patch.username {
-            user.username = username;
-        }
-        if let Some(email) = patch.email {
-            user.email = Some(email);
-        }
-        if let Some(role) = patch.role {
-            user.role = role;
-        }
-        if let Some(disabled) = patch.disabled {
-            user.disabled = disabled;
-        }
-        Ok(user)
-    }
-
-    async fn delete_user(&self, _actor: &RequestIdentity, _user_id: &str) -> TalosResult<()> {
-        Ok(())
     }
 }
 

@@ -1,9 +1,6 @@
 import { createElectronAppServerClient, type DesktopRendererBridge } from "@talos/sdk-app-server/desktop";
 import type {
-  AdminCreateUserRequest,
-  AdminPatchUserRequest,
   AppProtocol,
-  CreateUserTokenRequest,
   DocUpdateRequest,
   LlmConfig,
   LlmConfigRead,
@@ -19,7 +16,6 @@ import type {
   TalosSessionHistorySnapshot,
   TimelineEventEnvelope,
   TimelineRecoverySnapshot,
-  UpdateCurrentUserRequest,
   WorkspaceDocKind,
 } from "@talos/sdk-core";
 
@@ -133,21 +129,8 @@ export function createDesktopTalosClient(
     },
     user: {
       current: () => client.getCurrentUser(),
-      update: (request: UpdateCurrentUserRequest) => client.updateCurrentUser(request),
-      tokens: {
-        list: () => client.listUserTokens(),
-        create: (request: CreateUserTokenRequest) => client.createUserToken(request),
-        delete: (tokenId: string) => client.deleteUserToken(tokenId).then(() => undefined),
-      },
     },
     admin: {
-      users: {
-        list: () => client.listAdminUsers(),
-        create: (request: AdminCreateUserRequest) => client.createAdminUser(request),
-        patch: (userId: string, request: AdminPatchUserRequest) =>
-          client.patchAdminUser(userId, request),
-        delete: (userId: string) => client.deleteAdminUser(userId).then(() => undefined),
-      },
       sessions: {
         list: (query?: SessionQuery): Promise<PaginatedResponse<TalosSession>> =>
           client.listAdminSessions({

@@ -3,9 +3,8 @@ use serde::{Deserialize, Serialize};
 use talos_error::{TalosError, TalosResult};
 
 use crate::{
-    AdminCreateUserRequest, AdminPatchUserRequest, AuthResponse, AuthScope, AuthService,
-    Capabilities, CreateUserTokenResult, LoginRequest, RegisterRequest, RequestIdentity, UserDto,
-    UserRole, UserService, UserTokenMeta,
+    AuthResponse, AuthScope, AuthService, Capabilities, LoginRequest, RegisterRequest,
+    RequestIdentity, UserDto, UserRole, UserService,
 };
 
 #[derive(Debug, Clone)]
@@ -36,22 +35,6 @@ impl CloudAuthService {
     {
         self.send(self.http.post(self.url(path)).json(body), token)
             .await
-    }
-
-    async fn patch<T, B>(&self, path: &str, body: &B, token: Option<&str>) -> TalosResult<T>
-    where
-        T: for<'de> Deserialize<'de>,
-        B: Serialize + ?Sized,
-    {
-        self.send(self.http.patch(self.url(path)).json(body), token)
-            .await
-    }
-
-    async fn delete<T>(&self, path: &str, token: Option<&str>) -> TalosResult<T>
-    where
-        T: for<'de> Deserialize<'de>,
-    {
-        self.send(self.http.delete(self.url(path)), token).await
     }
 
     async fn send<T>(&self, request: reqwest::RequestBuilder, token: Option<&str>) -> TalosResult<T>
@@ -141,45 +124,6 @@ impl AuthService for CloudAuthService {
         Ok(())
     }
 
-    async fn create_token(
-        &self,
-        actor: &RequestIdentity,
-        name: &str,
-    ) -> TalosResult<CreateUserTokenResult> {
-        let response: CloudCreateUserTokenResult = self
-            .post(
-                "/v1/me/tokens",
-                &CloudCreateUserTokenRequest {
-                    name: name.to_string(),
-                },
-                bearer_from_actor(actor).as_deref(),
-            )
-            .await?;
-        Ok(CreateUserTokenResult {
-            token_id: response.token_id,
-            raw_token: response.raw_token,
-            prefix: response.prefix,
-        })
-    }
-
-    async fn list_tokens(&self, actor: &RequestIdentity) -> TalosResult<Vec<UserTokenMeta>> {
-        let response: CloudListResponse<CloudUserTokenMeta> = self
-            .get("/v1/me/tokens", bearer_from_actor(actor).as_deref())
-            .await?;
-        Ok(response.data.into_iter().map(map_token_meta).collect())
-    }
-
-    async fn revoke_token(&self, actor: &RequestIdentity, token_id: &str) -> TalosResult<()> {
-        let response = self
-            .delete::<CloudLogoutResponse>(
-                &format!("/v1/me/tokens/{token_id}"),
-                bearer_from_actor(actor).as_deref(),
-            )
-            .await?;
-        expect_success(response)?;
-        Ok(())
-    }
-
     async fn verify_access_token(&self, token: &str) -> TalosResult<RequestIdentity> {
         let response: CloudIntrospectionResponse = self
             .post(
@@ -200,78 +144,6 @@ impl UserService for CloudAuthService {
         self.get("/v1/me", bearer_from_actor(actor).as_deref())
             .await
             .map(map_user)
-    }
-
-    async fn patch_current_user(
-        &self,
-        actor: &RequestIdentity,
-        patch: crate::UpdateCurrentUserRequest,
-    ) -> TalosResult<UserDto> {
-        self.patch("/v1/me", &patch, bearer_from_actor(actor).as_deref())
-            .await
-            .map(map_user)
-    }
-
-    async fn list_users(&self, actor: &RequestIdentity) -> TalosResult<Vec<UserDto>> {
-        let response: CloudListResponse<CloudUserDto> = self
-            .get("/v1/admin/users", bearer_from_actor(actor).as_deref())
-            .await?;
-        Ok(response.data.into_iter().map(map_user).collect())
-    }
-
-    async fn create_user(
-        &self,
-        actor: &RequestIdentity,
-        request: AdminCreateUserRequest,
-    ) -> TalosResult<UserDto> {
-        let email = request.email.ok_or_else(|| {
-            TalosError::ValidationError("email is required for cloud admin user".to_string())
-        })?;
-        self.post(
-            "/v1/admin/users",
-            &CloudAdminCreateUserRequest {
-                username: request.username,
-                password: request.password,
-                email,
-                role: format_role(request.role).to_string(),
-                disabled: request.disabled,
-            },
-            bearer_from_actor(actor).as_deref(),
-        )
-        .await
-        .map(map_user)
-    }
-
-    async fn patch_user(
-        &self,
-        actor: &RequestIdentity,
-        user_id: &str,
-        patch: AdminPatchUserRequest,
-    ) -> TalosResult<UserDto> {
-        self.patch(
-            &format!("/v1/admin/users/{user_id}"),
-            &CloudAdminPatchUserRequest {
-                username: patch.username,
-                email: patch.email,
-                password: patch.password,
-                role: patch.role.map(format_role).map(str::to_string),
-                disabled: patch.disabled,
-            },
-            bearer_from_actor(actor).as_deref(),
-        )
-        .await
-        .map(map_user)
-    }
-
-    async fn delete_user(&self, actor: &RequestIdentity, user_id: &str) -> TalosResult<()> {
-        let response = self
-            .delete::<CloudLogoutResponse>(
-                &format!("/v1/admin/users/{user_id}"),
-                bearer_from_actor(actor).as_deref(),
-            )
-            .await?;
-        expect_success(response)?;
-        Ok(())
     }
 }
 
@@ -351,17 +223,6 @@ fn map_capabilities(value: CloudCapabilitiesDto) -> Capabilities {
     }
 }
 
-fn map_token_meta(value: CloudUserTokenMeta) -> UserTokenMeta {
-    UserTokenMeta {
-        token_id: value.token_id,
-        name: value.name,
-        prefix: value.prefix,
-        created_at: value.created_at_ms,
-        last_used_at: value.last_used_at_ms,
-        expires_at: value.expires_at_ms,
-    }
-}
-
 fn parse_role(value: &str) -> TalosResult<UserRole> {
     match value {
         "user" => Ok(UserRole::User),
@@ -369,13 +230,6 @@ fn parse_role(value: &str) -> TalosResult<UserRole> {
         other => Err(TalosError::AuthError(format!(
             "unknown cloud role: {other}"
         ))),
-    }
-}
-
-fn format_role(value: UserRole) -> &'static str {
-    match value {
-        UserRole::User => "user",
-        UserRole::Admin => "admin",
     }
 }
 
@@ -411,34 +265,6 @@ struct CloudLoginRequest {
 #[derive(Debug, Serialize)]
 struct CloudIntrospectionRequest {
     token: String,
-}
-
-#[derive(Debug, Serialize)]
-struct CloudCreateUserTokenRequest {
-    name: String,
-}
-
-#[derive(Debug, Serialize)]
-struct CloudAdminCreateUserRequest {
-    username: String,
-    password: String,
-    email: String,
-    role: String,
-    disabled: Option<bool>,
-}
-
-#[derive(Debug, Serialize)]
-struct CloudAdminPatchUserRequest {
-    username: Option<String>,
-    email: Option<String>,
-    password: Option<String>,
-    role: Option<String>,
-    disabled: Option<bool>,
-}
-
-#[derive(Debug, Deserialize)]
-struct CloudListResponse<T> {
-    data: Vec<T>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -492,23 +318,6 @@ struct CloudUserDto {
     disabled: bool,
     created_at_ms: i64,
     updated_at_ms: i64,
-}
-
-#[derive(Debug, Deserialize)]
-struct CloudUserTokenMeta {
-    token_id: String,
-    name: String,
-    prefix: String,
-    created_at_ms: i64,
-    last_used_at_ms: Option<i64>,
-    expires_at_ms: Option<i64>,
-}
-
-#[derive(Debug, Deserialize)]
-struct CloudCreateUserTokenResult {
-    token_id: String,
-    raw_token: String,
-    prefix: String,
 }
 
 #[derive(Debug, Deserialize)]

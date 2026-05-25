@@ -4,7 +4,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde::{de::DeserializeOwned, Serialize};
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 use talos_app_protocol::events::TimelineSubscriptionNotification;
 use talos_app_protocol::jsonrpc::{JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, RequestId};
@@ -23,7 +23,6 @@ use talos_app_protocol::requests::{
     TurnStartResponse, WorkspaceDocListParams, WorkspaceDocReadParams, WorkspaceDocWriteParams,
 };
 use talos_app_protocol::version::ProtocolVersion;
-use talos_auth::{AdminCreateUserRequest, AdminPatchUserRequest, UserDto};
 use talos_config::{LlmConfig, LlmConfigRead};
 use talos_error::{TalosError, TalosResult};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -85,24 +84,6 @@ struct SubscriptionStream {
 #[derive(Debug, Clone, serde::Deserialize)]
 struct ListResponse<T> {
     data: Vec<T>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct EmptyParams {}
-
-#[derive(Debug, Clone, Serialize)]
-struct AdminUserPatchRequest {
-    user_id: String,
-    username: Option<String>,
-    email: Option<String>,
-    password: Option<String>,
-    role: Option<talos_auth::UserRole>,
-    disabled: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct AdminUserDeleteRequest {
-    user_id: String,
 }
 
 const APP_SERVER_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -311,50 +292,6 @@ impl AppServerClient {
         params: AdminSessionListParams,
     ) -> TalosResult<AdminSessionListResponse> {
         self.request_typed("admin.session.list", params).await
-    }
-
-    pub async fn list_admin_users(&mut self) -> TalosResult<Vec<UserDto>> {
-        self.request_typed::<_, ListResponse<UserDto>>("admin.user.list", EmptyParams {})
-            .await
-            .map(|response| response.data)
-    }
-
-    pub async fn create_admin_user(
-        &mut self,
-        request: AdminCreateUserRequest,
-    ) -> TalosResult<UserDto> {
-        self.request_typed("admin.user.create", request).await
-    }
-
-    pub async fn patch_admin_user(
-        &mut self,
-        user_id: &str,
-        request: AdminPatchUserRequest,
-    ) -> TalosResult<UserDto> {
-        self.request_typed(
-            "admin.user.patch",
-            AdminUserPatchRequest {
-                user_id: user_id.to_string(),
-                username: request.username,
-                email: request.email,
-                password: request.password,
-                role: request.role,
-                disabled: request.disabled,
-            },
-        )
-        .await
-    }
-
-    pub async fn delete_admin_user(&mut self, user_id: &str) -> TalosResult<()> {
-        let _: Value = self
-            .request_typed(
-                "admin.user.delete",
-                AdminUserDeleteRequest {
-                    user_id: user_id.to_string(),
-                },
-            )
-            .await?;
-        Ok(())
     }
 
     pub async fn get_session(&mut self, session_id: &str) -> TalosResult<TalosSession> {

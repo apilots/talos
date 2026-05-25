@@ -149,48 +149,6 @@ async fn test_patch_session_handler_returns_success_ack() {
 }
 
 #[tokio::test]
-async fn test_create_user_token_handler_returns_raw_token() {
-    let state = test_state(false);
-
-    let response = create_user_token_handler(
-        State(state),
-        axum::extract::Extension(test_auth()),
-        Json(CreateUserTokenRequest {
-            name: "cli".to_string(),
-        }),
-    )
-    .await
-    .expect("create token should succeed");
-
-    assert_eq!(response.0["prefix"].as_str().unwrap_or_default().len(), 12);
-    assert!(response.0["raw_token"]
-        .as_str()
-        .unwrap_or_default()
-        .starts_with("tls_"));
-}
-
-#[tokio::test]
-async fn test_list_user_tokens_handler_returns_data_array() {
-    let state = test_state(false);
-
-    let _ = create_user_token_handler(
-        State(state.clone()),
-        axum::extract::Extension(test_auth()),
-        Json(CreateUserTokenRequest {
-            name: "cli".to_string(),
-        }),
-    )
-    .await
-    .expect("create token should succeed");
-
-    let response = list_user_tokens_handler(State(state), axum::extract::Extension(test_auth()))
-        .await
-        .expect("list tokens should succeed");
-
-    assert_eq!(response.0["data"].as_array().map(Vec::len), Some(1));
-}
-
-#[tokio::test]
 async fn test_close_session_handler_returns_success() {
     let state = test_state(false);
 

@@ -16,7 +16,6 @@ vi.mock("@/features/settings", async () => {
     SettingsAgentWorkspaceSection: () => <div>Agent workspace content</div>,
     SettingsAppearanceSection: () => <div>Appearance content</div>,
     SettingsGeneralSection: () => <div>General content</div>,
-    SettingsKeysSection: () => <div>Account content</div>,
     SettingsModelsSection: () => <div>Models content</div>,
     SettingsPermissionsSection: () => <div>Permissions content</div>,
     SettingsServerSection: () => <div>Advanced content</div>,
@@ -90,13 +89,6 @@ describe("SettingsPage", () => {
 
     expect(screen.getByRole("link", { name: "General" }).getAttribute("aria-current")).toBeNull();
     expect(screen.getByRole("link", { name: "Agent Workspace" }).getAttribute("aria-current")).toBe("page");
-  });
-
-  it("hides account settings for open access mode", () => {
-    renderSettings("/settings", "open");
-
-    expect(screen.queryByText("Account & Tokens")).toBeNull();
-    expect(screen.getByText("General content")).toBeTruthy();
   });
 
   it("shows model settings for regular authenticated users", () => {

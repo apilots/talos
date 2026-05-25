@@ -22,7 +22,7 @@ describe("desktop IPC guard", () => {
 
   it("allows admin and llm config methods required by desktop admin UI", () => {
     expect(isDesktopRendererMethod("admin.session.list")).toBe(true);
-    expect(isDesktopRendererMethod("admin.user.list")).toBe(true);
+    expect(isDesktopRendererMethod("admin.user.list")).toBe(false);
     expect(isDesktopRendererMethod("config.read")).toBe(true);
     expect(isDesktopRendererMethod("config.reload")).toBe(true);
     expect(() => assertDesktopRendererInvoke("admin.session.list", {})).not.toThrow();
@@ -49,7 +49,7 @@ describe("desktop IPC guard", () => {
       },
     );
 
-    expect(isDesktopRendererMethod("user.token.create")).toBe(true);
+    expect(isDesktopRendererMethod("user.token.create")).toBe(false);
     expect(result.actorCredentials?.credential.type).toBe("existing_session_token");
     expect(isDesktopRendererMethod("auth.login")).toBe(false);
     expect(isDesktopRendererMethod("auth.register")).toBe(false);

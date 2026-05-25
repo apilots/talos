@@ -133,57 +133,6 @@ impl RequestIdentity {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct UserRecord {
-    pub user_id: String,
-    pub username: String,
-    pub email: Option<String>,
-    #[serde(skip_serializing)]
-    pub password_hash: String,
-    pub role: UserRole,
-    pub token_version: u64,
-    pub disabled: bool,
-    pub created_at: i64,
-    pub updated_at: i64,
-}
-
-#[derive(Debug, Clone)]
-pub struct CreateUserRecord {
-    pub user_id: String,
-    pub username: String,
-    pub email: Option<String>,
-    pub password_hash: String,
-    pub role: UserRole,
-    pub token_version: u64,
-    pub disabled: bool,
-    pub created_at: i64,
-    pub updated_at: i64,
-}
-
-impl From<CreateUserRecord> for UserRecord {
-    fn from(value: CreateUserRecord) -> Self {
-        Self {
-            user_id: value.user_id,
-            username: value.username,
-            email: value.email,
-            password_hash: value.password_hash,
-            role: value.role,
-            token_version: value.token_version,
-            disabled: value.disabled,
-            created_at: value.created_at,
-            updated_at: value.updated_at,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct UserPatch {
-    pub username: Option<String>,
-    pub email: Option<String>,
-    pub role: Option<UserRole>,
-    pub disabled: Option<bool>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct UserDto {
     pub user_id: String,
@@ -193,42 +142,6 @@ pub struct UserDto {
     pub disabled: bool,
     pub created_at: i64,
     pub updated_at: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct UserTokenMeta {
-    pub token_id: String,
-    pub name: String,
-    pub prefix: String,
-    pub created_at: i64,
-    pub last_used_at: Option<i64>,
-    pub expires_at: Option<i64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct CreateUserTokenResult {
-    pub token_id: String,
-    pub raw_token: String,
-    pub prefix: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct CreateUserTokenRequest {
-    pub name: String,
-}
-
-impl From<UserRecord> for UserDto {
-    fn from(value: UserRecord) -> Self {
-        Self {
-            user_id: value.user_id,
-            username: value.username,
-            email: value.email,
-            role: value.role,
-            disabled: value.disabled,
-            created_at: value.created_at,
-            updated_at: value.updated_at,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
@@ -273,39 +186,6 @@ pub struct RegisterRequest {
 pub struct LoginRequest {
     pub username: String,
     pub password: String,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct UpdateCurrentUserRequest {
-    #[serde(default)]
-    pub username: Option<String>,
-    #[serde(default)]
-    pub email: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct AdminCreateUserRequest {
-    pub username: String,
-    pub password: String,
-    #[serde(default)]
-    pub email: Option<String>,
-    pub role: UserRole,
-    #[serde(default)]
-    pub disabled: Option<bool>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct AdminPatchUserRequest {
-    #[serde(default)]
-    pub username: Option<String>,
-    #[serde(default)]
-    pub email: Option<String>,
-    #[serde(default)]
-    pub password: Option<String>,
-    #[serde(default)]
-    pub role: Option<UserRole>,
-    #[serde(default)]
-    pub disabled: Option<bool>,
 }
 
 pub fn default_scopes_for_role(role: UserRole) -> Vec<AuthScope> {

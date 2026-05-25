@@ -81,23 +81,6 @@ async fn test_list_sessions_allows_anonymous_route_when_auth_disabled() {
 }
 
 #[tokio::test]
-async fn test_list_admin_users_allows_auth_disabled_actor() {
-    let state = test_state(true);
-    let response = list_admin_users_handler(
-        State(state),
-        axum::extract::Extension(RequestIdentity::auth_disabled()),
-    )
-    .await
-    .expect("auth disabled actor should access admin users");
-    let body = response.0;
-    let data = body
-        .get("data")
-        .and_then(Value::as_array)
-        .expect("data array should exist");
-    assert!(data.is_empty());
-}
-
-#[tokio::test]
 async fn test_get_llm_allows_auth_disabled_actor() {
     let state = test_state(true);
     let response = get_llm_handler(State(state))

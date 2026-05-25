@@ -8,5 +8,4 @@ export {
   AdminSessionsSection,
   AdminSystemSection,
   AdminToolsSection,
-  AdminUsersSection,
 } from "./components";

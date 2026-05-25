@@ -5,4 +5,3 @@ export { AdminNavigation } from "./AdminNavigation";
 export { AdminSessionsSection } from "./AdminSessionsSection";
 export { AdminSystemSection } from "./AdminSystemSection";
 export { AdminToolsSection } from "./AdminToolsSection";
-export { AdminUsersSection } from "./AdminUsersSection";

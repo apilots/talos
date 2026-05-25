@@ -6,7 +6,6 @@ export type DesktopRendererMethod = Exclude<AppProtocol.ClientMethod, "initializ
 const emptyParams = (params: unknown) => isRecord(params);
 const sessionParams = (params: unknown) => hasString(params, "session_id");
 const projectParams = (params: unknown) => hasString(params, "project_id");
-const userRole = (value: unknown) => value === "user" || value === "admin";
 const llmConfigWriteParams = (params: unknown) =>
   hasString(params, "path") &&
   isRecord(params) &&
@@ -17,17 +16,6 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "account.get": emptyParams,
   "admin.project.list": emptyParams,
   "admin.session.list": emptyParams,
-  "admin.user.create": (params) =>
-    hasString(params, "username") &&
-    hasString(params, "password") &&
-    isRecord(params) &&
-    userRole(params.role),
-  "admin.user.delete": (params) => hasString(params, "user_id"),
-  "admin.user.list": emptyParams,
-  "admin.user.patch": (params) =>
-    hasString(params, "user_id") &&
-    isRecord(params) &&
-    (params.role === undefined || userRole(params.role)),
   "app.list": emptyParams,
   "auth.logout": emptyParams,
   "config.read": emptyParams,
@@ -79,13 +67,6 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
     hasArray(params, "input") &&
     hasString(params, "client_request_id"),
   "user.current": emptyParams,
-  "user.token.create": (params) => hasString(params, "name"),
-  "user.token.delete": (params) => hasString(params, "token_id"),
-  "user.token.list": emptyParams,
-  "user.update": (params) =>
-    isRecord(params) &&
-    (params.username === undefined || params.username === null || typeof params.username === "string") &&
-    (params.email === undefined || params.email === null || typeof params.email === "string"),
   "workspace.doc.list": emptyParams,
   "workspace.doc.read": (params) => hasString(params, "kind"),
   "workspace.doc.write": (params) => hasString(params, "kind") && hasString(params, "content"),

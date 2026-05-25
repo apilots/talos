@@ -9,7 +9,6 @@ export {
   SettingsAgentWorkspaceSection,
   SettingsAppearanceSection,
   SettingsGeneralSection,
-  SettingsKeysSection,
   SettingsModelsSection,
   SettingsPermissionsSection,
   SettingsServerSection,

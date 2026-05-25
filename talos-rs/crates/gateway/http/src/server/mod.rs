@@ -25,9 +25,7 @@ use tower_http::services::{ServeDir, ServeFile};
 use tracing::{error, info};
 
 use self::admin_users::{
-    create_admin_user_handler, delete_admin_session_handler, delete_admin_user_handler,
-    list_admin_projects_handler, list_admin_sessions_handler, list_admin_users_handler,
-    patch_admin_user_handler,
+    delete_admin_session_handler, list_admin_projects_handler, list_admin_sessions_handler,
 };
 use self::auth::{auth_middleware, lifecycle_gate_middleware};
 use self::events::{
@@ -54,11 +52,7 @@ use self::sessions::{
     get_session_history_handler, list_sessions_handler, patch_session_handler,
 };
 use self::state::HttpApiState;
-use self::user_profile::{
-    create_user_token_handler, current_user_handler, delete_user_token_handler,
-    list_user_tokens_handler, local_auth_removed_handler, logout_handler,
-    patch_current_user_handler,
-};
+use self::user_profile::{current_user_handler, local_auth_removed_handler, logout_handler};
 use self::workspace_docs::{
     get_workspace_doc_handler, list_workspace_docs_handler, put_workspace_doc_handler,
 };
@@ -161,26 +155,7 @@ impl HttpServer {
             .route("/v1/auth/login", post(local_auth_removed_handler))
             .route("/v1/models", get(list_models_handler))
             .route("/v1/auth/logout", post(logout_handler))
-            .route(
-                "/v1/user",
-                get(current_user_handler).patch(patch_current_user_handler),
-            )
-            .route(
-                "/v1/user/tokens",
-                get(list_user_tokens_handler).post(create_user_token_handler),
-            )
-            .route(
-                "/v1/user/tokens/:token_id",
-                axum::routing::delete(delete_user_token_handler),
-            )
-            .route(
-                "/v1/admin/users",
-                get(list_admin_users_handler).post(create_admin_user_handler),
-            )
-            .route(
-                "/v1/admin/users/:user_id",
-                axum::routing::patch(patch_admin_user_handler).delete(delete_admin_user_handler),
-            )
+            .route("/v1/user", get(current_user_handler))
             .route("/v1/admin/sessions", get(list_admin_sessions_handler))
             .route(
                 "/v1/admin/sessions/:session_id",

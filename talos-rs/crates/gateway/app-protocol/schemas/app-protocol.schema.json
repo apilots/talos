@@ -109,110 +109,6 @@
       },
       "type": "object"
     },
-    "AdminUserCreateParams": {
-      "properties": {
-        "disabled": {
-          "default": null,
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "email": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "password": {
-          "type": "string"
-        },
-        "role": {
-          "$ref": "#/definitions/AdminUserRole"
-        },
-        "username": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "password",
-        "role",
-        "username"
-      ],
-      "type": "object"
-    },
-    "AdminUserDeleteParams": {
-      "properties": {
-        "user_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "user_id"
-      ],
-      "type": "object"
-    },
-    "AdminUserListParams": {
-      "type": "object"
-    },
-    "AdminUserPatchParams": {
-      "properties": {
-        "disabled": {
-          "default": null,
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "email": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "password": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "role": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/AdminUserRole"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "user_id": {
-          "type": "string"
-        },
-        "username": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "user_id"
-      ],
-      "type": "object"
-    },
-    "AdminUserRole": {
-      "enum": [
-        "user",
-        "admin"
-      ],
-      "type": "string"
-    },
     "AppListParams": {
       "type": "object"
     },
@@ -512,10 +408,6 @@
         "tool.dynamic_result.submit",
         "admin.session.list",
         "admin.project.list",
-        "admin.user.list",
-        "admin.user.create",
-        "admin.user.patch",
-        "admin.user.delete",
         "model.list",
         "config.read",
         "config.value.write",
@@ -533,10 +425,6 @@
         "account.get",
         "auth.logout",
         "user.current",
-        "user.update",
-        "user.token.list",
-        "user.token.create",
-        "user.token.delete",
         "memory.search"
       ],
       "type": "string"
@@ -1012,78 +900,6 @@
           "properties": {
             "method": {
               "enum": [
-                "admin.user.list"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/AdminUserListParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "admin.user.create"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/AdminUserCreateParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "admin.user.patch"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/AdminUserPatchParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "admin.user.delete"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/AdminUserDeleteParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
                 "model.list"
               ],
               "type": "string"
@@ -1390,78 +1206,6 @@
           "properties": {
             "method": {
               "enum": [
-                "user.update"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/UpdateCurrentUserRequest"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "user.token.list"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/UserTokenListParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "user.token.create"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/CreateUserTokenRequest"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "user.token.delete"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/UserTokenDeleteParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
                 "memory.search"
               ],
               "type": "string"
@@ -1510,17 +1254,6 @@
       "required": [
         "path",
         "value"
-      ],
-      "type": "object"
-    },
-    "CreateUserTokenRequest": {
-      "properties": {
-        "name": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "name"
       ],
       "type": "object"
     },
@@ -3867,40 +3600,7 @@
       ],
       "type": "object"
     },
-    "UpdateCurrentUserRequest": {
-      "properties": {
-        "email": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "username": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "type": "object"
-    },
     "UserCurrentParams": {
-      "type": "object"
-    },
-    "UserTokenDeleteParams": {
-      "properties": {
-        "token_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "token_id"
-      ],
-      "type": "object"
-    },
-    "UserTokenListParams": {
       "type": "object"
     },
     "WorkspaceDocListParams": {

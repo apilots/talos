@@ -44,14 +44,6 @@ vi.mock("@/features/chat", () => ({
   }),
 }));
 
-vi.mock("@/features/auth", () => ({
-  listUsers: () =>
-    Promise.resolve([
-      { user_id: "owner-1", username: "xujiang" },
-      { user_id: "owner-2", username: "admin" },
-    ]),
-}));
-
 vi.mock("@/features/connection", () => ({
   useConnectionSettings: () => ({
     connection: {
@@ -110,6 +102,7 @@ describe("useAdminPage", () => {
 
   it("keeps model configuration out of the admin section list", () => {
     expect(adminSections).not.toContain("models");
+    expect(adminSections).not.toContain("users");
     expect(adminSections).toContain("system");
   });
 

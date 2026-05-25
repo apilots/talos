@@ -101,11 +101,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::AdminSessionListParams>());
     output.push_str(&export::<crate::requests::AdminSessionPagination>());
     output.push_str(&export::<crate::requests::AdminProjectListParams>());
-    output.push_str(&export::<crate::requests::AdminUserRole>());
-    output.push_str(&export::<crate::requests::AdminUserListParams>());
-    output.push_str(&export::<crate::requests::AdminUserCreateParams>());
-    output.push_str(&export::<crate::requests::AdminUserPatchParams>());
-    output.push_str(&export::<crate::requests::AdminUserDeleteParams>());
     output.push_str(&export::<crate::requests::ModelListParams>());
     output.push_str(&export::<crate::requests::ConfigReadParams>());
     output.push_str(&export::<crate::requests::ConfigValueWriteParams>());
@@ -123,16 +118,10 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::AccountGetParams>());
     output.push_str(&export::<crate::requests::AuthLogoutParams>());
     output.push_str(&export::<crate::requests::UserCurrentParams>());
-    output.push_str(&export::<crate::requests::UserTokenListParams>());
-    output.push_str(&export::<crate::requests::UserTokenDeleteParams>());
     output.push_str(&export::<crate::requests::MemorySearchParams>());
     output.push_str(&export::<talos_auth::UserRole>());
     output.push_str(&export::<talos_auth::UserDto>());
-    output.push_str(&export::<talos_auth::UserTokenMeta>());
-    output.push_str(&export::<talos_auth::CreateUserTokenResult>());
-    output.push_str(&export::<talos_auth::CreateUserTokenRequest>());
     output.push_str(&export::<talos_auth::Capabilities>());
-    output.push_str(&export::<talos_auth::UpdateCurrentUserRequest>());
     output.push_str(&export::<crate::requests::OptionalStringPatch>());
     output.push_str(&export::<crate::requests::OptionalPathPatch>());
     output.push_str(&export::<crate::requests::ProtocolTalosContext>());

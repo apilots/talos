@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { Bot, Brush, KeyRound, ServerCog, Settings2, ShieldCheck, UserRoundCog } from "lucide-react";
+import { Bot, Brush, ServerCog, Settings2, ShieldCheck, UserRoundCog } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, Navigate, useParams } from "react-router-dom";
@@ -8,7 +8,6 @@ import {
   SettingsAgentWorkspaceSection,
   SettingsAppearanceSection,
   SettingsGeneralSection,
-  SettingsKeysSection,
   SettingsModelsSection,
   SettingsPermissionsSection,
   SettingsServerSection,
@@ -29,7 +28,6 @@ const settingsNavigation: SettingsNavigationItem[] = [
   { id: "models", icon: Bot },
   { id: "agent-workspace", icon: UserRoundCog },
   { id: "permissions", icon: ShieldCheck },
-  { id: "account", icon: KeyRound },
   { id: "appearance", icon: Brush },
   { id: "advanced", icon: ServerCog },
 ];
@@ -56,22 +54,9 @@ export function SettingsPage() {
   } = useSettingsPage();
   const requestedSection = params.section;
   const activeSection = requestedSection ? requestedSection : "general";
-  const sections = useMemo(
-    () =>
-      settingsNavigation.filter((item) => {
-        if (item.id === "account") {
-          return connection.authStatus !== "open";
-        }
-        return true;
-      }),
-    [connection.authStatus],
-  );
+  const sections = useMemo(() => settingsNavigation, []);
 
   if (requestedSection && !isSettingsSection(requestedSection)) {
-    return <Navigate replace to="/settings" />;
-  }
-
-  if (activeSection === "account" && connection.authStatus === "open") {
     return <Navigate replace to="/settings" />;
   }
 
@@ -130,8 +115,6 @@ export function SettingsPage() {
                 setSafeFileWrites={setSafeFileWrites}
               />
             ) : null}
-
-            {activeSection === "account" && connection.authStatus !== "open" ? <SettingsKeysSection /> : null}
 
             {activeSection === "appearance" ? (
               <SettingsAppearanceSection

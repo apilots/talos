@@ -4,23 +4,21 @@ use serde_json::{json, Value};
 use talos_app_protocol::errors::AppServerErrorBody;
 use talos_app_protocol::requests::{
     AdminProjectListResponse, AdminSessionListParams, AdminSessionListResponse,
-    AdminSessionPagination, AdminUserRole, ClientRequest, ClientRequestParams,
-    ConfigBatchWriteParams, ConfigReadParams, ConfigValueWriteParams, EventSubscribeParams,
-    MemoryFileReadParams, MemoryFileWriteParams, MessageCommandStatus, OptionalPathPatch,
-    OptionalStringPatch, ProjectCreateParams, ProjectPatchParams, ProtocolInputItem,
-    ProtocolTalosContext, SessionCreateParams, SessionListParams, SessionPatchParams,
-    TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
-    TimelinePendingDynamicToolResult, TimelinePendingUserAction, TimelineRecoverySnapshot,
-    TimelineReplay, TurnStartParams, TurnStartResponse,
+    AdminSessionPagination, ClientRequest, ClientRequestParams, ConfigBatchWriteParams,
+    ConfigReadParams, ConfigValueWriteParams, EventSubscribeParams, MemoryFileReadParams,
+    MemoryFileWriteParams, MessageCommandStatus, OptionalPathPatch, OptionalStringPatch,
+    ProjectCreateParams, ProjectPatchParams, ProtocolInputItem, ProtocolTalosContext,
+    SessionCreateParams, SessionListParams, SessionPatchParams, TimelineActiveTurnSnapshot,
+    TimelineActiveTurnStatus, TimelineCursorStatus, TimelinePendingDynamicToolResult,
+    TimelinePendingUserAction, TimelineRecoverySnapshot, TimelineReplay, TurnStartParams,
+    TurnStartResponse,
 };
 use talos_application_service::{
     Actor, AdminSessionPage, MemoryDate, MemoryListParams, MemorySearchParams,
     TalosApplicationService, TimelineCursorStatus as ApplicationTimelineCursorStatus,
     TimelineSubscribeParams, TimelineSubscription, TurnRetryRequest, WorkspaceDocService,
 };
-use talos_auth::{
-    AdminCreateUserRequest, AdminPatchUserRequest, AuthScope, RequestIdentity, UserRole,
-};
+use talos_auth::{AuthScope, RequestIdentity, UserRole};
 use talos_error::TalosError;
 use talos_session_store::{
     ActiveTurnRecord, ActiveTurnStatus, IdempotencyStatus, PendingUserAction, TimelineEventId,
@@ -284,60 +282,6 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .map_err(AppServerErrorBody::from_talos_error)?;
                 to_value(AdminProjectListResponse { data: projects })
             }
-            ClientRequestParams::AdminUserList(_) => {
-                let users = self
-                    .app
-                    .account
-                    .list_users(&request_identity(actor))
-                    .await
-                    .map_err(AppServerErrorBody::from_talos_error)?;
-                to_value(json!({ "data": users }))
-            }
-            ClientRequestParams::AdminUserCreate(params) => {
-                let user = self
-                    .app
-                    .account
-                    .create_user(
-                        &request_identity(actor),
-                        AdminCreateUserRequest {
-                            username: params.username,
-                            password: params.password,
-                            email: params.email,
-                            role: map_user_role(params.role),
-                            disabled: params.disabled,
-                        },
-                    )
-                    .await
-                    .map_err(AppServerErrorBody::from_talos_error)?;
-                to_value(user)
-            }
-            ClientRequestParams::AdminUserPatch(params) => {
-                let user = self
-                    .app
-                    .account
-                    .patch_user(
-                        &request_identity(actor),
-                        &params.user_id,
-                        AdminPatchUserRequest {
-                            username: params.username,
-                            email: params.email,
-                            password: params.password,
-                            role: params.role.map(map_user_role),
-                            disabled: params.disabled,
-                        },
-                    )
-                    .await
-                    .map_err(AppServerErrorBody::from_talos_error)?;
-                to_value(user)
-            }
-            ClientRequestParams::AdminUserDelete(params) => {
-                self.app
-                    .account
-                    .delete_user(&request_identity(actor), &params.user_id)
-                    .await
-                    .map_err(AppServerErrorBody::from_talos_error)?;
-                to_value(json!({ "success": true }))
-            }
             ClientRequestParams::ModelList(_) => {
                 let models = self.app.config.list_models().await;
                 to_value(json!({ "data": models }))
@@ -443,41 +387,6 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .await
                     .map_err(AppServerErrorBody::from_talos_error)?;
                 to_value(user)
-            }
-            ClientRequestParams::UserUpdate(params) => {
-                let user = self
-                    .app
-                    .account
-                    .patch_current_user(&request_identity(actor), params)
-                    .await
-                    .map_err(AppServerErrorBody::from_talos_error)?;
-                to_value(user)
-            }
-            ClientRequestParams::UserTokenList(_) => {
-                let tokens = self
-                    .app
-                    .account
-                    .list_tokens(&request_identity(actor))
-                    .await
-                    .map_err(AppServerErrorBody::from_talos_error)?;
-                to_value(json!({ "data": tokens }))
-            }
-            ClientRequestParams::UserTokenCreate(params) => {
-                let token = self
-                    .app
-                    .account
-                    .create_token(&request_identity(actor), &params.name)
-                    .await
-                    .map_err(AppServerErrorBody::from_talos_error)?;
-                to_value(token)
-            }
-            ClientRequestParams::UserTokenDelete(params) => {
-                self.app
-                    .account
-                    .revoke_token(&request_identity(actor), &params.token_id)
-                    .await
-                    .map_err(AppServerErrorBody::from_talos_error)?;
-                to_value(json!({ "success": true }))
             }
             ClientRequestParams::MemorySearch(_) => self.dispatch_secondary(actor, request).await,
         }
@@ -945,13 +854,6 @@ fn map_directory_patch(patch: OptionalPathPatch) -> OptionalCurrentDirectoryPatc
     match patch {
         OptionalPathPatch::Set { path } => OptionalCurrentDirectoryPatch::Set { path },
         OptionalPathPatch::Clear => OptionalCurrentDirectoryPatch::Clear,
-    }
-}
-
-fn map_user_role(role: AdminUserRole) -> UserRole {
-    match role {
-        AdminUserRole::User => UserRole::User,
-        AdminUserRole::Admin => UserRole::Admin,
     }
 }
 

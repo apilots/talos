@@ -3,9 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
-use talos_auth::{
-    CreateUserTokenRequest, CreateUserTokenResult, UpdateCurrentUserRequest, UserDto, UserTokenMeta,
-};
 use ts_rs::TS;
 
 use crate::errors::AppServerErrorBody;
@@ -72,14 +69,6 @@ pub enum ClientMethod {
     AdminSessionList,
     #[serde(rename = "admin.project.list")]
     AdminProjectList,
-    #[serde(rename = "admin.user.list")]
-    AdminUserList,
-    #[serde(rename = "admin.user.create")]
-    AdminUserCreate,
-    #[serde(rename = "admin.user.patch")]
-    AdminUserPatch,
-    #[serde(rename = "admin.user.delete")]
-    AdminUserDelete,
     #[serde(rename = "model.list")]
     ModelList,
     #[serde(rename = "config.read")]
@@ -114,14 +103,6 @@ pub enum ClientMethod {
     AuthLogout,
     #[serde(rename = "user.current")]
     UserCurrent,
-    #[serde(rename = "user.update")]
-    UserUpdate,
-    #[serde(rename = "user.token.list")]
-    UserTokenList,
-    #[serde(rename = "user.token.create")]
-    UserTokenCreate,
-    #[serde(rename = "user.token.delete")]
-    UserTokenDelete,
     #[serde(rename = "memory.search")]
     MemorySearch,
 }
@@ -154,10 +135,6 @@ impl ClientMethod {
             Self::ToolDynamicResultSubmit => "tool.dynamic_result.submit",
             Self::AdminSessionList => "admin.session.list",
             Self::AdminProjectList => "admin.project.list",
-            Self::AdminUserList => "admin.user.list",
-            Self::AdminUserCreate => "admin.user.create",
-            Self::AdminUserPatch => "admin.user.patch",
-            Self::AdminUserDelete => "admin.user.delete",
             Self::ModelList => "model.list",
             Self::ConfigRead => "config.read",
             Self::ConfigValueWrite => "config.value.write",
@@ -175,10 +152,6 @@ impl ClientMethod {
             Self::AccountGet => "account.get",
             Self::AuthLogout => "auth.logout",
             Self::UserCurrent => "user.current",
-            Self::UserUpdate => "user.update",
-            Self::UserTokenList => "user.token.list",
-            Self::UserTokenCreate => "user.token.create",
-            Self::UserTokenDelete => "user.token.delete",
             Self::MemorySearch => "memory.search",
         }
     }
@@ -220,10 +193,6 @@ impl FromStr for ClientMethod {
             "tool.dynamic_result.submit" => Ok(Self::ToolDynamicResultSubmit),
             "admin.session.list" => Ok(Self::AdminSessionList),
             "admin.project.list" => Ok(Self::AdminProjectList),
-            "admin.user.list" => Ok(Self::AdminUserList),
-            "admin.user.create" => Ok(Self::AdminUserCreate),
-            "admin.user.patch" => Ok(Self::AdminUserPatch),
-            "admin.user.delete" => Ok(Self::AdminUserDelete),
             "model.list" => Ok(Self::ModelList),
             "config.read" => Ok(Self::ConfigRead),
             "config.value.write" => Ok(Self::ConfigValueWrite),
@@ -241,10 +210,6 @@ impl FromStr for ClientMethod {
             "account.get" => Ok(Self::AccountGet),
             "auth.logout" => Ok(Self::AuthLogout),
             "user.current" => Ok(Self::UserCurrent),
-            "user.update" => Ok(Self::UserUpdate),
-            "user.token.list" => Ok(Self::UserTokenList),
-            "user.token.create" => Ok(Self::UserTokenCreate),
-            "user.token.delete" => Ok(Self::UserTokenDelete),
             "memory.search" => Ok(Self::MemorySearch),
             _ => Err(AppServerErrorBody::method_not_found(value)),
         }
@@ -304,14 +269,6 @@ pub enum ClientRequestParams {
     AdminSessionList(AdminSessionListParams),
     #[serde(rename = "admin.project.list")]
     AdminProjectList(AdminProjectListParams),
-    #[serde(rename = "admin.user.list")]
-    AdminUserList(AdminUserListParams),
-    #[serde(rename = "admin.user.create")]
-    AdminUserCreate(AdminUserCreateParams),
-    #[serde(rename = "admin.user.patch")]
-    AdminUserPatch(AdminUserPatchParams),
-    #[serde(rename = "admin.user.delete")]
-    AdminUserDelete(AdminUserDeleteParams),
     #[serde(rename = "model.list")]
     ModelList(ModelListParams),
     #[serde(rename = "config.read")]
@@ -346,14 +303,6 @@ pub enum ClientRequestParams {
     AuthLogout(AuthLogoutParams),
     #[serde(rename = "user.current")]
     UserCurrent(UserCurrentParams),
-    #[serde(rename = "user.update")]
-    UserUpdate(UpdateCurrentUserRequest),
-    #[serde(rename = "user.token.list")]
-    UserTokenList(UserTokenListParams),
-    #[serde(rename = "user.token.create")]
-    UserTokenCreate(CreateUserTokenRequest),
-    #[serde(rename = "user.token.delete")]
-    UserTokenDelete(UserTokenDeleteParams),
     #[serde(rename = "memory.search")]
     MemorySearch(MemorySearchParams),
 }
@@ -425,18 +374,6 @@ impl ClientRequest {
             ClientMethod::AdminProjectList => {
                 ClientRequestParams::AdminProjectList(decode(params_value)?)
             }
-            ClientMethod::AdminUserList => {
-                ClientRequestParams::AdminUserList(decode(params_value)?)
-            }
-            ClientMethod::AdminUserCreate => {
-                ClientRequestParams::AdminUserCreate(decode(params_value)?)
-            }
-            ClientMethod::AdminUserPatch => {
-                ClientRequestParams::AdminUserPatch(decode(params_value)?)
-            }
-            ClientMethod::AdminUserDelete => {
-                ClientRequestParams::AdminUserDelete(decode(params_value)?)
-            }
             ClientMethod::ModelList => ClientRequestParams::ModelList(decode(params_value)?),
             ClientMethod::ConfigRead => ClientRequestParams::ConfigRead(decode(params_value)?),
             ClientMethod::ConfigValueWrite => {
@@ -470,16 +407,6 @@ impl ClientRequest {
             ClientMethod::AccountGet => ClientRequestParams::AccountGet(decode(params_value)?),
             ClientMethod::AuthLogout => ClientRequestParams::AuthLogout(decode(params_value)?),
             ClientMethod::UserCurrent => ClientRequestParams::UserCurrent(decode(params_value)?),
-            ClientMethod::UserUpdate => ClientRequestParams::UserUpdate(decode(params_value)?),
-            ClientMethod::UserTokenList => {
-                ClientRequestParams::UserTokenList(decode(params_value)?)
-            }
-            ClientMethod::UserTokenCreate => {
-                ClientRequestParams::UserTokenCreate(decode(params_value)?)
-            }
-            ClientMethod::UserTokenDelete => {
-                ClientRequestParams::UserTokenDelete(decode(params_value)?)
-            }
             ClientMethod::MemorySearch => ClientRequestParams::MemorySearch(decode(params_value)?),
         };
         Ok(Self {
@@ -828,48 +755,7 @@ pub struct AdminProjectListResponse {
     pub data: Vec<talos_types::ProjectRecord>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum AdminUserRole {
-    User,
-    Admin,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct AdminUserListParams {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct AdminUserCreateParams {
-    pub username: String,
-    pub password: String,
-    #[serde(default)]
-    pub email: Option<String>,
-    pub role: AdminUserRole,
-    #[serde(default)]
-    pub disabled: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct AdminUserPatchParams {
-    pub user_id: String,
-    #[serde(default)]
-    pub username: Option<String>,
-    #[serde(default)]
-    pub email: Option<String>,
-    #[serde(default)]
-    pub password: Option<String>,
-    #[serde(default)]
-    pub role: Option<AdminUserRole>,
-    #[serde(default)]
-    pub disabled: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct AdminUserDeleteParams {
-    pub user_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
 pub struct ModelListParams {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
@@ -941,19 +827,6 @@ pub struct AuthLogoutParams {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
 pub struct UserCurrentParams {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct UserTokenListParams {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct UserTokenDeleteParams {
-    pub token_id: String,
-}
-
-pub type UserCurrentResponse = UserDto;
-pub type UserUpdateResponse = UserDto;
-pub type UserTokenListResponse = Vec<UserTokenMeta>;
-pub type UserTokenCreateResponse = CreateUserTokenResult;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
 pub struct MemorySearchParams {
@@ -1043,10 +916,6 @@ mod tests {
         assert_eq!(
             ClientMethod::from_str("admin.project.list").unwrap(),
             ClientMethod::AdminProjectList
-        );
-        assert_eq!(
-            ClientMethod::from_str("admin.user.list").unwrap(),
-            ClientMethod::AdminUserList
         );
     }
 }

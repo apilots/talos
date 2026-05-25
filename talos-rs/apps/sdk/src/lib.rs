@@ -18,10 +18,7 @@ pub use talos_app_protocol::requests::{
     TimelineRecoveryParams, TimelineRecoverySnapshot, TimelineReplay,
     ToolDynamicResultSubmitParams,
 };
-pub use talos_auth::{
-    AdminCreateUserRequest, AdminPatchUserRequest, AuthResponse, LoginRequest, RegisterRequest,
-    UserDto, UserRole,
-};
+pub use talos_auth::{AuthResponse, UserDto, UserRole};
 pub use talos_config::LlmConfig;
 pub use talos_error::{TalosError, TalosResult};
 pub use talos_types::talos::{

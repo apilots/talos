@@ -16,8 +16,7 @@ class RecordingTransport implements AppServerTransport {
       method === "model.list" ||
       method === "memory.search" ||
       method === "project.list" ||
-      method === "admin.project.list" ||
-      method === "admin.user.list"
+      method === "admin.project.list"
     ) {
       return Promise.resolve({ data: [] } as T);
     }
@@ -56,17 +55,6 @@ describe("AppServerClient", () => {
     });
     await client.listProjects();
     await client.listAdminProjects();
-    await client.listAdminUsers();
-    await client.createAdminUser({
-      username: "alice",
-      password: "secret",
-      role: "admin",
-    });
-    await client.patchAdminUser("user-1", {
-      role: "user",
-      disabled: false,
-    });
-    await client.deleteAdminUser("user-1");
     await client.getLlmConfig();
     await client.updateLlmConfig(testLlmConfig);
     await client.listAdminSessions({ limit: 20, offset: 0, user_id: null, channel_id: null, provider: null, project_id: null });
@@ -96,24 +84,6 @@ describe("AppServerClient", () => {
       },
       { method: "project.list", params: {} },
       { method: "admin.project.list", params: {} },
-      { method: "admin.user.list", params: {} },
-      {
-        method: "admin.user.create",
-        params: {
-          username: "alice",
-          password: "secret",
-          role: "admin",
-        },
-      },
-      {
-        method: "admin.user.patch",
-        params: {
-          user_id: "user-1",
-          role: "user",
-          disabled: false,
-        },
-      },
-      { method: "admin.user.delete", params: { user_id: "user-1" } },
       { method: "config.read", params: {} },
       {
         method: "config.value.write",
