@@ -6,8 +6,8 @@ use talos_agent::{AgentHarness, AgentOrchestrator};
 use talos_app_server::BackgroundTaskDrain;
 use talos_application_service::TalosApplicationService;
 use talos_auth::{
-    AuthCacheConfig, AuthManager, AuthService, DatabaseUserStore, JwtAuth, JwtConfig, UserService,
-    UserStore, UserTokenStore,
+    AuthCacheConfig, AuthManager, AuthService, CloudAuthService, DatabaseUserStore, JwtAuth,
+    JwtConfig, UserService, UserStore, UserTokenStore,
 };
 use talos_channel::{ChannelServer, TelegramChannel};
 use talos_config::{Config, LlmConfigManager, LlmConfigService, TalosPaths, YamlLlmConfigStore};
@@ -339,7 +339,10 @@ pub async fn start_server(
     // PAT authentication is part of verify_access_token and active whenever auth middleware is enabled.
     if auth_disabled {
         http_server = http_server.with_auth_disabled(true);
-    } else if config.gateway.auth {
+    } else if config.gateway.auth
+        && !(config.cloud.enabled
+            && config.cloud.auth.provider == talos_config::CloudAuthProvider::Cloud)
+    {
         http_server =
             http_server.with_jwt_secret(config.gateway.jwt_secret.clone().ok_or_else(|| {
                 TalosError::InvalidConfiguration(
@@ -504,8 +507,15 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
             ttl_seconds: config.gateway.auth_cache.ttl_seconds,
         },
     ));
-    let auth_service: Arc<dyn AuthService> = auth_manager.clone();
-    let user_service: Arc<dyn UserService> = auth_manager.clone();
+    let (auth_service, user_service): (Arc<dyn AuthService>, Arc<dyn UserService>) =
+        if config.cloud.enabled
+            && config.cloud.auth.provider == talos_config::CloudAuthProvider::Cloud
+        {
+            let cloud_auth = Arc::new(CloudAuthService::new(config.cloud.api_base_url.clone()));
+            (cloud_auth.clone(), cloud_auth)
+        } else {
+            (auth_manager.clone(), auth_manager.clone())
+        };
 
     let config_path = TalosPaths::resolve().config_file;
     let llm_store = Arc::new(YamlLlmConfigStore::new(config_path));

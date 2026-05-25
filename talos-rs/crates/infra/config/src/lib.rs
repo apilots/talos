@@ -40,6 +40,7 @@ pub mod validate;
 
 pub type TalosTimezone = chrono_tz::Tz;
 pub use domains::agent::{AgentConfig, PlannerMode};
+pub use domains::cloud::{CloudAuthConfig, CloudAuthProvider, CloudConfig};
 pub use domains::kernel::{
     AgentKernelCompactionConfig, AgentKernelConfig, AgentKernelOutputConfig,
     AgentKernelTimelineEventsConfig,
@@ -84,6 +85,10 @@ pub struct Config {
     #[serde(default)]
     pub gateway: GatewayConfig,
 
+    /// Cloud control-plane configuration.
+    #[serde(default)]
+    pub cloud: CloudConfig,
+
     /// 渠道配置
     #[serde(default)]
     pub channels: ChannelsConfig,
@@ -127,6 +132,7 @@ impl Default for Config {
             timezone: default_timezone(),
             agent: AgentConfig::default(),
             gateway: GatewayConfig::default(),
+            cloud: CloudConfig::default(),
             channels: ChannelsConfig::default(),
             logging: LoggingConfig::default(),
             storage: StorageBackendConfig::default(),

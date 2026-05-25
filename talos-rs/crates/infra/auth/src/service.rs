@@ -402,6 +402,7 @@ impl AuthManager {
             role: state.role,
             scopes: default_scopes_for_role(state.role),
             auth_disabled: false,
+            access_token: None,
         }
     }
 
@@ -633,6 +634,7 @@ impl AuthService for AuthManager {
             role: state.role,
             scopes,
             auth_disabled: false,
+            access_token: Some(token.to_string()),
         })
     }
 }

@@ -6,7 +6,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | Type | Next ID |
 | --- | ---: |
-| `feat` | 020 |
+| `feat` | 021 |
 | `fix` | 004 |
 | `refactor` | 025 |
 | `docs` | 001 |
@@ -15,6 +15,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | ID | Directory | Status |
 | --- | --- | --- |
+| feat-020 | `feat-020-cloud-auth-metrics` | draft |
 | refactor-023 | `refactor-023-agent-kernel-simplification` | draft |
 | refactor-024 | `refactor-024-agent-kernel-final-answer-simplification` | draft |
 

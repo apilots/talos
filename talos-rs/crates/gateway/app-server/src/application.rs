@@ -993,6 +993,7 @@ fn request_identity(actor: &Actor) -> RequestIdentity {
         },
         scopes: Vec::<AuthScope>::new(),
         auth_disabled: false,
+        access_token: None,
     }
 }
 

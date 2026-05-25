@@ -7,7 +7,7 @@ fn test_default_config() {
     assert_eq!(config.gateway.port, 18789);
     assert!(!config.gateway.auth);
     assert_eq!(config.gateway.access_token_ttl_days, 30);
-    assert!(config.gateway.allow_register);
+    assert!(!config.gateway.allow_register);
     assert!(config.gateway.auth_cache.enabled);
     assert_eq!(config.gateway.auth_cache.ttl_seconds, 300);
     assert_eq!(config.storage.database_type, DatabaseType::Sqlite);
@@ -217,6 +217,21 @@ fn test_validate_runtime_requires_jwt_secret_when_auth_enabled() {
     config.llm.model = "qwen-max".to_string();
     config.llm.ollama.base_url = Some("http://localhost:11434".to_string());
     config.agent.model = "qwen-max".to_string();
+    assert!(config.validate_runtime().is_ok());
+}
+
+#[test]
+fn test_validate_runtime_allows_cloud_auth_without_jwt_secret() {
+    let mut config = Config::default();
+    config.gateway.auth = true;
+    config.gateway.jwt_secret = None;
+    config.cloud.enabled = true;
+    config.cloud.auth.provider = crate::CloudAuthProvider::Cloud;
+    config.llm.provider = "ollama".to_string();
+    config.llm.model = "qwen-max".to_string();
+    config.llm.ollama.base_url = Some("http://localhost:11434".to_string());
+    config.agent.model = "qwen-max".to_string();
+
     assert!(config.validate_runtime().is_ok());
 }
 

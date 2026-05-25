@@ -228,6 +228,7 @@ mod tests {
             role: UserRole::User,
             scopes: Vec::new(),
             auth_disabled: false,
+            access_token: None,
         }
     }
 

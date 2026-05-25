@@ -7,7 +7,14 @@ gateway:
   jwt_secret: ${TALOS_GATEWAY_JWT_SECRET}
   auth: false
   access_token_ttl_days: 30
-  allow_register: true
+  allow_register: false
+
+cloud:
+  enabled: false
+  api_base_url: "http://127.0.0.1:8787"
+  auth:
+    provider: "local"
+    introspection_cache_ttl_seconds: 300
 
 agent:
   name: "talos"

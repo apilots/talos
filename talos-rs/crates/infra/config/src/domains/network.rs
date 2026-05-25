@@ -59,7 +59,7 @@ fn default_access_token_ttl_days() -> u32 {
 }
 
 fn default_allow_register() -> bool {
-    true
+    false
 }
 
 fn default_auth_cache_enabled() -> bool {

@@ -1,9 +1,11 @@
+mod cloud;
 mod jwt;
 mod pairing;
 mod password;
 mod service;
 mod store;
 
+pub use cloud::CloudAuthService;
 pub use jwt::{AccessTokenClaims, IssuedAccessToken, JwtAuth, JwtConfig};
 pub use pairing::{DevicePairing, PairingCode, PairingResult};
 pub use password::{validate_password, PasswordService};
@@ -101,6 +103,7 @@ pub struct RequestIdentity {
     pub role: UserRole,
     pub scopes: Vec<AuthScope>,
     pub auth_disabled: bool,
+    pub access_token: Option<String>,
 }
 
 impl RequestIdentity {
@@ -123,6 +126,7 @@ impl RequestIdentity {
             role: UserRole::Admin,
             scopes: default_scopes_for_role(UserRole::Admin),
             auth_disabled: false,
+            access_token: None,
         }
     }
 
@@ -133,6 +137,7 @@ impl RequestIdentity {
             role: UserRole::User,
             scopes: default_scopes_for_role(UserRole::User),
             auth_disabled: true,
+            access_token: None,
         }
     }
 }

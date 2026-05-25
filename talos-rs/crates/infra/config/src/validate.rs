@@ -434,7 +434,18 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
         ));
     }
 
-    if config.gateway.auth {
+    if config.cloud.enabled && config.cloud.api_base_url.trim().is_empty() {
+        return Err(TalosError::InvalidConfiguration(
+            "cloud.api_base_url must not be empty when cloud.enabled=true".to_string(),
+        ));
+    }
+    if config.cloud.enabled && config.cloud.auth.introspection_cache_ttl_seconds == 0 {
+        return Err(TalosError::InvalidConfiguration(
+            "cloud.auth.introspection_cache_ttl_seconds must be > 0".to_string(),
+        ));
+    }
+
+    if config.gateway.auth && !uses_cloud_auth(config) {
         let Some(secret) = config.gateway.jwt_secret.as_ref() else {
             return Err(TalosError::InvalidConfiguration(
                 "gateway.jwt_secret is required when gateway.auth=true".to_string(),
@@ -484,4 +495,9 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
     }
 
     Ok(())
+}
+
+fn uses_cloud_auth(config: &crate::Config) -> bool {
+    config.cloud.enabled
+        && config.cloud.auth.provider == crate::domains::cloud::CloudAuthProvider::Cloud
 }
