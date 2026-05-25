@@ -41,18 +41,26 @@ async fn test_models_allow_no_token_when_auth_disabled() {
 }
 
 #[tokio::test]
-async fn test_local_auth_routes_return_gone() {
-    let response = local_auth_removed_handler()
-        .await
-        .expect_err("local auth routes should be removed");
-    let response = response.into_response();
-    let status = response.status();
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("body should be readable");
-    let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
-    assert_eq!(status, StatusCode::GONE);
-    assert_eq!(payload["code"], "local_auth_removed");
+async fn test_removed_local_auth_paths_do_not_require_bearer() {
+    let state = test_state(false);
+    let app = Router::new()
+        .with_state(state.clone())
+        .layer(middleware::from_fn_with_state(state, auth_middleware));
+
+    for uri in ["/v1/auth/register", "/v1/auth/login"] {
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(axum::http::Method::POST)
+                    .uri(uri)
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should succeed");
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
 }
 
 #[tokio::test]

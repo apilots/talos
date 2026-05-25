@@ -18,18 +18,14 @@ frontend and SDK mock-flow regression tests that do not start a real gateway.
 - Scope: async ack + timeline event SSE + idempotency behavior
 - Verifies: `/v1/sessions/{id}/messages`, `/v1/sessions/{id}/events`, `Idempotency-Key`
 
-4. `scenarios/04_auth.sh`
-- Scope: authentication and token-protected API paths
-- Verifies: auth enabled/disabled handling and bearer token flow
-
-5. `scenarios/05_cli/`
+4. `scenarios/05_cli/`
 - Scope: CLI-driven interactive scenarios
 - Files:
   - `app_server_e2e.sh`
   - `full_flow.sh`
   - `bilingual_chat.sh`
 
-6. `scenarios/06_tools/`
+5. `scenarios/06_tools/`
 - Scope: tool-effect validation scenarios
 - Files:
   - `http_bash.sh`

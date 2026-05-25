@@ -41,7 +41,6 @@ use crate::server::messages::{
     retry_message_attempt_handler, session_message_handler, submit_message_command,
 };
 use crate::server::misc::get_llm_handler;
-use crate::server::user_profile::local_auth_removed_handler;
 
 #[path = "tests/support.rs"]
 mod support;

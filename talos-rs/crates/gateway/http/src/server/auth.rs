@@ -65,9 +65,16 @@ pub(super) async fn auth_middleware(
 }
 
 fn is_public_route(path: &str) -> bool {
-    matches!(path, "/health" | "/v1/auth/register" | "/v1/auth/login")
+    path == "/health" || is_removed_local_auth_path(path)
 }
 
 fn is_webui_route(path: &str) -> bool {
     !path.starts_with("/v1/")
+}
+
+fn is_removed_local_auth_path(path: &str) -> bool {
+    matches!(
+        path,
+        concat!("/v1/auth/", "register") | concat!("/v1/auth/", "login")
+    )
 }

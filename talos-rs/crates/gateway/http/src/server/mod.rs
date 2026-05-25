@@ -52,7 +52,7 @@ use self::sessions::{
     get_session_history_handler, list_sessions_handler, patch_session_handler,
 };
 use self::state::HttpApiState;
-use self::user_profile::{current_user_handler, local_auth_removed_handler, logout_handler};
+use self::user_profile::{current_user_handler, logout_handler};
 use self::workspace_docs::{
     get_workspace_doc_handler, list_workspace_docs_handler, put_workspace_doc_handler,
 };
@@ -151,8 +151,6 @@ impl HttpServer {
 
         let mut app = Router::new()
             .route("/health", get(health_handler))
-            .route("/v1/auth/register", post(local_auth_removed_handler))
-            .route("/v1/auth/login", post(local_auth_removed_handler))
             .route("/v1/models", get(list_models_handler))
             .route("/v1/auth/logout", post(logout_handler))
             .route("/v1/user", get(current_user_handler))

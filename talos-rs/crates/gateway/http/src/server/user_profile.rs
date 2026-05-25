@@ -10,14 +10,6 @@ use talos_auth::RequestIdentity;
 use super::errors::ApiError;
 use super::state::HttpApiState;
 
-pub(super) async fn local_auth_removed_handler() -> Result<Json<Value>, ApiError> {
-    Err(ApiError::new(
-        StatusCode::GONE,
-        "local_auth_removed",
-        "Talos local login and registration have moved to Talos Cloud",
-    ))
-}
-
 pub(super) async fn logout_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
