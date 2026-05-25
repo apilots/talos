@@ -18,19 +18,7 @@ pub struct GatewayConfig {
     /// User PAT support is part of auth middleware path and is enabled together with `auth`.
     /// There is no separate on/off toggle currently for PATs.
 
-    /// JWT secret used by gateway auth middleware.
-    #[serde(default)]
-    pub jwt_secret: Option<String>,
-
-    /// Access token TTL in days.
-    #[serde(default = "default_access_token_ttl_days")]
-    pub access_token_ttl_days: u32,
-
-    /// Allow public user registration.
-    #[serde(default = "default_allow_register")]
-    pub allow_register: bool,
-
-    /// Authentication cache settings shared by JWT user-state checks and user token lookups.
+    /// Authentication cache settings for cloud token introspection.
     #[serde(default)]
     pub auth_cache: GatewayAuthCacheConfig,
 }
@@ -52,14 +40,6 @@ fn default_host() -> String {
 
 fn default_port() -> u16 {
     18789
-}
-
-fn default_access_token_ttl_days() -> u32 {
-    30
-}
-
-fn default_allow_register() -> bool {
-    false
 }
 
 fn default_auth_cache_enabled() -> bool {
@@ -85,9 +65,6 @@ impl Default for GatewayConfig {
             host: default_host(),
             port: default_port(),
             auth: false,
-            jwt_secret: None,
-            access_token_ttl_days: default_access_token_ttl_days(),
-            allow_register: default_allow_register(),
             auth_cache: GatewayAuthCacheConfig::default(),
         }
     }

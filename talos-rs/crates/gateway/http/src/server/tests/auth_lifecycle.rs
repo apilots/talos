@@ -41,6 +41,21 @@ async fn test_models_allow_no_token_when_auth_disabled() {
 }
 
 #[tokio::test]
+async fn test_local_auth_routes_return_gone() {
+    let response = local_auth_removed_handler()
+        .await
+        .expect_err("local auth routes should be removed");
+    let response = response.into_response();
+    let status = response.status();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should be readable");
+    let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
+    assert_eq!(status, StatusCode::GONE);
+    assert_eq!(payload["code"], "local_auth_removed");
+}
+
+#[tokio::test]
 async fn test_list_sessions_allows_anonymous_route_when_auth_disabled() {
     let state = test_state(true);
     let app = Router::new()

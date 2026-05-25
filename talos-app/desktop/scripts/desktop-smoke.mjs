@@ -32,7 +32,6 @@ const appArgs = appExecutable
 const childEnv = {
   ...process.env,
   TALOS_LLM_ANTHROPIC_API_KEY: process.env.TALOS_LLM_ANTHROPIC_API_KEY ?? "desktop-smoke-dummy",
-  TALOS_GATEWAY_JWT_SECRET: process.env.TALOS_GATEWAY_JWT_SECRET ?? "desktop-smoke-jwt-secret",
   TALOS_DESKTOP_LAUNCH_TOKEN: launchToken,
   TALOS_LOCAL_LAUNCH_TOKEN: launchToken,
 };

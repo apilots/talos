@@ -115,25 +115,6 @@ export interface CreateUserTokenRequest {
   name: string;
 }
 
-export interface AuthResponse {
-  access_token: string;
-  token_type: string;
-  expires_at: number;
-  user: UserDto;
-  capabilities: Capabilities;
-}
-
-export interface RegisterRequest {
-  username: string;
-  password: string;
-  email?: string | null;
-}
-
-export interface LoginRequest {
-  username: string;
-  password: string;
-}
-
 export interface UpdateCurrentUserRequest {
   username?: string;
   email?: string | null;

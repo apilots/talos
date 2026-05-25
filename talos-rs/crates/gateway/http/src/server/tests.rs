@@ -1,16 +1,20 @@
 use super::*;
+use async_trait::async_trait;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, Request, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
 use serde_json::Value;
+use std::sync::Mutex;
 use talos_application_service::TalosApplicationService;
 use talos_auth::{
-    AuthCacheConfig, AuthManager, AuthService, CreateUserTokenRequest, InMemoryUserStore,
-    InMemoryUserTokenStore, JwtAuth, RequestIdentity, UserService,
+    AdminCreateUserRequest, AdminPatchUserRequest, AuthResponse, AuthService,
+    CreateUserTokenRequest, CreateUserTokenResult, LoginRequest, RegisterRequest, RequestIdentity,
+    UpdateCurrentUserRequest, UserDto, UserService, UserTokenMeta,
 };
 use talos_config::{InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService};
+use talos_error::{TalosError, TalosResult};
 use talos_gateway::Gateway;
 use talos_gateway::GatewayRequest;
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
@@ -42,6 +46,7 @@ use crate::server::messages::{
 use crate::server::misc::get_llm_handler;
 use crate::server::user_profile::{
     create_user_token_handler, list_admin_users_handler, list_user_tokens_handler,
+    local_auth_removed_handler,
 };
 
 #[path = "tests/support.rs"]
@@ -684,16 +689,158 @@ impl MessageIdempotencyStore for RecordingEventStore {
     }
 }
 
+#[derive(Default)]
+struct FakeAuthService {
+    tokens: Mutex<Vec<UserTokenMeta>>,
+}
+
+impl FakeAuthService {
+    fn user_from_actor(actor: &RequestIdentity) -> UserDto {
+        UserDto {
+            user_id: actor.user_id.clone(),
+            username: actor
+                .username
+                .clone()
+                .unwrap_or_else(|| actor.user_id.clone()),
+            email: None,
+            role: actor.role,
+            disabled: false,
+            created_at: 1,
+            updated_at: 1,
+        }
+    }
+}
+
+#[async_trait]
+impl AuthService for FakeAuthService {
+    async fn register(&self, _input: RegisterRequest) -> TalosResult<AuthResponse> {
+        Err(TalosError::AuthError(
+            "local auth is not available in tests".to_string(),
+        ))
+    }
+
+    async fn login(&self, _input: LoginRequest) -> TalosResult<AuthResponse> {
+        Err(TalosError::AuthError(
+            "local auth is not available in tests".to_string(),
+        ))
+    }
+
+    async fn logout(&self, _actor: &RequestIdentity) -> TalosResult<()> {
+        Ok(())
+    }
+
+    async fn create_token(
+        &self,
+        _actor: &RequestIdentity,
+        name: &str,
+    ) -> TalosResult<CreateUserTokenResult> {
+        let token_id = format!("token-{}", self.tokens.lock().unwrap().len() + 1);
+        let raw_token = format!("tls_{}", "a".repeat(32));
+        let prefix = raw_token.chars().take(12).collect::<String>();
+        self.tokens.lock().unwrap().push(UserTokenMeta {
+            token_id: token_id.clone(),
+            name: name.to_string(),
+            prefix: prefix.clone(),
+            created_at: 1,
+            last_used_at: None,
+            expires_at: None,
+        });
+        Ok(CreateUserTokenResult {
+            token_id,
+            raw_token,
+            prefix,
+        })
+    }
+
+    async fn list_tokens(&self, _actor: &RequestIdentity) -> TalosResult<Vec<UserTokenMeta>> {
+        Ok(self.tokens.lock().unwrap().clone())
+    }
+
+    async fn revoke_token(&self, _actor: &RequestIdentity, token_id: &str) -> TalosResult<()> {
+        self.tokens
+            .lock()
+            .unwrap()
+            .retain(|token| token.token_id != token_id);
+        Ok(())
+    }
+
+    async fn verify_access_token(&self, token: &str) -> TalosResult<RequestIdentity> {
+        Ok(RequestIdentity::mock_admin(token))
+    }
+}
+
+#[async_trait]
+impl UserService for FakeAuthService {
+    async fn get_current_user(&self, actor: &RequestIdentity) -> TalosResult<UserDto> {
+        Ok(Self::user_from_actor(actor))
+    }
+
+    async fn patch_current_user(
+        &self,
+        actor: &RequestIdentity,
+        patch: UpdateCurrentUserRequest,
+    ) -> TalosResult<UserDto> {
+        let mut user = Self::user_from_actor(actor);
+        if let Some(username) = patch.username {
+            user.username = username;
+        }
+        Ok(user)
+    }
+
+    async fn list_users(&self, actor: &RequestIdentity) -> TalosResult<Vec<UserDto>> {
+        if actor.auth_disabled {
+            return Ok(Vec::new());
+        }
+        Ok(vec![Self::user_from_actor(actor)])
+    }
+
+    async fn create_user(
+        &self,
+        _actor: &RequestIdentity,
+        request: AdminCreateUserRequest,
+    ) -> TalosResult<UserDto> {
+        Ok(UserDto {
+            user_id: format!("user-{}", request.username),
+            username: request.username,
+            email: request.email,
+            role: request.role,
+            disabled: request.disabled.unwrap_or(false),
+            created_at: 1,
+            updated_at: 1,
+        })
+    }
+
+    async fn patch_user(
+        &self,
+        actor: &RequestIdentity,
+        _user_id: &str,
+        patch: AdminPatchUserRequest,
+    ) -> TalosResult<UserDto> {
+        let mut user = Self::user_from_actor(actor);
+        if let Some(username) = patch.username {
+            user.username = username;
+        }
+        if let Some(email) = patch.email {
+            user.email = Some(email);
+        }
+        if let Some(role) = patch.role {
+            user.role = role;
+        }
+        if let Some(disabled) = patch.disabled {
+            user.disabled = disabled;
+        }
+        Ok(user)
+    }
+
+    async fn delete_user(&self, _actor: &RequestIdentity, _user_id: &str) -> TalosResult<()> {
+        Ok(())
+    }
+}
+
 fn test_auth_services() -> (Arc<dyn AuthService>, Arc<dyn UserService>) {
-    let manager = Arc::new(AuthManager::new(
-        Arc::new(InMemoryUserStore::default()),
-        Arc::new(InMemoryUserTokenStore::default()),
-        Arc::new(JwtAuth::new("test-secret")),
-        true,
-        AuthCacheConfig::default(),
-    ));
-    let auth_service: Arc<dyn AuthService> = manager.clone();
-    let user_service: Arc<dyn UserService> = manager;
+    let service = Arc::new(FakeAuthService::default());
+    let auth_service: Arc<dyn AuthService> = service.clone();
+    let user_service: Arc<dyn UserService> = service;
     (auth_service, user_service)
 }
 

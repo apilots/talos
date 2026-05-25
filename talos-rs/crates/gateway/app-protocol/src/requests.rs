@@ -4,8 +4,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
 use talos_auth::{
-    AuthResponse, CreateUserTokenRequest, CreateUserTokenResult, LoginRequest, RegisterRequest,
-    UpdateCurrentUserRequest, UserDto, UserTokenMeta,
+    CreateUserTokenRequest, CreateUserTokenResult, UpdateCurrentUserRequest, UserDto, UserTokenMeta,
 };
 use ts_rs::TS;
 
@@ -111,10 +110,6 @@ pub enum ClientMethod {
     ToolList,
     #[serde(rename = "account.get")]
     AccountGet,
-    #[serde(rename = "auth.register")]
-    AuthRegister,
-    #[serde(rename = "auth.login")]
-    AuthLogin,
     #[serde(rename = "auth.logout")]
     AuthLogout,
     #[serde(rename = "user.current")]
@@ -178,8 +173,6 @@ impl ClientMethod {
             Self::AppList => "app.list",
             Self::ToolList => "tool.list",
             Self::AccountGet => "account.get",
-            Self::AuthRegister => "auth.register",
-            Self::AuthLogin => "auth.login",
             Self::AuthLogout => "auth.logout",
             Self::UserCurrent => "user.current",
             Self::UserUpdate => "user.update",
@@ -246,8 +239,6 @@ impl FromStr for ClientMethod {
             "app.list" => Ok(Self::AppList),
             "tool.list" => Ok(Self::ToolList),
             "account.get" => Ok(Self::AccountGet),
-            "auth.register" => Ok(Self::AuthRegister),
-            "auth.login" => Ok(Self::AuthLogin),
             "auth.logout" => Ok(Self::AuthLogout),
             "user.current" => Ok(Self::UserCurrent),
             "user.update" => Ok(Self::UserUpdate),
@@ -351,10 +342,6 @@ pub enum ClientRequestParams {
     ToolList(ToolListParams),
     #[serde(rename = "account.get")]
     AccountGet(AccountGetParams),
-    #[serde(rename = "auth.register")]
-    AuthRegister(RegisterRequest),
-    #[serde(rename = "auth.login")]
-    AuthLogin(LoginRequest),
     #[serde(rename = "auth.logout")]
     AuthLogout(AuthLogoutParams),
     #[serde(rename = "user.current")]
@@ -481,8 +468,6 @@ impl ClientRequest {
             ClientMethod::AppList => ClientRequestParams::AppList(decode(params_value)?),
             ClientMethod::ToolList => ClientRequestParams::ToolList(decode(params_value)?),
             ClientMethod::AccountGet => ClientRequestParams::AccountGet(decode(params_value)?),
-            ClientMethod::AuthRegister => ClientRequestParams::AuthRegister(decode(params_value)?),
-            ClientMethod::AuthLogin => ClientRequestParams::AuthLogin(decode(params_value)?),
             ClientMethod::AuthLogout => ClientRequestParams::AuthLogout(decode(params_value)?),
             ClientMethod::UserCurrent => ClientRequestParams::UserCurrent(decode(params_value)?),
             ClientMethod::UserUpdate => ClientRequestParams::UserUpdate(decode(params_value)?),
@@ -965,8 +950,6 @@ pub struct UserTokenDeleteParams {
     pub token_id: String,
 }
 
-pub type AuthRegisterResponse = AuthResponse;
-pub type AuthLoginResponse = AuthResponse;
 pub type UserCurrentResponse = UserDto;
 pub type UserUpdateResponse = UserDto;
 pub type UserTokenListResponse = Vec<UserTokenMeta>;

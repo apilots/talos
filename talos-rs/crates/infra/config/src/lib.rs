@@ -10,10 +10,7 @@
 //! # 环境变量覆盖
 //!
 //! 使用 `${VAR_NAME}` 语法：
-//! ```yaml
-//! gateway:
-//!   jwt_secret: ${TALOS_GATEWAY_JWT_SECRET}
-//! ```
+//! Environment placeholders are expanded in string values.
 //!
 //! # 使用方式
 //!
@@ -40,7 +37,7 @@ pub mod validate;
 
 pub type TalosTimezone = chrono_tz::Tz;
 pub use domains::agent::{AgentConfig, PlannerMode};
-pub use domains::cloud::{CloudAuthConfig, CloudAuthProvider, CloudConfig};
+pub use domains::cloud::{CloudAuthConfig, CloudConfig};
 pub use domains::kernel::{
     AgentKernelCompactionConfig, AgentKernelConfig, AgentKernelOutputConfig,
     AgentKernelTimelineEventsConfig,
@@ -62,7 +59,7 @@ pub use domains::tools::{
     LocalExecToolConfig, McpServerConfig, McpToolConfig, McpTransportConfig, ToolSandboxModeConfig,
     ToolSandboxPolicy, ToolsRuntimeConfig,
 };
-pub use env::{EnvSecretStore, RuntimeEnv, TALOS_GATEWAY_JWT_SECRET};
+pub use env::{EnvSecretStore, RuntimeEnv};
 pub use paths::{
     resolve_runtime_path, resolve_talos_home, sanitize_agent_name, set_talos_home, TalosPaths,
 };

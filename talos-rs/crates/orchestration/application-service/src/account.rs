@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
 use talos_auth::{
-    AdminCreateUserRequest, AdminPatchUserRequest, AuthResponse, AuthService,
-    CreateUserTokenResult, LoginRequest, RegisterRequest, RequestIdentity,
-    UpdateCurrentUserRequest, UserDto, UserService, UserTokenMeta,
+    AdminCreateUserRequest, AdminPatchUserRequest, AuthService, CreateUserTokenResult,
+    RequestIdentity, UpdateCurrentUserRequest, UserDto, UserService, UserTokenMeta,
 };
 use talos_error::TalosResult;
 
@@ -19,14 +18,6 @@ impl AccountService {
             auth_service,
             user_service,
         }
-    }
-
-    pub async fn register(&self, request: RegisterRequest) -> TalosResult<AuthResponse> {
-        self.auth_service.register(request).await
-    }
-
-    pub async fn login(&self, request: LoginRequest) -> TalosResult<AuthResponse> {
-        self.auth_service.login(request).await
     }
 
     pub async fn logout(&self, actor: &RequestIdentity) -> TalosResult<()> {

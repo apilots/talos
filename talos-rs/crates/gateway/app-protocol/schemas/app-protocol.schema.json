@@ -531,8 +531,6 @@
         "app.list",
         "tool.list",
         "account.get",
-        "auth.register",
-        "auth.login",
         "auth.logout",
         "user.current",
         "user.update",
@@ -1356,42 +1354,6 @@
           "properties": {
             "method": {
               "enum": [
-                "auth.register"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/RegisterRequest"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "auth.login"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/LoginRequest"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
                 "auth.logout"
               ],
               "type": "string"
@@ -1805,21 +1767,6 @@
       ],
       "type": "object"
     },
-    "LoginRequest": {
-      "properties": {
-        "password": {
-          "type": "string"
-        },
-        "username": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "password",
-        "username"
-      ],
-      "type": "object"
-    },
     "MemoryFileListParams": {
       "properties": {
         "limit": {
@@ -2101,28 +2048,6 @@
       "required": [
         "major",
         "minor"
-      ],
-      "type": "object"
-    },
-    "RegisterRequest": {
-      "properties": {
-        "email": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "password": {
-          "type": "string"
-        },
-        "username": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "password",
-        "username"
       ],
       "type": "object"
     },

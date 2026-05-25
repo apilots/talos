@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Talos - Authentication Layer (JWT/Device Pairing)"
+description = "Talos - Cloud authentication contract"
 repository.workspace = true
 
 [dependencies]
@@ -12,12 +12,8 @@ repository.workspace = true
 tokio = { workspace = true }
 async-trait = { workspace = true }
 
-# JWT
-jsonwebtoken = "9"
-
 # Error handling
 talos-error = { path = "../error" }
-talos-storage = { path = "../storage" }
 
 # Serialization
 serde = { workspace = true }
@@ -25,9 +21,6 @@ serde_json = { workspace = true }
 reqwest = { workspace = true }
 schemars = { workspace = true, features = ["derive"] }
 ts-rs = { workspace = true }
-base64 = { workspace = true }
-sha2 = { workspace = true }
-moka = { workspace = true }
 
 # Logging
 tracing = { workspace = true }
@@ -35,5 +28,3 @@ tracing = { workspace = true }
 # Utils
 uuid = { workspace = true }
 rand = "0.8"
-argon2 = "0.5"
-chrono = { workspace = true }

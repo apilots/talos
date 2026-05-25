@@ -6,31 +6,19 @@ use axum::response::Json;
 use serde_json::{json, Value};
 
 use talos_auth::{
-    AdminCreateUserRequest, AdminPatchUserRequest, CreateUserTokenRequest, LoginRequest,
-    RegisterRequest, RequestIdentity, UpdateCurrentUserRequest,
+    AdminCreateUserRequest, AdminPatchUserRequest, CreateUserTokenRequest, RequestIdentity,
+    UpdateCurrentUserRequest,
 };
 
 use super::errors::ApiError;
 use super::state::HttpApiState;
 
-pub(super) async fn register_handler(
-    State(state): State<Arc<HttpApiState>>,
-    Json(request): Json<RegisterRequest>,
-) -> Result<Json<Value>, ApiError> {
-    let response = state
-        .account
-        .register(request)
-        .await
-        .map_err(map_auth_error)?;
-    Ok(Json(json!(response)))
-}
-
-pub(super) async fn login_handler(
-    State(state): State<Arc<HttpApiState>>,
-    Json(request): Json<LoginRequest>,
-) -> Result<Json<Value>, ApiError> {
-    let response = state.account.login(request).await.map_err(map_auth_error)?;
-    Ok(Json(json!(response)))
+pub(super) async fn local_auth_removed_handler() -> Result<Json<Value>, ApiError> {
+    Err(ApiError::new(
+        StatusCode::GONE,
+        "local_auth_removed",
+        "Talos local login and registration have moved to Talos Cloud",
+    ))
 }
 
 pub(super) async fn logout_handler(

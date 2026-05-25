@@ -56,8 +56,8 @@ use self::sessions::{
 use self::state::HttpApiState;
 use self::user_profile::{
     create_user_token_handler, current_user_handler, delete_user_token_handler,
-    list_user_tokens_handler, login_handler, logout_handler, patch_current_user_handler,
-    register_handler,
+    list_user_tokens_handler, local_auth_removed_handler, logout_handler,
+    patch_current_user_handler,
 };
 use self::workspace_docs::{
     get_workspace_doc_handler, list_workspace_docs_handler, put_workspace_doc_handler,
@@ -77,7 +77,6 @@ pub struct HttpServer {
     base_config: TalosConfig,
     host: String,
     port: u16,
-    jwt_secret: String,
     auth_disabled: bool,
     webui_dir: Option<PathBuf>,
     lifecycle: Arc<ServerLifecycle>,
@@ -103,17 +102,10 @@ impl HttpServer {
             base_config,
             host: host.into(),
             port,
-            jwt_secret: String::new(),
             auth_disabled: false,
             webui_dir: None,
             lifecycle: Arc::new(ServerLifecycle::new()),
         }
-    }
-
-    /// Override JWT secret used by the HTTP auth middleware.
-    pub fn with_jwt_secret(mut self, jwt_secret: impl Into<String>) -> Self {
-        self.jwt_secret = jwt_secret.into();
-        self
     }
 
     /// Disable auth checks for local mock mode.
@@ -165,8 +157,8 @@ impl HttpServer {
 
         let mut app = Router::new()
             .route("/health", get(health_handler))
-            .route("/v1/auth/register", post(register_handler))
-            .route("/v1/auth/login", post(login_handler))
+            .route("/v1/auth/register", post(local_auth_removed_handler))
+            .route("/v1/auth/login", post(local_auth_removed_handler))
             .route("/v1/models", get(list_models_handler))
             .route("/v1/auth/logout", post(logout_handler))
             .route(

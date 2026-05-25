@@ -7,11 +7,9 @@ import type {
   DocUpdateRequest,
   LlmConfig,
   LlmConfigRead,
-  LoginRequest,
   MemoryFileListParams,
   MemorySearchParams,
   PaginatedResponse,
-  RegisterRequest,
   SessionQuery,
   SessionUpdate,
   TalosMessageAck,
@@ -131,8 +129,6 @@ export function createDesktopTalosClient(
 
   return {
     auth: {
-      register: (request: RegisterRequest) => client.authRegister(request),
-      login: (request: LoginRequest) => client.authLogin(request),
       logout: () => client.authLogout().then(() => undefined),
     },
     user: {

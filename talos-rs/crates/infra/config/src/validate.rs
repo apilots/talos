@@ -423,11 +423,6 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             "gateway.port must be > 0".to_string(),
         ));
     }
-    if config.gateway.access_token_ttl_days == 0 {
-        return Err(TalosError::InvalidConfiguration(
-            "gateway.access_token_ttl_days must be > 0".to_string(),
-        ));
-    }
     if config.gateway.auth_cache.ttl_seconds == 0 {
         return Err(TalosError::InvalidConfiguration(
             "gateway.auth_cache.ttl_seconds must be > 0".to_string(),
@@ -445,17 +440,10 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
         ));
     }
 
-    if config.gateway.auth && !uses_cloud_auth(config) {
-        let Some(secret) = config.gateway.jwt_secret.as_ref() else {
-            return Err(TalosError::InvalidConfiguration(
-                "gateway.jwt_secret is required when gateway.auth=true".to_string(),
-            ));
-        };
-        if secret.trim().is_empty() || is_unresolved_placeholder(secret) {
-            return Err(TalosError::InvalidConfiguration(
-                "gateway.jwt_secret is empty or unresolved placeholder".to_string(),
-            ));
-        }
+    if config.gateway.auth && !config.cloud.enabled {
+        return Err(TalosError::InvalidConfiguration(
+            "cloud.enabled=true is required when gateway.auth=true".to_string(),
+        ));
     }
 
     if config.logging.level.trim().is_empty() || is_unresolved_placeholder(&config.logging.level) {
@@ -495,9 +483,4 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
     }
 
     Ok(())
-}
-
-fn uses_cloud_auth(config: &crate::Config) -> bool {
-    config.cloud.enabled
-        && config.cloud.auth.provider == crate::domains::cloud::CloudAuthProvider::Cloud
 }

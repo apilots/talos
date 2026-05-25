@@ -5,10 +5,7 @@ use std::time::Duration;
 use talos_agent::{AgentHarness, AgentOrchestrator};
 use talos_app_server::BackgroundTaskDrain;
 use talos_application_service::TalosApplicationService;
-use talos_auth::{
-    AuthCacheConfig, AuthManager, AuthService, CloudAuthService, DatabaseUserStore, JwtAuth,
-    JwtConfig, UserService, UserStore, UserTokenStore,
-};
+use talos_auth::{AuthService, CloudAuthService, UserService};
 use talos_channel::{ChannelServer, TelegramChannel};
 use talos_config::{Config, LlmConfigManager, LlmConfigService, TalosPaths, YamlLlmConfigStore};
 use talos_coordinator::{Coordinator, CoordinatorImpl};
@@ -335,20 +332,8 @@ pub async fn start_server(
         .and_then(|value| value.auth_disabled)
         .unwrap_or(!config.gateway.auth);
 
-    // gateway.auth only controls HTTP auth middleware.
-    // PAT authentication is part of verify_access_token and active whenever auth middleware is enabled.
     if auth_disabled {
         http_server = http_server.with_auth_disabled(true);
-    } else if config.gateway.auth
-        && !(config.cloud.enabled
-            && config.cloud.auth.provider == talos_config::CloudAuthProvider::Cloud)
-    {
-        http_server =
-            http_server.with_jwt_secret(config.gateway.jwt_secret.clone().ok_or_else(|| {
-                TalosError::InvalidConfiguration(
-                    "gateway.jwt_secret is required when gateway.auth=true".to_string(),
-                )
-            })?);
     }
 
     if let Some(webui_dir) = options.as_ref().and_then(|value| value.webui_dir.clone()) {
@@ -435,10 +420,6 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
             gc_batch_size: config.agent.kernel.timeline_events.gc_batch_size,
         },
     ));
-    let user_store_impl = Arc::new(DatabaseUserStore::new(storage.clone()).await?);
-    let user_store: Arc<dyn UserStore> = user_store_impl.clone();
-    let token_store: Arc<dyn UserTokenStore> = user_store_impl;
-
     let router: Arc<dyn Router> = Arc::new(RouterImpl::new());
     if let Err(err) = router
         .add_binding(Binding {
@@ -488,34 +469,9 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
     let request_handler: Arc<dyn RequestHandler> = coordinator.clone();
     let session_runtime: Arc<dyn SessionRuntime> = coordinator.clone();
     let gateway: Arc<dyn Gateway> = Arc::new(GatewayImpl::new(request_handler.clone()));
-    let jwt_auth = Arc::new(JwtAuth::with_config(JwtConfig {
-        secret: config
-            .gateway
-            .jwt_secret
-            .clone()
-            .unwrap_or_else(|| "talos-dev-jwt-secret".to_string()),
-        expiry_days: config.gateway.access_token_ttl_days,
-        issuer: "talos".to_string(),
-    }));
-    let auth_manager = Arc::new(AuthManager::new(
-        user_store,
-        token_store,
-        jwt_auth,
-        config.gateway.allow_register,
-        AuthCacheConfig {
-            enabled: config.gateway.auth_cache.enabled,
-            ttl_seconds: config.gateway.auth_cache.ttl_seconds,
-        },
-    ));
-    let (auth_service, user_service): (Arc<dyn AuthService>, Arc<dyn UserService>) =
-        if config.cloud.enabled
-            && config.cloud.auth.provider == talos_config::CloudAuthProvider::Cloud
-        {
-            let cloud_auth = Arc::new(CloudAuthService::new(config.cloud.api_base_url.clone()));
-            (cloud_auth.clone(), cloud_auth)
-        } else {
-            (auth_manager.clone(), auth_manager.clone())
-        };
+    let cloud_auth = Arc::new(CloudAuthService::new(config.cloud.api_base_url.clone()));
+    let auth_service: Arc<dyn AuthService> = cloud_auth.clone();
+    let user_service: Arc<dyn UserService> = cloud_auth;
 
     let config_path = TalosPaths::resolve().config_file;
     let llm_store = Arc::new(YamlLlmConfigStore::new(config_path));

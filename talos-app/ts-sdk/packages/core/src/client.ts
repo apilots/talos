@@ -14,9 +14,6 @@ import type {
   ProjectPatch,
   ProjectRecord,
   PaginatedResponse,
-  RegisterRequest,
-  LoginRequest,
-  AuthResponse,
   CreateUserTokenRequest,
   CreateUserTokenResult,
   UpdateCurrentUserRequest,
@@ -92,18 +89,6 @@ export class TalosClient {
   }
 
   auth = {
-    register: async (request: RegisterRequest): Promise<AuthResponse> => {
-      return this.http.request<AuthResponse>(this.url("/v1/auth/register"), {
-        method: "POST",
-        body: JSON.stringify(request),
-      });
-    },
-    login: async (request: LoginRequest): Promise<AuthResponse> => {
-      return this.http.request<AuthResponse>(this.url("/v1/auth/login"), {
-        method: "POST",
-        body: JSON.stringify(request),
-      });
-    },
     logout: async (): Promise<void> => {
       await this.http.request<void>(this.url("/v1/auth/logout"), {
         method: "POST",

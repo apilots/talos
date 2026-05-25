@@ -1,9 +1,6 @@
 import type {
   AdminCreateUserRequest,
   AdminPatchUserRequest,
-  AuthResponse,
-  LoginRequest,
-  RegisterRequest,
   UpdateCurrentUserRequest,
   UserDto,
 } from "@talos/sdk-browser";
@@ -18,14 +15,6 @@ export interface HealthResponse {
   service: string;
   timestamp: string;
   auth_enabled: boolean;
-}
-
-export async function registerUser(request: RegisterRequest): Promise<AuthResponse> {
-  return getTalosClient().auth.register(request);
-}
-
-export async function loginUser(request: LoginRequest): Promise<AuthResponse> {
-  return getTalosClient().auth.login(request);
 }
 
 export async function logoutUser(): Promise<void> {

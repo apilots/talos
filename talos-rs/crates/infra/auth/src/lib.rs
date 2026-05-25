@@ -1,19 +1,10 @@
 mod cloud;
-mod jwt;
 mod pairing;
-mod password;
 mod service;
-mod store;
 
 pub use cloud::CloudAuthService;
-pub use jwt::{AccessTokenClaims, IssuedAccessToken, JwtAuth, JwtConfig};
 pub use pairing::{DevicePairing, PairingCode, PairingResult};
-pub use password::{validate_password, PasswordService};
-pub use service::{AuthCacheConfig, AuthManager, AuthService, UserService};
-pub use store::{
-    DatabaseUserStore, DatabaseUserTokenStore, InMemoryUserStore, InMemoryUserTokenStore,
-    UserStore, UserTokenStore,
-};
+pub use service::{AuthCacheConfig, AuthService, UserService};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

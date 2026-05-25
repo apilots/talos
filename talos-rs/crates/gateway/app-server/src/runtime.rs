@@ -367,21 +367,14 @@ async fn handle_request(
 }
 
 async fn resolve_request_actor(
-    state: &RuntimeState,
+    _state: &RuntimeState,
     validator: &dyn ActorCredentialValidator,
     config: &AppServerConfig,
-    method: ClientMethod,
+    _method: ClientMethod,
     request_actor_credentials: Option<ActorCredentials>,
 ) -> Result<Actor, AppServerErrorBody> {
     if !config.auth_enabled {
         return Ok(Actor::full("anonymous"));
-    }
-
-    if is_public_auth_method(method) {
-        return state
-            .actor
-            .clone()
-            .ok_or_else(AppServerErrorBody::not_initialized);
     }
 
     let credentials = request_actor_credentials.ok_or_else(|| {
@@ -392,10 +385,6 @@ async fn resolve_request_actor(
         )
     })?;
     validator.validate(&credentials).await
-}
-
-fn is_public_auth_method(method: ClientMethod) -> bool {
-    matches!(method, ClientMethod::AuthLogin | ClientMethod::AuthRegister)
 }
 
 fn spawn_subscription(

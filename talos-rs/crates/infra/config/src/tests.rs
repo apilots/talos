@@ -6,8 +6,6 @@ fn test_default_config() {
     assert_eq!(config.agent.name, "talos");
     assert_eq!(config.gateway.port, 18789);
     assert!(!config.gateway.auth);
-    assert_eq!(config.gateway.access_token_ttl_days, 30);
-    assert!(!config.gateway.allow_register);
     assert!(config.gateway.auth_cache.enabled);
     assert_eq!(config.gateway.auth_cache.ttl_seconds, 300);
     assert_eq!(config.storage.database_type, DatabaseType::Sqlite);
@@ -173,7 +171,6 @@ gateway:
   host: 127.0.0.1
   port: 18789
   auth: false
-  jwt_secret: jwt
 logging:
   level: info
   format: text
@@ -206,13 +203,12 @@ fn test_expand_env_in_string() {
 }
 
 #[test]
-fn test_validate_runtime_requires_jwt_secret_when_auth_enabled() {
+fn test_validate_runtime_requires_cloud_when_auth_enabled() {
     let mut config = Config::default();
     config.gateway.auth = true;
-    config.gateway.jwt_secret = None;
     assert!(config.validate_runtime().is_err());
 
-    config.gateway.jwt_secret = Some("jwt-secret".to_string());
+    config.cloud.enabled = true;
     config.llm.provider = "ollama".to_string();
     config.llm.model = "qwen-max".to_string();
     config.llm.ollama.base_url = Some("http://localhost:11434".to_string());
@@ -221,12 +217,10 @@ fn test_validate_runtime_requires_jwt_secret_when_auth_enabled() {
 }
 
 #[test]
-fn test_validate_runtime_allows_cloud_auth_without_jwt_secret() {
+fn test_validate_runtime_allows_cloud_auth_without_local_secret() {
     let mut config = Config::default();
     config.gateway.auth = true;
-    config.gateway.jwt_secret = None;
     config.cloud.enabled = true;
-    config.cloud.auth.provider = crate::CloudAuthProvider::Cloud;
     config.llm.provider = "ollama".to_string();
     config.llm.model = "qwen-max".to_string();
     config.llm.ollama.base_url = Some("http://localhost:11434".to_string());
@@ -332,18 +326,6 @@ models:
 }
 
 #[test]
-fn test_validate_runtime_rejects_zero_access_token_ttl() {
-    let mut config = Config::default();
-    config.gateway.access_token_ttl_days = 0;
-    config.llm.provider = "ollama".to_string();
-    config.llm.model = "qwen-max".to_string();
-    config.agent.model = "qwen-max".to_string();
-    config.llm.ollama.base_url = Some("http://localhost:11434".to_string());
-
-    assert!(config.validate_runtime().is_err());
-}
-
-#[test]
 fn test_validate_runtime_rejects_zero_auth_cache_ttl() {
     let mut config = Config::default();
     config.gateway.auth_cache.ttl_seconds = 0;
@@ -380,7 +362,6 @@ gateway:
   host: 127.0.0.1
   port: 18789
   auth: false
-  jwt_secret: jwt
 logging:
   level: info
   format: text
@@ -500,7 +481,6 @@ gateway:
   host: 127.0.0.1
   port: 18789
   auth: false
-  jwt_secret: jwt
 logging:
   level: info
   format: text
@@ -614,7 +594,6 @@ gateway:
   host: 127.0.0.1
   port: 18789
   auth: false
-  jwt_secret: jwt
 logging:
   level: info
   format: text

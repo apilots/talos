@@ -29,13 +29,7 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
     isRecord(params) &&
     (params.role === undefined || userRole(params.role)),
   "app.list": emptyParams,
-  "auth.login": (params) => hasString(params, "username") && hasString(params, "password"),
   "auth.logout": emptyParams,
-  "auth.register": (params) =>
-    hasString(params, "username") &&
-    hasString(params, "password") &&
-    isRecord(params) &&
-    (params.email === undefined || params.email === null || typeof params.email === "string"),
   "config.read": emptyParams,
   "config.value.write": llmConfigWriteParams,
   "config.batch.write": (params) =>

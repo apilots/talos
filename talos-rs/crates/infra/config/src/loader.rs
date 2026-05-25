@@ -3,10 +3,7 @@ use std::path::{Path, PathBuf};
 
 use talos_error::TalosResult;
 
-use crate::{
-    env::{RuntimeEnv, TALOS_GATEWAY_JWT_SECRET},
-    validate, Config, EnvSecretStore, TalosPaths,
-};
+use crate::{env::RuntimeEnv, validate, Config, EnvSecretStore, TalosPaths};
 
 const TALOS_RESOURCE_DIR_ENV: &str = "TALOS_RESOURCE_DIR";
 const DEFAULT_CONFIG_RELATIVE_PATH: &str = "conf/talos.yaml";
@@ -136,7 +133,6 @@ fn ensure_runtime_env_file(paths: &TalosPaths) -> TalosResult<()> {
     paths.ensure_base_dirs()?;
     let env_store = EnvSecretStore::new(paths.env_file.clone());
     env_store.ensure_file()?;
-    env_store.ensure_random(TALOS_GATEWAY_JWT_SECRET)?;
     Ok(())
 }
 
@@ -243,7 +239,7 @@ mod tests {
         let paths = TalosPaths::from_home(dir.path().join(".talos"));
         let resource_dir = write_resource_template(
             dir.path(),
-            "gateway:\n  auth: true\n  jwt_secret: ${TALOS_GATEWAY_JWT_SECRET}\nllm:\n  anthropic:\n    api_key: ${TALOS_LLM_ANTHROPIC_API_KEY}\n",
+            "gateway:\n  auth: true\ncloud:\n  enabled: true\nllm:\n  anthropic:\n    api_key: ${TALOS_LLM_ANTHROPIC_API_KEY}\n",
         );
 
         paths
@@ -261,9 +257,8 @@ mod tests {
         let env = std::fs::read_to_string(&paths.env_file).expect("env file should be written");
         assert!(config.contains("gateway:"));
         assert!(config.contains("auth: true"));
-        assert!(config.contains("${TALOS_GATEWAY_JWT_SECRET}"));
         assert!(config.contains("${TALOS_LLM_ANTHROPIC_API_KEY}"));
-        assert!(env.contains("TALOS_GATEWAY_JWT_SECRET="));
+        assert!(env.is_empty());
     }
 
     #[test]
@@ -272,14 +267,14 @@ mod tests {
         let paths = TalosPaths::from_home(dir.path().join(".talos"));
         let resource_dir = write_resource_template(
             dir.path(),
-            "gateway:\n  auth: true\n  jwt_secret: ${TALOS_GATEWAY_JWT_SECRET}\n",
+            "gateway:\n  auth: true\ncloud:\n  enabled: true\n",
         );
         paths
             .ensure_base_dirs()
             .expect("base dirs should be created");
         std::fs::write(&paths.config_file, "gateway:\n  host: custom\n")
             .expect("config should write");
-        std::fs::write(&paths.env_file, "TALOS_GATEWAY_JWT_SECRET=existing\n")
+        std::fs::write(&paths.env_file, "TALOS_CLOUD_API_TOKEN=existing\n")
             .expect("env should write");
 
         if !paths.config_file.exists() {
@@ -294,7 +289,7 @@ mod tests {
         let config = std::fs::read_to_string(&paths.config_file).expect("config should read");
         let env = std::fs::read_to_string(&paths.env_file).expect("env should read");
         assert_eq!(config, "gateway:\n  host: custom\n");
-        assert_eq!(env, "TALOS_GATEWAY_JWT_SECRET=existing\n");
+        assert_eq!(env, "TALOS_CLOUD_API_TOKEN=existing\n");
     }
 
     #[test]

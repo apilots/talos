@@ -427,24 +427,6 @@ impl AppServerApplication for TalosApplicationAdapter {
                 "created_at": 0,
                 "updated_at": 0
             })),
-            ClientRequestParams::AuthRegister(params) => {
-                let response = self
-                    .app
-                    .account
-                    .register(params)
-                    .await
-                    .map_err(AppServerErrorBody::from_talos_error)?;
-                to_value(response)
-            }
-            ClientRequestParams::AuthLogin(params) => {
-                let response = self
-                    .app
-                    .account
-                    .login(params)
-                    .await
-                    .map_err(AppServerErrorBody::from_talos_error)?;
-                to_value(response)
-            }
             ClientRequestParams::AuthLogout(_) => {
                 self.app
                     .account

@@ -132,9 +132,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_auth::CreateUserTokenResult>());
     output.push_str(&export::<talos_auth::CreateUserTokenRequest>());
     output.push_str(&export::<talos_auth::Capabilities>());
-    output.push_str(&export::<talos_auth::AuthResponse>());
-    output.push_str(&export::<talos_auth::RegisterRequest>());
-    output.push_str(&export::<talos_auth::LoginRequest>());
     output.push_str(&export::<talos_auth::UpdateCurrentUserRequest>());
     output.push_str(&export::<crate::requests::OptionalStringPatch>());
     output.push_str(&export::<crate::requests::OptionalPathPatch>());

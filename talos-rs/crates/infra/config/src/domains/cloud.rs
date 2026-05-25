@@ -11,15 +11,7 @@ pub struct CloudConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CloudAuthConfig {
-    pub provider: CloudAuthProvider,
     pub introspection_cache_ttl_seconds: u64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CloudAuthProvider {
-    Local,
-    Cloud,
 }
 
 impl Default for CloudConfig {
@@ -35,7 +27,6 @@ impl Default for CloudConfig {
 impl Default for CloudAuthConfig {
     fn default() -> Self {
         Self {
-            provider: CloudAuthProvider::Local,
             introspection_cache_ttl_seconds: 300,
         }
     }

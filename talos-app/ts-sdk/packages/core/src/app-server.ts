@@ -10,11 +10,8 @@ import type {
   ProjectRecord,
   AdminCreateUserRequest,
   AdminPatchUserRequest,
-  AuthResponse,
   CreateUserTokenRequest,
   CreateUserTokenResult,
-  LoginRequest,
-  RegisterRequest,
   TalosActiveTurn,
   TalosMessageAck,
   TalosSessionHistorySnapshot,
@@ -111,14 +108,6 @@ export class AppServerClient {
 
   getAccount(): Promise<unknown> {
     return this.transport.request("account.get", {});
-  }
-
-  authRegister(request: RegisterRequest): Promise<AuthResponse> {
-    return this.transport.request("auth.register", request);
-  }
-
-  authLogin(request: LoginRequest): Promise<AuthResponse> {
-    return this.transport.request("auth.login", request);
   }
 
   authLogout(): Promise<unknown> {

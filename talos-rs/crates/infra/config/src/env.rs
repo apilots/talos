@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use talos_error::{TalosError, TalosResult};
 
 pub const TALOS_ENV_PREFIX: &str = "TALOS_";
-pub const TALOS_GATEWAY_JWT_SECRET: &str = "TALOS_GATEWAY_JWT_SECRET";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RuntimeEnv {
@@ -205,7 +204,7 @@ mod tests {
     fn parse_dotenv_filters_non_talos_keys() {
         let parsed = parse_dotenv_filtered(
             r#"
-TALOS_GATEWAY_JWT_SECRET=secret
+TALOS_CLOUD_API_TOKEN=secret
 ANTHROPIC_API_KEY=ignored
 export TALOS_LLM_ANTHROPIC_API_KEY="sk-test"
 INVALID-NAME=ignored
@@ -213,7 +212,7 @@ INVALID-NAME=ignored
         );
 
         assert_eq!(
-            parsed.get("TALOS_GATEWAY_JWT_SECRET").map(String::as_str),
+            parsed.get("TALOS_CLOUD_API_TOKEN").map(String::as_str),
             Some("secret")
         );
         assert_eq!(
@@ -229,13 +228,13 @@ INVALID-NAME=ignored
     fn process_env_overrides_dotenv() {
         let dir = tempfile::tempdir().expect("temp dir should be created");
         let env_file = dir.path().join(".env");
-        std::fs::write(&env_file, "TALOS_GATEWAY_JWT_SECRET=from-file\n")
+        std::fs::write(&env_file, "TALOS_CLOUD_API_TOKEN=from-file\n")
             .expect("env file should write");
 
         let env =
-            RuntimeEnv::load_from_iter(&env_file, [("TALOS_GATEWAY_JWT_SECRET", "from-process")])
+            RuntimeEnv::load_from_iter(&env_file, [("TALOS_CLOUD_API_TOKEN", "from-process")])
                 .expect("runtime env should load");
 
-        assert_eq!(env.get("TALOS_GATEWAY_JWT_SECRET"), Some("from-process"));
+        assert_eq!(env.get("TALOS_CLOUD_API_TOKEN"), Some("from-process"));
     }
 }
