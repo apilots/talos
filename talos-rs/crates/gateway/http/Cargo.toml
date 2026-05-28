@@ -28,3 +28,4 @@ async-trait = "0.1"
 
 [dev-dependencies]
 talos-app-server = { workspace = true }
+tempfile = "3"

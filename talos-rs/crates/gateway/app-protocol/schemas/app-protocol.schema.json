@@ -340,6 +340,89 @@
       ],
       "type": "object"
     },
+    "AuthSessionClearParams": {
+      "type": "object"
+    },
+    "AuthSessionReadParams": {
+      "type": "object"
+    },
+    "AuthSessionSnapshot": {
+      "properties": {
+        "access_token": {
+          "type": "string"
+        },
+        "cloud_api_base_url": {
+          "type": "string"
+        },
+        "expires_at_ms": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last_used_at_ms": {
+          "type": "string"
+        },
+        "schema_version": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "token_type": {
+          "type": "string"
+        },
+        "user": {
+          "$ref": "#/definitions/AuthSessionUserSnapshot"
+        }
+      },
+      "required": [
+        "access_token",
+        "cloud_api_base_url",
+        "last_used_at_ms",
+        "schema_version",
+        "token_type",
+        "user"
+      ],
+      "type": "object"
+    },
+    "AuthSessionStoreParams": {
+      "properties": {
+        "session": {
+          "$ref": "#/definitions/AuthSessionSnapshot"
+        }
+      },
+      "required": [
+        "session"
+      ],
+      "type": "object"
+    },
+    "AuthSessionUserSnapshot": {
+      "properties": {
+        "email": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "$ref": "#/definitions/UserRole"
+        },
+        "user_id": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "user_id",
+        "username"
+      ],
+      "type": "object"
+    },
     "ClientCapabilities": {
       "properties": {
         "protocol_version": {
@@ -424,6 +507,9 @@
         "tool.list",
         "account.get",
         "auth.logout",
+        "auth.session.read",
+        "auth.session.store",
+        "auth.session.clear",
         "user.current",
         "memory.search"
       ],
@@ -1176,6 +1262,60 @@
             },
             "params": {
               "$ref": "#/definitions/AuthLogoutParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "auth.session.read"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AuthSessionReadParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "auth.session.store"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AuthSessionStoreParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "auth.session.clear"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AuthSessionClearParams"
             }
           },
           "required": [
@@ -3602,6 +3742,13 @@
     },
     "UserCurrentParams": {
       "type": "object"
+    },
+    "UserRole": {
+      "enum": [
+        "user",
+        "admin"
+      ],
+      "type": "string"
     },
     "WorkspaceDocListParams": {
       "type": "object"

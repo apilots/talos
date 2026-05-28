@@ -3,7 +3,6 @@
 //! Gateway mode supports real session APIs and SSE streaming.
 
 mod app;
-mod auth;
 mod chat;
 mod client;
 mod commands;
@@ -21,7 +20,6 @@ mod transcript;
 mod types;
 mod utils;
 
-pub use auth::{clear_auth_session, read_auth_session, write_auth_session, AuthSession};
 pub use client::GatewayClient;
 pub use run::run_tui_app_with_gateway_client;
 use types::*;

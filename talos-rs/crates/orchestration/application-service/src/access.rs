@@ -22,6 +22,7 @@ pub enum ActorAccess {
 pub struct Actor {
     pub user_id: String,
     pub access: ActorAccess,
+    pub access_token: Option<String>,
 }
 
 impl Actor {
@@ -29,6 +30,7 @@ impl Actor {
         Self {
             user_id: user_id.into(),
             access: ActorAccess::Regular,
+            access_token: None,
         }
     }
 
@@ -36,11 +38,17 @@ impl Actor {
         Self {
             user_id: user_id.into(),
             access: ActorAccess::Full,
+            access_token: None,
         }
     }
 
     pub fn has_full_access(&self) -> bool {
         self.access == ActorAccess::Full
+    }
+
+    pub fn with_access_token(mut self, token: impl Into<String>) -> Self {
+        self.access_token = Some(token.into());
+        self
     }
 }
 

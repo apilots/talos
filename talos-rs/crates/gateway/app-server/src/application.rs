@@ -4,21 +4,25 @@ use serde_json::{json, Value};
 use talos_app_protocol::errors::AppServerErrorBody;
 use talos_app_protocol::requests::{
     AdminProjectListResponse, AdminSessionListParams, AdminSessionListResponse,
-    AdminSessionPagination, ClientRequest, ClientRequestParams, ConfigBatchWriteParams,
-    ConfigReadParams, ConfigValueWriteParams, EventSubscribeParams, MemoryFileReadParams,
-    MemoryFileWriteParams, MessageCommandStatus, OptionalPathPatch, OptionalStringPatch,
-    ProjectCreateParams, ProjectPatchParams, ProtocolInputItem, ProtocolTalosContext,
-    SessionCreateParams, SessionListParams, SessionPatchParams, TimelineActiveTurnSnapshot,
-    TimelineActiveTurnStatus, TimelineCursorStatus, TimelinePendingDynamicToolResult,
-    TimelinePendingUserAction, TimelineRecoverySnapshot, TimelineReplay, TurnStartParams,
-    TurnStartResponse,
+    AdminSessionPagination, AuthSessionReadResponse, AuthSessionSnapshot, AuthSessionUserSnapshot,
+    ClientRequest, ClientRequestParams, ConfigBatchWriteParams, ConfigReadParams,
+    ConfigValueWriteParams, EventSubscribeParams, MemoryFileReadParams, MemoryFileWriteParams,
+    MessageCommandStatus, OptionalPathPatch, OptionalStringPatch, ProjectCreateParams,
+    ProjectPatchParams, ProtocolInputItem, ProtocolTalosContext, SessionCreateParams,
+    SessionListParams, SessionPatchParams, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus,
+    TimelineCursorStatus, TimelinePendingDynamicToolResult, TimelinePendingUserAction,
+    TimelineRecoverySnapshot, TimelineReplay, TurnStartParams, TurnStartResponse,
 };
 use talos_application_service::{
     Actor, AdminSessionPage, MemoryDate, MemoryListParams, MemorySearchParams,
     TalosApplicationService, TimelineCursorStatus as ApplicationTimelineCursorStatus,
     TimelineSubscribeParams, TimelineSubscription, TurnRetryRequest, WorkspaceDocService,
 };
-use talos_auth::{AuthScope, RequestIdentity, UserRole};
+use talos_auth::{
+    AuthScope, CloudSessionCache, CloudSessionCacheEntry, CloudSessionCacheManager,
+    CloudSessionUserSnapshot, RequestIdentity, UserRole,
+};
+use talos_config::TalosPaths;
 use talos_error::TalosError;
 use talos_session_store::{
     ActiveTurnRecord, ActiveTurnStatus, IdempotencyStatus, PendingUserAction, TimelineEventId,
@@ -79,6 +83,7 @@ pub struct TalosApplicationAdapter {
     replay_limit: usize,
     drain_provider: Arc<Option<Box<dyn BackgroundTaskDrain>>>,
     tool_registry: Option<Arc<ToolRegistry>>,
+    cloud_session_cache: CloudSessionCacheManager,
 }
 
 impl TalosApplicationAdapter {
@@ -88,6 +93,9 @@ impl TalosApplicationAdapter {
             replay_limit: replay_limit.max(1),
             drain_provider: Arc::new(None),
             tool_registry: None,
+            cloud_session_cache: CloudSessionCacheManager::for_talos_home(
+                TalosPaths::resolve().talos_home,
+            ),
         }
     }
 
@@ -98,6 +106,11 @@ impl TalosApplicationAdapter {
 
     pub fn with_tool_registry(mut self, registry: Arc<ToolRegistry>) -> Self {
         self.tool_registry = Some(registry);
+        self
+    }
+
+    pub fn with_cloud_session_cache(mut self, cache: CloudSessionCache) -> Self {
+        self.cloud_session_cache = CloudSessionCacheManager::new(cache);
         self
     }
 }
@@ -376,6 +389,43 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .account
                     .logout(&request_identity(actor))
                     .await
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                self.cloud_session_cache
+                    .clear()
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(json!({ "success": true }))
+            }
+            ClientRequestParams::AuthSessionRead(_) => {
+                let session = self
+                    .cloud_session_cache
+                    .read_candidate(CloudSessionCache::now_ms())
+                    .map_err(AppServerErrorBody::from_talos_error)?
+                    .map(auth_session_snapshot_from_cache_entry);
+                to_value(AuthSessionReadResponse { session })
+            }
+            ClientRequestParams::AuthSessionStore(params) => {
+                let actor_token = actor.access_token.as_deref().ok_or_else(|| {
+                    AppServerErrorBody::from_talos_error(TalosError::AuthError(
+                        "cloud session store requires verified cloud actor credentials".to_string(),
+                    ))
+                })?;
+                if actor_token != params.session.access_token {
+                    return Err(AppServerErrorBody::from_talos_error(TalosError::AuthError(
+                        "cloud session token does not match actor credentials".to_string(),
+                    )));
+                }
+                let entry = auth_session_cache_entry_from_snapshot(
+                    params.session,
+                    CloudSessionCache::now_ms(),
+                )?;
+                self.cloud_session_cache
+                    .store_verified_session(&entry)
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(json!({ "success": true }))
+            }
+            ClientRequestParams::AuthSessionClear(_) => {
+                self.cloud_session_cache
+                    .clear()
                     .map_err(AppServerErrorBody::from_talos_error)?;
                 to_value(json!({ "success": true }))
             }
@@ -877,8 +927,57 @@ fn request_identity(actor: &Actor) -> RequestIdentity {
         },
         scopes: Vec::<AuthScope>::new(),
         auth_disabled: false,
-        access_token: None,
+        access_token: actor.access_token.clone(),
     }
+}
+
+fn auth_session_snapshot_from_cache_entry(entry: CloudSessionCacheEntry) -> AuthSessionSnapshot {
+    AuthSessionSnapshot {
+        schema_version: entry.schema_version,
+        cloud_api_base_url: entry.cloud_api_base_url,
+        access_token: entry.access_token,
+        token_type: entry.token_type,
+        expires_at_ms: entry.expires_at_ms.map(|value| value.to_string()),
+        last_used_at_ms: entry.last_used_at_ms.to_string(),
+        user: AuthSessionUserSnapshot {
+            user_id: entry.user.user_id,
+            username: entry.user.username,
+            email: entry.user.email,
+            role: entry.user.role,
+        },
+    }
+}
+
+fn auth_session_cache_entry_from_snapshot(
+    snapshot: AuthSessionSnapshot,
+    last_used_at_ms: i64,
+) -> ProtocolResult<CloudSessionCacheEntry> {
+    Ok(CloudSessionCacheEntry {
+        schema_version: snapshot.schema_version,
+        cloud_api_base_url: snapshot.cloud_api_base_url,
+        access_token: snapshot.access_token,
+        token_type: snapshot.token_type,
+        expires_at_ms: parse_optional_i64(snapshot.expires_at_ms.as_deref(), "expires_at_ms")?,
+        last_used_at_ms,
+        user: CloudSessionUserSnapshot {
+            user_id: snapshot.user.user_id,
+            username: snapshot.user.username,
+            email: snapshot.user.email,
+            role: snapshot.user.role,
+        },
+    })
+}
+
+fn parse_optional_i64(value: Option<&str>, field: &str) -> ProtocolResult<Option<i64>> {
+    value.map(|value| parse_i64(value, field)).transpose()
+}
+
+fn parse_i64(value: &str, field: &str) -> ProtocolResult<i64> {
+    value.parse::<i64>().map_err(|err| {
+        AppServerErrorBody::from_talos_error(TalosError::ValidationError(format!(
+            "invalid cloud session {field}: {err}"
+        )))
+    })
 }
 
 fn parse_event_id(value: Option<String>) -> ProtocolResult<Option<TimelineEventId>> {
@@ -911,5 +1010,37 @@ fn expected_version(value: Option<String>) -> ExpectedFileVersion {
     match value {
         Some(version_token) => ExpectedFileVersion::Match { version_token },
         None => ExpectedFileVersion::MustNotExist,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auth_session_store_uses_server_last_used_time() {
+        let client_last_used_at_ms = 9_999_999;
+        let server_last_used_at_ms = 1_000_000;
+
+        let entry = auth_session_cache_entry_from_snapshot(
+            AuthSessionSnapshot {
+                schema_version: 1,
+                cloud_api_base_url: "http://127.0.0.1:8787".to_string(),
+                access_token: "token".to_string(),
+                token_type: "Bearer".to_string(),
+                expires_at_ms: Some("2000000".to_string()),
+                last_used_at_ms: client_last_used_at_ms.to_string(),
+                user: AuthSessionUserSnapshot {
+                    user_id: "user-1".to_string(),
+                    username: "user-1".to_string(),
+                    email: Some("user@example.com".to_string()),
+                    role: UserRole::Admin,
+                },
+            },
+            server_last_used_at_ms,
+        )
+        .expect("snapshot should map");
+
+        assert_eq!(entry.last_used_at_ms, server_last_used_at_ms);
     }
 }

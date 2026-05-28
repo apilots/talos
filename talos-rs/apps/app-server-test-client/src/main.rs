@@ -27,6 +27,8 @@ async fn main() -> Result<()> {
         launch_token: token,
         client_name: "talos-app-server-test-client".to_string(),
         client_version: env!("CARGO_PKG_VERSION").to_string(),
+        actor_credentials: None,
+        use_cloud_session_cache: false,
     })
     .await?;
     match scenario {

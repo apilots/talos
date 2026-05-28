@@ -33,13 +33,16 @@ async fn run_app_server_cli(cli: Cli) -> Result<(), Box<dyn std::error::Error>> 
         .launch_token
         .or_else(|| std::env::var("TALOS_LOCAL_LAUNCH_TOKEN").ok())
         .unwrap_or_else(|| format!("cli-{}", uuid::Uuid::new_v4().simple()));
-    let mut client = AppServerClient::connect(AppServerClientConfig {
+    let config = AppServerClientConfig {
         app_server_bin,
         launch_token,
         client_name: "talos-cli".to_string(),
         client_version: env!("CARGO_PKG_VERSION").to_string(),
-    })
-    .await?;
+        actor_credentials: None,
+        use_cloud_session_cache: false,
+    }
+    .with_cloud_session_cache();
+    let mut client = AppServerClient::connect(config).await?;
 
     let result = match cli.command {
         Commands::Chat(cmd) => execute_app_server_chat_command(&mut client, cmd).await,

@@ -11,6 +11,17 @@ const llmConfigWriteParams = (params: unknown) =>
   isRecord(params) &&
   params.path === "llm" &&
   hasString(params, "value");
+const authSessionStoreParams = (params: unknown) =>
+  isRecord(params) &&
+  isRecord(params.session) &&
+  params.session.schema_version === 1 &&
+  hasString(params.session, "access_token") &&
+  hasString(params.session, "token_type") &&
+  hasString(params.session, "cloud_api_base_url") &&
+  hasString(params.session, "last_used_at_ms") &&
+  isRecord(params.session.user) &&
+  hasString(params.session.user, "user_id") &&
+  hasString(params.session.user, "username");
 
 const DESKTOP_RENDERER_METHOD_GUARDS = {
   "account.get": emptyParams,
@@ -18,6 +29,9 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "admin.session.list": emptyParams,
   "app.list": emptyParams,
   "auth.logout": emptyParams,
+  "auth.session.clear": emptyParams,
+  "auth.session.read": emptyParams,
+  "auth.session.store": authSessionStoreParams,
   "config.read": emptyParams,
   "config.value.write": llmConfigWriteParams,
   "config.batch.write": (params) =>

@@ -16,6 +16,8 @@ import type {
   TalosUsage,
   TimelineRecoverySnapshot,
   UserDto,
+  AuthSessionReadResponse,
+  AuthSessionStoreParams,
   WorkspaceDocDetail,
   WorkspaceDocKind,
   WorkspaceDocSummary,
@@ -106,6 +108,18 @@ export class AppServerClient {
 
   authLogout(): Promise<unknown> {
     return this.transport.request("auth.logout", {});
+  }
+
+  readAuthSession(): Promise<AuthSessionReadResponse> {
+    return this.transport.request("auth.session.read", {});
+  }
+
+  storeAuthSession(params: AuthSessionStoreParams): Promise<unknown> {
+    return this.transport.request("auth.session.store", params);
+  }
+
+  clearAuthSession(): Promise<unknown> {
+    return this.transport.request("auth.session.clear", {});
   }
 
   getCurrentUser(): Promise<UserDto> {

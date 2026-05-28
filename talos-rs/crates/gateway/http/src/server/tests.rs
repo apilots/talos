@@ -721,7 +721,10 @@ impl AuthService for FakeAuthService {
     }
 
     async fn verify_access_token(&self, token: &str) -> TalosResult<RequestIdentity> {
-        Ok(RequestIdentity::mock_admin(token))
+        if token == "reject" {
+            return Err(TalosError::AuthError("invalid token".to_string()));
+        }
+        Ok(RequestIdentity::mock_admin(token).with_access_token(token))
     }
 }
 

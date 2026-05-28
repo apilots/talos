@@ -16,7 +16,6 @@ tokio = { version = "1.0", features = ["full"] }
 talos-error = { workspace = true }
 talos-types = { workspace = true }
 talos-tools-policy = { workspace = true }
-talos-config = { path = "../../crates/infra/config" }
 talos-sdk = { path = "../sdk" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

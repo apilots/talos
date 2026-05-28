@@ -1,6 +1,7 @@
 mod access;
 mod admin_users;
 mod auth;
+mod auth_session;
 mod errors;
 mod events;
 mod lifecycle;
@@ -28,6 +29,9 @@ use self::admin_users::{
     delete_admin_session_handler, list_admin_projects_handler, list_admin_sessions_handler,
 };
 use self::auth::{auth_middleware, lifecycle_gate_middleware};
+use self::auth_session::{
+    clear_auth_session_handler, read_auth_session_handler, store_auth_session_handler,
+};
 use self::events::{
     get_active_turn_handler, recover_timeline_handler, subscribe_timeline_events_handler,
 };
@@ -153,6 +157,12 @@ impl HttpServer {
             .route("/health", get(health_handler))
             .route("/v1/models", get(list_models_handler))
             .route("/v1/auth/logout", post(logout_handler))
+            .route(
+                "/v1/auth/session",
+                get(read_auth_session_handler)
+                    .post(store_auth_session_handler)
+                    .delete(clear_auth_session_handler),
+            )
             .route("/v1/user", get(current_user_handler))
             .route("/v1/admin/sessions", get(list_admin_sessions_handler))
             .route(

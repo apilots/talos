@@ -117,6 +117,12 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::ToolListParams>());
     output.push_str(&export::<crate::requests::AccountGetParams>());
     output.push_str(&export::<crate::requests::AuthLogoutParams>());
+    output.push_str(&export::<crate::requests::AuthSessionReadParams>());
+    output.push_str(&export::<crate::requests::AuthSessionReadResponse>());
+    output.push_str(&export::<crate::requests::AuthSessionStoreParams>());
+    output.push_str(&export::<crate::requests::AuthSessionClearParams>());
+    output.push_str(&export::<crate::requests::AuthSessionSnapshot>());
+    output.push_str(&export::<crate::requests::AuthSessionUserSnapshot>());
     output.push_str(&export::<crate::requests::UserCurrentParams>());
     output.push_str(&export::<crate::requests::MemorySearchParams>());
     output.push_str(&export::<talos_auth::UserRole>());

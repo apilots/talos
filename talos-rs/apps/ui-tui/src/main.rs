@@ -12,13 +12,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let launch_token = option_arg(&args, "--launch-token")
         .or_else(|| std::env::var("TALOS_LOCAL_LAUNCH_TOKEN").ok())
         .unwrap_or_else(|| format!("tui-{}", uuid::Uuid::new_v4().simple()));
-    let client = AppServerClient::connect(AppServerClientConfig {
+    let config = AppServerClientConfig {
         app_server_bin,
         launch_token,
         client_name: "talos-ui-tui".to_string(),
         client_version: env!("CARGO_PKG_VERSION").to_string(),
-    })
-    .await?;
+        actor_credentials: None,
+        use_cloud_session_cache: false,
+    }
+    .with_cloud_session_cache();
+    let client = AppServerClient::connect(config).await?;
     let gateway_client: Arc<dyn talos_ui_tui::GatewayClient> = Arc::new(Mutex::new(client));
     run_tui_app_with_gateway_client(gateway_client, TalosConnectionMode::Embedded).await
 }

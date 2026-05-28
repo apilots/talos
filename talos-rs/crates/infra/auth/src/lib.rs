@@ -1,10 +1,15 @@
 mod cloud;
 mod pairing;
 mod service;
+mod session_cache;
 
 pub use cloud::CloudAuthService;
 pub use pairing::{DevicePairing, PairingCode, PairingResult};
 pub use service::{AuthCacheConfig, AuthService, UserService};
+pub use session_cache::{
+    CloudSessionCache, CloudSessionCacheEntry, CloudSessionCacheManager, CloudSessionUserSnapshot,
+    DEFAULT_CLOUD_SESSION_IDLE_TIMEOUT_MS, DEFAULT_CLOUD_SESSION_TOUCH_INTERVAL_MS,
+};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -108,6 +113,11 @@ impl RequestIdentity {
 
     pub fn has_full_access(&self) -> bool {
         self.auth_disabled || self.is_admin()
+    }
+
+    pub fn with_access_token(mut self, token: impl Into<String>) -> Self {
+        self.access_token = Some(token.into());
+        self
     }
 
     pub fn mock_admin(user_id: impl Into<String>) -> Self {

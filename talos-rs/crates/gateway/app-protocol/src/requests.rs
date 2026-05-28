@@ -101,6 +101,12 @@ pub enum ClientMethod {
     AccountGet,
     #[serde(rename = "auth.logout")]
     AuthLogout,
+    #[serde(rename = "auth.session.read")]
+    AuthSessionRead,
+    #[serde(rename = "auth.session.store")]
+    AuthSessionStore,
+    #[serde(rename = "auth.session.clear")]
+    AuthSessionClear,
     #[serde(rename = "user.current")]
     UserCurrent,
     #[serde(rename = "memory.search")]
@@ -151,6 +157,9 @@ impl ClientMethod {
             Self::ToolList => "tool.list",
             Self::AccountGet => "account.get",
             Self::AuthLogout => "auth.logout",
+            Self::AuthSessionRead => "auth.session.read",
+            Self::AuthSessionStore => "auth.session.store",
+            Self::AuthSessionClear => "auth.session.clear",
             Self::UserCurrent => "user.current",
             Self::MemorySearch => "memory.search",
         }
@@ -209,6 +218,9 @@ impl FromStr for ClientMethod {
             "tool.list" => Ok(Self::ToolList),
             "account.get" => Ok(Self::AccountGet),
             "auth.logout" => Ok(Self::AuthLogout),
+            "auth.session.read" => Ok(Self::AuthSessionRead),
+            "auth.session.store" => Ok(Self::AuthSessionStore),
+            "auth.session.clear" => Ok(Self::AuthSessionClear),
             "user.current" => Ok(Self::UserCurrent),
             "memory.search" => Ok(Self::MemorySearch),
             _ => Err(AppServerErrorBody::method_not_found(value)),
@@ -301,6 +313,12 @@ pub enum ClientRequestParams {
     AccountGet(AccountGetParams),
     #[serde(rename = "auth.logout")]
     AuthLogout(AuthLogoutParams),
+    #[serde(rename = "auth.session.read")]
+    AuthSessionRead(AuthSessionReadParams),
+    #[serde(rename = "auth.session.store")]
+    AuthSessionStore(AuthSessionStoreParams),
+    #[serde(rename = "auth.session.clear")]
+    AuthSessionClear(AuthSessionClearParams),
     #[serde(rename = "user.current")]
     UserCurrent(UserCurrentParams),
     #[serde(rename = "memory.search")]
@@ -406,6 +424,15 @@ impl ClientRequest {
             ClientMethod::ToolList => ClientRequestParams::ToolList(decode(params_value)?),
             ClientMethod::AccountGet => ClientRequestParams::AccountGet(decode(params_value)?),
             ClientMethod::AuthLogout => ClientRequestParams::AuthLogout(decode(params_value)?),
+            ClientMethod::AuthSessionRead => {
+                ClientRequestParams::AuthSessionRead(decode(params_value)?)
+            }
+            ClientMethod::AuthSessionStore => {
+                ClientRequestParams::AuthSessionStore(decode(params_value)?)
+            }
+            ClientMethod::AuthSessionClear => {
+                ClientRequestParams::AuthSessionClear(decode(params_value)?)
+            }
             ClientMethod::UserCurrent => ClientRequestParams::UserCurrent(decode(params_value)?),
             ClientMethod::MemorySearch => ClientRequestParams::MemorySearch(decode(params_value)?),
         };
@@ -824,6 +851,44 @@ pub struct AccountGetParams {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
 pub struct AuthLogoutParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct AuthSessionReadParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct AuthSessionReadResponse {
+    #[serde(default)]
+    pub session: Option<AuthSessionSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct AuthSessionStoreParams {
+    pub session: AuthSessionSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct AuthSessionClearParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct AuthSessionSnapshot {
+    pub schema_version: u32,
+    pub cloud_api_base_url: String,
+    pub access_token: String,
+    pub token_type: String,
+    #[serde(default)]
+    pub expires_at_ms: Option<String>,
+    pub last_used_at_ms: String,
+    pub user: AuthSessionUserSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct AuthSessionUserSnapshot {
+    pub user_id: String,
+    pub username: String,
+    #[serde(default)]
+    pub email: Option<String>,
+    pub role: talos_auth::UserRole,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
 pub struct UserCurrentParams {}

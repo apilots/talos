@@ -367,14 +367,25 @@ async fn handle_request(
 }
 
 async fn resolve_request_actor(
-    _state: &RuntimeState,
+    state: &RuntimeState,
     validator: &dyn ActorCredentialValidator,
     config: &AppServerConfig,
-    _method: ClientMethod,
+    method: ClientMethod,
     request_actor_credentials: Option<ActorCredentials>,
 ) -> Result<Actor, AppServerErrorBody> {
     if !config.auth_enabled {
         return Ok(Actor::full("anonymous"));
+    }
+
+    if matches!(
+        method,
+        ClientMethod::AuthSessionRead | ClientMethod::AuthSessionClear
+    ) && request_actor_credentials.is_none()
+    {
+        return state
+            .actor
+            .clone()
+            .ok_or_else(AppServerErrorBody::not_initialized);
     }
 
     let credentials = request_actor_credentials.ok_or_else(|| {
@@ -794,6 +805,35 @@ mod tests {
 
         assert_eq!(messages[1]["error"]["code"], UNAUTHORIZED);
         assert!(app.dispatched.lock().expect("dispatch lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn auth_enabled_allows_session_cache_read_after_local_initialize() {
+        let app = Arc::new(MockApp::default());
+        let output = run_with_app_validator_and_config(
+            format!(
+                "{}{}",
+                initialize_request("secret"),
+                auth_session_read_request()
+            ),
+            app.clone(),
+            Arc::new(ExistingTokenValidator),
+            AppServerConfig {
+                auth_enabled: true,
+                ..AppServerConfig::default()
+            },
+        )
+        .await;
+        let messages = parse_output(&output);
+
+        assert!(messages[1]["result"]["ok"].as_bool().unwrap_or(false));
+        assert_eq!(
+            app.dispatched_actors
+                .lock()
+                .expect("dispatch actor lock")
+                .as_slice(),
+            &["local-desktop"]
+        );
     }
 
     #[tokio::test]
@@ -1228,6 +1268,18 @@ mod tests {
                     }
                 },
                 "params": { "session_id": "s1" }
+            })
+        )
+    }
+
+    fn auth_session_read_request() -> String {
+        format!(
+            "{}\n",
+            json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "auth.session.read",
+                "params": {}
             })
         )
     }

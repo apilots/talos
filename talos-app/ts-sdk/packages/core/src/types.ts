@@ -41,6 +41,12 @@ export type {
   TalosTurnStartedEvent,
   TurnExecutionMetrics,
 } from "./generated/app-protocol";
+export type {
+  AuthSessionReadResponse,
+  AuthSessionSnapshot,
+  AuthSessionStoreParams,
+  AuthSessionUserSnapshot,
+} from "./generated/app-protocol";
 
 export type TalosConnectionMode = "embedded" | "remote";
 

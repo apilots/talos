@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
-use talos_auth::RequestIdentity;
+use talos_auth::{CloudSessionCache, RequestIdentity};
 
 use super::errors::ApiError;
 use super::state::HttpApiState;
@@ -54,11 +54,23 @@ pub(super) async fn auth_middleware(
         _ => return Err(StatusCode::UNAUTHORIZED),
     };
 
-    let auth_result = state
-        .auth_service
-        .verify_access_token(&token)
-        .await
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let skip_cache_touch = is_session_cache_management_route(path.as_str());
+    let auth_result = match state.auth_service.verify_access_token(&token).await {
+        Ok(identity) => identity,
+        Err(_) => {
+            if !skip_cache_touch {
+                let _ = state
+                    .cloud_session_cache
+                    .clear_rejected_token(&token, CloudSessionCache::now_ms());
+            }
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+    };
+    if !skip_cache_touch {
+        let _ = state
+            .cloud_session_cache
+            .record_verified_token_use(&token, CloudSessionCache::now_ms());
+    }
 
     req.extensions_mut().insert(auth_result);
     Ok(next.run(req).await)
@@ -77,4 +89,8 @@ fn is_removed_local_auth_path(path: &str) -> bool {
         path,
         concat!("/v1/auth/", "register") | concat!("/v1/auth/", "login")
     )
+}
+
+fn is_session_cache_management_route(path: &str) -> bool {
+    path == "/v1/auth/session"
 }

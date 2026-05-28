@@ -10,6 +10,7 @@ serde_json = { workspace = true }
 talos-app-protocol = { workspace = true }
 talos-application-service = { workspace = true }
 talos-auth = { workspace = true }
+talos-config = { workspace = true }
 talos-error = { workspace = true }
 talos-session-store = { path = "../../orchestration/session-store" }
 talos-tools = { workspace = true }
@@ -19,4 +20,5 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
+tempfile = "3"
 tokio = { workspace = true }

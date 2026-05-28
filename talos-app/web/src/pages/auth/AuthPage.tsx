@@ -2,7 +2,7 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { ExternalLink, LogIn, UserPlus } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
-import { getCurrentUser } from "@/features/auth";
+import { getCurrentUser, storeDesktopCloudSession } from "@/features/auth";
 import { useConnectionSettings } from "@/features/connection";
 import { Button } from "@/shared/ui/Button";
 import { Panel } from "@/shared/ui/Panel";
@@ -42,6 +42,7 @@ export function AuthPage() {
           authRole: user.role,
           userId: user.user_id,
         });
+        void storeDesktopCloudSession(accessToken, defaultCloudAuthUrl, user);
         navigate("/", { replace: true });
       })
       .catch(() => {

@@ -19,6 +19,10 @@ pub(super) async fn logout_handler(
         .logout(&actor.0)
         .await
         .map_err(map_auth_error)?;
+    state
+        .cloud_session_cache
+        .clear()
+        .map_err(ApiError::from_talos_error)?;
     Ok(Json(json!({ "success": true })))
 }
 

@@ -1,6 +1,13 @@
 import { useEffect, useRef } from "react";
 
-import { getCurrentUser, getGatewayHealth } from "../api";
+import {
+  clearDesktopCloudSession,
+  getCurrentUser,
+  getCurrentUserWithToken,
+  getGatewayHealth,
+  readDesktopCloudSession,
+  storeDesktopCloudSession,
+} from "../api";
 import { useConnectionSettings } from "@/features/connection";
 
 export function useAuthBootstrap() {
@@ -34,12 +41,27 @@ export function useAuthBootstrap() {
           });
           return;
         }
-        const user = await getCurrentUser();
+        let restoredToken = "";
+        let restoredCloudApiBaseUrl = "";
+        if (!connection.authToken) {
+          const session = await readDesktopCloudSession();
+          if (session?.access_token) {
+            restoredToken = session.access_token;
+            restoredCloudApiBaseUrl = session.cloud_api_base_url;
+          }
+        }
+        const user = restoredToken
+          ? await getCurrentUserWithToken(restoredToken)
+          : await getCurrentUser();
         if (canceled) {
           return;
         }
-        attemptedKeyRef.current = attemptKey;
+        if (restoredToken) {
+          void storeDesktopCloudSession(restoredToken, restoredCloudApiBaseUrl, user);
+        }
+        attemptedKeyRef.current = `${connection.serverUrl}::${restoredToken || connection.authToken || "__anonymous__"}`;
         setConnection({
+          ...(restoredToken ? { authToken: restoredToken } : {}),
           authStatus: "authenticated",
           authUsername: user.username,
           authRole: user.role,
@@ -50,6 +72,7 @@ export function useAuthBootstrap() {
         if (canceled) {
           return;
         }
+        void clearDesktopCloudSession();
         attemptedKeyRef.current = attemptKey;
         setConnection({
           authStatus: "unauthenticated",

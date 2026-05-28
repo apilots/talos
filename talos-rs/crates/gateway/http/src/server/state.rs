@@ -4,7 +4,9 @@ use talos_application_service::{
     AccountService, ConfigService, EventService, MemoryService, TalosApplicationService,
     WorkspaceDocService,
 };
-use talos_auth::AuthService;
+#[cfg(test)]
+use talos_auth::CloudSessionCache;
+use talos_auth::{AuthService, CloudSessionCacheManager};
 #[cfg(test)]
 use talos_session_store::TimelineEventService;
 use talos_types::TalosConfig;
@@ -23,6 +25,7 @@ pub(super) struct HttpApiState {
     pub(super) account: Arc<AccountService>,
     pub(super) base_config: TalosConfig,
     pub(super) auth_service: Arc<dyn AuthService>,
+    pub(super) cloud_session_cache: CloudSessionCacheManager,
     pub(super) auth_disabled: bool,
     pub(super) lifecycle: Arc<ServerLifecycle>,
 }
@@ -47,8 +50,17 @@ impl HttpApiState {
             account: Arc::new(app.account.clone()),
             base_config,
             auth_service,
+            cloud_session_cache: CloudSessionCacheManager::for_talos_home(
+                talos_config::TalosPaths::resolve().talos_home,
+            ),
             auth_disabled,
             lifecycle,
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_cloud_session_cache(mut self, cache: CloudSessionCache) -> Self {
+        self.cloud_session_cache = CloudSessionCacheManager::new(cache);
+        self
     }
 }

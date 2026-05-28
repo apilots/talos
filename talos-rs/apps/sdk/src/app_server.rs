@@ -10,9 +10,10 @@ use talos_app_protocol::events::TimelineSubscriptionNotification;
 use talos_app_protocol::jsonrpc::{JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, RequestId};
 use talos_app_protocol::requests::{
     ActorCredential, ActorCredentials, AdminProjectListParams, AdminProjectListResponse,
-    AdminSessionListParams, AdminSessionListResponse, ClientCapabilities, ClientInfo,
-    ConfigReadParams, ConfigValueWriteParams, EventSubscribeParams, EventSubscribeResponse,
-    EventUnsubscribeParams, EventUnsubscribeResponse, InitializeParams, InitializeResponse,
+    AdminSessionListParams, AdminSessionListResponse, AuthSessionReadParams,
+    AuthSessionReadResponse, ClientCapabilities, ClientInfo, ConfigReadParams,
+    ConfigValueWriteParams, EventSubscribeParams, EventSubscribeResponse, EventUnsubscribeParams,
+    EventUnsubscribeResponse, InitializeParams, InitializeResponse,
     MemoryFileListParams as ProtocolMemoryFileListParams, MemoryFileReadParams,
     MemoryFileWriteParams, MessageCommandStatus as ProtocolMessageCommandStatus, ModelListParams,
     ProjectCreateParams, ProjectDeleteParams, ProjectListParams, ProjectPatchParams,
@@ -45,6 +46,8 @@ pub struct AppServerClientConfig {
     pub launch_token: String,
     pub client_name: String,
     pub client_version: String,
+    pub actor_credentials: Option<ActorCredentials>,
+    pub use_cloud_session_cache: bool,
 }
 
 impl AppServerClientConfig {
@@ -60,7 +63,14 @@ impl AppServerClientConfig {
             launch_token,
             client_name: "talos-rust-sdk".to_string(),
             client_version: env!("CARGO_PKG_VERSION").to_string(),
+            actor_credentials: None,
+            use_cloud_session_cache: false,
         })
+    }
+
+    pub fn with_cloud_session_cache(mut self) -> Self {
+        self.use_cloud_session_cache = true;
+        self
     }
 }
 
@@ -72,6 +82,8 @@ pub struct AppServerClient {
     subscription_senders: Arc<Mutex<HashMap<String, SubscriptionStream>>>,
     events: mpsc::Receiver<TimelineEventEnvelope>,
     notifications: mpsc::Receiver<TimelineSubscriptionNotification>,
+    actor_credentials: Option<ActorCredentials>,
+    use_cloud_session_cache: bool,
 }
 
 struct SubscriptionStream {
@@ -93,6 +105,9 @@ impl AppServerClient {
         let mut client = Self::spawn(&config).await?;
         client.initialize(&config).await?;
         client.notify_initialized().await?;
+        if config.use_cloud_session_cache {
+            client.restore_cloud_session_candidate().await?;
+        }
         Ok(client)
     }
 
@@ -133,6 +148,8 @@ impl AppServerClient {
             subscription_senders,
             events: events_rx,
             notifications: notifications_rx,
+            actor_credentials: config.actor_credentials.clone(),
+            use_cloud_session_cache: config.use_cloud_session_cache,
         })
     }
 
@@ -166,6 +183,20 @@ impl AppServerClient {
     async fn notify_initialized(&mut self) -> TalosResult<()> {
         let notification = JsonRpcNotification::new("initialized", None);
         self.write_json(&notification).await
+    }
+
+    async fn restore_cloud_session_candidate(&mut self) -> TalosResult<()> {
+        let response: AuthSessionReadResponse = self
+            .request_typed("auth.session.read", AuthSessionReadParams {})
+            .await?;
+        if let Some(session) = response.session {
+            self.actor_credentials = Some(ActorCredentials {
+                credential: ActorCredential::ExistingSessionToken {
+                    token: session.access_token,
+                },
+            });
+        }
+        Ok(())
     }
 
     pub async fn list_models(&mut self) -> TalosResult<Vec<ModelInfo>> {
@@ -723,7 +754,8 @@ impl AppServerClient {
         let id = self.next_request_id();
         let params = serde_json::to_value(params)
             .map_err(|error| TalosError::SerializationError(error.to_string()))?;
-        let request = JsonRpcRequest::new(RequestId::Number(id), method, Some(params));
+        let mut request = JsonRpcRequest::new(RequestId::Number(id), method, Some(params));
+        request.actor_credentials = self.actor_credentials_for_request(method);
         let (tx, rx) = oneshot::channel();
         self.pending_responses.lock().await.insert(id, tx);
         if let Err(error) = self.write_json(&request).await {
@@ -740,11 +772,28 @@ impl AppServerClient {
             }
         };
 
-        response.map_err(|_| {
+        let result = response.map_err(|_| {
             TalosError::ClientError(format!(
                 "app-server response channel closed for request {id}"
             ))
-        })?
+        })?;
+        match result {
+            Err(TalosError::AuthError(message))
+                if self.use_cloud_session_cache
+                    && self.actor_credentials.is_some()
+                    && method != "auth.session.clear" =>
+            {
+                self.actor_credentials = None;
+                Err(TalosError::AuthError(format!(
+                    "{message}; cached cloud session was rejected, please sign in again"
+                )))
+            }
+            other => other,
+        }
+    }
+
+    fn actor_credentials_for_request(&self, method: &str) -> Option<ActorCredentials> {
+        actor_credentials_for_method(method, &self.actor_credentials)
     }
 
     fn next_request_id(&mut self) -> i32 {
@@ -981,6 +1030,28 @@ fn map_app_server_error(error: talos_app_protocol::errors::AppServerErrorBody) -
     }
 }
 
+fn actor_credentials_for_method(
+    method: &str,
+    credentials: &Option<ActorCredentials>,
+) -> Option<ActorCredentials> {
+    if matches!(
+        method,
+        "initialize" | "auth.session.read" | "auth.session.clear"
+    ) {
+        None
+    } else {
+        credentials.clone()
+    }
+}
+
+#[cfg(test)]
+fn is_business_method(method: &str) -> bool {
+    !matches!(
+        method,
+        "initialize" | "auth.session.read" | "auth.session.store" | "auth.session.clear"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1012,6 +1083,42 @@ mod tests {
         assert_eq!(ack.request_id, "req-1");
         assert_eq!(ack.message_id.as_deref(), Some("msg-1"));
         assert_eq!(ack.status, MessageCommandStatus::Accepted);
+    }
+
+    #[test]
+    fn skips_cached_actor_credentials_for_local_session_methods() {
+        let credentials = Some(ActorCredentials {
+            credential: ActorCredential::ExistingSessionToken {
+                token: "cloud-token".to_string(),
+            },
+        });
+
+        assert_eq!(
+            actor_credentials_for_method("initialize", &credentials),
+            None
+        );
+        assert_eq!(
+            actor_credentials_for_method("auth.session.read", &credentials),
+            None
+        );
+        assert_eq!(
+            actor_credentials_for_method("auth.session.clear", &credentials),
+            None
+        );
+        assert_eq!(
+            actor_credentials_for_method("session.list", &credentials),
+            credentials
+        );
+    }
+
+    #[test]
+    fn touches_cached_session_only_for_business_methods() {
+        assert!(!is_business_method("initialize"));
+        assert!(!is_business_method("auth.session.read"));
+        assert!(!is_business_method("auth.session.store"));
+        assert!(!is_business_method("auth.session.clear"));
+        assert!(is_business_method("user.current"));
+        assert!(is_business_method("session.list"));
     }
 
     #[test]

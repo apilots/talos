@@ -55,6 +55,40 @@ describe("desktop IPC guard", () => {
     expect(isDesktopRendererMethod("auth.register")).toBe(false);
   });
 
+  it("allows desktop cloud session cache methods with validated shapes", () => {
+    expect(() => assertDesktopRendererInvoke("auth.session.read", {})).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("auth.session.clear", {})).not.toThrow();
+    expect(() =>
+      assertDesktopRendererInvoke(
+        "auth.session.store",
+        {
+          session: {
+            schema_version: 1,
+            cloud_api_base_url: "http://127.0.0.1:8787",
+            access_token: "token-1",
+            token_type: "Bearer",
+            expires_at_ms: null,
+            last_used_at_ms: Date.now().toString(),
+            user: {
+              user_id: "user-1",
+              username: "ada",
+              email: "ada@example.com",
+              role: "admin",
+            },
+          },
+        },
+        {
+          actorCredentials: {
+            credential: {
+              type: "existing_session_token",
+              token: "token-1",
+            },
+          },
+        },
+      ),
+    ).not.toThrow();
+  });
+
   it("rejects renderer attempts to pass local launch credentials", () => {
     expect(() =>
       assertDesktopRendererInvoke(
