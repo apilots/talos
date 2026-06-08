@@ -9,8 +9,7 @@ const featuresRoot = join(webSrcRoot, "features");
 const ignoredDirectories = new Set(["dist", "node_modules", ".git"]);
 const maxEffectiveLinesPerFile = 1000;
 const legacyLineBaselines = new Map([
-  ["src/features/admin/components/AdminModelsSection.tsx", 417],
-  ["src/features/admin/components/AdminSessionsSection.tsx", 213],
+  ["src/features/settings/components/models/SettingsModelsEditor.tsx", 417],
   ["src/features/chat/components/ChatComposer.test.tsx", 250],
   ["src/features/chat/components/ChatComposer.tsx", 574],
   ["src/features/chat/store.ts", 516],

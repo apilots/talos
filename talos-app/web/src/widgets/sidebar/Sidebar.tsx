@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { FolderOpen, HardDriveUpload, LogOut, Plus, Settings2, Shield, SlidersHorizontal, Trash2 } from "lucide-react";
+import { FolderOpen, HardDriveUpload, LogOut, Plus, Settings2, SlidersHorizontal, Trash2 } from "lucide-react";
 import { Link, NavLink } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -74,7 +74,6 @@ export function Sidebar({
   const avatarLabel = connection.authUsername.trim().charAt(0).toUpperCase() || "U";
   const desktopRuntime = isDesktopRuntime();
   const shellLabel = desktopRuntime ? "DESKTOP" : t("sidebar:webConsole");
-  const canShowAdmin = connection.authStatus === "authenticated" && connection.authRole === "admin";
 
   useEffect(() => {
     if (!accountMenuOpen) {
@@ -202,9 +201,6 @@ export function Sidebar({
 
       <nav className="mt-5 space-y-1 border-t border-border/80 pt-5">
         <NavItem icon={<HardDriveUpload size={16} />} label={t("sidebar:files")} to="/files" />
-        {canShowAdmin ? (
-          <NavItem icon={<Shield size={16} />} label={t("sidebar:admin")} to="/admin" />
-        ) : null}
       </nav>
 
       <div className="relative mt-4 border-t border-border/80 pt-4" ref={accountMenuRef}>

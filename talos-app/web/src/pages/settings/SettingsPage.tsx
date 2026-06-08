@@ -1,10 +1,11 @@
 import type { LucideIcon } from "lucide-react";
-import { Bot, Brush, ServerCog, Settings2, ShieldCheck, UserRoundCog } from "lucide-react";
+import { Bot, Brush, ServerCog, Settings2, ShieldCheck, UserCircle, UserRoundCog } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, Navigate, useParams } from "react-router-dom";
 
 import {
+  SettingsAccountSection,
   SettingsAgentWorkspaceSection,
   SettingsAppearanceSection,
   SettingsGeneralSection,
@@ -25,6 +26,7 @@ type SettingsNavigationItem = {
 
 const settingsNavigation: SettingsNavigationItem[] = [
   { id: "general", icon: Settings2 },
+  { id: "account", icon: UserCircle },
   { id: "models", icon: Bot },
   { id: "agent-workspace", icon: UserRoundCog },
   { id: "permissions", icon: ShieldCheck },
@@ -102,6 +104,8 @@ export function SettingsPage() {
                 uiTheme={uiTheme}
               />
             ) : null}
+
+            {activeSection === "account" ? <SettingsAccountSection connection={connection} /> : null}
 
             {activeSection === "models" ? <SettingsModelsSection /> : null}
 

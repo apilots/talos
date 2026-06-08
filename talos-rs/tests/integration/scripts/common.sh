@@ -100,16 +100,56 @@ prepare_talos_home() {
 apply_test_config_overrides() {
   local config_path="$1"
 
-  CONFIG_PATH="${config_path}" python3 - <<'PY'
+CONFIG_PATH="${config_path}" python3 - <<'PY'
 import os
+import json
 from pathlib import Path
 
 config_path = Path(os.environ["CONFIG_PATH"])
 text = config_path.read_text()
 
-# Talos integration scenarios exercise local product flows. Authentication
-# product coverage lives in talos-cloud e2e; keep local tests anonymous.
-text = text.replace('auth: true', 'auth: false', 1)
+def replace_section_value(content: str, section: str, key: str, value: str) -> str:
+    lines = content.splitlines(keepends=True)
+    in_section = False
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if line.startswith(f"{section}:"):
+            in_section = True
+            continue
+        if in_section and stripped and not line.startswith(" "):
+            break
+        if in_section and line.startswith(f"  {key}:"):
+            newline = "\n" if line.endswith("\n") else ""
+            lines[index] = f"  {key}: {value}{newline}"
+            return "".join(lines)
+    raise SystemExit(f"missing config key: {section}.{key}")
+
+gateway_auth = os.environ.get("TALOS_TEST_GATEWAY_AUTH")
+if gateway_auth is None:
+    # Most Talos scenarios exercise local product flows. Cloud auth has a
+    # dedicated scenario that opts back into real gateway auth explicitly.
+    text = replace_section_value(text, "gateway", "auth", "false")
+else:
+    enabled = gateway_auth.lower() in ("1", "true", "yes", "on")
+    text = replace_section_value(text, "gateway", "auth", "true" if enabled else "false")
+
+gateway_port = os.environ.get("TALOS_TEST_PORT")
+if gateway_port:
+    text = replace_section_value(text, "gateway", "port", gateway_port)
+
+cloud_enabled = os.environ.get("TALOS_TEST_CLOUD_ENABLED")
+if cloud_enabled is not None:
+    enabled = cloud_enabled.lower() in ("1", "true", "yes", "on")
+    text = replace_section_value(text, "cloud", "enabled", "true" if enabled else "false")
+
+cloud_api_base_url = os.environ.get("TALOS_TEST_CLOUD_API_BASE_URL")
+if cloud_api_base_url:
+    text = replace_section_value(
+        text,
+        "cloud",
+        "api_base_url",
+        json.dumps(cloud_api_base_url),
+    )
 
 config_path.write_text(text)
 PY

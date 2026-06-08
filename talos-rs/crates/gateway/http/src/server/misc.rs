@@ -17,6 +17,7 @@ pub(super) async fn health_handler(State(state): State<Arc<HttpApiState>>) -> Js
         "service": "talos-gateway-http",
         "timestamp": chrono::Utc::now().to_rfc3339(),
         "auth_enabled": !state.auth_disabled,
+        "cloud_auth_url": state.base_config.cloud.api_base_url,
     }))
 }
 

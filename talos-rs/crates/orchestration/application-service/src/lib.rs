@@ -1,6 +1,5 @@
 pub mod access;
 pub mod account;
-pub mod admin;
 pub mod config;
 pub mod event;
 pub mod file;
@@ -12,7 +11,6 @@ pub mod workspace_docs;
 
 pub use access::{Actor, ActorAccess, ResourceAccessService};
 pub use account::AccountService;
-pub use admin::{AdminSessionPage, DEFAULT_ADMIN_SESSION_PAGE_SIZE, MAX_ADMIN_SESSION_PAGE_SIZE};
 pub use config::{ConfigService, RuntimeConfigReloadHook};
 pub use event::{
     ApplicationEvent, ApplicationEventStream, EventReplay, EventService, TimelineCursorStatus,
@@ -327,36 +325,5 @@ impl TalosApplicationService {
 
     pub async fn delete_project(&self, actor: &Actor, project_id: &str) -> ApplicationResult<()> {
         self.access.delete_project(actor, project_id).await
-    }
-
-    pub async fn list_admin_sessions(
-        &self,
-        actor: &Actor,
-        query: SessionQuery,
-    ) -> ApplicationResult<Vec<TalosSession>> {
-        self.access.list_admin_sessions(actor, query).await
-    }
-
-    pub async fn count_admin_sessions(
-        &self,
-        actor: &Actor,
-        query: SessionQuery,
-    ) -> ApplicationResult<usize> {
-        self.access.count_admin_sessions(actor, query).await
-    }
-
-    pub async fn delete_admin_session(
-        &self,
-        actor: &Actor,
-        session_id: &str,
-    ) -> ApplicationResult<SessionPatchAck> {
-        self.access.delete_admin_session(actor, session_id).await
-    }
-
-    pub async fn list_admin_projects(
-        &self,
-        actor: &Actor,
-    ) -> ApplicationResult<Vec<ProjectRecord>> {
-        self.access.list_admin_projects(actor).await
     }
 }

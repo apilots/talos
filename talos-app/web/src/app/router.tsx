@@ -29,9 +29,6 @@ const FilesPage = lazy(() =>
 const SettingsPage = lazy(() =>
   import("@/pages/settings/SettingsPage").then((module) => ({ default: module.SettingsPage })),
 );
-const AdminPage = lazy(() =>
-  import("@/pages/admin/AdminPage").then((module) => ({ default: module.AdminPage })),
-);
 const AuthPage = lazy(() =>
   import("@/pages/auth/AuthPage").then((module) => ({ default: module.AuthPage })),
 );
@@ -44,20 +41,6 @@ function RequireAuth({ children }: { children: ReactNode }) {
   if (connection.authStatus !== "authenticated" && connection.authStatus !== "open") {
     return <Navigate replace to="/auth/login" />;
   }
-  return <>{children}</>;
-}
-
-function RequireAdmin({ children }: { children: ReactNode }) {
-  const { connection } = useConnectionSettings();
-  if (connection.authStatus === "loading" || connection.authStatus === "unknown") {
-    return <AuthLoading />;
-  }
-  const hasAdminAccess =
-    connection.authStatus === "authenticated" && connection.authRole === "admin";
-  if (!hasAdminAccess) {
-    return <Navigate replace to="/" />;
-  }
-
   return <>{children}</>;
 }
 
@@ -122,14 +105,6 @@ export const router = createRouter([
       {
         path: "settings/:section",
         element: withSuspense(<SettingsPage />),
-      },
-      {
-        path: "admin",
-        element: withSuspense(
-          <RequireAdmin>
-            <AdminPage />
-          </RequireAdmin>,
-        ),
       },
     ],
   },

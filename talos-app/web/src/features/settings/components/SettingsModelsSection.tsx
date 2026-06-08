@@ -1,5 +1,5 @@
-import { AdminModelsSection } from "@/features/admin/components/AdminModelsSection";
+import { SettingsModelsEditor } from "./models/SettingsModelsEditor";
 
 export function SettingsModelsSection() {
-  return <AdminModelsSection />;
+  return <SettingsModelsEditor />;
 }

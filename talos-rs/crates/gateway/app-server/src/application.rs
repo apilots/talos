@@ -3,20 +3,19 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use talos_app_protocol::errors::AppServerErrorBody;
 use talos_app_protocol::requests::{
-    AdminProjectListResponse, AdminSessionListParams, AdminSessionListResponse,
-    AdminSessionPagination, AuthSessionReadResponse, AuthSessionSnapshot, AuthSessionUserSnapshot,
-    ClientRequest, ClientRequestParams, ConfigBatchWriteParams, ConfigReadParams,
-    ConfigValueWriteParams, EventSubscribeParams, MemoryFileReadParams, MemoryFileWriteParams,
-    MessageCommandStatus, OptionalPathPatch, OptionalStringPatch, ProjectCreateParams,
-    ProjectPatchParams, ProtocolInputItem, ProtocolTalosContext, SessionCreateParams,
-    SessionListParams, SessionPatchParams, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus,
-    TimelineCursorStatus, TimelinePendingDynamicToolResult, TimelinePendingUserAction,
-    TimelineRecoverySnapshot, TimelineReplay, TurnStartParams, TurnStartResponse,
+    AuthSessionReadResponse, AuthSessionSnapshot, AuthSessionUserSnapshot, ClientRequest,
+    ClientRequestParams, ConfigBatchWriteParams, ConfigReadParams, ConfigValueWriteParams,
+    EventSubscribeParams, MemoryFileReadParams, MemoryFileWriteParams, MessageCommandStatus,
+    OptionalPathPatch, OptionalStringPatch, ProjectCreateParams, ProjectPatchParams,
+    ProtocolInputItem, ProtocolTalosContext, SessionCreateParams, SessionListParams,
+    SessionPatchParams, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
+    TimelinePendingDynamicToolResult, TimelinePendingUserAction, TimelineRecoverySnapshot,
+    TimelineReplay, TurnStartParams, TurnStartResponse,
 };
 use talos_application_service::{
-    Actor, AdminSessionPage, MemoryDate, MemoryListParams, MemorySearchParams,
-    TalosApplicationService, TimelineCursorStatus as ApplicationTimelineCursorStatus,
-    TimelineSubscribeParams, TimelineSubscription, TurnRetryRequest, WorkspaceDocService,
+    Actor, MemoryDate, MemoryListParams, MemorySearchParams, TalosApplicationService,
+    TimelineCursorStatus as ApplicationTimelineCursorStatus, TimelineSubscribeParams,
+    TimelineSubscription, TurnRetryRequest, WorkspaceDocService,
 };
 use talos_auth::{
     AuthScope, CloudSessionCache, CloudSessionCacheEntry, CloudSessionCacheManager,
@@ -284,17 +283,6 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .map_err(AppServerErrorBody::from_talos_error)?;
                 to_value(json!({ "success": true }))
             }
-            ClientRequestParams::AdminSessionList(params) => {
-                to_value(self.list_admin_sessions(actor, params).await?)
-            }
-            ClientRequestParams::AdminProjectList(_) => {
-                let projects = self
-                    .app
-                    .list_admin_projects(actor)
-                    .await
-                    .map_err(AppServerErrorBody::from_talos_error)?;
-                to_value(AdminProjectListResponse { data: projects })
-            }
             ClientRequestParams::ModelList(_) => {
                 let models = self.app.config.list_models().await;
                 to_value(json!({ "data": models }))
@@ -375,15 +363,6 @@ impl AppServerApplication for TalosApplicationAdapter {
             ClientRequestParams::SkillList(_) => to_value(json!({ "data": self.list_skills() })),
             ClientRequestParams::AppList(_) => to_value(json!({ "data": self.list_apps() })),
             ClientRequestParams::ToolList(_) => to_value(json!({ "data": self.list_tools() })),
-            ClientRequestParams::AccountGet(_) => to_value(json!({
-                "user_id": actor.user_id,
-                "username": actor.user_id,
-                "email": null,
-                "role": if actor.has_full_access() { "admin" } else { "user" },
-                "disabled": false,
-                "created_at": 0,
-                "updated_at": 0
-            })),
             ClientRequestParams::AuthLogout(_) => {
                 self.app
                     .account
@@ -563,39 +542,6 @@ impl TalosApplicationAdapter {
             )
             .await
             .map_err(AppServerErrorBody::from_talos_error)
-    }
-
-    async fn list_admin_sessions(
-        &self,
-        actor: &Actor,
-        params: AdminSessionListParams,
-    ) -> ProtocolResult<AdminSessionListResponse> {
-        let page = AdminSessionPage::from_query(SessionQuery {
-            user_id: params.user_id,
-            channel_id: params.channel_id,
-            provider: params.provider,
-            project_id: params.project_id,
-            limit: params.limit,
-            offset: params.offset,
-        });
-        let sessions = self
-            .app
-            .list_admin_sessions(actor, page.query)
-            .await
-            .map_err(AppServerErrorBody::from_talos_error)?;
-        let total = self
-            .app
-            .count_admin_sessions(actor, page.count_query)
-            .await
-            .map_err(AppServerErrorBody::from_talos_error)?;
-        Ok(AdminSessionListResponse {
-            data: sessions,
-            pagination: AdminSessionPagination {
-                total,
-                limit: page.limit,
-                offset: page.offset,
-            },
-        })
     }
 
     async fn start_turn(

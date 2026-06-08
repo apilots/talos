@@ -9,12 +9,10 @@ use serde_json::Value;
 use talos_app_protocol::events::TimelineSubscriptionNotification;
 use talos_app_protocol::jsonrpc::{JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, RequestId};
 use talos_app_protocol::requests::{
-    ActorCredential, ActorCredentials, AdminProjectListParams, AdminProjectListResponse,
-    AdminSessionListParams, AdminSessionListResponse, AuthSessionReadParams,
-    AuthSessionReadResponse, ClientCapabilities, ClientInfo, ConfigReadParams,
-    ConfigValueWriteParams, EventSubscribeParams, EventSubscribeResponse, EventUnsubscribeParams,
-    EventUnsubscribeResponse, InitializeParams, InitializeResponse,
-    MemoryFileListParams as ProtocolMemoryFileListParams, MemoryFileReadParams,
+    ActorCredential, ActorCredentials, AuthSessionReadParams, AuthSessionReadResponse,
+    ClientCapabilities, ClientInfo, ConfigReadParams, ConfigValueWriteParams, EventSubscribeParams,
+    EventSubscribeResponse, EventUnsubscribeParams, EventUnsubscribeResponse, InitializeParams,
+    InitializeResponse, MemoryFileListParams as ProtocolMemoryFileListParams, MemoryFileReadParams,
     MemoryFileWriteParams, MessageCommandStatus as ProtocolMessageCommandStatus, ModelListParams,
     ProjectCreateParams, ProjectDeleteParams, ProjectListParams, ProjectPatchParams,
     ProjectReadParams, ProtocolInputItem, SessionActiveTurnParams, SessionCloseParams,
@@ -318,13 +316,6 @@ impl AppServerClient {
             .map(|response| response.data)
     }
 
-    pub async fn list_admin_sessions(
-        &mut self,
-        params: AdminSessionListParams,
-    ) -> TalosResult<AdminSessionListResponse> {
-        self.request_typed("admin.session.list", params).await
-    }
-
     pub async fn get_session(&mut self, session_id: &str) -> TalosResult<TalosSession> {
         self.request_typed(
             "session.read",
@@ -412,15 +403,6 @@ impl AppServerClient {
         self.request_typed::<_, ListResponse<ProjectRecord>>("project.list", ProjectListParams {})
             .await
             .map(|response| response.data)
-    }
-
-    pub async fn list_admin_projects(&mut self) -> TalosResult<Vec<ProjectRecord>> {
-        self.request_typed::<_, AdminProjectListResponse>(
-            "admin.project.list",
-            AdminProjectListParams {},
-        )
-        .await
-        .map(|response| response.data)
     }
 
     pub async fn get_project(&mut self, project_id: &str) -> TalosResult<ProjectRecord> {

@@ -2,7 +2,6 @@ import { TalosHttpError } from "@talos/sdk-browser";
 import type {
   ModelInfo,
   ProjectRecord as ApiProjectRecord,
-  SessionQuery,
   SessionUpdate,
   TalosContext,
   TalosMessageRequest,
@@ -61,14 +60,6 @@ export async function listProjects() {
 
 export async function listSessions() {
   return getTalosClient().sessions.list();
-}
-
-export async function listAdminSessions(query?: SessionQuery) {
-  return getTalosClient().admin.sessions.list(query);
-}
-
-export async function deleteAdminSession(sessionId: string) {
-  await getTalosClient().admin.sessions.delete(sessionId);
 }
 
 export async function listSessionsByProject(projectId: string) {

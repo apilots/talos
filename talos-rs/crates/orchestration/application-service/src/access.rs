@@ -184,15 +184,6 @@ impl ResourceAccessService {
         self.delete_runtime_session(session_id).await
     }
 
-    pub async fn delete_admin_session(
-        &self,
-        actor: &Actor,
-        session_id: &str,
-    ) -> TalosResult<SessionPatchAck> {
-        Self::require_admin(actor)?;
-        self.delete_runtime_session(session_id).await
-    }
-
     pub async fn cancel_active_turn(&self, actor: &Actor, session_id: &str) -> TalosResult<()> {
         let _session = self.get_session(actor, session_id).await?;
         self.cancel_runtime_turn(session_id).await
@@ -254,29 +245,6 @@ impl ResourceAccessService {
         let _project = self.get_project(actor, project_id).await?;
         self.invalidate_project_sessions(project_id).await?;
         self.session_records.delete_project(project_id).await
-    }
-
-    pub async fn list_admin_sessions(
-        &self,
-        actor: &Actor,
-        query: SessionQuery,
-    ) -> TalosResult<Vec<TalosSession>> {
-        Self::require_admin(actor)?;
-        self.session_records.list_sessions(query).await
-    }
-
-    pub async fn count_admin_sessions(
-        &self,
-        actor: &Actor,
-        query: SessionQuery,
-    ) -> TalosResult<usize> {
-        Self::require_admin(actor)?;
-        self.session_records.count_sessions(query).await
-    }
-
-    pub async fn list_admin_projects(&self, actor: &Actor) -> TalosResult<Vec<ProjectRecord>> {
-        Self::require_admin(actor)?;
-        self.session_records.list_projects().await
     }
 
     fn filter_sessions(&self, actor: &Actor, sessions: Vec<TalosSession>) -> Vec<TalosSession> {
@@ -829,31 +797,5 @@ mod tests {
             service.listed_queries.lock().unwrap()[0].user_id.as_deref(),
             Some("member-user")
         );
-    }
-
-    #[tokio::test]
-    async fn regular_actor_cannot_use_admin_route() {
-        let service = Arc::new(RecordingSessionService::default());
-        let access = ResourceAccessService::new(service);
-
-        let error = access
-            .list_admin_projects(&Actor::regular("member-user"))
-            .await
-            .expect_err("regular actor should not access admin route");
-
-        assert!(matches!(error, talos_error::TalosError::AuthError(_)));
-    }
-
-    #[tokio::test]
-    async fn full_actor_can_use_admin_route() {
-        let service = Arc::new(RecordingSessionService::default());
-        let access = ResourceAccessService::new(service);
-
-        let projects = access
-            .list_admin_projects(&Actor::full("admin-user"))
-            .await
-            .expect("full actor should access admin route");
-
-        assert_eq!(projects.len(), 2);
     }
 }

@@ -110,19 +110,9 @@ pnpm test        # Vitest 单元测试
 pnpm check       # lint + test + build 全量检查
 ```
 
-## Admin 面板
+## 权限管理
 
-访问 `http://127.0.0.1:5173/admin`（需要 admin 角色账号登录）。
-
-Admin 面板包含以下功能模块：
-
-- **Dashboard** — 系统指标概览
-- **Users** — 用户管理（增删改查）
-- **Sessions** — 会话监控
-- **Tools** — 工具管理
-- **Models** — 模型配置管理
-- **Audit** — 审计日志
-- **System** — 系统信息
+用户、角色、账号类型等统一权限管理能力已迁移到 `talos-cloud`。Talos Web 只展示当前登录用户自己的项目、会话、记忆、工作区文档和个人配置。
 
 ## 项目工作空间默认路径
 

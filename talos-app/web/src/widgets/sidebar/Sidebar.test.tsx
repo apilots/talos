@@ -57,9 +57,9 @@ describe("Sidebar", () => {
     expect(screen.getByText("Sign out")).toBeTruthy();
   });
 
-  it("keeps admin visible only for admin accounts", () => {
-    const { rerender } = renderSidebar("user");
-    expect(screen.queryByText("Admin")).toBeNull();
+  it("never renders Talos admin navigation", () => {
+    const { container, rerender } = renderSidebar("user");
+    expect(container.querySelector('a[href="/admin"]')).toBeNull();
 
     rerender(
       <MemoryRouter>
@@ -84,6 +84,6 @@ describe("Sidebar", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole("link", { name: "Admin" })).toBeTruthy();
+    expect(container.querySelector('a[href="/admin"]')).toBeNull();
   });
 });

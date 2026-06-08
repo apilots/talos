@@ -6,13 +6,11 @@ import type {
   LlmConfigRead,
   MemoryFileListParams,
   MemorySearchParams,
-  PaginatedResponse,
   SessionQuery,
   SessionUpdate,
   TalosMessageAck,
   TalosMessageRequest,
   TalosMessageRetryRequest,
-  TalosSession,
   TalosSessionHistorySnapshot,
   TimelineEventEnvelope,
   TimelineRecoverySnapshot,
@@ -129,23 +127,6 @@ export function createDesktopTalosClient(
     },
     user: {
       current: () => client.getCurrentUser(),
-    },
-    admin: {
-      sessions: {
-        list: (query?: SessionQuery): Promise<PaginatedResponse<TalosSession>> =>
-          client.listAdminSessions({
-            user_id: query?.user_id ?? null,
-            channel_id: query?.channel_id ?? null,
-            provider: query?.provider ?? null,
-            project_id: query?.project_id ?? null,
-            limit: query?.limit ?? null,
-            offset: query?.offset ?? null,
-          }),
-        delete: (sessionId: string) => client.deleteSession(sessionId).then(() => undefined),
-      },
-      projects: {
-        list: () => client.listAdminProjects(),
-      },
     },
     llm: {
       get: (): Promise<LlmConfigRead> => client.getLlmConfig(),

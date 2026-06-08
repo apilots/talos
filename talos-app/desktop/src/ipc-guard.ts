@@ -24,9 +24,6 @@ const authSessionStoreParams = (params: unknown) =>
   hasString(params.session.user, "username");
 
 const DESKTOP_RENDERER_METHOD_GUARDS = {
-  "account.get": emptyParams,
-  "admin.project.list": emptyParams,
-  "admin.session.list": emptyParams,
   "app.list": emptyParams,
   "auth.logout": emptyParams,
   "auth.session.clear": emptyParams,

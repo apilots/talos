@@ -1,3 +1,4 @@
+export { SettingsAccountSection } from "./SettingsAccountSection";
 export { SettingsAgentWorkspaceSection } from "./SettingsAgentWorkspaceSection";
 export { SettingsAppearanceSection } from "./SettingsAppearanceSection";
 export { SettingsGeneralSection } from "./SettingsGeneralSection";

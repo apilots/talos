@@ -179,46 +179,6 @@ async fn test_delete_session_handler_returns_success() {
 }
 
 #[tokio::test]
-async fn test_delete_admin_session_handler_returns_success() {
-    let state = test_state(false);
-
-    let response = delete_admin_session_handler(
-        State(state),
-        axum::extract::Extension(test_auth()),
-        Path("mock-session".to_string()),
-    )
-    .await
-    .expect("delete admin session should succeed");
-
-    assert_eq!(response.0["success"], serde_json::Value::Bool(true));
-}
-
-#[tokio::test]
-async fn test_list_admin_sessions_handler_returns_pagination_payload() {
-    let state = test_state(false);
-
-    let response = list_admin_sessions_handler(
-        State(state),
-        axum::extract::Extension(test_auth()),
-        Query(SessionQuery {
-            user_id: None,
-            channel_id: None,
-            provider: None,
-            project_id: None,
-            limit: Some(25),
-            offset: Some(50),
-        }),
-    )
-    .await
-    .expect("list admin sessions should succeed");
-
-    assert_eq!(response.0["data"], serde_json::Value::Array(Vec::new()));
-    assert_eq!(response.0["pagination"]["total"], 0);
-    assert_eq!(response.0["pagination"]["limit"], 25);
-    assert_eq!(response.0["pagination"]["offset"], 50);
-}
-
-#[tokio::test]
 async fn test_compact_session_handler_returns_session_payload() {
     let state = test_state(false);
 

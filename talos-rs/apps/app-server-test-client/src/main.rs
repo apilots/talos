@@ -3,10 +3,10 @@ use std::process::Stdio;
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 use talos_sdk::{
-    canonical_method, AdminSessionListParams, AppServerClient, AppServerClientConfig,
-    EventSubscribeParams, ExpectedFileVersion, ProjectPatch, ProtocolTalosContext,
-    SessionCreateParams, TalosError, TalosInputItem, TalosMessageRequest, TalosTimelineEventType,
-    TimelineEventEnvelope, WorkspaceDocKind,
+    canonical_method, AppServerClient, AppServerClientConfig, EventSubscribeParams,
+    ExpectedFileVersion, ProjectPatch, ProtocolTalosContext, SessionCreateParams, TalosError,
+    TalosInputItem, TalosMessageRequest, TalosTimelineEventType, TimelineEventEnvelope,
+    WorkspaceDocKind,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
@@ -28,7 +28,7 @@ async fn main() -> Result<()> {
         client_name: "talos-app-server-test-client".to_string(),
         client_version: env!("CARGO_PKG_VERSION").to_string(),
         actor_credentials: None,
-        use_cloud_session_cache: false,
+        use_cloud_session_cache: scenario.uses_cloud_session_cache(),
     })
     .await?;
     match scenario {
@@ -39,6 +39,7 @@ async fn main() -> Result<()> {
         Scenario::TurnSmoke => turn_smoke(&mut client).await?,
         Scenario::ActiveTurnConflict => active_turn_conflict(&mut client).await?,
         Scenario::ResourceMatrix => resource_matrix(&mut client).await?,
+        Scenario::CloudSessionCache => cloud_session_cache(&mut client).await?,
     }
     client.shutdown().await?;
     Ok(())
@@ -53,6 +54,7 @@ enum Scenario {
     TurnSmoke,
     ActiveTurnConflict,
     ResourceMatrix,
+    CloudSessionCache,
 }
 
 impl Scenario {
@@ -65,8 +67,13 @@ impl Scenario {
             "turn-smoke" => Ok(Self::TurnSmoke),
             "active-turn-conflict" => Ok(Self::ActiveTurnConflict),
             "resource-matrix" => Ok(Self::ResourceMatrix),
+            "cloud-session-cache" => Ok(Self::CloudSessionCache),
             other => Err(anyhow!("unsupported scenario: {other}")),
         }
+    }
+
+    fn uses_cloud_session_cache(self) -> bool {
+        matches!(self, Self::CloudSessionCache)
     }
 }
 
@@ -83,6 +90,14 @@ async fn smoke(client: &mut AppServerClient) -> Result<()> {
     client.list_workspace_docs().await?;
     eprintln!("event.subscribe");
     subscribe_events(client, &session_id).await?;
+    Ok(())
+}
+
+async fn cloud_session_cache(client: &mut AppServerClient) -> Result<()> {
+    eprintln!("cloud-session-cache model.list");
+    client.list_models().await?;
+    eprintln!("cloud-session-cache session.create");
+    create_session(client).await?;
     Ok(())
 }
 
@@ -265,15 +280,6 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     {
         return Err(anyhow!("project.list did not include created project"));
     }
-    let admin_projects = client.list_admin_projects().await?;
-    if !admin_projects
-        .iter()
-        .any(|candidate| candidate.project_id == project.project_id)
-    {
-        return Err(anyhow!(
-            "admin.project.list did not include created project"
-        ));
-    }
     let patched_name = format!("{project_name} patched");
     let patched_project = client
         .patch_project(
@@ -294,27 +300,12 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
 
     eprintln!("resource-matrix session error mapping");
     let session_id = create_session(client).await?;
-    let admin_sessions = client
-        .list_admin_sessions(AdminSessionListParams {
-            user_id: None,
-            channel_id: None,
-            provider: None,
-            project_id: None,
-            limit: Some(20),
-            offset: Some(0),
-        })
-        .await?;
-    if !admin_sessions
-        .data
+    let listed_sessions = client.list_sessions(Default::default()).await?;
+    if !listed_sessions
         .iter()
         .any(|candidate| candidate.context.session_id == session_id)
     {
-        return Err(anyhow!(
-            "admin.session.list did not include created session"
-        ));
-    }
-    if admin_sessions.pagination.limit != 20 {
-        return Err(anyhow!("admin.session.list returned unexpected page limit"));
+        return Err(anyhow!("session.list did not include created session"));
     }
     let _snapshot = client.recover_session(&session_id).await?;
     expect_not_found(

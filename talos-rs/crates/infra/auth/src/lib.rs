@@ -5,7 +5,7 @@ mod session_cache;
 
 pub use cloud::CloudAuthService;
 pub use pairing::{DevicePairing, PairingCode, PairingResult};
-pub use service::{AuthCacheConfig, AuthService, UserService};
+pub use service::{AuthCacheConfig, AuthService, OpenModeUserService, UserService};
 pub use session_cache::{
     CloudSessionCache, CloudSessionCacheEntry, CloudSessionCacheManager, CloudSessionUserSnapshot,
     DEFAULT_CLOUD_SESSION_IDLE_TIMEOUT_MS, DEFAULT_CLOUD_SESSION_TOUCH_INTERVAL_MS,

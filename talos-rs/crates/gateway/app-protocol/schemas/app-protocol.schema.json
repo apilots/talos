@@ -1,9 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
-    "AccountGetParams": {
-      "type": "object"
-    },
     "ActorCredential": {
       "oneOf": [
         {
@@ -53,60 +50,6 @@
       "required": [
         "credential"
       ],
-      "type": "object"
-    },
-    "AdminProjectListParams": {
-      "type": "object"
-    },
-    "AdminSessionListParams": {
-      "properties": {
-        "channel_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "limit": {
-          "default": null,
-          "format": "uint",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "offset": {
-          "default": null,
-          "format": "uint",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "project_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "provider": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "user_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
       "type": "object"
     },
     "AppListParams": {
@@ -489,8 +432,6 @@
         "event.subscribe",
         "event.unsubscribe",
         "tool.dynamic_result.submit",
-        "admin.session.list",
-        "admin.project.list",
         "model.list",
         "config.read",
         "config.value.write",
@@ -505,7 +446,6 @@
         "skill.list",
         "app.list",
         "tool.list",
-        "account.get",
         "auth.logout",
         "auth.session.read",
         "auth.session.store",
@@ -950,42 +890,6 @@
           "properties": {
             "method": {
               "enum": [
-                "admin.session.list"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/AdminSessionListParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "admin.project.list"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/AdminProjectListParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
                 "model.list"
               ],
               "type": "string"
@@ -1226,24 +1130,6 @@
             },
             "params": {
               "$ref": "#/definitions/ToolListParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "account.get"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/AccountGetParams"
             }
           },
           "required": [
@@ -1950,6 +1836,12 @@
       "properties": {
         "auth_enabled": {
           "type": "boolean"
+        },
+        "cloud_auth_url": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "name": {
           "type": "string"

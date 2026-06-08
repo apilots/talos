@@ -12,10 +12,9 @@ pub use app_server::{AppServerClient, AppServerClientConfig};
 pub use message::{MessageCommandAck, MessageCommandStatus};
 pub use talos_app_protocol::events::{canonical_method, ApplicationEvent};
 pub use talos_app_protocol::requests::{
-    AdminProjectListParams, AdminSessionListParams, AdminSessionPagination, EventSubscribeParams,
-    EventSubscribeResponse, ProtocolTalosContext, SessionCreateParams, SessionHistoryParams,
-    TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
-    TimelineRecoveryParams, TimelineRecoverySnapshot, TimelineReplay,
+    EventSubscribeParams, EventSubscribeResponse, ProtocolTalosContext, SessionCreateParams,
+    SessionHistoryParams, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus,
+    TimelineCursorStatus, TimelineRecoveryParams, TimelineRecoverySnapshot, TimelineReplay,
     ToolDynamicResultSubmitParams,
 };
 pub use talos_auth::{AuthResponse, UserDto, UserRole};

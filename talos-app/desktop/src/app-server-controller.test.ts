@@ -21,7 +21,12 @@ class FakeBridge implements AppServerBridge {
     this.connected = true;
     return Promise.resolve({
       protocol_version: { major: 0, minor: 3 },
-      server_info: { name: "fake", version: "0.1.0", auth_enabled: false },
+      server_info: {
+        name: "fake",
+        version: "0.1.0",
+        auth_enabled: false,
+        cloud_auth_url: null,
+      },
     });
   }
 

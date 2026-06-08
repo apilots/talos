@@ -5,7 +5,7 @@ use std::time::Duration;
 use talos_agent::{AgentHarness, AgentOrchestrator};
 use talos_app_server::BackgroundTaskDrain;
 use talos_application_service::TalosApplicationService;
-use talos_auth::{AuthService, CloudAuthService, UserService};
+use talos_auth::{AuthService, CloudAuthService, OpenModeUserService, UserService};
 use talos_channel::{ChannelServer, TelegramChannel};
 use talos_config::{Config, LlmConfigManager, LlmConfigService, TalosPaths, YamlLlmConfigStore};
 use talos_coordinator::{Coordinator, CoordinatorImpl};
@@ -390,6 +390,7 @@ pub async fn run_json_rpc_stdio(config: Config) -> TalosResult<()> {
         validator,
         talos_app_server::AppServerConfig {
             auth_enabled: config.gateway.auth,
+            cloud_auth_url: Some(config.cloud.api_base_url.clone()),
             ..talos_app_server::AppServerConfig::default()
         },
     )
@@ -471,7 +472,11 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
     let gateway: Arc<dyn Gateway> = Arc::new(GatewayImpl::new(request_handler.clone()));
     let cloud_auth = Arc::new(CloudAuthService::new(config.cloud.api_base_url.clone()));
     let auth_service: Arc<dyn AuthService> = cloud_auth.clone();
-    let user_service: Arc<dyn UserService> = cloud_auth;
+    let user_service: Arc<dyn UserService> = if config.gateway.auth {
+        cloud_auth
+    } else {
+        Arc::new(OpenModeUserService)
+    };
 
     let config_path = TalosPaths::resolve().config_file;
     let llm_store = Arc::new(YamlLlmConfigStore::new(config_path));

@@ -13,7 +13,7 @@ type WorkspaceDocViewMode = "preview" | "edit";
 export function WorkspaceDocsPage() {
   const { t } = useTranslation(["workspaceDocs", "common"]);
   const { connection } = useConnectionSettings();
-  const canEdit = connection.authStatus === "open" || connection.authRole === "admin";
+  const canEdit = connection.authStatus === "open" || connection.authStatus === "authenticated";
   const [viewMode, setViewMode] = useState<WorkspaceDocViewMode>("preview");
   const {
     docKinds,

@@ -32,6 +32,7 @@ pub struct AppServerConfig {
     pub server_name: String,
     pub server_version: String,
     pub auth_enabled: bool,
+    pub cloud_auth_url: Option<String>,
 }
 
 impl Default for AppServerConfig {
@@ -42,6 +43,7 @@ impl Default for AppServerConfig {
             server_name: "talos-app-server".to_string(),
             server_version: env!("CARGO_PKG_VERSION").to_string(),
             auth_enabled: false,
+            cloud_auth_url: None,
         }
     }
 }
@@ -241,6 +243,7 @@ async fn handle_request(
                             name: config.server_name.clone(),
                             version: config.server_version.clone(),
                             auth_enabled: config.auth_enabled,
+                            cloud_auth_url: config.cloud_auth_url.clone(),
                         },
                     })
                     .map_err(|error| AppServerErrorBody::invalid_request(error.to_string()));

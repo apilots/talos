@@ -11,7 +11,10 @@ export interface HealthResponse {
   service: string;
   timestamp: string;
   auth_enabled: boolean;
+  cloud_auth_url?: string | null;
 }
+
+const envCloudAuthUrl = import.meta.env.VITE_TALOS_CLOUD_AUTH_URL as string | undefined;
 
 export async function logoutUser(): Promise<void> {
   if (isDesktopRuntime()) {
@@ -69,6 +72,7 @@ export async function getGatewayHealth(): Promise<HealthResponse> {
       service: serverInfo.name,
       timestamp: new Date().toISOString(),
       auth_enabled: serverInfo.auth_enabled,
+      cloud_auth_url: serverInfo.cloud_auth_url,
     };
   }
 
@@ -82,6 +86,15 @@ export async function getGatewayHealth(): Promise<HealthResponse> {
     throw new Error(`${response.status} ${response.statusText}`);
   }
   return response.json() as Promise<HealthResponse>;
+}
+
+export async function getCloudAuthUrl(): Promise<string> {
+  const health = await getGatewayHealth();
+  const configured = health.cloud_auth_url?.trim() || envCloudAuthUrl?.trim();
+  if (!configured) {
+    throw new Error("Cloud auth URL is not configured.");
+  }
+  return configured;
 }
 
 export async function readDesktopCloudSession(): Promise<AppProtocol.AuthSessionSnapshot | null> {

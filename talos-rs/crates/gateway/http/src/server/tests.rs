@@ -35,7 +35,6 @@ use talos_types::{
 };
 use tower::util::ServiceExt;
 
-use crate::server::admin_users::{delete_admin_session_handler, list_admin_sessions_handler};
 use crate::server::events::{get_active_turn_handler, subscribe_timeline_events_handler};
 use crate::server::messages::{
     retry_message_attempt_handler, session_message_handler, submit_message_command,

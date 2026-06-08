@@ -1,6 +1,7 @@
 export { useAuthBootstrap } from "./hooks/useAuthBootstrap";
 export {
   clearDesktopCloudSession,
+  getCloudAuthUrl,
   getCurrentUser,
   getCurrentUserWithToken,
   logoutUser,

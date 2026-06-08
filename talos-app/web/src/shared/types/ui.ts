@@ -38,13 +38,6 @@ export interface FileRecord {
   updatedAt: number;
 }
 
-export interface AdminMetric {
-  id: string;
-  label: string;
-  value: string;
-  trend: string;
-}
-
 export type ChatToolStatus =
   | "queued"
   | "running"

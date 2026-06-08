@@ -1,5 +1,10 @@
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+use cloud_sdk_rs::cloud_types::{
+    AuthResponseDto, CapabilitiesDto, CurrentUserDto, IntrospectionRequestDto,
+    IntrospectionResponseDto, LoginRequestDto, LogoutResponseDto, RegisterRequestDto, UserRoleDto,
+    UserStatusDto,
+};
+use cloud_sdk_rs::{CloudSdkError, TalosCloudClient};
 use talos_error::{TalosError, TalosResult};
 
 use crate::{
@@ -9,70 +14,18 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct CloudAuthService {
-    api_base_url: String,
-    http: reqwest::Client,
+    client: TalosCloudClient,
 }
 
 impl CloudAuthService {
     pub fn new(api_base_url: impl Into<String>) -> Self {
         Self {
-            api_base_url: api_base_url.into(),
-            http: reqwest::Client::new(),
+            client: TalosCloudClient::new(api_base_url),
         }
     }
 
-    async fn get<T>(&self, path: &str, token: Option<&str>) -> TalosResult<T>
-    where
-        T: for<'de> Deserialize<'de>,
-    {
-        self.send(self.http.get(self.url(path)), token).await
-    }
-
-    async fn post<T, B>(&self, path: &str, body: &B, token: Option<&str>) -> TalosResult<T>
-    where
-        T: for<'de> Deserialize<'de>,
-        B: Serialize + ?Sized,
-    {
-        self.send(self.http.post(self.url(path)).json(body), token)
-            .await
-    }
-
-    async fn send<T>(&self, request: reqwest::RequestBuilder, token: Option<&str>) -> TalosResult<T>
-    where
-        T: for<'de> Deserialize<'de>,
-    {
-        let request = if let Some(token) = token {
-            request.bearer_auth(token)
-        } else {
-            request
-        }
-        .header(reqwest::header::ACCEPT, "application/json");
-        let response = request
-            .send()
-            .await
-            .map_err(|err| TalosError::NetworkError(err.to_string()))?;
-        let status = response.status();
-        if status.is_success() {
-            return response
-                .json::<T>()
-                .await
-                .map_err(|err| TalosError::SerializationError(err.to_string()));
-        }
-        let error = response
-            .json::<CloudErrorResponse>()
-            .await
-            .unwrap_or_else(|_| CloudErrorResponse {
-                code: "request_failed".to_string(),
-                message: status.to_string(),
-            });
-        Err(TalosError::AuthError(format!(
-            "cloud auth request failed: {}: {}",
-            error.code, error.message
-        )))
-    }
-
-    fn url(&self, path: &str) -> String {
-        format!("{}{}", self.api_base_url.trim_end_matches('/'), path)
+    fn with_token(&self, token: &str) -> TalosCloudClient {
+        self.client.clone().with_access_token(token.to_owned())
     }
 }
 
@@ -82,58 +35,57 @@ impl AuthService for CloudAuthService {
         let email = input.email.ok_or_else(|| {
             TalosError::ValidationError("email is required for cloud registration".to_string())
         })?;
-        let response: CloudRegisterResponse = self
-            .post(
-                "/v1/auth/register",
-                &CloudRegisterRequest {
-                    email,
-                    username: input.username,
-                    password: input.password,
-                },
-                None,
-            )
-            .await?;
-        Err(TalosError::AuthError(format!(
-            "email verification required for user {}",
-            response.user_id
-        )))
+        let username = input.username;
+        let password = input.password;
+        self.client
+            .register(RegisterRequestDto {
+                email,
+                username: username.clone(),
+                password: password.clone(),
+            })
+            .await
+            .map_err(map_cloud_error)?;
+        self.client
+            .login(LoginRequestDto {
+                identifier: username,
+                password,
+            })
+            .await
+            .map(map_auth_response)
+            .map_err(map_cloud_error)
     }
 
     async fn login(&self, input: LoginRequest) -> TalosResult<AuthResponse> {
-        self.post(
-            "/v1/auth/login",
-            &CloudLoginRequest {
+        self.client
+            .login(LoginRequestDto {
                 identifier: input.username,
                 password: input.password,
-            },
-            None,
-        )
-        .await
-        .map(map_auth_response)
+            })
+            .await
+            .map(map_auth_response)
+            .map_err(map_cloud_error)
     }
 
     async fn logout(&self, actor: &RequestIdentity) -> TalosResult<()> {
+        let Some(token) = bearer_from_actor(actor) else {
+            return Ok(());
+        };
         let response = self
-            .post::<CloudLogoutResponse, _>(
-                "/v1/auth/logout",
-                &serde_json::json!({}),
-                bearer_from_actor(actor).as_deref(),
-            )
-            .await?;
-        expect_success(response)?;
-        Ok(())
+            .with_token(&token)
+            .logout()
+            .await
+            .map_err(map_cloud_error)?;
+        expect_success(response)
     }
 
     async fn verify_access_token(&self, token: &str) -> TalosResult<RequestIdentity> {
-        let response: CloudIntrospectionResponse = self
-            .post(
-                "/v1/auth/introspect",
-                &CloudIntrospectionRequest {
-                    token: token.to_string(),
-                },
-                None,
-            )
-            .await?;
+        let response = self
+            .client
+            .introspect(IntrospectionRequestDto {
+                token: token.to_string(),
+            })
+            .await
+            .map_err(map_cloud_error)?;
         map_identity(response, token)
     }
 }
@@ -141,9 +93,13 @@ impl AuthService for CloudAuthService {
 #[async_trait]
 impl UserService for CloudAuthService {
     async fn get_current_user(&self, actor: &RequestIdentity) -> TalosResult<UserDto> {
-        self.get("/v1/me", bearer_from_actor(actor).as_deref())
+        let token = bearer_from_actor(actor)
+            .ok_or_else(|| TalosError::AuthError("cloud access token is missing".to_string()))?;
+        self.with_token(&token)
+            .me()
             .await
             .map(map_user)
+            .map_err(map_cloud_error)
     }
 }
 
@@ -152,7 +108,7 @@ fn bearer_from_actor(actor: &RequestIdentity) -> Option<String> {
 }
 
 fn map_identity(
-    response: CloudIntrospectionResponse,
+    response: IntrospectionResponseDto,
     raw_token: &str,
 ) -> TalosResult<RequestIdentity> {
     if !response.active {
@@ -161,7 +117,7 @@ fn map_identity(
     let user = response
         .user
         .ok_or_else(|| TalosError::AuthError("cloud introspection missing user".to_string()))?;
-    if user.status != "active" {
+    if user.status != UserStatusDto::Active {
         return Err(TalosError::AuthError(
             "cloud user is not active".to_string(),
         ));
@@ -178,7 +134,7 @@ fn map_identity(
     Ok(RequestIdentity {
         user_id: user.user_id,
         username: user.username,
-        role: parse_role(&user.role)?,
+        role: map_role(user.role),
         scopes: capabilities
             .scopes
             .iter()
@@ -189,7 +145,7 @@ fn map_identity(
     })
 }
 
-fn map_auth_response(response: CloudAuthResponse) -> AuthResponse {
+fn map_auth_response(response: AuthResponseDto) -> AuthResponse {
     AuthResponse {
         access_token: response.access_token,
         token_type: response.token_type,
@@ -199,22 +155,22 @@ fn map_auth_response(response: CloudAuthResponse) -> AuthResponse {
     }
 }
 
-fn map_user(user: CloudUserDto) -> UserDto {
+fn map_user(user: CurrentUserDto) -> UserDto {
     UserDto {
         user_id: user.user_id,
         username: user.username,
         email: Some(user.email),
-        role: parse_role(&user.role).unwrap_or(UserRole::User),
+        role: map_role(user.role),
         disabled: user.disabled,
         created_at: user.created_at_ms,
         updated_at: user.updated_at_ms,
     }
 }
 
-fn map_capabilities(value: CloudCapabilitiesDto) -> Capabilities {
+fn map_capabilities(value: CapabilitiesDto) -> Capabilities {
     Capabilities {
         is_admin: value.is_admin,
-        role: parse_role(&value.role).unwrap_or(UserRole::User),
+        role: map_role(value.role),
         scopes: value
             .scopes
             .into_iter()
@@ -223,17 +179,14 @@ fn map_capabilities(value: CloudCapabilitiesDto) -> Capabilities {
     }
 }
 
-fn parse_role(value: &str) -> TalosResult<UserRole> {
+fn map_role(value: UserRoleDto) -> UserRole {
     match value {
-        "user" => Ok(UserRole::User),
-        "admin" => Ok(UserRole::Admin),
-        other => Err(TalosError::AuthError(format!(
-            "unknown cloud role: {other}"
-        ))),
+        UserRoleDto::User => UserRole::User,
+        UserRoleDto::Admin => UserRole::Admin,
     }
 }
 
-fn expect_success(response: CloudLogoutResponse) -> TalosResult<()> {
+fn expect_success(response: LogoutResponseDto) -> TalosResult<()> {
     if response.success {
         Ok(())
     } else {
@@ -243,84 +196,11 @@ fn expect_success(response: CloudLogoutResponse) -> TalosResult<()> {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct CloudErrorResponse {
-    code: String,
-    message: String,
-}
-
-#[derive(Debug, Serialize)]
-struct CloudRegisterRequest {
-    email: String,
-    username: String,
-    password: String,
-}
-
-#[derive(Debug, Serialize)]
-struct CloudLoginRequest {
-    identifier: String,
-    password: String,
-}
-
-#[derive(Debug, Serialize)]
-struct CloudIntrospectionRequest {
-    token: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct CloudAuthResponse {
-    access_token: String,
-    token_type: String,
-    expires_at_ms: i64,
-    user: CloudUserDto,
-    capabilities: CloudCapabilitiesDto,
-}
-
-#[derive(Debug, Deserialize)]
-struct CloudRegisterResponse {
-    user_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct CloudIntrospectionResponse {
-    active: bool,
-    user: Option<CloudIntrospectionUser>,
-    capabilities: Option<CloudCapabilitiesDto>,
-    entitlement: Option<CloudEntitlementDto>,
-}
-
-#[derive(Debug, Deserialize)]
-struct CloudIntrospectionUser {
-    user_id: String,
-    username: Option<String>,
-    role: String,
-    status: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct CloudEntitlementDto {
-    can_use: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct CloudCapabilitiesDto {
-    is_admin: bool,
-    role: String,
-    scopes: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct CloudUserDto {
-    user_id: String,
-    email: String,
-    username: String,
-    role: String,
-    disabled: bool,
-    created_at_ms: i64,
-    updated_at_ms: i64,
-}
-
-#[derive(Debug, Deserialize)]
-struct CloudLogoutResponse {
-    success: bool,
+fn map_cloud_error(error: CloudSdkError) -> TalosError {
+    match error {
+        CloudSdkError::Transport(err) => TalosError::NetworkError(err.to_string()),
+        CloudSdkError::Api { code, message, .. } => {
+            TalosError::AuthError(format!("cloud auth request failed: {code}: {message}"))
+        }
+    }
 }

@@ -5,7 +5,7 @@ use talos_types::{
     DocUpdateRequest, TalosConfig, WorkspaceDocDetail, WorkspaceDocKind, WorkspaceDocSummary,
 };
 
-use crate::access::{Actor, ResourceAccessService};
+use crate::access::Actor;
 use crate::file::{
     content_hash, modified_at_ms, read_optional, validate_expected_version, with_file_lock,
     workspace_root, write_atomic, FileLockRegistry,
@@ -79,11 +79,10 @@ impl WorkspaceDocService {
 
     pub async fn put_doc(
         &self,
-        actor: &Actor,
+        _actor: &Actor,
         kind: WorkspaceDocKind,
         request: DocUpdateRequest,
     ) -> TalosResult<WorkspaceDocDetail> {
-        ResourceAccessService::require_admin(actor)?;
         let path = self.doc_path(kind);
         with_file_lock(&self.file_locks, &path, async {
             let existing = read_optional(&path).await?;
@@ -196,10 +195,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn put_doc_rejects_non_admin() {
+    async fn put_doc_allows_regular_actor() {
         let (service, workspace_dir) = test_service();
 
-        let error = service
+        let detail = service
             .put_doc(
                 &Actor::regular("member"),
                 WorkspaceDocKind::Soul,
@@ -209,9 +208,9 @@ mod tests {
                 },
             )
             .await
-            .expect_err("non-admin should not write workspace docs");
+            .expect("regular actor should write own workspace docs");
 
-        assert!(matches!(error, TalosError::AuthError(_)));
+        assert_eq!(detail.content, "# Shared doc");
         let _ = std::fs::remove_dir_all(workspace_dir);
     }
 }

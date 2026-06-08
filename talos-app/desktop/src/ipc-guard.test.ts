@@ -20,12 +20,15 @@ describe("desktop IPC guard", () => {
     ).not.toThrow();
   });
 
-  it("allows admin and llm config methods required by desktop admin UI", () => {
-    expect(isDesktopRendererMethod("admin.session.list")).toBe(true);
+  it("allows llm config methods and rejects removed admin methods", () => {
+    const removedMethod = "admin.session.list" as never;
+
+    expect(isDesktopRendererMethod(removedMethod)).toBe(false);
     expect(isDesktopRendererMethod("admin.user.list")).toBe(false);
+    expect(isDesktopRendererMethod("account.get")).toBe(false);
     expect(isDesktopRendererMethod("config.read")).toBe(true);
     expect(isDesktopRendererMethod("config.reload")).toBe(true);
-    expect(() => assertDesktopRendererInvoke("admin.session.list", {})).not.toThrow();
+    expect(() => assertDesktopRendererInvoke(removedMethod, {})).toThrow();
     expect(() => assertDesktopRendererInvoke("config.value.write", {
       path: "llm",
       value: "{}",

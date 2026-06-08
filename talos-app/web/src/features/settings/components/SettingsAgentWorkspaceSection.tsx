@@ -17,7 +17,7 @@ type EditorMode = "preview" | "edit";
 export function SettingsAgentWorkspaceSection() {
   const { t } = useTranslation(["settings", "workspaceDocs", "memory", "common"]);
   const { connection } = useConnectionSettings();
-  const canEdit = connection.authStatus === "open" || connection.authRole === "admin";
+  const canEdit = connection.authStatus === "open" || connection.authStatus === "authenticated";
   const [mode, setMode] = useState<AgentWorkspaceMode>("general");
   const [docEditorMode, setDocEditorMode] = useState<EditorMode>("preview");
   const [memoryEditorMode, setMemoryEditorMode] = useState<EditorMode>("preview");

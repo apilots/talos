@@ -1,10 +1,6 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
-import {
-  createAdminSlice,
-  type AdminSlice,
-} from "@/features/admin/store";
 import type { ChatSlice, ChatSliceSetter } from "@/features/chat/store";
 import { createChatSlice } from "@/features/chat/store";
 import {
@@ -32,8 +28,7 @@ export interface AppState
     ConnectionSlice,
     UiSlice,
     MemorySlice,
-    FilesSlice,
-    AdminSlice {}
+    FilesSlice {}
 
 export const useAppStore = create<AppState>()(
   persist(
@@ -42,7 +37,6 @@ export const useAppStore = create<AppState>()(
       ...createUiSlice(set as unknown as (updater: (state: UiSlice) => Partial<UiSlice>) => void),
       ...createMemorySlice(set as unknown as (updater: (state: MemorySlice) => Partial<MemorySlice>) => void),
       ...createFilesSlice(set as unknown as (updater: (state: FilesSlice) => Partial<FilesSlice>) => void),
-      ...createAdminSlice(set as unknown as (updater: (state: AdminSlice) => Partial<AdminSlice>) => void),
       ...createChatSlice(set as unknown as ChatSliceSetter),
     }),
     {

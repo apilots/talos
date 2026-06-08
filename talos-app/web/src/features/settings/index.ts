@@ -6,6 +6,7 @@ export {
 } from "./hooks/useSettingsPage";
 export type { SettingsPageState } from "./hooks/useSettingsPage";
 export {
+  SettingsAccountSection,
   SettingsAgentWorkspaceSection,
   SettingsAppearanceSection,
   SettingsGeneralSection,

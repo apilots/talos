@@ -98,9 +98,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::EventUnsubscribeParams>());
     output.push_str(&export::<crate::requests::EventUnsubscribeResponse>());
     output.push_str(&export::<crate::requests::ToolDynamicResultSubmitParams>());
-    output.push_str(&export::<crate::requests::AdminSessionListParams>());
-    output.push_str(&export::<crate::requests::AdminSessionPagination>());
-    output.push_str(&export::<crate::requests::AdminProjectListParams>());
     output.push_str(&export::<crate::requests::ModelListParams>());
     output.push_str(&export::<crate::requests::ConfigReadParams>());
     output.push_str(&export::<crate::requests::ConfigValueWriteParams>());
@@ -115,7 +112,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::SkillListParams>());
     output.push_str(&export::<crate::requests::AppListParams>());
     output.push_str(&export::<crate::requests::ToolListParams>());
-    output.push_str(&export::<crate::requests::AccountGetParams>());
     output.push_str(&export::<crate::requests::AuthLogoutParams>());
     output.push_str(&export::<crate::requests::AuthSessionReadParams>());
     output.push_str(&export::<crate::requests::AuthSessionReadResponse>());

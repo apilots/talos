@@ -8,7 +8,7 @@ use talos_memory::{Memory, MemoryIndexFile, MemorySearchQuery, MemorySearchResul
 use talos_types::{DocUpdateRequest, MemoryFileDetail, MemoryFileSummary, TalosConfig};
 use tokio::fs;
 
-use crate::access::{Actor, ResourceAccessService};
+use crate::access::Actor;
 use crate::file::{
     content_hash, modified_at_ms, read_optional, validate_expected_version, with_file_lock,
     workspace_root, write_atomic, FileLockRegistry,
@@ -125,11 +125,10 @@ impl MemoryService {
 
     pub async fn put_file(
         &self,
-        actor: &Actor,
+        _actor: &Actor,
         date: MemoryDate,
         request: DocUpdateRequest,
     ) -> TalosResult<MemoryFileDetail> {
-        ResourceAccessService::require_admin(actor)?;
         let path = self.memory_file_path(date);
         with_file_lock(&self.file_locks, &path, async {
             let existing = read_optional(&path).await?;

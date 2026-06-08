@@ -15,16 +15,9 @@ class RecordingTransport implements AppServerTransport {
     if (
       method === "model.list" ||
       method === "memory.search" ||
-      method === "project.list" ||
-      method === "admin.project.list"
+      method === "project.list"
     ) {
       return Promise.resolve({ data: [] } as T);
-    }
-    if (method === "admin.session.list") {
-      return Promise.resolve({
-        data: [],
-        pagination: { total: 0, limit: 20, offset: 0 },
-      } as T);
     }
     if (method === "session.recover") {
       return Promise.resolve(emptyRecoverySnapshot as T);
@@ -54,10 +47,8 @@ describe("AppServerClient", () => {
       model: "MiniMax-M2.5",
     });
     await client.listProjects();
-    await client.listAdminProjects();
     await client.getLlmConfig();
     await client.updateLlmConfig(testLlmConfig);
-    await client.listAdminSessions({ limit: 20, offset: 0, user_id: null, channel_id: null, provider: null, project_id: null });
     await client.createProject("Talos", "/tmp/talos");
     await client.patchProject("project-1", { name: "Talos Core" });
     await client.recoverSession("session-1", "ev_00000000000000000001", 100);
@@ -83,24 +74,12 @@ describe("AppServerClient", () => {
         },
       },
       { method: "project.list", params: {} },
-      { method: "admin.project.list", params: {} },
       { method: "config.read", params: {} },
       {
         method: "config.value.write",
         params: {
           path: "llm",
           value: JSON.stringify(testLlmConfig),
-        },
-      },
-      {
-        method: "admin.session.list",
-        params: {
-          limit: 20,
-          offset: 0,
-          user_id: null,
-          channel_id: null,
-          provider: null,
-          project_id: null,
         },
       },
       { method: "project.create", params: { name: "Talos", directory: "/tmp/talos" } },

@@ -14,6 +14,7 @@ vi.mock("@/features/settings", async () => {
   return {
     ...actual,
     SettingsAgentWorkspaceSection: () => <div>Agent workspace content</div>,
+    SettingsAccountSection: () => <div>Account content</div>,
     SettingsAppearanceSection: () => <div>Appearance content</div>,
     SettingsGeneralSection: () => <div>General content</div>,
     SettingsModelsSection: () => <div>Models content</div>,
@@ -30,6 +31,7 @@ function buildSettingsState(
   return {
     connection: {
       authStatus,
+      authToken: authStatus === "authenticated" ? "cloud-token" : "",
       authRole,
       authUsername: authRole,
       userId: `${authRole}-1`,
@@ -96,5 +98,12 @@ describe("SettingsPage", () => {
 
     expect(screen.getByText("Models")).toBeTruthy();
     expect(screen.getByText("General content")).toBeTruthy();
+  });
+
+  it("renders the account handoff section", () => {
+    renderSettings("/settings/account", "authenticated", "admin");
+
+    expect(screen.getByText("Account content")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Account & Tokens" }).getAttribute("aria-current")).toBe("page");
   });
 });

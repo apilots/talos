@@ -103,9 +103,7 @@ try {
   );
   const account = await waitForEvaluate(
     cdp,
-    serverInfo?.auth_enabled === true
-      ? "window.__talosSmokeInvoke('user.current', {})"
-      : "window.__talosSmokeInvoke('account.get', {})",
+    "window.__talosSmokeInvoke('user.current', {})",
     30_000,
   );
   const skillCount = await waitForEvaluate(
@@ -130,11 +128,10 @@ try {
   assert(typeof serverInfo?.auth_enabled === "boolean", `desktop server info did not include auth state: ${JSON.stringify(serverInfo)}`);
   if (serverInfo.auth_enabled) {
     assert(account?.username === smokeUsername, `desktop login did not return the smoke user: ${JSON.stringify(account)}`);
-    assert(adminVisible === (account?.role === "admin"), "Admin navigation should match authenticated user role.");
   } else {
-    assert(account?.role === "admin", `account.get did not reflect open-mode desktop admin access: ${JSON.stringify(account)}`);
-    assert(adminVisible === false, "Admin navigation should stay hidden in open auth mode.");
+    assert(account?.role === "admin", `user.current did not reflect open-mode desktop admin access: ${JSON.stringify(account)}`);
   }
+  assert(adminVisible === false, "Admin navigation should not be rendered in Talos.");
 
   await evaluate(cdp, "location.hash = '#/'; undefined");
   await waitForExpression(cdp, "Boolean(document.querySelector('[data-smoke=\"chat-composer-input\"]'))", 30_000);
@@ -250,16 +247,6 @@ try {
     })()`,
     30_000,
   );
-
-  await clickAdminIfAvailable(cdp);
-  if (account?.role === "admin" && serverInfo.auth_enabled) {
-    await waitForHash(cdp, "#/admin", 30_000);
-    await captureScreenshot(cdp, path.join(artifactDir, "admin.png"));
-    routeInteractions.push({ name: "admin", route: "#/admin", method: "click" });
-  } else {
-    await waitForExpression(cdp, "location.hash === '#/'", 30_000);
-    routeInteractions.push({ name: "admin-guard", route: "#/", method: "click-or-redirect" });
-  }
 
   const cleanup = await cleanupCreatedSessions(cdp, createdSessionIds);
   assert(
@@ -530,26 +517,6 @@ async function clickAccountMenuSettings(cdp) {
     30_000,
   );
   await clickAnchorByHash(cdp, "#/settings");
-}
-
-async function clickAdminIfAvailable(cdp) {
-  const result = await evaluate(
-    cdp,
-    `(() => {
-      const anchor = Array.from(document.querySelectorAll("a")).find((candidate) => {
-        const href = candidate.getAttribute("href") || "";
-        return candidate.hash === "#/admin" || href === "#/admin" || href.endsWith("#/admin");
-      });
-      if (anchor) {
-        anchor.click();
-        return "clicked";
-      }
-      location.hash = "#/";
-      return "unavailable";
-    })()`,
-  );
-  assert(result === "clicked" || result === "unavailable", `Unexpected admin click result: ${result}`);
-  return result;
 }
 
 async function readComposerStopState(cdp) {

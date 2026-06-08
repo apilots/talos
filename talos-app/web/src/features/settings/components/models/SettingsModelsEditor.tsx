@@ -89,7 +89,7 @@ interface ModelModalProps {
 }
 
 function ModelModal({ mode, form, saving, error, onChange, onSave, onClose }: ModelModalProps) {
-  const { t } = useTranslation("admin");
+  const { t } = useTranslation("settings");
   const isAdd = mode === "add";
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(28,22,16,0.46)] px-6 py-10">
@@ -176,7 +176,7 @@ interface ProviderTabProps {
 }
 
 function ProviderTab({ config, keyConfigured, onChange }: ProviderTabProps) {
-  const { t } = useTranslation("admin");
+  const { t } = useTranslation("settings");
   const [modalMode, setModalMode] = useState<"add" | "edit" | null>(null);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [modelForm, setModelForm] = useState<ModelFormState>(emptyModelForm);
@@ -307,8 +307,8 @@ function ProviderTab({ config, keyConfigured, onChange }: ProviderTabProps) {
 
 // ─── Main section ─────────────────────────────────────────────────────────────
 
-export function AdminModelsSection() {
-  const { t } = useTranslation("admin");
+export function SettingsModelsEditor() {
+  const { t } = useTranslation("settings");
   const connectionKey = useConnectionKey();
   const queryClient = useQueryClient();
   const [activeProvider, setActiveProvider] = useState<ProviderKey>("anthropic");

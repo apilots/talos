@@ -65,10 +65,6 @@ pub enum ClientMethod {
     EventUnsubscribe,
     #[serde(rename = "tool.dynamic_result.submit")]
     ToolDynamicResultSubmit,
-    #[serde(rename = "admin.session.list")]
-    AdminSessionList,
-    #[serde(rename = "admin.project.list")]
-    AdminProjectList,
     #[serde(rename = "model.list")]
     ModelList,
     #[serde(rename = "config.read")]
@@ -97,8 +93,6 @@ pub enum ClientMethod {
     AppList,
     #[serde(rename = "tool.list")]
     ToolList,
-    #[serde(rename = "account.get")]
-    AccountGet,
     #[serde(rename = "auth.logout")]
     AuthLogout,
     #[serde(rename = "auth.session.read")]
@@ -139,8 +133,6 @@ impl ClientMethod {
             Self::EventSubscribe => "event.subscribe",
             Self::EventUnsubscribe => "event.unsubscribe",
             Self::ToolDynamicResultSubmit => "tool.dynamic_result.submit",
-            Self::AdminSessionList => "admin.session.list",
-            Self::AdminProjectList => "admin.project.list",
             Self::ModelList => "model.list",
             Self::ConfigRead => "config.read",
             Self::ConfigValueWrite => "config.value.write",
@@ -155,7 +147,6 @@ impl ClientMethod {
             Self::SkillList => "skill.list",
             Self::AppList => "app.list",
             Self::ToolList => "tool.list",
-            Self::AccountGet => "account.get",
             Self::AuthLogout => "auth.logout",
             Self::AuthSessionRead => "auth.session.read",
             Self::AuthSessionStore => "auth.session.store",
@@ -200,8 +191,6 @@ impl FromStr for ClientMethod {
             "event.subscribe" => Ok(Self::EventSubscribe),
             "event.unsubscribe" => Ok(Self::EventUnsubscribe),
             "tool.dynamic_result.submit" => Ok(Self::ToolDynamicResultSubmit),
-            "admin.session.list" => Ok(Self::AdminSessionList),
-            "admin.project.list" => Ok(Self::AdminProjectList),
             "model.list" => Ok(Self::ModelList),
             "config.read" => Ok(Self::ConfigRead),
             "config.value.write" => Ok(Self::ConfigValueWrite),
@@ -216,7 +205,6 @@ impl FromStr for ClientMethod {
             "skill.list" => Ok(Self::SkillList),
             "app.list" => Ok(Self::AppList),
             "tool.list" => Ok(Self::ToolList),
-            "account.get" => Ok(Self::AccountGet),
             "auth.logout" => Ok(Self::AuthLogout),
             "auth.session.read" => Ok(Self::AuthSessionRead),
             "auth.session.store" => Ok(Self::AuthSessionStore),
@@ -277,10 +265,6 @@ pub enum ClientRequestParams {
     EventUnsubscribe(EventUnsubscribeParams),
     #[serde(rename = "tool.dynamic_result.submit")]
     ToolDynamicResultSubmit(ToolDynamicResultSubmitParams),
-    #[serde(rename = "admin.session.list")]
-    AdminSessionList(AdminSessionListParams),
-    #[serde(rename = "admin.project.list")]
-    AdminProjectList(AdminProjectListParams),
     #[serde(rename = "model.list")]
     ModelList(ModelListParams),
     #[serde(rename = "config.read")]
@@ -309,8 +293,6 @@ pub enum ClientRequestParams {
     AppList(AppListParams),
     #[serde(rename = "tool.list")]
     ToolList(ToolListParams),
-    #[serde(rename = "account.get")]
-    AccountGet(AccountGetParams),
     #[serde(rename = "auth.logout")]
     AuthLogout(AuthLogoutParams),
     #[serde(rename = "auth.session.read")]
@@ -386,12 +368,6 @@ impl ClientRequest {
             ClientMethod::ToolDynamicResultSubmit => {
                 ClientRequestParams::ToolDynamicResultSubmit(decode(params_value)?)
             }
-            ClientMethod::AdminSessionList => {
-                ClientRequestParams::AdminSessionList(decode(params_value)?)
-            }
-            ClientMethod::AdminProjectList => {
-                ClientRequestParams::AdminProjectList(decode(params_value)?)
-            }
             ClientMethod::ModelList => ClientRequestParams::ModelList(decode(params_value)?),
             ClientMethod::ConfigRead => ClientRequestParams::ConfigRead(decode(params_value)?),
             ClientMethod::ConfigValueWrite => {
@@ -422,7 +398,6 @@ impl ClientRequest {
             ClientMethod::SkillList => ClientRequestParams::SkillList(decode(params_value)?),
             ClientMethod::AppList => ClientRequestParams::AppList(decode(params_value)?),
             ClientMethod::ToolList => ClientRequestParams::ToolList(decode(params_value)?),
-            ClientMethod::AccountGet => ClientRequestParams::AccountGet(decode(params_value)?),
             ClientMethod::AuthLogout => ClientRequestParams::AuthLogout(decode(params_value)?),
             ClientMethod::AuthSessionRead => {
                 ClientRequestParams::AuthSessionRead(decode(params_value)?)
@@ -474,6 +449,7 @@ pub struct ServerInfo {
     pub name: String,
     pub version: String,
     pub auth_enabled: bool,
+    pub cloud_auth_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
@@ -745,43 +721,6 @@ pub struct ToolDynamicResultSubmitParams {
     pub success: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct AdminSessionListParams {
-    #[serde(default)]
-    pub user_id: Option<String>,
-    #[serde(default)]
-    pub channel_id: Option<String>,
-    #[serde(default)]
-    pub provider: Option<String>,
-    #[serde(default)]
-    pub project_id: Option<String>,
-    #[serde(default)]
-    pub limit: Option<usize>,
-    #[serde(default)]
-    pub offset: Option<usize>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct AdminSessionPagination {
-    pub total: usize,
-    pub limit: usize,
-    pub offset: usize,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AdminSessionListResponse {
-    pub data: Vec<talos_types::TalosSession>,
-    pub pagination: AdminSessionPagination,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct AdminProjectListParams {}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AdminProjectListResponse {
-    pub data: Vec<talos_types::ProjectRecord>,
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
 pub struct ModelListParams {}
 
@@ -845,9 +784,6 @@ pub struct AppListParams {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
 pub struct ToolListParams {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct AccountGetParams {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
 pub struct AuthLogoutParams {}
@@ -974,13 +910,8 @@ mod tests {
             ClientMethod::from_str("session.close").unwrap(),
             ClientMethod::SessionClose
         );
-        assert_eq!(
-            ClientMethod::from_str("admin.session.list").unwrap(),
-            ClientMethod::AdminSessionList
-        );
-        assert_eq!(
-            ClientMethod::from_str("admin.project.list").unwrap(),
-            ClientMethod::AdminProjectList
-        );
+        assert!(ClientMethod::from_str("account.get").is_err());
+        assert!(ClientMethod::from_str("admin.session.list").is_err());
+        assert!(ClientMethod::from_str("admin.project.list").is_err());
     }
 }

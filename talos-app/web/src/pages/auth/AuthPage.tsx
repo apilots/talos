@@ -1,19 +1,19 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { ExternalLink, LogIn, UserPlus } from "lucide-react";
+import { LogIn, UserPlus } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
-import { getCurrentUser, storeDesktopCloudSession } from "@/features/auth";
+import { getCloudAuthUrl, getCurrentUser, storeDesktopCloudSession } from "@/features/auth";
 import { useConnectionSettings } from "@/features/connection";
 import { Button } from "@/shared/ui/Button";
 import { Panel } from "@/shared/ui/Panel";
-
-const defaultCloudAuthUrl = import.meta.env.VITE_TALOS_CLOUD_AUTH_URL ?? "http://127.0.0.1:8787";
 
 export function AuthPage() {
   const navigate = useNavigate();
   const { connection, setConnection } = useConnectionSettings();
   const [error, setError] = useState("");
   const [isCompleting, setIsCompleting] = useState(false);
+  const [cloudAuthUrl, setCloudAuthUrl] = useState("");
+  const [isLoadingConfig, setIsLoadingConfig] = useState(true);
 
   const redirectUri = useMemo(() => `${window.location.origin}/auth/login`, []);
 
@@ -24,9 +24,34 @@ export function AuthPage() {
   }, [connection.authStatus, navigate]);
 
   useEffect(() => {
+    let canceled = false;
+    setIsLoadingConfig(true);
+    void getCloudAuthUrl()
+      .then((url) => {
+        if (!canceled) {
+          setCloudAuthUrl(url);
+          setError("");
+        }
+      })
+      .catch(() => {
+        if (!canceled) {
+          setError("Cloud auth URL is not configured by the Talos server.");
+        }
+      })
+      .finally(() => {
+        if (!canceled) {
+          setIsLoadingConfig(false);
+        }
+      });
+    return () => {
+      canceled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const accessToken = params.get("access_token");
-    if (!accessToken || isCompleting) {
+    if (!accessToken || isCompleting || !cloudAuthUrl) {
       return;
     }
 
@@ -42,7 +67,7 @@ export function AuthPage() {
           authRole: user.role,
           userId: user.user_id,
         });
-        void storeDesktopCloudSession(accessToken, defaultCloudAuthUrl, user);
+        void storeDesktopCloudSession(accessToken, cloudAuthUrl, user);
         navigate("/", { replace: true });
       })
       .catch(() => {
@@ -56,10 +81,14 @@ export function AuthPage() {
         setError("Cloud login callback could not be verified.");
       })
       .finally(() => setIsCompleting(false));
-  }, [isCompleting, navigate, setConnection]);
+  }, [cloudAuthUrl, isCompleting, navigate, setConnection]);
 
   function openCloudAuth(path: string) {
-    const url = new URL(path, defaultCloudAuthUrl);
+    if (!cloudAuthUrl) {
+      setError("Cloud auth URL is not configured by the Talos server.");
+      return;
+    }
+    const url = new URL(path, cloudAuthUrl);
     url.searchParams.set("redirect_uri", redirectUri);
     window.location.href = url.toString();
   }
@@ -81,29 +110,19 @@ export function AuthPage() {
         </div>
 
         <form className="mt-6 grid gap-3" onSubmit={handleLogin}>
-          <Button className="w-full" disabled={isCompleting} type="submit">
+          <Button className="w-full" disabled={isCompleting || isLoadingConfig || !cloudAuthUrl} type="submit">
             <LogIn size={16} />
             Continue with Cloud Login
           </Button>
           <Button
             className="w-full"
-            disabled={isCompleting}
+            disabled={isCompleting || isLoadingConfig || !cloudAuthUrl}
             onClick={() => openCloudAuth("/auth/register")}
             type="button"
             variant="secondary"
           >
             <UserPlus size={16} />
             Create Cloud Account
-          </Button>
-          <Button
-            className="w-full"
-            disabled={isCompleting}
-            onClick={() => openCloudAuth("/auth/google")}
-            type="button"
-            variant="ghost"
-          >
-            <ExternalLink size={16} />
-            Continue with Google
           </Button>
         </form>
 

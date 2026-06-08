@@ -95,6 +95,7 @@ moka = { version = "0.12", features = ["sync"] }
 
 # HTTP Client for tests
 reqwest = { version = "0.11", features = ["json"] }
+cloud-sdk-rs = { path = "../../talos-cloud/cloud-rs/crates/cloud-sdk-rs" }
 
 # Internal crates
 talos-error = { path = "crates/infra/error" }

@@ -52,11 +52,6 @@ interface ListResponse<T> {
   data: T[];
 }
 
-export interface AdminSessionListResponse {
-  data: TalosSession[];
-  pagination: AppProtocol.AdminSessionPagination;
-}
-
 export class AppServerClient {
   constructor(protected readonly transport: AppServerTransport) {}
 
@@ -100,10 +95,6 @@ export class AppServerClient {
 
   configReload(): Promise<unknown> {
     return this.transport.request("config.reload", {});
-  }
-
-  getAccount(): Promise<unknown> {
-    return this.transport.request("account.get", {});
   }
 
   authLogout(): Promise<unknown> {
@@ -152,12 +143,6 @@ export class AppServerClient {
     return this.transport
       .request<ListResponse<TalosSession>>("session.list", params)
       .then((response) => response.data);
-  }
-
-  listAdminSessions(
-    params: AppProtocol.AdminSessionListParams,
-  ): Promise<AdminSessionListResponse> {
-    return this.transport.request("admin.session.list", params);
   }
 
   getSession(sessionId: string): Promise<TalosSession> {
@@ -211,12 +196,6 @@ export class AppServerClient {
   listProjects(): Promise<ProjectRecord[]> {
     return this.transport
       .request<ListResponse<ProjectRecord>>("project.list", {})
-      .then((response) => response.data);
-  }
-
-  listAdminProjects(): Promise<ProjectRecord[]> {
-    return this.transport
-      .request<ListResponse<ProjectRecord>>("admin.project.list", {})
       .then((response) => response.data);
   }
 

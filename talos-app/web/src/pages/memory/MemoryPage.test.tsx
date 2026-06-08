@@ -59,27 +59,12 @@ function buildMemoryState() {
 }
 
 describe("MemoryPage", () => {
-  it("keeps memory preview-only for normal users", async () => {
+  it("allows authenticated users to switch into edit mode", async () => {
     await i18n.changeLanguage("zh-CN");
     useConnectionSettingsMock.mockReturnValue({
       connection: {
+        authStatus: "authenticated",
         authRole: "user",
-      },
-    });
-    useMemoryPageMock.mockReturnValue(buildMemoryState());
-
-    render(<MemoryPage />);
-
-    expect(screen.queryByRole("button", { name: "编辑" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
-    expect(screen.getByTestId("markdown-preview")).toHaveTextContent("# Shared memory");
-  });
-
-  it("allows admins to switch into edit mode", async () => {
-    await i18n.changeLanguage("zh-CN");
-    useConnectionSettingsMock.mockReturnValue({
-      connection: {
-        authRole: "admin",
       },
     });
     useMemoryPageMock.mockReturnValue(buildMemoryState());

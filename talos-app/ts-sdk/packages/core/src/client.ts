@@ -12,7 +12,6 @@ import type {
   UserDto,
   ProjectPatch,
   ProjectRecord,
-  PaginatedResponse,
   SessionConf,
   SessionQuery,
   SessionUpdate,
@@ -93,27 +92,6 @@ export class TalosClient {
   user = {
     current: async (): Promise<UserDto> => {
       return this.http.request<UserDto>(this.url("/v1/user"));
-    },
-  };
-
-  admin = {
-    sessions: {
-      list: async (query?: SessionQuery): Promise<PaginatedResponse<TalosSession>> => {
-        return this.http.request<PaginatedResponse<TalosSession>>(
-          this.urlWithQuery("/v1/admin/sessions", query),
-        );
-      },
-      delete: async (sessionId: string): Promise<void> => {
-        await this.http.request<void>(this.url(`/v1/admin/sessions/${sessionId}`), {
-          method: "DELETE",
-        });
-      },
-    },
-    projects: {
-      list: async (): Promise<ProjectRecord[]> => {
-        const response = await this.http.request<{ data: ProjectRecord[] }>(this.url("/v1/admin/projects"));
-        return response.data;
-      },
     },
   };
 

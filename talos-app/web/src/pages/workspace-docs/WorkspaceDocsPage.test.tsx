@@ -51,27 +51,12 @@ function buildWorkspaceDocsState() {
 }
 
 describe("WorkspaceDocsPage", () => {
-  it("keeps workspace docs preview-only for normal users", async () => {
+  it("allows authenticated users to switch workspace docs into edit mode", async () => {
     await i18n.changeLanguage("zh-CN");
     useConnectionSettingsMock.mockReturnValue({
       connection: {
+        authStatus: "authenticated",
         authRole: "user",
-      },
-    });
-    useWorkspaceDocsPageMock.mockReturnValue(buildWorkspaceDocsState());
-
-    render(<WorkspaceDocsPage />);
-
-    expect(screen.queryByRole("button", { name: "编辑" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
-    expect(screen.getByTestId("markdown-preview")).toHaveTextContent("# Shared workspace doc");
-  });
-
-  it("allows admins to switch workspace docs into edit mode", async () => {
-    await i18n.changeLanguage("zh-CN");
-    useConnectionSettingsMock.mockReturnValue({
-      connection: {
-        authRole: "admin",
       },
     });
     useWorkspaceDocsPageMock.mockReturnValue(buildWorkspaceDocsState());
