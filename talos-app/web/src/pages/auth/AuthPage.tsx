@@ -2,8 +2,12 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { LogIn } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 
-import { getCloudLoginStatus, readDesktopCloudSession, startCloudLogin } from "@/features/auth";
-import { redirectToExternalUrl } from "@/features/auth/navigation";
+import {
+  getCloudLoginStatus,
+  readDesktopCloudSession,
+  redirectToExternalUrl,
+  startCloudLogin,
+} from "@/features/auth";
 import { useConnectionSettings } from "@/features/connection";
 import { Button } from "@/shared/ui/Button";
 import { Panel } from "@/shared/ui/Panel";

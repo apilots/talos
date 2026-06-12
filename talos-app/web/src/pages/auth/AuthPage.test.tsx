@@ -9,20 +9,17 @@ import "@/shared/i18n/setup";
 import {
   getCloudLoginStatus,
   readDesktopCloudSession,
+  redirectToExternalUrl,
   startCloudLogin,
 } from "@/features/auth";
-import { redirectToExternalUrl } from "@/features/auth/navigation";
 import { useAppStore } from "@/shared/store/app-store";
 import { AuthPage } from "./AuthPage";
 
 vi.mock("@/features/auth", () => ({
   getCloudLoginStatus: vi.fn(),
   readDesktopCloudSession: vi.fn(),
-  startCloudLogin: vi.fn(),
-}));
-
-vi.mock("@/features/auth/navigation", () => ({
   redirectToExternalUrl: vi.fn(),
+  startCloudLogin: vi.fn(),
 }));
 
 const getCloudLoginStatusMock = vi.mocked(getCloudLoginStatus);

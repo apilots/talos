@@ -6,7 +6,7 @@ import {
   useModelsQuery,
   useSessionsQuery,
 } from "../hooks/useChatQueries";
-import { logoutUser } from "@/features/auth/api";
+import { logoutUser } from "@/features/auth";
 import { useAppStore } from "@/shared/store/app-store";
 import { getEffectiveSessionStatus } from "@/shared/types/domain";
 import { Sidebar } from "@/widgets/sidebar/Sidebar";
