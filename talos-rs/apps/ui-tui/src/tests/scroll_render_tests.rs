@@ -36,8 +36,8 @@ fn test_input_status_line_uses_dynamic_token_left_percent() {
 
 #[tokio::test]
 async fn test_turn_completed_updates_session_usage() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
     set_test_model_info(&mut app, "kimi-k2.5", 32_768);
     app.current_model = "kimi-k2.5".to_string();
     app.in_flight = true;
@@ -66,8 +66,8 @@ async fn test_turn_completed_updates_session_usage() {
 
 #[tokio::test]
 async fn test_live_metrics_do_not_overwrite_session_usage_before_turn_completed() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
     set_test_model_info(&mut app, "kimi-k2.5", 1_000);
     app.current_model = "kimi-k2.5".to_string();
     app.session_id = Some("sess-test".to_string());
@@ -150,8 +150,8 @@ async fn test_live_metrics_do_not_overwrite_session_usage_before_turn_completed(
 
 #[tokio::test]
 async fn test_completed_without_final_metrics_preserves_last_live_metrics() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
     set_test_model_info(&mut app, "kimi-k2.5", 1_000);
     app.current_model = "kimi-k2.5".to_string();
     app.session_id = Some("sess-test".to_string());
@@ -480,8 +480,8 @@ fn test_rebuild_chat_render_state_skips_footer_for_non_user_blocks() {
 
 #[tokio::test]
 async fn test_multiple_questions_keep_reply_order() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
 
     assert!(app.send_user_message("q1".to_string()).await.unwrap());
     assert!(app.send_user_message("q2".to_string()).await.unwrap());
@@ -513,8 +513,8 @@ async fn test_multiple_questions_keep_reply_order() {
 
 #[tokio::test]
 async fn test_send_is_non_blocking_when_stream_connect_is_slow() {
-    let mut app = create_remote_app_with_connect_delay(500);
-    app.initialize_remote().await;
+    let mut app = create_app_server_app_with_connect_delay(500);
+    app.initialize_session().await;
 
     let started = Instant::now();
     assert!(app.send_user_message("slow-1".to_string()).await.unwrap());
@@ -530,7 +530,7 @@ async fn test_send_is_non_blocking_when_stream_connect_is_slow() {
 
 #[tokio::test]
 async fn test_send_is_non_blocking_when_session_create_is_slow() {
-    let mut app = create_remote_app_with_session_delay(500);
+    let mut app = create_app_server_app_with_session_delay(500);
 
     let started = Instant::now();
     assert!(app
@@ -547,8 +547,8 @@ async fn test_send_is_non_blocking_when_session_create_is_slow() {
 
 #[tokio::test]
 async fn test_failed_queued_message_is_dropped_after_one_retry() {
-    let mut app = create_remote_app_with_stream_failures(2);
-    app.initialize_remote().await;
+    let mut app = create_app_server_app_with_stream_failures(2);
+    app.initialize_session().await;
 
     assert!(app.send_user_message("drop-me".to_string()).await.unwrap());
     assert!(app.send_user_message("next-one".to_string()).await.unwrap());
@@ -584,9 +584,9 @@ async fn test_failed_queued_message_is_dropped_after_one_retry() {
 }
 
 #[tokio::test]
-async fn test_quit_enters_closing_state_before_remote_close_finishes() {
-    let mut app = create_remote_app_with_close_delay(500);
-    app.initialize_remote().await;
+async fn test_quit_enters_closing_state_before_session_close_finishes() {
+    let mut app = create_app_server_app_with_close_delay(500);
+    app.initialize_session().await;
     app.input_buffer = "/quit".to_string();
     app.cursor_index = app.input_buffer.chars().count();
 
@@ -600,9 +600,9 @@ async fn test_quit_enters_closing_state_before_remote_close_finishes() {
 }
 
 #[tokio::test]
-async fn test_quit_exits_after_remote_close_completes() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+async fn test_quit_exits_after_session_close_completes() {
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
     app.input_buffer = "/quit".to_string();
     app.cursor_index = app.input_buffer.chars().count();
 
@@ -627,8 +627,8 @@ async fn test_quit_exits_after_remote_close_completes() {
 
 #[tokio::test]
 async fn test_quit_timeout_requires_second_quit_to_force_exit() {
-    let mut app = create_remote_app_with_close_delay(5_000);
-    app.initialize_remote().await;
+    let mut app = create_app_server_app_with_close_delay(5_000);
+    app.initialize_session().await;
     app.input_buffer = "/quit".to_string();
     app.cursor_index = app.input_buffer.chars().count();
     let _ = app.submit_input().await.unwrap();

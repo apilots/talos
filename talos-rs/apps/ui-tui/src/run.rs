@@ -14,13 +14,11 @@ use ratatui::{
     backend::{Backend, CrosstermBackend},
     Terminal,
 };
-use talos_types::talos::TalosConnectionMode;
 
 use super::{GatewayClient, TuiApp};
 
 pub async fn run_tui_app_with_gateway_client(
     client: Arc<dyn GatewayClient>,
-    connection_mode: TalosConnectionMode,
 ) -> Result<(), Box<dyn Error>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -34,8 +32,8 @@ pub async fn run_tui_app_with_gateway_client(
     let mut terminal = Terminal::new(backend)?;
     terminal.hide_cursor()?;
 
-    let mut app = TuiApp::new_with_gateway_client(client, connection_mode);
-    app.initialize_remote().await;
+    let mut app = TuiApp::new_with_gateway_client(client);
+    app.initialize_session().await;
     let run_result = run_event_loop(&mut terminal, &mut app).await;
 
     disable_raw_mode()?;

@@ -994,7 +994,7 @@ async fn test_run_general_turn_ends_loop_terminal_without_extra_finalization() {
     let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     let (tx, mut rx) = mpsc::channel(16);
     let mut ctx = build_ctx_with_stream(Some(tx));
 

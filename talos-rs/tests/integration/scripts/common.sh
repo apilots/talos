@@ -5,8 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 PORT="${TALOS_TEST_PORT:-8080}"
 HEALTH_URL="http://127.0.0.1:${PORT}/health"
 GATEWAY_URL="http://127.0.0.1:${PORT}"
-DEFAULT_TOKEN="talos-local-test-token"
-AUTH_TOKEN="${GATEWAY_TOKEN:-$DEFAULT_TOKEN}"
+AUTH_TOKEN="${GATEWAY_TOKEN:-}"
 REPORT_ROOT="${ROOT_DIR}/tests/integration/reports"
 SCENARIO_REPORT_DIR="${TALOS_SCENARIO_REPORT_DIR:-${REPORT_ROOT}/manual}"
 SERVER_LOG="${SCENARIO_REPORT_DIR}/server.log"
@@ -137,11 +136,6 @@ gateway_port = os.environ.get("TALOS_TEST_PORT")
 if gateway_port:
     text = replace_section_value(text, "gateway", "port", gateway_port)
 
-cloud_enabled = os.environ.get("TALOS_TEST_CLOUD_ENABLED")
-if cloud_enabled is not None:
-    enabled = cloud_enabled.lower() in ("1", "true", "yes", "on")
-    text = replace_section_value(text, "cloud", "enabled", "true" if enabled else "false")
-
 cloud_api_base_url = os.environ.get("TALOS_TEST_CLOUD_API_BASE_URL")
 if cloud_api_base_url:
     text = replace_section_value(
@@ -149,6 +143,15 @@ if cloud_api_base_url:
         "cloud",
         "api_base_url",
         json.dumps(cloud_api_base_url),
+    )
+
+cloud_web_base_url = os.environ.get("TALOS_TEST_CLOUD_WEB_BASE_URL")
+if cloud_web_base_url:
+    text = replace_section_value(
+        text,
+        "cloud",
+        "web_base_url",
+        json.dumps(cloud_web_base_url),
     )
 
 config_path.write_text(text)

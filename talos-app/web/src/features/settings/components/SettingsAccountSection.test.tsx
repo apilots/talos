@@ -41,14 +41,14 @@ describe("SettingsAccountSection", () => {
     vi.clearAllMocks();
   });
 
-  it("opens Cloud account management with the current token", async () => {
+  it("opens Cloud account management without passing a token in the URL", async () => {
     render(<SettingsAccountSection connection={buildConnection()} />);
 
     await waitFor(() => expect(screen.getByText("127.0.0.1:8787")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: /Manage account/i }));
 
     expect(window.open).toHaveBeenCalledWith(
-      "http://127.0.0.1:8787/account?access_token=cloud-token",
+      "http://127.0.0.1:8787/account",
       "_blank",
       "noopener,noreferrer",
     );
@@ -62,7 +62,7 @@ describe("SettingsAccountSection", () => {
     fireEvent.click(screen.getByRole("button", { name: /Manage users/i }));
 
     expect(window.open).toHaveBeenCalledWith(
-      "http://127.0.0.1:8787/admin/users?access_token=cloud-token",
+      "http://127.0.0.1:8787/admin/users",
       "_blank",
       "noopener,noreferrer",
     );

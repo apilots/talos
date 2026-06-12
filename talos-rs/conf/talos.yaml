@@ -1,14 +1,14 @@
 timezone: "Asia/Shanghai"
 
+# Development-only default config. Release builds must use the production profile.
 gateway:
   port: 8080
   host: "0.0.0.0"
-  token: "talos-local-test-token"
   auth: false
 
 cloud:
-  enabled: false
   api_base_url: "http://127.0.0.1:8787"
+  web_base_url: "http://127.0.0.1:3000"
   auth:
     introspection_cache_ttl_seconds: 300
 

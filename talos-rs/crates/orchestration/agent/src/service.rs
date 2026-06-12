@@ -77,7 +77,7 @@ pub trait AgentOrchestrator: Send + Sync {
     async fn drain_active_turns(&self, timeout: Duration) -> TalosResult<()>;
     async fn submit_dynamic_tool_result(
         &self,
-        session_id: &str,
+        session: TalosSession,
         call_id: &str,
         tool_name: &str,
         output: String,

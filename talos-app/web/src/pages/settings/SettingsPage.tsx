@@ -1,6 +1,5 @@
 import type { LucideIcon } from "lucide-react";
 import { Bot, Brush, ServerCog, Settings2, ShieldCheck, UserCircle, UserRoundCog } from "lucide-react";
-import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, Navigate, useParams } from "react-router-dom";
 
@@ -56,7 +55,6 @@ export function SettingsPage() {
   } = useSettingsPage();
   const requestedSection = params.section;
   const activeSection = requestedSection ? requestedSection : "general";
-  const sections = useMemo(() => settingsNavigation, []);
 
   if (requestedSection && !isSettingsSection(requestedSection)) {
     return <Navigate replace to="/settings" />;
@@ -73,7 +71,7 @@ export function SettingsPage() {
               </div>
             </div>
             <nav className="mt-3 space-y-1">
-              {sections.map((item) => {
+              {settingsNavigation.map((item) => {
                 const Icon = item.icon;
                 const isCurrent = activeSection === item.id;
                 return (

@@ -199,6 +199,7 @@ export function createDesktopTalosClient(
       search: (query: MemorySearchParams) => client.searchMemory(query.q, query.limit),
     },
     workspaceDocs: {
+      info: () => client.getWorkspaceInfo(),
       list: () => client.listWorkspaceDocs(),
       get: (kind: WorkspaceDocKind) => client.readWorkspaceDoc(kind),
       put: (kind: WorkspaceDocKind, request: DocUpdateRequest) =>

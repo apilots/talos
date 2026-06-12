@@ -13,7 +13,7 @@ async fn test_prompt_builder_creates_and_injects_bootstrap_static_sections() {
     .expect("agents file should write");
 
     let mut config = PromptBuildConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     config.load_policy.include_session_summary = false;
     config.load_policy.include_recent_messages = false;
 
@@ -57,7 +57,7 @@ async fn test_prompt_builder_minimal_mode_filters_bootstrap_files() {
     .expect("agents file should write");
 
     let mut config = PromptBuildConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     config.load_policy.include_session_summary = false;
     config.load_policy.include_recent_messages = false;
 
@@ -97,7 +97,7 @@ async fn test_prompt_builder_falls_back_to_workspace_agents_when_project_agents_
     .expect("workspace agents file should write");
 
     let mut config = PromptBuildConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     config.load_policy.include_session_summary = false;
     config.load_policy.include_recent_messages = false;
 
@@ -122,7 +122,7 @@ async fn test_prompt_builder_uses_absent_placeholder_for_missing_bootstrap_slot(
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
 
     let mut config = PromptBuildConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
 
     let assembly = PromptBuilder::new()
         .config(config)

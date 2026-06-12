@@ -221,7 +221,7 @@ async fn handle_request(
     }
 
     match decoded.params {
-        ClientRequestParams::Initialize(params) => {
+        ClientRequestParams::Initialize(_params) => {
             if state.actor.is_some() {
                 return send_error(
                     outgoing_tx,
@@ -234,23 +234,18 @@ async fn handle_request(
                 )
                 .await;
             }
-            match validator.validate(&params.actor_credentials).await {
-                Ok(actor) => {
-                    state.actor = Some(actor);
-                    let result = serde_json::to_value(InitializeResponse {
-                        protocol_version: ProtocolVersion::CURRENT,
-                        server_info: ServerInfo {
-                            name: config.server_name.clone(),
-                            version: config.server_version.clone(),
-                            auth_enabled: config.auth_enabled,
-                            cloud_auth_url: config.cloud_auth_url.clone(),
-                        },
-                    })
-                    .map_err(|error| AppServerErrorBody::invalid_request(error.to_string()));
-                    send_result(outgoing_tx, id, result).await
-                }
-                Err(error) => send_error(outgoing_tx, id, error).await,
-            }
+            state.actor = Some(Actor::regular("anonymous"));
+            let result = serde_json::to_value(InitializeResponse {
+                protocol_version: ProtocolVersion::CURRENT,
+                server_info: ServerInfo {
+                    name: config.server_name.clone(),
+                    version: config.server_version.clone(),
+                    auth_enabled: config.auth_enabled,
+                    cloud_auth_url: config.cloud_auth_url.clone(),
+                },
+            })
+            .map_err(|error| AppServerErrorBody::invalid_request(error.to_string()));
+            send_result(outgoing_tx, id, result).await
         }
         ClientRequestParams::EventSubscribe(params) => {
             if !state.initialized_notification_seen {
@@ -382,7 +377,11 @@ async fn resolve_request_actor(
 
     if matches!(
         method,
-        ClientMethod::AuthSessionRead | ClientMethod::AuthSessionClear
+        ClientMethod::AuthLoginStart
+            | ClientMethod::AuthLoginStatus
+            | ClientMethod::AuthLoginCancel
+            | ClientMethod::AuthSessionRead
+            | ClientMethod::AuthSessionClear
     ) && request_actor_credentials.is_none()
     {
         return state
@@ -589,7 +588,7 @@ mod tests {
 
     use super::*;
     use crate::application::SubscriptionSource;
-    use crate::auth::{ActorCredentialValidator, EnvLaunchTokenValidator};
+    use crate::auth::ActorCredentialValidator;
 
     #[derive(Default)]
     struct MockApp {
@@ -700,11 +699,6 @@ mod tests {
     impl ActorCredentialValidator for ExistingTokenValidator {
         async fn validate(&self, credentials: &ActorCredentials) -> ProtocolResult<Actor> {
             match &credentials.credential {
-                talos_app_protocol::requests::ActorCredential::LocalLaunchToken { token }
-                    if token == "secret" =>
-                {
-                    Ok(Actor::regular("local-desktop"))
-                }
                 talos_app_protocol::requests::ActorCredential::ExistingSessionToken { token }
                     if token == "user-token" =>
                 {
@@ -736,15 +730,23 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_credentials_return_unauthorized() {
-        let output = run_with_app_and_validator(
-            initialize_request("bad"),
+        let output = run_with_app_validator_and_config(
+            format!(
+                "{}{}",
+                initialize_request("secret"),
+                session_read_request_with_actor_token("bad")
+            ),
             Arc::new(MockApp::default()),
             Arc::new(RejectingValidator),
+            AppServerConfig {
+                auth_enabled: true,
+                ..AppServerConfig::default()
+            },
         )
         .await;
         let messages = parse_output(&output);
 
-        assert_eq!(messages[0]["error"]["code"], UNAUTHORIZED);
+        assert_eq!(messages[1]["error"]["code"], UNAUTHORIZED);
     }
 
     #[tokio::test]
@@ -835,7 +837,7 @@ mod tests {
                 .lock()
                 .expect("dispatch actor lock")
                 .as_slice(),
-            &["local-desktop"]
+            &["anonymous"]
         );
     }
 
@@ -941,7 +943,7 @@ mod tests {
             server_read,
             server_write,
             app.clone(),
-            Arc::new(EnvLaunchTokenValidator::new("secret", "tester")),
+            Arc::new(ExistingTokenValidator),
             AppServerConfig::default(),
         ));
         let (client_read, mut client_write) = split(client);
@@ -1057,7 +1059,7 @@ mod tests {
             server_read,
             server_write,
             app.clone(),
-            Arc::new(EnvLaunchTokenValidator::new("secret", "tester")),
+            Arc::new(ExistingTokenValidator),
             AppServerConfig::default(),
         ));
         let (client_read, mut client_write) = split(client);
@@ -1121,7 +1123,7 @@ mod tests {
             server_read,
             server_write,
             app.clone(),
-            Arc::new(EnvLaunchTokenValidator::new("secret", "tester")),
+            Arc::new(ExistingTokenValidator),
             AppServerConfig::default(),
         ));
         let (client_read, mut client_write) = split(client);
@@ -1177,12 +1179,7 @@ mod tests {
     }
 
     async fn run_with_app(input: String, app: Arc<MockApp>) -> String {
-        run_with_app_and_validator(
-            input,
-            app,
-            Arc::new(EnvLaunchTokenValidator::new("secret", "tester")),
-        )
-        .await
+        run_with_app_and_validator(input, app, Arc::new(ExistingTokenValidator)).await
     }
 
     async fn run_with_app_and_validator(
@@ -1217,7 +1214,7 @@ mod tests {
         output
     }
 
-    fn initialize_request(token: &str) -> String {
+    fn initialize_request(_token: &str) -> String {
         format!(
             "{}\n",
             json!({
@@ -1233,12 +1230,6 @@ mod tests {
                         "protocol_version": { "major": 0, "minor": 2 },
                         "supports_server_requests": false,
                         "supports_event_replay": true
-                    },
-                    "actor_credentials": {
-                        "credential": {
-                            "type": "local_launch_token",
-                            "token": token
-                        }
                     }
                 }
             })

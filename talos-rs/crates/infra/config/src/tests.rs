@@ -135,7 +135,7 @@ fn test_kernel_defaults() {
     assert_eq!(config.timezone, "UTC");
     assert_eq!(config.agent.kernel.timezone, config.timezone);
     assert_eq!(
-        config.agent.kernel.memory.workspace_dir,
+        config.agent.kernel.workspace_dir,
         config
             .talos_paths()
             .workspace_dir_for_agent("talos")
@@ -208,7 +208,6 @@ fn test_validate_runtime_requires_cloud_when_auth_enabled() {
     config.gateway.auth = true;
     assert!(config.validate_runtime().is_err());
 
-    config.cloud.enabled = true;
     config.llm.provider = "ollama".to_string();
     config.llm.model = "qwen-max".to_string();
     config.llm.ollama.base_url = Some("http://localhost:11434".to_string());
@@ -220,7 +219,6 @@ fn test_validate_runtime_requires_cloud_when_auth_enabled() {
 fn test_validate_runtime_allows_cloud_auth_without_local_secret() {
     let mut config = Config::default();
     config.gateway.auth = true;
-    config.cloud.enabled = true;
     config.llm.provider = "ollama".to_string();
     config.llm.model = "qwen-max".to_string();
     config.llm.ollama.base_url = Some("http://localhost:11434".to_string());

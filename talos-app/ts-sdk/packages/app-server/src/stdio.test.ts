@@ -25,15 +25,15 @@ describe("JsonRpcStdioTransport server requests", () => {
   it("responds to server requests with registered handler output", async () => {
     const transport = createTransportHarness();
     transport.instance.onServerRequest((request) => {
-      expect(request.method).toBe("client.auth.refresh");
-      return { token: "next-token" };
+      expect(request.method).toBe("client.user_input.request");
+      return { text: "confirmed" };
     });
 
     transport.handleLine(JSON.stringify({
       jsonrpc: "2.0",
       id: 7,
-      method: "client.auth.refresh",
-      params: { reason: "expired" },
+      method: "client.user_input.request",
+      params: { prompt: "Continue?" },
     }));
     await Promise.resolve();
 
@@ -41,7 +41,7 @@ describe("JsonRpcStdioTransport server requests", () => {
       {
         jsonrpc: "2.0",
         id: 7,
-        result: { token: "next-token" },
+        result: { text: "confirmed" },
       },
     ]);
   });

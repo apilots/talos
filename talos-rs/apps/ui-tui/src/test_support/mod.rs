@@ -1016,45 +1016,45 @@ impl GatewayClient for MockGatewayClient {
 
 pub(crate) fn create_embedded_app() -> TuiApp {
     let client: Arc<dyn GatewayClient> = Arc::new(MockGatewayClient::new());
-    TuiApp::new_with_gateway_client(client, TalosConnectionMode::Embedded)
+    TuiApp::new_with_gateway_client(client)
 }
 
-pub(crate) fn create_remote_app() -> TuiApp {
+pub(crate) fn create_app_server_app() -> TuiApp {
     let client: Arc<dyn GatewayClient> = Arc::new(MockGatewayClient::new());
-    TuiApp::new_with_gateway_client(client, TalosConnectionMode::Remote)
+    TuiApp::new_with_gateway_client(client)
 }
 
-pub(crate) fn create_remote_app_with_connect_delay(delay_ms: u64) -> TuiApp {
+pub(crate) fn create_app_server_app_with_connect_delay(delay_ms: u64) -> TuiApp {
     let client: Arc<dyn GatewayClient> = Arc::new(MockGatewayClient::with_connect_delay(delay_ms));
-    TuiApp::new_with_gateway_client(client, TalosConnectionMode::Remote)
+    TuiApp::new_with_gateway_client(client)
 }
 
-pub(crate) fn create_remote_app_with_model_list_failures(failures: u8) -> TuiApp {
+pub(crate) fn create_app_server_app_with_model_list_failures(failures: u8) -> TuiApp {
     let client: Arc<dyn GatewayClient> =
         Arc::new(MockGatewayClient::with_list_models_failures(failures));
-    TuiApp::new_with_gateway_client(client, TalosConnectionMode::Remote)
+    TuiApp::new_with_gateway_client(client)
 }
 
-pub(crate) fn create_remote_app_with_session_delay(delay_ms: u64) -> TuiApp {
+pub(crate) fn create_app_server_app_with_session_delay(delay_ms: u64) -> TuiApp {
     let client: Arc<dyn GatewayClient> = Arc::new(MockGatewayClient::with_session_delay(delay_ms));
-    TuiApp::new_with_gateway_client(client, TalosConnectionMode::Remote)
+    TuiApp::new_with_gateway_client(client)
 }
 
-pub(crate) fn create_remote_app_with_create_session_failures(failures: u8) -> TuiApp {
+pub(crate) fn create_app_server_app_with_create_session_failures(failures: u8) -> TuiApp {
     let client: Arc<dyn GatewayClient> =
         Arc::new(MockGatewayClient::with_create_session_failures(failures));
-    TuiApp::new_with_gateway_client(client, TalosConnectionMode::Remote)
+    TuiApp::new_with_gateway_client(client)
 }
 
-pub(crate) fn create_remote_app_with_stream_failures(failures: u8) -> TuiApp {
+pub(crate) fn create_app_server_app_with_stream_failures(failures: u8) -> TuiApp {
     let client: Arc<dyn GatewayClient> =
         Arc::new(MockGatewayClient::with_stream_failures(failures));
-    TuiApp::new_with_gateway_client(client, TalosConnectionMode::Remote)
+    TuiApp::new_with_gateway_client(client)
 }
 
-pub(crate) fn create_remote_app_with_close_delay(delay_ms: u64) -> TuiApp {
+pub(crate) fn create_app_server_app_with_close_delay(delay_ms: u64) -> TuiApp {
     let client: Arc<dyn GatewayClient> = Arc::new(MockGatewayClient::with_close_delay(delay_ms));
-    TuiApp::new_with_gateway_client(client, TalosConnectionMode::Remote)
+    TuiApp::new_with_gateway_client(client)
 }
 
 pub(crate) fn set_test_model_info(app: &mut TuiApp, model_id: &str, context_window: u32) {

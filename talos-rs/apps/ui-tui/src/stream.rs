@@ -146,7 +146,7 @@ impl TuiApp {
                 self.connection_status = "error".to_string();
                 self.push_block(
                     ChatRole::System,
-                    format!("Failed to create remote session: {}", err),
+                    format!("Failed to create session: {}", err),
                 );
                 self.push_right_event("session create failed".to_string());
             }

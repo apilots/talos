@@ -3,8 +3,9 @@ use chrono::Utc;
 use dashmap::mapref::entry::Entry;
 use std::collections::VecDeque;
 use std::time::Duration;
+use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult};
-use talos_memory::Memory;
+use talos_memory::{Memory, MemoryStore};
 use talos_memory::{
     SessionTranscriptActions, SessionTranscriptAuthor, SessionTranscriptBranch,
     SessionTranscriptDynamicToolResponsePayload, SessionTranscriptEventKind,
@@ -143,12 +144,13 @@ impl AgentHarness {
 
     pub(crate) async fn validate_dynamic_tool_submission(
         &self,
+        memory_store: &MemoryStore,
+        kernel_config: &AgentKernelConfig,
         session_id: &str,
         call_id: &str,
         tool_name: &str,
     ) -> TalosResult<()> {
-        let records = self
-            .memory_store
+        let records = memory_store
             .load_transcript_records(session_id, None, SessionTranscriptBranch::ReactiveLoop)
             .await?;
 
@@ -192,7 +194,7 @@ impl AgentHarness {
             )));
         }
 
-        let timeout_ms = self.kernel_config.tools.dynamic.response_timeout_ms;
+        let timeout_ms = kernel_config.tools.dynamic.response_timeout_ms;
         if timeout_ms > 0 {
             let elapsed_ms = Utc::now()
                 .signed_duration_since(request_timestamp)
@@ -210,14 +212,22 @@ impl AgentHarness {
 
     pub(crate) async fn submit_dynamic_tool_result(
         &self,
-        session_id: &str,
+        session: TalosSession,
         call_id: &str,
         tool_name: &str,
         output: String,
         success: bool,
     ) -> TalosResult<()> {
-        self.validate_dynamic_tool_submission(session_id, call_id, tool_name)
-            .await?;
+        let session_id = session.context.session_id.clone();
+        let (kernel_config, memory_store) = self.memory_store_for_session(&session).await?;
+        self.validate_dynamic_tool_submission(
+            memory_store.as_ref(),
+            &kernel_config,
+            &session_id,
+            call_id,
+            tool_name,
+        )
+        .await?;
         let record = SessionTranscriptRecord {
             header: SessionTranscriptHeader {
                 id: Uuid::new_v4().to_string(),
@@ -239,7 +249,7 @@ impl AgentHarness {
             actions: SessionTranscriptActions::default(),
             partial: false,
         };
-        self.memory_store.append_transcript_record(&record).await
+        memory_store.append_transcript_record(&record).await
     }
 
     pub(crate) async fn compact_session_impl(
@@ -248,6 +258,7 @@ impl AgentHarness {
     ) -> TalosResult<TalosUsage> {
         let session_id = session.context.session_id.clone();
         self.ensure_session_is_idle(&session_id, "compact").await?;
+        let (kernel_config, memory_store) = self.memory_store_for_session(&session).await?;
         let selected_model = if session.config.llm.model.trim().is_empty() {
             self.model.clone()
         } else {
@@ -257,14 +268,11 @@ impl AgentHarness {
             &session_id,
             &selected_model,
             self.llm_provider.clone(),
-            self.memory_store.as_ref(),
-            &self.kernel_config,
+            memory_store.as_ref(),
+            &kernel_config,
             talos_agent_kernel::MemoryFlushPolicy::for_compaction(
-                self.kernel_config.memory.workspace_memory_flush_enabled
-                    && self
-                        .kernel_config
-                        .memory
-                        .workspace_memory_flush_on_compaction,
+                kernel_config.memory.workspace_memory_flush_enabled
+                    && kernel_config.memory.workspace_memory_flush_on_compaction,
             ),
         )
         .await?;
@@ -280,7 +288,8 @@ impl AgentHarness {
     pub(crate) async fn clear_session_impl(&self, session: TalosSession) -> TalosResult<()> {
         let session_id = session.context.session_id.clone();
         self.ensure_session_is_idle(&session_id, "clear").await?;
-        self.memory_store.reset_session(&session_id).await
+        let (_kernel_config, memory_store) = self.memory_store_for_session(&session).await?;
+        memory_store.reset_session(&session_id).await
     }
 
     pub(crate) async fn close_session_impl(&self, session: TalosSession) -> TalosResult<()> {
@@ -292,8 +301,7 @@ impl AgentHarness {
         let session_id = session.context.session_id.clone();
         let task_session_id = session_id.clone();
         let llm_provider = self.llm_provider.clone();
-        let memory_store = self.memory_store.clone();
-        let kernel_config = self.kernel_config.clone();
+        let (kernel_config, memory_store) = self.memory_store_for_session(&session).await?;
         let accepted = self
             .memory_flush_manager
             .spawn_flush(&session_id, async move {

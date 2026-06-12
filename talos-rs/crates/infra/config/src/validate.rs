@@ -121,11 +121,11 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             "agent.kernel.default_workspace_id is empty or unresolved placeholder".to_string(),
         ));
     }
-    if config.agent.kernel.memory.workspace_dir.trim().is_empty()
-        || is_unresolved_placeholder(&config.agent.kernel.memory.workspace_dir)
+    if config.agent.kernel.workspace_dir.trim().is_empty()
+        || is_unresolved_placeholder(&config.agent.kernel.workspace_dir)
     {
         return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.memory.workspace_dir is empty or unresolved placeholder".to_string(),
+            "agent.kernel.workspace_dir is empty or unresolved placeholder".to_string(),
         ));
     }
     if config.agent.kernel.memory.hot_recent_messages == 0 {
@@ -429,20 +429,19 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
         ));
     }
 
-    if config.cloud.enabled && config.cloud.api_base_url.trim().is_empty() {
+    if config.gateway.auth && config.cloud.api_base_url.trim().is_empty() {
         return Err(TalosError::InvalidConfiguration(
-            "cloud.api_base_url must not be empty when cloud.enabled=true".to_string(),
+            "cloud.api_base_url must not be empty when gateway.auth=true".to_string(),
         ));
     }
-    if config.cloud.enabled && config.cloud.auth.introspection_cache_ttl_seconds == 0 {
+    if config.gateway.auth && config.cloud.web_base_url.trim().is_empty() {
+        return Err(TalosError::InvalidConfiguration(
+            "cloud.web_base_url must not be empty when gateway.auth=true".to_string(),
+        ));
+    }
+    if config.gateway.auth && config.cloud.auth.introspection_cache_ttl_seconds == 0 {
         return Err(TalosError::InvalidConfiguration(
             "cloud.auth.introspection_cache_ttl_seconds must be > 0".to_string(),
-        ));
-    }
-
-    if config.gateway.auth && !config.cloud.enabled {
-        return Err(TalosError::InvalidConfiguration(
-            "cloud.enabled=true is required when gateway.auth=true".to_string(),
         ));
     }
 

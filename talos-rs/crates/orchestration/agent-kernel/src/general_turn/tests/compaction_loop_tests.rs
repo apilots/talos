@@ -55,7 +55,7 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
     }
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     config.prompt.bootstrap.enabled = false;
     config.prompt.window.compaction_buffer_tokens = 32;
     config.prompt.window.reserved_output_tokens =
@@ -192,7 +192,7 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_reaches_
     }
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     config.prompt.bootstrap.enabled = false;
     config.prompt.window.compaction_buffer_tokens = 32;
     config.prompt.window.reserved_output_tokens =
@@ -280,7 +280,7 @@ async fn test_run_general_turn_updates_compaction_state_to_recovery_after_succes
     }
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     config.prompt.bootstrap.enabled = false;
     config.prompt.window.compaction_buffer_tokens = 32;
     config.prompt.window.reserved_output_tokens =
@@ -362,7 +362,7 @@ async fn test_prepare_general_turn_drops_sections_only_after_compaction_exhauste
     }
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     config.prompt.bootstrap.enabled = false;
     config.prompt.window.compaction_buffer_tokens = 64;
     config.prompt.window.reserved_output_tokens =
@@ -451,7 +451,7 @@ async fn test_prepare_general_turn_records_rejected_compaction_when_summary_is_m
     }
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     config.prompt.bootstrap.enabled = false;
     config.prompt.window.compaction_buffer_tokens = 64;
     config.prompt.window.reserved_output_tokens =
@@ -500,7 +500,7 @@ async fn test_prepare_general_turn_rejects_blocked_session_state() {
     let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
 
     let mut ctx = build_ctx_with_stream(None);
     ctx.session.state.insert(
@@ -548,7 +548,7 @@ async fn test_run_general_turn_blocks_session_when_budget_remains_exhausted() {
     seed_recent_user_message(memory_store.as_ref()).await;
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     config.prompt.bootstrap.auto_create_missing_files = false;
     config.prompt.window.compaction_buffer_tokens = 8;
     config.prompt.window.reserved_output_tokens =
@@ -626,7 +626,7 @@ async fn test_prepare_general_turn_uses_compacted_load_policy_during_recovery() 
     config.compaction.recent_summaries_keep = 2;
     config.prompt.window.reserved_output_tokens =
         talos_config::ReservedOutputPolicy::Fixed { tokens: 512 };
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
 
     let mut normal_ctx = build_ctx_with_stream(None);
     normal_ctx.selected_model_info.context_window = 16_384;

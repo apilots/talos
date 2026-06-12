@@ -88,7 +88,6 @@ cargo build -p app-server --bin app-server
 cd ../talos-app
 TALOS_APP_SERVER_BIN=../talos-rs/target/debug/app-server \
 TALOS_APP_SERVER_CWD=../talos-rs \
-TALOS_LOCAL_LAUNCH_TOKEN=local-token \
 pnpm --filter @talos/sdk-app-server test:integration
 ```
 

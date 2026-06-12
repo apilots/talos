@@ -105,7 +105,7 @@ mod tests {
 
     fn test_kernel_config(workspace_dir: &std::path::Path) -> Arc<AgentKernelConfig> {
         let mut config = AgentKernelConfig::default();
-        config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+        config.workspace_dir = workspace_dir.to_string_lossy().to_string();
         Arc::new(config)
     }
 

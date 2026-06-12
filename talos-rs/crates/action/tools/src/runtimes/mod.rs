@@ -26,7 +26,7 @@ pub(crate) fn resolve_base_dir(context: &ToolContext) -> TalosResult<PathBuf> {
     }
 
     if let Some(config) = context.kernel_config() {
-        let workspace_dir = config.memory.workspace_dir.trim();
+        let workspace_dir = config.workspace_dir.trim();
         if !workspace_dir.is_empty() {
             return Ok(expand_workspace_dir(workspace_dir));
         }
@@ -67,7 +67,7 @@ mod tests {
     #[test]
     fn resolve_base_dir_prefers_explicit_project_root() {
         let mut config = AgentKernelConfig::default();
-        config.memory.workspace_dir = "/tmp/talos-workspace".to_string();
+        config.workspace_dir = "/tmp/talos-workspace".to_string();
         let context = crate::ToolContext::new_with_kernel_config(
             "session-1",
             "user-1",
@@ -83,7 +83,7 @@ mod tests {
     #[test]
     fn resolve_base_dir_falls_back_to_workspace_dir_without_project_root() {
         let mut config = AgentKernelConfig::default();
-        config.memory.workspace_dir = "/tmp/talos-workspace".to_string();
+        config.workspace_dir = "/tmp/talos-workspace".to_string();
         let context = crate::ToolContext::new_with_kernel_config(
             "session-1",
             "user-1",

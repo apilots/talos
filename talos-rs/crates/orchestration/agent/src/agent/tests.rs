@@ -256,7 +256,7 @@ fn single_text_block_stream(text: &str) -> ModelBlockStream {
 fn build_temp_agent() -> (TempDir, AgentHarness) {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let mut kernel_config = AgentKernelConfig::default();
-    kernel_config.memory.workspace_dir = temp_dir.path().display().to_string();
+    kernel_config.workspace_dir = temp_dir.path().display().to_string();
     kernel_config.memory.compaction_threshold_bytes = usize::MAX;
     let agent = AgentHarness::new(
         "test_agent".to_string(),
@@ -273,7 +273,7 @@ fn build_temp_agent() -> (TempDir, AgentHarness) {
 fn build_test_session(session_id: &str, workspace_id: &str) -> TalosSession {
     TalosSession {
         title: "Untitled Session".to_string(),
-        user_id: "local-user".to_string(),
+        user_id: "talos-test-local-user".to_string(),
         conf: SessionConf::default(),
         project_id: None,
         current_directory: None,
@@ -285,7 +285,7 @@ fn build_test_session(session_id: &str, workspace_id: &str) -> TalosSession {
             project_root: None,
             source_type: TalosSourceType::Cli,
             provider: TalosProvider::Cli,
-            user_id: "local-user".to_string(),
+            user_id: "talos-test-local-user".to_string(),
             message_id: "message-1".to_string(),
             trace_id: "trace-1".to_string(),
             channel_id: None,
@@ -905,7 +905,7 @@ async fn test_run_stream_replays_dynamic_resume_into_model_loop() {
     ));
     let mut kernel_config = AgentKernelConfig::default();
     kernel_config.prompt.bootstrap.enabled = false;
-    kernel_config.memory.workspace_dir = temp_dir.path().display().to_string();
+    kernel_config.workspace_dir = temp_dir.path().display().to_string();
     let agent = AgentHarness::new(
         "test_agent".to_string(),
         "Test Agent".to_string(),
@@ -916,6 +916,14 @@ async fn test_run_stream_replays_dynamic_resume_into_model_loop() {
         kernel_config,
     );
     let session_id = "session-dynamic-main-resume";
+    let mut session = build_test_session(session_id, "workspace-1");
+    session.config.agent.kernel.prompt.bootstrap.enabled = false;
+    session.config.agent.kernel.workspace_dir = temp_dir.path().display().to_string();
+    session.config.agent.kernel.output.max_tokens = 256;
+    let (_kernel_config, memory_store) = agent
+        .memory_store_for_session(&session)
+        .await
+        .expect("session memory store should build");
     let request_record = talos_memory::SessionTranscriptRecord {
         header: talos_memory::SessionTranscriptHeader {
             id: uuid::Uuid::new_v4().to_string(),
@@ -957,21 +965,14 @@ async fn test_run_stream_replays_dynamic_resume_into_model_loop() {
         actions: talos_memory::SessionTranscriptActions::default(),
         partial: false,
     };
-    agent
-        .memory_store
+    memory_store
         .append_transcript_record(&request_record)
         .await
         .expect("dynamic request record should append");
-    agent
-        .memory_store
+    memory_store
         .append_transcript_record(&response_record)
         .await
         .expect("dynamic response record should append");
-
-    let mut session = build_test_session(session_id, "workspace-1");
-    session.config.agent.kernel.prompt.bootstrap.enabled = false;
-    session.config.agent.kernel.memory.workspace_dir = temp_dir.path().display().to_string();
-    session.config.agent.kernel.output.max_tokens = 256;
 
     let mut stream = agent
         .run_stream(OrchestratorRequest {
@@ -1037,10 +1038,57 @@ async fn test_run_stream_replays_dynamic_resume_into_model_loop() {
 }
 
 #[tokio::test]
+async fn test_session_memory_store_does_not_write_profile_snapshot() {
+    let (guard, agent) = build_temp_agent();
+    let mut session = build_test_session("session-profile-snapshot", "workspace-profile");
+    session.config.agent.kernel.workspace_dir = guard.path().display().to_string();
+    let profile_path = guard
+        .path()
+        .join("users")
+        .join("talos-test-local-user")
+        .join("profile.json");
+    std::fs::create_dir_all(profile_path.parent().expect("profile parent should exist"))
+        .expect("profile parent should be created");
+    std::fs::write(
+        &profile_path,
+        r#"{"user_id":"talos-test-local-user","username":"Alice","updated_at_ms":1}"#,
+    )
+    .expect("profile snapshot should be seeded");
+
+    let (kernel_config, _memory_store) = agent
+        .memory_store_for_session(&session)
+        .await
+        .expect("session memory store should build");
+
+    let profile_content =
+        std::fs::read_to_string(&profile_path).expect("profile snapshot should remain readable");
+    let profile: serde_json::Value =
+        serde_json::from_str(&profile_content).expect("profile snapshot should be json");
+
+    assert_eq!(
+        kernel_config.workspace_dir,
+        guard
+            .path()
+            .join("users")
+            .join("talos-test-local-user")
+            .to_string_lossy()
+            .to_string()
+    );
+    assert_eq!(profile["user_id"], "talos-test-local-user");
+    assert_eq!(profile["username"], "Alice");
+    assert_eq!(profile["updated_at_ms"], 1);
+}
+
+#[tokio::test]
 async fn test_close_session_flushes_workspace_memory() {
     let (_guard, agent) = build_temp_agent();
     let session_id = "session-close-flush";
-    let session = build_test_session(session_id, "workspace-a");
+    let mut session = build_test_session(session_id, "workspace-a");
+    session.config.agent.kernel.workspace_dir = _guard.path().display().to_string();
+    let (_kernel_config, memory_store) = agent
+        .memory_store_for_session(&session)
+        .await
+        .expect("session memory store should build");
     let timestamp = Utc::now();
     let turn = TalosTurn {
         turn_id: "turn-1".to_string(),
@@ -1060,8 +1108,7 @@ async fn test_close_session_flushes_workspace_memory() {
         stop_reason: TalosStopReason::EndTurn,
     };
 
-    agent
-        .memory_store
+    memory_store
         .append_turn(&turn)
         .await
         .expect("session turn should be persisted");
@@ -1077,6 +1124,8 @@ async fn test_close_session_flushes_workspace_memory() {
 
     let file_path = _guard
         .path()
+        .join("users")
+        .join("talos-test-local-user")
         .join("memory")
         .join(format!("{}.md", Utc::now().format("%Y-%m-%d")));
     let mut content = None;
@@ -1112,6 +1161,12 @@ fn test_planner_mode_comes_from_kernel_config() {
 async fn test_submit_dynamic_tool_result_rejects_replay() {
     let (_temp_dir, agent) = build_temp_agent();
     let session_id = "session-dynamic-replay";
+    let mut session = build_test_session(session_id, "workspace-1");
+    session.config.agent.kernel.workspace_dir = _temp_dir.path().display().to_string();
+    let (_kernel_config, memory_store) = agent
+        .memory_store_for_session(&session)
+        .await
+        .expect("session memory store should build");
     let request_record = talos_memory::SessionTranscriptRecord {
         header: talos_memory::SessionTranscriptHeader {
             id: uuid::Uuid::new_v4().to_string(),
@@ -1132,15 +1187,14 @@ async fn test_submit_dynamic_tool_result_rejects_replay() {
         actions: talos_memory::SessionTranscriptActions::default(),
         partial: false,
     };
-    agent
-        .memory_store
+    memory_store
         .append_transcript_record(&request_record)
         .await
         .expect("request record should append");
 
     agent
         .submit_dynamic_tool_result(
-            session_id,
+            session.clone(),
             "call-1",
             "skill_greet",
             "hello".to_string(),
@@ -1151,7 +1205,7 @@ async fn test_submit_dynamic_tool_result_rejects_replay() {
 
     let error = agent
         .submit_dynamic_tool_result(
-            session_id,
+            session,
             "call-1",
             "skill_greet",
             "hello again".to_string(),
@@ -1167,6 +1221,19 @@ async fn test_submit_dynamic_tool_result_rejects_timeout() {
     let (_temp_dir, mut agent) = build_temp_agent();
     agent.kernel_config.tools.dynamic.response_timeout_ms = 1;
     let session_id = "session-dynamic-timeout";
+    let mut session = build_test_session(session_id, "workspace-1");
+    session.config.agent.kernel.workspace_dir = _temp_dir.path().display().to_string();
+    session
+        .config
+        .agent
+        .kernel
+        .tools
+        .dynamic
+        .response_timeout_ms = 1;
+    let (_kernel_config, memory_store) = agent
+        .memory_store_for_session(&session)
+        .await
+        .expect("session memory store should build");
     let request_record = talos_memory::SessionTranscriptRecord {
         header: talos_memory::SessionTranscriptHeader {
             id: uuid::Uuid::new_v4().to_string(),
@@ -1187,15 +1254,14 @@ async fn test_submit_dynamic_tool_result_rejects_timeout() {
         actions: talos_memory::SessionTranscriptActions::default(),
         partial: false,
     };
-    agent
-        .memory_store
+    memory_store
         .append_transcript_record(&request_record)
         .await
         .expect("request record should append");
 
     let error = agent
         .submit_dynamic_tool_result(
-            session_id,
+            session,
             "call-timeout",
             "skill_greet",
             "late".to_string(),

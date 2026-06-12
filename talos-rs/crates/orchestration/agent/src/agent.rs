@@ -213,6 +213,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
 
     async fn build_general_turn_resume(
         &self,
+        memory_store: &MemoryStore,
         session_id: &str,
         resume_context: Option<GatewayResumeContext>,
     ) -> TalosResult<Option<GeneralTurnResume>> {
@@ -220,8 +221,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
             return Ok(None);
         };
 
-        let records = self
-            .memory_store
+        let records = memory_store
             .load_transcript_records(session_id, None, SessionTranscriptBranch::ReactiveLoop)
             .await?;
         let mut request = None;
@@ -391,8 +391,9 @@ After receiving tool outputs, continue reasoning and provide the final response.
         let input = Self::extract_text_input(&agent_request.input);
         let invocation_id = format!("inv-{}", Utc::now().timestamp_millis());
         let session_id = agent_request.session.context.session_id.clone();
-        let kernel_config =
-            Self::normalized_kernel_config(agent_request.session.config.agent.kernel.clone());
+        let (kernel_config, memory_store) = self
+            .memory_store_for_session(&agent_request.session)
+            .await?;
         let mut ctx = self.build_invocation_context(
             &agent_request,
             input.clone(),
@@ -401,11 +402,10 @@ After receiving tool outputs, continue reasoning and provide the final response.
             &kernel_config,
         );
         let resume = self
-            .build_general_turn_resume(&session_id, resume_context)
+            .build_general_turn_resume(memory_store.as_ref(), &session_id, resume_context)
             .await?;
         let llm_provider = self.llm_provider.clone();
         let tool_registry = self.tool_registry.clone();
-        let memory_store = self.memory_store.clone();
         let agent_name = self.name.clone();
         let agent_description = self.description.clone();
         let title_input = input.clone();
@@ -502,8 +502,15 @@ After receiving tool outputs, continue reasoning and provide the final response.
             );
             let mut timeline_state = KernelTimelineState::default();
             seed_resume_context(&mut timeline, &mut timeline_state, resume_context.clone());
-            let kernel_config =
-                Self::normalized_kernel_config(agent_request.session.config.agent.kernel.clone());
+            let (kernel_config, memory_store) =
+                match this.memory_store_for_session(&agent_request.session).await {
+                    Ok(value) => value,
+                    Err(err) => {
+                        let _ = tx.send(timeline.fail_turn(err.to_string())).await;
+                        this.finish_active_turn_and_resume(&session_id).await;
+                        return;
+                    }
+                };
             let (kernel_tx, mut kernel_rx) = mpsc::channel(256);
             let mut kernel_ctx = this.build_invocation_context(
                 &agent_request,
@@ -513,7 +520,11 @@ After receiving tool outputs, continue reasoning and provide the final response.
                 &kernel_config,
             );
             let resume = match this
-                .build_general_turn_resume(&session_id, resume_context.clone())
+                .build_general_turn_resume(
+                    memory_store.as_ref(),
+                    &session_id,
+                    resume_context.clone(),
+                )
                 .await
             {
                 Ok(resume) => resume,
@@ -545,7 +556,6 @@ After receiving tool outputs, continue reasoning and provide the final response.
 
             let llm_provider = this.llm_provider.clone();
             let tool_registry = this.tool_registry.clone();
-            let memory_store = this.memory_store.clone();
             let agent_name = this.name.clone();
             let agent_description = this.description.clone();
             let title_input = input.clone();
@@ -1480,13 +1490,13 @@ impl AgentOrchestrator for AgentHarness {
 
     async fn submit_dynamic_tool_result(
         &self,
-        session_id: &str,
+        session: talos_types::TalosSession,
         call_id: &str,
         tool_name: &str,
         output: String,
         success: bool,
     ) -> TalosResult<()> {
-        self.submit_dynamic_tool_result(session_id, call_id, tool_name, output, success)
+        self.submit_dynamic_tool_result(session, call_id, tool_name, output, success)
             .await
     }
 }

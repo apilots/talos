@@ -21,6 +21,7 @@ pub enum ActorAccess {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Actor {
     pub user_id: String,
+    pub username: Option<String>,
     pub access: ActorAccess,
     pub access_token: Option<String>,
 }
@@ -29,6 +30,7 @@ impl Actor {
     pub fn regular(user_id: impl Into<String>) -> Self {
         Self {
             user_id: user_id.into(),
+            username: None,
             access: ActorAccess::Regular,
             access_token: None,
         }
@@ -37,6 +39,7 @@ impl Actor {
     pub fn full(user_id: impl Into<String>) -> Self {
         Self {
             user_id: user_id.into(),
+            username: None,
             access: ActorAccess::Full,
             access_token: None,
         }
@@ -48,6 +51,11 @@ impl Actor {
 
     pub fn with_access_token(mut self, token: impl Into<String>) -> Self {
         self.access_token = Some(token.into());
+        self
+    }
+
+    pub fn with_username(mut self, username: Option<String>) -> Self {
+        self.username = username;
         self
     }
 }

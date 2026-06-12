@@ -153,7 +153,7 @@ impl AgentOrchestrator for MockAgent {
 
     async fn submit_dynamic_tool_result(
         &self,
-        _session_id: &str,
+        _session: talos_types::TalosSession,
         _call_id: &str,
         _tool_name: &str,
         _output: String,

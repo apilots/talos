@@ -1,5 +1,5 @@
 import type { AppProtocol } from "@talos/sdk-core";
-import { BrowserWindow, ipcMain } from "electron";
+import { BrowserWindow, ipcMain, shell } from "electron";
 
 import type { DesktopAppServerController } from "./app-server-controller";
 import { assertDesktopRendererInvoke } from "./ipc-guard";
@@ -16,6 +16,16 @@ export function registerDesktopIpcHandlers(runtime: DesktopAppServerController):
       });
     },
   );
+  ipcMain.handle(TALOS_IPC.openExternal, (_event, url: unknown) => {
+    if (typeof url !== "string") {
+      throw new Error("External URL must be a string.");
+    }
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error(`External URL protocol is not allowed: ${parsed.protocol}`);
+    }
+    return shell.openExternal(parsed.toString());
+  });
 }
 
 export function broadcastApplicationEvent(event: AppProtocol.TimelineEventEnvelope): void {

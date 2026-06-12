@@ -104,7 +104,6 @@ protocol file used by `@talos/sdk-core`.
 Useful environment variables for app-server scenarios:
 
 - `TALOS_APP_SERVER_BIN`: App Server binary invoked directly
-- `TALOS_LOCAL_LAUNCH_TOKEN`: local initialize token
 - `TALOS_APP_SERVER_TEST_MODEL`: model override for turn smoke scenarios
 - `TALOS_APP_SERVER_SCENARIO_TIMEOUT_SECS`: per-scenario timeout override
 

@@ -40,7 +40,7 @@ pub trait GatewayClient: Send + Sync {
         session_id: &str,
         after_event_id: Option<String>,
     ) -> TalosResult<TimelineRecoverySnapshot>;
-    /// Shut down the remote gateway process. After this call, the client must not be reused.
+    /// Shut down the app-server process. After this call, the client must not be reused.
     async fn shutdown(&self) -> TalosResult<()>;
 }
 

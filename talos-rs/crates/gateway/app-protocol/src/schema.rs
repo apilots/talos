@@ -109,10 +109,18 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::WorkspaceDocListParams>());
     output.push_str(&export::<crate::requests::WorkspaceDocReadParams>());
     output.push_str(&export::<crate::requests::WorkspaceDocWriteParams>());
+    output.push_str(&export::<crate::requests::WorkspaceInfoParams>());
+    output.push_str(&export::<crate::requests::WorkspaceInfoResponse>());
     output.push_str(&export::<crate::requests::SkillListParams>());
     output.push_str(&export::<crate::requests::AppListParams>());
     output.push_str(&export::<crate::requests::ToolListParams>());
     output.push_str(&export::<crate::requests::AuthLogoutParams>());
+    output.push_str(&export::<talos_auth::CloudLoginClientKind>());
+    output.push_str(&export::<talos_auth::CloudLoginStartRequest>());
+    output.push_str(&export::<talos_auth::CloudLoginStartResponse>());
+    output.push_str(&export::<talos_auth::CloudLoginStatusRequest>());
+    output.push_str(&export::<talos_auth::CloudLoginStatusResponse>());
+    output.push_str(&export::<talos_auth::CloudLoginCancelRequest>());
     output.push_str(&export::<crate::requests::AuthSessionReadParams>());
     output.push_str(&export::<crate::requests::AuthSessionReadResponse>());
     output.push_str(&export::<crate::requests::AuthSessionStoreParams>());
@@ -167,8 +175,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::server_requests::ServerRequest>());
     output.push_str(&export::<crate::server_requests::RequestUserInputParams>());
     output.push_str(&export::<crate::server_requests::RequestUserInputResponse>());
-    output.push_str(&export::<crate::server_requests::AuthRefreshParams>());
-    output.push_str(&export::<crate::server_requests::AuthRefreshResponse>());
     output.push_str(&export::<crate::jsonrpc::JsonRpcRequest>());
     output.push_str(&export::<crate::jsonrpc::JsonRpcResponse>());
     output.push_str(&export::<crate::jsonrpc::JsonRpcNotification>());

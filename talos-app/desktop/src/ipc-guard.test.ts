@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { AppProtocol } from "@talos/sdk-core";
 
 import { assertDesktopRendererInvoke, isDesktopRendererMethod } from "./ipc-guard";
 
@@ -92,7 +93,7 @@ describe("desktop IPC guard", () => {
     ).not.toThrow();
   });
 
-  it("rejects renderer attempts to pass local launch credentials", () => {
+  it("rejects renderer attempts to pass unsupported actor credentials", () => {
     expect(() =>
       assertDesktopRendererInvoke(
         "user.current",
@@ -100,10 +101,10 @@ describe("desktop IPC guard", () => {
         {
           actorCredentials: {
             credential: {
-              type: "local_launch_token",
+              type: "unsupported_token",
               token: "secret",
             },
-          },
+          } as unknown as AppProtocol.ActorCredentials,
         },
       ),
     ).toThrow("Invalid desktop renderer actor credentials.");

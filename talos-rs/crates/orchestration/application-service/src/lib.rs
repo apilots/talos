@@ -7,6 +7,7 @@ pub mod history;
 pub mod memory;
 pub mod session;
 pub mod turn;
+pub mod workspace;
 pub mod workspace_docs;
 
 pub use access::{Actor, ActorAccess, ResourceAccessService};
@@ -25,6 +26,7 @@ pub use history::SessionHistoryService;
 pub use memory::{MemoryDate, MemoryListParams, MemorySearchParams, MemoryService};
 pub use session::SessionService;
 pub use turn::{message_request_hash, TurnRetryRequest, TurnService};
+pub use workspace::{AgentWorkspaceInfo, EffectiveAgentWorkspace, EffectiveWorkspaceResolver};
 pub use workspace_docs::WorkspaceDocService;
 
 pub type ApplicationResult<T> = talos_error::TalosResult<T>;

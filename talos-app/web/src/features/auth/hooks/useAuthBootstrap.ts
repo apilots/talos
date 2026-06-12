@@ -16,6 +16,10 @@ export function useAuthBootstrap() {
   const inflightKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
+    if (connection.authStatus === "logged_out") {
+      return;
+    }
+
     const attemptKey = `${connection.serverUrl}::${connection.authToken || "__anonymous__"}`;
     if (attemptedKeyRef.current === attemptKey || inflightKeyRef.current === attemptKey) {
       return;
@@ -50,9 +54,8 @@ export function useAuthBootstrap() {
             restoredCloudApiBaseUrl = session.cloud_api_base_url;
           }
         }
-        const user = restoredToken
-          ? await getCurrentUserWithToken(restoredToken)
-          : await getCurrentUser();
+        const authToken = restoredToken || connection.authToken;
+        const user = authToken ? await getCurrentUserWithToken(authToken) : await getCurrentUser();
         if (canceled) {
           return;
         }

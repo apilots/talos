@@ -13,6 +13,7 @@ use crate::file::{
     content_hash, modified_at_ms, read_optional, validate_expected_version, with_file_lock,
     workspace_root, write_atomic, FileLockRegistry,
 };
+use crate::workspace::EffectiveWorkspaceResolver;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MemoryDate(NaiveDate);
@@ -47,7 +48,7 @@ pub struct MemorySearchParams {
 
 #[derive(Clone)]
 pub struct MemoryService {
-    base_config: TalosConfig,
+    resolver: EffectiveWorkspaceResolver,
     llm_provider: Arc<dyn LlmProvider>,
     file_locks: FileLockRegistry,
 }
@@ -59,7 +60,7 @@ impl MemoryService {
         file_locks: FileLockRegistry,
     ) -> Self {
         Self {
-            base_config,
+            resolver: EffectiveWorkspaceResolver::new(base_config.clone()),
             llm_provider,
             file_locks,
         }
@@ -67,15 +68,17 @@ impl MemoryService {
 
     pub async fn list_files(
         &self,
+        actor: &Actor,
         params: MemoryListParams,
     ) -> TalosResult<Vec<MemoryFileSummary>> {
-        let config = &self.base_config.agent.kernel.memory;
+        let workspace = self.resolver.resolve_for_actor(actor)?;
+        let config = &workspace.config.agent.kernel.memory;
         let limit = params
             .limit
             .unwrap_or(config.file_list_default_limit)
             .min(config.file_list_max_limit.max(1));
 
-        let mut entries = match tokio::fs::read_dir(self.memory_dir()).await {
+        let mut entries = match tokio::fs::read_dir(self.memory_dir(&workspace.config)).await {
             Ok(entries) => entries,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(err) => return Err(TalosError::StorageError(err.to_string())),
@@ -100,7 +103,7 @@ impl MemoryService {
             if !date_in_range(date, params.date_from, params.date_to, params.before_date) {
                 continue;
             }
-            let Some(detail) = self.load_detail(date).await? else {
+            let Some(detail) = self.load_detail(&workspace.config, date).await? else {
                 continue;
             };
             files.push(MemoryFileSummary {
@@ -117,24 +120,27 @@ impl MemoryService {
         Ok(files)
     }
 
-    pub async fn get_file(&self, date: MemoryDate) -> TalosResult<MemoryFileDetail> {
-        self.load_detail(date)
+    pub async fn get_file(&self, actor: &Actor, date: MemoryDate) -> TalosResult<MemoryFileDetail> {
+        let workspace = self.resolver.resolve_for_actor(actor)?;
+        self.load_detail(&workspace.config, date)
             .await?
             .ok_or_else(|| TalosError::ResourceNotFound("memory file not found".to_string()))
     }
 
     pub async fn put_file(
         &self,
-        _actor: &Actor,
+        actor: &Actor,
         date: MemoryDate,
         request: DocUpdateRequest,
     ) -> TalosResult<MemoryFileDetail> {
-        let path = self.memory_file_path(date);
+        let workspace = self.resolver.resolve_for_actor(actor)?;
+        self.resolver.write_profile_snapshot(&workspace).await?;
+        let path = self.memory_file_path(&workspace.config, date);
         with_file_lock(&self.file_locks, &path, async {
             let existing = read_optional(&path).await?;
             validate_expected_version(existing.as_deref(), &request)?;
             let rebuild_indexes = || {
-                let store = MemoryStore::from_config(&self.base_config.agent.kernel);
+                let store = MemoryStore::from_config(&workspace.config.agent.kernel);
                 async move { store.rebuild_memory_indexes().await }
             };
             write_memory_file_transaction(
@@ -147,13 +153,14 @@ impl MemoryService {
         })
         .await?;
 
-        self.load_detail(date)
+        self.load_detail(&workspace.config, date)
             .await?
             .ok_or_else(|| TalosError::InternalError("memory file missing after write".to_string()))
     }
 
     pub async fn search_files(
         &self,
+        actor: &Actor,
         params: MemorySearchParams,
     ) -> TalosResult<Vec<MemorySearchResult>> {
         if params.query.trim().is_empty() {
@@ -161,8 +168,9 @@ impl MemoryService {
                 "search query cannot be empty".to_string(),
             ));
         }
-        let max_results = self
-            .base_config
+        let workspace = self.resolver.resolve_for_actor(actor)?;
+        let max_results = workspace
+            .config
             .agent
             .kernel
             .memory
@@ -170,7 +178,7 @@ impl MemoryService {
             .max(1);
         let limit = params.limit.unwrap_or(max_results).min(max_results);
         let store = MemoryStore::from_config_with_llm(
-            &self.base_config.agent.kernel,
+            &workspace.config.agent.kernel,
             self.llm_provider.clone(),
         );
         let mut results = store
@@ -193,26 +201,34 @@ impl MemoryService {
         Ok(results)
     }
 
-    fn memory_dir(&self) -> PathBuf {
-        workspace_root(&self.base_config).join(&self.base_config.agent.kernel.memory.memory_dirname)
+    fn memory_dir(&self, config: &TalosConfig) -> PathBuf {
+        workspace_root(config).join(&config.agent.kernel.memory.memory_dirname)
     }
 
-    fn memory_file_path(&self, date: MemoryDate) -> PathBuf {
-        self.memory_dir().join(format!("{}.md", date.file_stem()))
+    fn memory_file_path(&self, config: &TalosConfig, date: MemoryDate) -> PathBuf {
+        self.memory_dir(config)
+            .join(format!("{}.md", date.file_stem()))
     }
 
-    fn memory_index_path(&self, date: MemoryDate) -> PathBuf {
-        self.memory_file_path(date).with_extension("index.json")
+    fn memory_index_path(&self, config: &TalosConfig, date: MemoryDate) -> PathBuf {
+        self.memory_file_path(config, date)
+            .with_extension("index.json")
     }
 
-    async fn load_detail(&self, date: MemoryDate) -> TalosResult<Option<MemoryFileDetail>> {
-        let path = self.memory_file_path(date);
+    async fn load_detail(
+        &self,
+        config: &TalosConfig,
+        date: MemoryDate,
+    ) -> TalosResult<Option<MemoryFileDetail>> {
+        let path = self.memory_file_path(config, date);
         let content = read_optional(&path).await?;
         let updated_at = modified_at_ms(&path).await?;
         match content {
             Some(content) => {
                 let version_token = content_hash(&content);
-                let section_count = self.load_section_count(date, &version_token).await?;
+                let section_count = self
+                    .load_section_count(config, date, &version_token)
+                    .await?;
                 let date_text = date.file_stem();
                 Ok(Some(MemoryFileDetail {
                     date: date_text.clone(),
@@ -229,10 +245,11 @@ impl MemoryService {
 
     async fn load_section_count(
         &self,
+        config: &TalosConfig,
         date: MemoryDate,
         version_token: &str,
     ) -> TalosResult<usize> {
-        let index_path = self.memory_index_path(date);
+        let index_path = self.memory_index_path(config, date);
         let Some(index_content) = read_optional(&index_path).await? else {
             return Ok(0);
         };

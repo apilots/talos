@@ -6,6 +6,7 @@ use talos_error::TalosResult;
 use crate::{env::RuntimeEnv, validate, Config, EnvSecretStore, TalosPaths};
 
 const TALOS_RESOURCE_DIR_ENV: &str = "TALOS_RESOURCE_DIR";
+const TALOS_CONFIG_ENV: &str = "TALOS_CONFIG";
 const DEFAULT_CONFIG_RELATIVE_PATH: &str = "conf/talos.yaml";
 
 pub(crate) fn load_config() -> TalosResult<Config> {
@@ -16,8 +17,11 @@ pub(crate) fn load_config_from_path(path: Option<&str>) -> TalosResult<Config> {
     use talos_error::TalosError;
 
     let paths = TalosPaths::resolve();
-    let config_path = match path {
-        Some(path) => PathBuf::from(path),
+    let explicit_path = path
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os(TALOS_CONFIG_ENV).map(PathBuf::from));
+    let config_path = match explicit_path {
+        Some(path) => path,
         None => {
             ensure_first_run_files(&paths)?;
             paths.config_file.clone()
@@ -31,7 +35,7 @@ pub(crate) fn load_config_from_path(path: Option<&str>) -> TalosResult<Config> {
         )));
     }
 
-    if path.is_some() {
+    if path.is_some() || std::env::var_os(TALOS_CONFIG_ENV).is_some() {
         ensure_runtime_env_file(&paths)?;
     }
     let runtime_env = RuntimeEnv::load(&paths.env_file)?;
@@ -239,7 +243,7 @@ mod tests {
         let paths = TalosPaths::from_home(dir.path().join(".talos"));
         let resource_dir = write_resource_template(
             dir.path(),
-            "gateway:\n  auth: true\ncloud:\n  enabled: true\nllm:\n  anthropic:\n    api_key: ${TALOS_LLM_ANTHROPIC_API_KEY}\n",
+            "gateway:\n  auth: true\nllm:\n  anthropic:\n    api_key: ${TALOS_LLM_ANTHROPIC_API_KEY}\n",
         );
 
         paths
@@ -265,10 +269,7 @@ mod tests {
     fn first_run_files_do_not_overwrite_existing_config_or_secret() {
         let dir = tempfile::tempdir().expect("temp dir should be created");
         let paths = TalosPaths::from_home(dir.path().join(".talos"));
-        let resource_dir = write_resource_template(
-            dir.path(),
-            "gateway:\n  auth: true\ncloud:\n  enabled: true\n",
-        );
+        let resource_dir = write_resource_template(dir.path(), "gateway:\n  auth: true\n");
         paths
             .ensure_base_dirs()
             .expect("base dirs should be created");

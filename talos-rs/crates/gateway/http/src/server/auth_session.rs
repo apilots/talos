@@ -5,7 +5,11 @@ use axum::response::Json;
 use talos_app_protocol::requests::{
     AuthSessionReadResponse, AuthSessionSnapshot, AuthSessionStoreParams, AuthSessionUserSnapshot,
 };
-use talos_auth::{CloudSessionCache, CloudSessionCacheEntry, CloudSessionUserSnapshot};
+use talos_auth::{
+    CloudLoginCancelRequest, CloudLoginStartRequest, CloudLoginStartResponse,
+    CloudLoginStatusRequest, CloudLoginStatusResponse, CloudSessionCache, CloudSessionCacheEntry,
+    CloudSessionUserSnapshot,
+};
 
 use super::errors::ApiError;
 use super::state::HttpApiState;
@@ -26,6 +30,44 @@ pub(super) async fn read_auth_session_handler(
         .filter(|entry| entry.access_token == actor_token)
         .map(auth_session_snapshot_from_cache_entry);
     Ok(Json(AuthSessionReadResponse { session }))
+}
+
+pub(super) async fn start_cloud_login_handler(
+    State(state): State<Arc<HttpApiState>>,
+    Json(request): Json<CloudLoginStartRequest>,
+) -> Result<Json<CloudLoginStartResponse>, ApiError> {
+    Ok(Json(
+        state
+            .cloud_login
+            .start(request)
+            .await
+            .map_err(ApiError::from_talos_error)?,
+    ))
+}
+
+pub(super) async fn cloud_login_status_handler(
+    State(state): State<Arc<HttpApiState>>,
+    axum::extract::Query(request): axum::extract::Query<CloudLoginStatusRequest>,
+) -> Result<Json<CloudLoginStatusResponse>, ApiError> {
+    Ok(Json(
+        state
+            .cloud_login
+            .status(request)
+            .await
+            .map_err(ApiError::from_talos_error)?,
+    ))
+}
+
+pub(super) async fn cancel_cloud_login_handler(
+    State(state): State<Arc<HttpApiState>>,
+    Json(request): Json<CloudLoginCancelRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    state
+        .cloud_login
+        .cancel(request)
+        .await
+        .map_err(ApiError::from_talos_error)?;
+    Ok(Json(serde_json::json!({ "success": true })))
 }
 
 pub(super) async fn store_auth_session_handler(

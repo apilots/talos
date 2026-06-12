@@ -22,9 +22,18 @@ const authSessionStoreParams = (params: unknown) =>
   isRecord(params.session.user) &&
   hasString(params.session.user, "user_id") &&
   hasString(params.session.user, "username");
+const authLoginStartParams = (params: unknown) =>
+  isRecord(params) &&
+  hasString(params, "client_name") &&
+  typeof params.client_kind === "string" &&
+  ["web", "desktop", "tui", "cli"].includes(params.client_kind);
+const authLoginSessionParams = (params: unknown) => isRecord(params) && hasString(params, "login_id");
 
 const DESKTOP_RENDERER_METHOD_GUARDS = {
   "app.list": emptyParams,
+  "auth.login.cancel": authLoginSessionParams,
+  "auth.login.start": authLoginStartParams,
+  "auth.login.status": authLoginSessionParams,
   "auth.logout": emptyParams,
   "auth.session.clear": emptyParams,
   "auth.session.read": emptyParams,
@@ -81,6 +90,7 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "workspace.doc.list": emptyParams,
   "workspace.doc.read": (params) => hasString(params, "kind"),
   "workspace.doc.write": (params) => hasString(params, "kind") && hasString(params, "content"),
+  "workspace.info": emptyParams,
 } satisfies Record<DesktopRendererMethod, ParamGuard>;
 
 export function assertDesktopRendererInvoke(

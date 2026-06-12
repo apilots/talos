@@ -3,11 +3,8 @@ import { BrowserWindow } from "electron";
 
 export async function handleDesktopServerRequest(
   request: AppProtocol.JsonRpcRequest,
-  launchToken: string,
 ): Promise<unknown> {
   switch (request.method) {
-    case "client.auth.refresh":
-      return { token: launchToken };
     case "client.user_input.request":
       return requestDesktopUserInput(request.params as AppProtocol.RequestUserInputParams);
     default:

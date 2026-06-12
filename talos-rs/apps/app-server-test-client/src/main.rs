@@ -14,17 +14,14 @@ use tokio::process::Command;
 #[tokio::main]
 async fn main() -> Result<()> {
     let scenario = Scenario::parse(std::env::args().nth(1).as_deref())?;
-    let token = std::env::var("TALOS_LOCAL_LAUNCH_TOKEN")
-        .context("TALOS_LOCAL_LAUNCH_TOKEN is required")?;
     let binary = std::env::var("TALOS_APP_SERVER_BIN").unwrap_or_else(|_| "app-server".to_string());
 
     if scenario == Scenario::Malformed {
-        return malformed(&binary, &token).await;
+        return malformed(&binary).await;
     }
 
     let mut client = AppServerClient::connect(AppServerClientConfig {
         app_server_bin: binary,
-        launch_token: token,
         client_name: "talos-app-server-test-client".to_string(),
         client_version: env!("CARGO_PKG_VERSION").to_string(),
         actor_credentials: None,
@@ -473,7 +470,7 @@ async fn collect_two_subscriptions_until_terminal(
     Err(anyhow!("timed out waiting for terminal event"))
 }
 
-async fn malformed(binary: &str, token: &str) -> Result<()> {
+async fn malformed(binary: &str) -> Result<()> {
     let mut child = Command::new(binary)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -508,12 +505,6 @@ async fn malformed(binary: &str, token: &str) -> Result<()> {
                 "protocol_version": { "major": 0, "minor": 2 },
                 "supports_server_requests": false,
                 "supports_event_replay": true
-            },
-            "actor_credentials": {
-                "credential": {
-                    "type": "local_launch_token",
-                    "token": token
-                }
             }
         }
     });

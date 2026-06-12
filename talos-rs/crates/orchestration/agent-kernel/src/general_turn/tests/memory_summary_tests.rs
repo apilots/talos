@@ -111,7 +111,7 @@ async fn test_flush_session_memory_rejects_blank_summary_title() {
     seed_recent_user_message(&memory_store).await;
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
 
     let error = flush_session_memory(
         "s1",
@@ -155,7 +155,7 @@ async fn test_flush_session_memory_returns_early_when_threshold_is_zero() {
     seed_recent_user_message(&memory_store).await;
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     config.memory.compaction_threshold_bytes = 0;
 
     flush_session_memory(
@@ -193,7 +193,7 @@ async fn test_flush_session_memory_prefers_compaction_model_override() {
     seed_recent_user_message(&memory_store).await;
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     config.compaction.model = Some("compact-model-v2".to_string());
 
     let provider = Arc::new(ModelRecordingProvider::new(vec![
@@ -247,7 +247,7 @@ async fn test_flush_session_memory_returns_early_when_transcript_is_blank() {
         .expect("append should succeed");
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
 
     flush_session_memory(
         "s1",
@@ -284,7 +284,7 @@ async fn test_flush_session_memory_persists_session_only_summary_without_workspa
     seed_recent_user_message(&memory_store).await;
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
 
     flush_session_memory(
         "s1",
@@ -322,7 +322,7 @@ async fn test_flush_session_memory_persists_durable_summary_and_workspace_memory
     seed_recent_user_message(&memory_store).await;
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
 
     flush_session_memory(
         "s1",
@@ -360,7 +360,7 @@ async fn test_flush_session_memory_close_flush_appends_workspace_for_session_onl
     seed_recent_user_message(&memory_store).await;
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
 
     flush_session_memory(
         "s1",
@@ -398,7 +398,7 @@ async fn test_flush_session_memory_close_flush_uses_title_as_minimal_workspace_b
     seed_recent_user_message(&memory_store).await;
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
 
     flush_session_memory(
         "s1",
@@ -436,7 +436,7 @@ async fn test_flush_session_memory_retries_invalid_summary_response_before_succe
     seed_recent_user_message(&memory_store).await;
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
 
     flush_session_memory(
         "s1",
@@ -475,7 +475,7 @@ async fn test_flush_session_memory_retries_structurally_invalid_summary_before_s
     seed_recent_user_message(&memory_store).await;
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
 
     flush_session_memory(
         "s1",
@@ -540,7 +540,7 @@ async fn test_flush_session_memory_trims_oldest_history_turns_before_summary_req
     }
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
 
     let provider = Arc::new(RecordingSummaryProvider::new(vec![
         "{\"title\":\"Trimmed summary\",\"facts\":[\"kept newest turns\"]}".to_string(),
@@ -615,7 +615,7 @@ async fn test_flush_session_memory_trims_old_tool_outputs_before_history() {
     }
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     config.compaction.source_recent_messages_limit = 12;
     config.compaction.source_recent_tool_results_limit = 3;
     config.compaction.tool_output_keep_last = 1;
@@ -711,7 +711,7 @@ async fn test_flush_session_memory_trims_old_tool_exchanges_before_history() {
     }
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     config.compaction.source_recent_messages_limit = 12;
     config.compaction.source_recent_tool_results_limit = 3;
     config.compaction.source_recent_tool_exchanges_limit = 3;
@@ -768,7 +768,7 @@ async fn test_flush_session_memory_retries_invalid_persistence_decision_before_s
     seed_recent_user_message(&memory_store).await;
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
 
     flush_session_memory(
         "s1",
@@ -810,7 +810,7 @@ async fn test_flush_session_memory_retries_structurally_invalid_persistence_deci
     seed_recent_user_message(&memory_store).await;
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
 
     flush_session_memory(
         "s1",
@@ -846,7 +846,7 @@ async fn test_flush_session_memory_errors_after_invalid_summary_retry_budget() {
     seed_recent_user_message(&memory_store).await;
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
 
     let error = flush_session_memory(
         "s1",
@@ -879,7 +879,7 @@ async fn test_flush_session_memory_errors_after_invalid_persistence_retry_budget
     seed_recent_user_message(&memory_store).await;
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
 
     let error = flush_session_memory(
         "s1",

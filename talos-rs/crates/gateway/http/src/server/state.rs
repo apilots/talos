@@ -6,7 +6,7 @@ use talos_application_service::{
 };
 #[cfg(test)]
 use talos_auth::CloudSessionCache;
-use talos_auth::{AuthService, CloudSessionCacheManager};
+use talos_auth::{AuthService, CloudLoginService, CloudSessionCacheManager};
 #[cfg(test)]
 use talos_session_store::TimelineEventService;
 use talos_types::TalosConfig;
@@ -25,6 +25,7 @@ pub(super) struct HttpApiState {
     pub(super) account: Arc<AccountService>,
     pub(super) base_config: TalosConfig,
     pub(super) auth_service: Arc<dyn AuthService>,
+    pub(super) cloud_login: Arc<CloudLoginService>,
     pub(super) cloud_session_cache: CloudSessionCacheManager,
     pub(super) auth_disabled: bool,
     pub(super) lifecycle: Arc<ServerLifecycle>,
@@ -39,6 +40,13 @@ impl HttpApiState {
         auth_disabled: bool,
         lifecycle: Arc<ServerLifecycle>,
     ) -> Self {
+        let cloud_session_cache = CloudSessionCacheManager::for_talos_home(
+            talos_config::TalosPaths::resolve().talos_home,
+        );
+        let cloud_login = Arc::new(CloudLoginService::new(
+            base_config.cloud.api_base_url.clone(),
+            cloud_session_cache.clone(),
+        ));
         Self {
             app: app.clone(),
             #[cfg(test)]
@@ -50,9 +58,8 @@ impl HttpApiState {
             account: Arc::new(app.account.clone()),
             base_config,
             auth_service,
-            cloud_session_cache: CloudSessionCacheManager::for_talos_home(
-                talos_config::TalosPaths::resolve().talos_home,
-            ),
+            cloud_login,
+            cloud_session_cache,
             auth_disabled,
             lifecycle,
         }
@@ -61,6 +68,10 @@ impl HttpApiState {
     #[cfg(test)]
     pub(super) fn with_cloud_session_cache(mut self, cache: CloudSessionCache) -> Self {
         self.cloud_session_cache = CloudSessionCacheManager::new(cache);
+        self.cloud_login = Arc::new(CloudLoginService::new(
+            self.base_config.cloud.api_base_url.clone(),
+            self.cloud_session_cache.clone(),
+        ));
         self
     }
 }

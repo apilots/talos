@@ -148,7 +148,7 @@ async fn test_escape_cancels_in_flight_turn() {
     let client = Arc::new(MockGatewayClient::new());
     let state = client.state.clone();
     let gateway_client: Arc<dyn GatewayClient> = client;
-    let mut app = TuiApp::new_with_gateway_client(gateway_client, TalosConnectionMode::Remote);
+    let mut app = TuiApp::new_with_gateway_client(gateway_client);
     app.session_id = Some("sess-test".to_string());
     app.in_flight = true;
 
@@ -173,7 +173,7 @@ async fn test_escape_without_in_flight_clears_local_selection_only() {
     let client = Arc::new(MockGatewayClient::new());
     let state = client.state.clone();
     let gateway_client: Arc<dyn GatewayClient> = client;
-    let mut app = TuiApp::new_with_gateway_client(gateway_client, TalosConnectionMode::Remote);
+    let mut app = TuiApp::new_with_gateway_client(gateway_client);
     app.chat_selection = Some(ChatSelection {
         anchor: SelectionPoint {
             line_index: 0,
@@ -198,8 +198,8 @@ async fn test_escape_without_in_flight_clears_local_selection_only() {
 
 #[tokio::test]
 async fn test_submit_input_composes_pasted_blocks_into_plain_text_message() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
     let pasted = format!("{}\n{}", "A".repeat(420), "B".repeat(420));
     app.input_buffer = "Explain this log\n\n".to_string();
     app.cursor_index = app.input_buffer.chars().count();
@@ -239,8 +239,8 @@ fn test_compose_user_input_text_expands_pasted_blocks_without_markers() {
 
 #[tokio::test]
 async fn test_submit_input_restores_pasted_blocks_when_queue_is_full() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
 
     assert!(app.send_user_message("m1".to_string()).await.unwrap());
     assert!(app.send_user_message("m2".to_string()).await.unwrap());
@@ -263,19 +263,19 @@ async fn test_submit_input_restores_pasted_blocks_when_queue_is_full() {
 }
 
 #[tokio::test]
-async fn test_remote_initialize_creates_session_and_models() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+async fn test_app_server_initialize_creates_session_and_models() {
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
     assert_eq!(app.session_id.as_deref(), Some("sess-test"));
     assert!(app.available_models.iter().any(|m| m == "qwen-plus"));
     assert_eq!(app.connection_status, "connected");
 }
 
 #[tokio::test]
-async fn test_remote_initialize_retries_model_loading_before_succeeding() {
-    let mut app = create_remote_app_with_model_list_failures(1);
+async fn test_app_server_initialize_retries_model_loading_before_succeeding() {
+    let mut app = create_app_server_app_with_model_list_failures(1);
 
-    app.initialize_remote().await;
+    app.initialize_session().await;
 
     assert_eq!(app.session_id.as_deref(), Some("sess-test"));
     assert_eq!(app.connection_status, "connected");
@@ -286,10 +286,10 @@ async fn test_remote_initialize_retries_model_loading_before_succeeding() {
 }
 
 #[tokio::test]
-async fn test_remote_initialize_retries_session_creation_before_succeeding() {
-    let mut app = create_remote_app_with_create_session_failures(1);
+async fn test_app_server_initialize_retries_session_creation_before_succeeding() {
+    let mut app = create_app_server_app_with_create_session_failures(1);
 
-    app.initialize_remote().await;
+    app.initialize_session().await;
 
     assert_eq!(app.session_id.as_deref(), Some("sess-test"));
     assert_eq!(app.connection_status, "connected");
@@ -300,9 +300,9 @@ async fn test_remote_initialize_retries_session_creation_before_succeeding() {
 }
 
 #[tokio::test]
-async fn test_model_command_updates_remote_session_model() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+async fn test_model_command_updates_app_server_session_model() {
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
     app.input_buffer = "/model gpt-5.3 medium".to_string();
     app.cursor_index = app.input_buffer.chars().count();
     let should_quit = app.submit_input().await.unwrap();
@@ -318,12 +318,12 @@ async fn test_model_command_updates_remote_session_model() {
 }
 
 #[tokio::test]
-async fn test_compact_command_triggers_remote_compaction() {
+async fn test_compact_command_triggers_session_compaction() {
     let client = Arc::new(MockGatewayClient::new());
     let state = client.state.clone();
     let gateway_client: Arc<dyn GatewayClient> = client;
-    let mut app = TuiApp::new_with_gateway_client(gateway_client, TalosConnectionMode::Remote);
-    app.initialize_remote().await;
+    let mut app = TuiApp::new_with_gateway_client(gateway_client);
+    app.initialize_session().await;
     app.input_buffer = "/compact".to_string();
     app.cursor_index = app.input_buffer.chars().count();
 
@@ -349,8 +349,8 @@ async fn test_clear_command_resets_local_chat_and_session_usage() {
     let client = Arc::new(MockGatewayClient::new());
     let state = client.state.clone();
     let gateway_client: Arc<dyn GatewayClient> = client;
-    let mut app = TuiApp::new_with_gateway_client(gateway_client, TalosConnectionMode::Remote);
-    app.initialize_remote().await;
+    let mut app = TuiApp::new_with_gateway_client(gateway_client);
+    app.initialize_session().await;
     app.session_usage = TalosUsage {
         input_tokens: 20,
         output_tokens: 10,
@@ -395,8 +395,8 @@ async fn test_status_command_displays_cache_usage_metrics() {
         cache_read_input_tokens: Some(21),
     };
     let gateway_client: Arc<dyn GatewayClient> = client;
-    let mut app = TuiApp::new_with_gateway_client(gateway_client, TalosConnectionMode::Remote);
-    app.initialize_remote().await;
+    let mut app = TuiApp::new_with_gateway_client(gateway_client);
+    app.initialize_session().await;
     app.session_usage = TalosUsage {
         input_tokens: 12,
         output_tokens: 5,
@@ -434,8 +434,8 @@ async fn test_status_command_displays_cache_usage_metrics() {
 
 #[tokio::test]
 async fn test_send_timeline_events_updates_assistant_block() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
     assert!(app.send_user_message("hello".to_string()).await.unwrap());
 
     for _ in 0..40 {
@@ -465,8 +465,8 @@ async fn test_send_timeline_events_updates_assistant_block() {
 
 #[tokio::test]
 async fn test_thinking_block_is_not_created_before_first_delta() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
     assert!(app.send_user_message("hello".to_string()).await.unwrap());
 
     assert!(app.in_flight);
@@ -482,8 +482,8 @@ async fn test_thinking_block_is_not_created_before_first_delta() {
 
 #[tokio::test]
 async fn test_reasoning_delta_renders_plain_text_and_preserves_paragraphs() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
     app.session_id = Some("sess-test".to_string());
 
     app.handle_stream_event(reasoning_delta_event(
@@ -515,8 +515,8 @@ async fn test_reasoning_delta_renders_plain_text_and_preserves_paragraphs() {
 
 #[tokio::test]
 async fn test_modes_alias_works_as_models() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
     app.input_buffer = "/modes".to_string();
     app.cursor_index = app.input_buffer.chars().count();
     let _ = app.submit_input().await.unwrap();
@@ -535,8 +535,8 @@ async fn test_modes_alias_works_as_models() {
 
 #[tokio::test]
 async fn test_queue_limit_and_serial_dispatch() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
 
     assert!(app.send_user_message("m1".to_string()).await.unwrap());
     assert!(app.send_user_message("m2".to_string()).await.unwrap());
@@ -568,8 +568,8 @@ async fn test_queue_limit_and_serial_dispatch() {
 
 #[tokio::test]
 async fn test_queued_messages_do_not_add_system_noise_blocks() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
 
     assert!(app.send_user_message("m1".to_string()).await.unwrap());
     let before = app.chat_blocks.len();
@@ -579,8 +579,8 @@ async fn test_queued_messages_do_not_add_system_noise_blocks() {
 
 #[tokio::test]
 async fn test_submit_input_queues_without_adding_user_block() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
 
     app.input_buffer = "m1".to_string();
     app.cursor_index = app.input_buffer.chars().count();
@@ -608,8 +608,8 @@ async fn test_submit_input_queues_without_adding_user_block() {
 
 #[tokio::test]
 async fn test_submit_input_keeps_text_when_queue_is_full() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
 
     assert!(app.send_user_message("m1".to_string()).await.unwrap());
     assert!(app.send_user_message("m2".to_string()).await.unwrap());
@@ -635,8 +635,8 @@ async fn test_submit_input_keeps_text_when_queue_is_full() {
 
 #[tokio::test]
 async fn test_timeout_uses_status_hint_not_chat_block() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
     app.in_flight = true;
     app.active_message_raw = Some("slow request".to_string());
     app.active_retry_count = 1;
@@ -671,8 +671,8 @@ async fn test_timeout_reconnects_active_stream_instead_of_retrying_turn() {
         ),
     ];
     let client = Arc::new(MockGatewayClient::with_active_reconnect_events(events));
-    let mut app = TuiApp::new_with_gateway_client(client.clone(), TalosConnectionMode::Remote);
-    app.initialize_remote().await;
+    let mut app = TuiApp::new_with_gateway_client(client.clone());
+    app.initialize_session().await;
     app.in_flight = true;
     app.active_message_raw = Some("slow request".to_string());
     app.active_user_idx = Some(app.push_block(ChatRole::User, "slow request".to_string()));
@@ -711,8 +711,8 @@ async fn test_timeout_reconnects_active_stream_instead_of_retrying_turn() {
 
 #[tokio::test]
 async fn test_stale_timeline_events_are_ignored() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
     app.in_flight = true;
     app.active_stream_message_id = Some("msg-current".to_string());
     app.last_stream_sequence = Some(3);
@@ -746,8 +746,8 @@ async fn test_stale_timeline_events_are_ignored() {
 
 #[tokio::test]
 async fn test_duplicate_stream_sequence_is_ignored() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
     app.active_stream_message_id = Some("msg-current".to_string());
@@ -775,8 +775,8 @@ async fn test_duplicate_stream_sequence_is_ignored() {
 
 #[tokio::test]
 async fn test_stale_tool_event_does_not_advance_sequence_or_block_valid_output() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
     app.active_stream_message_id = Some("msg-current".to_string());
@@ -822,8 +822,8 @@ async fn test_stale_tool_event_does_not_advance_sequence_or_block_valid_output()
 
 #[tokio::test]
 async fn test_turn_completed_finishes_stream_without_output_delta() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
     app.in_flight = true;
     app.received_output_delta = false;
     app.session_id = Some("sess-test".to_string());
@@ -844,8 +844,8 @@ async fn test_turn_completed_finishes_stream_without_output_delta() {
 
 #[tokio::test]
 async fn test_execution_summary_stays_in_right_panel_not_transcript() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
 
@@ -868,8 +868,8 @@ async fn test_execution_summary_stays_in_right_panel_not_transcript() {
 
 #[tokio::test]
 async fn test_commentary_stream_does_not_update_assistant_block() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
 
@@ -898,8 +898,8 @@ async fn test_commentary_stream_does_not_update_assistant_block() {
 
 #[tokio::test]
 async fn test_unknown_stream_moves_to_assistant_when_committed_final() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
 
@@ -940,8 +940,8 @@ async fn test_unknown_stream_moves_to_assistant_when_committed_final() {
 
 #[tokio::test]
 async fn test_unknown_stream_stays_thinking_when_committed_commentary() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
 
@@ -972,8 +972,8 @@ async fn test_unknown_stream_stays_thinking_when_committed_commentary() {
 
 #[tokio::test]
 async fn test_tool_using_stream_keeps_assistant_output_interleaved() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
 
@@ -1039,8 +1039,8 @@ async fn test_tool_using_stream_keeps_assistant_output_interleaved() {
 
 #[tokio::test]
 async fn test_stream_event_preserves_manual_scroll_mode() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
     app.in_flight = true;
     app.chat_manual_scroll = true;
     app.chat_scroll = 5;

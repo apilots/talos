@@ -10,24 +10,6 @@
             },
             "type": {
               "enum": [
-                "local_launch_token"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "token",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "token": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
                 "existing_session_token"
               ],
               "type": "string"
@@ -272,17 +254,6 @@
     "AuthLogoutParams": {
       "type": "object"
     },
-    "AuthRefreshParams": {
-      "properties": {
-        "reason": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "reason"
-      ],
-      "type": "object"
-    },
     "AuthSessionClearParams": {
       "type": "object"
     },
@@ -443,10 +414,14 @@
         "workspace.doc.list",
         "workspace.doc.read",
         "workspace.doc.write",
+        "workspace.info",
         "skill.list",
         "app.list",
         "tool.list",
         "auth.logout",
+        "auth.login.start",
+        "auth.login.status",
+        "auth.login.cancel",
         "auth.session.read",
         "auth.session.store",
         "auth.session.clear",
@@ -1088,6 +1063,24 @@
           "properties": {
             "method": {
               "enum": [
+                "workspace.info"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/WorkspaceInfoParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "skill.list"
               ],
               "type": "string"
@@ -1148,6 +1141,60 @@
             },
             "params": {
               "$ref": "#/definitions/AuthLogoutParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "auth.login.start"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/CloudLoginStartRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "auth.login.status"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/CloudLoginStatusRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "auth.login.cancel"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/CloudLoginCancelRequest"
             }
           },
           "required": [
@@ -1247,6 +1294,52 @@
           "type": "object"
         }
       ]
+    },
+    "CloudLoginCancelRequest": {
+      "properties": {
+        "login_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "login_id"
+      ],
+      "type": "object"
+    },
+    "CloudLoginClientKind": {
+      "enum": [
+        "web",
+        "desktop",
+        "tui",
+        "cli"
+      ],
+      "type": "string"
+    },
+    "CloudLoginStartRequest": {
+      "properties": {
+        "client_kind": {
+          "$ref": "#/definitions/CloudLoginClientKind"
+        },
+        "client_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "client_kind",
+        "client_name"
+      ],
+      "type": "object"
+    },
+    "CloudLoginStatusRequest": {
+      "properties": {
+        "login_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "login_id"
+      ],
+      "type": "object"
     },
     "ConfigBatchWriteParams": {
       "properties": {
@@ -1375,7 +1468,15 @@
     "InitializeParams": {
       "properties": {
         "actor_credentials": {
-          "$ref": "#/definitions/ActorCredentials"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ActorCredentials"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "capabilities": {
           "$ref": "#/definitions/ClientCapabilities"
@@ -1385,7 +1486,6 @@
         }
       },
       "required": [
-        "actor_credentials",
         "capabilities",
         "client_info"
       ],
@@ -2053,24 +2153,6 @@
             },
             "params": {
               "$ref": "#/definitions/RequestUserInputParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "client.auth.refresh"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/AuthRefreshParams"
             }
           },
           "required": [
@@ -3676,6 +3758,9 @@
         "content",
         "kind"
       ],
+      "type": "object"
+    },
+    "WorkspaceInfoParams": {
       "type": "object"
     }
   },

@@ -4,16 +4,12 @@ use clap::{Args, Parser, Subcommand};
 #[derive(Parser)]
 #[command(name = "talos-cli")]
 #[command(bin_name = "talos-cli")]
-#[command(version = "1.0")]
+#[command(version)]
 #[command(about = "Talos AI System CLI - Full-stack access to AI assistant capabilities", long_about = None)]
 pub struct Cli {
     /// App-server host binary.
     #[arg(long)]
     pub(super) app_server_bin: Option<String>,
-
-    /// Local launch token for app-server initialize.actor_credentials
-    #[arg(long)]
-    pub(super) launch_token: Option<String>,
 
     /// Commands for the CLI
     #[command(subcommand)]
@@ -37,11 +33,31 @@ pub(super) enum Commands {
     /// System status check
     Status,
 
+    /// Authentication commands
+    #[command(subcommand)]
+    Auth(AuthCommands),
+
     /// System information
     Info,
 
     /// Run a local app-server protocol smoke scenario
     AppServerSmoke(AppServerSmokeCmd),
+}
+
+#[derive(Subcommand)]
+pub(super) enum AuthCommands {
+    /// Start Cloud device login and wait until approved
+    Login {
+        /// Print the login URL without opening a browser
+        #[arg(long, default_value_t = false)]
+        no_browser: bool,
+    },
+
+    /// Show cached Cloud login status
+    Status,
+
+    /// Logout and clear cached Cloud session
+    Logout,
 }
 
 #[derive(Subcommand)]
@@ -159,8 +175,4 @@ pub(super) struct AppServerSmokeCmd {
     /// App-server host binary.
     #[arg(long)]
     pub(super) app_server_bin: Option<String>,
-
-    /// Local launch token passed to initialize.actor_credentials
-    #[arg(long)]
-    pub(super) launch_token: Option<String>,
 }

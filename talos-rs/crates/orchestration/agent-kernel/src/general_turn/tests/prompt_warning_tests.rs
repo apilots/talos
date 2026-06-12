@@ -67,7 +67,7 @@ async fn test_run_general_turn_emits_prompt_warning_event() {
     seed_recent_user_message(memory_store.as_ref()).await;
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.auto_create_missing_files = false;
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     let mut ctx = build_ctx_with_stream(None);
 
     let result = run_general_turn(
@@ -107,7 +107,7 @@ async fn test_run_general_turn_streams_prompt_warning_event() {
     seed_recent_user_message(memory_store.as_ref()).await;
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.auto_create_missing_files = false;
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     let (tx, mut rx) = mpsc::channel(16);
     let mut ctx = build_ctx_with_stream(Some(tx));
 

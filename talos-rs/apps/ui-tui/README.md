@@ -42,12 +42,11 @@ The TUI module integrates with:
 # Run the TUI application in embedded app-server mode (default, no port)
 cargo run -p talos-ui-tui --bin talos
 
-# Override embedded app-server binary and local launch token
-cargo run -p talos-ui-tui --bin talos -- --app-server-bin ./target/debug/app-server --launch-token local-token
+# Override embedded app-server binary
+cargo run -p talos-ui-tui --bin talos -- --app-server-bin ./target/debug/app-server
 
 # Environment variable alternatives
 export TALOS_APP_SERVER_BIN=./target/debug/app-server
-export TALOS_LOCAL_LAUNCH_TOKEN=local-token
 ```
 
 ## Components

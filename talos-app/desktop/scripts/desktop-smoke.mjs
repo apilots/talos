@@ -10,7 +10,6 @@ const repoRoot = path.resolve(desktopDir, "../..");
 const artifactDir = path.resolve(repoRoot, ".tmp/desktop-smoke", timestamp());
 const explicitAppServerBin = process.env.TALOS_APP_SERVER_BIN;
 const appServerBin = explicitAppServerBin ?? path.resolve(repoRoot, "talos-rs/target/debug/app-server");
-const launchToken = process.env.TALOS_DESKTOP_LAUNCH_TOKEN ?? "desktop-smoke-token";
 const appExecutable = process.env.TALOS_DESKTOP_SMOKE_APP;
 const smokeUsername = process.env.TALOS_DESKTOP_SMOKE_USERNAME ?? "admin";
 const smokePassword = process.env.TALOS_DESKTOP_SMOKE_PASSWORD ?? "admin@123";
@@ -32,8 +31,6 @@ const appArgs = appExecutable
 const childEnv = {
   ...process.env,
   TALOS_LLM_ANTHROPIC_API_KEY: process.env.TALOS_LLM_ANTHROPIC_API_KEY ?? "desktop-smoke-dummy",
-  TALOS_DESKTOP_LAUNCH_TOKEN: launchToken,
-  TALOS_LOCAL_LAUNCH_TOKEN: launchToken,
 };
 if (!appExecutable || explicitAppServerBin) {
   childEnv.TALOS_APP_SERVER_BIN = appServerBin;

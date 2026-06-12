@@ -214,7 +214,11 @@ impl<'a> PromptBuilder<'a> {
         if !self.config.prompt.bootstrap.enabled {
             return Ok(Vec::new());
         }
-        let workspace_dir = bootstrap::expand_workspace_dir(&self.config.memory.workspace_dir);
+        let workspace_dir_config = self.workspace_dir();
+        if workspace_dir_config.is_empty() {
+            return Ok(Vec::new());
+        }
+        let workspace_dir = bootstrap::expand_workspace_dir(workspace_dir_config);
         fs::create_dir_all(&workspace_dir).await.map_err(|err| {
             talos_error::TalosError::StorageError(format!(
                 "create prompt workspace dir {}: {}",
@@ -248,7 +252,12 @@ impl<'a> PromptBuilder<'a> {
         let Some(project_root) = self.project_root.as_ref() else {
             return Ok(Vec::new());
         };
-        let workspace_dir = bootstrap::expand_workspace_dir(&self.config.memory.workspace_dir);
+        let workspace_dir_config = self.workspace_dir();
+        let workspace_dir = if workspace_dir_config.is_empty() {
+            None
+        } else {
+            Some(bootstrap::expand_workspace_dir(workspace_dir_config))
+        };
 
         let mut files = Vec::new();
         for kind in WorkspaceBootstrapFileKind::project_files() {
@@ -264,17 +273,26 @@ impl<'a> PromptBuilder<'a> {
                 continue;
             }
 
-            let workspace_path = workspace_dir.join(kind.file_name());
-            let workspace_file =
-                Self::read_bootstrap_file(&workspace_path, *kind, BootstrapFileScope::Workspace)
-                    .await?;
-            if workspace_file.content.is_some() {
-                files.push(workspace_file);
-            } else {
-                files.push(project_file);
+            if let Some(workspace_dir) = workspace_dir.as_ref() {
+                let workspace_path = workspace_dir.join(kind.file_name());
+                let workspace_file = Self::read_bootstrap_file(
+                    &workspace_path,
+                    *kind,
+                    BootstrapFileScope::Workspace,
+                )
+                .await?;
+                if workspace_file.content.is_some() {
+                    files.push(workspace_file);
+                    continue;
+                }
             }
+            files.push(project_file);
         }
         Ok(files)
+    }
+
+    fn workspace_dir(&self) -> &str {
+        self.config.workspace_dir.trim()
     }
 }
 

@@ -26,7 +26,8 @@ use tracing::{error, info};
 
 use self::auth::{auth_middleware, lifecycle_gate_middleware};
 use self::auth_session::{
-    clear_auth_session_handler, read_auth_session_handler, store_auth_session_handler,
+    cancel_cloud_login_handler, clear_auth_session_handler, cloud_login_status_handler,
+    read_auth_session_handler, start_cloud_login_handler, store_auth_session_handler,
 };
 use self::events::{
     get_active_turn_handler, recover_timeline_handler, subscribe_timeline_events_handler,
@@ -54,7 +55,8 @@ use self::sessions::{
 use self::state::HttpApiState;
 use self::user_profile::{current_user_handler, logout_handler};
 use self::workspace_docs::{
-    get_workspace_doc_handler, list_workspace_docs_handler, put_workspace_doc_handler,
+    get_workspace_doc_handler, get_workspace_info_handler, list_workspace_docs_handler,
+    put_workspace_doc_handler,
 };
 use talos_application_service::TalosApplicationService;
 use talos_auth::AuthService;
@@ -153,6 +155,9 @@ impl HttpServer {
             .route("/health", get(health_handler))
             .route("/v1/models", get(list_models_handler))
             .route("/v1/auth/logout", post(logout_handler))
+            .route("/v1/auth/login/start", post(start_cloud_login_handler))
+            .route("/v1/auth/login/status", get(cloud_login_status_handler))
+            .route("/v1/auth/login/cancel", post(cancel_cloud_login_handler))
             .route(
                 "/v1/auth/session",
                 get(read_auth_session_handler)
@@ -182,6 +187,7 @@ impl HttpServer {
             )
             .route("/v1/memory/search", get(search_memory_files_handler))
             .route("/v1/workspace/docs", get(list_workspace_docs_handler))
+            .route("/v1/workspace/info", get(get_workspace_info_handler))
             .route(
                 "/v1/workspace/docs/:kind",
                 get(get_workspace_doc_handler).put(put_workspace_doc_handler),

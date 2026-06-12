@@ -171,7 +171,7 @@ mod tests {
             .expect("write should succeed");
 
         let mut config = talos_config::AgentKernelConfig::default();
-        config.memory.workspace_dir = file
+        config.workspace_dir = file
             .path()
             .parent()
             .expect("parent should exist")

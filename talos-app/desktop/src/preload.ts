@@ -12,6 +12,7 @@ const bridge: TalosDesktopBridge = {
     params: unknown,
     options?: { actorCredentials?: AppProtocol.ActorCredentials | null },
   ) => ipcRenderer.invoke(TALOS_IPC.invoke, method, params, options) as Promise<T>,
+  openExternal: (url: string) => ipcRenderer.invoke(TALOS_IPC.openExternal, url) as Promise<void>,
   onEvent: (handler) => {
     const listener = (_event: IpcRendererEvent, timelineEvent: AppProtocol.TimelineEventEnvelope) => {
       handler(timelineEvent);

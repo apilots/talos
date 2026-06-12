@@ -3,7 +3,11 @@ mod pairing;
 mod service;
 mod session_cache;
 
-pub use cloud::CloudAuthService;
+pub use cloud::{
+    CloudAuthService, CloudLoginCancelRequest, CloudLoginClientKind, CloudLoginService,
+    CloudLoginStartRequest, CloudLoginStartResponse, CloudLoginStatusRequest,
+    CloudLoginStatusResponse,
+};
 pub use pairing::{DevicePairing, PairingCode, PairingResult};
 pub use service::{AuthCacheConfig, AuthService, OpenModeUserService, UserService};
 pub use session_cache::{
@@ -134,7 +138,7 @@ impl RequestIdentity {
     pub fn auth_disabled() -> Self {
         Self {
             user_id: "anonymous".to_string(),
-            username: None,
+            username: Some("anonymous".to_string()),
             role: UserRole::User,
             scopes: default_scopes_for_role(UserRole::User),
             auth_disabled: true,
@@ -216,4 +220,18 @@ pub fn default_scopes_for_role(role: UserRole) -> Vec<AuthScope> {
         scopes.push(AuthScope::UsersWrite);
     }
     scopes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auth_disabled_identity_uses_anonymous_user_snapshot() {
+        let identity = RequestIdentity::auth_disabled();
+
+        assert_eq!(identity.user_id, "anonymous");
+        assert_eq!(identity.username.as_deref(), Some("anonymous"));
+        assert!(identity.auth_disabled);
+    }
 }

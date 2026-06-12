@@ -18,6 +18,7 @@ import type {
   UserDto,
   AuthSessionReadResponse,
   AuthSessionStoreParams,
+  AgentWorkspaceInfo,
   WorkspaceDocDetail,
   WorkspaceDocKind,
   WorkspaceDocSummary,
@@ -99,6 +100,18 @@ export class AppServerClient {
 
   authLogout(): Promise<unknown> {
     return this.transport.request("auth.logout", {});
+  }
+
+  startCloudLogin(params: AppProtocol.CloudLoginStartRequest): Promise<AppProtocol.CloudLoginStartResponse> {
+    return this.transport.request("auth.login.start", params);
+  }
+
+  getCloudLoginStatus(params: AppProtocol.CloudLoginStatusRequest): Promise<AppProtocol.CloudLoginStatusResponse> {
+    return this.transport.request("auth.login.status", params);
+  }
+
+  cancelCloudLogin(params: AppProtocol.CloudLoginCancelRequest): Promise<unknown> {
+    return this.transport.request("auth.login.cancel", params);
   }
 
   readAuthSession(): Promise<AuthSessionReadResponse> {
@@ -281,6 +294,10 @@ export class AppServerClient {
     return this.transport
       .request<ListResponse<WorkspaceDocSummary>>("workspace.doc.list", {})
       .then((response) => response.data);
+  }
+
+  getWorkspaceInfo(): Promise<AgentWorkspaceInfo> {
+    return this.transport.request("workspace.info", {});
   }
 
   readWorkspaceDoc(kind: WorkspaceDocKind): Promise<WorkspaceDocDetail> {

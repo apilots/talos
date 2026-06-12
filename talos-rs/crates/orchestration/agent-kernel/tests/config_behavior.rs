@@ -86,10 +86,6 @@ fn test_boundary_validation() {
     );
 
     assert!(
-        !config.memory.workspace_dir.trim().is_empty(),
-        "memory.workspace_dir must be non-empty"
-    );
-    assert!(
         config.memory.hot_recent_messages > 0,
         "memory.hot_recent_messages must be > 0"
     );

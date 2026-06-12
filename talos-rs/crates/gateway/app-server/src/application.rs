@@ -10,7 +10,7 @@ use talos_app_protocol::requests::{
     ProtocolInputItem, ProtocolTalosContext, SessionCreateParams, SessionListParams,
     SessionPatchParams, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
     TimelinePendingDynamicToolResult, TimelinePendingUserAction, TimelineRecoverySnapshot,
-    TimelineReplay, TurnStartParams, TurnStartResponse,
+    TimelineReplay, TurnStartParams, TurnStartResponse, WorkspaceInfoResponse,
 };
 use talos_application_service::{
     Actor, MemoryDate, MemoryListParams, MemorySearchParams, TalosApplicationService,
@@ -18,8 +18,8 @@ use talos_application_service::{
     TimelineSubscription, TurnRetryRequest, WorkspaceDocService,
 };
 use talos_auth::{
-    AuthScope, CloudSessionCache, CloudSessionCacheEntry, CloudSessionCacheManager,
-    CloudSessionUserSnapshot, RequestIdentity, UserRole,
+    AuthScope, CloudLoginService, CloudSessionCache, CloudSessionCacheEntry,
+    CloudSessionCacheManager, CloudSessionUserSnapshot, RequestIdentity, UserRole,
 };
 use talos_config::TalosPaths;
 use talos_error::TalosError;
@@ -83,18 +83,26 @@ pub struct TalosApplicationAdapter {
     drain_provider: Arc<Option<Box<dyn BackgroundTaskDrain>>>,
     tool_registry: Option<Arc<ToolRegistry>>,
     cloud_session_cache: CloudSessionCacheManager,
+    cloud_api_base_url: String,
+    cloud_login: Arc<CloudLoginService>,
 }
 
 impl TalosApplicationAdapter {
     pub fn new(app: std::sync::Arc<TalosApplicationService>, replay_limit: usize) -> Self {
+        let cloud_session_cache =
+            CloudSessionCacheManager::for_talos_home(TalosPaths::resolve().talos_home);
+        let cloud_api_base_url = "http://127.0.0.1:8787".to_string();
         Self {
             app,
             replay_limit: replay_limit.max(1),
             drain_provider: Arc::new(None),
             tool_registry: None,
-            cloud_session_cache: CloudSessionCacheManager::for_talos_home(
-                TalosPaths::resolve().talos_home,
-            ),
+            cloud_session_cache: cloud_session_cache.clone(),
+            cloud_api_base_url: cloud_api_base_url.clone(),
+            cloud_login: Arc::new(CloudLoginService::new(
+                cloud_api_base_url,
+                cloud_session_cache,
+            )),
         }
     }
 
@@ -110,6 +118,19 @@ impl TalosApplicationAdapter {
 
     pub fn with_cloud_session_cache(mut self, cache: CloudSessionCache) -> Self {
         self.cloud_session_cache = CloudSessionCacheManager::new(cache);
+        self.cloud_login = Arc::new(CloudLoginService::new(
+            self.cloud_api_base_url.clone(),
+            self.cloud_session_cache.clone(),
+        ));
+        self
+    }
+
+    pub fn with_cloud_api_base_url(mut self, api_base_url: impl Into<String>) -> Self {
+        self.cloud_api_base_url = api_base_url.into();
+        self.cloud_login = Arc::new(CloudLoginService::new(
+            self.cloud_api_base_url.clone(),
+            self.cloud_session_cache.clone(),
+        ));
         self
     }
 }
@@ -299,18 +320,21 @@ impl AppServerApplication for TalosApplicationAdapter {
                 let files = self
                     .app
                     .memory
-                    .list_files(MemoryListParams {
-                        limit: params.limit,
-                        before_date: None,
-                        date_from: None,
-                        date_to: None,
-                    })
+                    .list_files(
+                        actor,
+                        MemoryListParams {
+                            limit: params.limit,
+                            before_date: None,
+                            date_from: None,
+                            date_to: None,
+                        },
+                    )
                     .await
                     .map_err(AppServerErrorBody::from_talos_error)?;
                 to_value(json!({ "data": files }))
             }
             ClientRequestParams::MemoryFileRead(params) => {
-                to_value(self.read_memory_file(params).await?)
+                to_value(self.read_memory_file(actor, params).await?)
             }
             ClientRequestParams::MemoryFileWrite(params) => {
                 to_value(self.write_memory_file(actor, params).await?)
@@ -319,7 +343,7 @@ impl AppServerApplication for TalosApplicationAdapter {
                 let docs = self
                     .app
                     .workspace_docs
-                    .list_docs()
+                    .list_docs(actor)
                     .await
                     .map_err(AppServerErrorBody::from_talos_error)?;
                 to_value(json!({ "data": docs }))
@@ -330,7 +354,7 @@ impl AppServerApplication for TalosApplicationAdapter {
                 to_value(
                     self.app
                         .workspace_docs
-                        .get_doc(kind)
+                        .get_doc(actor, kind)
                         .await
                         .map_err(AppServerErrorBody::from_talos_error)?,
                 )
@@ -353,6 +377,19 @@ impl AppServerApplication for TalosApplicationAdapter {
                         .map_err(AppServerErrorBody::from_talos_error)?,
                 )
             }
+            ClientRequestParams::WorkspaceInfo(_) => {
+                let info = self
+                    .app
+                    .workspace_docs
+                    .workspace_info(actor)
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(WorkspaceInfoResponse {
+                    user_id: info.user_id,
+                    username: info.username,
+                    base_workspace_dir: info.base_workspace_dir,
+                    user_workspace_dir: info.user_workspace_dir,
+                })
+            }
             ClientRequestParams::ConfigValueWrite(params) => {
                 to_value(self.write_config_value(actor, params).await?)
             }
@@ -371,6 +408,25 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .map_err(AppServerErrorBody::from_talos_error)?;
                 self.cloud_session_cache
                     .clear()
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(json!({ "success": true }))
+            }
+            ClientRequestParams::AuthLoginStart(params) => to_value(
+                self.cloud_login
+                    .start(params)
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
+            ClientRequestParams::AuthLoginStatus(params) => to_value(
+                self.cloud_login
+                    .status(params)
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
+            ClientRequestParams::AuthLoginCancel(params) => {
+                self.cloud_login
+                    .cancel(params)
+                    .await
                     .map_err(AppServerErrorBody::from_talos_error)?;
                 to_value(json!({ "success": true }))
             }
@@ -573,12 +629,13 @@ impl TalosApplicationAdapter {
 
     async fn read_memory_file(
         &self,
+        actor: &Actor,
         params: MemoryFileReadParams,
     ) -> ProtocolResult<talos_types::MemoryFileDetail> {
         let date = memory_date_from_path(&params.path)?;
         self.app
             .memory
-            .get_file(date)
+            .get_file(actor, date)
             .await
             .map_err(AppServerErrorBody::from_talos_error)
     }
@@ -701,7 +758,7 @@ impl TalosApplicationAdapter {
 
     async fn dispatch_secondary(
         &self,
-        _actor: &Actor,
+        actor: &Actor,
         request: ClientRequest,
     ) -> ProtocolResult<Value> {
         match request.params {
@@ -709,12 +766,15 @@ impl TalosApplicationAdapter {
                 let results = self
                     .app
                     .memory
-                    .search_files(MemorySearchParams {
-                        query: params.query,
-                        limit: params.limit,
-                        date_from: None,
-                        date_to: None,
-                    })
+                    .search_files(
+                        actor,
+                        MemorySearchParams {
+                            query: params.query,
+                            limit: params.limit,
+                            date_from: None,
+                            date_to: None,
+                        },
+                    )
                     .await
                     .map_err(AppServerErrorBody::from_talos_error)?;
                 to_value(json!({ "data": results }))

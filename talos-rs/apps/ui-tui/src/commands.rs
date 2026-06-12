@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use tracing::error;
 
 use crate::client::GatewayClient;
-use crate::types::{AppState, ChatRole, QueuedMessage, RemoteCommandUpdate, SessionHistoryLoad};
+use crate::types::{AppState, ChatRole, CommandUpdate, QueuedMessage, SessionHistoryLoad};
 use crate::utils::summarize_for_queue;
 use crate::{TuiApp, MAX_QUEUE_LEN, SESSION_CLOSE_TIMEOUT};
 use talos_sdk::{TalosSession, TimelineActiveTurnStatus};
@@ -104,15 +104,15 @@ impl TuiApp {
                     return Ok(false);
                 }
 
-                self.switch_remote_model_command(requested.to_string())?;
+                self.switch_model_command(requested.to_string())?;
 
                 Ok(false)
             }
             "sessions" | "s" => {
                 // Load sessions for quick switch
                 if let Some(client) = self.gateway_client.clone() {
-                    let _ = self.spawn_remote_command_task("loading sessions", async move {
-                        RemoteCommandUpdate::HistoryLoaded(client.list_sessions().await)
+                    let _ = self.spawn_command_task("loading sessions", async move {
+                        CommandUpdate::HistoryLoaded(client.list_sessions().await)
                     });
                     self.show_sessions_picker = true;
                     Ok(false)
@@ -142,8 +142,7 @@ impl TuiApp {
                         self.push_right_event("session force exit".to_string());
                         self.push_block(
                             ChatRole::System,
-                            "Forcing local exit while remote session closes in background."
-                                .to_string(),
+                            "Forcing local exit while session closes in background.".to_string(),
                         );
                         self.should_exit = true;
                         return Ok(false);
@@ -155,7 +154,7 @@ impl TuiApp {
                     );
                     return Ok(false);
                 }
-                self.close_remote_session_command()?;
+                self.close_session_command()?;
                 Ok(false)
             }
             unknown => {
@@ -275,7 +274,7 @@ impl TuiApp {
         };
 
         if self.session_id.is_none() {
-            self.start_remote_session_connect();
+            self.start_session_connect();
             return;
         }
 
@@ -319,7 +318,7 @@ impl TuiApp {
     pub(crate) async fn refresh_models_from_gateway(&mut self) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {
             return Err(TalosError::ClientError(
-                "missing gateway client in remote mode".to_string(),
+                "missing app-server client".to_string(),
             ));
         };
 
@@ -353,30 +352,30 @@ impl TuiApp {
     pub(crate) fn refresh_models_command(&mut self) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {
             return Err(TalosError::ClientError(
-                "missing gateway client in remote mode".to_string(),
+                "missing app-server client".to_string(),
             ));
         };
 
-        self.spawn_remote_command_task("models load started", async move {
+        self.spawn_command_task("models load started", async move {
             let result = client.list_models().await;
-            RemoteCommandUpdate::ModelsLoaded(result)
+            CommandUpdate::ModelsLoaded(result)
         })
     }
 
     pub(crate) fn status_command(&mut self) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {
             return Err(TalosError::ClientError(
-                "missing gateway client in remote mode".to_string(),
+                "missing app-server client".to_string(),
             ));
         };
         let session_id = self.session_id.clone();
-        self.spawn_remote_command_task("status request started", async move {
+        self.spawn_command_task("status request started", async move {
             let result = if let Some(session_id) = session_id {
                 client.get_session(&session_id).await.map(Some)
             } else {
                 Ok(None)
             };
-            RemoteCommandUpdate::StatusLoaded(result)
+            CommandUpdate::StatusLoaded(result)
         })
     }
 
@@ -401,41 +400,41 @@ impl TuiApp {
     pub(crate) fn compact_session_command(&mut self) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {
             return Err(TalosError::ClientError(
-                "missing gateway client in remote mode".to_string(),
+                "missing app-server client".to_string(),
             ));
         };
         let Some(session_id) = self.active_session_id_for_control_command("compact") else {
             return Ok(());
         };
-        self.spawn_remote_command_task("session compact started", async move {
-            RemoteCommandUpdate::SessionCompacted(client.compact_session(&session_id).await)
+        self.spawn_command_task("session compact started", async move {
+            CommandUpdate::SessionCompacted(client.compact_session(&session_id).await)
         })
     }
 
     pub(crate) fn clear_session_command(&mut self) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {
             return Err(TalosError::ClientError(
-                "missing gateway client in remote mode".to_string(),
+                "missing app-server client".to_string(),
             ));
         };
         let Some(session_id) = self.active_session_id_for_control_command("clear") else {
             return Ok(());
         };
-        self.spawn_remote_command_task("session clear started", async move {
-            RemoteCommandUpdate::SessionCleared(client.clear_session(&session_id).await)
+        self.spawn_command_task("session clear started", async move {
+            CommandUpdate::SessionCleared(client.clear_session(&session_id).await)
         })
     }
 
-    pub(crate) fn switch_remote_model_command(&mut self, requested: String) -> TalosResult<()> {
+    pub(crate) fn switch_model_command(&mut self, requested: String) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {
             return Err(TalosError::ClientError(
-                "missing gateway client in remote mode".to_string(),
+                "missing app-server client".to_string(),
             ));
         };
         let session_id = self.session_id.clone();
         let context = self.build_session_context();
         let current_directory = Some(self.startup_directory.clone());
-        self.spawn_remote_command_task(format!("model switch started: {}", requested), async move {
+        self.spawn_command_task(format!("model switch started: {}", requested), async move {
             let result = if let Some(session_id) = session_id {
                 client.update_session_model(&session_id, &requested).await
             } else {
@@ -448,7 +447,7 @@ impl TuiApp {
                     })
                     .await
             };
-            RemoteCommandUpdate::ModelSwitched { requested, result }
+            CommandUpdate::ModelSwitched { requested, result }
         })
     }
 
@@ -458,8 +457,8 @@ impl TuiApp {
             return;
         };
         self.current_state = AppState::History;
-        let _ = self.spawn_remote_command_task("loading history", async move {
-            RemoteCommandUpdate::HistoryLoaded(client.list_sessions().await)
+        let _ = self.spawn_command_task("loading history", async move {
+            CommandUpdate::HistoryLoaded(client.list_sessions().await)
         });
     }
 
@@ -531,7 +530,7 @@ impl TuiApp {
             self.push_block(ChatRole::System, format!("Session: {}", session_id));
             return;
         };
-        let _ = self.spawn_remote_command_task("loading session history", async move {
+        let _ = self.spawn_command_task("loading session history", async move {
             let result = match client.get_session_history(&session_id).await {
                 Ok(history) => {
                     let live_recovery = match client.get_active_turn(&session_id).await {
@@ -562,7 +561,7 @@ impl TuiApp {
                 }
                 Err(err) => Err(err),
             };
-            RemoteCommandUpdate::SessionHistoryLoaded { result, session }
+            CommandUpdate::SessionHistoryLoaded { result, session }
         });
     }
 
@@ -601,7 +600,7 @@ impl TuiApp {
         let requested = model.clone();
         let context = self.build_session_context();
         let current_directory = Some(self.startup_directory.clone());
-        let _ = self.spawn_remote_command_task(
+        let _ = self.spawn_command_task(
             format!("model picker switching to: {}", model),
             async move {
                 let result = if let Some(session_id) = session_id {
@@ -616,19 +615,19 @@ impl TuiApp {
                         })
                         .await
                 };
-                RemoteCommandUpdate::ModelPickerSwitched { requested, result }
+                CommandUpdate::ModelPickerSwitched { requested, result }
             },
         );
     }
 
-    pub(crate) fn close_remote_session_command(&mut self) -> TalosResult<()> {
+    pub(crate) fn close_session_command(&mut self) -> TalosResult<()> {
         if self.close_in_progress {
             return Ok(());
         }
 
         let Some(client) = self.gateway_client.clone() else {
             return Err(TalosError::ClientError(
-                "missing gateway client in remote mode".to_string(),
+                "missing app-server client".to_string(),
             ));
         };
         let session_id = self.session_id.clone();
@@ -648,8 +647,7 @@ impl TuiApp {
 
         let handle = tokio::spawn(async move {
             let result =
-                close_remote_session_and_shutdown(client, session_id, closing_session_id.clone())
-                    .await;
+                close_session_and_shutdown(client, session_id, closing_session_id.clone()).await;
             if tx.send(result).await.is_err() {
                 error!(
                     session_id = %closing_session_id,
@@ -661,19 +659,16 @@ impl TuiApp {
         Ok(())
     }
 
-    pub(crate) fn spawn_remote_command_task<F>(
+    pub(crate) fn spawn_command_task<F>(
         &mut self,
         event: impl Into<String>,
         fut: F,
     ) -> TalosResult<()>
     where
-        F: std::future::Future<Output = RemoteCommandUpdate> + Send + 'static,
+        F: std::future::Future<Output = CommandUpdate> + Send + 'static,
     {
         if self.pending_command_update.is_some() {
-            self.show_status_hint(
-                "Another remote command is still running.",
-                Duration::from_secs(2),
-            );
+            self.show_status_hint("Another command is still running.", Duration::from_secs(2));
             return Ok(());
         }
 
@@ -683,21 +678,21 @@ impl TuiApp {
         let handle = tokio::spawn(async move {
             let result = fut.await;
             if tx.send(result).await.is_err() {
-                error!("failed to deliver remote command result to TUI task");
+                error!("failed to deliver command result to TUI task");
             }
         });
         self.pending_command_task = Some(handle);
         Ok(())
     }
 
-    pub(crate) async fn ensure_remote_session(&mut self) -> TalosResult<String> {
+    pub(crate) async fn ensure_session(&mut self) -> TalosResult<String> {
         if let Some(session_id) = self.session_id.clone() {
             return Ok(session_id);
         }
 
         let Some(client) = self.gateway_client.clone() else {
             return Err(TalosError::ClientError(
-                "missing gateway client in remote mode".to_string(),
+                "missing app-server client".to_string(),
             ));
         };
 
@@ -720,7 +715,7 @@ impl TuiApp {
         Ok(created.context.session_id)
     }
 
-    pub(crate) fn start_remote_session_connect(&mut self) {
+    pub(crate) fn start_session_connect(&mut self) {
         if self.session_id.is_some() || self.pending_session_connect.is_some() {
             return;
         }
@@ -766,7 +761,7 @@ impl TuiApp {
     }
 }
 
-async fn close_remote_session_and_shutdown(
+async fn close_session_and_shutdown(
     client: Arc<dyn GatewayClient>,
     session_id: Option<String>,
     fallback_session_id: String,

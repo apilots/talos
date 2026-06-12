@@ -4,6 +4,7 @@ export const TALOS_IPC = {
   connect: "talos:connect",
   event: "talos:event",
   invoke: "talos:invoke",
+  openExternal: "talos:open-external",
   runtimeState: "talos:runtime-state",
   subscriptionTerminated: "talos:subscription-terminated",
 } as const;
@@ -22,6 +23,7 @@ export interface TalosDesktopBridge {
     params: unknown,
     options?: { actorCredentials?: AppProtocol.ActorCredentials | null },
   ): Promise<T>;
+  openExternal(url: string): Promise<void>;
   onEvent(handler: (event: AppProtocol.TimelineEventEnvelope) => void): () => void;
   onSubscriptionTerminated(handler: (envelope: AppProtocol.SubscriptionTerminatedEnvelope) => void): () => void;
   onRuntimeState(handler: (state: TalosRuntimeState) => void): () => void;

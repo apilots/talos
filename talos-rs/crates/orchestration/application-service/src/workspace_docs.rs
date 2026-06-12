@@ -10,17 +10,18 @@ use crate::file::{
     content_hash, modified_at_ms, read_optional, validate_expected_version, with_file_lock,
     workspace_root, write_atomic, FileLockRegistry,
 };
+use crate::workspace::{AgentWorkspaceInfo, EffectiveWorkspaceResolver};
 
 #[derive(Clone)]
 pub struct WorkspaceDocService {
-    base_config: TalosConfig,
+    resolver: EffectiveWorkspaceResolver,
     file_locks: FileLockRegistry,
 }
 
 impl WorkspaceDocService {
     pub fn new(base_config: TalosConfig, file_locks: FileLockRegistry) -> Self {
         Self {
-            base_config,
+            resolver: EffectiveWorkspaceResolver::new(base_config),
             file_locks,
         }
     }
@@ -38,10 +39,10 @@ impl WorkspaceDocService {
         }
     }
 
-    pub async fn list_docs(&self) -> TalosResult<Vec<WorkspaceDocSummary>> {
+    pub async fn list_docs(&self, actor: &Actor) -> TalosResult<Vec<WorkspaceDocSummary>> {
         let mut docs = Vec::new();
         for kind in supported_doc_kinds() {
-            let detail = self.get_doc(kind).await?;
+            let detail = self.get_doc(actor, kind).await?;
             docs.push(WorkspaceDocSummary {
                 kind,
                 path: detail.path,
@@ -53,8 +54,17 @@ impl WorkspaceDocService {
         Ok(docs)
     }
 
-    pub async fn get_doc(&self, kind: WorkspaceDocKind) -> TalosResult<WorkspaceDocDetail> {
-        let path = self.doc_path(kind);
+    pub fn workspace_info(&self, actor: &Actor) -> TalosResult<AgentWorkspaceInfo> {
+        Ok(self.resolver.resolve_for_actor(actor)?.into())
+    }
+
+    pub async fn get_doc(
+        &self,
+        actor: &Actor,
+        kind: WorkspaceDocKind,
+    ) -> TalosResult<WorkspaceDocDetail> {
+        let workspace = self.resolver.resolve_for_actor(actor)?;
+        let path = self.doc_path(&workspace.config, kind);
         let content = read_optional(&path).await?;
         let updated_at = modified_at_ms(&path).await?;
         match content {
@@ -79,11 +89,13 @@ impl WorkspaceDocService {
 
     pub async fn put_doc(
         &self,
-        _actor: &Actor,
+        actor: &Actor,
         kind: WorkspaceDocKind,
         request: DocUpdateRequest,
     ) -> TalosResult<WorkspaceDocDetail> {
-        let path = self.doc_path(kind);
+        let workspace = self.resolver.resolve_for_actor(actor)?;
+        self.resolver.write_profile_snapshot(&workspace).await?;
+        let path = self.doc_path(&workspace.config, kind);
         with_file_lock(&self.file_locks, &path, async {
             let existing = read_optional(&path).await?;
             validate_expected_version(existing.as_deref(), &request)?;
@@ -91,11 +103,11 @@ impl WorkspaceDocService {
         })
         .await?;
 
-        self.get_doc(kind).await
+        self.get_doc(actor, kind).await
     }
 
-    fn doc_path(&self, kind: WorkspaceDocKind) -> PathBuf {
-        workspace_root(&self.base_config).join(kind.file_name())
+    fn doc_path(&self, config: &TalosConfig, kind: WorkspaceDocKind) -> PathBuf {
+        workspace_root(config).join(kind.file_name())
     }
 }
 
@@ -122,7 +134,7 @@ mod tests {
             std::env::temp_dir().join(format!("talos-workspace-doc-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&workspace_dir).expect("workspace dir should exist");
         let mut config = TalosConfig::default();
-        config.agent.kernel.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+        config.agent.kernel.workspace_dir = workspace_dir.to_string_lossy().to_string();
         (
             WorkspaceDocService::new(config, FileLockRegistry::default()),
             workspace_dir,
@@ -148,7 +160,7 @@ mod tests {
         assert!(detail.exists);
         assert_eq!(detail.content, "soul content");
         assert_eq!(
-            std::fs::read_to_string(workspace_dir.join("SOUL.md"))
+            std::fs::read_to_string(workspace_dir.join("users").join("admin").join("SOUL.md"))
                 .expect("workspace doc should exist on disk"),
             "soul content"
         );
@@ -158,7 +170,9 @@ mod tests {
     #[tokio::test]
     async fn put_doc_rejects_stale_version() {
         let (service, workspace_dir) = test_service();
-        std::fs::write(workspace_dir.join("IDENTITY.md"), "current version")
+        let user_dir = workspace_dir.join("users").join("admin");
+        std::fs::create_dir_all(&user_dir).expect("user workspace should exist");
+        std::fs::write(user_dir.join("IDENTITY.md"), "current version")
             .expect("seed doc should write");
 
         let error = service
@@ -184,7 +198,7 @@ mod tests {
         let (service, workspace_dir) = test_service();
 
         let docs = service
-            .list_docs()
+            .list_docs(&Actor::regular("member"))
             .await
             .expect("list workspace docs should succeed");
 

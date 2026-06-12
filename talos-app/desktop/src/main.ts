@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,13 +21,10 @@ const rendererDevUrl = process.env.TALOS_DESKTOP_RENDERER_URL;
 let controller: DesktopAppServerController | undefined;
 
 async function createController(): Promise<DesktopAppServerController> {
-  const launchToken = process.env.TALOS_DESKTOP_LAUNCH_TOKEN ?? randomUUID();
   const env = resolveAppServerEnvironment({
     baseEnv: process.env,
+    packagedResourcesPath: app.isPackaged ? process.resourcesPath : null,
   });
-  if (app.isPackaged && !env.TALOS_RESOURCE_DIR) {
-    env.TALOS_RESOURCE_DIR = process.resourcesPath;
-  }
   return new DesktopAppServerController({
     command: resolveAppServerCommand({
       env,
@@ -36,17 +32,13 @@ async function createController(): Promise<DesktopAppServerController> {
       platform: process.platform,
       resourcesPath: process.resourcesPath,
     }),
-    env: {
-      ...env,
-      TALOS_LOCAL_LAUNCH_TOKEN: launchToken,
-    },
-    launchToken,
+    env,
     clientName: "talos-desktop",
     clientVersion: app.getVersion(),
     onEvent: (envelope) => broadcastApplicationEvent(envelope),
     onSubscriptionTerminated: (envelope) => broadcastSubscriptionTerminated(envelope),
     onRuntimeState: (state) => broadcastRuntimeState(state),
-    onServerRequest: (request) => handleDesktopServerRequest(request, launchToken),
+    onServerRequest: (request) => handleDesktopServerRequest(request),
   });
 }
 

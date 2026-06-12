@@ -26,7 +26,9 @@ copyFileSync(sourceBinary, destination);
 chmodSync(destination, 0o755);
 console.log(`Prepared desktop app-server binary: ${destination}`);
 
-const configTemplateSource = path.join(rustDir, "conf", "talos.yaml");
+const configTemplateSource =
+  process.env.TALOS_DESKTOP_CONFIG_TEMPLATE ??
+  path.join(rustDir, "conf", profile === "release" ? "talos-prod.yaml" : "talos-dev.yaml");
 const configTemplateDestination = path.join(resourcesConfDir, "talos.yaml");
 copyFileSync(configTemplateSource, configTemplateDestination);
 console.log(`Prepared desktop config template: ${configTemplateDestination}`);

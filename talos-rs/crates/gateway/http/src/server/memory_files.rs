@@ -40,9 +40,10 @@ pub(super) struct MemorySearchHttpQuery {
 
 pub(super) async fn list_memory_files_handler(
     State(state): State<Arc<HttpApiState>>,
-    _auth: axum::extract::Extension<RequestIdentity>,
+    auth: axum::extract::Extension<RequestIdentity>,
     Query(query): Query<MemoryFilesQuery>,
 ) -> Result<Json<Value>, ApiError> {
+    let actor = shared_actor(&auth.0);
     let params = MemoryListParams {
         limit: query.limit,
         before_date: parse_optional_memory_date(query.before_date.as_deref())?,
@@ -51,7 +52,7 @@ pub(super) async fn list_memory_files_handler(
     };
     let files = state
         .memory
-        .list_files(params)
+        .list_files(&actor, params)
         .await
         .map_err(map_memory_error)?;
     Ok(Json(json!({ "data": files })))
@@ -59,13 +60,14 @@ pub(super) async fn list_memory_files_handler(
 
 pub(super) async fn get_memory_file_handler(
     State(state): State<Arc<HttpApiState>>,
-    _auth: axum::extract::Extension<RequestIdentity>,
+    auth: axum::extract::Extension<RequestIdentity>,
     Path(date): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
+    let actor = shared_actor(&auth.0);
     let date = MemoryDate::parse(&date).map_err(map_memory_error)?;
     let detail = state
         .memory
-        .get_file(date)
+        .get_file(&actor, date)
         .await
         .map_err(map_memory_error)?;
     Ok(Json(json!(detail)))
@@ -89,9 +91,10 @@ pub(super) async fn put_memory_file_handler(
 
 pub(super) async fn search_memory_files_handler(
     State(state): State<Arc<HttpApiState>>,
-    _auth: axum::extract::Extension<RequestIdentity>,
+    auth: axum::extract::Extension<RequestIdentity>,
     Query(query): Query<MemorySearchHttpQuery>,
 ) -> Result<Json<Value>, ApiError> {
+    let actor = shared_actor(&auth.0);
     let params = MemorySearchParams {
         query: query.q,
         limit: query.limit,
@@ -100,7 +103,7 @@ pub(super) async fn search_memory_files_handler(
     };
     let results = state
         .memory
-        .search_files(params)
+        .search_files(&actor, params)
         .await
         .map_err(map_memory_error)?;
     Ok(Json(json!({ "data": results })))

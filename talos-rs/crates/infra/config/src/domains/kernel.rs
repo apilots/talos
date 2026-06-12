@@ -299,6 +299,10 @@ impl Default for AgentKernelCompactionConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentKernelConfig {
+    /// Effective agent workspace root for prompt, memory, sessions, and file tool fallback.
+    #[serde(default = "default_kernel_workspace_dir")]
+    pub workspace_dir: String,
+
     /// Maximum parallel tool executions
     #[serde(default = "default_kernel_tool_parallelism")]
     pub tool_parallelism: usize,
@@ -360,6 +364,13 @@ fn default_kernel_tool_parallelism() -> usize {
     1
 }
 
+fn default_kernel_workspace_dir() -> String {
+    crate::TalosPaths::resolve()
+        .workspace_dir_for_agent("talos")
+        .to_string_lossy()
+        .to_string()
+}
+
 fn default_kernel_max_tool_rounds() -> u32 {
     8
 }
@@ -383,6 +394,7 @@ fn default_kernel_planner_mode() -> PlannerMode {
 impl Default for AgentKernelConfig {
     fn default() -> Self {
         Self {
+            workspace_dir: default_kernel_workspace_dir(),
             tool_parallelism: default_kernel_tool_parallelism(),
             max_tool_rounds: default_kernel_max_tool_rounds(),
             tool_result_max_bytes: default_kernel_tool_result_max_bytes(),

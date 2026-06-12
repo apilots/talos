@@ -17,7 +17,7 @@ async fn test_run_general_turn_forces_summary_when_final_response_is_empty_after
     let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     let mut ctx = build_ctx_with_stream(None);
 
     let result = run_general_turn(
@@ -61,7 +61,7 @@ async fn test_run_general_turn_uses_salvage_call_when_forced_summary_is_still_em
     let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     let mut ctx = build_ctx_with_stream(None);
 
     let result = run_general_turn(

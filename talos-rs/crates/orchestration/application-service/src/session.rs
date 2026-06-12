@@ -71,7 +71,7 @@ impl SessionService {
 
     fn workspace_root(&self) -> Option<PathBuf> {
         let base_config = self.base_config_snapshot();
-        let workspace_dir = base_config.agent.kernel.memory.workspace_dir.trim();
+        let workspace_dir = base_config.agent.kernel.workspace_dir.trim();
         if workspace_dir.is_empty() {
             return None;
         }

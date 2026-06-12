@@ -34,6 +34,7 @@ pub mod paths;
 pub mod service;
 pub mod store;
 pub mod validate;
+pub mod workspace;
 
 pub type TalosTimezone = chrono_tz::Tz;
 pub use domains::agent::{AgentConfig, PlannerMode};
@@ -65,6 +66,10 @@ pub use paths::{
 };
 pub use service::{LlmConfigManager, LlmConfigService};
 pub use store::{InMemoryLlmConfigStore, LlmConfigStore, YamlLlmConfigStore};
+pub use workspace::{
+    resolve_effective_kernel_workspace, validate_session_workspace_user,
+    validate_user_workspace_segment, EffectiveKernelWorkspace,
+};
 
 /// 主配置结构
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -164,7 +169,7 @@ impl Config {
         self.logging.file = Some(paths.log_file.to_string_lossy().to_string());
         self.storage.connection_string = paths.sqlite_db.to_string_lossy().to_string();
         self.agent.kernel.timezone = self.timezone.clone();
-        self.agent.kernel.memory.workspace_dir = paths
+        self.agent.kernel.workspace_dir = paths
             .workspace_dir_for_agent(&self.agent.name)
             .to_string_lossy()
             .to_string();

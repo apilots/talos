@@ -21,6 +21,7 @@ async fn test_health() {
         .expect("body should be readable");
     let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
     assert_eq!(payload["auth_enabled"], true);
+    assert_eq!(payload["cloud_auth_url"], "http://127.0.0.1:3000");
 }
 
 #[tokio::test]
@@ -231,6 +232,31 @@ async fn test_get_workspace_doc_handler_returns_exists_false_for_missing_file() 
 }
 
 #[tokio::test]
+async fn test_get_workspace_info_handler_returns_effective_paths() {
+    let (config, workspace_dir) = isolated_test_config();
+    let state = test_state_with_config(config, false);
+
+    let response = get_workspace_info_handler(State(state), axum::extract::Extension(test_auth()))
+        .await
+        .expect("get workspace info should succeed");
+
+    assert_eq!(
+        response.0["base_workspace_dir"],
+        workspace_dir.to_string_lossy().to_string()
+    );
+    assert_eq!(response.0["user_id"], "static-token");
+    assert_eq!(
+        response.0["user_workspace_dir"],
+        workspace_dir
+            .join("users")
+            .join("static-token")
+            .to_string_lossy()
+            .to_string()
+    );
+    let _ = std::fs::remove_dir_all(workspace_dir);
+}
+
+#[tokio::test]
 async fn test_put_and_get_memory_file_handlers_roundtrip() {
     let (config, workspace_dir) = isolated_test_config();
     let state = test_state_with_config(config, false);
@@ -382,7 +408,10 @@ async fn test_http_and_app_server_adapters_share_application_service_contract() 
 #[tokio::test]
 async fn test_search_memory_files_handler_returns_matching_data() {
     let (config, workspace_dir) = isolated_test_config();
-    let memory_dir = workspace_dir.join("memory");
+    let memory_dir = workspace_dir
+        .join("users")
+        .join("static-token")
+        .join("memory");
     std::fs::create_dir_all(&memory_dir).expect("memory dir should exist");
     std::fs::write(
         memory_dir.join("2026-04-04.md"),

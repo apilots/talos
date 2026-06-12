@@ -201,7 +201,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().expect("temp dir should be created");
         let mut kernel_config = AgentKernelConfig::default();
         kernel_config.timezone = "Asia/Shanghai".to_string();
-        kernel_config.memory.workspace_dir = temp_dir.path().to_string_lossy().to_string();
+        kernel_config.workspace_dir = temp_dir.path().to_string_lossy().to_string();
         let store = MemoryStore::from_config(&kernel_config);
         let timestamp = Utc
             .with_ymd_and_hms(2026, 4, 4, 23, 21, 0)

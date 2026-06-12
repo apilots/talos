@@ -1,12 +1,11 @@
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
     Frame,
 };
 
 use crate::types::AppState;
-use crate::utils::APP_VERSION;
 use crate::TuiApp;
 
 impl TuiApp {
@@ -32,14 +31,7 @@ impl TuiApp {
         // Save left panel area for floater positioning
         self.left_panel_area = Some(area);
 
-        let left_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Rgb(106, 111, 123)))
-            .title(format!("Talos TUI ({})", APP_VERSION))
-            .title_alignment(Alignment::Left)
-            .style(Style::default().fg(Color::White));
-        let left_inner = left_block.inner(area);
-        f.render_widget(left_block, area);
+        let left_inner = area;
 
         let show_queue_panel = !self.message_queue.is_empty();
         let input_panel_height = self

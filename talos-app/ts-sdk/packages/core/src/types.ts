@@ -485,6 +485,13 @@ export interface WorkspaceDocDetail extends WorkspaceDocSummary {
   content: string;
 }
 
+export interface AgentWorkspaceInfo {
+  user_id: string;
+  username?: string | null;
+  base_workspace_dir: string;
+  user_workspace_dir: string;
+}
+
 export type ModelInputKind = "text" | "image" | "audio" | "video" | "file";
 
 export type ThinkingFormat = "open_ai" | "anthropic" | "qwen";

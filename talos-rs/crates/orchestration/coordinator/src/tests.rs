@@ -148,7 +148,7 @@ impl AgentOrchestrator for RecordingStreamAgent {
 
     async fn submit_dynamic_tool_result(
         &self,
-        _session_id: &str,
+        _session: TalosSession,
         _call_id: &str,
         _tool_name: &str,
         _output: String,
@@ -428,7 +428,7 @@ impl AgentOrchestrator for TrackingFlushAgent {
 
     async fn submit_dynamic_tool_result(
         &self,
-        _session_id: &str,
+        _session: TalosSession,
         _call_id: &str,
         _tool_name: &str,
         _output: String,

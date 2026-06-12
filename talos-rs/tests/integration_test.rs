@@ -83,7 +83,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         model: None,
     };
-    let token = std::env::var("GATEWAY_TOKEN").unwrap_or_else(|_| "talos-local-test-token".to_string());
+    let token = std::env::var("GATEWAY_TOKEN")
+        .map_err(|_| "GATEWAY_TOKEN must be set for authenticated integration_test")?;
 
     let session_response = client
         .post("http://localhost:8080/v1/sessions")

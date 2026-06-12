@@ -29,6 +29,7 @@ import type {
   WorkspaceDocDetail,
   WorkspaceDocKind,
   WorkspaceDocSummary,
+  AgentWorkspaceInfo,
 } from "./types";
 
 interface ListResponse<T> {
@@ -245,6 +246,8 @@ export class TalosClient {
   };
 
   workspaceDocs = {
+    info: () =>
+      this.http.request<AgentWorkspaceInfo>(this.url("/v1/workspace/info")),
     list: async (): Promise<WorkspaceDocSummary[]> => {
       const response = await this.http.request<ListResponse<WorkspaceDocSummary>>(
         this.url("/v1/workspace/docs"),

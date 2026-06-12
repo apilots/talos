@@ -6,7 +6,7 @@ async fn test_remote_session_defaults_project_root_to_workspace_dir() {
     std::fs::create_dir_all(&workspace_dir).expect("workspace dir should be created");
 
     let mut config = TalosConfig::default();
-    config.agent.kernel.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.agent.kernel.workspace_dir = workspace_dir.to_string_lossy().to_string();
 
     let mock_router = Arc::new(MockRouter::new());
     let session_store = Arc::new(talos_session_store::MockSessionStore::new());
@@ -51,7 +51,7 @@ async fn test_remote_session_ignores_current_directory_patch_for_root_resolution
     std::fs::create_dir_all(&custom_dir).expect("custom dir should be created");
 
     let mut config = TalosConfig::default();
-    config.agent.kernel.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.agent.kernel.workspace_dir = workspace_dir.to_string_lossy().to_string();
 
     let mock_router = Arc::new(MockRouter::new());
     let session_store = Arc::new(TitleTestSessionStore::new(SessionRecord {

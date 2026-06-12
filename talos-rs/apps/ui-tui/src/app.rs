@@ -9,7 +9,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use talos_sdk::{ProtocolTalosContext, TalosSession};
-use talos_types::talos::{TalosConnectionMode, TalosUsage};
+use talos_types::talos::TalosUsage;
 
 use crate::client::GatewayClient;
 use crate::render;
@@ -17,14 +17,11 @@ use crate::types::{AppState, ChatRole, CopyProjection, RenderedChatLine};
 use crate::utils::{build_welcome_card, APP_VERSION};
 use crate::{TuiApp, CHAT_CONTENT_PADDING_LEFT, WELCOME_MODEL_PLACEHOLDER};
 
-const REMOTE_INIT_MAX_ATTEMPTS: usize = 5;
-const REMOTE_INIT_RETRY_DELAY_MS: u64 = 250;
+const SESSION_INIT_MAX_ATTEMPTS: usize = 5;
+const SESSION_INIT_RETRY_DELAY_MS: u64 = 250;
 
 impl TuiApp {
-    pub(crate) fn build(
-        gateway_client: Option<Arc<dyn GatewayClient>>,
-        connection_mode: TalosConnectionMode,
-    ) -> Self {
+    pub(crate) fn build(gateway_client: Option<Arc<dyn GatewayClient>>) -> Self {
         let mut app = Self {
             current_state: AppState::Chat,
             input_buffer: String::new(),
@@ -33,7 +30,6 @@ impl TuiApp {
             selected_pasted_block: None,
             startup_directory: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             current_project_root: None,
-            connection_mode,
             current_model: String::new(),
             session_usage: TalosUsage::default(),
             turn_metrics: None,
@@ -102,9 +98,7 @@ impl TuiApp {
             input_area: None,
         };
 
-        if matches!(app.connection_mode, TalosConnectionMode::Embedded) {
-            app.current_project_root = Some(app.startup_directory.clone());
-        }
+        app.current_project_root = Some(app.startup_directory.clone());
 
         app.push_block(
             ChatRole::System,
@@ -112,8 +106,6 @@ impl TuiApp {
                 APP_VERSION,
                 WELCOME_MODEL_PLACEHOLDER,
                 app.current_project_root.as_deref(),
-                &app.startup_directory,
-                app.connection_mode,
             ),
         );
         app.push_block(
@@ -125,11 +117,8 @@ impl TuiApp {
         app
     }
 
-    pub fn new_with_gateway_client(
-        gateway_client: Arc<dyn GatewayClient>,
-        connection_mode: TalosConnectionMode,
-    ) -> Self {
-        Self::build(Some(gateway_client), connection_mode)
+    pub fn new_with_gateway_client(gateway_client: Arc<dyn GatewayClient>) -> Self {
+        Self::build(Some(gateway_client))
     }
 
     pub(crate) fn build_session_context(&self) -> ProtocolTalosContext {
@@ -144,20 +133,20 @@ impl TuiApp {
         }
     }
 
-    pub async fn initialize_remote(&mut self) {
+    pub async fn initialize_session(&mut self) {
         self.connection_status = "connecting".to_string();
-        self.push_right_event("connecting to gateway".to_string());
+        self.push_right_event("connecting to app-server".to_string());
 
         if let Err(err) = self.refresh_models_with_retry().await {
             self.push_block(
                 ChatRole::System,
-                format!("Failed to load models from gateway: {}", err),
+                format!("Failed to load models from app-server: {}", err),
             );
             self.connection_status = "error".to_string();
             return;
         }
 
-        match self.ensure_remote_session_with_retry().await {
+        match self.ensure_session_with_retry().await {
             Ok(session_id) => {
                 self.connection_status = "connected".to_string();
                 self.push_right_event(format!("session ready: {}", session_id));
@@ -165,7 +154,7 @@ impl TuiApp {
             Err(err) => {
                 self.push_block(
                     ChatRole::System,
-                    format!("Failed to create remote session: {}", err),
+                    format!("Failed to create session: {}", err),
                 );
                 self.connection_status = "error".to_string();
             }
@@ -174,50 +163,50 @@ impl TuiApp {
 
     async fn refresh_models_with_retry(&mut self) -> talos_error::TalosResult<()> {
         let mut last_error = None;
-        for attempt in 1..=REMOTE_INIT_MAX_ATTEMPTS {
+        for attempt in 1..=SESSION_INIT_MAX_ATTEMPTS {
             match self.refresh_models_from_gateway().await {
                 Ok(()) => return Ok(()),
                 Err(err) => {
                     last_error = Some(err);
-                    if attempt == REMOTE_INIT_MAX_ATTEMPTS {
+                    if attempt == SESSION_INIT_MAX_ATTEMPTS {
                         break;
                     }
                     self.push_right_event(format!(
                         "model load retry {}/{}",
                         attempt + 1,
-                        REMOTE_INIT_MAX_ATTEMPTS
+                        SESSION_INIT_MAX_ATTEMPTS
                     ));
-                    tokio::time::sleep(Self::remote_init_retry_delay(attempt)).await;
+                    tokio::time::sleep(Self::session_init_retry_delay(attempt)).await;
                 }
             }
         }
         Err(last_error.expect("retry loop should capture the final model load error"))
     }
 
-    async fn ensure_remote_session_with_retry(&mut self) -> talos_error::TalosResult<String> {
+    async fn ensure_session_with_retry(&mut self) -> talos_error::TalosResult<String> {
         let mut last_error = None;
-        for attempt in 1..=REMOTE_INIT_MAX_ATTEMPTS {
-            match self.ensure_remote_session().await {
+        for attempt in 1..=SESSION_INIT_MAX_ATTEMPTS {
+            match self.ensure_session().await {
                 Ok(session_id) => return Ok(session_id),
                 Err(err) => {
                     last_error = Some(err);
-                    if attempt == REMOTE_INIT_MAX_ATTEMPTS {
+                    if attempt == SESSION_INIT_MAX_ATTEMPTS {
                         break;
                     }
                     self.push_right_event(format!(
                         "session create retry {}/{}",
                         attempt + 1,
-                        REMOTE_INIT_MAX_ATTEMPTS
+                        SESSION_INIT_MAX_ATTEMPTS
                     ));
-                    tokio::time::sleep(Self::remote_init_retry_delay(attempt)).await;
+                    tokio::time::sleep(Self::session_init_retry_delay(attempt)).await;
                 }
             }
         }
         Err(last_error.expect("retry loop should capture the final session create error"))
     }
 
-    fn remote_init_retry_delay(attempt: usize) -> Duration {
-        Duration::from_millis(REMOTE_INIT_RETRY_DELAY_MS.saturating_mul(attempt as u64))
+    fn session_init_retry_delay(attempt: usize) -> Duration {
+        Duration::from_millis(SESSION_INIT_RETRY_DELAY_MS.saturating_mul(attempt as u64))
     }
 
     pub fn get_current_state(&self) -> &AppState {
@@ -271,18 +260,13 @@ impl TuiApp {
                     .as_ref()
                     .map(|env| env.directory.clone())
             })
-            .or_else(|| {
-                matches!(self.connection_mode, TalosConnectionMode::Embedded)
-                    .then(|| self.startup_directory.clone())
-            });
+            .or_else(|| Some(self.startup_directory.clone()));
         if let Some(welcome_block) = self.chat_blocks.first_mut() {
             if welcome_block.content.starts_with('╭') {
                 welcome_block.content = build_welcome_card(
                     APP_VERSION,
                     &self.current_model,
                     self.current_project_root.as_deref(),
-                    &self.startup_directory,
-                    self.connection_mode,
                 );
             }
         }
@@ -314,8 +298,6 @@ impl TuiApp {
                 APP_VERSION,
                 &self.current_model,
                 self.current_project_root.as_deref(),
-                &self.startup_directory,
-                self.connection_mode,
             ),
         );
         self.push_block(
@@ -359,17 +341,7 @@ mod tests {
 
     #[test]
     fn embedded_session_context_uses_terminal_channel() {
-        let app = TuiApp::build(None, TalosConnectionMode::Embedded);
-        let context = app.build_session_context();
-
-        assert_eq!(context.source_type, "cli");
-        assert_eq!(context.provider, "cli");
-        assert_eq!(context.channel_id, "terminal");
-    }
-
-    #[test]
-    fn remote_session_context_uses_terminal_channel() {
-        let app = TuiApp::build(None, TalosConnectionMode::Remote);
+        let app = TuiApp::build(None);
         let context = app.build_session_context();
 
         assert_eq!(context.source_type, "cli");

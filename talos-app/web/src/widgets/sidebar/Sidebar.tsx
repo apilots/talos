@@ -10,7 +10,13 @@ import type { SessionUiStatus, ThreadFilter } from "@/shared/types/ui";
 import { isDesktopRuntime } from "@/shared/api/desktop-client";
 
 type AuthConnectionState = {
-  authStatus: "unknown" | "loading" | "authenticated" | "unauthenticated" | "open";
+  authStatus:
+    | "unknown"
+    | "loading"
+    | "authenticated"
+    | "unauthenticated"
+    | "logged_out"
+    | "open";
   authRole: "user" | "admin";
   authUsername: string;
   userId: string;
@@ -74,6 +80,7 @@ export function Sidebar({
   const avatarLabel = connection.authUsername.trim().charAt(0).toUpperCase() || "U";
   const desktopRuntime = isDesktopRuntime();
   const shellLabel = desktopRuntime ? "DESKTOP" : t("sidebar:webConsole");
+  const logoSrc = `${import.meta.env.BASE_URL}logo.png`;
 
   useEffect(() => {
     if (!accountMenuOpen) {
@@ -111,9 +118,11 @@ export function Sidebar({
             <div className="font-display text-[21px] font-semibold tracking-[-0.04em] text-ink">Talos</div>
             <div className="mt-1 text-[10px] uppercase tracking-[0.22em] text-muted">{shellLabel}</div>
           </div>
-          <div className="flex size-10 items-center justify-center rounded-[var(--radius-control)] border border-brand/25 bg-brand/10 text-brand">
-            ⬡
-          </div>
+          <img
+            alt="Talos"
+            className="size-10 rounded-[var(--radius-control)] shadow-[0_6px_16px_rgba(27,24,19,0.08)]"
+            src={logoSrc}
+          />
         </div>
         <div className="mt-3 flex items-center gap-2 text-[11px] text-muted">
           <span className="size-2 rounded-full bg-success shadow-[0_0_14px_rgba(94,234,212,0.55)]" />

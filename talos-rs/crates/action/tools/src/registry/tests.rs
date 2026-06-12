@@ -438,7 +438,7 @@ async fn test_default_registry_allows_memory_search() {
         .expect("root memory should write");
 
     let mut config = AgentKernelConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     let context =
         ToolContext::new_with_kernel_config("session-ctx", "user-ctx", Some(Arc::new(config)));
     let invocation = registry

@@ -1,16 +1,33 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { createElement, type PropsWithChildren } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import "@/shared/i18n/setup";
 import { SettingsAgentWorkspaceSection } from "./SettingsAgentWorkspaceSection";
+
+const getWorkspaceInfo = vi.fn();
 
 vi.mock("@/features/connection", () => ({
   useConnectionSettings: () => ({
     connection: {
       authStatus: "authenticated",
       authRole: "user",
+      userId: "alice",
+    },
+  }),
+}));
+
+vi.mock("@/features/chat", () => ({
+  useConnectionKey: () => "settings-test-connection",
+}));
+
+vi.mock("@/shared/api/client", () => ({
+  getTalosClient: () => ({
+    workspaceDocs: {
+      info: getWorkspaceInfo,
     },
   }),
 }));
@@ -69,16 +86,41 @@ vi.mock("@/features/memory", () => ({
   }),
 }));
 
+function createWrapper() {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  });
+
+  return function Wrapper({ children }: PropsWithChildren) {
+    return createElement(QueryClientProvider, { client: queryClient }, children);
+  };
+}
+
 describe("SettingsAgentWorkspaceSection", () => {
   afterEach(() => {
     cleanup();
+    vi.clearAllMocks();
   });
 
-  it("shows only workspace path content on the general tab", () => {
-    render(<SettingsAgentWorkspaceSection />);
+  it("shows server-provided workspace path content on the general tab", async () => {
+    getWorkspaceInfo.mockResolvedValue({
+      user_id: "alice",
+      username: "Alice",
+      base_workspace_dir: "/srv/talos/workspace-talos",
+      user_workspace_dir: "/srv/talos/workspace-talos/users/alice",
+    });
+
+    render(<SettingsAgentWorkspaceSection />, { wrapper: createWrapper() });
 
     expect(screen.getByText("Workspace path")).toBeTruthy();
-    expect(screen.getByDisplayValue(__TALOS_DEFAULT_PROJECT_ROOT__)).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("/srv/talos/workspace-talos")).toBeTruthy();
+      expect(screen.getByDisplayValue("/srv/talos/workspace-talos/users/alice")).toBeTruthy();
+    });
     expect(screen.queryByText("2026-05-06")).toBeNull();
     expect(screen.queryByText("MEMORY.md")).toBeNull();
   });

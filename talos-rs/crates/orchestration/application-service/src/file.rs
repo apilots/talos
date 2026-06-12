@@ -38,7 +38,8 @@ where
 }
 
 pub fn workspace_root(config: &TalosConfig) -> PathBuf {
-    resolve_runtime_path(&config.agent.kernel.memory.workspace_dir)
+    let workspace_dir = config.agent.kernel.workspace_dir.trim();
+    resolve_runtime_path(workspace_dir)
 }
 
 pub fn content_hash(content: &str) -> String {

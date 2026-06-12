@@ -173,7 +173,7 @@ mod tests {
 
     fn test_kernel_config(workspace_dir: &std::path::Path) -> Arc<AgentKernelConfig> {
         let mut config = AgentKernelConfig::default();
-        config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+        config.workspace_dir = workspace_dir.to_string_lossy().to_string();
         Arc::new(config)
     }
 
@@ -253,7 +253,7 @@ mod tests {
 
         let tool = MemorySearchTool;
         let mut config = AgentKernelConfig::default();
-        config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+        config.workspace_dir = workspace_dir.to_string_lossy().to_string();
         config.memory.search_max_results = 1;
         let context =
             ToolContext::new_with_kernel_config("session-1", "user-1", Some(Arc::new(config)))
@@ -318,7 +318,7 @@ mod tests {
         let relative = workspace_dir
             .strip_prefix(&home_path)
             .expect("workspace should live under HOME");
-        config.memory.workspace_dir = format!("~/{}", relative.to_string_lossy());
+        config.workspace_dir = format!("~/{}", relative.to_string_lossy());
         let context =
             ToolContext::new_with_kernel_config("session-1", "user-1", Some(Arc::new(config)))
                 .with_memory_store(Arc::new(MemoryStore::new_with_llm(

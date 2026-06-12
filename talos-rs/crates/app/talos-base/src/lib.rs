@@ -371,26 +371,18 @@ pub async fn run_json_rpc_stdio(config: Config) -> TalosResult<()> {
             .with_drain_provider(Box::new(CoordinatorDrain {
                 coordinator: runtime.coordinator,
             }))
-            .with_tool_registry(runtime.tool_registry),
+            .with_tool_registry(runtime.tool_registry)
+            .with_cloud_api_base_url(config.cloud.api_base_url.clone()),
     );
-    let local_launch_access = if config.gateway.auth {
-        talos_app_server::LocalLaunchAccess::Regular
-    } else {
-        talos_app_server::LocalLaunchAccess::Full
-    };
-    let validator = Arc::new(
-        talos_app_server::AuthServiceCredentialValidator::new(
-            runtime.auth_service,
-            std::env::var("TALOS_LOCAL_LAUNCH_TOKEN").ok(),
-        )
-        .with_local_launch_access(local_launch_access),
-    );
+    let validator = Arc::new(talos_app_server::AuthServiceCredentialValidator::new(
+        runtime.auth_service,
+    ));
     talos_app_server::run_stdio(
         app,
         validator,
         talos_app_server::AppServerConfig {
             auth_enabled: config.gateway.auth,
-            cloud_auth_url: Some(config.cloud.api_base_url.clone()),
+            cloud_auth_url: Some(config.cloud.web_base_url.clone()),
             ..talos_app_server::AppServerConfig::default()
         },
     )

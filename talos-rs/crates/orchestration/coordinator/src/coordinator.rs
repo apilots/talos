@@ -336,7 +336,7 @@ impl RequestHandler for CoordinatorImpl {
             })?;
         let (_target_agent, agent) = self.resolve_session_agent(&session).await?;
         agent
-            .submit_dynamic_tool_result(session_id, call_id, tool_name, output, success)
+            .submit_dynamic_tool_result(session, call_id, tool_name, output, success)
             .await
     }
 }
@@ -556,7 +556,7 @@ impl SessionService for CoordinatorImpl {
             })?;
         let (_target_agent, agent) = self.resolve_session_agent(&session).await?;
         agent
-            .submit_dynamic_tool_result(session_id, call_id, tool_name, output, success)
+            .submit_dynamic_tool_result(session, call_id, tool_name, output, success)
             .await?;
         Ok(())
     }

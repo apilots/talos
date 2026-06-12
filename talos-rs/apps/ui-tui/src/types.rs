@@ -279,9 +279,9 @@ pub(crate) struct SessionHistoryLoad {
     pub(crate) live_recovery: Option<TalosResult<TimelineRecoverySnapshot>>,
 }
 
-// ── Remote command update ────────────────────────────────────────────────────
+// ── Command update ───────────────────────────────────────────────────────────
 
-pub(crate) enum RemoteCommandUpdate {
+pub(crate) enum CommandUpdate {
     ModelsLoaded(TalosResult<Vec<ModelInfo>>),
     StatusLoaded(TalosResult<Option<TalosSession>>),
     SessionCompacted(TalosResult<TalosSession>),

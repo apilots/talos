@@ -91,7 +91,7 @@ async fn test_static_prefix_and_bootstrap_blocks_are_cacheable() {
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
 
     let mut config = PromptBuildConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
 
     let assembly = PromptBuilder::new()
         .config(config)
@@ -135,7 +135,7 @@ async fn test_prompt_cache_break_reason_detects_tool_catalog_changes() {
 async fn test_prompt_cache_break_reason_detects_bootstrap_changes() {
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     let mut config = PromptBuildConfig::default();
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
 
     let baseline = PromptBuilder::new()
         .config(config.clone())

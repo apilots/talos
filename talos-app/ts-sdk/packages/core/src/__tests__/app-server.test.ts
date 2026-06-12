@@ -59,6 +59,9 @@ describe("AppServerClient", () => {
       output: "done",
       success: true,
     });
+    await client.startCloudLogin({ client_name: "Talos Test", client_kind: "web" });
+    await client.getCloudLoginStatus({ login_id: "login-1" });
+    await client.cancelCloudLogin({ login_id: "login-1" });
     await client.unsubscribeEvents("sub-1");
     await client.searchMemory("stable fact", 3);
 
@@ -102,6 +105,12 @@ describe("AppServerClient", () => {
           success: true,
         },
       },
+      {
+        method: "auth.login.start",
+        params: { client_name: "Talos Test", client_kind: "web" },
+      },
+      { method: "auth.login.status", params: { login_id: "login-1" } },
+      { method: "auth.login.cancel", params: { login_id: "login-1" } },
       { method: "event.unsubscribe", params: { subscription_id: "sub-1" } },
       { method: "memory.search", params: { query: "stable fact", limit: 3 } },
     ]);

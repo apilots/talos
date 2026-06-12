@@ -2,7 +2,13 @@ import type { RuntimeMode } from "@/shared/types/ui";
 
 const defaultServerUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 type UserRole = "user" | "admin";
-type AuthStatus = "unknown" | "loading" | "authenticated" | "unauthenticated" | "open";
+type AuthStatus =
+  | "unknown"
+  | "loading"
+  | "authenticated"
+  | "unauthenticated"
+  | "logged_out"
+  | "open";
 
 export interface ConnectionState {
   serverUrl: string;

@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Brain, Save, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { useConnectionKey } from "@/features/chat";
 import { useConnectionSettings } from "@/features/connection";
 import { formatMemoryDate, useMemoryPage } from "@/features/memory";
 import { formatWorkspaceDocDate, useWorkspaceDocsPage } from "@/features/workspace-docs";
+import { getTalosClient } from "@/shared/api/client";
 import { MarkdownRenderer } from "@/widgets/message-list/MarkdownRenderer";
 import { Button } from "@/shared/ui/Button";
 import { Input, Textarea } from "@/shared/ui/Input";
@@ -17,12 +20,20 @@ type EditorMode = "preview" | "edit";
 export function SettingsAgentWorkspaceSection() {
   const { t } = useTranslation(["settings", "workspaceDocs", "memory", "common"]);
   const { connection } = useConnectionSettings();
+  const connectionKey = useConnectionKey();
   const canEdit = connection.authStatus === "open" || connection.authStatus === "authenticated";
   const [mode, setMode] = useState<AgentWorkspaceMode>("general");
   const [docEditorMode, setDocEditorMode] = useState<EditorMode>("preview");
   const [memoryEditorMode, setMemoryEditorMode] = useState<EditorMode>("preview");
   const workspaceDocs = useWorkspaceDocsPage();
   const memory = useMemoryPage();
+  const workspaceInfoQuery = useQuery({
+    queryKey: ["talos", connectionKey, "workspace-info"],
+    queryFn: () => getTalosClient().workspaceDocs.info(),
+    refetchOnWindowFocus: false,
+  });
+  const baseWorkspacePath = workspaceInfoQuery.data?.base_workspace_dir ?? "";
+  const userWorkspacePath = workspaceInfoQuery.data?.user_workspace_dir ?? "";
 
   useEffect(() => {
     if (!canEdit) {
@@ -94,9 +105,19 @@ export function SettingsAgentWorkspaceSection() {
             </div>
           </div>
           <div className="mt-5 max-w-3xl">
-            <FieldBlock label={t("settings:detectedWorkspace")}>
-              <Input disabled value={__TALOS_DEFAULT_PROJECT_ROOT__} />
+            <FieldBlock label={t("settings:baseWorkspace")}>
+              <Input disabled value={baseWorkspacePath || t("common:loading")} />
             </FieldBlock>
+            <div className="mt-4">
+              <FieldBlock label={t("settings:currentUserWorkspace")}>
+                <Input disabled value={userWorkspacePath || t("common:loading")} />
+              </FieldBlock>
+            </div>
+            {workspaceInfoQuery.error instanceof Error ? (
+              <div className="mt-4 rounded-[var(--radius-control)] border border-danger/20 bg-danger/5 px-3 py-2 text-sm text-danger">
+                {workspaceInfoQuery.error.message}
+              </div>
+            ) : null}
           </div>
         </Panel>
       ) : null}

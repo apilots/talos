@@ -39,4 +39,34 @@ describe("resolveAppServerEnvironment", () => {
 
     expect(env).toEqual({ TALOS_HOME: "/tmp/talos" });
   });
+
+  it("uses packaged resources as the default release config", () => {
+    const env = resolveAppServerEnvironment({
+      baseEnv: {
+        HOME: "/Users/example",
+      },
+      packagedResourcesPath: "/Applications/Talos.app/Contents/Resources",
+    });
+
+    expect(env).toMatchObject({
+      HOME: "/Users/example",
+      TALOS_RESOURCE_DIR: "/Applications/Talos.app/Contents/Resources",
+      TALOS_CONFIG: "/Applications/Talos.app/Contents/Resources/conf/talos.yaml",
+    });
+  });
+
+  it("keeps explicit packaged Talos config overrides", () => {
+    const env = resolveAppServerEnvironment({
+      baseEnv: {
+        TALOS_CONFIG: "/tmp/custom.yaml",
+        TALOS_RESOURCE_DIR: "/tmp/resources",
+      },
+      packagedResourcesPath: "/Applications/Talos.app/Contents/Resources",
+    });
+
+    expect(env).toMatchObject({
+      TALOS_CONFIG: "/tmp/custom.yaml",
+      TALOS_RESOURCE_DIR: "/tmp/resources",
+    });
+  });
 });

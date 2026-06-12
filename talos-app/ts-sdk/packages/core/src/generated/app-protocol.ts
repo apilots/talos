@@ -20,13 +20,13 @@ export type ToolErrorData = { tool_name: string, reason: string, };
 
 export type ConfigErrorData = { path: string, reason: string, };
 
-export type ClientMethod = "initialize" | "session.create" | "session.list" | "session.read" | "session.patch" | "session.delete" | "session.close" | "session.compact" | "session.clear" | "session.active_turn" | "session.history" | "session.recover" | "project.create" | "project.list" | "project.read" | "project.patch" | "project.delete" | "turn.start" | "turn.interrupt" | "turn.retry" | "event.subscribe" | "event.unsubscribe" | "tool.dynamic_result.submit" | "model.list" | "config.read" | "config.value.write" | "config.batch.write" | "config.reload" | "memory.file.list" | "memory.file.read" | "memory.file.write" | "workspace.doc.list" | "workspace.doc.read" | "workspace.doc.write" | "skill.list" | "app.list" | "tool.list" | "auth.logout" | "auth.session.read" | "auth.session.store" | "auth.session.clear" | "user.current" | "memory.search";
+export type ClientMethod = "initialize" | "session.create" | "session.list" | "session.read" | "session.patch" | "session.delete" | "session.close" | "session.compact" | "session.clear" | "session.active_turn" | "session.history" | "session.recover" | "project.create" | "project.list" | "project.read" | "project.patch" | "project.delete" | "turn.start" | "turn.interrupt" | "turn.retry" | "event.subscribe" | "event.unsubscribe" | "tool.dynamic_result.submit" | "model.list" | "config.read" | "config.value.write" | "config.batch.write" | "config.reload" | "memory.file.list" | "memory.file.read" | "memory.file.write" | "workspace.doc.list" | "workspace.doc.read" | "workspace.doc.write" | "workspace.info" | "skill.list" | "app.list" | "tool.list" | "auth.logout" | "auth.login.start" | "auth.login.status" | "auth.login.cancel" | "auth.session.read" | "auth.session.store" | "auth.session.clear" | "user.current" | "memory.search";
 
-export type ClientRequestParams = { "method": "initialize", "params": InitializeParams } | { "method": "session.create", "params": SessionCreateParams } | { "method": "session.list", "params": SessionListParams } | { "method": "session.read", "params": SessionReadParams } | { "method": "session.patch", "params": SessionPatchParams } | { "method": "session.delete", "params": SessionDeleteParams } | { "method": "session.close", "params": SessionCloseParams } | { "method": "session.compact", "params": SessionCompactParams } | { "method": "session.clear", "params": SessionClearParams } | { "method": "session.active_turn", "params": SessionActiveTurnParams } | { "method": "session.history", "params": SessionHistoryParams } | { "method": "session.recover", "params": TimelineRecoveryParams } | { "method": "project.create", "params": ProjectCreateParams } | { "method": "project.list", "params": ProjectListParams } | { "method": "project.read", "params": ProjectReadParams } | { "method": "project.patch", "params": ProjectPatchParams } | { "method": "project.delete", "params": ProjectDeleteParams } | { "method": "turn.start", "params": TurnStartParams } | { "method": "turn.interrupt", "params": TurnInterruptParams } | { "method": "turn.retry", "params": TurnRetryParams } | { "method": "event.subscribe", "params": EventSubscribeParams } | { "method": "event.unsubscribe", "params": EventUnsubscribeParams } | { "method": "tool.dynamic_result.submit", "params": ToolDynamicResultSubmitParams } | { "method": "model.list", "params": ModelListParams } | { "method": "config.read", "params": ConfigReadParams } | { "method": "config.value.write", "params": ConfigValueWriteParams } | { "method": "config.batch.write", "params": ConfigBatchWriteParams } | { "method": "config.reload", "params": ConfigReloadParams } | { "method": "memory.file.list", "params": MemoryFileListParams } | { "method": "memory.file.read", "params": MemoryFileReadParams } | { "method": "memory.file.write", "params": MemoryFileWriteParams } | { "method": "workspace.doc.list", "params": WorkspaceDocListParams } | { "method": "workspace.doc.read", "params": WorkspaceDocReadParams } | { "method": "workspace.doc.write", "params": WorkspaceDocWriteParams } | { "method": "skill.list", "params": SkillListParams } | { "method": "app.list", "params": AppListParams } | { "method": "tool.list", "params": ToolListParams } | { "method": "auth.logout", "params": AuthLogoutParams } | { "method": "auth.session.read", "params": AuthSessionReadParams } | { "method": "auth.session.store", "params": AuthSessionStoreParams } | { "method": "auth.session.clear", "params": AuthSessionClearParams } | { "method": "user.current", "params": UserCurrentParams } | { "method": "memory.search", "params": MemorySearchParams };
+export type ClientRequestParams = { "method": "initialize", "params": InitializeParams } | { "method": "session.create", "params": SessionCreateParams } | { "method": "session.list", "params": SessionListParams } | { "method": "session.read", "params": SessionReadParams } | { "method": "session.patch", "params": SessionPatchParams } | { "method": "session.delete", "params": SessionDeleteParams } | { "method": "session.close", "params": SessionCloseParams } | { "method": "session.compact", "params": SessionCompactParams } | { "method": "session.clear", "params": SessionClearParams } | { "method": "session.active_turn", "params": SessionActiveTurnParams } | { "method": "session.history", "params": SessionHistoryParams } | { "method": "session.recover", "params": TimelineRecoveryParams } | { "method": "project.create", "params": ProjectCreateParams } | { "method": "project.list", "params": ProjectListParams } | { "method": "project.read", "params": ProjectReadParams } | { "method": "project.patch", "params": ProjectPatchParams } | { "method": "project.delete", "params": ProjectDeleteParams } | { "method": "turn.start", "params": TurnStartParams } | { "method": "turn.interrupt", "params": TurnInterruptParams } | { "method": "turn.retry", "params": TurnRetryParams } | { "method": "event.subscribe", "params": EventSubscribeParams } | { "method": "event.unsubscribe", "params": EventUnsubscribeParams } | { "method": "tool.dynamic_result.submit", "params": ToolDynamicResultSubmitParams } | { "method": "model.list", "params": ModelListParams } | { "method": "config.read", "params": ConfigReadParams } | { "method": "config.value.write", "params": ConfigValueWriteParams } | { "method": "config.batch.write", "params": ConfigBatchWriteParams } | { "method": "config.reload", "params": ConfigReloadParams } | { "method": "memory.file.list", "params": MemoryFileListParams } | { "method": "memory.file.read", "params": MemoryFileReadParams } | { "method": "memory.file.write", "params": MemoryFileWriteParams } | { "method": "workspace.doc.list", "params": WorkspaceDocListParams } | { "method": "workspace.doc.read", "params": WorkspaceDocReadParams } | { "method": "workspace.doc.write", "params": WorkspaceDocWriteParams } | { "method": "workspace.info", "params": WorkspaceInfoParams } | { "method": "skill.list", "params": SkillListParams } | { "method": "app.list", "params": AppListParams } | { "method": "tool.list", "params": ToolListParams } | { "method": "auth.logout", "params": AuthLogoutParams } | { "method": "auth.login.start", "params": CloudLoginStartRequest } | { "method": "auth.login.status", "params": CloudLoginStatusRequest } | { "method": "auth.login.cancel", "params": CloudLoginCancelRequest } | { "method": "auth.session.read", "params": AuthSessionReadParams } | { "method": "auth.session.store", "params": AuthSessionStoreParams } | { "method": "auth.session.clear", "params": AuthSessionClearParams } | { "method": "user.current", "params": UserCurrentParams } | { "method": "memory.search", "params": MemorySearchParams };
 
 export type ClientRequest = { method: ClientMethod, params: ClientRequestParams, };
 
-export type InitializeParams = { client_info: ClientInfo, capabilities: ClientCapabilities, actor_credentials: ActorCredentials, };
+export type InitializeParams = { client_info: ClientInfo, capabilities: ClientCapabilities, actor_credentials: ActorCredentials | null, };
 
 export type InitializeResponse = { protocol_version: ProtocolVersion, server_info: ServerInfo, };
 
@@ -38,7 +38,7 @@ export type ClientCapabilities = { protocol_version: ProtocolVersion, supports_s
 
 export type ActorCredentials = { credential: ActorCredential, };
 
-export type ActorCredential = { "type": "local_launch_token", token: string, } | { "type": "existing_session_token", token: string, };
+export type ActorCredential = { "type": "existing_session_token", token: string, };
 
 export type SessionCreateParams = { context: ProtocolTalosContext, model: string | null, project_id: string | null, current_directory: string | null, };
 
@@ -132,6 +132,10 @@ export type WorkspaceDocReadParams = { kind: string, };
 
 export type WorkspaceDocWriteParams = { kind: string, content: string, expected_version: string | null, };
 
+export type WorkspaceInfoParams = Record<string, never>;
+
+export type WorkspaceInfoResponse = { user_id: string, username: string | null, base_workspace_dir: string, user_workspace_dir: string, };
+
 export type SkillListParams = Record<string, never>;
 
 export type AppListParams = Record<string, never>;
@@ -139,6 +143,18 @@ export type AppListParams = Record<string, never>;
 export type ToolListParams = Record<string, never>;
 
 export type AuthLogoutParams = Record<string, never>;
+
+export type CloudLoginClientKind = "web" | "desktop" | "tui" | "cli";
+
+export type CloudLoginStartRequest = { client_name: string, client_kind: CloudLoginClientKind, };
+
+export type CloudLoginStartResponse = { login_id: string, login_url: string, user_code: string, expires_at_ms: bigint, interval_ms: bigint, };
+
+export type CloudLoginStatusRequest = { login_id: string, };
+
+export type CloudLoginStatusResponse = { "status": "pending", interval_ms: bigint, } | { "status": "authenticated", user: UserDto, } | { "status": "denied" } | { "status": "expired" };
+
+export type CloudLoginCancelRequest = { login_id: string, };
 
 export type AuthSessionReadParams = Record<string, never>;
 
@@ -238,15 +254,11 @@ export type ServerNotification = { "method": "initialized", "params": Initialize
 
 export type InitializedNotification = { protocol_version: ProtocolVersion, };
 
-export type ServerRequest = { "method": "client.user_input.request", "params": RequestUserInputParams } | { "method": "client.auth.refresh", "params": AuthRefreshParams };
+export type ServerRequest = { "method": "client.user_input.request", "params": RequestUserInputParams };
 
 export type RequestUserInputParams = { prompt: string, };
 
 export type RequestUserInputResponse = { text: string, };
-
-export type AuthRefreshParams = { reason: string, };
-
-export type AuthRefreshResponse = { token: string, };
 
 export type JsonRpcRequest = { jsonrpc: string, id: RequestId, method: string, actor_credentials: ActorCredentials | null, params: unknown, };
 

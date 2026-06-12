@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import "@/shared/i18n/setup";
 import { i18n } from "@/shared/i18n/setup";
@@ -51,6 +51,11 @@ function buildWorkspaceDocsState() {
 }
 
 describe("WorkspaceDocsPage", () => {
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
   it("allows authenticated users to switch workspace docs into edit mode", async () => {
     await i18n.changeLanguage("zh-CN");
     useConnectionSettingsMock.mockReturnValue({
@@ -67,5 +72,21 @@ describe("WorkspaceDocsPage", () => {
 
     expect(screen.getByRole("button", { name: "保存" })).toBeInTheDocument();
     expect(screen.getByDisplayValue("# Shared workspace doc")).toBeInTheDocument();
+  });
+
+  it("allows admin users to edit their own workspace docs", async () => {
+    await i18n.changeLanguage("en");
+    useConnectionSettingsMock.mockReturnValue({
+      connection: {
+        authStatus: "authenticated",
+        authRole: "admin",
+      },
+    });
+    useWorkspaceDocsPageMock.mockReturnValue(buildWorkspaceDocsState());
+
+    render(<WorkspaceDocsPage />);
+
+    expect(screen.getByRole("heading", { name: "MEMORY.md" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
   });
 });

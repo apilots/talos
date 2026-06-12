@@ -24,7 +24,6 @@ export interface JsonRpcStdioTransportOptions {
 }
 
 export interface AppServerClientOptions extends JsonRpcStdioTransportOptions {
-  launchToken: string;
   clientName?: string;
   clientVersion?: string;
   getActorCredentials?: () => AppProtocol.ActorCredentials | null | undefined;
@@ -322,10 +321,7 @@ export class StdioAppServerClient extends AppServerClient {
       args: options.args ?? [],
       cwd: options.cwd,
       getActorCredentials: options.getActorCredentials,
-      env: {
-        ...(options.env ?? {}),
-        TALOS_LOCAL_LAUNCH_TOKEN: options.launchToken,
-      },
+      env: options.env,
     });
     super(transport);
     this.transport = transport;
@@ -343,12 +339,7 @@ export class StdioAppServerClient extends AppServerClient {
         supports_server_requests: true,
         supports_event_replay: true,
       },
-      actor_credentials: {
-        credential: {
-          type: "local_launch_token",
-          token: this.options.launchToken,
-        },
-      },
+      actor_credentials: null,
     } satisfies AppProtocol.InitializeParams);
     this.transport.notify("initialized", null);
     return response;

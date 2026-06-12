@@ -45,12 +45,12 @@ export function SidebarContainer() {
     } finally {
       setConnection({
         authToken: "",
-        authStatus: "unauthenticated",
+        authStatus: "logged_out",
         authRole: "user",
-        authUsername: "web-user",
-        userId: "web-user",
+        authUsername: "Anonymous",
+        userId: "anonymous",
       });
-      navigate("/auth/login");
+      navigate("/auth/logout");
     }
   }
 

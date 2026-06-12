@@ -99,7 +99,6 @@ describe("DesktopAppServerController", () => {
     vi.useFakeTimers();
     const bridges: FakeBridge[] = [];
     const controller = new DesktopAppServerController({
-      launchToken: "token",
       restartDelayMs: 10,
       bridgeFactory: () => {
         const bridge = new FakeBridge();
@@ -143,7 +142,6 @@ describe("DesktopAppServerController", () => {
     vi.useFakeTimers();
     const bridges: FakeBridge[] = [];
     const controller = new DesktopAppServerController({
-      launchToken: "token",
       restartDelayMs: 10,
       bridgeFactory: () => {
         const bridge = new FakeBridge();
@@ -179,7 +177,6 @@ describe("DesktopAppServerController", () => {
     const rendererHandlers = new Set<(envelope: AppProtocol.TimelineEventEnvelope) => void>();
     const rendererEvents: AppProtocol.TimelineEventEnvelope[] = [];
     const controller = new DesktopAppServerController({
-      launchToken: "token",
       restartDelayMs: 10,
       bridgeFactory: () => {
         const bridge = new FakeBridge();

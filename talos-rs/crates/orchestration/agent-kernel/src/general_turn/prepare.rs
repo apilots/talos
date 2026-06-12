@@ -136,6 +136,7 @@ fn build_prompt_builder<'a>(
         .planning_instruction(planning_instruction)
         .config(PromptBuildConfig {
             load_policy,
+            workspace_dir: kernel_config.workspace_dir.clone(),
             prompt: kernel_config.prompt.clone(),
             memory: kernel_config.memory.clone(),
             tools: kernel_config.tools.clone(),

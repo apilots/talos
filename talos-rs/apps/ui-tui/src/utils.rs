@@ -10,7 +10,6 @@ use std::{
     path::Path,
     process::{Command, Stdio},
 };
-use talos_types::talos::TalosConnectionMode;
 use unicode_width::UnicodeWidthChar;
 
 pub(crate) const APP_VERSION: &str = "v0.1.0";
@@ -242,8 +241,6 @@ pub(crate) fn build_welcome_card(
     version: &str,
     model: &str,
     working_directory: Option<&Path>,
-    directory: &Path,
-    connection_mode: TalosConnectionMode,
 ) -> String {
     const CARD_WIDTH: usize = 50;
     const INFO_BLOCK_INDENT: usize = 2;
@@ -264,8 +261,6 @@ pub(crate) fn build_welcome_card(
     let working_directory_line = working_directory
         .map(|path| format!("working_directory: {}", compact_directory_path(path)))
         .unwrap_or_else(|| "working_directory: (server-managed)".to_string());
-    let directory_line = format!("client_directory: {}", compact_directory_path(directory));
-    let connection_line = format!("connection: {}", connection_mode);
     [
         "╭──────────────────────────────────────────────────╮".to_string(),
         card_line(&format!(" >_ Talos TUI ({})", version)),
@@ -277,8 +272,6 @@ pub(crate) fn build_welcome_card(
             INFO_BLOCK_INDENT,
         ),
         indented_card_line(&working_directory_line, INFO_BLOCK_INDENT),
-        indented_card_line(&directory_line, INFO_BLOCK_INDENT),
-        indented_card_line(&connection_line, INFO_BLOCK_INDENT),
         "╰──────────────────────────────────────────────────╯".to_string(),
     ]
     .join("\n")
@@ -287,7 +280,6 @@ pub(crate) fn build_welcome_card(
 #[cfg(test)]
 mod tests {
     use super::build_welcome_card;
-    use crate::utils::TalosConnectionMode;
     use std::path::Path;
 
     #[test]
@@ -296,8 +288,6 @@ mod tests {
             "v0.1.0",
             "qwen-plus",
             Some(Path::new("/Users/xujiang/data/ailabs/talos/talos-rs")),
-            Path::new("/Users/xujiang/data/ailabs/talos/talos-rs"),
-            TalosConnectionMode::Embedded,
         );
 
         let lines: Vec<&str> = card.lines().collect();
@@ -315,7 +305,9 @@ mod tests {
         );
         assert!(lines[5].starts_with("│  model:"));
         assert!(lines[6].starts_with("│  working_directory:"));
-        assert!(lines[7].starts_with("│  client_directory:"));
-        assert!(lines[8].starts_with("│  connection:"));
+        assert_eq!(
+            lines[7],
+            "╰──────────────────────────────────────────────────╯"
+        );
     }
 }

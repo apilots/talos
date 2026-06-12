@@ -47,7 +47,7 @@ export function SettingsAccountSection({
     };
   }, []);
 
-  const isAuthenticated = connection.authStatus === "authenticated" && Boolean(connection.authToken);
+  const isAuthenticated = connection.authStatus === "authenticated";
   const isAdmin = connection.authRole === "admin";
   const roleLabel = isAdmin ? t("auth:roleAdmin") : t("auth:roleUser");
   const identityLabel = connection.authUsername || connection.userId || t("settings:account.unknownUser");
@@ -83,12 +83,11 @@ export function SettingsAccountSection({
   );
 
   function openCloud(path: CloudAccountPath) {
-    if (!cloudAuthUrl || !connection.authToken) {
+    if (!cloudAuthUrl || !isAuthenticated) {
       return;
     }
 
     const targetUrl = new URL(path, cloudAuthUrl);
-    targetUrl.searchParams.set("access_token", connection.authToken);
     window.open(targetUrl.toString(), "_blank", "noopener,noreferrer");
   }
 

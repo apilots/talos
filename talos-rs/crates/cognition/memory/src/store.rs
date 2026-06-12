@@ -68,7 +68,7 @@ impl MemoryStore {
 
     pub fn from_config(config: &AgentKernelConfig) -> Self {
         Self::new_internal(
-            Self::resolve_workspace_dir(&config.memory.workspace_dir),
+            Self::resolve_workspace_dir(&effective_workspace_dir(config)),
             talos_config::parse_timezone(&config.timezone)
                 .expect("agent kernel timezone should be validated before memory store init"),
             None,
@@ -78,7 +78,7 @@ impl MemoryStore {
 
     pub fn from_config_with_llm(config: &AgentKernelConfig, llm: Arc<dyn LlmProvider>) -> Self {
         Self::new_internal(
-            Self::resolve_workspace_dir(&config.memory.workspace_dir),
+            Self::resolve_workspace_dir(&effective_workspace_dir(config)),
             talos_config::parse_timezone(&config.timezone)
                 .expect("agent kernel timezone should be validated before memory store init"),
             Some(llm),
@@ -124,4 +124,9 @@ impl MemoryStore {
     pub fn llm_provider(&self) -> Option<Arc<dyn LlmProvider>> {
         self.llm.clone()
     }
+}
+
+fn effective_workspace_dir(config: &AgentKernelConfig) -> String {
+    let workspace_dir = config.workspace_dir.trim();
+    workspace_dir.to_string()
 }

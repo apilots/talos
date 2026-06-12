@@ -167,9 +167,8 @@ ADMIN_PASSWORD="AdminSecret123!"
 
 export TALOS_HOME="${TMP_DIR}/talos-home"
 export TALOS_TEST_GATEWAY_AUTH="true"
-export TALOS_TEST_CLOUD_ENABLED="true"
 export TALOS_TEST_CLOUD_API_BASE_URL="${CLOUD_BASE_URL}"
-export TALOS_LOCAL_LAUNCH_TOKEN="${TALOS_LOCAL_LAUNCH_TOKEN:-talos-auth-e2e-launch-token}"
+export TALOS_TEST_CLOUD_WEB_BASE_URL="${CLOUD_BASE_URL}"
 export TALOS_APP_SERVER_BIN="${ROOT_DIR}/target/debug/app-server"
 
 start_cloud_server

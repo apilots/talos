@@ -356,7 +356,7 @@ fn build_request(input: &str) -> OrchestratorRequest {
     OrchestratorRequest {
         session: TalosSession {
             title: "Untitled Session".to_string(),
-            user_id: "integration-user".to_string(),
+            user_id: "talos-test-integration-user".to_string(),
             conf: talos_types::SessionConf::default(),
             project_id: None,
             current_directory: None,
@@ -368,7 +368,7 @@ fn build_request(input: &str) -> OrchestratorRequest {
                 project_root: None,
                 source_type: TalosSourceType::System,
                 provider: TalosProvider::System,
-                user_id: "integration-user".to_string(),
+                user_id: "talos-test-integration-user".to_string(),
                 message_id: "integration-message".to_string(),
                 trace_id: "integration-trace".to_string(),
                 channel_id: None,

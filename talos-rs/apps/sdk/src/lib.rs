@@ -6,9 +6,11 @@
 pub mod app_server;
 mod app_server_events;
 mod common;
+mod login;
 mod message;
 
 pub use app_server::{AppServerClient, AppServerClientConfig};
+pub use login::{now_ms, open_external_url};
 pub use message::{MessageCommandAck, MessageCommandStatus};
 pub use talos_app_protocol::events::{canonical_method, ApplicationEvent};
 pub use talos_app_protocol::requests::{
@@ -17,7 +19,10 @@ pub use talos_app_protocol::requests::{
     TimelineCursorStatus, TimelineRecoveryParams, TimelineRecoverySnapshot, TimelineReplay,
     ToolDynamicResultSubmitParams,
 };
-pub use talos_auth::{AuthResponse, UserDto, UserRole};
+pub use talos_auth::{
+    AuthResponse, CloudLoginClientKind, CloudLoginStartResponse, CloudLoginStatusResponse, UserDto,
+    UserRole,
+};
 pub use talos_config::LlmConfig;
 pub use talos_error::{TalosError, TalosResult};
 pub use talos_types::talos::{

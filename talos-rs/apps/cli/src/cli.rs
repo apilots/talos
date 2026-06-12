@@ -6,17 +6,20 @@
 use clap::Parser;
 use std::collections::HashMap;
 use std::io::Write;
+use std::time::Duration;
 use talos_sdk::{
-    AppServerClient, AppServerClientConfig, EventSubscribeParams, ProtocolTalosContext,
-    SessionCreateParams, TalosInputItem, TalosMessageRequest, TalosTimelineContent,
-    TalosTimelineDelta, TalosTimelineEventPayload, TalosTimelineItemKind, TalosTimelinePhase,
-    TimelineEventEnvelope,
+    now_ms, open_external_url, AppServerClient, AppServerClientConfig, CloudLoginClientKind,
+    CloudLoginStatusResponse, EventSubscribeParams, ProtocolTalosContext, SessionCreateParams,
+    TalosInputItem, TalosMessageRequest, TalosTimelineContent, TalosTimelineDelta,
+    TalosTimelineEventPayload, TalosTimelineItemKind, TalosTimelinePhase, TimelineEventEnvelope,
 };
 use tracing::{debug, error};
 
 mod types;
 
-use types::{AppServerSmokeCmd, ChatCommands, Cli, Commands, ModelsCmd, SessionCommands};
+use types::{
+    AppServerSmokeCmd, AuthCommands, ChatCommands, Cli, Commands, ModelsCmd, SessionCommands,
+};
 
 /// Main function to run the CLI
 pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
@@ -29,13 +32,8 @@ async fn run_app_server_cli(cli: Cli) -> Result<(), Box<dyn std::error::Error>> 
         .app_server_bin
         .or_else(|| std::env::var("TALOS_APP_SERVER_BIN").ok())
         .unwrap_or_else(|| "app-server".to_string());
-    let launch_token = cli
-        .launch_token
-        .or_else(|| std::env::var("TALOS_LOCAL_LAUNCH_TOKEN").ok())
-        .unwrap_or_else(|| format!("cli-{}", uuid::Uuid::new_v4().simple()));
     let config = AppServerClientConfig {
         app_server_bin,
-        launch_token,
         client_name: "talos-cli".to_string(),
         client_version: env!("CARGO_PKG_VERSION").to_string(),
         actor_credentials: None,
@@ -49,6 +47,7 @@ async fn run_app_server_cli(cli: Cli) -> Result<(), Box<dyn std::error::Error>> 
         Commands::Session(cmd) => execute_app_server_session_command(&mut client, cmd).await,
         Commands::Models(cmd) => execute_app_server_models_command(&mut client, cmd).await,
         Commands::Status => execute_app_server_status_command(&mut client).await,
+        Commands::Auth(cmd) => execute_auth_command(&mut client, cmd).await,
         Commands::Info => execute_app_server_info_command().await,
         Commands::AppServerSmoke(cmd) => {
             execute_app_server_smoke_with_client(&mut client, cmd).await
@@ -58,6 +57,65 @@ async fn run_app_server_cli(cli: Cli) -> Result<(), Box<dyn std::error::Error>> 
     result?;
     shutdown_result?;
     Ok(())
+}
+
+async fn execute_auth_command(
+    client: &mut AppServerClient,
+    cmd: AuthCommands,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match cmd {
+        AuthCommands::Login { no_browser } => login_with_cloud(client, no_browser).await,
+        AuthCommands::Status => {
+            let response = client.read_auth_session().await?;
+            if let Some(session) = response.session {
+                println!("Authenticated as {}", session.user.username);
+                println!("User ID: {}", session.user.user_id);
+                println!("Cloud API: {}", session.cloud_api_base_url);
+            } else {
+                println!("Not authenticated");
+            }
+            Ok(())
+        }
+        AuthCommands::Logout => {
+            client.auth_logout().await?;
+            println!("Logged out");
+            Ok(())
+        }
+    }
+}
+
+async fn login_with_cloud(
+    client: &mut AppServerClient,
+    no_browser: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let start = client
+        .start_cloud_login("Talos CLI", CloudLoginClientKind::Cli)
+        .await?;
+    println!("Open this URL to sign in:");
+    println!("{}", start.login_url);
+    println!("Code: {}", start.user_code);
+    if !no_browser {
+        if let Err(error) = open_external_url(&start.login_url) {
+            eprintln!("Could not open browser automatically: {error}");
+        }
+    }
+
+    loop {
+        if now_ms() >= start.expires_at_ms {
+            return Err("Cloud login expired".into());
+        }
+        match client.poll_cloud_login(start.login_id.clone()).await? {
+            CloudLoginStatusResponse::Pending { interval_ms } => {
+                tokio::time::sleep(Duration::from_millis(interval_ms.max(500))).await;
+            }
+            CloudLoginStatusResponse::Authenticated { user } => {
+                println!("Authenticated as {}", user.username);
+                return Ok(());
+            }
+            CloudLoginStatusResponse::Denied => return Err("Cloud login was denied".into()),
+            CloudLoginStatusResponse::Expired => return Err("Cloud login expired".into()),
+        }
+    }
 }
 
 async fn execute_app_server_smoke_with_client(

@@ -97,6 +97,75 @@ export async function getCloudAuthUrl(): Promise<string> {
   return configured;
 }
 
+export interface CloudLoginStartResponse {
+  login_id: string;
+  login_url: string;
+  user_code: string;
+  expires_at_ms: number;
+  interval_ms: number;
+}
+
+export type CloudLoginStatusResponse =
+  | { status: "pending"; interval_ms: number }
+  | { status: "authenticated"; user: UserDto }
+  | { status: "denied" }
+  | { status: "expired" };
+
+export async function startCloudLogin(): Promise<CloudLoginStartResponse> {
+  if (isDesktopRuntime()) {
+    const bridge = getDesktopBridge();
+    if (!bridge) {
+      throw new Error("Desktop runtime bridge is not available.");
+    }
+    return bridge.invoke<CloudLoginStartResponse>("auth.login.start", {
+      client_name: "Talos Desktop",
+      client_kind: "desktop",
+    });
+  }
+
+  const { serverUrl } = getConnectionSettings();
+  const response = await fetch(new URL("/v1/auth/login/start", serverUrl).toString(), {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      client_name: "Talos Web",
+      client_kind: "web",
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText}`);
+  }
+  return response.json() as Promise<CloudLoginStartResponse>;
+}
+
+export async function getCloudLoginStatus(loginId: string): Promise<CloudLoginStatusResponse> {
+  if (isDesktopRuntime()) {
+    const bridge = getDesktopBridge();
+    if (!bridge) {
+      throw new Error("Desktop runtime bridge is not available.");
+    }
+    return bridge.invoke<CloudLoginStatusResponse>("auth.login.status", {
+      login_id: loginId,
+    });
+  }
+
+  const { serverUrl } = getConnectionSettings();
+  const url = new URL("/v1/auth/login/status", serverUrl);
+  url.searchParams.set("login_id", loginId);
+  const response = await fetch(url.toString(), {
+    headers: {
+      Accept: "application/json",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText}`);
+  }
+  return response.json() as Promise<CloudLoginStatusResponse>;
+}
+
 export async function readDesktopCloudSession(): Promise<AppProtocol.AuthSessionSnapshot | null> {
   if (!isDesktopRuntime()) {
     return null;

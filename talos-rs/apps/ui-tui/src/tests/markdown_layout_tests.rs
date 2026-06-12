@@ -86,8 +86,8 @@ fn test_chat_content_columns_apply_left_padding() {
 
 #[tokio::test]
 async fn test_ctrl_h_switches_to_history_state() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
     assert_eq!(app.current_state, AppState::Chat);
 
     app.open_history();
@@ -97,7 +97,7 @@ async fn test_ctrl_h_switches_to_history_state() {
 
 #[test]
 fn test_toggle_model_picker_shows_picker() {
-    let mut app = create_remote_app();
+    let mut app = create_app_server_app();
     app.available_models = vec!["gpt-4o".to_string(), "qwen-plus".to_string()];
     app.current_model = "gpt-4o".to_string();
     assert!(!app.show_model_picker);
@@ -114,7 +114,7 @@ fn test_toggle_model_picker_shows_picker() {
 
 #[test]
 fn test_toggle_model_picker_without_models_shows_hint() {
-    let mut app = create_remote_app();
+    let mut app = create_app_server_app();
     app.available_models.clear();
     app.toggle_model_picker();
     assert!(
@@ -129,7 +129,7 @@ fn test_toggle_model_picker_without_models_shows_hint() {
 
 #[tokio::test]
 async fn test_command_autocomplete_inserts_command_only() {
-    let mut app = create_remote_app();
+    let mut app = create_app_server_app();
 
     let _ = app
         .handle_input(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
@@ -151,7 +151,7 @@ async fn test_command_autocomplete_inserts_command_only() {
 
 #[tokio::test]
 async fn test_command_autocomplete_syncs_query_into_input_buffer() {
-    let mut app = create_remote_app();
+    let mut app = create_app_server_app();
 
     let _ = app
         .handle_input(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
@@ -180,7 +180,7 @@ async fn test_command_autocomplete_syncs_query_into_input_buffer() {
 
 #[tokio::test]
 async fn test_command_autocomplete_backspace_keeps_input_buffer_in_sync() {
-    let mut app = create_remote_app();
+    let mut app = create_app_server_app();
 
     let _ = app
         .handle_input(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
@@ -217,7 +217,7 @@ async fn test_command_autocomplete_backspace_keeps_input_buffer_in_sync() {
 
 #[test]
 fn test_command_autocomplete_panel_height_is_inline_and_capped() {
-    let mut app = create_remote_app();
+    let mut app = create_app_server_app();
     app.show_command_autocomplete = true;
     app.command_suggestions = CommandSuggestion::all();
 
@@ -229,8 +229,8 @@ fn test_command_autocomplete_panel_height_is_inline_and_capped() {
 
 #[tokio::test]
 async fn test_history_enter_switches_session() {
-    let mut app = create_remote_app();
-    app.initialize_remote().await;
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
 
     let mut config = talos_types::TalosConfig::default();
     config.llm.model = "claude-3".to_string();

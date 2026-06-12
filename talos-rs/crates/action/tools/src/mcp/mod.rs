@@ -573,7 +573,7 @@ fn blob_storage_dir(context: &ToolContext, server: &str) -> PathBuf {
         .or_else(|| {
             context
                 .kernel_config()
-                .map(|config| PathBuf::from(config.memory.workspace_dir.trim()))
+                .map(|config| PathBuf::from(config.workspace_dir.trim()))
                 .filter(|path| !path.as_os_str().is_empty())
         })
         .unwrap_or_else(|| std::env::temp_dir().join("talos"));

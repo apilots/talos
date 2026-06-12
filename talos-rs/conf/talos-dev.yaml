@@ -1,0 +1,349 @@
+timezone: "Asia/Shanghai"
+
+# Development profile for local Talos + local Talos Cloud.
+gateway:
+  port: 8080
+  host: "0.0.0.0"
+  auth: false
+
+cloud:
+  api_base_url: "http://127.0.0.1:8787"
+  web_base_url: "http://127.0.0.1:3000"
+  auth:
+    introspection_cache_ttl_seconds: 300
+
+agent:
+  name: "talos"
+  model: "kimi-k2.5"
+  kernel:
+    tool_parallelism: 1
+    max_tool_rounds: 8
+    tool_result_max_bytes: 65536
+    context_compaction_max_bytes: 262144
+    default_workspace_id: "default"
+    tools:
+      enable_collaboration_tools: true
+    planner_mode: "built_in"
+    prompt:
+      window:
+        reserved_output_tokens:
+          kind: "fixed"
+          tokens: 8192
+        compaction_buffer_tokens: 4096
+      bootstrap:
+        enabled: true
+        auto_create_missing_files: true
+        max_chars_per_file: 8000
+        warning_mode: "once"
+        include_agents: true
+        include_soul: true
+        include_identity: true
+        include_user: true
+        include_heartbeat: true
+        include_memory: true
+    output:
+      max_tokens: 32000
+      upper_limit: 64000
+    compaction:
+      trigger_ratio_percent: 85
+      hard_ratio_percent: 95
+      recent_messages_keep: 24
+      recent_messages_max_chars: 4000
+      compacted_recent_messages_keep: 2
+      compacted_recent_messages_max_chars: 1200
+      recent_summaries_keep: 2
+      summary_max_chars: 1200
+      compacted_summary_max_chars: 800
+      source_recent_messages_limit: 48
+      source_recent_tool_results_limit: 12
+      tool_output_keep_last: 2
+      tool_output_max_chars: 2000
+      compacted_tool_output_max_chars: 600
+      source_recent_tool_exchanges_limit: 12
+      tool_exchange_keep_last: 2
+      tool_exchange_max_chars: 600
+      compacted_tool_exchange_max_chars: 300
+      retrieved_memories_keep: 4
+      retrieved_memory_max_chars: 2000
+      compacted_retrieved_memory_max_chars: 800
+    memory:
+      hot_recent_messages: 64
+      compaction_threshold_bytes: 262144
+      root_memory_filename: "MEMORY.md"
+      memory_dirname: "memory"
+      workspace_memory_flush_enabled: true
+      workspace_memory_flush_on_compaction: true
+      flush_file_pattern: "YYYY-MM-DD.md"
+      tool_search_enabled: true
+      tool_get_enabled: true
+      search_max_results: 6
+      file_list_default_limit: 20
+      file_list_max_limit: 90
+      search_include_root_memory: true
+      search_include_daily_memory: true
+      search_include_sessions: false
+
+channels:
+  whatsapp:
+    enabled: false
+  telegram:
+    enabled: false
+    token: ${TALOS_TELEGRAM_BOT_TOKEN}
+    allow_from: []
+    dm_policy: "open"
+    group_policy: "mention"
+    group_allow_from: []
+    dm_scope: "per_channel_peer_topic"
+    mode: "polling"
+    webhook_url: null
+    accounts:
+      - id: "telegram-default"
+        enabled: false
+        token: ${TALOS_TELEGRAM_ACCOUNT_1_TOKEN}
+        dm_policy: "open"
+        group_policy: "mention"
+        allow_from: []
+        group_allow_from: []
+        mode: "polling"
+        webhook_url: ${TALOS_TELEGRAM_ACCOUNT_1_WEBHOOK_URL}
+        groups:
+          - id: ${TALOS_TELEGRAM_GROUP_ID}
+            require_mention: true
+            allow_from: []
+            topics:
+              - id: ${TALOS_TELEGRAM_TOPIC_ID}
+                require_mention: false
+                allow_from: []
+      - id: "telegram-webhook"
+        enabled: false
+        token: ${TALOS_TELEGRAM_ACCOUNT_2_TOKEN}
+        dm_policy: "open"
+        group_policy: "mention"
+        allow_from: []
+        group_allow_from: []
+        mode: "webhook"
+        webhook_url: ${TALOS_TELEGRAM_ACCOUNT_2_WEBHOOK_URL}
+        groups: []
+  discord:
+    enabled: false
+  feishu:
+    enabled: false
+
+llm:
+  provider: "anthropic"
+  model: "kimi-k2.5"
+  anthropic:
+    api_key: ${TALOS_LLM_ANTHROPIC_API_KEY}
+    base_url: "https://coding.dashscope.aliyuncs.com/apps/anthropic/v1"
+    enabled: true
+    models:
+      - id: "qwen3.5-plus"
+        name: "Qwen 3.5 Plus"
+        context_window: 32768
+        reasoning: true
+        input: ["text", "image"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
+      - id: "qwen3-max-2026-01-23"
+        name: "Qwen Max"
+        context_window: 32768
+        reasoning: true
+        input: ["text", "image"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
+      - id: "qwen3-coder-next"
+        name: "Qwen Coder Next"
+        context_window: 32768
+        reasoning: false
+        input: ["text"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
+      - id: "qwen3-coder-plus"
+        name: "Qwen Coder Plus"
+        context_window: 32768
+        reasoning: false
+        input: ["text"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
+      - id: "glm-5"
+        name: "GLM-5"
+        context_window: 32768
+        reasoning: true
+        input: ["text"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
+      - id: "kimi-k2.5"
+        name: "Kimi K2.5"
+        context_window: 32768
+        reasoning: true
+        input: ["text", "image"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
+      - id: "MiniMax-M2.5"
+        name: "MiniMax M2.5"
+        context_window: 32768
+        reasoning: false
+        input: ["text"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
+  openai:
+    api_key: ${TALOS_LLM_OPENAI_API_KEY}
+    base_url: "https://coding.dashscope.aliyuncs.com/v1"
+    enabled: false
+    models:
+      - id: "qwen3.5-plus"
+        name: "Qwen 3.5 Plus"
+        context_window: 32768
+        reasoning: true
+        input: ["text", "image"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
+      - id: "qwen3-max-2026-01-23"
+        name: "Qwen Max"
+        context_window: 32768
+        reasoning: true
+        input: ["text", "image"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
+      - id: "qwen3-coder-next"
+        name: "Qwen Coder Next"
+        context_window: 32768
+        reasoning: false
+        input: ["text"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
+      - id: "qwen3-coder-plus"
+        name: "Qwen Coder Plus"
+        context_window: 32768
+        reasoning: false
+        input: ["text"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
+      - id: "glm-5"
+        name: "GLM-5"
+        context_window: 32768
+        reasoning: true
+        input: ["text"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
+      - id: "kimi-k2.5"
+        name: "Kimi K2.5"
+        context_window: 32768
+        reasoning: true
+        input: ["text", "image"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
+      - id: "MiniMax-M2.5"
+        name: "MiniMax M2.5"
+        context_window: 32768
+        reasoning: false
+        input: ["text"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
+  bailian:
+    api_key: ${TALOS_LLM_BAILIAN_API_KEY}
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    enabled: false
+    models:
+      - id: "qwen-max"
+        name: "qwen-max"
+        context_window: 32768
+        reasoning: false
+        input: ["text"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
+      - id: "qwen-plus"
+        name: "qwen-plus"
+        context_window: 32768
+        reasoning: true
+        input: ["text"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat:
+          thinking_format: "qwen"
+      - id: "qwen-turbo"
+        name: "qwen-turbo"
+        context_window: 32768
+        reasoning: false
+        input: ["text"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat: {}
+  ollama:
+    enabled: false
+    base_url: "http://localhost:11434"
+
+logging:
+  level: "info"
+  format: "text"
+  stdout: true
+
+storage:
+  database_type: "sqlite"
+  max_connections: 5

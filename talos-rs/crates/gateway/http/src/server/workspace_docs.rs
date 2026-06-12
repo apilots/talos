@@ -16,25 +16,39 @@ use super::state::HttpApiState;
 
 pub(super) async fn list_workspace_docs_handler(
     State(state): State<Arc<HttpApiState>>,
-    _auth: axum::extract::Extension<RequestIdentity>,
+    auth: axum::extract::Extension<RequestIdentity>,
 ) -> Result<Json<Value>, ApiError> {
+    let actor = shared_actor(&auth.0);
     let docs = state
         .workspace_docs
-        .list_docs()
+        .list_docs(&actor)
         .await
         .map_err(map_workspace_doc_error)?;
     Ok(Json(json!({ "data": docs })))
 }
 
+pub(super) async fn get_workspace_info_handler(
+    State(state): State<Arc<HttpApiState>>,
+    auth: axum::extract::Extension<RequestIdentity>,
+) -> Result<Json<Value>, ApiError> {
+    let actor = shared_actor(&auth.0);
+    let info = state
+        .workspace_docs
+        .workspace_info(&actor)
+        .map_err(map_workspace_doc_error)?;
+    Ok(Json(json!(info)))
+}
+
 pub(super) async fn get_workspace_doc_handler(
     State(state): State<Arc<HttpApiState>>,
-    _auth: axum::extract::Extension<RequestIdentity>,
+    auth: axum::extract::Extension<RequestIdentity>,
     Path(kind): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
+    let actor = shared_actor(&auth.0);
     let kind = WorkspaceDocService::parse_kind(&kind).map_err(map_workspace_doc_error)?;
     let detail = state
         .workspace_docs
-        .get_doc(kind)
+        .get_doc(&actor, kind)
         .await
         .map_err(map_workspace_doc_error)?;
     Ok(Json(json!(detail)))

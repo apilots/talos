@@ -177,7 +177,7 @@ async fn test_run_general_turn_bash_then_task_output() {
     let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     let mut ctx = build_ctx_with_stream(None);
 
     let result = run_general_turn(
@@ -229,7 +229,7 @@ async fn test_run_general_turn_stops_on_pending_dynamic_tool_result() {
     let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     let mut ctx = build_ctx_with_stream(None);
 
     let provider = Arc::new(DynamicLoopProvider::default());
@@ -276,7 +276,7 @@ async fn test_execute_general_turn_loop_uses_policy_step_hooks() {
     let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     let provider = Arc::new(PolicyStepProvider::default());
     let policy = Arc::new(RecordingStepPolicy::default());
     let prepared = PreparedGeneralTurn {
@@ -354,7 +354,7 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
     let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
-    config.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     let provider = Arc::new(DynamicResumeProvider::default());
     let prepared = PreparedGeneralTurn {
         session_id: "s1".to_string(),

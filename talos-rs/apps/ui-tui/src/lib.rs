@@ -34,7 +34,7 @@ use std::{
 };
 use talos_error::TalosResult;
 use talos_sdk::{ModelInfo, TalosSession, TalosTimelineItem, TimelineEventEnvelope};
-use talos_types::talos::{TalosConnectionMode, TalosUsage, TurnExecutionMetrics};
+use talos_types::talos::{TalosUsage, TurnExecutionMetrics};
 use tokio::sync::mpsc;
 use transcript::TranscriptState;
 
@@ -86,7 +86,6 @@ pub struct TuiApp {
     pub(crate) selected_pasted_block: Option<usize>,
     pub(crate) startup_directory: PathBuf,
     pub(crate) current_project_root: Option<PathBuf>,
-    pub(crate) connection_mode: TalosConnectionMode,
     pub(crate) current_model: String,
     pub(crate) session_usage: TalosUsage,
     pub(crate) turn_metrics: Option<TurnExecutionMetrics>,
@@ -121,7 +120,7 @@ pub struct TuiApp {
         Option<mpsc::Receiver<TalosResult<mpsc::Receiver<TimelineEventEnvelope>>>>,
     pub(crate) pending_stream_task: Option<tokio::task::JoinHandle<()>>,
     pub(crate) pending_stream: Option<mpsc::Receiver<TimelineEventEnvelope>>,
-    pub(crate) pending_command_update: Option<mpsc::Receiver<RemoteCommandUpdate>>,
+    pub(crate) pending_command_update: Option<mpsc::Receiver<CommandUpdate>>,
     pub(crate) pending_command_task: Option<tokio::task::JoinHandle<()>>,
     pub(crate) pending_close_update: Option<mpsc::Receiver<TalosResult<String>>>,
     pub(crate) pending_close_task: Option<tokio::task::JoinHandle<()>>,

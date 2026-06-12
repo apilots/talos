@@ -2,11 +2,12 @@ use talos_application_service::Actor;
 use talos_auth::RequestIdentity;
 
 pub(super) fn shared_actor(actor: &RequestIdentity) -> Actor {
-    if actor.has_full_access() {
+    let shared = if actor.has_full_access() {
         Actor::full(actor.user_id.clone())
     } else {
         Actor::regular(actor.user_id.clone())
-    }
+    };
+    shared.with_username(actor.username.clone())
 }
 
 #[cfg(test)]

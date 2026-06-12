@@ -99,7 +99,7 @@ The server will start on `http://0.0.0.0:8080` by default.
 
 Start the local app-server protocol adapter:
 ```bash
-TALOS_LOCAL_LAUNCH_TOKEN=local-token cargo run -p app-server --bin app-server
+cargo run -p app-server --bin app-server
 ```
 
 `app-server` speaks JSON-RPC over stdin/stdout JSONL. It does not open a

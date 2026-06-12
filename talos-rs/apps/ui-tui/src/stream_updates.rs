@@ -4,7 +4,7 @@ use talos_error::{TalosError, TalosResult};
 use talos_types::talos::TalosUsage;
 use tokio::sync::mpsc::error::TryRecvError;
 
-use crate::types::{AppState, ChatRole, RemoteCommandUpdate};
+use crate::types::{AppState, ChatRole, CommandUpdate};
 use crate::TuiApp;
 
 impl TuiApp {
@@ -38,7 +38,7 @@ impl TuiApp {
     }
 
     pub(crate) fn poll_command_updates(&mut self) {
-        let mut update: Option<RemoteCommandUpdate> = None;
+        let mut update: Option<CommandUpdate> = None;
         let mut should_clear = false;
 
         if let Some(rx) = self.pending_command_update.as_mut() {
@@ -51,7 +51,7 @@ impl TuiApp {
                 Err(TryRecvError::Disconnected) => {
                     self.push_block(
                         ChatRole::System,
-                        "Remote command channel dropped unexpectedly.".to_string(),
+                        "Command channel dropped unexpectedly.".to_string(),
                     );
                     should_clear = true;
                 }
@@ -68,7 +68,7 @@ impl TuiApp {
         };
 
         match update {
-            RemoteCommandUpdate::ModelsLoaded(result) => match result {
+            CommandUpdate::ModelsLoaded(result) => match result {
                 Ok(models) => {
                     self.available_model_info = models;
                     self.available_models = self
@@ -100,7 +100,7 @@ impl TuiApp {
                     self.push_right_event("models load failed".to_string());
                 }
             },
-            RemoteCommandUpdate::StatusLoaded(result) => match result {
+            CommandUpdate::StatusLoaded(result) => match result {
                 Ok(session_info) => {
                     let working_directory = session_info
                         .as_ref()
@@ -108,16 +108,14 @@ impl TuiApp {
                         .cloned()
                         .or_else(|| self.current_project_root.clone());
                     let mut lines = vec![
-                        "mode: Gateway".to_string(),
+                        "mode: app-server".to_string(),
                         format!("model: {}", self.current_model),
-                        format!("client_directory: {}", self.startup_directory.display()),
                         format!(
                             "working_directory: {}",
                             working_directory
                                 .map(|path| path.display().to_string())
                                 .unwrap_or_else(|| "(server-managed)".to_string())
                         ),
-                        format!("connection_mode: {}", self.connection_mode),
                         format!(
                             "session: {}",
                             self.session_id
@@ -143,7 +141,7 @@ impl TuiApp {
                     self.push_right_event("status load failed".to_string());
                 }
             },
-            RemoteCommandUpdate::SessionCompacted(result) => match result {
+            CommandUpdate::SessionCompacted(result) => match result {
                 Ok(info) => {
                     self.apply_session_snapshot(&info);
                     self.push_block(
@@ -160,7 +158,7 @@ impl TuiApp {
                     self.push_right_event("session compact failed".to_string());
                 }
             },
-            RemoteCommandUpdate::SessionCleared(result) => match result {
+            CommandUpdate::SessionCleared(result) => match result {
                 Ok(info) => {
                     self.apply_cleared_session_snapshot(&info);
                     self.push_block(
@@ -178,7 +176,7 @@ impl TuiApp {
                     self.push_right_event("session clear failed".to_string());
                 }
             },
-            RemoteCommandUpdate::ModelSwitched { requested, result } => match result {
+            CommandUpdate::ModelSwitched { requested, result } => match result {
                 Ok(info) => {
                     self.apply_session_snapshot(&info);
                     self.push_block(
@@ -192,7 +190,7 @@ impl TuiApp {
                     self.push_right_event("model switch failed".to_string());
                 }
             },
-            RemoteCommandUpdate::HistoryLoaded(result) => match result {
+            CommandUpdate::HistoryLoaded(result) => match result {
                 Ok(sessions) => {
                     let mut sessions = sessions;
                     sessions.sort_by(|left, right| {
@@ -214,7 +212,7 @@ impl TuiApp {
                     self.current_state = AppState::Chat;
                 }
             },
-            RemoteCommandUpdate::ModelPickerSwitched { requested, result } => match result {
+            CommandUpdate::ModelPickerSwitched { requested, result } => match result {
                 Ok(info) => {
                     self.apply_session_snapshot(&info);
                     self.show_model_picker = false;
@@ -230,7 +228,7 @@ impl TuiApp {
                     self.push_right_event("model picker switch failed".to_string());
                 }
             },
-            RemoteCommandUpdate::SessionHistoryLoaded { session, result } => match result {
+            CommandUpdate::SessionHistoryLoaded { session, result } => match result {
                 Ok(load) => {
                     let sid = &session.context.session_id;
                     let model = &session.config.llm.model;

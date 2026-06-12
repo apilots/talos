@@ -2,7 +2,14 @@ use super::*;
 
 #[tokio::test]
 async fn test_models_require_bearer_when_auth_enabled() {
-    let state = test_state(false);
+    let dir = tempfile::tempdir().expect("tempdir should be created");
+    let cache = talos_auth::CloudSessionCache::for_talos_home(dir.path());
+    let state = Arc::new(
+        Arc::try_unwrap(test_state(false))
+            .ok()
+            .expect("test state should have a single owner")
+            .with_cloud_session_cache(cache),
+    );
     let app = Router::new()
         .route("/v1/models", get(list_models_handler))
         .with_state(state.clone())
@@ -18,6 +25,37 @@ async fn test_models_require_bearer_when_auth_enabled() {
         .await
         .expect("request should succeed");
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn test_models_accept_server_side_cloud_session_cache_when_bearer_missing() {
+    let now_ms = talos_auth::CloudSessionCache::now_ms();
+    let dir = tempfile::tempdir().expect("tempdir should be created");
+    let cache = talos_auth::CloudSessionCache::for_talos_home(dir.path());
+    cache
+        .store(&test_cloud_session_entry("token", now_ms))
+        .expect("cache should be stored");
+    let state = Arc::new(
+        Arc::try_unwrap(test_state(false))
+            .ok()
+            .expect("test state should have a single owner")
+            .with_cloud_session_cache(cache),
+    );
+    let app = Router::new()
+        .route("/v1/models", get(list_models_handler))
+        .with_state(state.clone())
+        .layer(middleware::from_fn_with_state(state, auth_middleware));
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/models")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should succeed");
+    assert_eq!(resp.status(), StatusCode::OK);
 }
 
 #[tokio::test]

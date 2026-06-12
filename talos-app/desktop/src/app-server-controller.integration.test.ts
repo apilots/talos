@@ -69,7 +69,6 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
   });
 
   it("restarts the stdio app-server and replays renderer subscriptions", async () => {
-    const launchToken = process.env.TALOS_LOCAL_LAUNCH_TOKEN ?? "talos-desktop-test-token";
     const bridges: RecordingBridge[] = [];
     const lifecycle: TalosRuntimeState[] = [];
     const rendererHandlers = new Set<(envelope: AppProtocol.TimelineEventEnvelope) => void>();
@@ -79,10 +78,6 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
     controller = new DesktopAppServerController({
       command: process.env.TALOS_APP_SERVER_BIN ?? "app-server",
       cwd: process.env.TALOS_APP_SERVER_CWD,
-      env: {
-        TALOS_LOCAL_LAUNCH_TOKEN: launchToken,
-      },
-      launchToken,
       clientName: "talos-desktop-crash-recovery-smoke",
       clientVersion: "0.1.0",
       restartDelayMs: 10,

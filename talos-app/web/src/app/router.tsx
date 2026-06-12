@@ -1,5 +1,5 @@
 import { type ReactNode, lazy, Suspense } from "react";
-import { Navigate, createBrowserRouter, createHashRouter } from "react-router-dom";
+import { Navigate, createBrowserRouter, createHashRouter, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { AppLayout } from "@/app/layouts/AppLayout";
@@ -35,11 +35,13 @@ const AuthPage = lazy(() =>
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { connection } = useConnectionSettings();
+  const location = useLocation();
   if (connection.authStatus === "loading" || connection.authStatus === "unknown") {
     return <AuthLoading />;
   }
   if (connection.authStatus !== "authenticated" && connection.authStatus !== "open") {
-    return <Navigate replace to="/auth/login" />;
+    const next = `${location.pathname}${location.search}${location.hash}`;
+    return <Navigate replace to={`/auth/login?next=${encodeURIComponent(next)}`} />;
   }
   return <>{children}</>;
 }
@@ -64,6 +66,10 @@ const createRouter = isDesktopBuild ? createHashRouter : createBrowserRouter;
 export const router = createRouter([
   {
     path: "/auth/login",
+    element: withSuspense(<AuthPage />),
+  },
+  {
+    path: "/auth/logout",
     element: withSuspense(<AuthPage />),
   },
   {

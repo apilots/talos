@@ -1,21 +1,26 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { LogIn, UserPlus } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { LogIn } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
 
-import { getCloudAuthUrl, getCurrentUser, storeDesktopCloudSession } from "@/features/auth";
+import { getCloudLoginStatus, readDesktopCloudSession, startCloudLogin } from "@/features/auth";
+import { redirectToExternalUrl } from "@/features/auth/navigation";
 import { useConnectionSettings } from "@/features/connection";
 import { Button } from "@/shared/ui/Button";
 import { Panel } from "@/shared/ui/Panel";
 
 export function AuthPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { connection, setConnection } = useConnectionSettings();
   const [error, setError] = useState("");
   const [isCompleting, setIsCompleting] = useState(false);
-  const [cloudAuthUrl, setCloudAuthUrl] = useState("");
+  const [loginId, setLoginId] = useState("");
   const [isLoadingConfig, setIsLoadingConfig] = useState(true);
 
-  const redirectUri = useMemo(() => `${window.location.origin}/auth/login`, []);
+  const params = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const nextPath = sanitizeNextPath(params.get("next"));
+  const isLoggedOut = location.pathname === "/auth/logout" || connection.authStatus === "logged_out";
+  const logoSrc = `${import.meta.env.BASE_URL}logo.png`;
 
   useEffect(() => {
     if (connection.authStatus === "authenticated" || connection.authStatus === "open") {
@@ -24,53 +29,38 @@ export function AuthPage() {
   }, [connection.authStatus, navigate]);
 
   useEffect(() => {
-    let canceled = false;
-    setIsLoadingConfig(true);
-    void getCloudAuthUrl()
-      .then((url) => {
-        if (!canceled) {
-          setCloudAuthUrl(url);
-          setError("");
-        }
-      })
-      .catch(() => {
-        if (!canceled) {
-          setError("Cloud auth URL is not configured by the Talos server.");
-        }
-      })
-      .finally(() => {
-        if (!canceled) {
-          setIsLoadingConfig(false);
-        }
-      });
-    return () => {
-      canceled = true;
-    };
+    setIsLoadingConfig(false);
   }, []);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const accessToken = params.get("access_token");
-    if (!accessToken || isCompleting || !cloudAuthUrl) {
+    if (!loginId || isCompleting) {
       return;
     }
 
-    setIsCompleting(true);
-    setError("");
-    setConnection({ authToken: accessToken, authStatus: "loading" });
-    void getCurrentUser()
-      .then((user) => {
-        setConnection({
-          authToken: accessToken,
-          authStatus: "authenticated",
-          authUsername: user.username,
-          authRole: user.role,
-          userId: user.user_id,
-        });
-        void storeDesktopCloudSession(accessToken, cloudAuthUrl, user);
-        navigate("/", { replace: true });
-      })
-      .catch(() => {
+    let canceled = false;
+    let timeout: number | undefined;
+
+    async function poll() {
+      try {
+        const response = await getCloudLoginStatus(loginId);
+        if (canceled) return;
+        if (response.status === "pending") {
+          timeout = window.setTimeout(poll, response.interval_ms);
+          return;
+        }
+        if (response.status === "authenticated") {
+          const session = await readDesktopCloudSession();
+          if (canceled) return;
+          setConnection({
+            authToken: session?.access_token ?? "",
+            authStatus: "authenticated",
+            authUsername: response.user.username,
+            authRole: response.user.role,
+            userId: response.user.user_id,
+          });
+          navigate(nextPath, { replace: true });
+          return;
+        }
         setConnection({
           authToken: "",
           authStatus: "unauthenticated",
@@ -78,56 +68,102 @@ export function AuthPage() {
           authRole: "user",
           userId: "anonymous",
         });
-        setError("Cloud login callback could not be verified.");
-      })
-      .finally(() => setIsCompleting(false));
-  }, [cloudAuthUrl, isCompleting, navigate, setConnection]);
-
-  function openCloudAuth(path: string) {
-    if (!cloudAuthUrl) {
-      setError("Cloud auth URL is not configured by the Talos server.");
-      return;
+        setError(response.status === "expired" ? "Cloud login expired." : "Cloud login was denied.");
+      } catch {
+        if (canceled) return;
+        setConnection({
+          authToken: "",
+          authStatus: "unauthenticated",
+          authUsername: "Anonymous",
+          authRole: "user",
+          userId: "anonymous",
+        });
+        setError("Cloud login status could not be verified.");
+      }
     }
-    const url = new URL(path, cloudAuthUrl);
-    url.searchParams.set("redirect_uri", redirectUri);
-    window.location.href = url.toString();
+
+    void poll();
+    return () => {
+      canceled = true;
+      if (timeout !== undefined) window.clearTimeout(timeout);
+    };
+  }, [isCompleting, loginId, navigate, nextPath, setConnection]);
+
+  async function openCloudAuth() {
+    setIsCompleting(true);
+    setError("");
+    setConnection({ authToken: "", authStatus: "loading" });
+    try {
+      const response = await startCloudLogin();
+      setLoginId(response.login_id);
+      redirectToExternalUrl(response.login_url);
+    } catch {
+      setError("Cloud login could not be started.");
+      setConnection({ authStatus: "unauthenticated" });
+    } finally {
+      setIsCompleting(false);
+    }
   }
 
   function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    openCloudAuth("/auth/login");
+    void openCloudAuth();
   }
 
   return (
-    <div className="flex h-screen items-center justify-center bg-[linear-gradient(180deg,#f6f2ea,#ebe3d5)] p-6">
-      <Panel className="w-full max-w-[440px] rounded-lg border-border/80 bg-card p-7 shadow-[0_24px_70px_rgba(68,58,39,0.15)]">
-        <div className="space-y-2">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted">Talos Cloud</div>
-          <h1 className="text-2xl font-semibold text-ink">Sign in to Talos</h1>
-          <p className="text-sm leading-6 text-muted">
-            Account registration and login are handled by Talos Cloud. Local Talos only consumes the verified cloud identity.
+    <div className="flex h-screen items-center justify-center bg-[#f6f6f3] p-6 text-ink">
+      <Panel className="w-full max-w-[360px] rounded-[14px] border-[#dedbd2] bg-[#fffffc] p-6 shadow-[0_16px_44px_rgba(27,24,19,0.08)] backdrop-blur-none">
+        <div className="text-center">
+          <img
+            alt="Talos"
+            className="mx-auto size-14 rounded-[15px] shadow-[0_8px_22px_rgba(27,24,19,0.08)]"
+            src={logoSrc}
+          />
+          <h1 className="mt-5 text-[22px] font-semibold leading-7 text-ink">
+            {isLoggedOut ? "Signed out of Talos" : "Sign in to Talos"}
+          </h1>
+          <p className="mx-auto mt-2 max-w-[280px] text-[13px] leading-5 text-muted">
+            {isLoggedOut
+              ? "Your local session has been cleared."
+              : "Use your Talos Cloud account to continue."}
           </p>
         </div>
 
-        <form className="mt-6 grid gap-3" onSubmit={handleLogin}>
-          <Button className="w-full" disabled={isCompleting || isLoadingConfig || !cloudAuthUrl} type="submit">
-            <LogIn size={16} />
-            Continue with Cloud Login
-          </Button>
+        <form className="mt-7 grid gap-3" onSubmit={handleLogin}>
           <Button
-            className="w-full"
-            disabled={isCompleting || isLoadingConfig || !cloudAuthUrl}
-            onClick={() => openCloudAuth("/auth/register")}
-            type="button"
+            className="h-10 w-full rounded-[10px] border border-[#dedbd2] bg-white text-[13px] font-medium text-ink shadow-[0_1px_0_rgba(27,24,19,0.04)] hover:border-[#c9c4b8] hover:bg-[#f8f8f5] disabled:bg-[#f4f4f0]"
+            disabled={isCompleting || isLoadingConfig}
+            type="submit"
             variant="secondary"
           >
-            <UserPlus size={16} />
-            Create Cloud Account
+            <LogIn size={16} />
+            Continue with Talos Cloud
           </Button>
         </form>
 
-        {error ? <p className="mt-4 text-sm text-danger">{error}</p> : null}
+        {!isLoggedOut ? (
+          <button
+            className="mt-4 w-full text-center text-[12px] font-medium text-muted transition hover:text-ink disabled:cursor-not-allowed disabled:text-muted/60"
+            disabled={isCompleting || isLoadingConfig}
+            onClick={() => void openCloudAuth()}
+            type="button"
+          >
+            <span>Need an account?</span>{" "}
+            <span className="text-[#806132] transition hover:text-[#5f451f]">
+              Create one in Talos Cloud
+            </span>
+          </button>
+        ) : null}
+
+        {error ? <p className="mt-4 text-center text-[13px] leading-5 text-danger">{error}</p> : null}
       </Panel>
     </div>
   );
+}
+
+function sanitizeNextPath(value: string | null): string {
+  if (!value || !value.startsWith("/") || value.startsWith("//") || value.startsWith("/auth/")) {
+    return "/";
+  }
+  return value;
 }

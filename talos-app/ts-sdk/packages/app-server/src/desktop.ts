@@ -26,6 +26,7 @@ export interface DesktopTimelineEventSource {
 export interface DesktopRendererBridge extends DesktopTimelineEventSource {
   connect?(): Promise<AppProtocol.InitializeResponse>;
   invoke: DesktopTalosInvoke;
+  openExternal?(url: string): Promise<void>;
 }
 
 export async function getDesktopServerInfo(

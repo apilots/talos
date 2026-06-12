@@ -22,6 +22,10 @@ use talos_app_protocol::requests::{
     TurnStartResponse, WorkspaceDocListParams, WorkspaceDocReadParams, WorkspaceDocWriteParams,
 };
 use talos_app_protocol::version::ProtocolVersion;
+use talos_auth::{
+    CloudLoginCancelRequest, CloudLoginClientKind, CloudLoginStartRequest, CloudLoginStartResponse,
+    CloudLoginStatusRequest, CloudLoginStatusResponse, UserDto,
+};
 use talos_config::{LlmConfig, LlmConfigRead};
 use talos_error::{TalosError, TalosResult};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -41,7 +45,6 @@ use talos_types::talos::{SessionHistorySnapshot, TimelineEventEnvelope};
 #[derive(Debug, Clone)]
 pub struct AppServerClientConfig {
     pub app_server_bin: String,
-    pub launch_token: String,
     pub client_name: String,
     pub client_version: String,
     pub actor_credentials: Option<ActorCredentials>,
@@ -50,15 +53,9 @@ pub struct AppServerClientConfig {
 
 impl AppServerClientConfig {
     pub fn from_env() -> TalosResult<Self> {
-        let launch_token = std::env::var("TALOS_LOCAL_LAUNCH_TOKEN").map_err(|_| {
-            TalosError::InvalidConfiguration(
-                "TALOS_LOCAL_LAUNCH_TOKEN is required for app-server client".to_string(),
-            )
-        })?;
         Ok(Self {
             app_server_bin: std::env::var("TALOS_APP_SERVER_BIN")
                 .unwrap_or_else(|_| "app-server".to_string()),
-            launch_token,
             client_name: "talos-rust-sdk".to_string(),
             client_version: env!("CARGO_PKG_VERSION").to_string(),
             actor_credentials: None,
@@ -111,7 +108,6 @@ impl AppServerClient {
 
     async fn spawn(config: &AppServerClientConfig) -> TalosResult<Self> {
         let mut child = Command::new(&config.app_server_bin)
-            .env("TALOS_LOCAL_LAUNCH_TOKEN", &config.launch_token)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -168,11 +164,7 @@ impl AppServerClient {
                     supports_server_requests: false,
                     supports_event_replay: true,
                 },
-                actor_credentials: ActorCredentials {
-                    credential: ActorCredential::LocalLaunchToken {
-                        token: config.launch_token.clone(),
-                    },
-                },
+                actor_credentials: None,
             },
         )
         .await
@@ -183,7 +175,7 @@ impl AppServerClient {
         self.write_json(&notification).await
     }
 
-    async fn restore_cloud_session_candidate(&mut self) -> TalosResult<()> {
+    pub async fn restore_cloud_session_candidate(&mut self) -> TalosResult<bool> {
         let response: AuthSessionReadResponse = self
             .request_typed("auth.session.read", AuthSessionReadParams {})
             .await?;
@@ -193,7 +185,71 @@ impl AppServerClient {
                     token: session.access_token,
                 },
             });
+            return Ok(true);
         }
+        Ok(false)
+    }
+
+    pub async fn read_auth_session(&mut self) -> TalosResult<AuthSessionReadResponse> {
+        self.request_typed("auth.session.read", AuthSessionReadParams {})
+            .await
+    }
+
+    pub async fn start_cloud_login(
+        &mut self,
+        client_name: impl Into<String>,
+        client_kind: CloudLoginClientKind,
+    ) -> TalosResult<CloudLoginStartResponse> {
+        self.request_typed(
+            "auth.login.start",
+            CloudLoginStartRequest {
+                client_name: client_name.into(),
+                client_kind,
+            },
+        )
+        .await
+    }
+
+    pub async fn poll_cloud_login(
+        &mut self,
+        login_id: impl Into<String>,
+    ) -> TalosResult<CloudLoginStatusResponse> {
+        let response: CloudLoginStatusResponse = self
+            .request_typed(
+                "auth.login.status",
+                CloudLoginStatusRequest {
+                    login_id: login_id.into(),
+                },
+            )
+            .await?;
+        if matches!(response, CloudLoginStatusResponse::Authenticated { .. }) {
+            let _ = self.restore_cloud_session_candidate().await?;
+        }
+        Ok(response)
+    }
+
+    pub async fn cancel_cloud_login(&mut self, login_id: impl Into<String>) -> TalosResult<()> {
+        let _: Value = self
+            .request_typed(
+                "auth.login.cancel",
+                CloudLoginCancelRequest {
+                    login_id: login_id.into(),
+                },
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn current_user(&mut self) -> TalosResult<UserDto> {
+        self.request_typed("user.current", serde_json::json!({}))
+            .await
+    }
+
+    pub async fn auth_logout(&mut self) -> TalosResult<()> {
+        let _: Value = self
+            .request_typed("auth.logout", serde_json::json!({}))
+            .await?;
+        self.actor_credentials = None;
         Ok(())
     }
 
@@ -1018,7 +1074,12 @@ fn actor_credentials_for_method(
 ) -> Option<ActorCredentials> {
     if matches!(
         method,
-        "initialize" | "auth.session.read" | "auth.session.clear"
+        "initialize"
+            | "auth.login.start"
+            | "auth.login.status"
+            | "auth.login.cancel"
+            | "auth.session.read"
+            | "auth.session.clear"
     ) {
         None
     } else {
@@ -1030,7 +1091,13 @@ fn actor_credentials_for_method(
 fn is_business_method(method: &str) -> bool {
     !matches!(
         method,
-        "initialize" | "auth.session.read" | "auth.session.store" | "auth.session.clear"
+        "initialize"
+            | "auth.login.start"
+            | "auth.login.status"
+            | "auth.login.cancel"
+            | "auth.session.read"
+            | "auth.session.store"
+            | "auth.session.clear"
     )
 }
 
@@ -1088,6 +1155,18 @@ mod tests {
             None
         );
         assert_eq!(
+            actor_credentials_for_method("auth.login.start", &credentials),
+            None
+        );
+        assert_eq!(
+            actor_credentials_for_method("auth.login.status", &credentials),
+            None
+        );
+        assert_eq!(
+            actor_credentials_for_method("auth.login.cancel", &credentials),
+            None
+        );
+        assert_eq!(
             actor_credentials_for_method("session.list", &credentials),
             credentials
         );
@@ -1099,6 +1178,9 @@ mod tests {
         assert!(!is_business_method("auth.session.read"));
         assert!(!is_business_method("auth.session.store"));
         assert!(!is_business_method("auth.session.clear"));
+        assert!(!is_business_method("auth.login.start"));
+        assert!(!is_business_method("auth.login.status"));
+        assert!(!is_business_method("auth.login.cancel"));
         assert!(is_business_method("user.current"));
         assert!(is_business_method("session.list"));
     }

@@ -67,7 +67,7 @@ fn isolated_test_config() -> (talos_types::TalosConfig, std::path::PathBuf) {
         std::env::temp_dir().join(format!("talos-http-test-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&workspace_dir).expect("workspace dir should exist");
     let mut config = test_config();
-    config.agent.kernel.memory.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.agent.kernel.workspace_dir = workspace_dir.to_string_lossy().to_string();
     (config, workspace_dir)
 }
 

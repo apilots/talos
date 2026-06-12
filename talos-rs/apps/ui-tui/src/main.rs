@@ -1,7 +1,11 @@
+use std::io::Write;
 use std::sync::Arc;
+use std::time::Duration;
 
-use talos_sdk::{AppServerClient, AppServerClientConfig};
-use talos_types::talos::TalosConnectionMode;
+use talos_sdk::{
+    now_ms, open_external_url, AppServerClient, AppServerClientConfig, CloudLoginClientKind,
+    CloudLoginStatusResponse, TalosError,
+};
 use talos_ui_tui::run_tui_app_with_gateway_client;
 use tokio::sync::Mutex;
 
@@ -9,21 +13,79 @@ use tokio::sync::Mutex;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     let app_server_bin = resolve_app_server_bin(&args);
-    let launch_token = option_arg(&args, "--launch-token")
-        .or_else(|| std::env::var("TALOS_LOCAL_LAUNCH_TOKEN").ok())
-        .unwrap_or_else(|| format!("tui-{}", uuid::Uuid::new_v4().simple()));
     let config = AppServerClientConfig {
         app_server_bin,
-        launch_token,
         client_name: "talos-ui-tui".to_string(),
         client_version: env!("CARGO_PKG_VERSION").to_string(),
         actor_credentials: None,
         use_cloud_session_cache: false,
     }
     .with_cloud_session_cache();
-    let client = AppServerClient::connect(config).await?;
+    let mut client = AppServerClient::connect(config).await?;
+    ensure_authenticated(&mut client).await?;
     let gateway_client: Arc<dyn talos_ui_tui::GatewayClient> = Arc::new(Mutex::new(client));
-    run_tui_app_with_gateway_client(gateway_client, TalosConnectionMode::Embedded).await
+    run_tui_app_with_gateway_client(gateway_client).await
+}
+
+async fn ensure_authenticated(
+    client: &mut AppServerClient,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match client.current_user().await {
+        Ok(_) => Ok(()),
+        Err(TalosError::AuthError(_)) => login_with_cloud(client).await,
+        Err(error) => Err(Box::new(error)),
+    }
+}
+
+async fn login_with_cloud(client: &mut AppServerClient) -> Result<(), Box<dyn std::error::Error>> {
+    let start = client
+        .start_cloud_login("Talos TUI", CloudLoginClientKind::Tui)
+        .await?;
+    print_login_instructions(&start.login_url, &start.user_code);
+    let browser_opened = std::env::var("TALOS_TUI_NO_BROWSER").is_err()
+        && open_external_url(&start.login_url).is_ok();
+    if browser_opened {
+        eprintln!("Browser opened. If it did not appear, copy the URL above into your browser.");
+    } else {
+        eprintln!("Open the URL above in your browser to authorize Talos.");
+    }
+
+    loop {
+        if now_ms() >= start.expires_at_ms {
+            return Err("Cloud login expired".into());
+        }
+        match client.poll_cloud_login(start.login_id.clone()).await? {
+            CloudLoginStatusResponse::Pending { interval_ms } => {
+                eprint!("\rWaiting for Cloud authorization...");
+                let _ = std::io::stderr().flush();
+                tokio::time::sleep(Duration::from_millis(interval_ms.max(500))).await;
+            }
+            CloudLoginStatusResponse::Authenticated { user } => {
+                eprintln!(
+                    "\rAuthenticated as {}. Starting Talos TUI...",
+                    user.username
+                );
+                clear_terminal();
+                return Ok(());
+            }
+            CloudLoginStatusResponse::Denied => return Err("Cloud login was denied".into()),
+            CloudLoginStatusResponse::Expired => return Err("Cloud login expired".into()),
+        }
+    }
+}
+
+fn print_login_instructions(login_url: &str, user_code: &str) {
+    eprintln!();
+    eprintln!("Talos Cloud login required.");
+    eprintln!("Open this URL to authorize Talos:");
+    eprintln!("{}", login_url);
+    eprintln!("Code: {}", user_code);
+    eprintln!();
+}
+
+fn clear_terminal() {
+    eprint!("\x1b[2J\x1b[3J\x1b[H");
+    let _ = std::io::stderr().flush();
 }
 
 fn resolve_app_server_bin(args: &[String]) -> String {

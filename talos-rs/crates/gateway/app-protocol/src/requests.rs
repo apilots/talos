@@ -87,6 +87,8 @@ pub enum ClientMethod {
     WorkspaceDocRead,
     #[serde(rename = "workspace.doc.write")]
     WorkspaceDocWrite,
+    #[serde(rename = "workspace.info")]
+    WorkspaceInfo,
     #[serde(rename = "skill.list")]
     SkillList,
     #[serde(rename = "app.list")]
@@ -95,6 +97,12 @@ pub enum ClientMethod {
     ToolList,
     #[serde(rename = "auth.logout")]
     AuthLogout,
+    #[serde(rename = "auth.login.start")]
+    AuthLoginStart,
+    #[serde(rename = "auth.login.status")]
+    AuthLoginStatus,
+    #[serde(rename = "auth.login.cancel")]
+    AuthLoginCancel,
     #[serde(rename = "auth.session.read")]
     AuthSessionRead,
     #[serde(rename = "auth.session.store")]
@@ -144,10 +152,14 @@ impl ClientMethod {
             Self::WorkspaceDocList => "workspace.doc.list",
             Self::WorkspaceDocRead => "workspace.doc.read",
             Self::WorkspaceDocWrite => "workspace.doc.write",
+            Self::WorkspaceInfo => "workspace.info",
             Self::SkillList => "skill.list",
             Self::AppList => "app.list",
             Self::ToolList => "tool.list",
             Self::AuthLogout => "auth.logout",
+            Self::AuthLoginStart => "auth.login.start",
+            Self::AuthLoginStatus => "auth.login.status",
+            Self::AuthLoginCancel => "auth.login.cancel",
             Self::AuthSessionRead => "auth.session.read",
             Self::AuthSessionStore => "auth.session.store",
             Self::AuthSessionClear => "auth.session.clear",
@@ -202,10 +214,14 @@ impl FromStr for ClientMethod {
             "workspace.doc.list" => Ok(Self::WorkspaceDocList),
             "workspace.doc.read" => Ok(Self::WorkspaceDocRead),
             "workspace.doc.write" => Ok(Self::WorkspaceDocWrite),
+            "workspace.info" => Ok(Self::WorkspaceInfo),
             "skill.list" => Ok(Self::SkillList),
             "app.list" => Ok(Self::AppList),
             "tool.list" => Ok(Self::ToolList),
             "auth.logout" => Ok(Self::AuthLogout),
+            "auth.login.start" => Ok(Self::AuthLoginStart),
+            "auth.login.status" => Ok(Self::AuthLoginStatus),
+            "auth.login.cancel" => Ok(Self::AuthLoginCancel),
             "auth.session.read" => Ok(Self::AuthSessionRead),
             "auth.session.store" => Ok(Self::AuthSessionStore),
             "auth.session.clear" => Ok(Self::AuthSessionClear),
@@ -287,6 +303,8 @@ pub enum ClientRequestParams {
     WorkspaceDocRead(WorkspaceDocReadParams),
     #[serde(rename = "workspace.doc.write")]
     WorkspaceDocWrite(WorkspaceDocWriteParams),
+    #[serde(rename = "workspace.info")]
+    WorkspaceInfo(WorkspaceInfoParams),
     #[serde(rename = "skill.list")]
     SkillList(SkillListParams),
     #[serde(rename = "app.list")]
@@ -295,6 +313,12 @@ pub enum ClientRequestParams {
     ToolList(ToolListParams),
     #[serde(rename = "auth.logout")]
     AuthLogout(AuthLogoutParams),
+    #[serde(rename = "auth.login.start")]
+    AuthLoginStart(talos_auth::CloudLoginStartRequest),
+    #[serde(rename = "auth.login.status")]
+    AuthLoginStatus(talos_auth::CloudLoginStatusRequest),
+    #[serde(rename = "auth.login.cancel")]
+    AuthLoginCancel(talos_auth::CloudLoginCancelRequest),
     #[serde(rename = "auth.session.read")]
     AuthSessionRead(AuthSessionReadParams),
     #[serde(rename = "auth.session.store")]
@@ -395,10 +419,22 @@ impl ClientRequest {
             ClientMethod::WorkspaceDocWrite => {
                 ClientRequestParams::WorkspaceDocWrite(decode(params_value)?)
             }
+            ClientMethod::WorkspaceInfo => {
+                ClientRequestParams::WorkspaceInfo(decode(params_value)?)
+            }
             ClientMethod::SkillList => ClientRequestParams::SkillList(decode(params_value)?),
             ClientMethod::AppList => ClientRequestParams::AppList(decode(params_value)?),
             ClientMethod::ToolList => ClientRequestParams::ToolList(decode(params_value)?),
             ClientMethod::AuthLogout => ClientRequestParams::AuthLogout(decode(params_value)?),
+            ClientMethod::AuthLoginStart => {
+                ClientRequestParams::AuthLoginStart(decode(params_value)?)
+            }
+            ClientMethod::AuthLoginStatus => {
+                ClientRequestParams::AuthLoginStatus(decode(params_value)?)
+            }
+            ClientMethod::AuthLoginCancel => {
+                ClientRequestParams::AuthLoginCancel(decode(params_value)?)
+            }
             ClientMethod::AuthSessionRead => {
                 ClientRequestParams::AuthSessionRead(decode(params_value)?)
             }
@@ -427,7 +463,8 @@ fn decode<T: for<'de> Deserialize<'de>>(value: serde_json::Value) -> Result<T, A
 pub struct InitializeParams {
     pub client_info: ClientInfo,
     pub capabilities: ClientCapabilities,
-    pub actor_credentials: ActorCredentials,
+    #[serde(default)]
+    pub actor_credentials: Option<ActorCredentials>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
@@ -467,7 +504,6 @@ pub struct ActorCredentials {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ActorCredential {
-    LocalLaunchToken { token: String },
     ExistingSessionToken { token: String },
 }
 
@@ -774,6 +810,18 @@ pub struct WorkspaceDocWriteParams {
     pub content: String,
     #[serde(default)]
     pub expected_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct WorkspaceInfoParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct WorkspaceInfoResponse {
+    pub user_id: String,
+    #[serde(default)]
+    pub username: Option<String>,
+    pub base_workspace_dir: String,
+    pub user_workspace_dir: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]

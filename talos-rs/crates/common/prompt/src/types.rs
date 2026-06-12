@@ -574,6 +574,8 @@ impl Default for PromptLoadPolicy {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptBuildConfig {
     pub load_policy: PromptLoadPolicy,
+    #[serde(default)]
+    pub workspace_dir: String,
     pub prompt: AgentKernelPromptConfig,
     pub memory: AgentKernelMemoryConfig,
     pub tools: ToolsRuntimeConfig,
@@ -585,6 +587,7 @@ impl Default for PromptBuildConfig {
     fn default() -> Self {
         Self {
             load_policy: PromptLoadPolicy::default(),
+            workspace_dir: String::new(),
             prompt: AgentKernelPromptConfig::default(),
             memory: AgentKernelMemoryConfig::default(),
             tools: ToolsRuntimeConfig::default(),
