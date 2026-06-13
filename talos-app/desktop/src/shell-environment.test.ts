@@ -40,7 +40,7 @@ describe("resolveAppServerEnvironment", () => {
     expect(env).toEqual({ TALOS_HOME: "/tmp/talos" });
   });
 
-  it("uses packaged resources as the default release config", () => {
+  it("uses packaged resources as the release config template source", () => {
     const env = resolveAppServerEnvironment({
       baseEnv: {
         HOME: "/Users/example",
@@ -51,7 +51,6 @@ describe("resolveAppServerEnvironment", () => {
     expect(env).toMatchObject({
       HOME: "/Users/example",
       TALOS_RESOURCE_DIR: "/Applications/Talos.app/Contents/Resources",
-      TALOS_CONFIG: "/Applications/Talos.app/Contents/Resources/conf/talos.yaml",
     });
   });
 

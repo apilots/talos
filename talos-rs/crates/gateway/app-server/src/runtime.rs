@@ -1224,7 +1224,7 @@ mod tests {
                 "params": {
                     "client_info": {
                         "name": "test",
-                        "version": "0.1.0"
+                        "version": "0.1.1"
                     },
                     "capabilities": {
                         "protocol_version": { "major": 0, "minor": 2 },

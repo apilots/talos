@@ -351,18 +351,18 @@ export function SettingsModelsEditor() {
 
   const isDirty = draft && serverConfig && JSON.stringify(draft) !== JSON.stringify(serverConfig);
 
-  if (isLoading || !draft) {
-    return (
-      <Panel className="rounded-[1.4rem] border-border/80 bg-card/82 p-5">
-        <div className="text-sm text-muted">{t("modelsPanel.loading")}</div>
-      </Panel>
-    );
-  }
-
   if (error) {
     return (
       <Panel className="rounded-[1.4rem] border-border/80 bg-card/82 p-5">
         <div className="text-sm text-danger">{parseErrorMessage(error)}</div>
+      </Panel>
+    );
+  }
+
+  if (isLoading || !draft) {
+    return (
+      <Panel className="rounded-[1.4rem] border-border/80 bg-card/82 p-5">
+        <div className="text-sm text-muted">{t("modelsPanel.loading")}</div>
       </Panel>
     );
   }

@@ -64,7 +64,7 @@ impl Default for InitializeParams {
             capabilities: ClientCapabilities::default(),
             client_info: ClientInfo {
                 name: "talos".to_string(),
-                version: "0.1.0".to_string(),
+                version: "0.1.1".to_string(),
             },
         }
     }

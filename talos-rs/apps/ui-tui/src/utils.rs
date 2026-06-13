@@ -12,7 +12,7 @@ use std::{
 };
 use unicode_width::UnicodeWidthChar;
 
-pub(crate) const APP_VERSION: &str = "v0.1.0";
+pub(crate) const APP_VERSION: &str = "v0.1.1";
 
 // ── Event labels ────────────────────────────────────────────────────────────
 
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn build_welcome_card_separates_title_and_session_block() {
         let card = build_welcome_card(
-            "v0.1.0",
+            "v0.1.1",
             "qwen-plus",
             Some(Path::new("/Users/xujiang/data/ailabs/talos/talos-rs")),
         );
@@ -293,7 +293,7 @@ mod tests {
         let lines: Vec<&str> = card.lines().collect();
         assert_eq!(
             lines[1],
-            "│ >_ Talos TUI (v0.1.0)                            │"
+            "│ >_ Talos TUI (v0.1.1)                            │"
         );
         assert_eq!(
             lines[3],

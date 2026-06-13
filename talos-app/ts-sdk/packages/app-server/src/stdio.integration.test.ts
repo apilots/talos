@@ -19,7 +19,7 @@ describeIntegration("StdioAppServerClient integration", () => {
       command: process.env.TALOS_APP_SERVER_BIN ?? "app-server",
       cwd: process.env.TALOS_APP_SERVER_CWD,
       clientName: "talos-ts-sdk-integration",
-      clientVersion: "0.1.0",
+      clientVersion: "0.1.1",
     });
     const stderr: string[] = [];
     client.transport.onStderr((chunk) => stderr.push(chunk));

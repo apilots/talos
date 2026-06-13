@@ -60,7 +60,7 @@ describe("ElectronAppServerClient", () => {
         protocol_version: { major: 0, minor: 3 },
         server_info: {
           name: "talos-app-server",
-          version: "0.1.0",
+          version: "0.1.1",
           auth_enabled: false,
           cloud_auth_url: "http://127.0.0.1:8787",
         },
@@ -74,7 +74,7 @@ describe("ElectronAppServerClient", () => {
 
     await expect(getDesktopServerInfo(bridge)).resolves.toMatchObject({
       name: "talos-app-server",
-      version: "0.1.0",
+      version: "0.1.1",
       auth_enabled: false,
       cloud_auth_url: "http://127.0.0.1:8787",
     });
