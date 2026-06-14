@@ -1,4 +1,5 @@
 use super::*;
+use talos_types::talos::{TalosProvider, TalosSourceType};
 
 pub(crate) struct MockGateway;
 pub(crate) struct SilentGateway;
@@ -274,6 +275,10 @@ impl SessionService for MockSessionService {
         project_id: Option<String>,
         current_directory: Option<std::path::PathBuf>,
     ) -> TalosResult<talos_types::TalosSession> {
+        assert_ne!(
+            context.user_id, "empty-input-user",
+            "empty input requests must fail before session creation"
+        );
         Ok(talos_types::TalosSession {
             title: "Untitled Session".to_string(),
             user_id: context.user_id.clone(),

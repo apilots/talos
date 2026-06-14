@@ -45,22 +45,8 @@ if ! echo "${status_output}" | grep -q "App-server accessible"; then
 fi
 echo "CASE cli_app_server_status PASS"
 
-create_output="$(run_cli session create)"
-log_case_json "cli_app_server_session_create" "{\"command\":\"session create\"}" "${create_output}"
-session_id="$(echo "${create_output}" | sed -n 's/^Session created: \([^ ]*\).*/\1/p')"
-if [[ -z "${session_id}" ]]; then
-  echo "CASE cli_app_server_session_create FAIL output=${create_output}"
-  exit 1
-fi
-echo "CASE cli_app_server_session_create PASS session_id=${session_id}"
-
-info_output="$(run_cli session info "${session_id}")"
-log_case_json "cli_app_server_session_info" "{\"command\":\"session info\",\"session_id\":\"${session_id}\"}" "${info_output}"
-if ! echo "${info_output}" | grep -q "${session_id}"; then
-  echo "CASE cli_app_server_session_info FAIL output=${info_output}"
-  exit 1
-fi
-echo "CASE cli_app_server_session_info PASS"
+session_id="$(new_session_id)"
+echo "CASE cli_app_server_session_id PASS session_id=${session_id}"
 
 if ! capture_cli chat_output chat in "${session_id}" "Answer exactly: cli-app-server-ok"; then
   log_case_json "cli_app_server_chat_in" "{\"command\":\"chat in\",\"session_id\":\"${session_id}\"}" "${chat_output}"
@@ -74,6 +60,14 @@ if [[ -z "${chat_output}" || "${chat_output}" == Error:* ]]; then
 fi
 echo "CASE cli_app_server_chat_in PASS"
 echo "DETAIL cli_app_server_chat_output=${chat_output}"
+
+info_output="$(run_cli session info "${session_id}")"
+log_case_json "cli_app_server_session_info" "{\"command\":\"session info\",\"session_id\":\"${session_id}\"}" "${info_output}"
+if ! echo "${info_output}" | grep -q "${session_id}"; then
+  echo "CASE cli_app_server_session_info FAIL output=${info_output}"
+  exit 1
+fi
+echo "CASE cli_app_server_session_info PASS"
 
 list_output="$(run_cli session list --limit 5)"
 log_case_json "cli_app_server_session_list" "{\"command\":\"session list\",\"limit\":5}" "${list_output}"

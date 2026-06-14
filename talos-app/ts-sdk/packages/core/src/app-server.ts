@@ -148,10 +148,6 @@ export class AppServerClient {
       .then((response) => response.data);
   }
 
-  createSession(params: AppProtocol.SessionCreateParams): Promise<TalosSession> {
-    return this.transport.request("session.create", params);
-  }
-
   listSessions(params: AppProtocol.SessionListParams): Promise<TalosSession[]> {
     return this.transport
       .request<ListResponse<TalosSession>>("session.list", params)

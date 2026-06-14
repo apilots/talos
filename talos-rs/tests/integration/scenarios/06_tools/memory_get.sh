@@ -68,7 +68,7 @@ parse_response() {
   RESPONSE_BODY="${raw%HTTP_STATUS:*}"
 }
 
-create_session() {
+build_session_context() {
   python3 - <<'PY'
 import json
 import os
@@ -142,16 +142,16 @@ if [[ "${status}" != "200" ]]; then
 fi
 echo "CASE seed_memory_file_for_memory_get PASS status=${status}"
 
-session_payload="$(create_session)"
-session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
-  -H "Content-Type: application/json" \
-  -d "${session_payload}")"
+session_payload="$(build_session_context)"
+session_id="$(new_session_id)"
+remember_session_context "${session_id}" "${session_payload}"
+session_json="{\"id\":\"${session_id}\"}"
 session_id="$(session_id_from_json "${session_json}")"
 if [[ -z "${session_id}" ]]; then
-  echo "CASE memory_get_create_session FAIL response=${session_json}"
+  echo "CASE memory_get_session_id FAIL response=${session_json}"
   exit 1
 fi
-echo "CASE memory_get_create_session PASS session_id=${session_id}"
+echo "CASE memory_get_session_id PASS session_id=${session_id}"
 
 memory_get_input="You must call tool 'MemoryGet' exactly once with path ${MEMORY_FILE_PATH}. After the tool call, respond with exactly MEMORY_GET_OK:${MEMORY_MARKER}"
 memory_get_payload="$(build_payload "${memory_get_input}")"

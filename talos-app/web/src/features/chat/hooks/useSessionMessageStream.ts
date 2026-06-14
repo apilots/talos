@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 
 import { retryTimelineEvents, sendTimelineEvents, subscribeTimelineEventsForMessage } from "../api";
 import { applyStreamEvent } from "../stream-events";
+import type { TalosMessageRequest } from "@talos/sdk-browser";
 
 export function useSessionMessageStream(sessionId: string) {
   const abortRef = useRef<AbortController | null>(null);
@@ -13,7 +14,10 @@ export function useSessionMessageStream(sessionId: string) {
   }, []);
 
   const eventMessage = useCallback(
-    async (text: string, onAcceptedMessageId?: (messageId: string) => void) => {
+    async (
+      request: TalosMessageRequest,
+      onAcceptedMessageId?: (messageId: string) => void,
+    ) => {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -21,7 +25,7 @@ export function useSessionMessageStream(sessionId: string) {
       try {
         await sendTimelineEvents(
           sessionId,
-          text,
+          request,
           (event) => applyStreamEvent(sessionId, event),
           controller.signal,
           onAcceptedMessageId,

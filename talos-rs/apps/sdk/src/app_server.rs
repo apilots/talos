@@ -15,8 +15,8 @@ use talos_app_protocol::requests::{
     InitializeResponse, MemoryFileListParams as ProtocolMemoryFileListParams, MemoryFileReadParams,
     MemoryFileWriteParams, MessageCommandStatus as ProtocolMessageCommandStatus, ModelListParams,
     ProjectCreateParams, ProjectDeleteParams, ProjectListParams, ProjectPatchParams,
-    ProjectReadParams, ProtocolInputItem, SessionActiveTurnParams, SessionCloseParams,
-    SessionCreateParams, SessionDeleteParams, SessionHistoryParams, SessionListParams,
+    ProjectReadParams, ProtocolInputItem, ProtocolTalosContext, SessionActiveTurnParams,
+    SessionCloseParams, SessionDeleteParams, SessionHistoryParams, SessionListParams,
     SessionPatchParams, SessionReadParams, TimelineActiveTurnSnapshot, TimelineRecoveryParams,
     TimelineRecoverySnapshot, ToolDynamicResultSubmitParams, TurnInterruptParams, TurnStartParams,
     TurnStartResponse, WorkspaceDocListParams, WorkspaceDocReadParams, WorkspaceDocWriteParams,
@@ -40,7 +40,7 @@ use crate::{
     ProjectRecord, WorkspaceDocDetail, WorkspaceDocKind, WorkspaceDocSummary,
 };
 use crate::{ModelInfo, TalosInputItem, TalosMessageRequest, TalosSession};
-use talos_types::talos::{SessionHistorySnapshot, TimelineEventEnvelope};
+use talos_types::talos::{SessionHistorySnapshot, TalosContext, TimelineEventEnvelope};
 
 #[derive(Debug, Clone)]
 pub struct AppServerClientConfig {
@@ -356,13 +356,6 @@ impl AppServerClient {
         .await
     }
 
-    pub async fn create_session(
-        &mut self,
-        params: SessionCreateParams,
-    ) -> TalosResult<TalosSession> {
-        self.request_typed("session.create", params).await
-    }
-
     pub async fn list_sessions(
         &mut self,
         params: SessionListParams,
@@ -559,6 +552,10 @@ impl AppServerClient {
                     session_id: session_id.to_string(),
                     input: map_input(request.input)?,
                     workspace_id: request.workspace_id,
+                    context: request.context.map(map_protocol_context),
+                    model: request.model,
+                    project_id: request.project_id,
+                    current_directory: request.current_directory,
                     client_request_id,
                 },
             )
@@ -643,6 +640,13 @@ impl AppServerClient {
         session_id: &str,
         request: TalosMessageRequest,
     ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>> {
+        let start_response = self
+            .start_turn(
+                session_id,
+                request,
+                Some(format!("app-server-sdk-{}", uuid::Uuid::new_v4().simple())),
+            )
+            .await?;
         let subscription = self
             .subscribe_events(send_timeline_subscription_params(session_id))
             .await?;
@@ -653,29 +657,10 @@ impl AppServerClient {
             SubscriptionStream {
                 session_id: session_id.to_string(),
                 sender: tx,
-                turn_id: None,
+                turn_id: Some(start_response.turn_id),
                 pending: Vec::new(),
             },
         );
-        let start_response = match self
-            .start_turn(
-                session_id,
-                request,
-                Some(format!("app-server-sdk-{}", uuid::Uuid::new_v4().simple())),
-            )
-            .await
-        {
-            Ok(response) => response,
-            Err(error) => {
-                self.subscription_senders
-                    .lock()
-                    .await
-                    .remove(&subscription_id);
-                return Err(error);
-            }
-        };
-        self.activate_subscription_stream(&subscription_id, start_response.turn_id)
-            .await?;
         Ok(rx)
     }
 
@@ -711,41 +696,6 @@ impl AppServerClient {
             },
         );
         Ok(rx)
-    }
-
-    async fn activate_subscription_stream(
-        &self,
-        subscription_id: &str,
-        turn_id: String,
-    ) -> TalosResult<()> {
-        let outbound = {
-            let mut streams = self.subscription_senders.lock().await;
-            let Some(stream) = streams.get_mut(subscription_id) else {
-                return Ok(());
-            };
-            stream.turn_id = Some(turn_id.clone());
-            let pending = std::mem::take(&mut stream.pending);
-            let mut terminal_seen = false;
-            let mut outbound = Vec::new();
-            for event in pending {
-                if event.turn_id != turn_id {
-                    continue;
-                }
-                terminal_seen |= is_terminal_application_event(&event);
-                outbound.push((stream.sender.clone(), event));
-            }
-            if terminal_seen {
-                streams.remove(subscription_id);
-            }
-            outbound
-        };
-
-        for (sender, talos_event) in outbound {
-            if sender.try_send(talos_event).is_err() {
-                return Ok(());
-            }
-        }
-        Ok(())
     }
 
     pub async fn shutdown(&mut self) -> TalosResult<()> {
@@ -859,6 +809,17 @@ impl AppServerClient {
             .flush()
             .await
             .map_err(|error| TalosError::ClientError(error.to_string()))
+    }
+}
+
+fn map_protocol_context(context: TalosContext) -> ProtocolTalosContext {
+    ProtocolTalosContext {
+        source_type: context.source_type.to_string(),
+        provider: context.provider.to_string(),
+        channel_id: context.channel_id.unwrap_or_else(|| "default".to_string()),
+        thread_id: context.thread_id,
+        message_id: context.message_id,
+        trace_id: context.trace_id,
     }
 }
 

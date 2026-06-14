@@ -35,17 +35,12 @@ echo "CASE cli_stream_select_model PASS model=${primary_model}"
 
 memory_stream_stdout="$(scenario_report_path cli_memory_stream_stdout.log)"
 memory_stream_stderr="$(scenario_report_path cli_memory_stream_stderr.log)"
-memory_create_output="$(run_cli session create --model "${primary_model}")"
-memory_session_id="$(echo "${memory_create_output}" | sed -n 's/^Session created: \([^ ]*\).*/\1/p')"
-if [[ -z "${memory_session_id}" ]]; then
-  echo "CASE cli_stream_memory_session_create FAIL output=${memory_create_output}"
-  exit 1
-fi
-echo "CASE cli_stream_memory_session_create PASS session_id=${memory_session_id}"
+memory_session_id="$(new_session_id)"
+echo "CASE cli_stream_memory_session_id PASS session_id=${memory_session_id}"
 
 memory_stream_input="You must call MemorySearch exactly once with query talos项目 before any final answer. Do not answer from prior knowledge, prior messages, or workspace context. If no result is found, say so in one short sentence after the tool call."
 
-run_cli chat in "${memory_session_id}" "${memory_stream_input}" --stream \
+run_cli chat in "${memory_session_id}" "${memory_stream_input}" --model "${primary_model}" --stream \
   >"${memory_stream_stdout}" 2>"${memory_stream_stderr}"
 
 memory_stdout_text="$(cat "${memory_stream_stdout}")"

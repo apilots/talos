@@ -14,17 +14,6 @@ struct Context {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct SessionCreateRequest {
-    context: Context,
-    model: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct SessionCreateResponse {
-    id: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
 struct MessageInputItem {
     #[serde(rename = "type")]
     item_type: String,
@@ -35,21 +24,22 @@ struct MessageInputItem {
 struct MessageRequest {
     input: Vec<MessageInputItem>,
     workspace_id: Option<String>,
+    context: Option<Context>,
+    model: Option<String>,
+    project_id: Option<String>,
+    current_directory: Option<String>,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Testing Talos Gateway API with Bailian LLM...");
 
-    // 检查必要的环境变量
     if std::env::var("TALOS_LLM_BAILIAN_API_KEY").is_err() {
         println!("Warning: TALOS_LLM_BAILIAN_API_KEY environment variable not set");
     }
 
-    // 创建HTTP客户端
     let client = reqwest::Client::new();
 
-    // 测试健康检查端点
     println!("Testing health endpoint...");
     match client
         .get("http://localhost:8080/health")
@@ -71,45 +61,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test native messages endpoint
     println!("\nTesting messages endpoint...");
-    let session_request = SessionCreateRequest {
-        context: Context {
-            source_type: "http".to_string(),
-            provider: "http".to_string(),
-            channel_id: "default".to_string(),
-            user_id: "test_user".to_string(),
-            thread_id: None,
-            message_id: "msg-integration-test".to_string(),
-            trace_id: "trace-integration-test".to_string(),
-        },
-        model: None,
+    let session_id = format!(
+        "sess_integration_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos()
+    );
+    let context = Context {
+        source_type: "http".to_string(),
+        provider: "http".to_string(),
+        channel_id: "default".to_string(),
+        user_id: "test_user".to_string(),
+        thread_id: None,
+        message_id: "msg-integration-test".to_string(),
+        trace_id: "trace-integration-test".to_string(),
     };
-    let session_response = client
-        .post("http://localhost:8080/v1/sessions")
-        .json(&session_request)
-        .send()
-        .await?;
-    if !session_response.status().is_success() {
-        let error_text = session_response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        println!("✗ Session create failed with error: {}", error_text);
-        return Ok(());
-    }
-    let session = session_response.json::<SessionCreateResponse>().await?;
 
     let message_request = MessageRequest {
         input: vec![MessageInputItem {
-            item_type: "input_text".to_string(),
+            item_type: "text".to_string(),
             text: "hello from integration test".to_string(),
         }],
         workspace_id: None,
+        context: Some(context),
+        model: None,
+        project_id: None,
+        current_directory: None,
     };
 
     match client
         .post(format!(
             "http://localhost:8080/v1/sessions/{}/messages",
-            session.id
+            session_id
         ))
         .json(&message_request)
         .send()

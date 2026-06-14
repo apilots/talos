@@ -5,14 +5,18 @@ import type { DesktopRendererBridge } from "@talos/sdk-app-server/desktop";
 import { createDesktopTalosClient } from "./desktop-client";
 
 describe("createDesktopTalosClient", () => {
-  it("uses the desktop source type when creating desktop sessions", async () => {
+  it("uses the desktop source type when starting desktop turns", async () => {
     const calls: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
     const bridge: DesktopRendererBridge = {
       invoke: async function <T>(method: AppProtocol.ClientMethod, params?: unknown): Promise<T> {
         calls.push({ method, params });
-        if (method === "session.create") {
+        if (method === "turn.start") {
           return {
-            context: { session_id: "session-1" },
+            request_id: "req-1",
+            message_id: "message-1",
+            session_id: "session-1",
+            turn_id: "turn-1",
+            status: "accepted",
           } as T;
         }
         throw new Error(`unexpected method: ${method}`);
@@ -22,7 +26,8 @@ describe("createDesktopTalosClient", () => {
     };
     const client = createDesktopTalosClient(bridge);
 
-    await client.sessions.create({
+    await client.turns.start("session-1", {
+      input: [{ type: "text", text: "hello" }],
       context: {
         source_type: "http",
         provider: "sdk",
@@ -37,8 +42,9 @@ describe("createDesktopTalosClient", () => {
 
     expect(calls).toEqual([
       {
-        method: "session.create",
+        method: "turn.start",
         params: expect.objectContaining({
+          session_id: "session-1",
           context: expect.objectContaining({
             source_type: "desktop",
             provider: "sdk",
@@ -89,7 +95,7 @@ describe("createDesktopTalosClient", () => {
     };
     const client = createDesktopTalosClient(bridge);
 
-    await client.messages.sendEvents(
+    await client.turns.startEvents(
       "session-1",
       { input: [{ type: "text", text: "hello" }] },
       (envelope) => received.push(envelope.event.event_type),

@@ -46,7 +46,7 @@ print(json.dumps(payload, ensure_ascii=False))
 PY
 }
 
-create_session() {
+build_session_context() {
   local user_id="$1"
   USER_ID="$user_id" python3 - <<'PY'
 import json
@@ -89,16 +89,16 @@ print(data.get("output_text", ""))
 PY
 }
 
-en_session_payload="$(create_session "lang-user-en")"
-en_session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
-  -H "Content-Type: application/json" \
-  -d "${en_session_payload}")"
+en_session_payload="$(build_session_context "lang-user-en")"
+en_session_id="$(new_session_id)"
+remember_session_context "${en_session_id}" "${en_session_payload}"
+en_session_json="{\"id\":\"${en_session_id}\"}"
 en_session_id="$(session_id_from_json "${en_session_json}")"
 if [[ -z "${en_session_id}" ]]; then
-  echo "CASE messages_english_create_session FAIL response=${en_session_json}"
+  echo "CASE messages_english_session_id FAIL response=${en_session_json}"
   exit 1
 fi
-echo "CASE messages_english_create_session PASS session_id=${en_session_id}"
+echo "CASE messages_english_session_id PASS session_id=${en_session_id}"
 
 english_input="Please respond in English with one short sentence containing 'english-ok'."
 english_payload="$(build_payload "${english_input}")"
@@ -117,16 +117,16 @@ fi
 echo "CASE messages_english PASS"
 echo "DETAIL messages_english_output=${english_output}"
 
-zh_session_payload="$(create_session "lang-user-zh")"
-zh_session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
-  -H "Content-Type: application/json" \
-  -d "${zh_session_payload}")"
+zh_session_payload="$(build_session_context "lang-user-zh")"
+zh_session_id="$(new_session_id)"
+remember_session_context "${zh_session_id}" "${zh_session_payload}"
+zh_session_json="{\"id\":\"${zh_session_id}\"}"
 zh_session_id="$(session_id_from_json "${zh_session_json}")"
 if [[ -z "${zh_session_id}" ]]; then
-  echo "CASE messages_chinese_create_session FAIL response=${zh_session_json}"
+  echo "CASE messages_chinese_session_id FAIL response=${zh_session_json}"
   exit 1
 fi
-echo "CASE messages_chinese_create_session PASS session_id=${zh_session_id}"
+echo "CASE messages_chinese_session_id PASS session_id=${zh_session_id}"
 
 chinese_input="请用中文回复一句话，并包含“中文通过”四个字。"
 chinese_payload="$(build_payload "${chinese_input}")"

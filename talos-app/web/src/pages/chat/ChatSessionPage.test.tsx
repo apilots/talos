@@ -9,16 +9,41 @@ import { ChatSessionPage } from "./ChatSessionPage";
 
 const mocks = vi.hoisted(() => ({
   sendText: vi.fn(),
-  mutate: vi.fn(),
+  sendTurn: vi.fn(),
+  mutateModel: vi.fn(),
+  mutateProject: vi.fn(),
+  session: undefined as unknown,
+  composerProps: undefined as unknown,
 }));
 
 vi.mock("@/features/chat", () => ({
-  ChatComposer: () => <div data-testid="chat-composer" />,
+  ChatComposer: (props: {
+    disabled?: boolean;
+    onModelChange?: (model: string) => void;
+    onProjectChange: (projectId: string) => void;
+    onSend: () => Promise<void>;
+    showRuntimeModeSelector?: boolean;
+  }) => {
+    mocks.composerProps = props;
+    return (
+      <div data-disabled={props.disabled ? "true" : "false"} data-testid="chat-composer">
+        <button onClick={() => props.onModelChange?.("model-2")} type="button">
+          Model
+        </button>
+        <button onClick={() => props.onProjectChange("project-1")} type="button">
+          Project
+        </button>
+        <button onClick={() => void props.onSend()} type="button">
+          Send
+        </button>
+      </div>
+    );
+  },
   useChatSession: () => ({
     blocks: [],
     draft: "",
     setDraft: vi.fn(),
-    sendMessage: vi.fn(),
+    sendTurn: mocks.sendTurn,
     sendText: mocks.sendText,
     isStreaming: true,
     isCancelling: false,
@@ -32,16 +57,10 @@ vi.mock("@/features/chat", () => ({
   useModelsQuery: () => ({ data: [{ id: "model-1", name: "Model 1" }] }),
   useProjectsQuery: () => ({ data: [] }),
   useSessionQuery: () => ({
-    data: {
-      context: { session_id: "sess-1" },
-      title: "Session 1",
-      project_id: null,
-      config: { llm: { model: "model-1" } },
-      state: { message_count: 0 },
-    },
+    data: mocks.session,
   }),
-  useUpdateSessionModelMutation: () => ({ mutate: mocks.mutate }),
-  useUpdateSessionProjectMutation: () => ({ mutate: mocks.mutate }),
+  useUpdateSessionModelMutation: () => ({ mutate: mocks.mutateModel }),
+  useUpdateSessionProjectMutation: () => ({ mutate: mocks.mutateProject }),
 }));
 
 vi.mock("@/shared/store/app-store", () => ({
@@ -49,9 +68,15 @@ vi.mock("@/shared/store/app-store", () => ({
     selector({
       activeProjectId: "__unbound_project__",
       connection: {
-        runtimeMode: "cloud",
+        runtimeMode: "local",
       },
-      projects: [],
+      projects: [
+        {
+          id: "project-1",
+          name: "Project 1",
+          directory: "/tmp/project-1",
+        },
+      ],
       setActiveProjectId: vi.fn(),
       setConnection: vi.fn(),
     }),
@@ -68,13 +93,23 @@ function NavigateAwayButton() {
 
 describe("ChatSessionPage", () => {
   let resolveSend: () => void;
+  let rejectSend: (error: Error) => void;
 
   beforeEach(() => {
     Element.prototype.scrollIntoView = vi.fn();
+    mocks.session = {
+      context: { session_id: "sess-1" },
+      title: "Session 1",
+      project_id: null,
+      config: { llm: { model: "model-1" } },
+      state: { message_count: 0 },
+    };
+    mocks.composerProps = undefined;
     mocks.sendText.mockImplementation(
       () =>
-        new Promise<void>((resolve) => {
+        new Promise<void>((resolve, reject) => {
           resolveSend = resolve;
+          rejectSend = reject;
         }),
     );
   });
@@ -82,6 +117,72 @@ describe("ChatSessionPage", () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+  });
+
+  it("keeps model and project changes local before the session exists", () => {
+    mocks.session = undefined;
+
+    render(
+      <MemoryRouter initialEntries={[{ pathname: "/sessions/sess-1" }]}>
+        <Routes>
+          <Route element={<ChatSessionPage />} path="/sessions/:sessionId" />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByTestId("chat-composer").getAttribute("data-disabled")).toBe("false");
+    fireEvent.click(screen.getByRole("button", { name: "Model" }));
+    fireEvent.click(screen.getByRole("button", { name: "Project" }));
+
+    expect(mocks.mutateModel).not.toHaveBeenCalled();
+    expect(mocks.mutateProject).not.toHaveBeenCalled();
+  });
+
+  it("hides runtime mode selector on the session detail composer", () => {
+    render(
+      <MemoryRouter initialEntries={[{ pathname: "/sessions/sess-1" }]}>
+        <Routes>
+          <Route element={<ChatSessionPage />} path="/sessions/:sessionId" />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect((mocks.composerProps as { showRuntimeModeSelector?: boolean }).showRuntimeModeSelector).toBe(false);
+  });
+
+  it("keeps draft sessions sendable after the initial prompt fails", async () => {
+    mocks.session = undefined;
+    mocks.sendTurn.mockResolvedValue(undefined);
+
+    render(
+      <MemoryRouter initialEntries={[{ pathname: "/sessions/sess-1", state: { initialPrompt: "hello" } }]}>
+        <Routes>
+          <Route element={<ChatSessionPage />} path="/sessions/:sessionId" />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(mocks.sendText).toHaveBeenCalledWith("hello", {
+        model: undefined,
+        project: undefined,
+      });
+    });
+
+    await act(async () => {
+      rejectSend(new Error("first turn failed"));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("chat-composer").getAttribute("data-disabled")).toBe("false");
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(mocks.sendTurn).toHaveBeenCalledWith({
+      model: "model-1",
+      project: undefined,
+    });
   });
 
   it("does not navigate back to the session after leaving while the initial prompt is running", async () => {
@@ -103,7 +204,10 @@ describe("ChatSessionPage", () => {
     );
 
     await waitFor(() => {
-      expect(mocks.sendText).toHaveBeenCalledWith("hello");
+      expect(mocks.sendText).toHaveBeenCalledWith("hello", {
+        model: undefined,
+        project: undefined,
+      });
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Projects" }));

@@ -4,8 +4,8 @@ import { useNavigate } from "react-router-dom";
 
 import {
   ChatComposer,
+  generateSessionId,
   useCreateProjectMutation,
-  useCreateSessionMutation,
   useModelsQuery,
   useProjectsQuery,
 } from "@/features/chat";
@@ -17,7 +17,6 @@ export function ChatHomePage() {
   const navigate = useNavigate();
   const { data: models } = useModelsQuery();
   useProjectsQuery();
-  const createSession = useCreateSessionMutation();
   const createProject = useCreateProjectMutation();
   const projects = useAppStore((state) => state.projects);
   const activeProjectId = useAppStore((state) => state.activeProjectId);
@@ -44,12 +43,18 @@ export function ChatHomePage() {
     }
   }, [activeProject, activeProjectId, setActiveProjectId]);
 
-  async function handleCreateSession(initialPrompt?: string) {
-    const session = await createSession.mutateAsync({
-      model: selectedModel ?? models?.[0]?.id,
-    });
-    navigate(`/sessions/${session.context.session_id}`, {
-      state: initialPrompt?.trim() ? { initialPrompt } : undefined,
+  async function handleStartDraft(initialPrompt?: string) {
+    const trimmed = initialPrompt?.trim();
+    const sessionId = generateSessionId();
+    navigate(`/sessions/${sessionId}`, {
+      state: trimmed
+        ? {
+            initialPrompt: trimmed,
+            initialModel: selectedModel ?? models?.[0]?.id,
+            initialProjectId: activeProject?.id,
+            initialProject: activeProject,
+          }
+        : undefined,
     });
   }
 
@@ -76,11 +81,11 @@ export function ChatHomePage() {
             onModelChange={setSelectedModel}
             onProjectChange={setActiveProjectId}
             onRuntimeModeChange={(mode) => {
-              if (mode === "cloud") {
+              if (mode === "local") {
                 setConnection({ runtimeMode: mode });
               }
             }}
-            onSend={() => handleCreateSession(draft)}
+            onSend={() => handleStartDraft(draft)}
             projects={projects}
             runtimeMode={connection.runtimeMode}
             selectedModel={selectedModel}

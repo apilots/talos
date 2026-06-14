@@ -529,8 +529,8 @@ async fn test_send_is_non_blocking_when_stream_connect_is_slow() {
 }
 
 #[tokio::test]
-async fn test_send_is_non_blocking_when_session_create_is_slow() {
-    let mut app = create_app_server_app_with_session_delay(500);
+async fn test_send_is_non_blocking_for_first_draft_turn() {
+    let mut app = create_app_server_app();
 
     let started = Instant::now();
     assert!(app
@@ -540,9 +540,9 @@ async fn test_send_is_non_blocking_when_session_create_is_slow() {
     let elapsed = started.elapsed();
 
     assert!(elapsed < Duration::from_millis(150));
-    assert_eq!(app.message_queue.len(), 1);
-    assert!(app.pending_session_connect.is_some());
-    assert!(app.chat_blocks.iter().all(|b| b.content != "slow-create"));
+    assert_eq!(app.message_queue.len(), 0);
+    assert!(app.pending_stream_connect.is_some());
+    assert!(app.chat_blocks.iter().any(|b| b.content == "slow-create"));
 }
 
 #[tokio::test]

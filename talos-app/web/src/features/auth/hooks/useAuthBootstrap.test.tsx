@@ -57,7 +57,7 @@ describe("useAuthBootstrap", () => {
         authRole: "user",
         authUsername: "Anonymous",
         userId: "anonymous",
-        runtimeMode: "cloud",
+        runtimeMode: "local",
       },
     }));
   });

@@ -66,16 +66,16 @@ payload = {
 print(json.dumps(payload, ensure_ascii=False))
 PY
 )"
-create_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
-  -H "Content-Type: application/json" \
-  -d "${create_payload}")"
-log_case_json "create_session_for_close_flush" "${create_payload}" "${create_json}"
+create_id="$(new_session_id)"
+remember_session_context "${create_id}" "${create_payload}"
+create_json="{\"id\":\"${create_id}\"}"
+log_case_json "session_id_for_close_flush" "${create_payload}" "${create_json}"
 session_id="$(session_id_from_json "${create_json}")"
 if [[ -z "${session_id}" ]]; then
-  echo "CASE create_session_for_close_flush FAIL response=${create_json}"
+  echo "CASE session_id_for_close_flush FAIL response=${create_json}"
   exit 1
 fi
-echo "CASE create_session_for_close_flush PASS session_id=${session_id}"
+echo "CASE session_id_for_close_flush PASS session_id=${session_id}"
 
 message_payload='{
   "input": [

@@ -14,9 +14,9 @@ pub use login::{now_ms, open_external_url};
 pub use message::{MessageCommandAck, MessageCommandStatus};
 pub use talos_app_protocol::events::{canonical_method, ApplicationEvent};
 pub use talos_app_protocol::requests::{
-    EventSubscribeParams, EventSubscribeResponse, ProtocolTalosContext, SessionCreateParams,
-    SessionHistoryParams, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus,
-    TimelineCursorStatus, TimelineRecoveryParams, TimelineRecoverySnapshot, TimelineReplay,
+    EventSubscribeParams, EventSubscribeResponse, ProtocolTalosContext, SessionHistoryParams,
+    TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
+    TimelineRecoveryParams, TimelineRecoverySnapshot, TimelineReplay,
     ToolDynamicResultSubmitParams,
 };
 pub use talos_auth::{

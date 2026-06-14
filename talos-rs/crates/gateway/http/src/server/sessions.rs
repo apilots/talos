@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
@@ -9,7 +8,6 @@ use serde_json::{json, Value};
 
 use talos_auth::RequestIdentity;
 use talos_types::talos::SessionHistorySnapshot;
-use talos_types::talos::TalosContext;
 use talos_types::{
     OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, SessionConf, SessionPatch, SessionQuery,
 };
@@ -19,18 +17,6 @@ use super::errors::ApiError;
 use super::state::HttpApiState;
 
 #[derive(Debug, Deserialize)]
-pub(super) struct CreateSessionRequest {
-    context: TalosContext,
-    model: Option<String>,
-    #[serde(default)]
-    conf: Option<SessionConf>,
-    #[serde(default)]
-    project_id: Option<String>,
-    #[serde(default)]
-    current_directory: Option<PathBuf>,
-}
-
-#[derive(Debug, Deserialize)]
 pub(super) struct PatchSessionRequest {
     #[serde(default)]
     conf: Option<SessionConf>,
@@ -38,27 +24,6 @@ pub(super) struct PatchSessionRequest {
     project_id: Option<OptionalProjectIdPatch>,
     #[serde(default)]
     current_directory: Option<OptionalCurrentDirectoryPatch>,
-}
-
-pub(super) async fn create_session_handler(
-    State(state): State<Arc<HttpApiState>>,
-    actor: axum::extract::Extension<RequestIdentity>,
-    Json(request): Json<CreateSessionRequest>,
-) -> Result<Json<Value>, ApiError> {
-    let session = state
-        .app
-        .create_session(
-            &shared_actor(&actor.0),
-            request.context,
-            request.model,
-            request.conf,
-            request.project_id,
-            request.current_directory,
-        )
-        .await
-        .map_err(map_create_session_error)?;
-
-    Ok(Json(json!(session)))
 }
 
 pub(super) async fn list_sessions_handler(
@@ -267,22 +232,6 @@ fn map_session_error(error: talos_error::TalosError, not_found_message: &str) ->
         }
         talos_error::TalosError::ValidationError(message) => {
             ApiError::new(StatusCode::CONFLICT, "invalid_request", message)
-        }
-        other => ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "internal_error",
-            other.to_string(),
-        ),
-    }
-}
-
-fn map_create_session_error(error: talos_error::TalosError) -> ApiError {
-    match error {
-        talos_error::TalosError::UnsupportedModel(message) => {
-            ApiError::new(StatusCode::BAD_REQUEST, "invalid_request", message)
-        }
-        talos_error::TalosError::ValidationError(message) => {
-            ApiError::new(StatusCode::BAD_REQUEST, "invalid_request", message)
         }
         other => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,

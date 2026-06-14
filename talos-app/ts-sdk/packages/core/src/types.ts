@@ -157,6 +157,10 @@ export type TalosOutputItem =
 export interface TalosMessageRequest {
   input: TalosInputItem[];
   workspace_id?: string | null;
+  context?: TalosContext | null;
+  model?: string | null;
+  project_id?: string | null;
+  current_directory?: string | null;
 }
 
 export interface TalosMessageRetryRequest extends TalosMessageRequest {

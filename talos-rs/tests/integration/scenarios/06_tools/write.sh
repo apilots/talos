@@ -42,7 +42,7 @@ fi
 export PRIMARY_MODEL="${primary_model}"
 echo "CASE write_select_model PASS model=${primary_model}"
 
-create_session() {
+build_session_context() {
   python3 - <<'PY'
 import json
 import os
@@ -98,16 +98,16 @@ print(data.get("output_text", ""))
 PY
 }
 
-session_payload="$(create_session)"
-session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
-  -H "Content-Type: application/json" \
-  -d "${session_payload}")"
+session_payload="$(build_session_context)"
+session_id="$(new_session_id)"
+remember_session_context "${session_id}" "${session_payload}"
+session_json="{\"id\":\"${session_id}\"}"
 session_id="$(session_id_from_json "${session_json}")"
 if [[ -z "${session_id}" ]]; then
-  echo "CASE write_create_session FAIL response=${session_json}"
+  echo "CASE write_session_id FAIL response=${session_json}"
   exit 1
 fi
-echo "CASE write_create_session PASS session_id=${session_id}"
+echo "CASE write_session_id PASS session_id=${session_id}"
 
 write_input="You must call tool 'Write' exactly once to create notes/write_target.txt with content ${WRITE_MARKER}. After the tool call, respond with exactly WRITE_OK:${WRITE_MARKER}"
 write_payload="$(build_payload "${write_input}")"

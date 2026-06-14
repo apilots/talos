@@ -7,8 +7,8 @@ use talos_app_protocol::requests::{
     ClientRequestParams, ConfigBatchWriteParams, ConfigReadParams, ConfigValueWriteParams,
     EventSubscribeParams, MemoryFileReadParams, MemoryFileWriteParams, MessageCommandStatus,
     OptionalPathPatch, OptionalStringPatch, ProjectCreateParams, ProjectPatchParams,
-    ProtocolInputItem, ProtocolTalosContext, SessionCreateParams, SessionListParams,
-    SessionPatchParams, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
+    ProtocolInputItem, ProtocolTalosContext, SessionListParams, SessionPatchParams,
+    TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
     TimelinePendingDynamicToolResult, TimelinePendingUserAction, TimelineRecoverySnapshot,
     TimelineReplay, TurnStartParams, TurnStartResponse, WorkspaceInfoResponse,
 };
@@ -19,7 +19,7 @@ use talos_application_service::{
 };
 use talos_auth::{
     AuthScope, CloudLoginService, CloudSessionCache, CloudSessionCacheEntry,
-    CloudSessionCacheManager, CloudSessionUserSnapshot, RequestIdentity, UserRole,
+    CloudSessionCacheManager, CloudSessionUserSnapshot, RequestIdentity,
 };
 use talos_config::TalosPaths;
 use talos_error::TalosError;
@@ -142,9 +142,6 @@ impl AppServerApplication for TalosApplicationAdapter {
             ClientRequestParams::Initialize(_) => Err(AppServerErrorBody::invalid_request(
                 "initialize is handled by the app-server runtime",
             )),
-            ClientRequestParams::SessionCreate(params) => {
-                to_value(self.create_session(actor, params).await?)
-            }
             ClientRequestParams::SessionList(params) => {
                 to_value(json!({ "data": self.list_sessions(actor, params).await? }))
             }
@@ -518,24 +515,6 @@ impl AppServerApplication for TalosApplicationAdapter {
 }
 
 impl TalosApplicationAdapter {
-    async fn create_session(
-        &self,
-        actor: &Actor,
-        params: SessionCreateParams,
-    ) -> ProtocolResult<talos_types::TalosSession> {
-        self.app
-            .create_session(
-                actor,
-                map_context(params.context)?,
-                params.model,
-                None,
-                params.project_id,
-                params.current_directory,
-            )
-            .await
-            .map_err(AppServerErrorBody::from_talos_error)
-    }
-
     async fn list_sessions(
         &self,
         actor: &Actor,
@@ -613,6 +592,10 @@ impl TalosApplicationAdapter {
                 TalosMessageRequest {
                     input: params.input.into_iter().map(map_input_item).collect(),
                     workspace_id: params.workspace_id,
+                    context: params.context.map(map_context).transpose()?,
+                    model: params.model,
+                    project_id: params.project_id,
+                    current_directory: params.current_directory,
                 },
                 params.client_request_id,
             )
@@ -926,11 +909,7 @@ fn request_identity(actor: &Actor) -> RequestIdentity {
     RequestIdentity {
         user_id: actor.user_id.clone(),
         username: Some(actor.user_id.clone()),
-        role: if actor.has_full_access() {
-            UserRole::Admin
-        } else {
-            UserRole::User
-        },
+        role: actor.role,
         scopes: Vec::<AuthScope>::new(),
         auth_disabled: false,
         access_token: actor.access_token.clone(),
@@ -1022,6 +1001,7 @@ fn expected_version(value: Option<String>) -> ExpectedFileVersion {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use talos_auth::UserRole;
 
     #[test]
     fn auth_session_store_uses_server_last_used_time() {

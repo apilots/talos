@@ -61,7 +61,6 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "session.clear": sessionParams,
   "session.close": sessionParams,
   "session.compact": sessionParams,
-  "session.create": (params) => isRecord(params) && isRecord(params.context),
   "session.delete": sessionParams,
   "session.history": sessionParams,
   "session.list": emptyParams,

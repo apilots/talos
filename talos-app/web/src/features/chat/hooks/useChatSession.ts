@@ -9,9 +9,15 @@ import {
   useSessionHistoryQuery,
   useLiveRecoveryQuery,
 } from "./useChatQueries";
+import { createInitialTurnRequest } from "../api";
 import { applyActiveTurnSnapshot, applyStreamEvent, clearInactiveTurnSnapshot } from "../stream-events";
 import { useAppStore } from "@/shared/store/app-store";
-import type { PendingInput, SessionInputHistory, SessionInputHistoryItem } from "@/shared/types/ui";
+import type { PendingInput, ProjectRecord, SessionInputHistory, SessionInputHistoryItem } from "@/shared/types/ui";
+
+interface SendTextOptions {
+  model?: string;
+  project?: ProjectRecord;
+}
 
 export function useChatSession(
   sessionId: string,
@@ -37,7 +43,7 @@ export function useChatSession(
     reconnectMessage,
     retryResponse,
     sendMutation,
-    sendText,
+    sendText: streamText,
     stopResponse,
     streamState: liveStreamState,
     canRetryResponse,
@@ -137,19 +143,43 @@ export function useChatSession(
     sessionHistoryQuery.data,
   ]);
 
+  const sendText = (text: string, options?: SendTextOptions) => {
+    const content = text.trim();
+    if (!content) {
+      return Promise.resolve();
+    }
+    const request = options
+      ? createInitialTurnRequest(
+          useAppStore.getState().connection.userId,
+          content,
+          options.model,
+          options.project,
+        )
+      : undefined;
+    return streamText(content, request);
+  };
+
   return {
     blocks,
     inputHistory,
     draft,
     setDraft,
     sendText,
-    sendMessage: () => {
+    sendTurn: (options?: SendTextOptions) => {
       const text = draft.trim();
       if (!text) {
         return Promise.resolve();
       }
       setDraft("");
-      return sendMutation.mutateAsync({ text, appendUserInput: true });
+      const request = options
+        ? createInitialTurnRequest(
+            useAppStore.getState().connection.userId,
+            text,
+            options.model,
+            options.project,
+          )
+        : undefined;
+      return sendMutation.mutateAsync({ text, appendUserInput: true, request });
     },
     retryStream,
     retryResponse,

@@ -126,7 +126,7 @@ try {
   if (serverInfo.auth_enabled) {
     assert(account?.username === smokeUsername, `desktop login did not return the smoke user: ${JSON.stringify(account)}`);
   } else {
-    assert(account?.role === "admin", `user.current did not reflect open-mode desktop admin access: ${JSON.stringify(account)}`);
+    assert(account?.role === "user", `user.current did not reflect open-mode anonymous user role: ${JSON.stringify(account)}`);
   }
   assert(adminVisible === false, "Admin navigation should not be rendered in Talos.");
 

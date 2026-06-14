@@ -75,30 +75,6 @@ async fn test_models() {
 }
 
 #[tokio::test]
-async fn test_create_session_handler_returns_session_payload() {
-    let state = test_state(false);
-
-    let response = create_session_handler(
-        State(state),
-        axum::extract::Extension(test_auth()),
-        Json(
-            serde_json::from_value(serde_json::json!({
-                "context": test_context(),
-                "model": "qwen-plus"
-            }))
-            .expect("request should deserialize"),
-        ),
-    )
-    .await
-    .expect("create session should succeed");
-
-    assert_eq!(response.0["context"]["session_id"], "mock-session");
-    assert!(response.0["project_id"].is_null());
-    assert!(response.0["current_directory"].is_null());
-    assert_eq!(response.0["config"]["llm"]["model"], "qwen-plus");
-}
-
-#[tokio::test]
 async fn test_list_sessions_handler_returns_data_array() {
     let state = test_state(false);
 
@@ -313,7 +289,7 @@ async fn test_http_and_app_server_adapters_share_application_service_contract() 
     let (config, workspace_dir) = isolated_test_config();
     let state = test_state_with_config(config, false);
     let adapter = TalosApplicationAdapter::new(state.app.clone(), 32);
-    let actor = talos_application_service::Actor::full("static-token");
+    let actor = talos_application_service::Actor::regular("static-token");
 
     let put_response = put_memory_file_handler(
         State(state.clone()),

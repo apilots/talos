@@ -373,7 +373,16 @@ pub struct TalosReasoning {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TalosMessageRequest {
     pub input: Vec<TalosInputItem>,
+    #[serde(default)]
     pub workspace_id: Option<String>,
+    #[serde(default)]
+    pub context: Option<TalosContext>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub current_directory: Option<PathBuf>,
 }
 
 /// Token usage values.

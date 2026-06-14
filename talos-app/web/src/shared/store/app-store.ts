@@ -22,6 +22,7 @@ import {
   type UiSlice,
 } from "@/shared/store/ui-slice";
 import { createPersistStorage } from "@/shared/store/persist-storage";
+import type { RuntimeMode } from "@/shared/types/ui";
 
 export interface AppState
   extends ChatSlice,
@@ -63,6 +64,7 @@ export const useAppStore = create<AppState>()(
           connection: {
             ...currentState.connection,
             ...typedState?.connection,
+            runtimeMode: normalizeRuntimeMode(typedState?.connection?.runtimeMode),
           },
         };
       },
@@ -83,4 +85,8 @@ export const useAppStore = create<AppState>()(
 
 export function getConnectionSettings() {
   return useAppStore.getState().connection;
+}
+
+function normalizeRuntimeMode(value: unknown): RuntimeMode {
+  return value === "local" ? "local" : "local";
 }

@@ -37,6 +37,7 @@ pub use mock::MockSessionStore;
 pub trait SessionStore: Send + Sync {
     async fn create_session(
         &self,
+        session_id: Option<&str>,
         context: &TalosContext,
         agent_id: &str,
         default_model: &str,
@@ -284,6 +285,7 @@ impl DatabaseSessionStore {
 impl SessionStore for DatabaseSessionStore {
     async fn create_session(
         &self,
+        session_id: Option<&str>,
         context: &TalosContext,
         agent_id: &str,
         default_model: &str,
@@ -293,7 +295,9 @@ impl SessionStore for DatabaseSessionStore {
         project_id: Option<String>,
         current_directory: Option<PathBuf>,
     ) -> TalosResult<SessionRecord> {
-        let session_id = Self::new_session_id();
+        let session_id = session_id
+            .map(str::to_string)
+            .unwrap_or_else(Self::new_session_id);
         let now = chrono::Utc::now().timestamp_millis();
         let model = requested_model.unwrap_or(default_model).to_string();
         let base_conf = if requested_model.is_some() {

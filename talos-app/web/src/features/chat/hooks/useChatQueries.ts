@@ -6,7 +6,6 @@ import {
   clearSession,
   compactSession,
   createProject,
-  createSession,
   deleteProject,
   deleteSession,
   getActiveTurn,
@@ -20,7 +19,7 @@ import {
   updateSessionProject,
 } from "../api";
 import { useAppStore } from "@/shared/store/app-store";
-import { getEffectiveSessionStatus, resolveProjectRecord } from "@/shared/types/domain";
+import { getEffectiveSessionStatus } from "@/shared/types/domain";
 
 export const chatKeys = {
   all: ["talos"] as const,
@@ -139,26 +138,6 @@ export function useSessionHistoryQuery(sessionId: string) {
     queryKey: chatKeys.sessionHistory(connectionKey, sessionId),
     queryFn: () => getSessionHistory(sessionId),
     enabled: Boolean(sessionId),
-  });
-}
-
-export function useCreateSessionMutation() {
-  const connectionKey = useConnectionKey();
-  const queryClient = useQueryClient();
-  const userId = useAppStore((state) => state.connection.userId);
-  const activeProjectId = useAppStore((state) => state.activeProjectId);
-  const projects = useAppStore((state) => state.projects);
-  return useMutation({
-    mutationFn: ({ model }: { model: string | undefined }) =>
-      createSession(
-        userId,
-        model,
-        resolveProjectRecord(projects, activeProjectId),
-      ),
-    onSuccess: async (session) => {
-      await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
-      await queryClient.setQueryData(chatKeys.session(connectionKey, session.context.session_id), session);
-    },
   });
 }
 

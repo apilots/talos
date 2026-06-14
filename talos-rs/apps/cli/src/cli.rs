@@ -9,9 +9,9 @@ use std::io::Write;
 use std::time::Duration;
 use talos_sdk::{
     now_ms, open_external_url, AppServerClient, AppServerClientConfig, CloudLoginClientKind,
-    CloudLoginStatusResponse, EventSubscribeParams, ProtocolTalosContext, SessionCreateParams,
-    TalosInputItem, TalosMessageRequest, TalosTimelineContent, TalosTimelineDelta,
-    TalosTimelineEventPayload, TalosTimelineItemKind, TalosTimelinePhase, TimelineEventEnvelope,
+    CloudLoginStatusResponse, TalosContext, TalosInputItem, TalosMessageRequest, TalosProvider,
+    TalosSourceType, TalosTimelineContent, TalosTimelineDelta, TalosTimelineEventPayload,
+    TalosTimelineItemKind, TalosTimelinePhase, TimelineEventEnvelope,
 };
 use tracing::{debug, error};
 
@@ -136,64 +136,36 @@ async fn run_app_server_smoke(
 ) -> Result<(), Box<dyn std::error::Error>> {
     client.list_models().await?;
     client.config_read().await?;
-    let session = client
-        .create_session(SessionCreateParams {
-            context: default_chat_context("cli-app-server"),
-            model: None,
-            project_id: None,
-            current_directory: current_cli_directory(),
-        })
-        .await?;
-    client
-        .subscribe_events(EventSubscribeParams {
-            session_id: session.context.session_id,
-            since_event_id: None,
-            replay_limit: Some(32),
-            close_when_idle: None,
-            close_on_terminal: None,
-        })
-        .await?;
+    client.list_sessions(Default::default()).await?;
     Ok(())
 }
 
 async fn run_app_server_turn_smoke(
     client: &mut AppServerClient,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let session = client
-        .create_session(SessionCreateParams {
-            context: default_chat_context("cli-app-server"),
-            model: None,
-            project_id: None,
-            current_directory: current_cli_directory(),
-        })
-        .await?;
-    let session_id = session.context.session_id;
-    client
-        .subscribe_events(EventSubscribeParams {
-            session_id: session_id.clone(),
-            since_event_id: None,
-            replay_limit: Some(32),
-            close_when_idle: None,
-            close_on_terminal: None,
-        })
-        .await?;
-    client
-        .start_turn(
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let mut events = client
+        .send_timeline_events(
             &session_id,
             TalosMessageRequest {
                 input: vec![TalosInputItem::Text {
                     text: "answer with ok".to_string(),
                 }],
                 workspace_id: None,
+                context: Some(default_chat_context("cli-app-server")),
+                model: None,
+                project_id: None,
+                current_directory: current_cli_directory(),
             },
-            Some(format!("cli-app-server-{}", uuid::Uuid::new_v4().simple())),
         )
         .await?;
 
     let mut saw_started = false;
     let mut saw_delta = false;
     for _ in 0..128 {
-        let envelope = client.next_event().await?;
+        let Some(envelope) = events.recv().await else {
+            break;
+        };
         if envelope.session_id != session_id {
             continue;
         }
@@ -227,17 +199,11 @@ async fn execute_app_server_chat_command(
             user,
             stream,
         } => {
-            let session = client
-                .create_session(SessionCreateParams {
-                    context: default_chat_context(user.as_deref().unwrap_or("cli-user")),
-                    model: model.clone(),
-                    project_id: None,
-                    current_directory: current_cli_directory(),
-                })
-                .await?;
-            let request = build_message_request(&message, model, stream);
-            send_and_render_app_server_message(client, &session.context.session_id, request)
-                .await?;
+            let session_id = uuid::Uuid::new_v4().to_string();
+            let mut request = build_message_request(&message, model, stream);
+            request.context = Some(default_chat_context(user.as_deref().unwrap_or("cli-user")));
+            request.current_directory = current_cli_directory();
+            send_and_render_app_server_message(client, &session_id, request).await?;
         }
         ChatCommands::In {
             session_id,
@@ -245,7 +211,9 @@ async fn execute_app_server_chat_command(
             model,
             stream,
         } => {
-            let request = build_message_request(&message, model, stream);
+            let mut request = build_message_request(&message, model, stream);
+            request.context = Some(default_chat_context("cli-user"));
+            request.current_directory = current_cli_directory();
             send_and_render_app_server_message(client, &session_id, request).await?;
         }
         ChatCommands::Recent {
@@ -276,20 +244,6 @@ async fn execute_app_server_session_command(
     cmd: SessionCommands,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match cmd {
-        SessionCommands::Create { model, name: _ } => {
-            let session = client
-                .create_session(SessionCreateParams {
-                    context: default_chat_context("cli-user"),
-                    model,
-                    project_id: None,
-                    current_directory: current_cli_directory(),
-                })
-                .await?;
-            println!(
-                "Session created: {} (model: {})",
-                session.context.session_id, session.config.llm.model
-            );
-        }
         SessionCommands::List { limit, user: _ } => {
             let sessions = client.list_sessions(Default::default()).await?;
             println!("Active Sessions:");
@@ -339,7 +293,9 @@ async fn execute_app_server_session_command(
                     break;
                 }
                 if !input.is_empty() {
-                    let request = build_message_request(input, model.clone(), stream);
+                    let mut request = build_message_request(input, model.clone(), stream);
+                    request.context = Some(default_chat_context("cli-user"));
+                    request.current_directory = current_cli_directory();
                     if let Err(err) =
                         send_and_render_app_server_message(client, &session_id, request).await
                     {
@@ -397,7 +353,7 @@ async fn execute_app_server_info_command() -> Result<(), Box<dyn std::error::Err
 
 fn build_message_request(
     message: &str,
-    _model: Option<String>,
+    model: Option<String>,
     _stream: bool,
 ) -> TalosMessageRequest {
     TalosMessageRequest {
@@ -405,6 +361,10 @@ fn build_message_request(
             text: message.to_string(),
         }],
         workspace_id: None,
+        context: None,
+        model,
+        project_id: None,
+        current_directory: None,
     }
 }
 
@@ -585,14 +545,17 @@ fn display_tool_name(tool_name: &str) -> &str {
     }
 }
 
-fn default_chat_context(user_id: &str) -> ProtocolTalosContext {
-    ProtocolTalosContext {
-        source_type: "cli".to_string(),
-        provider: "cli".to_string(),
-        channel_id: "cli".to_string(),
+fn default_chat_context(user_id: &str) -> TalosContext {
+    TalosContext {
+        source_type: TalosSourceType::Cli,
+        provider: TalosProvider::Cli,
+        user_id: user_id.to_string(),
+        channel_id: Some("cli".to_string()),
         thread_id: None,
         message_id: format!("msg-{}", uuid::Uuid::new_v4().simple()),
         trace_id: format!("trace-{}-{user_id}", uuid::Uuid::new_v4().simple()),
+        project_root: None,
+        environment: None,
     }
 }
 

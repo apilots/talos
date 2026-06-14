@@ -115,10 +115,6 @@ impl RequestIdentity {
         self.auth_disabled
     }
 
-    pub fn has_full_access(&self) -> bool {
-        self.auth_disabled || self.is_admin()
-    }
-
     pub fn with_access_token(mut self, token: impl Into<String>) -> Self {
         self.access_token = Some(token.into());
         self
@@ -202,8 +198,8 @@ pub struct LoginRequest {
     pub password: String,
 }
 
-pub fn default_scopes_for_role(role: UserRole) -> Vec<AuthScope> {
-    let mut scopes = vec![
+pub fn default_scopes_for_role(_role: UserRole) -> Vec<AuthScope> {
+    vec![
         AuthScope::SessionsRead,
         AuthScope::SessionsWrite,
         AuthScope::ProjectsRead,
@@ -214,12 +210,7 @@ pub fn default_scopes_for_role(role: UserRole) -> Vec<AuthScope> {
         AuthScope::MemoryWrite,
         AuthScope::WorkspaceDocsRead,
         AuthScope::WorkspaceDocsWrite,
-    ];
-    if role.is_admin() {
-        scopes.push(AuthScope::UsersRead);
-        scopes.push(AuthScope::UsersWrite);
-    }
-    scopes
+    ]
 }
 
 #[cfg(test)]
@@ -233,5 +224,13 @@ mod tests {
         assert_eq!(identity.user_id, "anonymous");
         assert_eq!(identity.username.as_deref(), Some("anonymous"));
         assert!(identity.auth_disabled);
+    }
+
+    #[test]
+    fn default_scopes_do_not_grant_admin_local_privileges() {
+        assert_eq!(
+            default_scopes_for_role(UserRole::Admin),
+            default_scopes_for_role(UserRole::User)
+        );
     }
 }

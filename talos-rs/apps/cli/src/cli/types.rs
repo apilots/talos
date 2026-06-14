@@ -109,16 +109,6 @@ pub(super) enum ChatCommands {
 
 #[derive(Subcommand)]
 pub(super) enum SessionCommands {
-    /// Create a new session
-    Create {
-        /// Initial model for the session
-        #[arg(short, long)]
-        model: Option<String>,
-        /// Session name
-        #[arg(long)]
-        name: Option<String>,
-    },
-
     /// List all sessions
     List {
         /// Number of recent sessions to show

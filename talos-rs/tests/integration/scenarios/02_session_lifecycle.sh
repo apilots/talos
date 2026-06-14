@@ -21,6 +21,18 @@ if [[ -z "${primary_model}" || -z "${secondary_model}" ]]; then
 fi
 echo "CASE select_models PASS primary=${primary_model} secondary=${secondary_model}"
 
+removed_create_body="$(scenario_report_path removed_create_session_response.json)"
+removed_create_status="$(curl -sS -o "${removed_create_body}" -w "%{http_code}" \
+  -X POST "${GATEWAY_URL}/v1/sessions" \
+  -H "Content-Type: application/json" \
+  -d '{}')"
+log_case_json "explicit_session_create_removed" "{}" "$(cat "${removed_create_body}")"
+if [[ "${removed_create_status}" != "404" && "${removed_create_status}" != "405" ]]; then
+  echo "CASE explicit_session_create_removed FAIL status=${removed_create_status} body=$(cat "${removed_create_body}")"
+  exit 1
+fi
+echo "CASE explicit_session_create_removed PASS status=${removed_create_status}"
+
 create_payload='{
   "context": {
     "source_type": "http",
@@ -34,16 +46,30 @@ create_payload='{
   "model": "__PRIMARY_MODEL__"
 }'
 create_payload="${create_payload/__PRIMARY_MODEL__/${primary_model}}"
-create_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
-  -H "Content-Type: application/json" \
-  -d "${create_payload}")"
-log_case_json "create_session" "${create_payload}" "${create_json}"
+create_id="$(new_session_id)"
+remember_session_context "${create_id}" "${create_payload}"
+create_json="{\"id\":\"${create_id}\"}"
+log_case_json "session_id" "${create_payload}" "${create_json}"
 session_id="$(session_id_from_json "${create_json}")"
 if [[ -z "${session_id}" ]]; then
-  echo "CASE create_session FAIL response=${create_json}"
+  echo "CASE session_id FAIL response=${create_json}"
   exit 1
 fi
-echo "CASE create_session PASS session_id=${session_id}"
+echo "CASE session_id PASS session_id=${session_id}"
+
+first_message_payload='{
+  "input": [{"type":"text","text":"Reply with exactly SESSION_READY."}],
+  "workspace_id": null
+}'
+first_message_json="$(send_message_response "${session_id}" "${first_message_payload}" "session_lifecycle_first_message")"
+log_case_json "first_message" "${first_message_payload}" "${first_message_json}"
+first_message_session_id="$(json_get "${first_message_json}" "session_id")"
+first_message_stop="$(json_get "${first_message_json}" "stop_reason")"
+if [[ "${first_message_session_id}" != "${session_id}" || "${first_message_stop}" == "error" ]]; then
+  echo "CASE first_message FAIL response=${first_message_json}"
+  exit 1
+fi
+echo "CASE first_message PASS session_id=${first_message_session_id}"
 
 detail_json="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}")"
 log_case_json "get_session" "{\"session_id\":\"${session_id}\"}" "${detail_json}"

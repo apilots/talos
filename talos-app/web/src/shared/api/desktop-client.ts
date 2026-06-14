@@ -42,16 +42,20 @@ export function createDesktopTalosClient(
     getActorCredentials: () => actorCredentialsFromToken(getToken()),
   });
 
-  const messages = {
-    send: async (sessionId: string, request: TalosMessageRequest): Promise<TalosMessageAck> => {
+  const turns = {
+    start: async (sessionId: string, request: TalosMessageRequest): Promise<TalosMessageAck> => {
       return client.startTurn({
         session_id: sessionId,
         input: request.input as AppProtocol.ProtocolInputItem[],
         workspace_id: request.workspace_id ?? null,
+        context: toProtocolContext(request.context),
+        model: request.model ?? null,
+        project_id: request.project_id ?? null,
+        current_directory: request.current_directory ?? null,
         client_request_id: createClientRequestId(),
       });
     },
-    sendWithIdempotencyKey: async (
+    startWithIdempotencyKey: async (
       sessionId: string,
       request: TalosMessageRequest,
       idempotencyKey: string,
@@ -60,6 +64,10 @@ export function createDesktopTalosClient(
         session_id: sessionId,
         input: request.input as AppProtocol.ProtocolInputItem[],
         workspace_id: request.workspace_id ?? null,
+        context: toProtocolContext(request.context),
+        model: request.model ?? null,
+        project_id: request.project_id ?? null,
+        current_directory: request.current_directory ?? null,
         client_request_id: idempotencyKey,
       });
     },
@@ -107,7 +115,7 @@ export function createDesktopTalosClient(
         stop();
       }
     }, undefined, afterEventId ?? null, true, true),
-    sendEvents: (
+    startEvents: (
       sessionId: string,
       request: TalosMessageRequest,
       onEvent: (event: TimelineEventEnvelope) => void,
@@ -141,20 +149,6 @@ export function createDesktopTalosClient(
           project_id: query?.project_id ?? null,
           limit: query?.limit ?? null,
           offset: query?.offset ?? null,
-        }),
-      create: (body: Parameters<TalosWebClient["sessions"]["create"]>[0]) =>
-        client.createSession({
-          context: {
-            source_type: "desktop",
-            provider: body.context.provider,
-            channel_id: body.context.channel_id ?? "desktop",
-            thread_id: body.context.thread_id ?? null,
-            message_id: body.context.message_id,
-            trace_id: body.context.trace_id,
-          },
-          model: body.model ?? body.conf?.agent?.model ?? null,
-          project_id: body.project_id ?? null,
-          current_directory: body.current_directory ?? null,
         }),
       get: (sessionId: string) => client.getSession(sessionId),
       patch: (sessionId: string, update: SessionUpdate) =>
@@ -205,7 +199,7 @@ export function createDesktopTalosClient(
       put: (kind: WorkspaceDocKind, request: DocUpdateRequest) =>
         client.writeWorkspaceDoc(kind, request.content, expectedVersionToken(request)),
     },
-    messages,
+    turns,
   } as unknown as TalosWebClient;
 }
 
@@ -221,6 +215,10 @@ async function startTurnAndStream(
     session_id: sessionId,
     input: request.input as AppProtocol.ProtocolInputItem[],
     workspace_id: request.workspace_id ?? null,
+    context: toProtocolContext(request.context),
+    model: request.model ?? null,
+    project_id: request.project_id ?? null,
+    current_directory: request.current_directory ?? null,
     client_request_id: clientRequestId,
   });
   if (!ack.message_id) {
@@ -418,6 +416,22 @@ function toProtocolDirectoryPatch(
   return patch.type === "set"
     ? { type: "set", path: patch.path }
     : { type: "clear" };
+}
+
+function toProtocolContext(
+  context: TalosMessageRequest["context"] | undefined | null,
+): AppProtocol.ProtocolTalosContext | null {
+  if (!context) {
+    return null;
+  }
+  return {
+    source_type: "desktop",
+    provider: context.provider,
+    channel_id: context.channel_id ?? "desktop",
+    thread_id: context.thread_id ?? null,
+    message_id: context.message_id,
+    trace_id: context.trace_id,
+  };
 }
 
 function expectedVersionToken(request: DocUpdateRequest): string | null {

@@ -12,10 +12,8 @@ import type {
   UserDto,
   ProjectPatch,
   ProjectRecord,
-  SessionConf,
   SessionQuery,
   SessionUpdate,
-  TalosContext,
   TalosUsage,
   TimelineEventEnvelope,
   TalosActiveTurn,
@@ -38,14 +36,6 @@ interface ListResponse<T> {
 
 interface AckResponse {
   success: boolean;
-}
-
-interface CreateSessionRequest {
-  context: TalosContext;
-  model?: string | null;
-  conf?: SessionConf | null;
-  project_id?: string | null;
-  current_directory?: string | null;
 }
 
 interface CreateProjectRequest {
@@ -122,11 +112,6 @@ export class TalosClient {
       );
       return response.data;
     },
-    create: (body: CreateSessionRequest) =>
-      this.http.request<TalosSession>(this.url("/v1/sessions"), {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
     get: (sessionId: string) =>
       this.http.request<TalosSession>(this.url(`/v1/sessions/${sessionId}`)),
     patch: async (sessionId: string, update: SessionUpdate): Promise<void> => {
@@ -263,10 +248,10 @@ export class TalosClient {
       }),
   };
 
-  messages = {
-    send: (sessionId: string, request: TalosMessageRequest) =>
-      this.messages.sendWithIdempotencyKey(sessionId, request, createIdempotencyKey()),
-    sendWithIdempotencyKey: (
+  turns = {
+    start: (sessionId: string, request: TalosMessageRequest) =>
+      this.turns.startWithIdempotencyKey(sessionId, request, createIdempotencyKey()),
+    startWithIdempotencyKey: (
       sessionId: string,
       request: TalosMessageRequest,
       idempotencyKey: string,
@@ -291,7 +276,7 @@ export class TalosClient {
         body: JSON.stringify(request),
       }),
     retry: (sessionId: string, request: TalosMessageRetryRequest) =>
-      this.messages.retryWithIdempotencyKey(
+      this.turns.retryWithIdempotencyKey(
         sessionId,
         request,
         `retry_${request.client_message_id}_${request.retry_of_message_id}`,
@@ -339,7 +324,7 @@ export class TalosClient {
       }
 
       try {
-        await this.messages.events(
+        await this.turns.events(
           sessionId,
           afterEventId,
           (record) => {
@@ -362,18 +347,18 @@ export class TalosClient {
         signal?.removeEventListener("abort", abortFromCaller);
       }
     },
-    sendEvents: async (
+    startEvents: async (
       sessionId: string,
       request: TalosMessageRequest,
       onEvent: (event: TimelineEventEnvelope) => void,
       signal?: AbortSignal,
     ): Promise<void> => {
-      const ack = await this.messages.send(sessionId, request);
+      const ack = await this.turns.start(sessionId, request);
       if (!ack.message_id) {
         throw new Error(`Message ack did not include message_id: ${ack.turn_id}`);
       }
 
-      await this.messages.eventsForMessage(sessionId, ack.message_id, onEvent, signal);
+      await this.turns.eventsForMessage(sessionId, ack.message_id, onEvent, signal);
     },
     retryEvents: async (
       sessionId: string,
@@ -381,12 +366,12 @@ export class TalosClient {
       onEvent: (event: TimelineEventEnvelope) => void,
       signal?: AbortSignal,
     ): Promise<void> => {
-      const ack = await this.messages.retry(sessionId, request);
+      const ack = await this.turns.retry(sessionId, request);
       if (!ack.message_id) {
         throw new Error(`Retry ack did not include message_id: ${ack.turn_id}`);
       }
 
-      await this.messages.eventsForMessage(sessionId, ack.message_id, onEvent, signal);
+      await this.turns.eventsForMessage(sessionId, ack.message_id, onEvent, signal);
     },
   };
 

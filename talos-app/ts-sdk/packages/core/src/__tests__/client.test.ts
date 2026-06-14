@@ -71,7 +71,7 @@ describe("TalosClient", () => {
     const streamAdapter: StreamAdapter = { stream };
     const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
 
-    await client.messages.sendEvents(
+    await client.turns.startEvents(
       "session-1",
       {
         input: [{ type: "text", text: "hello" }],
@@ -144,7 +144,7 @@ describe("TalosClient", () => {
     const streamAdapter: StreamAdapter = { stream };
     const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
 
-    await client.messages.eventsForMessage("session-1", "msg-1", onEvent);
+    await client.turns.eventsForMessage("session-1", "msg-1", onEvent);
 
     expect(onEvent).toHaveBeenCalledTimes(1);
     expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
@@ -171,7 +171,7 @@ describe("TalosClient", () => {
     };
     const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
 
-    await client.messages.retry("session-1", {
+    await client.turns.retry("session-1", {
       client_message_id: "client-1",
       retry_of_message_id: "msg-1",
       input: [{ type: "text", text: "retry" }],

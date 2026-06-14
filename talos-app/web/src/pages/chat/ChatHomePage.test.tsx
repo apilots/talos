@@ -10,7 +10,6 @@ import { useAppStore } from "@/shared/store/app-store";
 import { createDefaultProjects } from "@/shared/types/domain";
 import { ChatHomePage } from "./ChatHomePage";
 
-const createSessionMutateAsync = vi.fn();
 const createProjectMutateAsync = vi.fn();
 
 vi.mock("@/features/chat", () => ({
@@ -20,9 +19,7 @@ vi.mock("@/features/chat", () => ({
   useCreateProjectMutation: () => ({
     mutateAsync: createProjectMutateAsync,
   }),
-  useCreateSessionMutation: () => ({
-    mutateAsync: createSessionMutateAsync,
-  }),
+  generateSessionId: () => "session-1",
   useModelsQuery: () => ({
     data: [{ id: "glm-5", name: "GLM-5" }],
   }),

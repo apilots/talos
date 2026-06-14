@@ -28,16 +28,16 @@ create_payload='{
     "trace_id": "trace-messages-http"
   }
 }'
-create_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
-  -H "Content-Type: application/json" \
-  -d "${create_payload}")"
-log_case_json "messages_create_session" "${create_payload}" "${create_json}"
+create_id="$(new_session_id)"
+remember_session_context "${create_id}" "${create_payload}"
+create_json="{\"id\":\"${create_id}\"}"
+log_case_json "messages_session_id" "${create_payload}" "${create_json}"
 session_id="$(session_id_from_json "${create_json}")"
 if [[ -z "${session_id}" ]]; then
-  echo "CASE messages_create_session FAIL response=${create_json}"
+  echo "CASE messages_session_id FAIL response=${create_json}"
   exit 1
 fi
-echo "CASE messages_create_session PASS session_id=${session_id}"
+echo "CASE messages_session_id PASS session_id=${session_id}"
 
 extract_output_text() {
   local response_json="$1"
@@ -131,12 +131,12 @@ echo "DETAIL messages_sse_events_begin"
 head -n 40 "${sse_log}"
 echo "DETAIL messages_sse_events_end"
 
-gone_session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
-  -H "Content-Type: application/json" \
-  -d "${create_payload}")"
+gone_session_id="$(new_session_id)"
+remember_session_context "${gone_session_id}" "${create_payload}"
+gone_session_json="{\"id\":\"${gone_session_id}\"}"
 gone_session_id="$(session_id_from_json "${gone_session_json}")"
 if [[ -z "${gone_session_id}" ]]; then
-  echo "CASE messages_events_cursor_gone_create_session FAIL response=${gone_session_json}"
+  echo "CASE messages_events_cursor_gone_session_id FAIL response=${gone_session_json}"
   exit 1
 fi
 gone_msg_json="$(send_message_response "${gone_session_id}" "${msg_payload}" "cursor_gone_msg")"

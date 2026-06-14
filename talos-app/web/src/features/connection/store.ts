@@ -38,13 +38,14 @@ export function createConnectionSlice(set: ConnectionSliceSetter): ConnectionSli
       authRole: "user",
       authUsername: "Anonymous",
       userId: "anonymous",
-      runtimeMode: "cloud",
+      runtimeMode: "local",
     },
     setConnection: (patch) =>
       set((state) => {
         const nextConnection = {
           ...state.connection,
           ...patch,
+          runtimeMode: normalizeRuntimeMode(patch.runtimeMode ?? state.connection.runtimeMode),
         };
         const changed = Object.keys(patch).some((key) => {
           const typedKey = key as keyof ConnectionState;
@@ -62,4 +63,8 @@ export function createConnectionSlice(set: ConnectionSliceSetter): ConnectionSli
         };
       }),
   };
+}
+
+function normalizeRuntimeMode(value: RuntimeMode): RuntimeMode {
+  return value === "local" ? "local" : "local";
 }

@@ -4,9 +4,9 @@ use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 use talos_sdk::{
     canonical_method, AppServerClient, AppServerClientConfig, EventSubscribeParams,
-    ExpectedFileVersion, ProjectPatch, ProtocolTalosContext, SessionCreateParams, TalosError,
-    TalosInputItem, TalosMessageRequest, TalosTimelineEventType, TimelineEventEnvelope,
-    WorkspaceDocKind,
+    ExpectedFileVersion, ProjectPatch, TalosContext, TalosError, TalosInputItem,
+    TalosMessageRequest, TalosProvider, TalosSourceType, TalosTimelineEventType,
+    TimelineEventEnvelope, WorkspaceDocKind,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
@@ -77,34 +77,32 @@ impl Scenario {
 async fn smoke(client: &mut AppServerClient) -> Result<()> {
     eprintln!("model.list");
     client.list_models().await?;
-    eprintln!("session.create");
-    let session_id = create_session(client).await?;
+    eprintln!("session id");
+    new_session_id(client).await?;
     eprintln!("config.read");
     client.config_read().await?;
     eprintln!("memory.file.list");
     client.list_memory_files().await?;
     eprintln!("workspace.doc.list");
     client.list_workspace_docs().await?;
-    eprintln!("event.subscribe");
-    subscribe_events(client, &session_id).await?;
     Ok(())
 }
 
 async fn cloud_session_cache(client: &mut AppServerClient) -> Result<()> {
     eprintln!("cloud-session-cache model.list");
     client.list_models().await?;
-    eprintln!("cloud-session-cache session.create");
-    create_session(client).await?;
+    eprintln!("cloud-session-cache session id");
+    new_session_id(client).await?;
     Ok(())
 }
 
 async fn replay(client: &mut AppServerClient) -> Result<()> {
-    eprintln!("replay session.create");
-    let session_id = session_id_from_env().unwrap_or(create_session(client).await?);
-    eprintln!("replay event.subscribe");
-    let initial_subscription = subscribe_events(client, &session_id).await?;
+    eprintln!("replay session id");
+    let session_id = session_id_from_env().unwrap_or(new_session_id(client).await?);
     eprintln!("replay turn.start");
     start_turn(client, &session_id).await?;
+    eprintln!("replay event.subscribe");
+    let initial_subscription = subscribe_events(client, &session_id).await?;
     eprintln!("replay collect initial events");
     let initial_events =
         collect_until_terminal(client, &initial_subscription.subscription_id).await?;
@@ -140,14 +138,14 @@ async fn replay(client: &mut AppServerClient) -> Result<()> {
 }
 
 async fn multi_subscriber(client: &mut AppServerClient) -> Result<()> {
-    eprintln!("multi-subscriber session.create");
-    let session_id = session_id_from_env().unwrap_or(create_session(client).await?);
+    eprintln!("multi-subscriber session id");
+    let session_id = session_id_from_env().unwrap_or(new_session_id(client).await?);
+    eprintln!("multi-subscriber turn.start");
+    start_turn(client, &session_id).await?;
     eprintln!("multi-subscriber first subscribe");
     let first = subscribe_events(client, &session_id).await?;
     eprintln!("multi-subscriber second subscribe");
     let second = subscribe_events(client, &session_id).await?;
-    eprintln!("multi-subscriber turn.start");
-    start_turn(client, &session_id).await?;
     eprintln!("multi-subscriber collect events");
     let (first_events, second_events) = collect_two_subscriptions_until_terminal(
         client,
@@ -159,20 +157,20 @@ async fn multi_subscriber(client: &mut AppServerClient) -> Result<()> {
 }
 
 async fn turn_smoke(client: &mut AppServerClient) -> Result<()> {
-    eprintln!("turn-smoke session.create");
-    let session_id = create_session(client).await?;
-    eprintln!("turn-smoke event.subscribe");
-    let subscription = subscribe_events(client, &session_id).await?;
+    eprintln!("turn-smoke session id");
+    let session_id = new_session_id(client).await?;
     eprintln!("turn-smoke turn.start");
     start_turn(client, &session_id).await?;
+    eprintln!("turn-smoke event.subscribe");
+    let subscription = subscribe_events(client, &session_id).await?;
     eprintln!("turn-smoke collect events");
     let events = collect_until_terminal(client, &subscription.subscription_id).await?;
     ensure_turn_event_flow(&events)
 }
 
 async fn active_turn_conflict(client: &mut AppServerClient) -> Result<()> {
-    eprintln!("active-turn-conflict session.create");
-    let session_id = create_session(client).await?;
+    eprintln!("active-turn-conflict session id");
+    let session_id = new_session_id(client).await?;
     eprintln!("active-turn-conflict first turn.start");
     start_turn(client, &session_id).await?;
     eprintln!("active-turn-conflict second turn.start");
@@ -296,7 +294,8 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     )?;
 
     eprintln!("resource-matrix session error mapping");
-    let session_id = create_session(client).await?;
+    let session_id = new_session_id(client).await?;
+    start_turn(client, &session_id).await?;
     let listed_sessions = client.list_sessions(Default::default()).await?;
     if !listed_sessions
         .iter()
@@ -329,18 +328,9 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     Ok(())
 }
 
-async fn create_session(client: &mut AppServerClient) -> Result<String> {
-    let session = client
-        .create_session(SessionCreateParams {
-            context: test_context(),
-            model: std::env::var("TALOS_APP_SERVER_TEST_MODEL")
-                .ok()
-                .filter(|value| !value.trim().is_empty()),
-            project_id: None,
-            current_directory: std::env::current_dir().ok(),
-        })
-        .await?;
-    Ok(session.context.session_id)
+async fn new_session_id(client: &mut AppServerClient) -> Result<String> {
+    let _ = client;
+    Ok(uuid::Uuid::new_v4().to_string())
 }
 
 async fn subscribe_events(
@@ -392,6 +382,12 @@ fn message_request(text: &str) -> TalosMessageRequest {
             text: text.to_string(),
         }],
         workspace_id: None,
+        context: Some(test_talos_context()),
+        model: std::env::var("TALOS_APP_SERVER_TEST_MODEL")
+            .ok()
+            .filter(|value| !value.trim().is_empty()),
+        project_id: None,
+        current_directory: None,
     }
 }
 
@@ -543,14 +539,17 @@ fn session_id_from_env() -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn test_context() -> ProtocolTalosContext {
-    ProtocolTalosContext {
-        source_type: "cli".to_string(),
-        provider: "cli".to_string(),
-        channel_id: "app-server-test-client".to_string(),
+fn test_talos_context() -> TalosContext {
+    TalosContext {
+        source_type: TalosSourceType::Cli,
+        provider: TalosProvider::Cli,
+        user_id: "app-server-test-client".to_string(),
+        channel_id: Some("app-server-test-client".to_string()),
         thread_id: None,
         message_id: format!("msg-{}", uuid::Uuid::new_v4().simple()),
         trace_id: format!("trace-{}", uuid::Uuid::new_v4().simple()),
+        project_root: None,
+        environment: None,
     }
 }
 

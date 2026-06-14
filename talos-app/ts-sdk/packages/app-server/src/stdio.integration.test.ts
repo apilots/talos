@@ -33,34 +33,33 @@ describeIntegration("StdioAppServerClient integration", () => {
     const models = await client.listModels();
     expect(models.length).toBeGreaterThan(0);
 
-    const session = await client.createSession({
-      context: {
-        source_type: "cli",
-        provider: "cli",
-        channel_id: "ts-sdk-integration",
-        thread_id: null,
-        message_id: `msg_${Date.now()}`,
-        trace_id: `trace_${Date.now()}`,
-      },
-      model: null,
-      project_id: null,
-      current_directory: null,
-    });
+    const sessionId = crypto.randomUUID();
 
     const events: AppProtocol.TimelineEventEnvelope[] = [];
     const unsubscribe = client.onEvent((event) => events.push(event));
     try {
       await client.subscribeEvents({
-        session_id: session.context.session_id,
+        session_id: sessionId,
         since_event_id: null,
         replay_limit: 50,
         close_when_idle: null,
         close_on_terminal: null,
       });
       await client.startTurn({
-        session_id: session.context.session_id,
+        session_id: sessionId,
         input: [{ type: "text", text: "Answer exactly: ts-sdk-app-server-ok" }],
         workspace_id: null,
+        context: {
+          source_type: "cli",
+          provider: "cli",
+          channel_id: "ts-sdk-integration",
+          thread_id: null,
+          message_id: `msg_${Date.now()}`,
+          trace_id: `trace_${Date.now()}`,
+        },
+        model: null,
+        project_id: null,
+        current_directory: null,
         client_request_id: "ts-sdk-app-server-smoke",
       });
       await waitFor(() => events.some((event) => event.event.event_type === "turn_completed"), 90_000);

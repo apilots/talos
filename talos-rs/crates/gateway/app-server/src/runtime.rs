@@ -372,7 +372,7 @@ async fn resolve_request_actor(
     request_actor_credentials: Option<ActorCredentials>,
 ) -> Result<Actor, AppServerErrorBody> {
     if !config.auth_enabled {
-        return Ok(Actor::full("anonymous"));
+        return Ok(Actor::regular("anonymous"));
     }
 
     if matches!(
@@ -594,7 +594,6 @@ mod tests {
     struct MockApp {
         dispatched: Mutex<Vec<String>>,
         dispatched_actors: Mutex<Vec<String>>,
-        dispatched_full_access: Mutex<Vec<bool>>,
         cancelled: Mutex<Vec<String>>,
         cancelled_actors: Mutex<Vec<String>>,
         drained: Mutex<usize>,
@@ -617,10 +616,6 @@ mod tests {
                 .lock()
                 .expect("dispatch actor lock")
                 .push(actor.user_id.clone());
-            self.dispatched_full_access
-                .lock()
-                .expect("dispatch access lock")
-                .push(actor.has_full_access());
             Ok(match request.params {
                 ClientRequestParams::TurnStart(params) => json!({
                     "request_id": "req-1",
@@ -784,13 +779,6 @@ mod tests {
                 .as_slice(),
             &["anonymous"]
         );
-        assert_eq!(
-            app.dispatched_full_access
-                .lock()
-                .expect("dispatch access lock")
-                .as_slice(),
-            &[true]
-        );
     }
 
     #[tokio::test]
@@ -871,13 +859,6 @@ mod tests {
                 .expect("dispatch actor lock")
                 .as_slice(),
             &["user-1"]
-        );
-        assert_eq!(
-            app.dispatched_full_access
-                .lock()
-                .expect("dispatch access lock")
-                .as_slice(),
-            &[false]
         );
     }
 

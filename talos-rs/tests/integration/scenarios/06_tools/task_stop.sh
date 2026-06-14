@@ -28,7 +28,7 @@ fi
 export PRIMARY_MODEL="${primary_model}"
 echo "CASE task_stop_select_model PASS model=${primary_model}"
 
-create_session() {
+build_session_context() {
   python3 - <<'PY'
 import json
 import os
@@ -84,16 +84,16 @@ print(data.get("output_text", ""))
 PY
 }
 
-session_payload="$(create_session)"
-session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
-  -H "Content-Type: application/json" \
-  -d "${session_payload}")"
+session_payload="$(build_session_context)"
+session_id="$(new_session_id)"
+remember_session_context "${session_id}" "${session_payload}"
+session_json="{\"id\":\"${session_id}\"}"
 session_id="$(session_id_from_json "${session_json}")"
 if [[ -z "${session_id}" ]]; then
-  echo "CASE task_stop_create_session FAIL response=${session_json}"
+  echo "CASE task_stop_session_id FAIL response=${session_json}"
   exit 1
 fi
-echo "CASE task_stop_create_session PASS session_id=${session_id}"
+echo "CASE task_stop_session_id PASS session_id=${session_id}"
 
 task_input="You must first call tool 'Bash' exactly once with command python3 -c \"import time; time.sleep(10)\" and run_in_background true. Then call tool 'TaskStop' exactly once using the returned task id. After both tool calls, respond with exactly TASK_STOP_OK"
 task_payload="$(build_payload "${task_input}")"

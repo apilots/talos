@@ -332,6 +332,56 @@ session_id_from_json() {
   json_get "${json}" "id"
 }
 
+session_context_payload_path() {
+  local session_id="$1"
+  local safe_session_id
+  safe_session_id="$(printf '%s' "${session_id}" | sed 's#[^A-Za-z0-9_.-]#-#g')"
+  printf '%s/session-contexts/%s.json\n' "${SCENARIO_REPORT_DIR}" "${safe_session_id}"
+}
+
+new_session_id() {
+  python3 - <<'PY'
+import uuid
+
+print(f"sess_{uuid.uuid4().hex}")
+PY
+}
+
+remember_session_context() {
+  local session_id="$1"
+  local create_payload="$2"
+  local payload_path
+  payload_path="$(session_context_payload_path "${session_id}")"
+  mkdir -p "$(dirname "${payload_path}")"
+  printf '%s' "${create_payload}" > "${payload_path}"
+}
+
+message_payload_with_session_context() {
+  local session_id="$1"
+  local payload="$2"
+  local payload_path
+  payload_path="$(session_context_payload_path "${session_id}")"
+  if [[ ! -f "${payload_path}" ]]; then
+    printf '%s\n' "${payload}"
+    return 0
+  fi
+
+  MESSAGE_PAYLOAD="${payload}" SESSION_PAYLOAD_PATH="${payload_path}" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+message_payload = json.loads(os.environ["MESSAGE_PAYLOAD"])
+session_payload = json.loads(Path(os.environ["SESSION_PAYLOAD_PATH"]).read_text())
+
+for key in ("context", "model", "project_id", "current_directory"):
+    if key in session_payload and message_payload.get(key) is None:
+        message_payload[key] = session_payload[key]
+
+print(json.dumps(message_payload, ensure_ascii=False, separators=(",", ":")))
+PY
+}
+
 usage_total_from_json() {
   local json="$1"
   local usage_total
@@ -348,6 +398,7 @@ send_message_ack() {
   local session_id="$1"
   local payload="$2"
   local idempotency_key="${3:-}"
+  payload="$(message_payload_with_session_context "${session_id}" "${payload}")"
   local args=(
     -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages"
     -H "Content-Type: application/json"

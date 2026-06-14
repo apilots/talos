@@ -123,24 +123,31 @@ over JSON-RPC stdio without opening a local port.
 
 ### API Usage
 
-Create a session:
+Start a chat with a client supplied session id:
 ```bash
-curl -X POST http://localhost:8080/v1/sessions \
+SESSION_ID="sess_$(uuidgen | tr '[:upper:]' '[:lower:]' | tr -d '-')"
+
+curl -X POST "http://localhost:8080/v1/sessions/${SESSION_ID}/messages" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-token-here" \
   -d '{
+    "input": [
+      { "type": "text", "text": "Hello, how are you?" }
+    ],
     "context": {
       "source_type": "http",
       "provider": "http",
+      "channel_id": "default",
       "user_id": "user123",
-      "message_id": "msg-create-1",
-      "trace_id": "trace-create-1"
+      "thread_id": null,
+      "message_id": "msg-start-1",
+      "trace_id": "trace-start-1"
     },
     "model": "gpt-4o-mini"
   }'
 ```
 
-Send a message inside a session:
+Send another message inside an existing session:
 ```bash
 curl -X POST http://localhost:8080/v1/sessions/<session_id>/messages \
   -H "Content-Type: application/json" \

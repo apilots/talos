@@ -49,7 +49,7 @@ use self::projects::{
 };
 use self::sessions::{
     cancel_active_turn_handler, clear_session_handler, close_session_handler,
-    compact_session_handler, create_session_handler, delete_session_handler, get_session_handler,
+    compact_session_handler, delete_session_handler, get_session_handler,
     get_session_history_handler, list_sessions_handler, patch_session_handler,
 };
 use self::state::HttpApiState;
@@ -166,10 +166,7 @@ impl HttpServer {
             )
             .route("/v1/user", get(current_user_handler))
             .route("/v1/llm", get(get_llm_handler).put(put_llm_handler))
-            .route(
-                "/v1/sessions",
-                get(list_sessions_handler).post(create_session_handler),
-            )
+            .route("/v1/sessions", get(list_sessions_handler))
             .route(
                 "/v1/projects",
                 get(list_projects_handler).post(create_project_handler),

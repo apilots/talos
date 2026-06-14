@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Check, ChevronDown, FolderOpen, LoaderCircle, Plus, Search, Square, Zap } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, FolderOpen, LoaderCircle, Plus, Search, Shield, Square, Zap } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/shared/lib/cn";
@@ -34,6 +34,7 @@ interface ChatComposerProps {
   reasoningLevel?: ReasoningLevel;
   onReasoningLevelChange?: (level: ReasoningLevel) => void;
   showProjectSelector?: boolean;
+  showRuntimeModeSelector?: boolean;
   compact?: boolean;
 }
 
@@ -42,6 +43,8 @@ interface ChatComposerProps {
 interface DropdownItem {
   value: string;
   label: string;
+  description?: string;
+  disabled?: boolean;
   icon?: React.ReactNode;
 }
 
@@ -85,16 +88,31 @@ function ComposerDropdown({ header, items, value, onChange, triggerIcon, classNa
           <div className="px-3 pb-1 pt-1.5 text-[11px] font-medium text-muted">{header}</div>
           {items.map((item) => (
             <button
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-ink transition hover:bg-muted/10 focus:outline-none"
+              aria-disabled={item.disabled}
+              className={cn(
+                "flex w-full items-start gap-2 px-3 py-2 text-left text-[13px] text-ink transition focus:outline-none",
+                item.disabled ? "cursor-not-allowed opacity-45" : "hover:bg-muted/10",
+              )}
+              disabled={item.disabled}
               key={item.value}
               onClick={() => {
+                if (item.disabled) {
+                  return;
+                }
                 onChange(item.value);
                 setOpen(false);
               }}
               type="button"
             >
-              {item.icon && <span className="shrink-0 text-muted">{item.icon}</span>}
-              <span className="flex-1">{item.label}</span>
+              {item.icon && <span className="mt-0.5 shrink-0 text-muted">{item.icon}</span>}
+              <span className="min-w-0 flex-1">
+                <span className="block">{item.label}</span>
+                {item.description ? (
+                  <span className="mt-0.5 block text-[12px] leading-snug text-muted">
+                    {item.description}
+                  </span>
+                ) : null}
+              </span>
               {item.value === value && <Check size={12} className="shrink-0 text-brand" />}
             </button>
           ))}
@@ -134,6 +152,7 @@ export function ChatComposer({
   reasoningLevel = "medium",
   onReasoningLevelChange,
   showProjectSelector = true,
+  showRuntimeModeSelector = true,
   compact = false,
 }: ChatComposerProps) {
   const { t } = useTranslation(["chat", "common"]);
@@ -142,7 +161,8 @@ export function ChatComposer({
   const [projectSearch, setProjectSearch] = useState("");
   const [addingProject, setAddingProject] = useState(false);
   const [newProjectPath, setNewProjectPath] = useState("");
-  const wrapperRef = useRef<HTMLDivElement>(null);
+  const projectTriggerRef = useRef<HTMLButtonElement>(null);
+  const projectPickerRef = useRef<HTMLDivElement>(null);
   const historyIndexRef = useRef<number | null>(null);
   const historyDraftRef = useRef("");
   const activeInputHistoryItems = useMemo(
@@ -154,10 +174,47 @@ export function ChatComposer({
     [activeInputHistoryItems],
   );
 
+  const closeProjectPicker = () => {
+    setProjectOpen(false);
+    setProjectSearch("");
+    setAddingProject(false);
+    setNewProjectPath("");
+  };
+
   const resetInputHistoryNavigation = () => {
     historyIndexRef.current = null;
     historyDraftRef.current = "";
   };
+
+  useEffect(() => {
+    if (!projectOpen) {
+      return;
+    }
+
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target as Node | null;
+      if (!target) {
+        return;
+      }
+      if (projectTriggerRef.current?.contains(target) || projectPickerRef.current?.contains(target)) {
+        return;
+      }
+      closeProjectPicker();
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        closeProjectPicker();
+      }
+    }
+
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [projectOpen]);
 
   useEffect(() => {
     historyIndexRef.current = null;
@@ -177,6 +234,7 @@ export function ChatComposer({
 
   const showCollapsibleProject = showProjectSelector && !compact;
   const showInlineProject = showProjectSelector && compact;
+  const effectiveRuntimeMode: RuntimeMode = runtimeMode === "local" ? "local" : "local";
   const sendButtonDisabled = isBusy ? false : Boolean(disabled || draft.trim().length === 0);
   const sendButtonLabel = isBusy ? t("common:stopResponse") : t("chat:send");
 
@@ -306,7 +364,7 @@ export function ChatComposer({
   );
 
   return (
-    <div className="relative" ref={wrapperRef}>
+    <div className="relative">
       <Panel className="overflow-visible rounded-[1.5rem] border-border/80 bg-card/95 p-0 backdrop-blur">
         {/* Compact: inline model + project row at top */}
         {showInlineProject && (
@@ -376,6 +434,20 @@ export function ChatComposer({
             <Plus size={13} />
           </button>
 
+          <ComposerDropdown
+            header={t("chat:agentAccessMode")}
+            items={[
+              {
+                value: "full_access",
+                label: t("chat:fullAccess"),
+                description: t("chat:fullAccessDescription"),
+                icon: <Shield size={13} />,
+              },
+            ]}
+            onChange={() => undefined}
+            value="full_access"
+          />
+
           <div className="min-w-4 flex-1" />
 
           {/* Model + Reasoning — non-compact only */}
@@ -408,6 +480,7 @@ export function ChatComposer({
                 <button
                   className="flex items-center gap-2 py-2.5 text-[12px] text-muted outline-none transition hover:text-ink focus:outline-none"
                   onClick={() => setProjectOpen(!projectOpen)}
+                  ref={projectTriggerRef}
                   type="button"
                 >
                   <FolderOpen size={13} className="shrink-0" />
@@ -421,30 +494,42 @@ export function ChatComposer({
                     size={13}
                   />
                 </button>
-                <div className="border-l border-border/40 pl-1">
-                  <ComposerDropdown
-                    header={t("common:runtimeMode")}
-                    items={[
-                      { value: "cloud", label: t("common:cloud") },
-                      { value: "local", label: t("common:localDesktopOnly") },
-                    ]}
-                    onChange={(v) => onRuntimeModeChange(v as RuntimeMode)}
-                    value={runtimeMode}
-                  />
-                </div>
+                {showRuntimeModeSelector && (
+                  <div className="border-l border-border/40 pl-1">
+                    <ComposerDropdown
+                      header={t("common:runtimeMode")}
+                      items={[
+                        { value: "local", label: t("common:local") },
+                        {
+                          value: "cloud",
+                          label: t("common:cloud"),
+                          description: t("common:comingSoon"),
+                          disabled: true,
+                        },
+                      ]}
+                      onChange={(v) => onRuntimeModeChange(v as RuntimeMode)}
+                      value={effectiveRuntimeMode}
+                    />
+                  </div>
+                )}
               </>
             )}
 
-            {/* Session page: no project selector, just runtime mode */}
-            {!showCollapsibleProject && !compact && (
+            {/* Runtime mode without project selector */}
+            {showRuntimeModeSelector && !showCollapsibleProject && !compact && (
               <ComposerDropdown
                 header={t("common:runtimeMode")}
                 items={[
-                  { value: "cloud", label: t("common:cloud") },
-                  { value: "local", label: t("common:localDesktopOnly") },
+                  { value: "local", label: t("common:local") },
+                  {
+                    value: "cloud",
+                    label: t("common:cloud"),
+                    description: t("common:comingSoon"),
+                    disabled: true,
+                  },
                 ]}
                 onChange={(v) => onRuntimeModeChange(v as RuntimeMode)}
-                value={runtimeMode}
+                value={effectiveRuntimeMode}
               />
             )}
           </div>
@@ -453,7 +538,10 @@ export function ChatComposer({
 
       {/* Floating project dropdown — outside Panel so it doesn't shift card height */}
       {showCollapsibleProject && projectOpen && (
-        <div className="absolute left-0 right-0 top-[calc(100%-1px)] z-50 rounded-b-[1.5rem] border border-t-0 border-border/70 bg-card/98 px-2 pb-2 pt-1 shadow-lg backdrop-blur">
+        <div
+          className="absolute left-0 right-0 top-[calc(100%-1px)] z-50 rounded-b-[1.5rem] border border-t-0 border-border/70 bg-card/98 px-2 pb-2 pt-1 shadow-lg backdrop-blur"
+          ref={projectPickerRef}
+        >
           <div className="relative mb-1 mt-1">
             <Search
               className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted"
@@ -477,8 +565,7 @@ export function ChatComposer({
                 key={project.id}
                 onClick={() => {
                   onProjectChange(project.id);
-                  setProjectOpen(false);
-                  setProjectSearch("");
+                  closeProjectPicker();
                 }}
                 type="button"
               >

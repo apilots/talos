@@ -37,16 +37,10 @@ if ! echo "${models_output}" | grep -q "Available models"; then
 fi
 echo "CASE cli_models PASS"
 
-create_output="$(run_cli session create --model "${primary_model}")"
-log_case_json "cli_session_create" "{\"command\":\"session create\",\"model\":\"${primary_model}\"}" "${create_output}"
-session_id="$(echo "${create_output}" | sed -n 's/^Session created: \([^ ]*\).*/\1/p')"
-if [[ -z "${session_id}" ]]; then
-  echo "CASE cli_session_create FAIL output=${create_output}"
-  exit 1
-fi
-echo "CASE cli_session_create PASS session_id=${session_id}"
+session_id="$(new_session_id)"
+echo "CASE cli_session_id PASS session_id=${session_id}"
 
-in_output="$(run_cli chat in "${session_id}" "hello from cli scenario")"
+in_output="$(run_cli chat in "${session_id}" "hello from cli scenario" --model "${primary_model}")"
 log_case_json "cli_chat_in_session" "{\"command\":\"chat in\",\"session_id\":\"${session_id}\",\"input\":\"hello from cli scenario\"}" "${in_output}"
 if [[ -z "${in_output}" || "${in_output}" == Error:* ]]; then
   echo "CASE cli_chat_in_session FAIL output=${in_output}"

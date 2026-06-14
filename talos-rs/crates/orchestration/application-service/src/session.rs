@@ -152,6 +152,7 @@ impl SessionService {
 
     pub async fn create_session(
         &self,
+        session_id: Option<&str>,
         context: TalosContext,
         target_agent: &str,
         model: Option<String>,
@@ -169,6 +170,7 @@ impl SessionService {
         let record = self
             .session_store
             .create_session(
+                session_id,
                 &context,
                 target_agent,
                 &base_model,
@@ -362,7 +364,7 @@ mod tests {
 
         service.update_base_llm(&llm);
         let session = service
-            .create_session(context(), "default", None, None, None, None)
+            .create_session(None, context(), "default", None, None, None, None)
             .await
             .expect("session should be created");
 
@@ -388,6 +390,7 @@ mod tests {
         service.update_base_llm(&llm);
         let session = service
             .create_session(
+                None,
                 context(),
                 "default",
                 Some("session-model".to_string()),
@@ -415,6 +418,7 @@ mod tests {
 
         let original = service
             .create_session(
+                None,
                 context(),
                 "default",
                 Some("session-model".to_string()),

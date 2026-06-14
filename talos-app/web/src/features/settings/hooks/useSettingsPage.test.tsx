@@ -38,7 +38,7 @@ describe("useSettingsPage", () => {
         serverUrl: "http://localhost:8080",
         authToken: "",
         userId: "web-user",
-        runtimeMode: "cloud",
+        runtimeMode: "local",
       },
       locale: "en",
       uiTheme: "light",

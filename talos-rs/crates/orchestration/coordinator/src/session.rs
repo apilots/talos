@@ -298,6 +298,7 @@ impl SessionManager {
         let record = self
             .session_store
             .create_session(
+                None,
                 &context,
                 target_agent,
                 &self.base_model(),

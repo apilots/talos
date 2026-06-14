@@ -56,6 +56,10 @@ impl TurnService {
         }
     }
 
+    pub fn validate_message_request(request: &TalosMessageRequest) -> TalosResult<()> {
+        validate_text_input(&request.input)
+    }
+
     pub async fn submit_message(
         &self,
         session: TalosSession,
@@ -245,6 +249,10 @@ impl TurnService {
         let message_request = TalosMessageRequest {
             input: request.input.clone(),
             workspace_id: request.workspace_id.clone(),
+            context: None,
+            model: None,
+            project_id: None,
+            current_directory: None,
         };
         let request_hash = message_request_hash(&session_id, &message_request)?;
         let idempotency_key = retry_idempotency_key(&request);

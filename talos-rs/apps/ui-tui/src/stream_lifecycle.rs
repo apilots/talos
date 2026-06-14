@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use talos_error::{TalosError, TalosResult};
+use talos_error::TalosResult;
 use talos_sdk::{TalosInputItem, TalosMessageRequest};
 use tokio::sync::mpsc;
 use tracing::error;
@@ -28,15 +28,28 @@ impl TuiApp {
             return Ok(());
         };
 
-        let Some(session_id) = self.session_id.clone() else {
-            return Err(TalosError::ClientError("session is not ready".to_string()));
+        let session_id = match self.session_id.clone() {
+            Some(session_id) => session_id,
+            None => {
+                let session_id = uuid::Uuid::new_v4().to_string();
+                self.session_id = Some(session_id.clone());
+                session_id
+            }
         };
+        let is_first_turn =
+            self.session_usage.total_tokens == 0 && self.active_stream_message_id.is_none();
         let active_summary = summarize_for_queue(&user_message);
         let request = TalosMessageRequest {
             input: vec![TalosInputItem::Text {
                 text: user_message.clone(),
             }],
             workspace_id: None,
+            context: is_first_turn.then(|| self.build_talos_context()),
+            model: is_first_turn
+                .then(|| self.current_model.clone())
+                .filter(|model| !model.is_empty()),
+            project_id: None,
+            current_directory: is_first_turn.then(|| self.startup_directory.clone()),
         };
 
         self.abort_pending_stream_task();

@@ -147,7 +147,7 @@ mod tests {
 
         let detail = service
             .put_doc(
-                &Actor::full("admin"),
+                &Actor::regular("admin"),
                 WorkspaceDocKind::Soul,
                 DocUpdateRequest {
                     content: "soul content".to_string(),
@@ -177,7 +177,7 @@ mod tests {
 
         let error = service
             .put_doc(
-                &Actor::full("admin"),
+                &Actor::regular("admin"),
                 WorkspaceDocKind::Identity,
                 DocUpdateRequest {
                     content: "updated".to_string(),

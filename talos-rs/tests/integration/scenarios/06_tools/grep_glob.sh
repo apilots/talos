@@ -53,7 +53,7 @@ fi
 export PRIMARY_MODEL="${primary_model}"
 echo "CASE grep_glob_select_model PASS model=${primary_model}"
 
-create_session() {
+build_session_context() {
   local channel="$1"
   local user="$2"
   CHANNEL_ID="${channel}" USER_ID="${user}" python3 - <<'PY'
@@ -111,16 +111,16 @@ print(data.get("output_text", ""))
 PY
 }
 
-glob_session_payload="$(create_session "tool-glob" "tool-glob-user")"
-glob_session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
-  -H "Content-Type: application/json" \
-  -d "${glob_session_payload}")"
+glob_session_payload="$(build_session_context "tool-glob" "tool-glob-user")"
+glob_session_id="$(new_session_id)"
+remember_session_context "${glob_session_id}" "${glob_session_payload}"
+glob_session_json="{\"id\":\"${glob_session_id}\"}"
 glob_session_id="$(session_id_from_json "${glob_session_json}")"
 if [[ -z "${glob_session_id}" ]]; then
-  echo "CASE tool_glob_create_session FAIL response=${glob_session_json}"
+  echo "CASE tool_glob_session_id FAIL response=${glob_session_json}"
   exit 1
 fi
-echo "CASE tool_glob_create_session PASS session_id=${glob_session_id}"
+echo "CASE tool_glob_session_id PASS session_id=${glob_session_id}"
 
 glob_input="You must call tool 'Glob' exactly once with pattern docs/*.md. After the tool call, respond with exactly GLOB_OK:${GLOB_FILE}"
 glob_payload="$(build_payload "${glob_input}")"
@@ -143,16 +143,16 @@ fi
 echo "CASE tool_glob PASS"
 echo "DETAIL tool_glob_output=${glob_output}"
 
-grep_session_payload="$(create_session "tool-grep" "tool-grep-user")"
-grep_session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
-  -H "Content-Type: application/json" \
-  -d "${grep_session_payload}")"
+grep_session_payload="$(build_session_context "tool-grep" "tool-grep-user")"
+grep_session_id="$(new_session_id)"
+remember_session_context "${grep_session_id}" "${grep_session_payload}"
+grep_session_json="{\"id\":\"${grep_session_id}\"}"
 grep_session_id="$(session_id_from_json "${grep_session_json}")"
 if [[ -z "${grep_session_id}" ]]; then
-  echo "CASE tool_grep_create_session FAIL response=${grep_session_json}"
+  echo "CASE tool_grep_session_id FAIL response=${grep_session_json}"
   exit 1
 fi
-echo "CASE tool_grep_create_session PASS session_id=${grep_session_id}"
+echo "CASE tool_grep_session_id PASS session_id=${grep_session_id}"
 
 grep_input="You must call tool 'Grep' exactly once with pattern ${GREP_MARKER} and path src. After the tool call, respond with exactly GREP_OK:${GREP_FILE}"
 grep_payload="$(build_payload "${grep_input}")"

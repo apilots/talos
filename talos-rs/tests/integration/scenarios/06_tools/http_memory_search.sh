@@ -27,7 +27,7 @@ fi
 export PRIMARY_MODEL="${primary_model}"
 echo "CASE select_model PASS model=${primary_model}"
 
-create_session() {
+build_session_context() {
   local user_id="$1"
   USER_ID="$user_id" python3 - <<'PY'
 import json
@@ -49,16 +49,16 @@ print(json.dumps(payload, ensure_ascii=False))
 PY
 }
 
-memory_stream_session_payload="$(create_session "memory-user-stream")"
-memory_stream_session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
-  -H "Content-Type: application/json" \
-  -d "${memory_stream_session_payload}")"
+memory_stream_session_payload="$(build_session_context "memory-user-stream")"
+memory_stream_session_id="$(new_session_id)"
+remember_session_context "${memory_stream_session_id}" "${memory_stream_session_payload}"
+memory_stream_session_json="{\"id\":\"${memory_stream_session_id}\"}"
 memory_stream_session_id="$(session_id_from_json "${memory_stream_session_json}")"
 if [[ -z "${memory_stream_session_id}" ]]; then
-  echo "CASE messages_memory_search_stream_create_session FAIL response=${memory_stream_session_json}"
+  echo "CASE messages_memory_search_stream_session_id FAIL response=${memory_stream_session_json}"
   exit 1
 fi
-echo "CASE messages_memory_search_stream_create_session PASS session_id=${memory_stream_session_id}"
+echo "CASE messages_memory_search_stream_session_id PASS session_id=${memory_stream_session_id}"
 
 memory_stream_payload="$(python3 - <<'PY'
 import json

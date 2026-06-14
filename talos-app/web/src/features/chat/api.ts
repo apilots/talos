@@ -70,17 +70,25 @@ export async function getSession(sessionId: string) {
   return getTalosClient().sessions.get(sessionId);
 }
 
-export async function createSession(
+export function generateSessionId() {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+export function createInitialTurnRequest(
   userId: string,
+  text: string,
   model: string | undefined,
   project: ProjectRecord | undefined,
-) {
-  return getTalosClient().sessions.create({
+): TalosMessageRequest {
+  return {
+    input: [{ type: "text", text }],
     context: createContext(userId),
     model,
-    conf: {},
     project_id: project && !isUnboundProject(project.id) ? project.id : undefined,
-  });
+  };
 }
 
 export async function createProject(input: string | CreateProjectInput) {
@@ -163,30 +171,20 @@ export async function recoverSessionLiveTail(sessionId: string, afterEventId?: s
   return getTalosClient().sessions.recover(sessionId, afterEventId);
 }
 
-export async function sendMessage(sessionId: string, text: string) {
-  const request: TalosMessageRequest = {
-    input: [{ type: "text", text }],
-  };
-  return getTalosClient().messages.send(sessionId, request);
-}
-
 export async function sendTimelineEvents(
   sessionId: string,
-  text: string,
+  request: TalosMessageRequest,
   onEvent: (event: TimelineEventEnvelope) => void,
   signal?: AbortSignal,
   onAcceptedMessageId?: (messageId: string) => void,
 ) {
-  const request: TalosMessageRequest = {
-    input: [{ type: "text", text }],
-  };
   const client = getTalosClient();
-  const ack = await client.messages.send(sessionId, request);
+  const ack = await client.turns.start(sessionId, request);
   if (!ack.message_id) {
     throw new Error(`Message ack did not include message_id: ${ack.turn_id}`);
   }
   onAcceptedMessageId?.(ack.message_id);
-  return client.messages.eventsForMessage(sessionId, ack.message_id, onEvent, signal);
+  return client.turns.eventsForMessage(sessionId, ack.message_id, onEvent, signal);
 }
 
 export async function retryTimelineEvents(
@@ -197,12 +195,12 @@ export async function retryTimelineEvents(
   onAcceptedMessageId?: (messageId: string) => void,
 ) {
   const client = getTalosClient();
-  const ack = await client.messages.retry(sessionId, request);
+  const ack = await client.turns.retry(sessionId, request);
   if (!ack.message_id) {
     throw new Error(`Retry ack did not include message_id: ${ack.turn_id}`);
   }
   onAcceptedMessageId?.(ack.message_id);
-  return client.messages.eventsForMessage(sessionId, ack.message_id, onEvent, signal);
+  return client.turns.eventsForMessage(sessionId, ack.message_id, onEvent, signal);
 }
 
 export async function subscribeTimelineEventsForMessage(
@@ -212,7 +210,7 @@ export async function subscribeTimelineEventsForMessage(
   signal?: AbortSignal,
   afterEventId?: string,
 ) {
-  return getTalosClient().messages.eventsForMessage(
+  return getTalosClient().turns.eventsForMessage(
     sessionId,
     messageId,
     onEvent,

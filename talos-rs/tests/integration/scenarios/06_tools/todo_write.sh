@@ -30,7 +30,7 @@ fi
 export PRIMARY_MODEL="${primary_model}"
 echo "CASE todo_write_select_model PASS model=${primary_model}"
 
-create_session() {
+build_session_context() {
   python3 - <<'PY'
 import json
 import os
@@ -86,16 +86,16 @@ print(data.get("output_text", ""))
 PY
 }
 
-session_payload="$(create_session)"
-session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
-  -H "Content-Type: application/json" \
-  -d "${session_payload}")"
+session_payload="$(build_session_context)"
+session_id="$(new_session_id)"
+remember_session_context "${session_id}" "${session_payload}"
+session_json="{\"id\":\"${session_id}\"}"
 session_id="$(session_id_from_json "${session_json}")"
 if [[ -z "${session_id}" ]]; then
-  echo "CASE todo_write_create_session FAIL response=${session_json}"
+  echo "CASE todo_write_session_id FAIL response=${session_json}"
   exit 1
 fi
-echo "CASE todo_write_create_session PASS session_id=${session_id}"
+echo "CASE todo_write_session_id PASS session_id=${session_id}"
 
 todo_input="You must call tool 'TodoWrite' exactly once with a todo item id ${TODO_ID}, content placeholder test todo only, status in_progress. After the tool call, respond with exactly TODO_WRITE_OK:${TODO_ID}"
 todo_payload="$(build_payload "${todo_input}")"

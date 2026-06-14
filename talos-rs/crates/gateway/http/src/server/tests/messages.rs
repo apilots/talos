@@ -10,6 +10,10 @@ async fn test_submit_message_command_returns_async_ack() {
             text: "hello".to_string(),
         }],
         workspace_id: None,
+        context: None,
+        model: None,
+        project_id: None,
+        current_directory: None,
     };
 
     let result = submit_message_command(
@@ -98,6 +102,52 @@ async fn test_session_message_handler_reuses_idempotent_ack() {
 }
 
 #[tokio::test]
+async fn test_session_message_handler_rejects_empty_input_before_session_creation() {
+    let state = test_state_with_event_store(false, Arc::new(RecordingEventStore::default()));
+    let app = Router::new()
+        .route(
+            "/v1/sessions/:session_id/messages",
+            post(session_message_handler),
+        )
+        .layer(axum::Extension(test_auth()))
+        .with_state(state);
+    let body = serde_json::json!({
+        "input": [],
+        "context": {
+            "source_type": "http",
+            "provider": "http",
+            "channel_id": "test-channel",
+            "user_id": "empty-input-user",
+            "thread_id": null,
+            "message_id": "msg-empty-input",
+            "trace_id": "trace-empty-input"
+        }
+    })
+    .to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/sessions/empty-input-session/messages")
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should return validation error");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let response_body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("response body should be readable");
+    let payload: Value = serde_json::from_slice(&response_body).expect("body should be json");
+    assert!(payload
+        .to_string()
+        .contains("input must include at least one non-empty text item"));
+}
+
+#[tokio::test]
 async fn test_session_message_handler_rejects_idempotency_hash_conflict() {
     let event_store = Arc::new(RecordingEventStore::default());
     let state = test_state_with_event_store(false, event_store);
@@ -165,6 +215,10 @@ async fn test_submit_message_command_timeout_stores_failed_idempotency() {
             text: "hello".to_string(),
         }],
         workspace_id: None,
+        context: None,
+        model: None,
+        project_id: None,
+        current_directory: None,
     };
     let mut headers = HeaderMap::new();
     headers.insert("idempotency-key", "timeout-key".parse().unwrap());

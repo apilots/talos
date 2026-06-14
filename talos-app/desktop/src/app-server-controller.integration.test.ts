@@ -110,7 +110,19 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
 
     try {
       await controller.connect();
-      const session = await rendererClient.createSession({
+      const sessionId = crypto.randomUUID();
+
+      await rendererClient.subscribeEvents({
+        session_id: sessionId,
+        since_event_id: null,
+        replay_limit: 50,
+        close_when_idle: null,
+        close_on_terminal: null,
+      });
+      await rendererClient.startTurn({
+        session_id: sessionId,
+        input: [{ type: "text", text: "Answer exactly: desktop-crash-recovery-before" }],
+        workspace_id: null,
         context: {
           source_type: "cli",
           provider: "cli",
@@ -122,19 +134,6 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
         model: null,
         project_id: null,
         current_directory: null,
-      });
-
-      await rendererClient.subscribeEvents({
-        session_id: session.context.session_id,
-        since_event_id: null,
-        replay_limit: 50,
-        close_when_idle: null,
-        close_on_terminal: null,
-      });
-      await rendererClient.startTurn({
-        session_id: session.context.session_id,
-        input: [{ type: "text", text: "Answer exactly: desktop-crash-recovery-before" }],
-        workspace_id: null,
         client_request_id: "desktop-crash-recovery-before",
       });
       await waitForEvent(
@@ -151,15 +150,19 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
         (request) => request.method === "event.subscribe",
       );
       expect(replaySubscribe?.params).toMatchObject({
-        session_id: session.context.session_id,
+        session_id: sessionId,
         since_event_id: lastEventId,
         replay_limit: 50,
       });
 
       await rendererClient.startTurn({
-        session_id: session.context.session_id,
+        session_id: sessionId,
         input: [{ type: "text", text: "Answer exactly: desktop-crash-recovery-after" }],
         workspace_id: null,
+        context: null,
+        model: null,
+        project_id: null,
+        current_directory: null,
         client_request_id: "desktop-crash-recovery-after",
       });
       await waitForEvent(

@@ -21,6 +21,10 @@ fn test_talos_roundtrip() {
             text: "hello".to_string(),
         }],
         workspace_id: Some("workspace-1".to_string()),
+        context: None,
+        model: None,
+        project_id: None,
+        current_directory: None,
     };
 
     let encoded = serde_json::to_string(&req).unwrap();

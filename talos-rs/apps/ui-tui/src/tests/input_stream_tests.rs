@@ -263,10 +263,10 @@ async fn test_submit_input_restores_pasted_blocks_when_queue_is_full() {
 }
 
 #[tokio::test]
-async fn test_app_server_initialize_creates_session_and_models() {
+async fn test_app_server_initialize_loads_models_without_session() {
     let mut app = create_app_server_app();
     app.initialize_session().await;
-    assert_eq!(app.session_id.as_deref(), Some("sess-test"));
+    assert_eq!(app.session_id.as_deref(), None);
     assert!(app.available_models.iter().any(|m| m == "qwen-plus"));
     assert_eq!(app.connection_status, "connected");
 }
@@ -277,7 +277,7 @@ async fn test_app_server_initialize_retries_model_loading_before_succeeding() {
 
     app.initialize_session().await;
 
-    assert_eq!(app.session_id.as_deref(), Some("sess-test"));
+    assert_eq!(app.session_id.as_deref(), None);
     assert_eq!(app.connection_status, "connected");
     assert!(app
         .right_panel_events
@@ -286,17 +286,17 @@ async fn test_app_server_initialize_retries_model_loading_before_succeeding() {
 }
 
 #[tokio::test]
-async fn test_app_server_initialize_retries_session_creation_before_succeeding() {
-    let mut app = create_app_server_app_with_create_session_failures(1);
+async fn test_app_server_initialize_does_not_create_session() {
+    let mut app = create_app_server_app();
 
     app.initialize_session().await;
 
-    assert_eq!(app.session_id.as_deref(), Some("sess-test"));
+    assert_eq!(app.session_id.as_deref(), None);
     assert_eq!(app.connection_status, "connected");
     assert!(app
         .right_panel_events
         .iter()
-        .any(|event| event.contains("session create retry 2/5")));
+        .any(|event| event.contains("draft chat ready")));
 }
 
 #[tokio::test]
@@ -324,6 +324,7 @@ async fn test_compact_command_triggers_session_compaction() {
     let gateway_client: Arc<dyn GatewayClient> = client;
     let mut app = TuiApp::new_with_gateway_client(gateway_client);
     app.initialize_session().await;
+    app.session_id = Some("sess-test".to_string());
     app.input_buffer = "/compact".to_string();
     app.cursor_index = app.input_buffer.chars().count();
 
@@ -351,6 +352,7 @@ async fn test_clear_command_resets_local_chat_and_session_usage() {
     let gateway_client: Arc<dyn GatewayClient> = client;
     let mut app = TuiApp::new_with_gateway_client(gateway_client);
     app.initialize_session().await;
+    app.session_id = Some("sess-test".to_string());
     app.session_usage = TalosUsage {
         input_tokens: 20,
         output_tokens: 10,
@@ -397,6 +399,7 @@ async fn test_status_command_displays_cache_usage_metrics() {
     let gateway_client: Arc<dyn GatewayClient> = client;
     let mut app = TuiApp::new_with_gateway_client(gateway_client);
     app.initialize_session().await;
+    app.session_id = Some("sess-test".to_string());
     app.session_usage = TalosUsage {
         input_tokens: 12,
         output_tokens: 5,
@@ -673,6 +676,7 @@ async fn test_timeout_reconnects_active_stream_instead_of_retrying_turn() {
     let client = Arc::new(MockGatewayClient::with_active_reconnect_events(events));
     let mut app = TuiApp::new_with_gateway_client(client.clone());
     app.initialize_session().await;
+    app.session_id = Some("sess-test".to_string());
     app.in_flight = true;
     app.active_message_raw = Some("slow request".to_string());
     app.active_user_idx = Some(app.push_block(ChatRole::User, "slow request".to_string()));

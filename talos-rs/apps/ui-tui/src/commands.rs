@@ -2,7 +2,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use talos_error::{TalosError, TalosResult};
-use talos_sdk::SessionCreateParams;
 use tokio::sync::mpsc;
 use tracing::error;
 
@@ -273,11 +272,6 @@ impl TuiApp {
             return;
         };
 
-        if self.session_id.is_none() {
-            self.start_session_connect();
-            return;
-        }
-
         if let Err(err) = self
             .start_stream_for_message(next_message.text.clone())
             .await
@@ -426,27 +420,19 @@ impl TuiApp {
     }
 
     pub(crate) fn switch_model_command(&mut self, requested: String) -> TalosResult<()> {
+        if self.session_id.is_none() {
+            self.current_model = requested.clone();
+            self.push_right_event(format!("draft model set: {}", requested));
+            return Ok(());
+        }
         let Some(client) = self.gateway_client.clone() else {
             return Err(TalosError::ClientError(
                 "missing app-server client".to_string(),
             ));
         };
-        let session_id = self.session_id.clone();
-        let context = self.build_session_context();
-        let current_directory = Some(self.startup_directory.clone());
+        let session_id = self.session_id.clone().expect("session checked above");
         self.spawn_command_task(format!("model switch started: {}", requested), async move {
-            let result = if let Some(session_id) = session_id {
-                client.update_session_model(&session_id, &requested).await
-            } else {
-                client
-                    .create_session(&SessionCreateParams {
-                        context,
-                        model: Some(requested.clone()),
-                        project_id: None,
-                        current_directory,
-                    })
-                    .await
-            };
+            let result = client.update_session_model(&session_id, &requested).await;
             CommandUpdate::ModelSwitched { requested, result }
         })
     }
@@ -592,29 +578,22 @@ impl TuiApp {
         else {
             return;
         };
+        if self.session_id.is_none() {
+            self.current_model = model.clone();
+            self.show_model_picker = false;
+            self.push_right_event(format!("draft model set: {}", model));
+            return;
+        }
         let Some(client) = self.gateway_client.clone() else {
             self.show_model_picker = false;
             return;
         };
-        let session_id = self.session_id.clone();
+        let session_id = self.session_id.clone().expect("session checked above");
         let requested = model.clone();
-        let context = self.build_session_context();
-        let current_directory = Some(self.startup_directory.clone());
         let _ = self.spawn_command_task(
             format!("model picker switching to: {}", model),
             async move {
-                let result = if let Some(session_id) = session_id {
-                    client.update_session_model(&session_id, &requested).await
-                } else {
-                    client
-                        .create_session(&SessionCreateParams {
-                            context,
-                            model: Some(requested.clone()),
-                            project_id: None,
-                            current_directory,
-                        })
-                        .await
-                };
+                let result = client.update_session_model(&session_id, &requested).await;
                 CommandUpdate::ModelPickerSwitched { requested, result }
             },
         );
@@ -683,75 +662,6 @@ impl TuiApp {
         });
         self.pending_command_task = Some(handle);
         Ok(())
-    }
-
-    pub(crate) async fn ensure_session(&mut self) -> TalosResult<String> {
-        if let Some(session_id) = self.session_id.clone() {
-            return Ok(session_id);
-        }
-
-        let Some(client) = self.gateway_client.clone() else {
-            return Err(TalosError::ClientError(
-                "missing app-server client".to_string(),
-            ));
-        };
-
-        let context = self.build_session_context();
-        let model = if self.current_model.is_empty() {
-            None
-        } else {
-            Some(self.current_model.clone())
-        };
-        let params = SessionCreateParams {
-            context,
-            model,
-            project_id: None,
-            current_directory: Some(self.startup_directory.clone()),
-        };
-
-        let created = client.create_session(&params).await?;
-        self.apply_session_snapshot(&created);
-        self.connection_status = "connected".to_string();
-        Ok(created.context.session_id)
-    }
-
-    pub(crate) fn start_session_connect(&mut self) {
-        if self.session_id.is_some() || self.pending_session_connect.is_some() {
-            return;
-        }
-
-        let Some(client) = self.gateway_client.clone() else {
-            self.push_block(ChatRole::System, "Gateway client unavailable.".to_string());
-            return;
-        };
-
-        let model = if self.current_model.is_empty() {
-            None
-        } else {
-            Some(self.current_model.clone())
-        };
-        let context = self.build_session_context();
-        let current_directory = Some(self.startup_directory.clone());
-        let (tx, rx) = mpsc::channel(1);
-        self.pending_session_connect = Some(rx);
-        self.connection_status = "connecting".to_string();
-        self.push_right_event("session create started".to_string());
-
-        let handle = tokio::spawn(async move {
-            let result = client
-                .create_session(&SessionCreateParams {
-                    context,
-                    model,
-                    project_id: None,
-                    current_directory,
-                })
-                .await
-                .map(|created| created.context.session_id);
-            if tx.send(result).await.is_err() {
-                error!("failed to deliver create session result to TUI task");
-            }
-        });
-        self.pending_session_task = Some(handle);
     }
 
     pub(crate) fn is_close_timed_out(&self) -> bool {

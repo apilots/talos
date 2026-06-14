@@ -63,7 +63,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::ClientCapabilities>());
     output.push_str(&export::<crate::requests::ActorCredentials>());
     output.push_str(&export::<crate::requests::ActorCredential>());
-    output.push_str(&export::<crate::requests::SessionCreateParams>());
     output.push_str(&export::<crate::requests::SessionListParams>());
     output.push_str(&export::<crate::requests::SessionReadParams>());
     output.push_str(&export::<crate::requests::SessionPatchParams>());

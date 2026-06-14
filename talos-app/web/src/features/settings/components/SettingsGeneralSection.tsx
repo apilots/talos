@@ -58,9 +58,9 @@ export function SettingsGeneralSection({
               }
               value={draft.runtimeMode}
             >
-              <option value="cloud">{t("common:cloud")}</option>
-              <option disabled value="local">
-                {t("common:localDesktopOnly")}
+              <option value="local">{t("common:local")}</option>
+              <option disabled value="cloud">
+                {t("common:cloud")}
               </option>
             </select>
             <p className="mt-2 text-xs text-muted">{t("settings:fields.runtimeDetail")}</p>

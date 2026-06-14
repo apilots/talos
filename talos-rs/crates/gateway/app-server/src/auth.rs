@@ -69,12 +69,9 @@ impl ActorCredentialValidator for AuthServiceCredentialValidator {
 }
 
 fn actor_from_identity(identity: &RequestIdentity) -> Actor {
-    let actor = if identity.has_full_access() {
-        Actor::full(identity.user_id.clone())
-    } else {
-        Actor::regular(identity.user_id.clone())
-    }
-    .with_username(identity.username.clone());
+    let actor = Actor::regular(identity.user_id.clone())
+        .with_username(identity.username.clone())
+        .with_role(identity.role);
     match identity.access_token.clone() {
         Some(token) => actor.with_access_token(token),
         None => actor,

@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use talos_error::{TalosError, TalosResult};
 use talos_sdk::{
-    AppServerClient, ModelInfo, SessionCreateParams, SessionHistorySnapshot, TalosMessageRequest,
-    TalosSession, TimelineActiveTurnSnapshot, TimelineEventEnvelope, TimelineRecoverySnapshot,
+    AppServerClient, ModelInfo, SessionHistorySnapshot, TalosMessageRequest, TalosSession,
+    TimelineActiveTurnSnapshot, TimelineEventEnvelope, TimelineRecoverySnapshot,
 };
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
@@ -11,7 +11,6 @@ use tokio::sync::Mutex;
 pub trait GatewayClient: Send + Sync {
     async fn list_models(&self) -> TalosResult<Vec<ModelInfo>>;
     async fn list_sessions(&self) -> TalosResult<Vec<TalosSession>>;
-    async fn create_session(&self, params: &SessionCreateParams) -> TalosResult<TalosSession>;
     async fn get_session(&self, session_id: &str) -> TalosResult<TalosSession>;
     async fn close_session(&self, session_id: &str) -> TalosResult<()>;
     async fn delete_session(&self, session_id: &str) -> TalosResult<()>;
@@ -52,10 +51,6 @@ impl GatewayClient for Mutex<AppServerClient> {
 
     async fn list_sessions(&self) -> TalosResult<Vec<TalosSession>> {
         self.lock().await.list_sessions(Default::default()).await
-    }
-
-    async fn create_session(&self, params: &SessionCreateParams) -> TalosResult<TalosSession> {
-        self.lock().await.create_session(params.clone()).await
     }
 
     async fn get_session(&self, session_id: &str) -> TalosResult<TalosSession> {

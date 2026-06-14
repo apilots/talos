@@ -381,7 +381,6 @@
     "ClientMethod": {
       "enum": [
         "initialize",
-        "session.create",
         "session.list",
         "session.read",
         "session.patch",
@@ -457,24 +456,6 @@
             },
             "params": {
               "$ref": "#/definitions/InitializeParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "session.create"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/SessionCreateParams"
             }
           },
           "required": [
@@ -2207,38 +2188,6 @@
       ],
       "type": "object"
     },
-    "SessionCreateParams": {
-      "properties": {
-        "context": {
-          "$ref": "#/definitions/ProtocolTalosContext"
-        },
-        "current_directory": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "model": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "project_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "context"
-      ],
-      "type": "object"
-    },
     "SessionDeleteParams": {
       "properties": {
         "session_id": {
@@ -3661,11 +3610,43 @@
             "null"
           ]
         },
+        "context": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProtocolTalosContext"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "current_directory": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "input": {
           "items": {
             "$ref": "#/definitions/ProtocolInputItem"
           },
           "type": "array"
+        },
+        "model": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "session_id": {
           "type": "string"

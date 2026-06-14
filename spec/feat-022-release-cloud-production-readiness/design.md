@@ -78,7 +78,7 @@ ActorCredential::ExistingSessionToken { token }
 如果实现仍需要保护 Desktop main 与 app-server sidecar 的本地连接，可以保留或新增 internal-only handshake，但必须满足：
 
 - 不出现在 `ActorCredential` / `ActorCredentials`。
-- 不调用 `Actor::regular` / `Actor::full`。
+- 不构造业务 `Actor`。
 - 不允许访问业务方法。
 - 不参与 session、workspace、memory、models、chat 的权限判断。
 - 不作为 Cloud token refresh 或 fallback。
@@ -278,7 +278,7 @@ async fn resolve_request_actor(
     credentials: Option<ActorCredentials>,
 ) -> ProtocolResult<Actor> {
     if !config.auth_enabled {
-        return Ok(Actor::full("anonymous"));
+        return Ok(Actor::regular("anonymous"));
     }
 
     if is_session_cache_method(method) && credentials.is_none() {

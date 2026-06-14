@@ -1,9 +1,7 @@
 import { useLocation, useNavigate } from "react-router-dom";
 
 import {
-  useCreateSessionMutation,
   useDeleteSessionMutation,
-  useModelsQuery,
   useSessionsQuery,
 } from "../hooks/useChatQueries";
 import { logoutUser } from "@/features/auth";
@@ -14,8 +12,6 @@ import { Sidebar } from "@/widgets/sidebar/Sidebar";
 export function SidebarContainer() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { data: models } = useModelsQuery();
-  const createSession = useCreateSessionMutation();
   const deleteSession = useDeleteSessionMutation();
   const threadFilter = useAppStore((state) => state.threadFilter);
   const setThreadFilter = useAppStore((state) => state.setThreadFilter);
@@ -66,11 +62,7 @@ export function SidebarContainer() {
         }
       }}
       onCreateThread={async () => {
-        const model = models?.[0]?.id;
-        const session = await createSession.mutateAsync({
-          model,
-        });
-        navigate(`/sessions/${session.context.session_id}`);
+        navigate("/");
       }}
       onCycleThreadFilter={() =>
         setThreadFilter(

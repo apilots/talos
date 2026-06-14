@@ -33,19 +33,14 @@ if [[ -z "${primary_model}" ]]; then
 fi
 echo "CASE cli_stream_select_model PASS model=${primary_model}"
 
-create_output="$(run_cli session create --model "${primary_model}")"
-session_id="$(echo "${create_output}" | sed -n 's/^Session created: \([^ ]*\).*/\1/p')"
-if [[ -z "${session_id}" ]]; then
-  echo "CASE cli_stream_session_create FAIL output=${create_output}"
-  exit 1
-fi
-echo "CASE cli_stream_session_create PASS session_id=${session_id}"
+session_id="$(new_session_id)"
+echo "CASE cli_stream_session_id PASS session_id=${session_id}"
 
 stream_stdout="$(scenario_report_path cli_stream_stdout.log)"
 stream_stderr="$(scenario_report_path cli_stream_stderr.log)"
 stream_input="You must call Bash tool exactly once with command ls and return raw output inside <tool_output></tool_output>."
 
-run_cli chat in "${session_id}" "${stream_input}" --stream \
+run_cli chat in "${session_id}" "${stream_input}" --model "${primary_model}" --stream \
   >"${stream_stdout}" 2>"${stream_stderr}"
 
 stdout_text="$(cat "${stream_stdout}")"

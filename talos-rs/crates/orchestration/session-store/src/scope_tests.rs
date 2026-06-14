@@ -98,6 +98,7 @@ async fn test_create_session_sets_default_title() {
 
     let session = store
         .create_session(
+            None,
             &sample_context(),
             "agent-a",
             "qwen-max",
@@ -127,6 +128,7 @@ async fn test_reset_session_record_clears_title_message_count_and_usage() {
 
     let session = store
         .create_session(
+            None,
             &sample_context(),
             "agent-a",
             "qwen-max",
@@ -186,6 +188,7 @@ async fn test_delete_session_record_removes_session() {
 
     let session = store
         .create_session(
+            None,
             &sample_context(),
             "agent-a",
             "qwen-max",
@@ -268,6 +271,7 @@ async fn test_list_session_records_filters_by_project_id() {
 
     let first = store
         .create_session(
+            None,
             &sample_context(),
             "agent-a",
             "qwen-max",
@@ -281,6 +285,7 @@ async fn test_list_session_records_filters_by_project_id() {
         .expect("create first session should succeed");
     let second = store
         .create_session(
+            None,
             &sample_context(),
             "agent-a",
             "qwen-max",
@@ -317,6 +322,7 @@ async fn test_list_session_records_respects_limit_and_offset() {
 
     let first = store
         .create_session(
+            None,
             &sample_context(),
             "agent-a",
             "qwen-max",
@@ -331,6 +337,7 @@ async fn test_list_session_records_respects_limit_and_offset() {
     tokio::time::sleep(std::time::Duration::from_millis(2)).await;
     let second = store
         .create_session(
+            None,
             &sample_context(),
             "agent-a",
             "qwen-max",
@@ -345,6 +352,7 @@ async fn test_list_session_records_respects_limit_and_offset() {
     tokio::time::sleep(std::time::Duration::from_millis(2)).await;
     let third = store
         .create_session(
+            None,
             &sample_context(),
             "agent-a",
             "qwen-max",
@@ -401,6 +409,7 @@ async fn test_list_projects_returns_session_count() {
 
     store
         .create_session(
+            None,
             &sample_context(),
             "agent-a",
             "qwen-max",

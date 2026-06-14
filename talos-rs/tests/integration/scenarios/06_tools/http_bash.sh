@@ -46,7 +46,7 @@ print(json.dumps(payload, ensure_ascii=False))
 PY
 }
 
-create_session() {
+build_session_context() {
   local user_id="$1"
   USER_ID="$user_id" python3 - <<'PY'
 import json
@@ -89,16 +89,16 @@ print(data.get("output_text", ""))
 PY
 }
 
-tool_session_payload="$(create_session "tool-user")"
-tool_session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
-  -H "Content-Type: application/json" \
-  -d "${tool_session_payload}")"
+tool_session_payload="$(build_session_context "tool-user")"
+tool_session_id="$(new_session_id)"
+remember_session_context "${tool_session_id}" "${tool_session_payload}"
+tool_session_json="{\"id\":\"${tool_session_id}\"}"
 tool_session_id="$(session_id_from_json "${tool_session_json}")"
 if [[ -z "${tool_session_id}" ]]; then
-  echo "CASE messages_tool_exec_create_session FAIL response=${tool_session_json}"
+  echo "CASE messages_tool_exec_session_id FAIL response=${tool_session_json}"
   exit 1
 fi
-echo "CASE messages_tool_exec_create_session PASS session_id=${tool_session_id}"
+echo "CASE messages_tool_exec_session_id PASS session_id=${tool_session_id}"
 
 tool_input="You must call tool 'Bash' exactly once with command ls, then return the raw stdout inside <tool_output></tool_output>."
 tool_payload="$(build_payload "${tool_input}")"
@@ -132,16 +132,16 @@ echo "DETAIL messages_tool_exec_tool_result_count=${tool_result_count}"
 echo "DETAIL messages_tool_exec_tool_call_name=${tool_call_name}"
 echo "DETAIL messages_tool_exec_tool_result_tool=${tool_result_tool}"
 
-stream_tool_session_payload="$(create_session "tool-user-stream")"
-stream_tool_session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
-  -H "Content-Type: application/json" \
-  -d "${stream_tool_session_payload}")"
+stream_tool_session_payload="$(build_session_context "tool-user-stream")"
+stream_tool_session_id="$(new_session_id)"
+remember_session_context "${stream_tool_session_id}" "${stream_tool_session_payload}"
+stream_tool_session_json="{\"id\":\"${stream_tool_session_id}\"}"
 stream_tool_session_id="$(session_id_from_json "${stream_tool_session_json}")"
 if [[ -z "${stream_tool_session_id}" ]]; then
-  echo "CASE messages_tool_exec_stream_create_session FAIL response=${stream_tool_session_json}"
+  echo "CASE messages_tool_exec_stream_session_id FAIL response=${stream_tool_session_json}"
   exit 1
 fi
-echo "CASE messages_tool_exec_stream_create_session PASS session_id=${stream_tool_session_id}"
+echo "CASE messages_tool_exec_stream_session_id PASS session_id=${stream_tool_session_id}"
 
 stream_tool_payload="$(python3 - <<'PY'
 import json

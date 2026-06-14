@@ -5,6 +5,7 @@ import { cancelActiveTurn } from "../api";
 import { useSessionMessageStream } from "./useSessionMessageStream";
 import { useSessionQueryInvalidation } from "./useSessionQueryInvalidation";
 import { useAppStore } from "@/shared/store/app-store";
+import type { TalosMessageRequest } from "@talos/sdk-browser";
 
 export function useSessionStreaming(
   sessionId: string,
@@ -65,9 +66,11 @@ export function useSessionStreaming(
     mutationFn: async ({
       text,
       appendUserInput = true,
+      request,
     }: {
       text: string;
       appendUserInput?: boolean;
+      request?: TalosMessageRequest;
     }) => {
       const clientMessageId = createClientMessageId();
       resetStream(sessionId);
@@ -83,7 +86,7 @@ export function useSessionStreaming(
         awaitingFinalResponse: false,
       });
       setSessionStatus(sessionId, "running");
-      await eventMessage(text, (messageId) => {
+      await eventMessage(request ?? { input: [{ type: "text", text }] }, (messageId) => {
         markPendingInputAccepted(sessionId, clientMessageId, messageId);
       });
     },
@@ -130,6 +133,11 @@ export function useSessionStreaming(
         sessionId,
         error instanceof Error ? error.message : "Failed to stream message.",
       );
+      useAppStore.getState().setStreamMeta(sessionId, {
+        isStreaming: false,
+        connectionState: "idle",
+        awaitingFinalResponse: false,
+      });
       setSessionStatus(sessionId, "error");
       await invalidateSessionQueries();
     },
@@ -212,12 +220,12 @@ export function useSessionStreaming(
     },
     retryResponse: () => retryMutation.mutateAsync(),
     canRetryResponse: Boolean(streamState?.activeInputText && streamState.activeMessageId),
-    sendText: (text: string) => {
+    sendText: (text: string, request?: TalosMessageRequest) => {
       const content = text.trim();
       if (!content) {
         return Promise.resolve();
       }
-      return sendMutation.mutateAsync({ text: content, appendUserInput: true });
+      return sendMutation.mutateAsync({ text: content, appendUserInput: true, request });
     },
     isStreaming: streamState?.isStreaming ?? false,
     isCancelling:

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
@@ -13,6 +13,7 @@ import {
 } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
 import { getSessionModel, UNBOUND_PROJECT_ID } from "@/shared/types/domain";
+import type { ProjectRecord } from "@/shared/types/ui";
 import { MessageList } from "@/widgets/message-list/MessageList";
 import { ChatContextBar } from "@/widgets/chat-context-bar/ChatContextBar";
 import { Panel } from "@/shared/ui/Panel";
@@ -20,6 +21,9 @@ import { Button } from "@/shared/ui/Button";
 
 interface SessionLocationState {
   initialPrompt?: string;
+  initialModel?: string;
+  initialProjectId?: string;
+  initialProject?: ProjectRecord;
 }
 
 export function ChatSessionPage() {
@@ -36,6 +40,10 @@ export function ChatSessionPage() {
   const activeSessionIdRef = useRef(sessionId);
   const stickToBottomRef = useRef(true);
   const locationState = location.state as SessionLocationState | null;
+  const [draftModel, setDraftModel] = useState<string | undefined>(locationState?.initialModel);
+  const [draftProjectId, setDraftProjectId] = useState<string | undefined>(
+    locationState?.initialProjectId,
+  );
 
   const { data: session } = useSessionQuery(sessionId);
   const { data: models } = useModelsQuery();
@@ -45,7 +53,7 @@ export function ChatSessionPage() {
     draft,
     inputHistory,
     setDraft,
-    sendMessage,
+    sendTurn,
     sendText,
     isStreaming,
     isCancelling,
@@ -63,7 +71,7 @@ export function ChatSessionPage() {
   const projects = useAppStore((state) => state.projects);
   const activeProjectId = useAppStore((state) => state.activeProjectId);
   const setActiveProjectId = useAppStore((state) => state.setActiveProjectId);
-  const currentModel = session ? getSessionModel(session) : models?.[0]?.id;
+  const currentModel = session ? getSessionModel(session) : draftModel ?? models?.[0]?.id;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -87,10 +95,10 @@ export function ChatSessionPage() {
 
   const selectedProjectId = useMemo(() => {
     if (!session) {
-      return activeProjectId;
+      return draftProjectId ?? activeProjectId;
     }
     return session.project_id ?? UNBOUND_PROJECT_ID;
-  }, [activeProjectId, projects, session]);
+  }, [activeProjectId, draftProjectId, session]);
   const boundProject = useMemo(() => {
     if (!session?.project_id) {
       return undefined;
@@ -99,18 +107,36 @@ export function ChatSessionPage() {
   }, [projects, session?.project_id]);
   useEffect(() => {
     const initialPrompt = locationState?.initialPrompt?.trim();
-    if (!session || !initialPrompt || initialPromptHandledRef.current) {
+    if (!initialPrompt || initialPromptHandledRef.current) {
       return;
     }
     initialPromptHandledRef.current = true;
     stickToBottomRef.current = true;
     window.requestAnimationFrame(scrollToBottom);
-    void sendText(initialPrompt).finally(() => {
-      if (mountedRef.current && activeSessionIdRef.current === sessionId) {
-        navigate(location.pathname, { replace: true, state: null });
-      }
-    });
-  }, [location.pathname, locationState?.initialPrompt, navigate, sendText, session, sessionId]);
+    const initialProject =
+      locationState?.initialProject ??
+      projects.find((entry) => entry.id === locationState?.initialProjectId);
+    void sendText(initialPrompt, {
+      model: locationState?.initialModel,
+      project: initialProject,
+    })
+      .catch(() => undefined)
+      .finally(() => {
+        if (mountedRef.current && activeSessionIdRef.current === sessionId) {
+          navigate(location.pathname, { replace: true, state: null });
+        }
+      });
+  }, [
+    location.pathname,
+    locationState?.initialModel,
+    locationState?.initialProject,
+    locationState?.initialProjectId,
+    locationState?.initialPrompt,
+    navigate,
+    projects,
+    sendText,
+    sessionId,
+  ]);
 
   useEffect(() => {
     stickToBottomRef.current = true;
@@ -252,7 +278,7 @@ export function ChatSessionPage() {
         <div className="mx-auto w-full max-w-[920px] px-7 pb-5">
           <ChatComposer
             activeProjectId={selectedProjectId}
-            disabled={!session}
+            disabled={false}
             draft={draft}
             inputHistory={inputHistory}
             isCancelling={isCancelling}
@@ -260,28 +286,46 @@ export function ChatSessionPage() {
             models={(models ?? []).map((model) => ({ id: model.id, name: model.name }))}
             onCancel={() => void stopResponse()}
             onDraftChange={setDraft}
-            onModelChange={(model) => updateModel.mutate(model)}
+            onModelChange={(model) => {
+              if (!session) {
+                setDraftModel(model);
+                return;
+              }
+              updateModel.mutate(model);
+            }}
             onProjectChange={(projectId) => {
               setActiveProjectId(projectId);
+              if (!session) {
+                setDraftProjectId(projectId);
+                return;
+              }
               const project = projects.find((entry) => entry.id === projectId);
               if (project || projectId === UNBOUND_PROJECT_ID) {
                 updateProject.mutate(project);
               }
             }}
             onRuntimeModeChange={(mode) => {
-              if (mode === "cloud") {
+              if (mode === "local") {
                 setConnection({ runtimeMode: mode });
               }
             }}
             onSend={() => {
               stickToBottomRef.current = true;
               window.requestAnimationFrame(scrollToBottom);
-              return sendMessage();
+              if (!session) {
+                const selectedProject = projects.find((entry) => entry.id === selectedProjectId);
+                return sendTurn({
+                  model: currentModel,
+                  project: selectedProject,
+                });
+              }
+              return sendTurn();
             }}
             projects={projects}
             runtimeMode={connection.runtimeMode}
             selectedModel={currentModel}
             showProjectSelector={false}
+            showRuntimeModeSelector={false}
           />
         </div>
       </div>

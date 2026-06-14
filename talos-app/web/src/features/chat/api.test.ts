@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TalosTimelineEvent, TimelineEventEnvelope } from "@talos/sdk-browser";
 
 import {
-  createSession,
+  createInitialTurnRequest,
   retryTimelineEvents,
   sendTimelineEvents,
 } from "./api";
@@ -12,31 +12,20 @@ import {
   type TalosWebClient,
 } from "@/shared/api/client";
 
-describe("chat api session creation", () => {
-  afterEach(() => {
-    resetTalosClientFactory();
-  });
+describe("chat api initial turn request", () => {
+  it("builds first-turn metadata without session create configuration", () => {
+    const request = createInitialTurnRequest("user-1", "hello", "qwen-max", undefined);
 
-  it("does not send removed tool permission configuration in create request", async () => {
-    const create = vi.fn(async () => ({
-      context: { session_id: "session-1" },
-      conf: {},
-    }));
-    setTalosClientFactory(() => ({
-      sessions: {
-        create,
-      },
-    } as unknown as TalosWebClient));
-
-    const session = await createSession("user-1", "qwen-max", undefined);
-
-    expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        model: "qwen-max",
-        conf: {},
+    expect(request).toMatchObject({
+      input: [{ type: "text", text: "hello" }],
+      model: "qwen-max",
+      context: expect.objectContaining({
+        user_id: "user-1",
+        source_type: "http",
+        provider: "sdk",
       }),
-    );
-    expect(session.conf).toEqual({});
+    });
+    expect(request).not.toHaveProperty("conf");
   });
 });
 
@@ -85,7 +74,7 @@ describe("chat message api", () => {
     const eventsForMessage = vi.fn(async (_sessionId, _messageId, callback) => {
       callback(event);
     });
-    const send = vi.fn(async () => ({
+    const start = vi.fn(async () => ({
       request_id: "req-1",
       message_id: "msg-accepted",
       session_id: "sess-1",
@@ -93,13 +82,19 @@ describe("chat message api", () => {
       status: "accepted",
     }));
     setTalosClientFactory(() => ({
-      messages: {
-        send,
+      turns: {
+        start,
         eventsForMessage,
       },
     } as unknown as TalosWebClient));
 
-    await sendTimelineEvents("sess-1", "hello", onEvent, undefined, onAcceptedMessageId);
+    await sendTimelineEvents(
+      "sess-1",
+      { input: [{ type: "text", text: "hello" }] },
+      onEvent,
+      undefined,
+      onAcceptedMessageId,
+    );
 
     expect(onAcceptedMessageId).toHaveBeenCalledWith("msg-accepted");
     expect(eventsForMessage).toHaveBeenCalledWith(
@@ -122,7 +117,7 @@ describe("chat message api", () => {
     }));
     const eventsForMessage = vi.fn(async () => undefined);
     setTalosClientFactory(() => ({
-      messages: {
+      turns: {
         retry,
         eventsForMessage,
       },

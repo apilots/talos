@@ -12,6 +12,7 @@ impl MockSessionStore {
 impl SessionStore for MockSessionStore {
     async fn create_session(
         &self,
+        session_id: Option<&str>,
         context: &TalosContext,
         _agent_id: &str,
         default_model: &str,
@@ -29,7 +30,9 @@ impl SessionStore for MockSessionStore {
             None => base_conf,
         };
         Ok(SessionRecord {
-            id: DatabaseSessionStore::new_session_id(),
+            id: session_id
+                .map(str::to_string)
+                .unwrap_or_else(DatabaseSessionStore::new_session_id),
             title: DEFAULT_SESSION_TITLE.to_string(),
             user_id: context.user_id.clone(),
             context: context.clone(),

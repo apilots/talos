@@ -25,7 +25,7 @@ function renderComposer(overrides: Partial<React.ComponentProps<typeof ChatCompo
       onRuntimeModeChange={vi.fn()}
       onSend={vi.fn()}
       projects={createDefaultProjects()}
-      runtimeMode="cloud"
+      runtimeMode="local"
       selectedModel="model-1"
       showProjectSelector={false}
       {...overrides}
@@ -54,7 +54,7 @@ function renderControlledComposer({
         onRuntimeModeChange={vi.fn()}
         onSend={vi.fn()}
         projects={createDefaultProjects()}
-        runtimeMode="cloud"
+        runtimeMode="local"
         selectedModel="model-1"
         showProjectSelector={false}
         {...overrides}
@@ -84,7 +84,7 @@ function renderControlledComposerWithRebuiltHistory(texts: string[]) {
         onRuntimeModeChange={vi.fn()}
         onSend={vi.fn()}
         projects={createDefaultProjects()}
-        runtimeMode="cloud"
+        runtimeMode="local"
         selectedModel="model-1"
         showProjectSelector={false}
       />
@@ -139,6 +139,82 @@ describe("ChatComposer", () => {
     fireEvent.click(stopButton);
 
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows full access as the current agent access mode with its description", () => {
+    renderComposer();
+
+    fireEvent.click(screen.getByRole("button", { name: /full access/i }));
+
+    expect(screen.getByText("Agent access")).toBeInTheDocument();
+    expect(
+      screen.getByText("Unrestricted access to the internet and any file on your computer."),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps local runtime selected and shows cloud as unavailable", () => {
+    const onRuntimeModeChange = vi.fn();
+    renderComposer({ onRuntimeModeChange });
+
+    fireEvent.click(screen.getByRole("button", { name: /local/i }));
+    const cloudOption = screen.getByRole("button", { name: /cloudcoming soon/i });
+
+    expect(cloudOption).toBeDisabled();
+    fireEvent.click(cloudOption);
+    expect(onRuntimeModeChange).not.toHaveBeenCalledWith("cloud");
+  });
+
+  it("closes the project picker when clicking outside the composer", () => {
+    render(
+      <div>
+        <button type="button">Outside</button>
+        <ChatComposer
+          activeProjectId={UNBOUND_PROJECT_ID}
+          draft=""
+          isStreaming={false}
+          models={[{ id: "model-1", name: "Model 1" }]}
+          onCancel={vi.fn()}
+          onDraftChange={vi.fn()}
+          onModelChange={vi.fn()}
+          onProjectChange={vi.fn()}
+          onRuntimeModeChange={vi.fn()}
+          onSend={vi.fn()}
+          projects={createDefaultProjects()}
+          runtimeMode="local"
+          selectedModel="model-1"
+          showProjectSelector
+        />
+      </div>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /work in a project/i }));
+    expect(screen.getByPlaceholderText("Search projects")).toBeInTheDocument();
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Outside" }));
+
+    expect(screen.queryByPlaceholderText("Search projects")).not.toBeInTheDocument();
+  });
+
+  it("closes the project picker when clicking other composer controls", () => {
+    renderComposer({ showProjectSelector: true });
+
+    fireEvent.click(screen.getByRole("button", { name: /work in a project/i }));
+    expect(screen.getByPlaceholderText("Search projects")).toBeInTheDocument();
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: /local/i }));
+
+    expect(screen.queryByPlaceholderText("Search projects")).not.toBeInTheDocument();
+  });
+
+  it("keeps the project picker open while interacting with project search", () => {
+    renderComposer({ showProjectSelector: true });
+
+    fireEvent.click(screen.getByRole("button", { name: /work in a project/i }));
+    const searchInput = screen.getByPlaceholderText("Search projects");
+
+    fireEvent.pointerDown(searchInput);
+
+    expect(searchInput).toBeInTheDocument();
   });
 
   it("navigates session input history from an empty composer with ArrowUp", () => {

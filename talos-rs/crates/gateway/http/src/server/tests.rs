@@ -23,11 +23,10 @@ use talos_session_store::{
 };
 use talos_types::talos::{
     StopReason, TalosContext, TalosInputItem, TalosItemDeltaEvent, TalosItemStartedEvent,
-    TalosMessageRequest, TalosOutputItem, TalosProvider, TalosReasoning, TalosSourceType,
-    TalosTimelineContent, TalosTimelineDelta, TalosTimelineEvent, TalosTimelineEventPayload,
-    TalosTimelineEventType, TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus,
-    TalosTimelinePhase, TalosToolProgressKind, TalosTurnCompletedEvent, TalosTurnStartedEvent,
-    TalosUsage,
+    TalosMessageRequest, TalosOutputItem, TalosReasoning, TalosTimelineContent, TalosTimelineDelta,
+    TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItem,
+    TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase, TalosToolProgressKind,
+    TalosTurnCompletedEvent, TalosTurnStartedEvent, TalosUsage,
 };
 use talos_types::{
     ModelInfo, ProjectPatch, ProjectRecord, SessionConf, SessionPatch, SessionPatchAck,
@@ -298,6 +297,7 @@ impl SessionStoreAdapter {
 impl SessionStore for SessionStoreAdapter {
     async fn create_session(
         &self,
+        session_id: Option<&str>,
         context: &TalosContext,
         _agent_id: &str,
         _default_model: &str,
@@ -317,7 +317,11 @@ impl SessionStore for SessionStoreAdapter {
                 current_directory,
             )
             .await?;
-        self.to_record(session)
+        let mut record = self.to_record(session)?;
+        if let Some(session_id) = session_id {
+            record.id = session_id.to_string();
+        }
+        Ok(record)
     }
 
     async fn resolve_or_create_session(
@@ -331,6 +335,7 @@ impl SessionStore for SessionStoreAdapter {
         current_directory: Option<std::path::PathBuf>,
     ) -> talos_error::TalosResult<SessionRecord> {
         self.create_session(
+            None,
             context,
             agent_id,
             default_model,
@@ -743,17 +748,6 @@ fn test_auth_services() -> (Arc<dyn AuthService>, Arc<dyn UserService>) {
 
 fn test_auth() -> RequestIdentity {
     RequestIdentity::mock_admin("static-token")
-}
-
-fn test_context() -> TalosContext {
-    TalosContext::new(
-        TalosSourceType::Http,
-        TalosProvider::Http,
-        "static-token",
-        "msg-1",
-        "trace-1",
-    )
-    .with_channel_id("test-channel")
 }
 
 #[path = "tests/active_turn.rs"]

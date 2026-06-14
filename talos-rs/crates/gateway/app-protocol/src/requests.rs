@@ -21,8 +21,6 @@ pub struct DeferredClientMethod {
 pub enum ClientMethod {
     #[serde(rename = "initialize")]
     Initialize,
-    #[serde(rename = "session.create")]
-    SessionCreate,
     #[serde(rename = "session.list")]
     SessionList,
     #[serde(rename = "session.read")]
@@ -119,7 +117,6 @@ impl ClientMethod {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Initialize => "initialize",
-            Self::SessionCreate => "session.create",
             Self::SessionList => "session.list",
             Self::SessionRead => "session.read",
             Self::SessionPatch => "session.patch",
@@ -181,7 +178,6 @@ impl FromStr for ClientMethod {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "initialize" => Ok(Self::Initialize),
-            "session.create" => Ok(Self::SessionCreate),
             "session.list" => Ok(Self::SessionList),
             "session.read" => Ok(Self::SessionRead),
             "session.patch" => Ok(Self::SessionPatch),
@@ -237,8 +233,6 @@ impl FromStr for ClientMethod {
 pub enum ClientRequestParams {
     #[serde(rename = "initialize")]
     Initialize(InitializeParams),
-    #[serde(rename = "session.create")]
-    SessionCreate(SessionCreateParams),
     #[serde(rename = "session.list")]
     SessionList(SessionListParams),
     #[serde(rename = "session.read")]
@@ -346,9 +340,6 @@ impl ClientRequest {
         let params_value = params.unwrap_or(serde_json::Value::Object(Default::default()));
         let params = match method_kind {
             ClientMethod::Initialize => ClientRequestParams::Initialize(decode(params_value)?),
-            ClientMethod::SessionCreate => {
-                ClientRequestParams::SessionCreate(decode(params_value)?)
-            }
             ClientMethod::SessionList => ClientRequestParams::SessionList(decode(params_value)?),
             ClientMethod::SessionRead => ClientRequestParams::SessionRead(decode(params_value)?),
             ClientMethod::SessionPatch => ClientRequestParams::SessionPatch(decode(params_value)?),
@@ -505,17 +496,6 @@ pub struct ActorCredentials {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ActorCredential {
     ExistingSessionToken { token: String },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct SessionCreateParams {
-    pub context: ProtocolTalosContext,
-    #[serde(default)]
-    pub model: Option<String>,
-    #[serde(default)]
-    pub project_id: Option<String>,
-    #[serde(default)]
-    pub current_directory: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
@@ -678,6 +658,14 @@ pub struct TurnStartParams {
     pub input: Vec<ProtocolInputItem>,
     #[serde(default)]
     pub workspace_id: Option<String>,
+    #[serde(default)]
+    pub context: Option<ProtocolTalosContext>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub current_directory: Option<PathBuf>,
     #[serde(default)]
     pub client_request_id: Option<String>,
 }
