@@ -577,7 +577,7 @@ RetrievedMemories         → CacheScope::None
 **验证方式：**
 1. `cargo test -p talos-tools`
 2. 构建 prompt 后打印 tool summary，肉眼确认格式和内容
-3. 运行 e2e（`tests/integration/run_e2e.sh`），观察工具调用错误是否减少
+3. 运行 e2e（`talos-e2e/run_e2e.sh`），观察工具调用错误是否减少
 
 ### 阶段 2：Planner 指导补强（P1，中风险，中收益）
 

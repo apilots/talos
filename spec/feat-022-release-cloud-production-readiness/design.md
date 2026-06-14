@@ -350,7 +350,7 @@ impl CloudConfig {
 ## 阶段 4: Release 验证与产物
 **目标**: 完成第一个 release 的必需验证。  
 **成功标准**: DMG 可验证、packaged app 可登录线上 Cloud 并完成核心 chat/workspace/memory 流程。  
-**测试**: `hdiutil verify`、packaged Desktop smoke、`tests/integration/run_e2e.sh`。  
+**测试**: `hdiutil verify`、packaged Desktop smoke、`talos-e2e/run_e2e.sh`。
 **状态**: 未开始
 
 ## 验证策略
@@ -363,7 +363,7 @@ cargo check -p talos-gateway-http -p talos-app-server -p talos-application-servi
 pnpm --filter @talos/sdk-core build
 pnpm --filter talos-web typecheck
 pnpm --filter talos-web test
-tests/integration/run_e2e.sh
+talos-e2e/run_e2e.sh
 ```
 
 ### 线上 Cloud smoke

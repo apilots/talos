@@ -646,7 +646,7 @@ Recent task continuity:
 | `talos-rs/crates/orchestration/agent-kernel/src/general_turn/*` | 失败恢复、salvage pass、低增益护栏 |
 | `talos-rs/crates/action/tools/src/tools/*.rs` | 强化 per-tool description |
 | `talos-rs/crates/common/prompt` tests | 增加 section 预算和 AGENTS discovery 测试 |
-| `talos-rs/tests/integration/scenarios` | 增加真实 HTTP SSE 回归 case |
+| `talos-e2e/scenarios` | 增加真实 HTTP SSE 回归 case |
 
 ---
 
@@ -774,7 +774,7 @@ Recent task continuity:
 - 输出报告可判定“工具失败恢复 / 首轮 grep 服从 / 多轮后仍会用工具”
 - 保留 1 组人工 tmux/TUI 复核清单
 **测试**:
-- `./tests/integration/run_e2e.sh`
+- `talos-e2e/run_e2e.sh`
 - 新增 manual SSE regression report
 
 ---

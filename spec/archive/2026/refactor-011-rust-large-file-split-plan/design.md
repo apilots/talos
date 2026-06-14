@@ -852,7 +852,7 @@ crates/cognition/memory/src/
 控制方式：
 
 - 每个阶段拆分时同步调整测试归属
-- 至少执行相关 crate 单测和 `tests/integration/run_e2e.sh`
+- 至少执行相关 crate 单测和 `talos-e2e/run_e2e.sh`
 
 ---
 

@@ -82,6 +82,7 @@ talos/
 ├── talos-py/          # Python 实现（计划中）
 ├── talos-go/          # Go 实现（计划中）
 ├── talos-app/         # TypeScript Web / Desktop / SDK workspace
+├── talos-e2e/         # 端到端测试场景与 runner
 ├── docs/              # 通用文档
 ├── specs/             # 接口规范（语言无关）
 └── README.md

@@ -532,7 +532,7 @@ cargo test -p talos-agent-kernel
 cargo test -p talos-agent
 cargo test -p talos-application-service
 pnpm --dir talos-app/web test -- streaming.test.tsx MessageList.test.tsx
-tests/integration/run_e2e.sh
+talos-e2e/run_e2e.sh
 ```
 
 ## 风险与权衡

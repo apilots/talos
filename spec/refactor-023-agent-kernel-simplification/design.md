@@ -732,7 +732,7 @@ parent general_turn
 | Phase 4 | `cargo test -p talos-agent` |
 | Phase 5 | `cargo test -p talos-agent-kernel -p talos-agent` |
 | Phase 6 | `cargo test -p talos-application-service`、相关 schema/SDK 测试 |
-| 服务端回归 | `tests/integration/run_e2e.sh` |
+| 服务端回归 | `talos-e2e/run_e2e.sh` |
 | WebUI/Desktop 受影响时 | 前端 typecheck/test；Desktop 最终 packaged DMG smoke |
 
 ## 完成定义

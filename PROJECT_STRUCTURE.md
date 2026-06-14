@@ -1,6 +1,6 @@
 # Talos 工程目录结构
 
-**最后更新**: 2026-04-14
+**最后更新**: 2026-06-14
 **说明**: 本文档描述当前仓库的真实目录结构；目标架构请看 `talos-rs/ARCHITECTURE.md`，crate 清单请看 `talos-rs/MODULES.md`。
 
 ## 顶层结构
@@ -12,8 +12,9 @@ talos/
 ├── PROJECT_STRUCTURE.md
 ├── README.md
 ├── docs/
-├── plans/
 ├── spec/
+├── talos-app/
+├── talos-e2e/
 └── talos-rs/
 ```
 
@@ -68,7 +69,20 @@ talos-rs/
 │   └── perception/
 │       └── channels/
 └── tests/
-    └── integration/
+    └── integration_test.rs
+```
+
+## E2E 结构
+
+```text
+talos-e2e/
+├── README.md
+├── protocol_smoke.sh
+├── run_e2e.sh
+├── scenarios/
+├── scripts/
+├── reports/
+└── .tmp/
 ```
 
 ## 文档职责划分
@@ -79,8 +93,8 @@ PROJECT_STRUCTURE.md     -> 当前目录树与文档边界
 talos-rs/ARCHITECTURE.md -> 目标架构与设计意图
 talos-rs/MODULES.md      -> 当前 workspace crate 清单
 talos-rs/README.md       -> 对外能力概览与运行方式
+talos-e2e/README.md      -> 端到端测试入口、场景分组与产物路径
 spec/                    -> 接口与方案规格
-plans/                   -> 分阶段实施计划
 ```
 
 ## 本次清理后保留的结构原则

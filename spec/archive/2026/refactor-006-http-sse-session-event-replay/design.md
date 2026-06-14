@@ -898,7 +898,7 @@ pub struct SessionEventLimitsConfig {
 新增 e2e 场景：
 
 ```text
-tests/integration/scenarios/03_messages_http_sse_replay.sh
+talos-e2e/scenarios/03_messages_http_sse_replay.sh
 ```
 
 覆盖：

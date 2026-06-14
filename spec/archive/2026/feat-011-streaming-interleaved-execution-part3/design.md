@@ -110,7 +110,7 @@
 
 - 相关 crate 单测
 - 相关 TUI 测试
-- `tests/integration/run_e2e.sh`
+- `talos-e2e/run_e2e.sh`
 
 ---
 

@@ -373,7 +373,7 @@ SQL 规则：
 
 **成功标准**: Talos 权限统一走 `talos-cloud`；本地不再能创建生产账号或签发生产 token。
 
-**测试**: `cargo test`、Web tests、SDK tests、`tests/integration/run_e2e.sh`、Desktop packaged smoke。
+**测试**: `cargo test`、Web tests、SDK tests、`talos-e2e/run_e2e.sh`、Desktop packaged smoke。
 
 **状态**: 未开始
 
@@ -428,7 +428,7 @@ cargo test -p cloud-http
 cargo test -p talos-auth
 cargo test -p talos-gateway-http
 cargo test -p talos-gateway-app-server
-tests/integration/run_e2e.sh
+talos-e2e/run_e2e.sh
 
 # web/sdk
 pnpm --filter @talos/sdk-core test

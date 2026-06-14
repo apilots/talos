@@ -316,7 +316,7 @@ function applyTimelineEvent(
 | TS/Vitest | Web reducer 按 `item_id` 合并 delta，final answer 不混入 commentary。 |
 | WebUI 测试 | 用户输入不消失；Thinking/Acting timeline 可折叠；tool action 的状态/progress/结果更新同一个 item；耗时显示；final answer 独立。 |
 | TUI 测试 | 新 timeline event 输入下，现有 thinking/assistant/tool 交互保持。 |
-| 集成测试 | `tests/integration/run_e2e.sh` 覆盖 CLI/server 主路径。 |
+| 集成测试 | `talos-e2e/run_e2e.sh` 覆盖 CLI/server 主路径。 |
 
 ## 边界与风险
 

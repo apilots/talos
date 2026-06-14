@@ -1123,7 +1123,7 @@ same TalosApplicationService instance
 
 ### 14.6 质量门禁
 
-所有阶段完成后至少执行。`tests/integration/run_e2e.sh` 只在最终 hardening / rollout 阶段执行，不作为每个阶段的必跑项：
+所有阶段完成后至少执行。`talos-e2e/run_e2e.sh` 只在最终 hardening / rollout 阶段执行，不作为每个阶段的必跑项：
 
 ```text
 cargo test -p talos-app-protocol
@@ -1132,7 +1132,7 @@ cargo test -p talos-coordinator
 cargo test -p talos-app-server
 cargo test -p talos-gateway-http
 cargo test -p talos-client
-tests/integration/run_e2e.sh
+talos-e2e/run_e2e.sh
 ```
 
 如果前端接入：

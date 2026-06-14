@@ -500,7 +500,7 @@ impl ToolInputDecoder<ReadFileInput> for ReadFileDecoder {
 
 ### 9.3 E2E 回归
 
-1. `tests/integration/run_e2e.sh`
+1. `talos-e2e/run_e2e.sh`
 2. general turn with tools
 3. plan-react mode
 4. session rewind / transcript persistence

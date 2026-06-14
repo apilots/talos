@@ -544,7 +544,7 @@ HTTP 模块只保留：
 至少执行：
 
 - 相关 crate 单元测试
-- `tests/integration/run_e2e.sh`
+- `talos-e2e/run_e2e.sh`
 
 ## 17. 明确不做的事情
 

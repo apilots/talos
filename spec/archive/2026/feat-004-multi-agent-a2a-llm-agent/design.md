@@ -1494,7 +1494,7 @@ async fn propagate_child_completion(
 ### 20.3 回归门禁
 
 - 相关 crate 单元测试
-- `tests/integration/run_e2e.sh`
+- `talos-e2e/run_e2e.sh`
 - 至少一条覆盖多 agent 的新 e2e 场景
 
 ---

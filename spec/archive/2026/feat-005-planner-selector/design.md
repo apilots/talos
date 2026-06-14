@@ -395,7 +395,7 @@ pub trait PlannerSelectorFactory: Send + Sync {
 
 1. `cargo build -p talos-agent` 编译无 warning
 2. `cargo test -p talos-agent` 全量通过
-3. `tests/integration/run_e2e.sh` 回归通过
+3. `talos-e2e/run_e2e.sh` 回归通过
 4. 手动跑固定回归集 15 条，记录每条 `planner_kind` 结果
 
 ---

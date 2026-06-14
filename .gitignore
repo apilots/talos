@@ -42,6 +42,7 @@ test-results/
 output/
 .playwright-mcp/
 .tmp/
+talos-e2e/.tmp/
 
 # sisyphus
 .sisyphus
