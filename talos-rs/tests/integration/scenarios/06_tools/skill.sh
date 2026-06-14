@@ -19,8 +19,8 @@ build_binaries
 start_server
 trap stop_server EXIT
 
-models_json="$(curl -sS -H "Authorization: Bearer ${AUTH_TOKEN}" "${GATEWAY_URL}/v1/models")"
-primary_model="$(python3 -c 'import json,sys; data=json.load(sys.stdin); arr=data.get("data",[]); print((arr[0].get("id") if arr else ""))' <<< "${models_json}")"
+models_json="$(curl -sS "${GATEWAY_URL}/v1/models")"
+primary_model="$(select_e2e_model_from_json "${models_json}")"
 if [[ -z "${primary_model}" ]]; then
   echo "CASE skill_select_model FAIL models=${models_json}"
   exit 1
@@ -87,7 +87,6 @@ PY
 session_payload="$(create_session)"
 session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
   -d "${session_payload}")"
 session_id="$(session_id_from_json "${session_json}")"
 if [[ -z "${session_id}" ]]; then
@@ -154,8 +153,8 @@ import os
 data = json.loads(os.environ["SKILL_JSON"])
 results = [item for item in data.get("output", []) if item.get("type") == "tool_result"]
 assert results, "missing tool_result"
-result = results[0]
-assert result.get("tool_name") == "Skill", result.get("tool_name")
+result = next((item for item in results if item.get("tool_name") == "Skill"), None)
+assert result is not None, [item.get("tool_name") for item in results]
 content_items = result.get("content") or []
 assert content_items, "missing content payload"
 content = ((content_items[0].get("value") or {}).get("value", content_items[0].get("value") or {}))

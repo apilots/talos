@@ -11,7 +11,7 @@ prepare_talos_home
 
 export TALOS_APP_SERVER_BIN="${ROOT_DIR}/target/debug/app-server"
 export TALOS_APP_SERVER_TEST_CLIENT_BIN="${ROOT_DIR}/target/debug/talos-app-server-test-client"
-export TALOS_APP_SERVER_TEST_MODEL="${TALOS_APP_SERVER_TEST_MODEL:-MiniMax-M2.5}"
+export TALOS_APP_SERVER_TEST_MODEL="${TALOS_APP_SERVER_TEST_MODEL:-qwen3.6-flash}"
 
 run_client_scenario() {
   local scenario="$1"

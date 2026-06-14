@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR}"
 RUST_DIR="${REPO_ROOT}/talos-rs"
 BUILD_ASSET_DIR="${REPO_ROOT}/build"
+CONF_DIR="${REPO_ROOT}/conf"
 TARGET="${1:-all}"
 PROFILE="${PROFILE:-dev}"
 PRODUCT_DIR="${PRODUCT_DIR:-${REPO_ROOT}/dist/products/${PROFILE}}"
@@ -123,7 +124,7 @@ copy_rust_binary_as() {
 copy_conf_resource() {
   local output_dir="$1"
   mkdir -p "${output_dir}/conf"
-  cp "${RUST_DIR}/conf/talos.yaml" "${output_dir}/conf/talos.yaml"
+  cp "${CONF_DIR}/talos-prod.yaml" "${output_dir}/conf/talos.yaml"
 }
 
 cleanup_desktop_package_dir() {

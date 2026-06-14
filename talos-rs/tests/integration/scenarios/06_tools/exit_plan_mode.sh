@@ -19,8 +19,8 @@ build_binaries
 start_server
 trap stop_server EXIT
 
-models_json="$(curl -sS -H "Authorization: Bearer ${AUTH_TOKEN}" "${GATEWAY_URL}/v1/models")"
-primary_model="$(python3 -c 'import json,sys; data=json.load(sys.stdin); arr=data.get("data",[]); print((arr[0].get("id") if arr else ""))' <<< "${models_json}")"
+models_json="$(curl -sS "${GATEWAY_URL}/v1/models")"
+primary_model="$(select_e2e_model_from_json "${models_json}")"
 if [[ -z "${primary_model}" ]]; then
   echo "CASE exit_plan_mode_select_model FAIL models=${models_json}"
   exit 1
@@ -87,7 +87,6 @@ PY
 session_payload="$(create_session)"
 session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
   -d "${session_payload}")"
 session_id="$(session_id_from_json "${session_json}")"
 if [[ -z "${session_id}" ]]; then
@@ -106,10 +105,20 @@ if [[ -z "${enter_output}" || "${enter_output}" == Error:* ]]; then
   echo "CASE seed_enter_plan_mode_before_exit FAIL response=${enter_json}"
   exit 1
 fi
-if ! echo "${enter_output}" | grep -Fq "PLAN_ENTERED"; then
-  echo "CASE seed_enter_plan_mode_before_exit FAIL missing_ack output=${enter_output}"
-  exit 1
-fi
+ENTER_JSON="${enter_json}" python3 - <<'PY'
+import json
+import os
+
+data = json.loads(os.environ["ENTER_JSON"])
+results = [item for item in data.get("output", []) if item.get("type") == "tool_result"]
+assert results, "missing tool_result"
+result = results[0]
+assert result.get("tool_name") == "EnterPlanMode", result.get("tool_name")
+content_items = result.get("content") or []
+assert content_items, "missing content payload"
+content = ((content_items[0].get("value") or {}).get("value", content_items[0].get("value") or {}))
+assert content.get("mode") == "plan", content
+PY
 
 plan_input="You are now in plan mode. Respond with exactly two concise numbered steps for validating tool coverage, then end with PLAN_READY."
 plan_payload="$(build_payload "${plan_input}")"

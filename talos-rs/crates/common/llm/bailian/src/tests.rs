@@ -125,6 +125,133 @@ async fn test_stream_model_blocks_maps_chat_completion_chunks() {
 }
 
 #[tokio::test]
+async fn test_stream_model_blocks_segments_assistant_text_after_tool_boundary() {
+    let body = concat!(
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"before\"}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"after\"}}]}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let base_url = spawn_sse_server(body).await;
+    let provider = BailianProvider::new(BailianConfig::new("test-api-key").with_base_url(base_url));
+    let stream = provider
+        .stream_model_blocks(ChatRequest::new_user("test", "qwen-test"))
+        .await
+        .expect("stream should start");
+
+    let events = collect_model_events(stream).await;
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::BlockCompleted(completed)
+            if completed.model_item_id == "bailian-choice-0-assistant"
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::BlockDelta { model_item_id, delta: ModelBlockDelta::AssistantText { delta } }
+            if model_item_id == "bailian-choice-0-assistant-1" && delta == "after"
+    )));
+}
+
+#[tokio::test]
+async fn test_stream_model_blocks_segments_reasoning_after_tool_boundary() {
+    let body = concat!(
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"before\"}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"after\"}}]}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let base_url = spawn_sse_server(body).await;
+    let provider = BailianProvider::new(BailianConfig::new("test-api-key").with_base_url(base_url));
+    let stream = provider
+        .stream_model_blocks(ChatRequest::new_user("test", "qwen-test"))
+        .await
+        .expect("stream should start");
+
+    let events = collect_model_events(stream).await;
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::BlockCompleted(completed)
+            if completed.model_item_id == "bailian-choice-0-reasoning"
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::BlockDelta { model_item_id, delta: ModelBlockDelta::ReasoningText { delta } }
+            if model_item_id == "bailian-choice-0-reasoning-1" && delta == "after"
+    )));
+}
+
+#[tokio::test]
+async fn test_stream_model_blocks_ignores_empty_text_chunks() {
+    let body = concat!(
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\"}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"\\n\"}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"visible\"}}]}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let base_url = spawn_sse_server(body).await;
+    let provider = BailianProvider::new(BailianConfig::new("test-api-key").with_base_url(base_url));
+    let stream = provider
+        .stream_model_blocks(ChatRequest::new_user("test", "qwen-test"))
+        .await
+        .expect("stream should start");
+
+    let events = collect_model_events(stream).await;
+
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(
+                event,
+                ModelBlockStreamEvent::BlockStarted(started)
+                    if started.kind == ModelBlockKind::AssistantText
+            ))
+            .count(),
+        1
+    );
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::BlockStarted(started)
+            if started.kind == ModelBlockKind::Reasoning
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::BlockDelta { delta: ModelBlockDelta::AssistantText { delta }, .. }
+            if delta == "visible"
+    )));
+}
+
+#[tokio::test]
+async fn test_stream_model_blocks_ignores_reasoning_after_assistant_text() {
+    let body = concat!(
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"final\"}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"late\"}}]}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let base_url = spawn_sse_server(body).await;
+    let provider = BailianProvider::new(BailianConfig::new("test-api-key").with_base_url(base_url));
+    let stream = provider
+        .stream_model_blocks(ChatRequest::new_user("test", "qwen-test"))
+        .await
+        .expect("stream should start");
+
+    let events = collect_model_events(stream).await;
+
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::BlockDelta {
+            delta: ModelBlockDelta::ReasoningText { delta },
+            ..
+        } if delta == "late"
+    )));
+}
+
+#[tokio::test]
 async fn test_stream_model_blocks_buffers_split_sse_lines() {
     let chunks = vec![
         "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"he".to_string(),
@@ -169,23 +296,23 @@ fn test_native_thinking_support_is_qwen_gated() {
         PromptCacheSupport::RequestLevel
     );
     assert_eq!(
-        provider.native_thinking_support("qwen-plus"),
+        provider.native_thinking_support("qwen3.7-plus"),
         NativeThinkingSupport::Supported
     );
     assert_eq!(
-        provider.native_thinking_support("qwen-plus-latest"),
+        provider.native_thinking_support("qwen3.7-max"),
         NativeThinkingSupport::Supported
     );
     assert_eq!(
-        provider.native_thinking_support("qwen-max"),
-        NativeThinkingSupport::Unsupported
+        provider.native_thinking_support("qwen3.6-flash"),
+        NativeThinkingSupport::Supported
     );
 }
 
 #[test]
 fn test_build_request_maps_native_thinking_to_bailian_fields() {
     let request = ChatRequest::builder()
-        .model("qwen-plus")
+        .model("qwen3.7-plus")
         .messages(vec![ChatMessage::user("hello")])
         .native_thinking(NativeThinkingConfig {
             effort: NativeThinkingEffort::Medium,
@@ -228,7 +355,7 @@ fn test_bailian_request_serializes_cache_control_for_request_level_provider() {
     });
     let request = BailianProvider::build_request(
         ChatRequest::builder()
-            .model("qwen-plus")
+            .model("qwen3.7-plus")
             .messages(vec![message])
             .build(),
         false,
@@ -246,7 +373,7 @@ fn test_bailian_request_serializes_cache_control_as_content_block() {
     });
     let request = BailianProvider::build_request(
         ChatRequest::builder()
-            .model("qwen-plus")
+            .model("qwen3.7-plus")
             .messages(vec![message])
             .build(),
         false,

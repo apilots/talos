@@ -57,26 +57,29 @@ export interface ChatSlice {
     status: "done" | "error",
     timingMs?: number | null,
   ) => void;
-  upsertTimelineItem: (sessionId: string, item: ChatTimelineItem) => void;
-  appendTimelineItemText: (sessionId: string, item: ChatTimelineItem, chunk: string, sequence?: number) => void;
+  upsertTimelineItem: (sessionId: string, messageId: string, item: ChatTimelineItem) => void;
+  appendTimelineItemText: (sessionId: string, messageId: string, item: ChatTimelineItem, chunk: string, sequence?: number) => void;
   commitTimelineAssistantText: (
     sessionId: string,
+    messageId: string,
     itemId: string,
     phase: TalosTimelinePhase,
   ) => void;
   updateTimelineTool: (
     sessionId: string,
+    messageId: string,
     itemId: string,
     payload: Partial<Extract<ChatTimelineItem, { kind: "tool_call" }>>,
   ) => void;
   completeTimelineItem: (
     sessionId: string,
+    messageId: string,
     itemId: string,
     status: ChatTimelineItem["status"],
     completedAtMs: number,
   ) => void;
   setTimelineLive: (sessionId: string, live: boolean) => void;
-  setTurnMetrics: (sessionId: string, metrics: ChatTurnMetrics) => void;
+  setTurnMetrics: (sessionId: string, messageId: string, metrics: ChatTurnMetrics) => void;
   setPendingUserAction: (
     sessionId: string,
     pendingUserAction?: StreamSessionState["pendingUserAction"],
@@ -324,17 +327,17 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
           },
         };
       }),
-    upsertTimelineItem: (sessionId, item) =>
+    upsertTimelineItem: (sessionId, messageId, item) =>
       set((state) => {
         const stream = ensureStreamState(state, sessionId);
         return {
           streams: {
             ...state.streams,
-            [sessionId]: upsertTimelineItemInStream(stream, sessionId, item),
+            [sessionId]: upsertTimelineItemInStream(stream, sessionId, messageId, item),
           },
         };
       }),
-    appendTimelineItemText: (sessionId, sourceItem, chunk, sequence) =>
+    appendTimelineItemText: (sessionId, messageId, sourceItem, chunk, sequence) =>
       set((state) => {
         const stream = ensureStreamState(state, sessionId);
         return {
@@ -343,6 +346,7 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
             [sessionId]: appendTimelineItemTextInStream(
               stream,
               sessionId,
+              messageId,
               sourceItem,
               chunk,
               sequence,
@@ -350,33 +354,33 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
           },
         };
       }),
-    commitTimelineAssistantText: (sessionId, itemId, phase) =>
+    commitTimelineAssistantText: (sessionId, messageId, itemId, phase) =>
       set((state) => {
         const stream = ensureStreamState(state, sessionId);
         return {
           streams: {
             ...state.streams,
-            [sessionId]: commitTimelineAssistantTextInStream(stream, itemId, phase),
+            [sessionId]: commitTimelineAssistantTextInStream(stream, sessionId, messageId, itemId, phase),
           },
         };
       }),
-    updateTimelineTool: (sessionId, itemId, payload) =>
+    updateTimelineTool: (sessionId, messageId, itemId, payload) =>
       set((state) => {
         const stream = ensureStreamState(state, sessionId);
         return {
           streams: {
             ...state.streams,
-            [sessionId]: updateTimelineToolInStream(stream, itemId, payload),
+            [sessionId]: updateTimelineToolInStream(stream, sessionId, messageId, itemId, payload),
           },
         };
       }),
-    completeTimelineItem: (sessionId, itemId, status, completedAtMs) =>
+    completeTimelineItem: (sessionId, messageId, itemId, status, completedAtMs) =>
       set((state) => {
         const stream = ensureStreamState(state, sessionId);
         return {
           streams: {
             ...state.streams,
-            [sessionId]: completeTimelineItemInStream(stream, itemId, status, completedAtMs),
+            [sessionId]: completeTimelineItemInStream(stream, sessionId, messageId, itemId, status, completedAtMs),
           },
         };
       }),
@@ -390,13 +394,13 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
           },
         };
       }),
-    setTurnMetrics: (sessionId, metrics) =>
+    setTurnMetrics: (sessionId, messageId, metrics) =>
       set((state) => {
         const stream = ensureStreamState(state, sessionId);
         return {
           streams: {
             ...state.streams,
-            [sessionId]: setTurnMetricsInStream(stream, sessionId, metrics),
+            [sessionId]: setTurnMetricsInStream(stream, sessionId, messageId, metrics),
           },
         };
       }),

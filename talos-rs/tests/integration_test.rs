@@ -83,12 +83,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         model: None,
     };
-    let token = std::env::var("GATEWAY_TOKEN")
-        .map_err(|_| "GATEWAY_TOKEN must be set for authenticated integration_test")?;
-
     let session_response = client
         .post("http://localhost:8080/v1/sessions")
-        .bearer_auth(&token)
         .json(&session_request)
         .send()
         .await?;
@@ -115,7 +111,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "http://localhost:8080/v1/sessions/{}/messages",
             session.id
         ))
-        .bearer_auth(token)
         .json(&message_request)
         .send()
         .await

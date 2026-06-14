@@ -11,9 +11,9 @@ require_command curl
 start_server
 trap stop_server EXIT
 
-models_json="$(curl -sS -H "Authorization: Bearer ${AUTH_TOKEN}" "${GATEWAY_URL}/v1/models")"
+models_json="$(curl -sS "${GATEWAY_URL}/v1/models")"
 log_case_json "select_models" "{}" "${models_json}"
-primary_model="$(python3 -c 'import json,sys; data=json.load(sys.stdin); arr=data.get("data",[]); print((arr[0].get("id") if arr else ""))' <<< "${models_json}")"
+primary_model="$(select_e2e_model_from_json "${models_json}")"
 secondary_model="$(python3 -c 'import json,sys; data=json.load(sys.stdin); arr=data.get("data",[]); print((arr[1].get("id") if len(arr) > 1 else (arr[0].get("id") if arr else "")))' <<< "${models_json}")"
 if [[ -z "${primary_model}" || -z "${secondary_model}" ]]; then
   echo "CASE select_models FAIL models=${models_json}"
@@ -36,7 +36,6 @@ create_payload='{
 create_payload="${create_payload/__PRIMARY_MODEL__/${primary_model}}"
 create_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
   -d "${create_payload}")"
 log_case_json "create_session" "${create_payload}" "${create_json}"
 session_id="$(session_id_from_json "${create_json}")"
@@ -46,7 +45,7 @@ if [[ -z "${session_id}" ]]; then
 fi
 echo "CASE create_session PASS session_id=${session_id}"
 
-detail_json="$(curl -sS -H "Authorization: Bearer ${AUTH_TOKEN}" "${GATEWAY_URL}/v1/sessions/${session_id}")"
+detail_json="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}")"
 log_case_json "get_session" "{\"session_id\":\"${session_id}\"}" "${detail_json}"
 detail_id="$(session_id_from_json "${detail_json}")"
 if [[ "${detail_id}" != "${session_id}" ]]; then
@@ -57,7 +56,6 @@ echo "CASE get_session PASS id=${detail_id}"
 
 patch_json="$(curl -sS -X PATCH "${GATEWAY_URL}/v1/sessions/${session_id}" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
   -d "{\"conf\":{\"agent.model\":\"${secondary_model}\"}}")"
 log_case_json "patch_session_model" "{\"session_id\":\"${session_id}\",\"conf\":{\"agent.model\":\"${secondary_model}\"}}" "${patch_json}"
 patch_success="$(json_get "${patch_json}" "success")"
@@ -67,7 +65,7 @@ if [[ "${patch_success}" != "true" && "${patch_success}" != "True" ]]; then
 fi
 echo "CASE patch_session_model PASS success=${patch_success}"
 
-list_json="$(curl -sS -H "Authorization: Bearer ${AUTH_TOKEN}" "${GATEWAY_URL}/v1/sessions?user_id=session-user&channel_id=session&provider=http")"
+list_json="$(curl -sS "${GATEWAY_URL}/v1/sessions?user_id=session-user&channel_id=session&provider=http")"
 log_case_json "list_sessions_with_filter" "{\"user_id\":\"session-user\",\"channel_id\":\"session\",\"provider\":\"http\"}" "${list_json}"
 list_count="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("data", [])))' <<< "${list_json}")"
 if [[ "${list_count}" -lt 1 ]]; then

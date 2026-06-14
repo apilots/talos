@@ -207,7 +207,7 @@ fn test_provider_name() {
     let config = AnthropicConfig::new("test-key");
     let provider = AnthropicProvider::new(config);
     assert_eq!(provider.name(), "anthropic");
-    assert_eq!(provider.default_model(), "claude-3-5-sonnet-20241022");
+    assert_eq!(provider.default_model(), "claude-sonnet-4-6");
     assert_eq!(
         provider.prompt_cache_support(),
         PromptCacheSupport::RequestLevel
@@ -226,6 +226,18 @@ fn test_native_thinking_support_is_model_gated() {
         provider.native_thinking_support("claude-3-7-sonnet-20250219"),
         NativeThinkingSupport::Supported
     );
+    assert_eq!(
+        provider.native_thinking_support("claude-opus-4-8"),
+        NativeThinkingSupport::Supported
+    );
+    assert_eq!(
+        provider.native_thinking_support("claude-sonnet-4-6"),
+        NativeThinkingSupport::Supported
+    );
+    assert_eq!(
+        provider.native_thinking_support("claude-haiku-4-5-20251001"),
+        NativeThinkingSupport::Supported
+    );
 }
 
 #[test]
@@ -238,12 +250,23 @@ fn test_build_headers() {
     assert!(headers.contains_key("anthropic-version"));
     assert!(headers.contains_key("accept"));
     assert!(headers.contains_key("content-type"));
+    assert_eq!(
+        headers.get("x-talos-client").and_then(|v| v.to_str().ok()),
+        Some("talos")
+    );
+    assert_eq!(
+        headers.get("x-talos-version").and_then(|v| v.to_str().ok()),
+        Some(env!("CARGO_PKG_VERSION"))
+    );
+    assert_eq!(
+        headers.get("user-agent").and_then(|v| v.to_str().ok()),
+        Some(concat!("talos/", env!("CARGO_PKG_VERSION")))
+    );
 }
 
 #[test]
-fn test_build_headers_for_aliyun_coding_plan() {
-    let config = AnthropicConfig::new("test-api-key")
-        .with_base_url("https://coding.dashscope.aliyuncs.com/apps/anthropic/v1");
+fn test_build_headers_for_compatible_endpoint() {
+    let config = AnthropicConfig::new("test-api-key").with_base_url("https://example.com/v1");
     let provider = AnthropicProvider::new(config);
     let headers = provider.build_headers();
 
@@ -253,18 +276,13 @@ fn test_build_headers_for_aliyun_coding_plan() {
         Some("*/*")
     );
     assert!(headers.contains_key("authorization"));
-    assert!(headers.contains_key("anthropic-beta"));
     assert_eq!(
-        headers.get("x-app").and_then(|v| v.to_str().ok()),
-        Some("cli")
+        headers.get("authorization").and_then(|v| v.to_str().ok()),
+        Some("Bearer test-api-key")
     );
     assert_eq!(
-        headers.get("user-agent").and_then(|v| v.to_str().ok()),
-        Some("claude-cli/0.1.0 (external, cli)")
-    );
-    assert_eq!(
-        headers.get("anthropic-beta").and_then(|v| v.to_str().ok()),
-        Some("claude-code-20250219")
+        headers.get("x-talos-client").and_then(|v| v.to_str().ok()),
+        Some("talos")
     );
 }
 

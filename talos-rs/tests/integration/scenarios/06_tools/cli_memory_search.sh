@@ -26,7 +26,7 @@ run_cli() {
 }
 
 models_json="$(run_cli models --format json)"
-primary_model="$(python3 -c 'import json,sys; arr=json.load(sys.stdin); print((arr[0].get("id") if arr else ""))' <<< "${models_json}")"
+primary_model="$(select_e2e_model_from_json "${models_json}")"
 if [[ -z "${primary_model}" ]]; then
   echo "CASE cli_stream_select_model FAIL models=${models_json}"
   exit 1
@@ -84,8 +84,11 @@ import re
 
 events = os.environ.get("EVENTS_TEXT", "")
 started = re.search(r"TOOL_CALL_STARTED name=MemorySearch internal=MemorySearch call_id=([^ ]*) item=([^\n ]+)", events)
-result = re.search(r"TOOL_CALL_RESULT item=([^\n ]+) is_error=false", events)
-print(f"{started.group(1) if started else ''}\t{started.group(2) if started else ''}\t{result.group(1) if result else ''}")
+started_item = started.group(2) if started else ""
+result_item = ""
+if started_item and re.search(rf"TOOL_CALL_RESULT item={re.escape(started_item)} is_error=false", events):
+    result_item = started_item
+print(f"{started.group(1) if started else ''}\t{started_item}\t{result_item}")
 PY
 )"
 memory_started_call_id="${memory_call_ids%%$'\t'*}"

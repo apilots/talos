@@ -9,9 +9,11 @@ load_env
 build_binaries
 
 timestamp="$(date '+%Y%m%d_%H%M%S')"
+export TALOS_E2E_TMP_ROOT="${TALOS_E2E_TMP_ROOT:-${REPO_ROOT}/.tmp/e2e}"
 report_file="${ROOT_DIR}/tests/integration/reports/e2e_report_${timestamp}.md"
 latest_file="${ROOT_DIR}/tests/integration/reports/latest_report.md"
 mkdir -p "${ROOT_DIR}/tests/integration/reports"
+mkdir -p "${TALOS_E2E_TMP_ROOT}"
 
 SCENARIO_ROOT="${ROOT_DIR}/tests/integration/scenarios"
 

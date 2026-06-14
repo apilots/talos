@@ -865,16 +865,13 @@ fn emit_kernel_timeline_events(
             KernelStreamEventType::AssistantTextStarted,
             KernelStreamEventData::AssistantTextStarted(data),
         ) => {
-            if state.assistant_text_items.contains_key(&data.item_key)
-                || state
-                    .completed_assistant_text_items
-                    .contains_key(&data.item_key)
-            {
+            if state.assistant_text_items.contains_key(&data.item_key) {
                 return Err(TalosError::ValidationError(format!(
                     "timeline assistant text item already started: {:?}",
                     data.item_key
                 )));
             }
+            state.completed_assistant_text_items.remove(&data.item_key);
             if matches!(data.phase, KernelAssistantTextPhase::FinalAnswer)
                 && state.final_answer_item_id.is_some()
             {

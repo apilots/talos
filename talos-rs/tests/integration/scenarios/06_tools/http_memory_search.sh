@@ -18,8 +18,8 @@ build_binaries
 start_server
 trap stop_server EXIT
 
-models_json="$(curl -sS -H "Authorization: Bearer ${AUTH_TOKEN}" "${GATEWAY_URL}/v1/models")"
-primary_model="$(python3 -c 'import json,sys; data=json.load(sys.stdin); arr=data.get("data",[]); print((arr[0].get("id") if arr else ""))' <<< "${models_json}")"
+models_json="$(curl -sS "${GATEWAY_URL}/v1/models")"
+primary_model="$(select_e2e_model_from_json "${models_json}")"
 if [[ -z "${primary_model}" ]]; then
   echo "CASE select_model FAIL models=${models_json}"
   exit 1
@@ -52,7 +52,6 @@ PY
 memory_stream_session_payload="$(create_session "memory-user-stream")"
 memory_stream_session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
   -d "${memory_stream_session_payload}")"
 memory_stream_session_id="$(session_id_from_json "${memory_stream_session_json}")"
 if [[ -z "${memory_stream_session_id}" ]]; then

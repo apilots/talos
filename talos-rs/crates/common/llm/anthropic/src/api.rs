@@ -6,7 +6,6 @@ use reqwest::{header, Client};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::env;
 use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
@@ -158,7 +157,6 @@ pub(crate) struct AnthropicTextBlock {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AnthropicEndpointKind {
     Official,
-    AliyunCodingPlan,
     Compatible,
 }
 
@@ -170,17 +168,11 @@ pub struct AnthropicProvider {
 
 impl AnthropicProvider {
     pub fn new(config: AnthropicConfig) -> Self {
-        let mut builder = Client::builder()
+        let client = Client::builder()
             .timeout(Duration::from_secs(config.timeout_secs))
-            .referer(false);
-
-        if Self::endpoint_kind_for_base_url(&config.base_url)
-            == AnthropicEndpointKind::AliyunCodingPlan
-        {
-            builder = builder.no_gzip().no_brotli().no_zstd().no_deflate();
-        }
-
-        let client = builder.build().expect("Failed to build HTTP client");
+            .referer(false)
+            .build()
+            .expect("Failed to build HTTP client");
 
         Self { config, client }
     }
@@ -189,10 +181,6 @@ impl AnthropicProvider {
         let base_url = base_url.trim_end_matches('/');
         if base_url.contains("api.anthropic.com") {
             AnthropicEndpointKind::Official
-        } else if base_url.contains("coding.dashscope.aliyuncs.com/apps/anthropic")
-            || base_url.contains("coding-intl.dashscope.aliyuncs.com/apps/anthropic")
-        {
-            AnthropicEndpointKind::AliyunCodingPlan
         } else {
             AnthropicEndpointKind::Compatible
         }
@@ -202,31 +190,32 @@ impl AnthropicProvider {
         Self::endpoint_kind_for_base_url(&self.config.base_url)
     }
 
-    fn claude_code_user_agent() -> String {
-        let entrypoint = env::var("CLAUDE_CODE_ENTRYPOINT").unwrap_or_else(|_| "cli".to_string());
-        let user_type = env::var("USER_TYPE").unwrap_or_else(|_| "external".to_string());
-        let agent_sdk_version = env::var("CLAUDE_AGENT_SDK_VERSION")
-            .ok()
-            .map(|value| format!(", agent-sdk/{}", value))
-            .unwrap_or_default();
-        let client_app = env::var("CLAUDE_AGENT_SDK_CLIENT_APP")
-            .ok()
-            .map(|value| format!(", client-app/{}", value))
-            .unwrap_or_default();
+    fn insert_header_value(
+        headers: &mut header::HeaderMap,
+        name: &'static str,
+        value: impl AsRef<str>,
+    ) {
+        if let Ok(header_value) = header::HeaderValue::from_str(value.as_ref()) {
+            headers.insert(name, header_value);
+        }
+    }
 
-        format!(
-            "claude-cli/{} ({}, {}{}{})",
-            env!("CARGO_PKG_VERSION"),
-            user_type,
-            entrypoint,
-            agent_sdk_version,
-            client_app
-        )
+    fn insert_talos_headers(headers: &mut header::HeaderMap) {
+        headers.insert(header::ACCEPT, header::HeaderValue::from_static("*/*"));
+        headers.insert("x-talos-client", header::HeaderValue::from_static("talos"));
+        headers.insert(
+            "x-talos-version",
+            header::HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
+        );
+        Self::insert_header_value(
+            headers,
+            header::USER_AGENT.as_str(),
+            format!("talos/{}", env!("CARGO_PKG_VERSION")),
+        );
     }
 
     pub(crate) fn build_headers(&self) -> header::HeaderMap {
         let mut headers = header::HeaderMap::new();
-        headers.insert(header::ACCEPT, header::HeaderValue::from_static("*/*"));
 
         match self.endpoint_kind() {
             AnthropicEndpointKind::Official => {
@@ -237,22 +226,6 @@ impl AnthropicProvider {
                 headers.insert(
                     "anthropic-version",
                     header::HeaderValue::from_static("2023-06-01"),
-                );
-            }
-            AnthropicEndpointKind::AliyunCodingPlan => {
-                headers.insert(
-                    header::AUTHORIZATION,
-                    header::HeaderValue::from_str(&format!("Bearer {}", self.config.api_key))
-                        .unwrap(),
-                );
-                headers.insert(
-                    "anthropic-beta",
-                    header::HeaderValue::from_static("claude-code-20250219"),
-                );
-                headers.insert("x-app", header::HeaderValue::from_static("cli"));
-                headers.insert(
-                    header::USER_AGENT,
-                    header::HeaderValue::from_str(&Self::claude_code_user_agent()).unwrap(),
                 );
             }
             AnthropicEndpointKind::Compatible => {
@@ -268,6 +241,7 @@ impl AnthropicProvider {
             header::CONTENT_TYPE,
             header::HeaderValue::from_static("application/json"),
         );
+        Self::insert_talos_headers(&mut headers);
         headers
     }
 
@@ -441,6 +415,7 @@ impl AnthropicProvider {
     pub(crate) fn supports_native_thinking_model(model: &str) -> bool {
         let normalized = model.trim().to_ascii_lowercase();
         normalized.starts_with("claude-3-7-sonnet")
+            || normalized.starts_with("claude-haiku-4")
             || normalized.starts_with("claude-sonnet-4")
             || normalized.starts_with("claude-opus-4")
             || normalized.starts_with("claude-4")
@@ -553,7 +528,7 @@ impl LlmProvider for AnthropicProvider {
         self.config
             .default_model
             .as_deref()
-            .unwrap_or("claude-3-5-sonnet-20241022")
+            .unwrap_or("claude-sonnet-4-6")
             .to_string()
     }
 

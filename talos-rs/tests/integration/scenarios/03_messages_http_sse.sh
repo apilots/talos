@@ -30,7 +30,6 @@ create_payload='{
 }'
 create_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
   -d "${create_payload}")"
 log_case_json "messages_create_session" "${create_payload}" "${create_json}"
 session_id="$(session_id_from_json "${create_json}")"
@@ -79,7 +78,7 @@ echo "CASE messages_non_stream PASS message_id=${message_id} session_id=${sessio
 echo "DETAIL messages_non_stream_output=${output_text}"
 echo "DETAIL messages_non_stream_usage_total=${message_usage_total}"
 
-session_after_msg_json="$(curl -sS -H "Authorization: Bearer ${AUTH_TOKEN}" "${GATEWAY_URL}/v1/sessions/${session_id}")"
+session_after_msg_json="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}")"
 log_case_json "messages_session_usage_after_non_stream" "{\"session_id\":\"${session_id}\"}" "${session_after_msg_json}"
 session_usage_total="$(usage_total_from_json "${session_after_msg_json}")"
 if [[ -z "${session_usage_total}" || "${session_usage_total}" -le 0 ]]; then
@@ -134,7 +133,6 @@ echo "DETAIL messages_sse_events_end"
 
 gone_session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
   -d "${create_payload}")"
 gone_session_id="$(session_id_from_json "${gone_session_json}")"
 if [[ -z "${gone_session_id}" ]]; then
@@ -150,7 +148,6 @@ fi
 gone_body="$(scenario_report_path cursor_gone_response.json)"
 gone_status="$(curl -sS -o "${gone_body}" -w "%{http_code}" \
   -H "Accept: text/event-stream" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
   "${GATEWAY_URL}/v1/sessions/${gone_session_id}/events?after_event_id=ev_00000000000000000001")"
 log_case_json "messages_events_cursor_gone" "{\"session_id\":\"${gone_session_id}\",\"after_event_id\":\"ev_00000000000000000001\"}" "$(cat "${gone_body}")"
 if [[ "${gone_status}" != "410" ]]; then
@@ -176,7 +173,7 @@ echo "CASE messages_idempotency PASS message_id=${id1}"
 echo "DETAIL messages_idempotency_first_output=${first_output}"
 echo "DETAIL messages_idempotency_second_output=${second_output}"
 
-recovery_json="$(curl -sS -H "Authorization: Bearer ${AUTH_TOKEN}" "${GATEWAY_URL}/v1/sessions/${session_id}/recovery")"
+recovery_json="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}/recovery")"
 log_case_json "session_recovery" "{\"session_id\":\"${session_id}\"}" "${recovery_json}"
 RECOVERY_JSON="${recovery_json}" python3 - <<'PY'
 import json, os, sys

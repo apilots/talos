@@ -617,6 +617,90 @@ async fn explicit_final_after_reasoning_closes_reasoning_before_summary() {
 }
 
 #[tokio::test]
+async fn unknown_model_block_completion_fails() {
+    let provider = Arc::new(ScriptedModelBlockProvider::new(
+        "unknown-completion",
+        vec![block_completed("missing-block"), done()],
+    ));
+
+    let err = stream_round(
+        provider,
+        ChatRequest::new_user("test", "test-model"),
+        0,
+        KernelModelCallMode::WorkingLoop,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect_err("unknown block completion should fail");
+
+    assert!(err
+        .to_string()
+        .contains("model block completed without active block missing-block"));
+}
+
+#[tokio::test]
+async fn repeated_completion_for_known_closed_reasoning_is_ignored() {
+    let provider = Arc::new(ScriptedModelBlockProvider::new(
+        "repeated-known-completion",
+        vec![
+            reasoning_started("reasoning-1"),
+            ModelBlockStreamEvent::BlockDelta {
+                model_item_id: "reasoning-1".to_string(),
+                delta: ModelBlockDelta::ReasoningText {
+                    delta: "thinking live".to_string(),
+                },
+            },
+            assistant_started("final", Some(AssistantTextPhaseHint::FinalAnswer)),
+            block_completed("reasoning-1"),
+            ModelBlockStreamEvent::BlockDelta {
+                model_item_id: "final".to_string(),
+                delta: ModelBlockDelta::AssistantText {
+                    delta: "Final answer.".to_string(),
+                },
+            },
+            block_completed("final"),
+            done(),
+        ],
+    ));
+    let (tx, mut rx) = mpsc::channel(16);
+
+    stream_round(
+        provider,
+        ChatRequest::new_user("test", "test-model"),
+        0,
+        KernelModelCallMode::WorkingLoop,
+        None,
+        Some(&tx),
+        None,
+    )
+    .await
+    .expect("duplicate completion for known closed block should be ignored");
+
+    let mut saw_thinking_delta = false;
+    let mut saw_final_delta = false;
+    while let Ok(event) = rx.try_recv() {
+        match event.data {
+            KernelStreamEventData::ThinkingDelta(data) => {
+                if data.delta == "thinking live" {
+                    saw_thinking_delta = true;
+                }
+            }
+            KernelStreamEventData::AssistantTextDelta(data) => {
+                if data.delta == "Final answer." {
+                    saw_final_delta = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    assert!(saw_thinking_delta);
+    assert!(saw_final_delta);
+}
+
+#[tokio::test]
 async fn explicit_final_with_pending_tool_args_fails_by_policy() {
     let provider = Arc::new(ScriptedModelBlockProvider::new(
         "pending-tool-then-final",

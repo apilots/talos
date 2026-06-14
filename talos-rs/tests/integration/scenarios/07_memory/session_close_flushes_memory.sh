@@ -20,10 +20,25 @@ export TALOS_HOME="${TEST_TALOS_HOME}"
 start_server
 trap cleanup EXIT
 
-WORKSPACE_DIR="${TALOS_HOME}/workspace-talos"
+workspace_info_json="$(curl -sS "${GATEWAY_URL}/v1/workspace/info")"
+WORKSPACE_DIR="$(json_get "${workspace_info_json}" "user_workspace_dir")"
+if [[ -z "${WORKSPACE_DIR}" ]]; then
+  echo "CASE workspace_info FAIL response=${workspace_info_json}"
+  exit 1
+fi
+echo "CASE workspace_info PASS user_workspace_dir=${WORKSPACE_DIR}"
 ROOT_MEMORY_FILE="${WORKSPACE_DIR}/MEMORY.md"
 DAY_FILE="${WORKSPACE_DIR}/memory/$(date '+%Y-%m-%d').md"
 mkdir -p "${WORKSPACE_DIR}"
+
+models_json="$(curl -sS "${GATEWAY_URL}/v1/models")"
+primary_model="$(select_e2e_model_from_json "${models_json}")"
+if [[ -z "${primary_model}" ]]; then
+  echo "CASE close_flush_select_model FAIL models=${models_json}"
+  exit 1
+fi
+export PRIMARY_MODEL="${primary_model}"
+echo "CASE close_flush_select_model PASS model=${primary_model}"
 
 pre_size=0
 if [[ -f "${DAY_FILE}" ]]; then
@@ -32,21 +47,27 @@ fi
 
 message_marker="close-flush-$(date '+%Y%m%d%H%M%S')-$$"
 
-create_payload='{
-  "context": {
-    "source_type": "http",
-    "provider": "http",
-    "channel_id": "session",
-    "user_id": "session-close-user",
-    "thread_id": null,
-    "message_id": "msg-session-close-flush",
-    "trace_id": "trace-session-close-flush"
-  },
-  "model": null
-}'
+create_payload="$(python3 - <<'PY'
+import json
+import os
+
+payload = {
+    "context": {
+        "source_type": "http",
+        "provider": "http",
+        "channel_id": "session",
+        "user_id": "session-close-user",
+        "thread_id": None,
+        "message_id": "msg-session-close-flush",
+        "trace_id": "trace-session-close-flush",
+    },
+    "model": os.environ["PRIMARY_MODEL"],
+}
+print(json.dumps(payload, ensure_ascii=False))
+PY
+)"
 create_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
   -d "${create_payload}")"
 log_case_json "create_session_for_close_flush" "${create_payload}" "${create_json}"
 session_id="$(session_id_from_json "${create_json}")"
@@ -60,7 +81,7 @@ message_payload='{
   "input": [
     {
       "type": "text",
-      "text": "__MESSAGE_MARKER__ Please remember that this session should be flushed on close."
+      "text": "__MESSAGE_MARKER__ Reply with exactly CLOSE_FLUSH_READY. Do not call tools."
     }
   ],
   "workspace_id": null
@@ -73,6 +94,29 @@ if [[ "${message_session_id}" != "${session_id}" ]]; then
   echo "CASE send_message_for_close_flush FAIL expected=${session_id} actual=${message_session_id}"
   exit 1
 fi
+message_stop="$(json_get "${message_json}" "stop_reason")"
+message_output="$(MESSAGE_JSON="${message_json}" python3 - <<'PY'
+import json
+import os
+import sys
+
+try:
+    data = json.loads(os.environ.get("MESSAGE_JSON", ""))
+except Exception:
+    print("")
+    sys.exit(0)
+
+print("\n".join(
+    item.get("text", "")
+    for item in data.get("output", [])
+    if item.get("type") == "output_text"
+))
+PY
+)"
+if [[ "${message_stop}" == "error" || "${message_output}" == Error:* ]]; then
+  echo "CASE send_message_for_close_flush FAIL response=${message_json}"
+  exit 1
+fi
 echo "CASE send_message_for_close_flush PASS session_id=${message_session_id}"
 
 if [[ ! -f "${ROOT_MEMORY_FILE}" ]]; then
@@ -82,7 +126,7 @@ fi
 echo "CASE root_memory_bootstrap PASS path=${ROOT_MEMORY_FILE}"
 
 close_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/close" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}")"
+ )"
 log_case_json "close_session_for_memory_flush" "{\"session_id\":\"${session_id}\"}" "${close_json}"
 close_success="$(json_get "${close_json}" "success")"
 if [[ "${close_success}" != "true" && "${close_success}" != "True" ]]; then

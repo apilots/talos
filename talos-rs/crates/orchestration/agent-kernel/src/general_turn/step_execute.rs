@@ -3,6 +3,7 @@ use crate::{
     AssistantTextCommittedStreamData, ToolArgsDeltaStreamData, ToolExecutionOutput,
     ToolProgressDeltaStreamData, ToolProgressKind, ToolStreamKey,
 };
+use std::collections::BTreeSet;
 
 pub(crate) async fn emit_stream_event(
     stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
@@ -118,6 +119,7 @@ fn ensure_not_after_final(final_answer_started: bool, event: &str) -> TalosResul
 
 async fn close_active_non_final_blocks_before_final(
     active_blocks: &mut BTreeMap<String, ActiveModelBlock>,
+    completed_blocks: &mut BTreeSet<String>,
     stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
 ) -> TalosResult<()> {
     let active_tool = active_blocks.iter().find_map(|(id, block)| {
@@ -134,6 +136,7 @@ async fn close_active_non_final_blocks_before_final(
         let Some(block) = active_blocks.remove(&model_item_id) else {
             continue;
         };
+        completed_blocks.insert(model_item_id);
         if let ActiveModelBlock::AssistantText {
             item_key,
             phase: KernelAssistantTextPhase::Commentary | KernelAssistantTextPhase::Unknown,
@@ -167,6 +170,7 @@ pub(crate) async fn stream_round(
     let mut finish_reason = None;
     let mut pending_calls: BTreeMap<usize, PendingToolCall> = BTreeMap::new();
     let mut active_blocks = BTreeMap::<String, ActiveModelBlock>::new();
+    let mut completed_blocks = BTreeSet::<String>::new();
     let mut streamed_tool_outputs = Vec::new();
     let mut usage = TalosUsage::default();
     let mut assistant_text_streamed = false;
@@ -194,6 +198,12 @@ pub(crate) async fn stream_round(
                             started.model_item_id
                         )));
                     }
+                    if completed_blocks.contains(&started.model_item_id) {
+                        return Err(provider_protocol_violation(format!(
+                            "model block restarted after completion {}",
+                            started.model_item_id
+                        )));
+                    }
                     active_blocks.insert(started.model_item_id, ActiveModelBlock::Reasoning);
                 }
                 ModelBlockKind::AssistantText => {
@@ -203,6 +213,11 @@ pub(crate) async fn stream_round(
                     if active_blocks.contains_key(&model_item_id) {
                         return Err(provider_protocol_violation(format!(
                             "duplicate active model block {model_item_id}"
+                        )));
+                    }
+                    if completed_blocks.contains(&model_item_id) {
+                        return Err(provider_protocol_violation(format!(
+                            "model block restarted after completion {model_item_id}"
                         )));
                     }
                     let item_key = KernelStreamItemKey {
@@ -221,8 +236,12 @@ pub(crate) async fn stream_round(
                                 "final answer started after tool call was emitted in same round",
                             ));
                         }
-                        close_active_non_final_blocks_before_final(&mut active_blocks, stream_tx)
-                            .await?;
+                        close_active_non_final_blocks_before_final(
+                            &mut active_blocks,
+                            &mut completed_blocks,
+                            stream_tx,
+                        )
+                        .await?;
                         final_answer_started = true;
                         final_answer_streamed = true;
                     } else if matches!(phase, KernelAssistantTextPhase::Commentary) {
@@ -260,6 +279,12 @@ pub(crate) async fn stream_round(
                     if active_blocks.contains_key(&started.model_item_id) {
                         return Err(provider_protocol_violation(format!(
                             "duplicate active model block {}",
+                            started.model_item_id
+                        )));
+                    }
+                    if completed_blocks.contains(&started.model_item_id) {
+                        return Err(provider_protocol_violation(format!(
+                            "model block restarted after completion {}",
                             started.model_item_id
                         )));
                     }
@@ -386,11 +411,15 @@ pub(crate) async fn stream_round(
             },
             ModelBlockStreamEvent::BlockCompleted(completed) => {
                 let Some(active_block) = active_blocks.remove(&completed.model_item_id) else {
+                    if completed_blocks.contains(&completed.model_item_id) {
+                        continue;
+                    }
                     return Err(provider_protocol_violation(format!(
                         "model block completed without active block {}",
                         completed.model_item_id
                     )));
                 };
+                completed_blocks.insert(completed.model_item_id);
                 match active_block {
                     ActiveModelBlock::Reasoning => {}
                     ActiveModelBlock::AssistantText { item_key, .. } => {

@@ -6,7 +6,6 @@ use reqwest::{header, Client};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::LazyLock;
 use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
@@ -17,12 +16,6 @@ use talos_llm_provider::{
 };
 use tokio::sync::mpsc;
 use tracing::{debug, error, info};
-use uuid::Uuid;
-
-static CODEX_INSTALLATION_ID: LazyLock<String> =
-    LazyLock::new(|| format!("talos-codex-{}", Uuid::new_v4().simple()));
-static CODEX_CONVERSATION_ID: LazyLock<String> =
-    LazyLock::new(|| format!("talos-session-{}", Uuid::new_v4().simple()));
 
 /// OpenAI API configuration.
 #[derive(Debug, Clone)]
@@ -188,12 +181,6 @@ struct OpenAIUsage {
     total_tokens: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum OpenAIEndpointKind {
-    AliyunCodingPlan,
-    Compatible,
-}
-
 /// OpenAI LLM provider.
 pub struct OpenAIProvider {
     config: OpenAIConfig,
@@ -202,32 +189,12 @@ pub struct OpenAIProvider {
 
 impl OpenAIProvider {
     pub fn new(config: OpenAIConfig) -> Self {
-        let mut builder = Client::builder().timeout(Duration::from_secs(config.timeout_secs));
-
-        if Self::endpoint_kind_for_base_url(&config.base_url)
-            == OpenAIEndpointKind::AliyunCodingPlan
-        {
-            builder = builder.no_gzip().no_brotli().no_zstd().no_deflate();
-        }
-
-        let client = builder.build().expect("Failed to build HTTP client");
+        let client = Client::builder()
+            .timeout(Duration::from_secs(config.timeout_secs))
+            .build()
+            .expect("Failed to build HTTP client");
 
         Self { config, client }
-    }
-
-    fn endpoint_kind_for_base_url(base_url: &str) -> OpenAIEndpointKind {
-        let base_url = base_url.trim_end_matches('/');
-        if base_url.contains("coding.dashscope.aliyuncs.com")
-            || base_url.contains("coding-intl.dashscope.aliyuncs.com")
-        {
-            OpenAIEndpointKind::AliyunCodingPlan
-        } else {
-            OpenAIEndpointKind::Compatible
-        }
-    }
-
-    fn endpoint_kind(&self) -> OpenAIEndpointKind {
-        Self::endpoint_kind_for_base_url(&self.config.base_url)
     }
 
     fn insert_header_value(
@@ -240,6 +207,20 @@ impl OpenAIProvider {
         }
     }
 
+    fn insert_talos_headers(headers: &mut header::HeaderMap) {
+        headers.insert(header::ACCEPT, header::HeaderValue::from_static("*/*"));
+        headers.insert("x-talos-client", header::HeaderValue::from_static("talos"));
+        headers.insert(
+            "x-talos-version",
+            header::HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
+        );
+        Self::insert_header_value(
+            headers,
+            header::USER_AGENT.as_str(),
+            format!("talos/{}", env!("CARGO_PKG_VERSION")),
+        );
+    }
+
     fn build_headers(&self) -> header::HeaderMap {
         let mut headers = header::HeaderMap::new();
         headers.insert(
@@ -250,31 +231,7 @@ impl OpenAIProvider {
             header::CONTENT_TYPE,
             header::HeaderValue::from_static("application/json"),
         );
-
-        if self.endpoint_kind() == OpenAIEndpointKind::AliyunCodingPlan {
-            let conversation_id = CODEX_CONVERSATION_ID.as_str();
-            let window_id = format!("{conversation_id}-1");
-            let user_agent = format!("codex_cli_rs/{}", env!("CARGO_PKG_VERSION"));
-
-            headers.insert(header::ACCEPT, header::HeaderValue::from_static("*/*"));
-            headers.insert(
-                "originator",
-                header::HeaderValue::from_static("codex_cli_rs"),
-            );
-            Self::insert_header_value(&mut headers, header::USER_AGENT.as_str(), user_agent);
-            headers.insert(
-                "version",
-                header::HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
-            );
-            Self::insert_header_value(
-                &mut headers,
-                "x-codex-installation-id",
-                CODEX_INSTALLATION_ID.as_str(),
-            );
-            Self::insert_header_value(&mut headers, "x-codex-window-id", &window_id);
-            Self::insert_header_value(&mut headers, "session_id", conversation_id);
-            Self::insert_header_value(&mut headers, "x-client-request-id", conversation_id);
-        }
+        Self::insert_talos_headers(&mut headers);
 
         headers
     }
@@ -702,7 +659,7 @@ impl LlmProvider for OpenAIProvider {
     }
 
     fn default_model(&self) -> String {
-        "gpt-4o".to_string()
+        "gpt-5.5".to_string()
     }
 
     fn native_thinking_support(&self, model: &str) -> NativeThinkingSupport {
@@ -1210,24 +1167,6 @@ mod tests {
     }
 
     #[test]
-    fn test_coding_plan_endpoint_detection() {
-        assert_eq!(
-            OpenAIProvider::endpoint_kind_for_base_url("https://coding.dashscope.aliyuncs.com/v1"),
-            OpenAIEndpointKind::AliyunCodingPlan
-        );
-        assert_eq!(
-            OpenAIProvider::endpoint_kind_for_base_url(
-                "https://coding-intl.dashscope.aliyuncs.com/v1/"
-            ),
-            OpenAIEndpointKind::AliyunCodingPlan
-        );
-        assert_eq!(
-            OpenAIProvider::endpoint_kind_for_base_url("https://api.openai.com/v1"),
-            OpenAIEndpointKind::Compatible
-        );
-    }
-
-    #[test]
     fn test_convert_messages() {
         let messages = vec![
             ChatMessage::system("You are a helpful assistant"),
@@ -1323,7 +1262,7 @@ mod tests {
         let config = OpenAIConfig::new("test-key");
         let provider = OpenAIProvider::new(config);
         assert_eq!(provider.name(), "openai");
-        assert_eq!(provider.default_model(), "gpt-4o");
+        assert_eq!(provider.default_model(), "gpt-5.5");
         assert_eq!(
             provider.prompt_cache_support(),
             PromptCacheSupport::Unsupported
@@ -1385,39 +1324,28 @@ mod tests {
 
         let auth_header = headers.get("authorization").unwrap();
         assert_eq!(auth_header.to_str().unwrap(), "Bearer test-api-key");
-        assert!(!headers.contains_key("originator"));
-        assert!(!headers.contains_key("x-codex-installation-id"));
-    }
-
-    #[test]
-    fn test_build_headers_adds_coding_plan_fingerprint() {
-        let config = OpenAIConfig::new("test-api-key")
-            .with_base_url("https://coding.dashscope.aliyuncs.com/v1");
-        let provider = OpenAIProvider::new(config);
-        let headers = provider.build_headers();
-
-        assert_eq!(
-            headers
-                .get("originator")
-                .and_then(|value| value.to_str().ok()),
-            Some("codex_cli_rs")
-        );
         assert_eq!(
             headers.get("accept").and_then(|value| value.to_str().ok()),
             Some("*/*")
         );
         assert_eq!(
-            headers.get("version").and_then(|value| value.to_str().ok()),
+            headers
+                .get("x-talos-client")
+                .and_then(|value| value.to_str().ok()),
+            Some("talos")
+        );
+        assert_eq!(
+            headers
+                .get("x-talos-version")
+                .and_then(|value| value.to_str().ok()),
             Some(env!("CARGO_PKG_VERSION"))
         );
-        assert!(headers
-            .get("user-agent")
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value.starts_with("codex_cli_rs/")));
-        assert!(headers.contains_key("x-codex-installation-id"));
-        assert!(headers.contains_key("x-codex-window-id"));
-        assert!(headers.contains_key("session_id"));
-        assert!(headers.contains_key("x-client-request-id"));
+        assert_eq!(
+            headers
+                .get("user-agent")
+                .and_then(|value| value.to_str().ok()),
+            Some(concat!("talos/", env!("CARGO_PKG_VERSION")))
+        );
     }
 
     #[test]

@@ -14,7 +14,7 @@ cloud:
 
 agent:
   name: "talos"
-  model: "kimi-k2.5"
+  model: "qwen3.7-plus"
   kernel:
     tool_parallelism: 1
     max_tool_rounds: 8
@@ -130,16 +130,16 @@ channels:
     enabled: false
 
 llm:
-  provider: "anthropic"
-  model: "kimi-k2.5"
+  provider: "bailian"
+  model: "qwen3.7-plus"
   anthropic:
     api_key: ${TALOS_LLM_ANTHROPIC_API_KEY}
-    base_url: "https://coding.dashscope.aliyuncs.com/apps/anthropic/v1"
-    enabled: true
+    base_url: "https://api.anthropic.com/v1"
+    enabled: false
     models:
-      - id: "qwen3.5-plus"
-        name: "Qwen 3.5 Plus"
-        context_window: 32768
+      - id: "claude-opus-4-8"
+        name: "Claude Opus 4.8"
+        context_window: 1000000
         reasoning: true
         input: ["text", "image"]
         cost:
@@ -148,9 +148,9 @@ llm:
           cache_read: 0
           cache_write: 0
         compat: {}
-      - id: "qwen3-max-2026-01-23"
-        name: "Qwen Max"
-        context_window: 32768
+      - id: "claude-sonnet-4-6"
+        name: "Claude Sonnet 4.6"
+        context_window: 1000000
         reasoning: true
         input: ["text", "image"]
         cost:
@@ -159,55 +159,11 @@ llm:
           cache_read: 0
           cache_write: 0
         compat: {}
-      - id: "qwen3-coder-next"
-        name: "Qwen Coder Next"
-        context_window: 32768
-        reasoning: false
-        input: ["text"]
-        cost:
-          input: 0
-          output: 0
-          cache_read: 0
-          cache_write: 0
-        compat: {}
-      - id: "qwen3-coder-plus"
-        name: "Qwen Coder Plus"
-        context_window: 32768
-        reasoning: false
-        input: ["text"]
-        cost:
-          input: 0
-          output: 0
-          cache_read: 0
-          cache_write: 0
-        compat: {}
-      - id: "glm-5"
-        name: "GLM-5"
-        context_window: 32768
-        reasoning: true
-        input: ["text"]
-        cost:
-          input: 0
-          output: 0
-          cache_read: 0
-          cache_write: 0
-        compat: {}
-      - id: "kimi-k2.5"
-        name: "Kimi K2.5"
-        context_window: 32768
+      - id: "claude-haiku-4-5-20251001"
+        name: "Claude Haiku 4.5"
+        context_window: 200000
         reasoning: true
         input: ["text", "image"]
-        cost:
-          input: 0
-          output: 0
-          cache_read: 0
-          cache_write: 0
-        compat: {}
-      - id: "MiniMax-M2.5"
-        name: "MiniMax M2.5"
-        context_window: 32768
-        reasoning: false
-        input: ["text"]
         cost:
           input: 0
           output: 0
@@ -216,107 +172,52 @@ llm:
         compat: {}
   openai:
     api_key: ${TALOS_LLM_OPENAI_API_KEY}
-    base_url: "https://coding.dashscope.aliyuncs.com/v1"
+    base_url: "https://api.openai.com/v1"
     enabled: false
     models:
-      - id: "qwen3.5-plus"
-        name: "Qwen 3.5 Plus"
-        context_window: 32768
+      - id: "gpt-5.5"
+        name: "GPT-5.5"
+        context_window: 1000000
         reasoning: true
         input: ["text", "image"]
         cost:
-          input: 0
-          output: 0
+          input: 5
+          output: 30
           cache_read: 0
           cache_write: 0
         compat: {}
-      - id: "qwen3-max-2026-01-23"
-        name: "Qwen Max"
-        context_window: 32768
+      - id: "gpt-5.4"
+        name: "GPT-5.4"
+        context_window: 1000000
         reasoning: true
         input: ["text", "image"]
         cost:
-          input: 0
-          output: 0
+          input: 2.5
+          output: 15
           cache_read: 0
           cache_write: 0
         compat: {}
-      - id: "qwen3-coder-next"
-        name: "Qwen Coder Next"
-        context_window: 32768
-        reasoning: false
-        input: ["text"]
-        cost:
-          input: 0
-          output: 0
-          cache_read: 0
-          cache_write: 0
-        compat: {}
-      - id: "qwen3-coder-plus"
-        name: "Qwen Coder Plus"
-        context_window: 32768
-        reasoning: false
-        input: ["text"]
-        cost:
-          input: 0
-          output: 0
-          cache_read: 0
-          cache_write: 0
-        compat: {}
-      - id: "glm-5"
-        name: "GLM-5"
-        context_window: 32768
-        reasoning: true
-        input: ["text"]
-        cost:
-          input: 0
-          output: 0
-          cache_read: 0
-          cache_write: 0
-        compat: {}
-      - id: "kimi-k2.5"
-        name: "Kimi K2.5"
-        context_window: 32768
+      - id: "gpt-5.4-mini"
+        name: "GPT-5.4 mini"
+        context_window: 400000
         reasoning: true
         input: ["text", "image"]
         cost:
-          input: 0
-          output: 0
-          cache_read: 0
-          cache_write: 0
-        compat: {}
-      - id: "MiniMax-M2.5"
-        name: "MiniMax M2.5"
-        context_window: 32768
-        reasoning: false
-        input: ["text"]
-        cost:
-          input: 0
-          output: 0
+          input: 0.75
+          output: 4.5
           cache_read: 0
           cache_write: 0
         compat: {}
   bailian:
     api_key: ${TALOS_LLM_BAILIAN_API_KEY}
     base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    enabled: false
+    enabled: true
     models:
-      - id: "qwen-max"
-        name: "qwen-max"
-        context_window: 32768
-        reasoning: false
-        input: ["text"]
-        cost:
-          input: 0
-          output: 0
-          cache_read: 0
-          cache_write: 0
-        compat: {}
-      - id: "qwen-plus"
-        name: "qwen-plus"
-        context_window: 32768
+      - id: "qwen3.7-max"
+        name: "Qwen 3.7 Max"
+        context_window: 991000
         reasoning: true
-        input: ["text"]
+        input: ["text", "image"]
         cost:
           input: 0
           output: 0
@@ -324,17 +225,30 @@ llm:
           cache_write: 0
         compat:
           thinking_format: "qwen"
-      - id: "qwen-turbo"
-        name: "qwen-turbo"
-        context_window: 32768
-        reasoning: false
-        input: ["text"]
+      - id: "qwen3.7-plus"
+        name: "Qwen 3.7 Plus"
+        context_window: 991000
+        reasoning: true
+        input: ["text", "image"]
         cost:
           input: 0
           output: 0
           cache_read: 0
           cache_write: 0
-        compat: {}
+        compat:
+          thinking_format: "qwen"
+      - id: "qwen3.6-flash"
+        name: "Qwen 3.6 Flash"
+        context_window: 1000000
+        reasoning: true
+        input: ["text", "image"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+        compat:
+          thinking_format: "qwen"
   ollama:
     enabled: false
     base_url: "http://localhost:11434"

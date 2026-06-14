@@ -20,7 +20,13 @@ export TALOS_HOME="${TEST_TALOS_HOME}"
 start_server
 trap cleanup EXIT
 
-WORKSPACE_DIR="${TALOS_HOME}/workspace-talos"
+workspace_info_json="$(curl -sS "${GATEWAY_URL}/v1/workspace/info")"
+WORKSPACE_DIR="$(json_get "${workspace_info_json}" "user_workspace_dir")"
+if [[ -z "${WORKSPACE_DIR}" ]]; then
+  echo "CASE workspace_info FAIL response=${workspace_info_json}"
+  exit 1
+fi
+echo "CASE workspace_info PASS user_workspace_dir=${WORKSPACE_DIR}"
 MEMORY_DATE="$(date '+%Y-%m-%d')"
 MEMORY_FILE="${WORKSPACE_DIR}/memory/${MEMORY_DATE}.md"
 MEMORY_INDEX_FILE="${WORKSPACE_DIR}/memory/${MEMORY_DATE}.index.json"
@@ -38,13 +44,12 @@ request_json() {
   if [[ -n "${body}" ]]; then
     status="$(curl -sS -o "${response_file}" -w "%{http_code}" \
       -X "${method}" "${url}" \
-      -H "Authorization: Bearer ${AUTH_TOKEN}" \
       -H "Content-Type: application/json" \
       -d "${body}")"
   else
     status="$(curl -sS -o "${response_file}" -w "%{http_code}" \
       -X "${method}" "${url}" \
-      -H "Authorization: Bearer ${AUTH_TOKEN}")"
+     )"
   fi
   cat "${response_file}"
   rm -f "${response_file}"

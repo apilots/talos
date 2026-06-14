@@ -73,6 +73,8 @@ pub struct TaskOutputRequest {
     #[serde(default = "default_task_output_yield_time_ms")]
     pub yield_time_ms: u64,
     #[serde(default)]
+    pub offset: Option<usize>,
+    #[serde(default)]
     pub max_output_tokens: Option<usize>,
 }
 
@@ -170,8 +172,13 @@ impl BashSessionManager {
         }
         spawn_waiter(child, session.clone());
 
-        self.collect_output(session_id, request.yield_time_ms, request.max_output_tokens)
-            .await
+        self.collect_output(
+            session_id,
+            request.yield_time_ms,
+            None,
+            request.max_output_tokens,
+        )
+        .await
     }
 
     async fn read_task_output(
@@ -216,6 +223,7 @@ impl BashSessionManager {
         self.collect_output(
             request.session_id,
             request.yield_time_ms,
+            request.offset,
             request.max_output_tokens,
         )
         .await
@@ -225,6 +233,7 @@ impl BashSessionManager {
         &self,
         session_id: i64,
         yield_time_ms: u64,
+        offset: Option<usize>,
         max_output_tokens: Option<usize>,
     ) -> TalosResult<TaskSessionResponse> {
         let session = self
@@ -243,10 +252,13 @@ impl BashSessionManager {
         }
 
         let mut state = session.state.lock().await;
-        let pending = &state.output[state.delivered_bytes..];
+        let start = offset
+            .unwrap_or(state.delivered_bytes)
+            .min(state.output.len());
+        let pending = &state.output[start..];
         let max_bytes = max_output_tokens.unwrap_or(session.max_output_bytes);
         let (chunk, consumed_bytes, truncated) = truncate_prefix(pending, max_bytes);
-        state.delivered_bytes += consumed_bytes;
+        state.delivered_bytes = state.delivered_bytes.max(start + consumed_bytes);
 
         let status = if state.exit_code.is_some() {
             TaskStatus::Exited
@@ -435,6 +447,7 @@ mod tests {
                 session_id,
                 chars: "ok\n".to_string(),
                 yield_time_ms: 50,
+                offset: None,
                 max_output_tokens: None,
             },
             &context,
@@ -444,6 +457,50 @@ mod tests {
 
         assert!(output.output.contains("done:ok"));
         assert_eq!(output.status, TaskStatus::Exited);
+    }
+
+    #[tokio::test]
+    async fn test_task_output_reads_from_explicit_offset() {
+        let context = crate::ToolContext::default()
+            .with_project_root(std::env::current_dir().expect("cwd should exist"));
+        let marker = "task-output-offset-marker";
+        let exec = run_bash_command(
+            &BashCommandRequest {
+                cmd: format!("python3 -c \"import time; print('x' * 1300 + '{}', flush=True); time.sleep(1)\"", marker),
+                workdir: None,
+                shell: Some("sh".to_string()),
+                login: false,
+                tty: false,
+                yield_time_ms: 100,
+                max_output_tokens: None,
+                sandbox_permissions: SandboxPermissions::UseDefault,
+                justification: None,
+                prefix_rule: None,
+            },
+            &context,
+        )
+        .await
+        .expect("bash command should start");
+
+        let session_id = exec.session_id.expect("session id should be present");
+        let output = read_task_output_with_context(
+            &TaskOutputRequest {
+                session_id,
+                chars: String::new(),
+                yield_time_ms: 100,
+                offset: Some(1200),
+                max_output_tokens: None,
+            },
+            &context,
+        )
+        .await
+        .expect("task output read should succeed");
+
+        assert!(output.output.contains(marker), "{}", output.output);
+        assert!(
+            !output.output.starts_with(&"x".repeat(1200)),
+            "offset output should not include the skipped prefix"
+        );
     }
 
     #[tokio::test]
@@ -501,6 +558,7 @@ mod tests {
                 session_id,
                 chars: "noop".to_string(),
                 yield_time_ms: 0,
+                offset: None,
                 max_output_tokens: None,
             },
             &foreign_context,

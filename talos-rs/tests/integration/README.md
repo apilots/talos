@@ -8,7 +8,7 @@ frontend and SDK mock-flow regression tests that do not start a real gateway.
 
 1. `scenarios/01_health_and_models.sh`
 - Scope: server boot + health + models listing
-- Verifies: `/health`, `/v1/models`, auth header path
+- Verifies: `/health`, `/v1/models`
 
 2. `scenarios/02_session_lifecycle.sh`
 - Scope: session CRUD-like lifecycle on native API
@@ -55,16 +55,12 @@ frontend and SDK mock-flow regression tests that do not start a real gateway.
   - `session_close_flushes_memory.sh`
   - `workspace_docs_api.sh`
 
-8. `scenarios/08_admin_llm.sh`
-- Scope: user-scoped LLM config API
-- Verifies: model/config read-write path for authenticated users
-
-9. `scenarios/08_tui/`
+8. `scenarios/08_tui/`
 - Scope: embedded TUI lifecycle validation
 - Files:
   - `embedded_quit_flushes_memory.sh`
 
-10. `scenarios/09_app_server/`
+9. `scenarios/09_app_server/`
 - Scope: JSON-RPC app-server protocol and resource parity
 - Files:
   - `protocol_e2e.sh`

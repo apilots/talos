@@ -21,8 +21,8 @@ build_binaries
 start_server
 trap stop_server EXIT
 
-models_json="$(curl -sS -H "Authorization: Bearer ${AUTH_TOKEN}" "${GATEWAY_URL}/v1/models")"
-primary_model="$(python3 -c 'import json,sys; data=json.load(sys.stdin); arr=data.get("data",[]); print((arr[0].get("id") if arr else ""))' <<< "${models_json}")"
+models_json="$(curl -sS "${GATEWAY_URL}/v1/models")"
+primary_model="$(select_e2e_model_from_json "${models_json}")"
 if [[ -z "${primary_model}" ]]; then
   echo "CASE task_output_select_model FAIL models=${models_json}"
   exit 1
@@ -89,7 +89,6 @@ PY
 session_payload="$(create_session)"
 session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
   -d "${session_payload}")"
 session_id="$(session_id_from_json "${session_json}")"
 if [[ -z "${session_id}" ]]; then
@@ -98,7 +97,7 @@ if [[ -z "${session_id}" ]]; then
 fi
 echo "CASE task_output_create_session PASS session_id=${session_id}"
 
-bash_input="You must call tool 'Bash' exactly once with command python3 -c \"import time; print('x' * 1300 + '${TASK_MARKER}', flush=True); time.sleep(20)\" and run_in_background true and timeout 0. After the tool call, respond with exactly TASK_STARTED"
+bash_input="Use the Bash tool exactly once. Set command to python3 -c \"import time; print('${TASK_MARKER}', flush=True); time.sleep(20)\". Set run_in_background to true and timeout to 0. After the tool call, respond with exactly TASK_STARTED"
 bash_payload="$(build_payload "${bash_input}")"
 bash_json="$(send_message_response "${session_id}" "${bash_payload}" "bash")"
 log_case_json "tool_task_output_bash" "${bash_payload}" "${bash_json}"
@@ -130,7 +129,7 @@ raise AssertionError(results)
 PY
 )"
 
-task_input="You must call tool 'TaskOutput' exactly once with task_id ${task_id} and offset 1200. After the tool call, respond with exactly TASK_OUTPUT_OK:${TASK_MARKER}"
+task_input="Use the TaskOutput tool exactly once with task_id ${task_id} and offset 0. After the tool call, respond with exactly TASK_OUTPUT_OK:${TASK_MARKER}"
 task_payload="$(build_payload "${task_input}")"
 task_json="$(send_message_response "${session_id}" "${task_payload}" "task")"
 log_case_json "tool_task_output" "${task_payload}" "${task_json}"

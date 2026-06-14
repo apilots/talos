@@ -20,7 +20,7 @@ if [[ "${status}" != "healthy" ]]; then
 fi
 echo "CASE health_check PASS status=${status}"
 
-models_json="$(curl -sS -H "Authorization: Bearer ${AUTH_TOKEN}" "${GATEWAY_URL}/v1/models")"
+models_json="$(curl -sS "${GATEWAY_URL}/v1/models")"
 log_case_json "models_list" "{}" "${models_json}"
 model_count="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("data", [])))' <<< "${models_json}")"
 first_model_name="$(python3 -c 'import json,sys; data=json.load(sys.stdin).get("data", []); print((data[0].get("name") if data else ""))' <<< "${models_json}")"

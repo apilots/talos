@@ -172,7 +172,7 @@ Release 配置必须独立生成或覆盖，不能依赖开发默认值。Deskto
 
 | 文件 | 目标语义 | 要求 |
 | --- | --- | --- |
-| `talos-rs/conf/talos.yaml` | 本地开发默认配置 | 可保留 open mode 与本地 Cloud API，但必须删除 `gateway.token` / `cloud.enabled`，并标注为 dev-only |
+| `conf/talos.yaml` | 本地开发默认配置 | 可保留 open mode 与本地 Cloud API，但必须删除 `gateway.token` / `cloud.enabled`，并标注为 dev-only |
 | `talos-app/desktop/resources/conf/talos.yaml` | Desktop packaged 默认配置 | release 包内不得指向 `127.0.0.1:8787`，不得包含 `gateway.token` / `cloud.enabled`，必须使用线上 Cloud API 或由 release build 注入 |
 | release profile YAML | 生产发布配置 | 必须 `gateway.auth=true`、`cloud.api_base_url=https://api.talos.love`、`cloud.web_base_url=https://cloud.talos.love` |
 | test generated YAML | 集成测试临时配置 | 继续通过 env 覆盖 Cloud API，但不能污染 release profile |
@@ -185,7 +185,7 @@ YAML 清理规则：
 - release 配置中禁止 `cloud.api_base_url` 指向 localhost / `127.0.0.1`。
 - release 配置中禁止任何 `local_launch_token`、`TALOS_LOCAL_LAUNCH_TOKEN` 或等价字段。
 - dev-only YAML 必须在文件注释或文档中明确“not for release”。
-- Desktop packaged build 必须显式选择 release YAML，不能隐式复制 `talos-rs/conf/talos.yaml`。
+- Desktop packaged build 必须显式选择 release YAML，不能隐式复制 `conf/talos.yaml`。
 - CI/release smoke 需要检查最终打包进 `.app` 的 YAML 内容，而不是只检查源码模板。
 
 ## 运行流程
@@ -323,7 +323,7 @@ impl CloudConfig {
 | `CloudSessionCache` | 继续保存 token，但不直接授权 | 每次进程启动后需要 Cloud 验证 |
 | `talos_config::CloudConfig` | 删除 `enabled` 字段 | `gateway.auth` 是唯一 auth mode 开关 |
 | `talos_config::GatewayConfig` | 拒绝 `gateway.token` 旧字段 | 避免死字段伪装成认证配置 |
-| `talos-rs/conf/talos.yaml` | 标注 dev-only 或拆为 dev profile，删除 `gateway.token` / `cloud.enabled` | 防止被 release 误用 |
+| `conf/talos.yaml` | 标注 dev-only 或拆为 dev profile，删除 `gateway.token` / `cloud.enabled` | 防止被 release 误用 |
 | `talos-app/desktop/resources/conf/talos.yaml` | 改为 release profile 或 build-time 注入，删除 `gateway.token` / `cloud.enabled` | packaged app 默认线上 Cloud |
 | release config | 新增 production YAML profile | `gateway.auth=true` + Cloud API/Web 线上地址 |
 

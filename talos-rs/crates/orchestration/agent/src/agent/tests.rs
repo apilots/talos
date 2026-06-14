@@ -652,6 +652,66 @@ fn test_assistant_text_delta_without_started_item_fails() {
 }
 
 #[test]
+fn test_assistant_text_completed_item_key_can_restart() {
+    let mut timeline =
+        TimelineBuilder::new("request-restart", "turn-restart", "message-1", "session-1");
+    let mut state = KernelTimelineState::default();
+    let item_key = KernelStreamItemKey {
+        round: Some(0),
+        local_id: "provider-assistant".to_string(),
+    };
+
+    let first_start = emit_kernel_timeline_events(
+        &mut timeline,
+        &mut state,
+        KernelStreamEvent::new(
+            KernelStreamEventType::AssistantTextStarted,
+            KernelStreamEventData::AssistantTextStarted(AssistantTextStartedStreamData {
+                item_key: item_key.clone(),
+                phase: KernelAssistantTextPhase::Commentary,
+                round: Some(0),
+            }),
+        ),
+    )
+    .expect("first assistant text should start");
+    emit_kernel_timeline_events(
+        &mut timeline,
+        &mut state,
+        KernelStreamEvent::new(
+            KernelStreamEventType::AssistantTextCompleted,
+            KernelStreamEventData::AssistantTextCompleted(AssistantTextCompletedStreamData {
+                item_key: item_key.clone(),
+            }),
+        ),
+    )
+    .expect("first assistant text should complete");
+
+    let second_start = emit_kernel_timeline_events(
+        &mut timeline,
+        &mut state,
+        KernelStreamEvent::new(
+            KernelStreamEventType::AssistantTextStarted,
+            KernelStreamEventData::AssistantTextStarted(AssistantTextStartedStreamData {
+                item_key,
+                phase: KernelAssistantTextPhase::Commentary,
+                round: Some(0),
+            }),
+        ),
+    )
+    .expect("completed provider item key should be reusable");
+
+    let first_item_id = match &first_start[0].payload {
+        TalosTimelineEventPayload::ItemStarted(payload) => payload.item.item_id.clone(),
+        other => panic!("expected item started, got {other:?}"),
+    };
+    let second_item_id = match &second_start[0].payload {
+        TalosTimelineEventPayload::ItemStarted(payload) => payload.item.item_id.clone(),
+        other => panic!("expected item started, got {other:?}"),
+    };
+    assert_ne!(first_item_id, second_item_id);
+}
+
+#[test]
 fn test_reasoning_item_closes_before_tool_boundary_and_restarts_after_tool() {
     let mut timeline = TimelineBuilder::new(
         "request-reasoning-tool",

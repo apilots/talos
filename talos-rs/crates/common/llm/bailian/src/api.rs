@@ -60,7 +60,9 @@ pub struct BailianThinkingConfig {
 #[derive(Debug, Default)]
 struct BailianModelBlockStreamState {
     reasoning_started: HashMap<usize, bool>,
+    reasoning_segment: HashMap<usize, usize>,
     assistant_started: HashMap<usize, bool>,
+    assistant_segment: HashMap<usize, usize>,
     tool_started: HashMap<usize, bool>,
 }
 
@@ -410,8 +412,8 @@ impl BailianProvider {
 
     pub(crate) fn model_capability(model: &str) -> BailianModelCapability {
         let normalized = model.trim().to_ascii_lowercase();
-        if normalized.starts_with("qwen-plus")
-            || normalized.starts_with("qwen3-max")
+        if normalized.starts_with("qwen3.7-")
+            || normalized == "qwen3.6-flash"
             || normalized.starts_with("qwq")
         {
             BailianModelCapability::Thinking
@@ -476,12 +478,54 @@ impl BailianProvider {
             .unwrap_or(0) as usize
     }
 
-    fn reasoning_model_item_id(choice_index: usize) -> String {
-        format!("bailian-choice-{choice_index}-reasoning")
+    fn reasoning_model_item_id(choice_index: usize, segment: usize) -> String {
+        if segment == 0 {
+            format!("bailian-choice-{choice_index}-reasoning")
+        } else {
+            format!("bailian-choice-{choice_index}-reasoning-{segment}")
+        }
     }
 
-    fn assistant_model_item_id(choice_index: usize) -> String {
-        format!("bailian-choice-{choice_index}-assistant")
+    fn current_reasoning_model_item_id(
+        state: &BailianModelBlockStreamState,
+        choice_index: usize,
+    ) -> String {
+        let segment = state
+            .reasoning_segment
+            .get(&choice_index)
+            .copied()
+            .unwrap_or(0);
+        Self::reasoning_model_item_id(choice_index, segment)
+    }
+
+    fn assistant_model_item_id(choice_index: usize, segment: usize) -> String {
+        if segment == 0 {
+            format!("bailian-choice-{choice_index}-assistant")
+        } else {
+            format!("bailian-choice-{choice_index}-assistant-{segment}")
+        }
+    }
+
+    fn current_assistant_model_item_id(
+        state: &BailianModelBlockStreamState,
+        choice_index: usize,
+    ) -> String {
+        let segment = state
+            .assistant_segment
+            .get(&choice_index)
+            .copied()
+            .unwrap_or(0);
+        Self::assistant_model_item_id(choice_index, segment)
+    }
+
+    fn has_seen_assistant_text(state: &BailianModelBlockStreamState, choice_index: usize) -> bool {
+        state.assistant_started.get(&choice_index) == Some(&true)
+            || state
+                .assistant_segment
+                .get(&choice_index)
+                .copied()
+                .unwrap_or(0)
+                > 0
     }
 
     fn tool_model_item_id(index: usize) -> String {
@@ -507,7 +551,7 @@ impl BailianProvider {
         Self::send_model_block_event(
             tx,
             ModelBlockStreamEvent::BlockStarted(ModelBlockStarted {
-                model_item_id: Self::reasoning_model_item_id(choice_index),
+                model_item_id: Self::current_reasoning_model_item_id(state, choice_index),
                 provider_item_id: Some(format!("choice:{choice_index}:reasoning")),
                 kind: ModelBlockKind::Reasoning,
                 assistant_text_phase_hint: None,
@@ -530,7 +574,7 @@ impl BailianProvider {
         Self::send_model_block_event(
             tx,
             ModelBlockStreamEvent::BlockStarted(ModelBlockStarted {
-                model_item_id: Self::assistant_model_item_id(choice_index),
+                model_item_id: Self::current_assistant_model_item_id(state, choice_index),
                 provider_item_id: Some(format!("choice:{choice_index}:message")),
                 kind: ModelBlockKind::AssistantText,
                 assistant_text_phase_hint: None,
@@ -579,17 +623,19 @@ impl BailianProvider {
             .filter_map(|(index, started)| started.then_some(*index))
             .collect();
         for index in reasoning_ids {
+            let segment = state.reasoning_segment.get(&index).copied().unwrap_or(0);
             state.reasoning_started.insert(index, false);
             if !Self::send_model_block_event(
                 tx,
                 ModelBlockStreamEvent::BlockCompleted(ModelBlockCompleted {
-                    model_item_id: Self::reasoning_model_item_id(index),
+                    model_item_id: Self::reasoning_model_item_id(index, segment),
                 }),
             )
             .await
             {
                 return false;
             }
+            state.reasoning_segment.insert(index, segment + 1);
         }
 
         let assistant_ids: Vec<_> = state
@@ -598,17 +644,19 @@ impl BailianProvider {
             .filter_map(|(index, started)| started.then_some(*index))
             .collect();
         for index in assistant_ids {
+            let segment = state.assistant_segment.get(&index).copied().unwrap_or(0);
             state.assistant_started.insert(index, false);
             if !Self::send_model_block_event(
                 tx,
                 ModelBlockStreamEvent::BlockCompleted(ModelBlockCompleted {
-                    model_item_id: Self::assistant_model_item_id(index),
+                    model_item_id: Self::assistant_model_item_id(index, segment),
                 }),
             )
             .await
             {
                 return false;
             }
+            state.assistant_segment.insert(index, segment + 1);
         }
 
         let tool_ids: Vec<_> = state
@@ -750,7 +798,7 @@ impl LlmProvider for BailianProvider {
     }
 
     fn default_model(&self) -> String {
-        "qwen-plus".to_string()
+        "qwen3.7-plus".to_string()
     }
 
     fn prompt_cache_support(&self) -> PromptCacheSupport {
@@ -946,6 +994,12 @@ impl LlmProvider for BailianProvider {
                             if let Some(reasoning_delta) =
                                 delta_object.and_then(Self::extract_reasoning_delta)
                             {
+                                if reasoning_delta.trim().is_empty() {
+                                    continue;
+                                }
+                                if Self::has_seen_assistant_text(&state, choice_index) {
+                                    continue;
+                                }
                                 if !Self::ensure_reasoning_model_block(
                                     &tx,
                                     &mut state,
@@ -955,7 +1009,8 @@ impl LlmProvider for BailianProvider {
                                     || !Self::send_model_block_event(
                                         &tx,
                                         ModelBlockStreamEvent::BlockDelta {
-                                            model_item_id: Self::reasoning_model_item_id(
+                                            model_item_id: Self::current_reasoning_model_item_id(
+                                                &state,
                                                 choice_index,
                                             ),
                                             delta: ModelBlockDelta::ReasoningText {
@@ -973,6 +1028,9 @@ impl LlmProvider for BailianProvider {
                                 .and_then(|d| d.get("content"))
                                 .and_then(|t| t.as_str())
                             {
+                                if delta.is_empty() {
+                                    continue;
+                                }
                                 if !Self::ensure_assistant_model_block(
                                     &tx,
                                     &mut state,
@@ -982,7 +1040,8 @@ impl LlmProvider for BailianProvider {
                                     || !Self::send_model_block_event(
                                         &tx,
                                         ModelBlockStreamEvent::BlockDelta {
-                                            model_item_id: Self::assistant_model_item_id(
+                                            model_item_id: Self::current_assistant_model_item_id(
+                                                &state,
                                                 choice_index,
                                             ),
                                             delta: ModelBlockDelta::AssistantText {

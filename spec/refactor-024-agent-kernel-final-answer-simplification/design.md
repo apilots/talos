@@ -517,7 +517,7 @@ fn decide_assistant_text_phase(round: &StreamRound) -> KernelAssistantTextPhase 
 - `talos-rs/crates/orchestration/agent-kernel/src/general_turn/types.rs`
 - `talos-rs/crates/orchestration/agent-kernel/src/general_turn/guard.rs`
 - `talos-rs/crates/infra/config/src/domains/kernel.rs`
-- `talos-rs/conf/talos.yaml`
+- `conf/talos.yaml`
 - `talos-app/desktop/resources/conf/talos.yaml`
 
 改动：

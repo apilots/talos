@@ -33,7 +33,7 @@ agent-kernel/general_turn
 
 截至 2026-05-22，本 spec 描述的主路径收敛已经落地：
 
-- `talos-rs/conf/talos.yaml` 和 Desktop bundled `talos-app/desktop/resources/conf/talos.yaml` 均只保留当前 kernel 配置；旧 `planner_selection`、`execution_mode`、`execution_children`、`execution_loop_iters`、`max_iters`、`max_task_per_turn`、`max_llm_calls` 已删除。
+- `conf/talos.yaml` 和 Desktop bundled `talos-app/desktop/resources/conf/talos.yaml` 均只保留当前 kernel 配置；旧 `planner_selection`、`execution_mode`、`execution_children`、`execution_loop_iters`、`max_iters`、`max_task_per_turn`、`max_llm_calls` 已删除。
 - `orchestration/agent` 作为 AgentHarness，主路径直接调用 `agent-kernel/general_turn`。
 - `KernelRuntime`、`DefaultRunner`、`LlmKernelAgent`、`FlowFactory`、`SingleFlow`、composite kernel agents 已从 Rust 主路径删除。
 - 交互式工具审批路径已删除；当前等待态只保留 dynamic tool result / user input。
@@ -53,7 +53,7 @@ agent-kernel/general_turn
 
 重构前默认/配置使用情况：
 
-- `talos-rs/conf/talos.yaml` 使用 `planner_mode: "built_in"`、`execution_mode: "single"`。
+- `conf/talos.yaml` 使用 `planner_mode: "built_in"`、`execution_mode: "single"`。
 - `AgentKernelConfig::default()` 中 `planner_mode` 默认是 `BuiltIn`，`execution_mode` 默认是 `Single`。
 - `ExecutionMode::{Sequential, Parallel, Loop}` 暂未看到稳定产品主路径使用，主要是早期参考 ADK 的泛化 runtime 设计。
 - `PlanReAct` 不是默认主路径，但在 `planner_selection: "auto"` 且 selector 返回 `react` 时仍可能被动态选中，因此不能直接当作死代码删除。
@@ -772,7 +772,7 @@ parent general_turn
 
 5. **Desktop / packaged resource 可能重新带入旧配置**
 
-   `talos-rs/conf` 与 Desktop bundled config 必须同步保持无旧字段；`AgentKernelConfig` 使用 `deny_unknown_fields`，旧字段会导致 packaged app-server 启动失败。
+   `conf` 与 Desktop bundled config 必须同步保持无旧字段；`AgentKernelConfig` 使用 `deny_unknown_fields`，旧字段会导致 packaged app-server 启动失败。
 
 ## 决策摘要
 

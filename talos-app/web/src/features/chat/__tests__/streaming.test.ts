@@ -213,6 +213,43 @@ describe("timeline stream events", () => {
     });
   });
 
+  it("merges deltas into the started reasoning item without leaving an empty timeline block", () => {
+    applyStreamEvent("sess-1", itemStarted("reasoning-5", "reasoning", "thinking", 1));
+    applyStreamEvent("sess-1", textDelta("reasoning-5", "<think>", 2));
+    applyStreamEvent("sess-1", textDelta("reasoning-5", "\n", 3));
+    applyStreamEvent("sess-1", itemCompleted("reasoning-5", 4));
+
+    const timeline = useAppStore.getState().streams["sess-1"]?.blocks.find((block) => block.kind === "timeline");
+    expect(timeline).toMatchObject({
+      id: "timeline-sess-1-msg-1",
+      kind: "timeline",
+      items: [
+        expect.objectContaining({
+          itemId: "reasoning-5",
+          sourceItemId: "reasoning-5",
+          text: "<think>\n",
+          status: "completed",
+        }),
+      ],
+    });
+    expect(timeline?.kind === "timeline" ? timeline.items : []).toHaveLength(1);
+  });
+
+  it("scopes repeated item ids by message when rendering live timeline blocks", () => {
+    applyStreamEvent("sess-1", itemStarted("reasoning-5", "reasoning", "thinking", 1));
+    applyStreamEvent("sess-1", textDelta("reasoning-5", "first", 2));
+    applyStreamEvent("sess-1", withMessage(itemStarted("reasoning-5", "reasoning", "thinking", 3), "msg-2", "turn-2"));
+    applyStreamEvent("sess-1", withMessage(textDelta("reasoning-5", "second", 4), "msg-2", "turn-2"));
+
+    const timelines = (useAppStore.getState().streams["sess-1"]?.blocks ?? []).filter((block) => block.kind === "timeline");
+    expect(timelines).toEqual([
+      expect.objectContaining({
+        id: "timeline-sess-1-msg-2",
+        items: [expect.objectContaining({ itemId: "reasoning-5", text: "second" })],
+      }),
+    ]);
+  });
+
   it("preserves active turn cursor while reconnecting running sessions", () => {
     applyActiveTurnSnapshot("sess-1", activeTurn({
       status: "running",
@@ -391,8 +428,8 @@ function baseEvent(payload: TalosTimelineEvent["payload"], sequence: number): Ti
 
 function itemStarted(
   itemId: string,
-  kind: "assistant_text" | "tool_call" | "user_input",
-  phase: "commentary" | "final_answer" | "unknown" | "acting" | "input",
+  kind: "assistant_text" | "tool_call" | "user_input" | "reasoning",
+  phase: "commentary" | "final_answer" | "unknown" | "acting" | "input" | "thinking",
   sequence: number,
 ): TimelineEventEnvelope {
   return baseEvent({
@@ -420,6 +457,19 @@ function itemStarted(
         : { type: "text", text: "" },
     },
   }, sequence);
+}
+
+function withMessage(event: TimelineEventEnvelope, messageId: string, turnId: string): TimelineEventEnvelope {
+  return {
+    ...event,
+    turn_id: turnId,
+    message_id: messageId,
+    event: {
+      ...event.event,
+      turn_id: turnId,
+      message_id: messageId,
+    },
+  };
 }
 
 function assistantTextCommitted(

@@ -2,13 +2,14 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+REPO_ROOT="$(cd "${ROOT_DIR}/.." && pwd)"
 PORT="${TALOS_TEST_PORT:-8080}"
 HEALTH_URL="http://127.0.0.1:${PORT}/health"
 GATEWAY_URL="http://127.0.0.1:${PORT}"
-AUTH_TOKEN="${GATEWAY_TOKEN:-}"
 REPORT_ROOT="${ROOT_DIR}/tests/integration/reports"
 SCENARIO_REPORT_DIR="${TALOS_SCENARIO_REPORT_DIR:-${REPORT_ROOT}/manual}"
 SERVER_LOG="${SCENARIO_REPORT_DIR}/server.log"
+E2E_TMP_ROOT="${TALOS_E2E_TMP_ROOT:-${REPO_ROOT}/.tmp/e2e}"
 
 scenario_report_path() {
   local name="$1"
@@ -78,19 +79,78 @@ cleanup_stale_server() {
 }
 
 load_env() {
-  if [[ -f "${ROOT_DIR}/.env" ]]; then
+  if [[ -f "${REPO_ROOT}/.env" ]]; then
     set -a
     # shellcheck disable=SC1090
-    source "${ROOT_DIR}/.env"
+    source "${REPO_ROOT}/.env"
     set +a
   fi
 }
 
-prepare_talos_home() {
-  local test_home="${TALOS_HOME:-${HOME}/.talos}"
-  local config_src="${ROOT_DIR}/conf/talos.yaml"
-  local config_dst="${test_home}/conf/talos.yaml"
+select_e2e_model_from_json() {
+  local models_json="$1"
+  local preferred_models="${TALOS_E2E_PREFERRED_MODELS:-qwen3.6-flash,qwen3.7-plus,qwen3.7-max}"
 
+  MODELS_JSON="${models_json}" PREFERRED_MODELS="${preferred_models}" python3 - <<'PY'
+import json
+import os
+import sys
+
+try:
+    payload = json.loads(os.environ.get("MODELS_JSON", ""))
+except Exception:
+    print("")
+    raise SystemExit(0)
+
+models = payload.get("data", payload) if isinstance(payload, dict) else payload
+if not isinstance(models, list):
+    print("")
+    raise SystemExit(0)
+
+ids = [
+    item.get("id")
+    for item in models
+    if isinstance(item, dict) and isinstance(item.get("id"), str) and item.get("id")
+]
+available = set(ids)
+
+for model in (m.strip() for m in os.environ.get("PREFERRED_MODELS", "").split(",")):
+    if model and model in available:
+        print(model)
+        raise SystemExit(0)
+
+print(ids[0] if ids else "")
+PY
+}
+
+default_talos_home() {
+  local scenario_name="${TALOS_SCENARIO_NAME:-manual}"
+  local safe_name
+  safe_name="$(printf '%s' "${scenario_name}" | sed 's#[^A-Za-z0-9_.-]#-#g')"
+  printf '%s/homes/%s\n' "${E2E_TMP_ROOT}" "${safe_name}"
+}
+
+prepare_talos_home() {
+  local using_default_home=0
+  local test_home="${TALOS_HOME:-}"
+  local config_src="${TALOS_TEST_CONFIG_TEMPLATE:-${REPO_ROOT}/conf/talos-dev.yaml}"
+
+  if [[ -z "${test_home}" ]]; then
+    using_default_home=1
+    test_home="$(default_talos_home)"
+  fi
+
+  if [[ "${test_home}" == "${HOME}/.talos" ]]; then
+    echo "Refusing to use default user Talos home for e2e: ${test_home}" >&2
+    exit 1
+  fi
+
+  export TALOS_HOME="${test_home}"
+  if [[ "${using_default_home}" == "1" ]]; then
+    rm -rf "${test_home}"
+  fi
+
+  local config_dst="${test_home}/conf/talos.yaml"
   mkdir -p "${test_home}/conf" "${test_home}/logs" "${test_home}/data"
   cp "${config_src}" "${config_dst}"
   apply_test_config_overrides "${config_dst}"
@@ -291,7 +351,6 @@ send_message_ack() {
   local args=(
     -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages"
     -H "Content-Type: application/json"
-    -H "Authorization: Bearer ${AUTH_TOKEN}"
   )
   if [[ -n "${idempotency_key}" ]]; then
     args+=(-H "Idempotency-Key: ${idempotency_key}")
@@ -310,7 +369,6 @@ collect_timeline_events() {
   OUTPUT_PATH="${output_path}" \
   AFTER_EVENT_ID="${after_event_id}" \
   GATEWAY_URL="${GATEWAY_URL}" \
-  AUTH_TOKEN="${AUTH_TOKEN}" \
   python3 - <<'PY'
 import json
 import os
@@ -323,7 +381,6 @@ message_id = os.environ["MESSAGE_ID"]
 output_path = os.environ["OUTPUT_PATH"]
 after_event_id = os.environ.get("AFTER_EVENT_ID", "")
 gateway_url = os.environ["GATEWAY_URL"].rstrip("/")
-auth_token = os.environ["AUTH_TOKEN"]
 
 query = {"limit": "10000"}
 if after_event_id:
@@ -333,7 +390,6 @@ request = urllib.request.Request(
     url,
     headers={
         "Accept": "text/event-stream",
-        "Authorization": f"Bearer {auth_token}",
     },
 )
 

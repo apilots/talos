@@ -18,7 +18,19 @@ type TimelineItemSnapshot = {
   callId?: string;
 };
 
-const timelineItemsBySession = new Map<string, Map<string, TimelineItemSnapshot>>();
+const timelineItemsByMessage = new Map<string, Map<string, TimelineItemSnapshot>>();
+
+function timelineMessageKey(sessionId: string, messageId: string) {
+  return `${sessionId}:${messageId}`;
+}
+
+function clearTimelineItemsForSession(sessionId: string) {
+  for (const key of timelineItemsByMessage.keys()) {
+    if (key.startsWith(`${sessionId}:`)) {
+      timelineItemsByMessage.delete(key);
+    }
+  }
+}
 
 export function buildBlocksFromHistorySnapshot(
   snapshot: TalosSessionHistorySnapshot | undefined,
@@ -89,9 +101,6 @@ export function buildBlocksFromHistorySnapshot(
         continue;
       }
       const chatItem = toChatTimelineItem(item);
-      if (chatItem.kind !== "tool_call" && !chatItem.text.trim()) {
-        continue;
-      }
       const timeline = ensureTimelineBlock(message.message_id, messageMetrics);
       const existingIndex = timeline.items.findIndex((entry) => entry.itemId === chatItem.itemId);
       if (existingIndex >= 0) {
@@ -154,6 +163,7 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEventEnvel
     }
     state.setTurnMetrics(
       sessionId,
+      event.message_id,
       toChatTurnMetrics(event.payload.metrics as TalosTurnExecutionMetrics, "running"),
     );
     return;
@@ -169,7 +179,7 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEventEnvel
 
   if (stream?.activeMessageId && !isSameMessage) {
     state.resetLiveResponse(sessionId);
-    timelineItemsBySession.delete(sessionId);
+    clearTimelineItemsForSession(sessionId);
   }
 
   if (stream?.pendingInput && stream.pendingInput.serverMessageId !== event.message_id) {
@@ -205,11 +215,12 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEventEnvel
       applyItemStarted(sessionId, event.message_id, event.payload.item);
       return;
     case "item_delta":
-      applyItemDelta(sessionId, event.payload.item_id, event.payload.delta, event.sequence);
+      applyItemDelta(sessionId, event.message_id, event.payload.item_id, event.payload.delta, event.sequence);
       return;
     case "item_completed":
       applyItemCompleted(
         sessionId,
+        event.message_id,
         event.payload.item_id,
         event.payload.status,
         Number(event.payload.completed_at_ms),
@@ -217,17 +228,18 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEventEnvel
       );
       return;
     case "assistant_text_committed":
-      applyAssistantTextCommitted(sessionId, event.payload.item_id, event.payload.phase);
+      applyAssistantTextCommitted(sessionId, event.message_id, event.payload.item_id, event.payload.phase);
       return;
     case "turn_completed":
       if (event.payload.metrics) {
         state.setTurnMetrics(
           sessionId,
+          event.message_id,
           toChatTurnMetrics(event.payload.metrics as TalosTurnExecutionMetrics, "completed"),
         );
       }
       markPendingInputCompleted(sessionId, event.message_id);
-      timelineItemsBySession.delete(sessionId);
+      timelineItemsByMessage.delete(timelineMessageKey(sessionId, event.message_id));
       state.setSessionStatus(
         sessionId,
         stream?.pendingUserAction ? "running" : undefined,
@@ -239,7 +251,7 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEventEnvel
       });
       return;
     case "turn_error":
-      timelineItemsBySession.delete(sessionId);
+      timelineItemsByMessage.delete(timelineMessageKey(sessionId, event.message_id));
       state.setPendingUserAction(sessionId, undefined);
       state.setSessionStatus(sessionId, "error");
       state.setStreamError(sessionId, event.payload.error || "Unknown stream error.");
@@ -281,7 +293,7 @@ function toChatTurnMetrics(
 }
 
 function applyItemStarted(sessionId: string, messageId: string, item: TalosTimelineItem) {
-  rememberTimelineItem(sessionId, item);
+  rememberTimelineItem(sessionId, messageId, item);
   if (item.phase === "input") {
     const text = timelineText(item.content);
     if (text.trim()) {
@@ -293,16 +305,17 @@ function applyItemStarted(sessionId: string, messageId: string, item: TalosTimel
     useAppStore.getState().setTimelineLive(sessionId, false);
     return;
   }
-  useAppStore.getState().upsertTimelineItem(sessionId, toChatTimelineItem(item));
+  useAppStore.getState().upsertTimelineItem(sessionId, messageId, toChatTimelineItem(item));
 }
 
 function applyItemDelta(
   sessionId: string,
+  messageId: string,
   itemId: string,
   delta: TalosTimelineDelta,
   sequence: number,
 ) {
-  const item = getTimelineItem(sessionId, itemId);
+  const item = getTimelineItem(sessionId, messageId, itemId);
   const state = useAppStore.getState();
 
   switch (delta.type) {
@@ -313,12 +326,12 @@ function applyItemDelta(
       if (item.item.phase === "final_answer") {
         state.appendStreamText(sessionId, "assistant", delta.text);
       } else {
-        state.appendTimelineItemText(sessionId, toChatTimelineItem(item.item), delta.text, sequence);
+        state.appendTimelineItemText(sessionId, messageId, toChatTimelineItem(item.item), delta.text, sequence);
       }
       return;
     case "tool_arguments":
       if (item?.callId) {
-        state.updateTimelineTool(sessionId, itemId, {
+        state.updateTimelineTool(sessionId, messageId, itemId, {
           arguments: appendToolArguments(item, delta.arguments_delta),
         });
       }
@@ -327,14 +340,14 @@ function applyItemDelta(
       if (item?.callId) {
         appendToolProgressSnapshot(item, delta.progress_kind, delta.text_delta);
         const progress = toolProgress(item);
-        state.updateTimelineTool(sessionId, itemId, {
+        state.updateTimelineTool(sessionId, messageId, itemId, {
           progress,
         });
       }
       return;
     case "tool_result":
       if (item?.callId) {
-        state.updateTimelineTool(sessionId, itemId, {
+        state.updateTimelineTool(sessionId, messageId, itemId, {
           output: outputContentToText(delta.content as never[]),
           isError: delta.is_error,
           status: delta.is_error ? "failed" : "completed",
@@ -349,8 +362,8 @@ function applyItemDelta(
         call_id: delta.call_id,
         tool_name: delta.tool_name,
       });
-      ensureTimelineToolForRequest(sessionId, itemId, item, delta.call_id, delta.tool_name);
-      state.updateTimelineTool(sessionId, itemId, {
+      ensureTimelineToolForRequest(sessionId, messageId, itemId, item, delta.call_id, delta.tool_name);
+      state.updateTimelineTool(sessionId, messageId, itemId, {
         toolName: delta.tool_name,
         arguments: unwrapJsonValue(delta.arguments),
         status: "running",
@@ -363,7 +376,7 @@ function applyItemDelta(
       return;
     case "status":
       if (item?.callId) {
-        state.updateTimelineTool(sessionId, itemId, { status: delta.status });
+        state.updateTimelineTool(sessionId, messageId, itemId, { status: delta.status });
       }
       return;
   }
@@ -371,17 +384,18 @@ function applyItemDelta(
 
 function applyItemCompleted(
   sessionId: string,
+  messageId: string,
   itemId: string,
   status: string,
   completedAtMs: number,
   finalContent: TalosTimelineContent | null,
 ) {
-  const item = getTimelineItem(sessionId, itemId);
+  const item = getTimelineItem(sessionId, messageId, itemId);
   if (item?.item.phase === "input") {
     markPendingInputCompleted(sessionId);
     return;
   }
-  useAppStore.getState().completeTimelineItem(sessionId, itemId, status as ChatTimelineItem["status"], completedAtMs);
+  useAppStore.getState().completeTimelineItem(sessionId, messageId, itemId, status as ChatTimelineItem["status"], completedAtMs);
   if (!item?.callId || item.item.kind !== "tool_call") {
     return;
   }
@@ -390,7 +404,7 @@ function applyItemCompleted(
   if (!result) {
     return;
   }
-  useAppStore.getState().updateTimelineTool(sessionId, itemId, {
+  useAppStore.getState().updateTimelineTool(sessionId, messageId, itemId, {
     output: outputContentToText(result.content as never[]),
     isError: result.is_error,
     status: result.is_error ? "failed" : "completed",
@@ -400,25 +414,27 @@ function applyItemCompleted(
 
 function applyAssistantTextCommitted(
   sessionId: string,
+  messageId: string,
   itemId: string,
   phase: TalosTimelineItem["phase"],
 ) {
-  const item = getTimelineItem(sessionId, itemId);
+  const item = getTimelineItem(sessionId, messageId, itemId);
   if (item) {
     item.item.phase = phase;
   }
   const state = useAppStore.getState();
-  state.commitTimelineAssistantText(sessionId, itemId, phase);
+  state.commitTimelineAssistantText(sessionId, messageId, itemId, phase);
   if (phase === "final_answer") {
     state.setTimelineLive(sessionId, false);
   }
 }
 
-function rememberTimelineItem(sessionId: string, item: TalosTimelineItem) {
-  let items = timelineItemsBySession.get(sessionId);
+function rememberTimelineItem(sessionId: string, messageId: string, item: TalosTimelineItem) {
+  const key = timelineMessageKey(sessionId, messageId);
+  let items = timelineItemsByMessage.get(key);
   if (!items) {
     items = new Map();
-    timelineItemsBySession.set(sessionId, items);
+    timelineItemsByMessage.set(key, items);
   }
   items.set(item.item_id, {
     item,
@@ -426,8 +442,8 @@ function rememberTimelineItem(sessionId: string, item: TalosTimelineItem) {
   });
 }
 
-function getTimelineItem(sessionId: string, itemId: string) {
-  return timelineItemsBySession.get(sessionId)?.get(itemId);
+function getTimelineItem(sessionId: string, messageId: string, itemId: string) {
+  return timelineItemsByMessage.get(timelineMessageKey(sessionId, messageId))?.get(itemId);
 }
 
 function appendToolArguments(item: TimelineItemSnapshot, delta: string) {
@@ -506,6 +522,7 @@ function timelineText(content: TalosTimelineContent) {
 
 function ensureTimelineToolForRequest(
   sessionId: string,
+  messageId: string,
   itemId: string,
   snapshot: TimelineItemSnapshot | undefined,
   callId: string,
@@ -514,7 +531,7 @@ function ensureTimelineToolForRequest(
   if (snapshot) {
     return;
   }
-  useAppStore.getState().upsertTimelineItem(sessionId, {
+  useAppStore.getState().upsertTimelineItem(sessionId, messageId, {
     itemId,
     kind: "tool_call",
     phase: "acting",
@@ -584,6 +601,7 @@ export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TalosActi
     const messageChanged = stream?.activeMessageId !== activeTurn.message_id;
     if (stream?.activeMessageId && messageChanged) {
       state.resetLiveResponse(sessionId);
+      clearTimelineItemsForSession(sessionId);
     }
     if (stream?.pendingInput && stream.pendingInput.serverMessageId !== activeTurn.message_id) {
       state.setPendingInput(sessionId, {
@@ -611,7 +629,7 @@ export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TalosActi
     return;
   }
 
-  if (activeTurn.status !== "waiting_user_action" || !pending) {
+  if (activeTurn.status !== "waiting_user_action" || !pending || !activeTurn.message_id) {
     return;
   }
 
@@ -627,7 +645,7 @@ export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TalosActi
   });
 
   const itemId = pending.item_id ?? `pending-${pending.call_id}`;
-  state.upsertTimelineItem(sessionId, {
+  state.upsertTimelineItem(sessionId, activeTurn.message_id, {
     itemId,
     sourceItemId: itemId,
     kind: "tool_call",

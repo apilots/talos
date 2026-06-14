@@ -44,8 +44,8 @@ build_binaries
 start_server
 trap cleanup EXIT
 
-models_json="$(curl -sS -H "Authorization: Bearer ${AUTH_TOKEN}" "${GATEWAY_URL}/v1/models")"
-primary_model="$(python3 -c 'import json,sys; data=json.load(sys.stdin); arr=data.get("data",[]); print((arr[0].get("id") if arr else ""))' <<< "${models_json}")"
+models_json="$(curl -sS "${GATEWAY_URL}/v1/models")"
+primary_model="$(select_e2e_model_from_json "${models_json}")"
 if [[ -z "${primary_model}" ]]; then
   echo "CASE grep_glob_select_model FAIL models=${models_json}"
   exit 1
@@ -114,7 +114,6 @@ PY
 glob_session_payload="$(create_session "tool-glob" "tool-glob-user")"
 glob_session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
   -d "${glob_session_payload}")"
 glob_session_id="$(session_id_from_json "${glob_session_json}")"
 if [[ -z "${glob_session_id}" ]]; then
@@ -147,7 +146,6 @@ echo "DETAIL tool_glob_output=${glob_output}"
 grep_session_payload="$(create_session "tool-grep" "tool-grep-user")"
 grep_session_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/sessions" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
   -d "${grep_session_payload}")"
 grep_session_id="$(session_id_from_json "${grep_session_json}")"
 if [[ -z "${grep_session_id}" ]]; then

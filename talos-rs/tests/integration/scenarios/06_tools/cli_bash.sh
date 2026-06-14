@@ -26,7 +26,7 @@ run_cli() {
 }
 
 models_json="$(run_cli models --format json)"
-primary_model="$(python3 -c 'import json,sys; arr=json.load(sys.stdin); print((arr[0].get("id") if arr else ""))' <<< "${models_json}")"
+primary_model="$(select_e2e_model_from_json "${models_json}")"
 if [[ -z "${primary_model}" ]]; then
   echo "CASE cli_stream_select_model FAIL models=${models_json}"
   exit 1
