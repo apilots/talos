@@ -12,6 +12,12 @@ cloud:
   auth:
     introspection_cache_ttl_seconds: 300
 
+fs:
+  directory_picker:
+    enabled: true
+    root: "home"
+    show_hidden: true
+
 agent:
   name: "talos"
   model: "qwen3.7-plus"
