@@ -8,7 +8,7 @@ Related: `refactor-023-agent-kernel-simplification`
 
 ## 当前实现更新
 
-截至 2026-05-24，PlanReAct 已作为历史遗留分支从实现与配置中移除；`planner_mode` 仅保留 `built_in`。本文后续关于 PlanReAct final tag policy 的设计内容仅作为历史上下文，不再代表当前实现目标。
+截至 2026-05-24，PlanReAct 已作为历史遗留分支从实现与配置中移除；`planner_mode` 仅保留 `built_in`。本文不再为 PlanReAct 保留 final tag policy 或兼容实现目标。
 
 ## 背景
 
@@ -67,7 +67,7 @@ else:
     assistant text is Commentary
 ```
 
-PlanReAct 模式不能直接套用 BuiltIn 终止规则，见“PlanReAct final tag policy”。
+旧 PlanReAct final tag policy 已从当前实现目标中删除；FinalAnswer 判定只覆盖 BuiltIn 主路径。
 
 ### 1.1 No-hint assistant text 投影策略
 
@@ -129,7 +129,7 @@ FinalResponse -> finalization_required -> ForcedFinalizationCause::LoopTerminal 
 ForcedFinalizationCause::LoopTerminal
 ```
 
-### 4.1 PlanReAct final tag policy
+### 4.1 旧 planner final tag policy 已删除
 
 BuiltIn 模式的 stop decision 是：
 
@@ -137,28 +137,7 @@ BuiltIn 模式的 stop decision 是：
 round done && tool_calls.is_empty()
 ```
 
-PlanReAct 在 `require_final_answer_tag=true` 时必须额外满足 planner final tag：
-
-```text
-round done
-  && tool_calls.is_empty()
-  && planner_response.has_final_answer_tag
-```
-
-如果 PlanReAct 输出没有 tool call，但也没有 `FINAL_ANSWER` / final segment：
-
-```text
-- 不得按 BuiltIn 规则直接 EndTurn；
-- 不得把纯 thought / no-progress 文本当作 FinalAnswer；
-- 交给 PlanReAct policy 处理 no-progress / replan / guard；
-- 超出策略预算后才进入异常 forced finalization 或失败路径。
-```
-
-实现边界：
-
-- `GeneralTurnStepDisposition` 可以继续表达结构化 tool call 层面的 `FinalResponse` / `ContinueWithTools`；
-- PlanReAct 是否接受该 `FinalResponse` 为 turn final，由 `GeneralTurnPolicy.after_step_result` 或 planner-private helper 决定；
-- 旧 `FinalAnswerExtractionProcessor` 如果仍有 tag parsing 价值，只能下沉为 PlanReAct planner helper，不能作为 public kernel final 判定 API。
+旧 ReAct planner 的 final tag parsing、replan、no-progress guard 不再作为当前实现目标。`GeneralTurnStepDisposition::FinalResponse` 只表达结构化 tool call 为空，并由 BuiltIn 主路径直接接受为 turn final。
 
 ### 5. ExecutionSummary 是执行 metrics，不是模型总结
 
@@ -446,7 +425,7 @@ pub enum GeneralTurnPolicyDecision {
 }
 ```
 
-BuiltIn policy returns `Continue` and accepts structural `FinalResponse` in the loop. PlanReAct policy can return `ContinueWithNudge` when `require_final_answer_tag=true` and the no-tool response lacks a final tag; this prevents the apparent `FinalResponse` from falling through to normal finalization.
+BuiltIn policy returns `Continue` and accepts structural `FinalResponse` in the loop. No other planner policy is retained as a compatibility target.
 
 ### Step 判定
 
@@ -463,7 +442,7 @@ fn classify_round(
 }
 ```
 
-`GeneralTurnStepDisposition::FinalResponse` 只表示结构化 tool call 为空。BuiltIn policy 会接受它作为 turn final；PlanReAct policy 可以基于 final tag / no-progress / replan 状态拒绝该 final，并返回 policy stop、forced finalization 或继续策略动作。
+`GeneralTurnStepDisposition::FinalResponse` 只表示结构化 tool call 为空。BuiltIn policy 会接受它作为 turn final；旧 planner final tag / no-progress / replan 状态不再参与当前主路径判定。
 
 ### Stream phase
 
@@ -501,8 +480,8 @@ fn decide_assistant_text_phase(round: &StreamRound) -> KernelAssistantTextPhase 
 | `gateway/app-protocol/src/requests.rs` | active turn snapshot 只暴露 status / pending action / last event。 | 可选增加 last known metrics；这是覆盖式 active snapshot，不是 timeline event log。 |
 | `session-store/active_turn.rs` | active turn 只保存 status/pending/last_event。 | 可选增加 `metrics_json` 保存 running turn last known metrics；覆盖式更新，不保留增量历史。 |
 | `infra/config/src/domains/kernel.rs` | `finalization_required` 允许普通 terminal 二次调模型。 | 删除 `AgentKernelConfig.finalization_required` 及默认值。 |
-| `processor/response*.rs` | 旧 `FinalAnswerExtractionProcessor` / `ResponseDisposition` 与 `GeneralTurnStepDisposition` 重复。 | 若已不在主路径使用，删除；若 PlanReAct 仍需要 final tag parsing，收敛为 planner-private helper，并接入 `GeneralTurnPolicy`。 |
-| `planner.rs` / PlanReAct policy | `require_final_answer_tag=true` 时，no-tool response 不能天然视为 final。 | BuiltIn 接受 `tool_calls.is_empty()`；PlanReAct 必须同时满足 final tag，否则走 no-progress/replan/guard。 |
+| `processor/response*.rs` | 旧 `FinalAnswerExtractionProcessor` / `ResponseDisposition` 与 `GeneralTurnStepDisposition` 重复。 | 若已不在主路径使用，删除；不再为旧 planner final tag parsing 保留 public kernel API。 |
+| `planner.rs` | BuiltIn planner 是唯一主路径 planner。 | BuiltIn 接受 `tool_calls.is_empty()`；旧 ReAct planner policy 不作为兼容目标。 |
 | `orchestration/agent/src/agent.rs` | timeline adapter 要求 final answer 前必须看到 execution summary。 | 取消该要求；FinalAnswer 由 kernel event/outcome 判定，系统状态通知不参与 final ordering。 |
 
 ## 文件级迁移计划
@@ -647,30 +626,6 @@ fn decide_assistant_text_phase(round: &StreamRound) -> KernelAssistantTextPhase 
 - direct answer 不出现同文本 Commentary + FinalAnswer 重复展示。
 - tool args / tool lifecycle 仍实时输出。
 
-### Phase 3B: PlanReAct final acceptance policy
-
-目标：PlanReAct 不被 BuiltIn 的 no-tool stop rule 误判。
-
-文件：
-
-- `talos-rs/crates/orchestration/agent-kernel/src/planner.rs`
-- `talos-rs/crates/orchestration/agent-kernel/src/general_turn/types.rs`
-- `talos-rs/crates/orchestration/agent-kernel/src/general_turn/loop_run.rs`
-- `talos-rs/crates/orchestration/agent-kernel/src/processor/response_processors.rs`
-
-改动：
-
-- PlanReAct final tag parsing 下沉为 planner-private helper。
-- `GeneralTurnPolicy.after_step_result` 对 PlanReAct `FinalResponse` 做 final acceptance。
-- `require_final_answer_tag=true` 时，必须 `tool_calls.is_empty() && has_final_answer_tag` 才 EndTurn。
-- no-tool 但无 final tag 的 PlanReAct 输出进入 no-progress / replan / guard，不直接 EndTurn。
-
-验证：
-
-- BuiltIn no-tool answer 仍直接 EndTurn。
-- PlanReAct 有 final tag 且 no tool calls 才 EndTurn。
-- PlanReAct 无 final tag 且 no tool calls 不被当作 FinalAnswer。
-
 ### Phase 4: 清理旧 response processor 残留
 
 目标：kernel 内只保留一套 FinalAnswer / tool call 判定。
@@ -692,7 +647,7 @@ fn decide_assistant_text_phase(round: &StreamRound) -> KernelAssistantTextPhase 
 验证：
 
 - `general_turn` 是唯一 final/tool loop 判定路径。
-- PlanReAct tag parsing 只能作为 planner helper + policy final acceptance，不拥有独立 loop。
+- 旧 planner tag parsing 不再作为兼容目标，也不拥有独立 loop。
 
 ## 行为测试清单
 
@@ -735,11 +690,6 @@ fn decide_assistant_text_phase(round: &StreamRound) -> KernelAssistantTextPhase 
    - repeated read-only investigation；
    - empty final response after tools。
 
-7. PlanReAct final acceptance：
-   - `require_final_answer_tag=true`；
-   - no tool calls + final tag => EndTurn；
-   - no tool calls + no final tag => 不 EndTurn，进入 policy 处理。
-
 必须删除或改写：
 
 - `finalization_required should default to true`；
@@ -756,7 +706,7 @@ fn decide_assistant_text_phase(round: &StreamRound) -> KernelAssistantTextPhase 
 | running turn metrics 不写 timeline event log | 页面重载后无法通过 replay 恢复当前累计 usage/tool counts | active turn 保存覆盖式 last known metrics；若暂不实现，则 reload 后等下一次 live update |
 | 普通 no-hint assistant text 缓冲影响实时文本展示 | UI 要等 round done 才显示该文本 | 保留 reasoning/tool lifecycle 实时；explicit final 仍实时；未来如需 no-hint text 实时展示另起 provisional/correction 设计 |
 | 旧历史 session 中有 ExecutionSummary item | 回放兼容需要处理 | history mapper 对旧 item 做只读展示，不作为新写入主路径 |
-| PlanReAct 旧 final tag parsing 依赖 processor | 编译或行为回归 | 将 parsing helper 内聚到 planner，并通过 `GeneralTurnPolicy` 做 final acceptance |
+| 旧 planner final tag parsing 依赖 processor | 编译或行为回归 | 删除旧 parsing 依赖；BuiltIn 主路径以结构化 tool call 判定 FinalAnswer |
 | 删除 `finalization_required` 后旧配置加载失败 | 本地用户配置仍带旧键时启动失败 | 项目未上线阶段接受破坏性清理；仓库配置全量删除；错误提示指向移除旧键 |
 
 ## 完成定义
@@ -765,7 +715,7 @@ fn decide_assistant_text_phase(round: &StreamRound) -> KernelAssistantTextPhase 
 - `ForcedFinalizationCause::LoopTerminal` 完全删除。
 - 普通 no-tool terminal 不再额外调用模型。
 - BuiltIn FinalAnswer 判定由 `round done && tool_calls.is_empty()` 或 provider explicit final 决定。
-- PlanReAct `require_final_answer_tag=true` 时，FinalAnswer 必须同时满足 final tag。
+- 旧 ReAct planner final tag policy 不再作为兼容目标。
 - no-hint assistant text 不再出现同文本 Commentary + FinalAnswer 重复。
 - Streaming tool execution 保留并通过测试。
 - ExecutionSummary legacy read only；新写入路径使用结构化 metrics，不再作为 FinalAnswer 前置语义或模型总结。

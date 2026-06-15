@@ -163,6 +163,7 @@ impl AgentOrchestrator for RecordingStreamAgent {
 impl talos_session_store::SessionStore for TitleTestSessionStore {
     async fn create_session(
         &self,
+        _session_id: Option<&str>,
         context: &TalosContext,
         _agent_id: &str,
         default_model: &str,
@@ -204,6 +205,7 @@ impl talos_session_store::SessionStore for TitleTestSessionStore {
         current_directory: Option<std::path::PathBuf>,
     ) -> TalosResult<SessionRecord> {
         self.create_session(
+            None,
             context,
             agent_id,
             default_model,

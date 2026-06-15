@@ -226,7 +226,7 @@ impl LlmProvider for ExecLoopProvider {
                         "TaskOutput",
                         json!({
                             "task_id": session_id,
-                            "offset": 250,
+                            "offset": 0,
                             "max_output_tokens": 2000
                         }),
                     )]),

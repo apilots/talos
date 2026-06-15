@@ -56,7 +56,7 @@ agent-kernel/general_turn
 - `conf/talos.yaml` 使用 `planner_mode: "built_in"`、`execution_mode: "single"`。
 - `AgentKernelConfig::default()` 中 `planner_mode` 默认是 `BuiltIn`，`execution_mode` 默认是 `Single`。
 - `ExecutionMode::{Sequential, Parallel, Loop}` 暂未看到稳定产品主路径使用，主要是早期参考 ADK 的泛化 runtime 设计。
-- `PlanReAct` 不是默认主路径，但在 `planner_selection: "auto"` 且 selector 返回 `react` 时仍可能被动态选中，因此不能直接当作死代码删除。
+- 旧 `planner_selection` / ReAct selector 路径已删除，当前不再存在动态选择 planner 的运行时入口。
 
 重构前主要调用链是：
 
@@ -82,7 +82,7 @@ TurnService
 2. `agent-kernel::KernelRuntime` 和 `DefaultRunner` 又包了一层 agent iteration loop。
 3. `agent-kernel::Agent` trait 让 `LlmKernelAgent`、`SequentialKernelAgent`、`ParallelKernelAgent`、`LoopKernelAgent` 都可以自己决定执行生命周期。
 4. `SingleFlow::run_events` 内部已经复制了一套与 `general_turn::execute_general_turn_loop` 相近的 model/tool loop。
-5. PlanReAct 的 replan、FINAL_ANSWER tag、finalization 逻辑散在 flow/processor/kernel state 中。
+5. 旧 planner selector 与 response processor 逻辑曾散在 flow/processor/kernel state 中，造成 finalization 边界不清。
 6. response processor 和 stream adapter 仍参与 final/phase 投影，容易形成上层重复判断。
 
 因此本次重构要做的是：**保留三层目录，但让每层只做一类事；删除或降级无用老代码，不再维护多套 loop。**
@@ -178,27 +178,11 @@ pub enum StopReason {
 
 本次不保留命令审批等待态；`WaitingDynamicInput` 是当前唯一进入 kernel waiting outcome 的用户补充输入场景。
 
-### 4. BuiltIn 是主路径，PlanReAct 是可选策略
+### 4. BuiltIn 是唯一 planner 主路径
 
-当前重构以 BuiltIn LLM agent 主路径为基准。PlanReAct 暂不作为必须优先保真的主执行路径，但需要作为兼容策略处理。
+当前重构以 BuiltIn LLM agent 主路径为基准。旧 ReAct planner strategy、selector、policy 和相关配置已从实现中删除；`planner_mode` 仅保留单值 `built_in`，作为配置治理边界暂时保留。
 
-保留两个 planner mode 的类型表达：
-
-```rust
-pub enum PlannerMode {
-    BuiltIn,
-    PlanReAct,
-}
-```
-
-但语义调整为：
-
-| Mode | 当前定位 | 重构策略 |
-| --- | --- | --- |
-| `BuiltIn` | 默认主路径。 | 优先拉直为 `orchestration/agent -> general_turn`。 |
-| `PlanReAct` | 非默认；只能通过显式 `planner_mode=plan_react` 启用。 | 作为可选 planner strategy 接入 `general_turn`，不保留独立 loop；不再存在 `planner_selection=auto` 动态选择。 |
-
-Planner mode 只能影响：
+当前 planner mode 只能影响：
 
 - prompt sections；
 - planner instruction；
@@ -213,12 +197,7 @@ Planner mode 只能影响：
 - 独立 final answer extraction；
 - 独立 stream phase 判断。
 
-PlanReAct 现有 `require_final_answer_tag`、replan 计数、no-progress 判断不能继续留在 `SingleFlow` 外层 loop 中。两种可接受路径：
-
-1. **已删除动态选择**：`planner_selection=auto` 和 selector 代码已删除，不再存在隐式选中 PlanReAct 的路径。
-2. **显式策略保留**：PlanReAct 只作为 `planner_mode=plan_react` 的 planner strategy 接入唯一 loop。
-
-在 `general_turn` 唯一化之前，不应该继续为了 PlanReAct 保留 `FlowFactory/SingleFlow` 的第二套 lifecycle。
+`planner_selection=auto` 和 selector 代码已删除，不再存在隐式或显式选中 ReAct planner 的路径。在 `general_turn` 唯一化之后，不应重新引入第二套 planner lifecycle。
 
 ### 5. ExecutionMode 不是当前主路径能力
 
@@ -410,7 +389,7 @@ GeneralTurnInput.resume
 
 ## GeneralTurnPolicy 边界
 
-`SingleFlow` 中的 request/response processor、callback、PlanReAct parser、replay injection 有价值，但不能继续拥有 loop。迁移后统一收敛为 policy/adapters：
+`SingleFlow` 中的 request/response processor、callback、旧 planner parser、replay injection 有价值，但不能继续拥有 loop。迁移后统一收敛为 policy/adapters：
 
 ```rust
 pub trait GeneralTurnPolicy: Send + Sync {
@@ -507,8 +486,8 @@ pub async fn execute_general_turn_loop(
 
 关键要求：
 
-- BuiltIn 是优先实现和验证的主路径。
-- PlanReAct 在重构期间可被配置禁用；若启用，其 replan policy 必须在 loop 内部作为 step policy 执行。
+- BuiltIn 是唯一实现和验证的 planner 主路径。
+- 旧 ReAct planner strategy 已删除，不作为兼容目标。
 - resume/replay 必须在 loop 内部执行，不能依赖 `SingleFlow` 外层分支。
 - forced finalization 在 loop 内部执行。
 - dynamic input 在 loop 内部转成 waiting outcome。
@@ -602,7 +581,7 @@ unary `run` 可以复用同一条内部执行路径，只是不订阅 timeline s
 
 - request processor 中的 prompt/planner effect；
 - response processor 中的 provider-neutral parsing；
-- PlanReAct FINAL_ANSWER tag parsing，前提是 PlanReAct 仍被配置启用；
+- 旧 planner final tag parsing 已删除，不作为主路径能力保留；
 - resume replay injection；
 - compaction / memory summary；
 - tool callback hooks；
@@ -647,7 +626,7 @@ parent general_turn
 - 增加或调整测试覆盖现有核心行为；
 - 明确哪些 public 类型短期保留为兼容 facade。
 - 确认 `ExecutionMode::{Sequential, Parallel, Loop}` 是否有真实产品调用；没有则标记为待删除。
-- 删除 `planner_selection=auto` 和 selector 旧路径；PlanReAct 只能显式配置。
+- 删除 `planner_selection=auto`、selector 和旧 ReAct planner 路径。
 - 定义并测试 `GeneralTurnResume` / `GeneralTurnOutcome::Waiting` 的最小路径。
 - 移除交互式命令审批路径；不以 command approval 阻塞主 loop。
 
@@ -661,7 +640,7 @@ parent general_turn
 - pending dynamic input；
 - dynamic result resume replay；
 - BuiltIn 主路径通过 kernel loop；
-- PlanReAct 若未禁用，必须共用 kernel loop；
+- 旧 ReAct planner 路径不可再被配置或动态选择；
 - stream 和 unary stop reason 一致。
 
 ### Phase 2: 拉直 BuiltIn 主路径
@@ -677,16 +656,16 @@ parent general_turn
 - `execute_general_turn_loop` 负责 continue/stop/waiting/finalization；
 - `cargo test -p talos-agent-kernel` 通过。
 
-### Phase 3: 处理 PlanReAct 和 selector 旧路径
+### Phase 3: 处理旧 planner selector 路径
 
-目标：避免 PlanReAct 继续要求保留第二套 loop，并删除 auto selector 旧路径。
+目标：删除 auto selector 和旧 ReAct planner 路径，避免任何 planner 分支继续要求保留第二套 loop。
 
 成功标准：
 
 - `planner_selection=auto` 和 selector 代码已删除；
-- PlanReAct 已作为显式 planner strategy 接入 `general_turn`；
-- `require_final_answer_tag`、replan、no-progress 判断不再位于 `SingleFlow` 外层 loop；
-- 相关 PlanReAct 测试要么迁移，要么明确删除。
+- 旧 ReAct planner strategy、policy、parser 和配置入口已删除；
+- `require_final_answer_tag`、replan、no-progress 判断不再作为主路径兼容目标；
+- 相关旧 planner 测试已明确删除或改写为 BuiltIn 主路径测试。
 
 ### Phase 4: 把 `orchestration/agent` 收敛为 AgentHarness
 
@@ -728,7 +707,7 @@ parent general_turn
 | 阶段 | 验证命令 |
 | --- | --- |
 | Phase 1-2 | `cargo test -p talos-agent-kernel` |
-| Phase 3 | `cargo test -p talos-agent-kernel`，覆盖 planner selector / PlanReAct 策略 |
+| Phase 3 | `cargo test -p talos-agent-kernel`，覆盖 BuiltIn planner 配置与旧 selector 删除后的主路径 |
 | Phase 4 | `cargo test -p talos-agent` |
 | Phase 5 | `cargo test -p talos-agent-kernel -p talos-agent` |
 | Phase 6 | `cargo test -p talos-application-service`、相关 schema/SDK 测试 |
@@ -743,7 +722,7 @@ parent general_turn
 - `agent-kernel/general_turn` 是唯一 model/tool loop。
 - stop/final answer/waiting/limit 只由 `general_turn` 产出。
 - BuiltIn 主路径直接走 `general_turn`。
-- PlanReAct 要么禁用动态选中，要么共用 `general_turn`，不能保留独立 loop。
+- 旧 ReAct planner selector 和显式策略入口已删除，不能保留独立 loop。
 - `GeneralTurnOutcome::Waiting` 强类型表达 `WaitingDynamicInput`。
 - `GeneralTurnResume` 支持 dynamic result replay；删除 `SingleFlow` 前恢复路径不能断。
 - processor/callback 只通过 `GeneralTurnPolicy` 影响 step，不拥有 loop。
@@ -758,9 +737,9 @@ parent general_turn
 
    需要先确认是否只是单元测试遗留。如果没有产品路径依赖，应迁移测试后删除。
 
-2. **PlanReAct 显式模式仍需防止扩散为第二套 loop**
+2. **旧 planner selector 不能回归为第二套 loop**
 
-   `planner_selection=auto` 已删除；后续风险只剩显式 `planner_mode=plan_react` 不能重新引入独立 loop。
+   `planner_selection=auto` 和旧 ReAct planner 已删除；后续风险是重新引入 planner 分支时绕开 `general_turn` 唯一 loop。
 
 3. **stream timeline adapter 目前在 `AgentImpl` 内较重**
 
@@ -781,8 +760,8 @@ parent general_turn
 - `agent-kernel/general_turn` 是唯一 loop。
 - 当前主路径已收敛为 `AgentHarness -> general_turn`。
 - composite kernel agents 已从 kernel 主路径移除。
-- BuiltIn 是当前主路径。
-- PlanReAct 不是默认主路径；只能显式配置，并且必须共用 `general_turn`。
+- BuiltIn 是当前唯一 planner 主路径。
+- 旧 ReAct planner strategy、selector 和配置入口已删除。
 - `ExecutionMode::{Sequential, Parallel, Loop}` 属于 ADK 风格历史泛化设计，已从 kernel 配置和主路径删除。
 - waiting/resume 是硬边界：`GeneralTurnOutcome::WaitingDynamicInput` 和 `GeneralTurnResume::DynamicToolResult` 已落地。
 - processor/callback/replay 统一收敛到 `GeneralTurnPolicy`，只影响 step，不拥有 loop。
