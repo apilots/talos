@@ -7,7 +7,6 @@ import { formatRelativeTime } from "@/shared/lib/time";
 import { cn } from "@/shared/lib/cn";
 import { Badge } from "@/shared/ui/Badge";
 import type { SessionUiStatus, ThreadFilter } from "@/shared/types/ui";
-import { isDesktopRuntime } from "@/shared/api/desktop-client";
 
 type AuthConnectionState = {
   authStatus:
@@ -78,9 +77,6 @@ export function Sidebar({
   const roleLabel =
     connection.authStatus === "open" ? "Open" : connection.authRole === "admin" ? "Admin" : "Pro";
   const avatarLabel = connection.authUsername.trim().charAt(0).toUpperCase() || "U";
-  const desktopRuntime = isDesktopRuntime();
-  const shellLabel = desktopRuntime ? "DESKTOP" : t("sidebar:webConsole");
-  const logoSrc = `${import.meta.env.BASE_URL}logo.png`;
 
   useEffect(() => {
     if (!accountMenuOpen) {
@@ -108,21 +104,13 @@ export function Sidebar({
   }, [accountMenuOpen]);
 
   return (
-    <aside className="sticky top-0 flex h-screen w-full shrink-0 flex-col border-r border-border/80 bg-sidebar/95 px-4 py-4 backdrop-blur-[18px]">
+    <aside className="sticky top-0 flex h-screen w-full shrink-0 flex-col border-r border-border/80 bg-card px-4 py-4">
       <Link
-        className="mb-5 block rounded-[var(--radius-panel)] border border-border/75 bg-card/86 px-4 py-4 shadow-[0_12px_28px_rgba(95,84,64,0.04)]"
+        className="mb-5 block rounded-[var(--radius-panel)] border border-border/75 bg-card px-4 py-4 shadow-[0_12px_28px_rgba(95,84,64,0.04)]"
         to="/"
       >
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="font-display text-[21px] font-semibold tracking-[-0.04em] text-ink">Talos</div>
-            <div className="mt-1 text-[10px] uppercase tracking-[0.22em] text-muted">{shellLabel}</div>
-          </div>
-          <img
-            alt="Talos"
-            className="size-10 rounded-[var(--radius-control)] shadow-[0_6px_16px_rgba(27,24,19,0.08)]"
-            src={logoSrc}
-          />
+        <div>
+          <div className="font-display text-[21px] font-semibold tracking-[-0.04em] text-ink">Talos</div>
         </div>
         <div className="mt-3 flex items-center gap-2 text-[11px] text-muted">
           <span className="size-2 rounded-full bg-success shadow-[0_0_14px_rgba(94,234,212,0.55)]" />

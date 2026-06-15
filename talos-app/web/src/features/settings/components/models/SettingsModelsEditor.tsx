@@ -382,7 +382,7 @@ export function SettingsModelsEditor() {
           <select
             value={draft.provider}
             onChange={(e) => setDefaultProvider(e.target.value as ProviderKey)}
-            className="rounded-lg border border-border/70 bg-background/60 px-3 py-1.5 text-sm text-ink focus:outline-none"
+            className="rounded-lg border border-border/70 bg-card px-3 py-1.5 text-sm text-ink focus:outline-none"
           >
             {PROVIDERS.map(({ key, label }) => (
               <option key={key} value={key}>{label}</option>
@@ -394,7 +394,7 @@ export function SettingsModelsEditor() {
           <select
             value={draft.model}
             onChange={(e) => setDefaultModel(e.target.value)}
-            className="rounded-lg border border-border/70 bg-background/60 px-3 py-1.5 text-sm text-ink focus:outline-none"
+            className="rounded-lg border border-border/70 bg-card px-3 py-1.5 text-sm text-ink focus:outline-none"
           >
             {draft[draft.provider as ProviderKey].models.map((m) => (
               <option key={m.id} value={m.id}>{m.name || m.id}</option>

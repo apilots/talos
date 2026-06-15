@@ -87,6 +87,12 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::ProjectReadParams>());
     output.push_str(&export::<crate::requests::ProjectPatchParams>());
     output.push_str(&export::<crate::requests::ProjectDeleteParams>());
+    output.push_str(&export::<crate::requests::FsDirectoryReadParams>());
+    output.push_str(&export::<crate::requests::FsDirectoryCreateParams>());
+    output.push_str(&export::<talos_types::FsDirectorySnapshot>());
+    output.push_str(&export::<talos_types::FsDirectoryEntry>());
+    output.push_str(&export::<talos_types::FsEntryKind>());
+    output.push_str(&export::<talos_types::FsDirectoryCreateResponse>());
     output.push_str(&export::<crate::requests::TurnStartParams>());
     output.push_str(&export::<crate::requests::MessageCommandStatus>());
     output.push_str(&export::<crate::requests::TurnStartResponse>());

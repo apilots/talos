@@ -3,13 +3,23 @@
 import "@testing-library/jest-dom/vitest";
 
 import { useState } from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import "@/shared/i18n/setup";
 import { createDefaultProjects, UNBOUND_PROJECT_ID } from "@/shared/types/domain";
 import type { SessionInputHistory } from "@/shared/types/ui";
 import { ChatComposer } from "./ChatComposer";
+
+const apiMocks = vi.hoisted(() => ({
+  createFsDirectory: vi.fn(),
+  readFsDirectory: vi.fn(),
+}));
+
+vi.mock("../api", () => ({
+  createFsDirectory: apiMocks.createFsDirectory,
+  readFsDirectory: apiMocks.readFsDirectory,
+}));
 
 function renderComposer(overrides: Partial<React.ComponentProps<typeof ChatComposer>> = {}) {
   return render(
@@ -114,14 +124,43 @@ function committedHistory(...texts: string[]): SessionInputHistory {
 
 describe("ChatComposer", () => {
   beforeEach(() => {
+    apiMocks.readFsDirectory.mockResolvedValue({
+      path: "/Users/xujiang",
+      parent: null,
+      entries: [
+        {
+          name: "data",
+          path: "/Users/xujiang/data",
+          kind: "directory",
+          is_symlink: false,
+          readable: true,
+          writable: true,
+        },
+      ],
+      readable: true,
+      writable: true,
+    });
+    apiMocks.createFsDirectory.mockImplementation(async (_parent: string, name: string) => ({
+      path: `/Users/xujiang/${name}`,
+      created: true,
+    }));
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
       callback(0);
       return 0;
+    });
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: vi.fn(() => null),
+        setItem: vi.fn(),
+      },
     });
   });
 
   afterEach(() => {
     cleanup();
+    apiMocks.createFsDirectory.mockReset();
+    apiMocks.readFsDirectory.mockReset();
     vi.restoreAllMocks();
   });
 
@@ -215,6 +254,52 @@ describe("ChatComposer", () => {
     fireEvent.pointerDown(searchInput);
 
     expect(searchInput).toBeInTheDocument();
+  });
+
+  it("opens project directory selection in a centered dialog", async () => {
+    renderComposer({
+      onCreateProject: vi.fn(),
+      showProjectSelector: true,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /work in a project/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Add new project" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use an existing folder" }));
+
+    expect(screen.queryByPlaceholderText("Search projects")).not.toBeInTheDocument();
+    expect(await screen.findByText("Use an existing folder")).toBeInTheDocument();
+    expect(await screen.findByDisplayValue("/Users/xujiang")).toBeInTheDocument();
+  });
+
+  it("retries project registration without creating the directory again after partial success", async () => {
+    const onCreateProject = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Project name already exists."))
+      .mockResolvedValueOnce(undefined);
+    renderComposer({
+      onCreateProject,
+      showProjectSelector: true,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /work in a project/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Add new project" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start from scratch" }));
+    fireEvent.change(await screen.findByPlaceholderText("Folder name"), {
+      target: { value: "new-project" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create and use project" }));
+
+    expect(await screen.findByText(/Directory was created, but project registration failed/i)).toBeInTheDocument();
+    expect(apiMocks.createFsDirectory).toHaveBeenCalledTimes(1);
+    expect(onCreateProject).toHaveBeenCalledWith({
+      directory: "/Users/xujiang/new-project",
+      name: "new-project",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry project registration" }));
+
+    await waitFor(() => expect(onCreateProject).toHaveBeenCalledTimes(2));
+    expect(apiMocks.createFsDirectory).toHaveBeenCalledTimes(1);
   });
 
   it("navigates session input history from an empty composer with ArrowUp", () => {

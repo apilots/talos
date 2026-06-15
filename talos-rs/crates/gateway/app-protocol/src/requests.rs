@@ -51,6 +51,10 @@ pub enum ClientMethod {
     ProjectPatch,
     #[serde(rename = "project.delete")]
     ProjectDelete,
+    #[serde(rename = "fs.directory.read")]
+    FsDirectoryRead,
+    #[serde(rename = "fs.directory.create")]
+    FsDirectoryCreate,
     #[serde(rename = "turn.start")]
     TurnStart,
     #[serde(rename = "turn.interrupt")]
@@ -132,6 +136,8 @@ impl ClientMethod {
             Self::ProjectRead => "project.read",
             Self::ProjectPatch => "project.patch",
             Self::ProjectDelete => "project.delete",
+            Self::FsDirectoryRead => "fs.directory.read",
+            Self::FsDirectoryCreate => "fs.directory.create",
             Self::TurnStart => "turn.start",
             Self::TurnInterrupt => "turn.interrupt",
             Self::TurnRetry => "turn.retry",
@@ -193,6 +199,8 @@ impl FromStr for ClientMethod {
             "project.read" => Ok(Self::ProjectRead),
             "project.patch" => Ok(Self::ProjectPatch),
             "project.delete" => Ok(Self::ProjectDelete),
+            "fs.directory.read" => Ok(Self::FsDirectoryRead),
+            "fs.directory.create" => Ok(Self::FsDirectoryCreate),
             "turn.start" => Ok(Self::TurnStart),
             "turn.interrupt" => Ok(Self::TurnInterrupt),
             "turn.retry" => Ok(Self::TurnRetry),
@@ -263,6 +271,10 @@ pub enum ClientRequestParams {
     ProjectPatch(ProjectPatchParams),
     #[serde(rename = "project.delete")]
     ProjectDelete(ProjectDeleteParams),
+    #[serde(rename = "fs.directory.read")]
+    FsDirectoryRead(FsDirectoryReadParams),
+    #[serde(rename = "fs.directory.create")]
+    FsDirectoryCreate(FsDirectoryCreateParams),
     #[serde(rename = "turn.start")]
     TurnStart(TurnStartParams),
     #[serde(rename = "turn.interrupt")]
@@ -368,6 +380,12 @@ impl ClientRequest {
             ClientMethod::ProjectPatch => ClientRequestParams::ProjectPatch(decode(params_value)?),
             ClientMethod::ProjectDelete => {
                 ClientRequestParams::ProjectDelete(decode(params_value)?)
+            }
+            ClientMethod::FsDirectoryRead => {
+                ClientRequestParams::FsDirectoryRead(decode(params_value)?)
+            }
+            ClientMethod::FsDirectoryCreate => {
+                ClientRequestParams::FsDirectoryCreate(decode(params_value)?)
             }
             ClientMethod::TurnStart => ClientRequestParams::TurnStart(decode(params_value)?),
             ClientMethod::TurnInterrupt => {
@@ -650,6 +668,18 @@ pub struct ProjectPatchParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct ProjectDeleteParams {
     pub project_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct FsDirectoryReadParams {
+    #[serde(default)]
+    pub path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct FsDirectoryCreateParams {
+    pub parent: PathBuf,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]

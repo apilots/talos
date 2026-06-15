@@ -8,8 +8,8 @@ use talos_types::talos::TalosUsage;
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType};
 use talos_types::{
     OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, ProjectPatch, ProjectRecord,
-    SessionConf, SessionConfigOverridePolicy, SessionPatch, SessionPatchAck, SessionQuery,
-    SessionRecord, DEFAULT_SESSION_TITLE,
+    ProjectStatus, SessionConf, SessionConfigOverridePolicy, SessionPatch, SessionPatchAck,
+    SessionQuery, SessionRecord, DEFAULT_SESSION_TITLE,
 };
 
 pub mod active_turn;
@@ -264,6 +264,7 @@ impl DatabaseSessionStore {
                 .get_string("directory")
                 .map(PathBuf::from)
                 .unwrap_or_default(),
+            status: ProjectStatus::default(),
             created_at: row.get_i64("created_at").unwrap_or_default(),
             updated_at: row.get_i64("updated_at").unwrap_or_default(),
             session_count: row.get_i64("session_count").unwrap_or_default(),
@@ -914,6 +915,7 @@ impl SessionStore for DatabaseSessionStore {
             name: name.to_string(),
             user_id: user_id.to_string(),
             directory: directory.clone(),
+            status: ProjectStatus::default(),
             created_at: now,
             updated_at: now,
             session_count: 0,

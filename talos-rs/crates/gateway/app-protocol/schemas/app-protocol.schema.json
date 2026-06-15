@@ -396,6 +396,8 @@
         "project.read",
         "project.patch",
         "project.delete",
+        "fs.directory.read",
+        "fs.directory.create",
         "turn.start",
         "turn.interrupt",
         "turn.retry",
@@ -726,6 +728,42 @@
             },
             "params": {
               "$ref": "#/definitions/ProjectDeleteParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "fs.directory.read"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/FsDirectoryReadParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "fs.directory.create"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/FsDirectoryCreateParams"
             }
           },
           "required": [
@@ -1444,6 +1482,33 @@
         "subscription_id",
         "unsubscribed"
       ],
+      "type": "object"
+    },
+    "FsDirectoryCreateParams": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "parent": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "parent"
+      ],
+      "type": "object"
+    },
+    "FsDirectoryReadParams": {
+      "properties": {
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "InitializeParams": {

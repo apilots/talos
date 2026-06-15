@@ -327,6 +327,7 @@ fn test_project_record_roundtrip_with_session_count() {
         name: "repo".to_string(),
         user_id: "user-1".to_string(),
         directory: std::path::PathBuf::from("/repo"),
+        status: ProjectStatus::default(),
         created_at: 1,
         updated_at: 2,
         session_count: 3,

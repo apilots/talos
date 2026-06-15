@@ -439,6 +439,7 @@ impl SessionService for MockSessionService {
             name,
             user_id: "static-token".to_string(),
             directory,
+            status: talos_types::ProjectStatus::default(),
             created_at: 0,
             updated_at: 0,
             session_count: 0,

@@ -27,7 +27,7 @@ export function SettingsAppearanceSection({
         <div className="flex items-center justify-between gap-6 py-4">
           <span className="text-sm text-ink">{t("settings:fields.theme")}</span>
           <select
-            className="w-36 rounded-xl border border-border bg-surface/85 px-3 py-2 text-sm outline-none transition focus:border-brand/50"
+            className="w-36 rounded-xl border border-border bg-card px-3 py-2 text-sm outline-none transition focus:border-brand/50"
             onChange={(event) => setUiTheme(event.target.value as "dark" | "light")}
             value={uiTheme}
           >

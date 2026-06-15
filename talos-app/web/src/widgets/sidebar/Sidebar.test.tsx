@@ -40,7 +40,9 @@ describe("Sidebar", () => {
   it("keeps main navigation focused on work items", () => {
     renderSidebar();
 
-    expect(screen.getByAltText("Talos")).toBeTruthy();
+    expect(screen.getByText("Talos")).toBeTruthy();
+    expect(screen.queryByAltText("Talos")).toBeNull();
+    expect(screen.queryByText(/web console/i)).toBeNull();
     expect(screen.getByText("Projects")).toBeTruthy();
     expect(screen.getByText("Files")).toBeTruthy();
     expect(screen.queryByText("Memory")).toBeNull();

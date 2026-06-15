@@ -3,6 +3,8 @@ import type {
   MemoryFileDetail,
   MemoryFileSummary,
   MemorySearchResult,
+  FsDirectoryCreateResponse,
+  FsDirectorySnapshot,
   LlmConfig,
   LlmConfigRead,
   ModelInfo,
@@ -225,6 +227,14 @@ export class AppServerClient {
 
   deleteProject(projectId: string): Promise<unknown> {
     return this.transport.request("project.delete", { project_id: projectId });
+  }
+
+  readFsDirectory(path: string | null = null): Promise<FsDirectorySnapshot> {
+    return this.transport.request("fs.directory.read", { path });
+  }
+
+  createFsDirectory(parent: string, name: string): Promise<FsDirectoryCreateResponse> {
+    return this.transport.request("fs.directory.create", { parent, name });
   }
 
   startTurn(params: AppProtocol.TurnStartParams): Promise<TalosMessageAck> {

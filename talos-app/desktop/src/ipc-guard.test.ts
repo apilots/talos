@@ -19,6 +19,15 @@ describe("desktop IPC guard", () => {
         client_request_id: "request-1",
       }),
     ).not.toThrow();
+    expect(() =>
+      assertDesktopRendererInvoke("fs.directory.read", { path: null }),
+    ).not.toThrow();
+    expect(() =>
+      assertDesktopRendererInvoke("fs.directory.create", {
+        parent: "/Users/example",
+        name: "project",
+      }),
+    ).not.toThrow();
   });
 
   it("allows llm config methods and rejects removed admin methods", () => {
@@ -140,5 +149,10 @@ describe("desktop IPC guard", () => {
         success: "true",
       }),
     ).toThrow("Invalid desktop renderer params for method: tool.dynamic_result.submit");
+    expect(() =>
+      assertDesktopRendererInvoke("fs.directory.create", {
+        parent: "/Users/example",
+      }),
+    ).toThrow("Invalid desktop renderer params for method: fs.directory.create");
   });
 });

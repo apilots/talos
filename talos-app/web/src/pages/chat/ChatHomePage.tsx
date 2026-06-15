@@ -58,8 +58,8 @@ export function ChatHomePage() {
     });
   }
 
-  async function handleCreateProject(path: string) {
-    const project = await createProject.mutateAsync(path);
+  async function handleCreateProject(input: string | { directory: string; name?: string }) {
+    const project = await createProject.mutateAsync(input);
     setActiveProjectId(project.id);
   }
 

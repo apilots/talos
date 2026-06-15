@@ -26,3 +26,4 @@ uuid = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }
 talos-storage = { workspace = true }
+tempfile = "3"

@@ -10,6 +10,8 @@ import type {
   MemorySearchResult,
   ModelInfo,
   UserDto,
+  FsDirectoryCreateResponse,
+  FsDirectorySnapshot,
   ProjectPatch,
   ProjectRecord,
   SessionQuery,
@@ -200,6 +202,22 @@ export class TalosClient {
       await this.http.request<void>(this.url(`/v1/projects/${projectId}`), {
         method: "DELETE",
       });
+    },
+  };
+
+  fs = {
+    directory: {
+      read: (query?: { path?: string | null }): Promise<FsDirectorySnapshot> =>
+        this.http.request<FsDirectorySnapshot>(
+          this.urlWithQuery("/v1/fs/directory", {
+            path: query?.path ?? undefined,
+          }),
+        ),
+      create: (body: { parent: string; name: string }): Promise<FsDirectoryCreateResponse> =>
+        this.http.request<FsDirectoryCreateResponse>(this.url("/v1/fs/directory"), {
+          method: "POST",
+          body: JSON.stringify(body),
+        }),
     },
   };
 

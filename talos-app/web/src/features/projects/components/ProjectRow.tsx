@@ -1,4 +1,4 @@
-import { ArrowUpRight, FolderRoot, Trash2 } from "lucide-react";
+import { ArrowUpRight, FolderRoot, Trash2, TriangleAlert } from "lucide-react";
 
 import type { ProjectRecord } from "@/shared/types/ui";
 import { cn } from "@/shared/lib/cn";
@@ -25,6 +25,8 @@ export function ProjectRow({
   deleteDisabledReason,
   deleting = false,
 }: ProjectRowProps) {
+  const unavailable = Boolean(project.status && project.status.state !== "available");
+
   return (
     <div
       className={cn(
@@ -42,8 +44,14 @@ export function ProjectRow({
           <span className="flex size-10 shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-border/65 bg-background/42 text-brand/80 transition group-hover:border-brand/30 group-hover:bg-brand/10">
             <FolderRoot size={16} />
           </span>
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-full border border-border/65 bg-background/38 text-muted/65 transition group-hover:border-brand/25 group-hover:text-brand">
-            <ArrowUpRight size={14} />
+          <span
+            className={cn(
+              "flex size-8 shrink-0 items-center justify-center rounded-full border border-border/65 bg-background/38 transition group-hover:border-brand/25",
+              unavailable ? "text-danger" : "text-muted/65 group-hover:text-brand",
+            )}
+            title={unavailable ? "Project directory is unavailable." : undefined}
+          >
+            {unavailable ? <TriangleAlert size={14} /> : <ArrowUpRight size={14} />}
           </span>
         </div>
         <div className="mt-10 min-w-0">

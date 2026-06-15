@@ -10,6 +10,7 @@ use talos_types::talos::{
 };
 use talos_types::{
     OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, ProjectPatch, ProjectRecord,
+    ProjectStatus,
     SessionConf, SessionPatch, SessionPatchAck, SessionQuery, SessionRecord, TalosConfig,
     TalosSession, DEFAULT_SESSION_TITLE,
 };
@@ -343,6 +344,7 @@ impl talos_session_store::SessionStore for TitleTestSessionStore {
             name: name.to_string(),
             user_id: user_id.to_string(),
             directory: directory.clone(),
+            status: ProjectStatus::default(),
             created_at: 0,
             updated_at: 0,
             session_count: 0,

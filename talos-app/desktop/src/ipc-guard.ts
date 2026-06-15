@@ -6,6 +6,10 @@ export type DesktopRendererMethod = Exclude<AppProtocol.ClientMethod, "initializ
 const emptyParams = (params: unknown) => isRecord(params);
 const sessionParams = (params: unknown) => hasString(params, "session_id");
 const projectParams = (params: unknown) => hasString(params, "project_id");
+const fsDirectoryReadParams = (params: unknown) =>
+  isRecord(params) && (params.path === undefined || params.path === null || typeof params.path === "string");
+const fsDirectoryCreateParams = (params: unknown) =>
+  hasString(params, "parent") && hasString(params, "name");
 const llmConfigWriteParams = (params: unknown) =>
   hasString(params, "path") &&
   isRecord(params) &&
@@ -47,6 +51,8 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "config.reload": emptyParams,
   "event.subscribe": sessionParams,
   "event.unsubscribe": (params) => hasString(params, "subscription_id"),
+  "fs.directory.create": fsDirectoryCreateParams,
+  "fs.directory.read": fsDirectoryReadParams,
   "memory.file.list": emptyParams,
   "memory.file.read": (params) => hasString(params, "path"),
   "memory.file.write": (params) => hasString(params, "path") && hasString(params, "content"),

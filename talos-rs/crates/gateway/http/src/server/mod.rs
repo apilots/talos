@@ -3,6 +3,7 @@ mod auth;
 mod auth_session;
 mod errors;
 mod events;
+mod fs;
 mod lifecycle;
 mod memory_files;
 mod messages;
@@ -32,6 +33,7 @@ use self::auth_session::{
 use self::events::{
     get_active_turn_handler, recover_timeline_handler, subscribe_timeline_events_handler,
 };
+use self::fs::{create_directory_handler, read_directory_handler};
 pub use self::lifecycle::{ServerLifecycle, ServerLifecycleState};
 use self::memory_files::{
     get_memory_file_handler, list_memory_files_handler, put_memory_file_handler,
@@ -166,6 +168,10 @@ impl HttpServer {
             )
             .route("/v1/user", get(current_user_handler))
             .route("/v1/llm", get(get_llm_handler).put(put_llm_handler))
+            .route(
+                "/v1/fs/directory",
+                get(read_directory_handler).post(create_directory_handler),
+            )
             .route("/v1/sessions", get(list_sessions_handler))
             .route(
                 "/v1/projects",

@@ -1,7 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Check, ChevronDown, FolderOpen, LoaderCircle, Plus, Search, Shield, Square, Zap } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowUp,
+  Check,
+  ChevronDown,
+  FolderOpen,
+  FolderPlus,
+  LoaderCircle,
+  Plus,
+  Search,
+  Shield,
+  Square,
+  TriangleAlert,
+  Zap,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { createFsDirectory, readFsDirectory } from "../api";
+import { ProjectDirectoryDialog, type ProjectDirectoryDialogMode } from "@/features/projects/components/ProjectDirectoryDialog";
 import { cn } from "@/shared/lib/cn";
 import { Panel } from "@/shared/ui/Panel";
 import { Textarea } from "@/shared/ui/Input";
@@ -28,7 +44,7 @@ interface ChatComposerProps {
   projects: ProjectRecord[];
   activeProjectId: string;
   onProjectChange: (projectId: string) => void;
-  onCreateProject?: (path: string) => Promise<void>;
+  onCreateProject?: (input: string | { directory: string; name?: string }) => Promise<void>;
   runtimeMode: RuntimeMode;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
   reasoningLevel?: ReasoningLevel;
@@ -129,6 +145,13 @@ interface InputHistoryNavigationItem {
   text: string;
 }
 
+type ProjectPickerMode = "list" | "add_menu" | "existing" | "create";
+type ProjectMenuMode = Exclude<ProjectPickerMode, "existing" | "create">;
+
+function projectStatusUnavailable(project: ProjectRecord) {
+  return Boolean(project.status && project.status.state !== "available");
+}
+
 // ─── main component ──────────────────────────────────────────────────────────
 
 export function ChatComposer({
@@ -159,8 +182,8 @@ export function ChatComposer({
   const isBusy = Boolean(isStreaming || isCancelling);
   const [projectOpen, setProjectOpen] = useState(false);
   const [projectSearch, setProjectSearch] = useState("");
-  const [addingProject, setAddingProject] = useState(false);
-  const [newProjectPath, setNewProjectPath] = useState("");
+  const [projectMode, setProjectMode] = useState<ProjectMenuMode>("list");
+  const [directoryDialogMode, setDirectoryDialogMode] = useState<ProjectDirectoryDialogMode | null>(null);
   const projectTriggerRef = useRef<HTMLButtonElement>(null);
   const projectPickerRef = useRef<HTMLDivElement>(null);
   const historyIndexRef = useRef<number | null>(null);
@@ -177,8 +200,7 @@ export function ChatComposer({
   const closeProjectPicker = () => {
     setProjectOpen(false);
     setProjectSearch("");
-    setAddingProject(false);
-    setNewProjectPath("");
+    setProjectMode("list");
   };
 
   const resetInputHistoryNavigation = () => {
@@ -231,6 +253,11 @@ export function ChatComposer({
       p.directory?.toLowerCase().includes(projectSearch.toLowerCase())
     );
   });
+
+  function openDirectoryDialog(mode: ProjectDirectoryDialogMode) {
+    closeProjectPicker();
+    setDirectoryDialogMode(mode);
+  }
 
   const showCollapsibleProject = showProjectSelector && !compact;
   const showInlineProject = showProjectSelector && compact;
@@ -542,93 +569,106 @@ export function ChatComposer({
           className="absolute left-0 right-0 top-[calc(100%-1px)] z-50 rounded-b-[1.5rem] border border-t-0 border-border/70 bg-card/98 px-2 pb-2 pt-1 shadow-lg backdrop-blur"
           ref={projectPickerRef}
         >
-          <div className="relative mb-1 mt-1">
-            <Search
-              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted"
-              size={12}
-            />
-            <input
-              autoFocus
-              className="w-full rounded-xl border border-border/50 bg-background/60 py-1.5 pl-7 pr-3 text-[12px] outline-none placeholder:text-muted focus:border-brand/50 focus:ring-0"
-              onChange={(e) => setProjectSearch(e.target.value)}
-              placeholder={t("chat:searchProjects")}
-              value={projectSearch}
-            />
-          </div>
-          <div className="max-h-44 overflow-y-auto">
-            {filteredProjects.map((project) => (
+          {projectMode === "list" ? (
+            <>
+              <div className="relative mb-1 mt-1">
+                <Search
+                  className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted"
+                  size={12}
+                />
+                <input
+                  autoFocus
+                  className="w-full rounded-xl border border-border/50 bg-background/60 py-1.5 pl-7 pr-3 text-[12px] outline-none placeholder:text-muted focus:border-brand/50 focus:ring-0"
+                  onChange={(e) => setProjectSearch(e.target.value)}
+                  placeholder={t("chat:searchProjects")}
+                  value={projectSearch}
+                />
+              </div>
+              <div className="max-h-44 overflow-y-auto">
+                {filteredProjects.map((project) => {
+                  const unavailable = projectStatusUnavailable(project);
+                  return (
+                    <button
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12px] outline-none transition hover:bg-muted/10 focus:outline-none",
+                        project.id === activeProjectId && "text-brand",
+                        unavailable && "text-muted",
+                      )}
+                      key={project.id}
+                      onClick={() => {
+                        if (unavailable) {
+                          return;
+                        }
+                        onProjectChange(project.id);
+                        closeProjectPicker();
+                      }}
+                      title={unavailable ? t("chat:projectDirectoryUnavailable") : undefined}
+                      type="button"
+                    >
+                      <FolderOpen size={12} className="shrink-0 text-muted" />
+                      <span className="truncate">
+                        {isUnboundProject(project.id) ? t("common:noProject") : project.name}
+                      </span>
+                      {unavailable ? (
+                        <TriangleAlert className="ml-auto shrink-0 text-danger" size={12} />
+                      ) : !isUnboundProject(project.id) && project.directory ? (
+                        <span className="ml-auto shrink-0 text-muted">
+                          {describeProjectDirectory(project.directory)}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
               <button
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12px] outline-none transition hover:bg-muted/10 focus:outline-none",
-                  project.id === activeProjectId && "text-brand",
-                )}
-                key={project.id}
-                onClick={() => {
-                  onProjectChange(project.id);
-                  closeProjectPicker();
-                }}
+                className="mt-0.5 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[12px] text-muted outline-none transition hover:bg-muted/10 hover:text-ink focus:outline-none"
+                onClick={() => setProjectMode("add_menu")}
                 type="button"
               >
-                <FolderOpen size={12} className="shrink-0 text-muted" />
-                <span className="truncate">
-                  {isUnboundProject(project.id) ? t("common:noProject") : project.name}
-                </span>
-                {!isUnboundProject(project.id) && project.directory && (
-                  <span className="ml-auto shrink-0 text-muted">
-                    {describeProjectDirectory(project.directory)}
-                  </span>
-                )}
+                <FolderPlus size={12} />
+                {t("chat:addNewProject")}
+                <ChevronDown className="-rotate-90 ml-auto" size={12} />
               </button>
-            ))}
-          </div>
-          {addingProject ? (
-            <div className="mt-1 flex gap-1.5">
-              <input
-                autoFocus
-                className="flex-1 rounded-xl border border-border/50 bg-background/60 px-3 py-1.5 text-[12px] outline-none placeholder:text-muted focus:border-brand/50 focus:ring-0"
-                onChange={(e) => setNewProjectPath(e.target.value)}
-                onKeyDown={async (e) => {
-                  if (e.key === "Enter" && newProjectPath.trim()) {
-                    await onCreateProject?.(newProjectPath.trim());
-                    setNewProjectPath("");
-                    setAddingProject(false);
-                    setProjectOpen(false);
-                  }
-                  if (e.key === "Escape") {
-                    setAddingProject(false);
-                    setNewProjectPath("");
-                  }
-                }}
-                placeholder="/path/to/project"
-                value={newProjectPath}
-              />
+            </>
+          ) : projectMode === "add_menu" ? (
+            <div className="py-1">
               <button
-                className="rounded-xl border border-border/50 bg-background/60 px-3 py-1.5 text-[12px] outline-none transition hover:border-brand/50 focus:outline-none"
-                onClick={async () => {
-                  if (newProjectPath.trim()) {
-                    await onCreateProject?.(newProjectPath.trim());
-                    setNewProjectPath("");
-                    setAddingProject(false);
-                    setProjectOpen(false);
-                  }
-                }}
+                className="mb-1 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12px] text-muted outline-none transition hover:bg-muted/10 hover:text-ink focus:outline-none"
+                onClick={() => setProjectMode("list")}
                 type="button"
               >
-                {t("chat:addPath")}
+                <ArrowLeft size={12} />
+                {t("chat:backToProjects")}
+              </button>
+              <button
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink outline-none transition hover:bg-muted/10 focus:outline-none"
+                onClick={() => openDirectoryDialog("create")}
+                type="button"
+              >
+                <Plus size={14} />
+                {t("chat:startFromScratch")}
+              </button>
+              <button
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink outline-none transition hover:bg-muted/10 focus:outline-none"
+                onClick={() => openDirectoryDialog("existing")}
+                type="button"
+              >
+                <FolderOpen size={14} />
+                {t("chat:useExistingFolder")}
               </button>
             </div>
-          ) : (
-            <button
-              className="mt-0.5 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[12px] text-muted outline-none transition hover:bg-muted/10 hover:text-ink focus:outline-none"
-              onClick={() => setAddingProject(true)}
-              type="button"
-            >
-              <Plus size={12} />
-              {t("chat:addNewProject")}
-            </button>
-          )}
+          ) : null}
         </div>
       )}
+      {onCreateProject ? (
+        <ProjectDirectoryDialog
+          createDirectory={createFsDirectory}
+          mode={directoryDialogMode}
+          onClose={() => setDirectoryDialogMode(null)}
+          onCreateProject={onCreateProject}
+          readDirectory={readFsDirectory}
+        />
+      ) : null}
     </div>
   );
 }

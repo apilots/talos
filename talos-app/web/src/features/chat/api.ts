@@ -32,6 +32,7 @@ function mapProjectRecord(project: ApiProjectRecord): ProjectRecord {
     id: project.project_id,
     name: project.name,
     directory: project.directory,
+    status: project.status,
     createdAt: project.created_at,
     updatedAt: project.updated_at,
     origin: "server",
@@ -99,6 +100,14 @@ export async function createProject(input: string | CreateProjectInput) {
     directory,
   });
   return mapProjectRecord(record);
+}
+
+export async function readFsDirectory(path?: string | null) {
+  return getTalosClient().fs.directory.read({ path });
+}
+
+export async function createFsDirectory(parent: string, name: string) {
+  return getTalosClient().fs.directory.create({ parent, name });
 }
 
 export async function deleteProject(projectId: string) {

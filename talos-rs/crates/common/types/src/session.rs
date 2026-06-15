@@ -340,9 +340,44 @@ pub struct ProjectRecord {
     pub name: String,
     pub user_id: String,
     pub directory: PathBuf,
+    #[serde(default)]
+    pub status: ProjectStatus,
     pub created_at: i64,
     pub updated_at: i64,
     pub session_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProjectStatus {
+    pub state: ProjectStatusState,
+    #[serde(default)]
+    pub reason: Option<ProjectUnavailableReason>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectStatusState {
+    Available,
+    Missing,
+    NotDirectory,
+    PermissionDenied,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectUnavailableReason {
+    PathNotFound,
+    NotDirectory,
+    PermissionDenied,
+}
+
+impl Default for ProjectStatus {
+    fn default() -> Self {
+        Self {
+            state: ProjectStatusState::Available,
+            reason: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

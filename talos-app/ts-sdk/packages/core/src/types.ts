@@ -40,6 +40,12 @@ export type {
   TalosTurnErrorEvent,
   TalosTurnStartedEvent,
   TurnExecutionMetrics,
+  FsDirectoryCreateParams,
+  FsDirectoryCreateResponse,
+  FsDirectoryEntry,
+  FsDirectoryReadParams,
+  FsDirectorySnapshot,
+  FsEntryKind,
 } from "./generated/app-protocol";
 export type {
   AuthSessionReadResponse,
@@ -424,9 +430,18 @@ export interface ProjectRecord {
   user_id?: string;
   name: string;
   directory: string;
+  status?: ProjectStatus | null;
   created_at: number;
   updated_at: number;
   session_count: number;
+}
+
+export type ProjectStatusState = "available" | "missing" | "not_directory" | "permission_denied";
+export type ProjectUnavailableReason = "path_not_found" | "not_directory" | "permission_denied";
+
+export interface ProjectStatus {
+  state: ProjectStatusState;
+  reason?: ProjectUnavailableReason | null;
 }
 
 export interface ProjectPatch {

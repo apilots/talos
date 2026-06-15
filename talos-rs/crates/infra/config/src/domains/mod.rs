@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod cloud;
+pub mod fs;
 pub mod kernel;
 pub mod memory;
 pub mod network;

@@ -3,6 +3,7 @@ pub mod account;
 pub mod config;
 pub mod event;
 pub mod file;
+pub mod fs;
 pub mod history;
 pub mod memory;
 pub mod session;
@@ -22,6 +23,7 @@ pub use file::{
     content_hash, modified_at_ms, read_optional, validate_expected_version, with_file_lock,
     workspace_root, write_atomic, FileLockRegistry,
 };
+pub use fs::FsService;
 pub use history::SessionHistoryService;
 pub use memory::{MemoryDate, MemoryListParams, MemorySearchParams, MemoryService};
 pub use session::SessionService;
@@ -55,6 +57,7 @@ pub struct TalosApplicationService {
     pub events: EventService,
     pub history: SessionHistoryService,
     pub config: ConfigService,
+    pub fs: FsService,
     pub memory: MemoryService,
     pub workspace_docs: WorkspaceDocService,
 }
@@ -134,6 +137,7 @@ impl TalosApplicationService {
             events: EventService::new(event_service.clone()),
             history: SessionHistoryService::new(base_config.clone(), event_service.clone()),
             config: ConfigService::new_with_reload_hook(llm_config_service, models, reload_hook),
+            fs: FsService::new(base_config.fs.directory_picker.clone()),
             memory: MemoryService::new(base_config.clone(), llm_provider, file_locks.clone()),
             workspace_docs: WorkspaceDocService::new(base_config, file_locks),
         }
@@ -319,7 +323,11 @@ impl TalosApplicationService {
     }
 
     pub async fn list_projects(&self, actor: &Actor) -> ApplicationResult<Vec<ProjectRecord>> {
-        self.access.list_projects(actor).await
+        let projects = self.access.list_projects(actor).await?;
+        Ok(projects
+            .into_iter()
+            .map(|project| self.fs.project_status(project))
+            .collect())
     }
 
     pub async fn get_project(
@@ -327,7 +335,8 @@ impl TalosApplicationService {
         actor: &Actor,
         project_id: &str,
     ) -> ApplicationResult<ProjectRecord> {
-        self.access.get_project(actor, project_id).await
+        let project = self.access.get_project(actor, project_id).await?;
+        Ok(self.fs.project_status(project))
     }
 
     pub async fn create_project(
@@ -336,7 +345,8 @@ impl TalosApplicationService {
         name: String,
         directory: std::path::PathBuf,
     ) -> ApplicationResult<ProjectRecord> {
-        self.access.create_project(actor, name, directory).await
+        let project = self.access.create_project(actor, name, directory).await?;
+        Ok(self.fs.project_status(project))
     }
 
     pub async fn patch_project(
@@ -345,11 +355,29 @@ impl TalosApplicationService {
         project_id: &str,
         patch: ProjectPatch,
     ) -> ApplicationResult<ProjectRecord> {
-        self.access.patch_project(actor, project_id, patch).await
+        let project = self.access.patch_project(actor, project_id, patch).await?;
+        Ok(self.fs.project_status(project))
     }
 
     pub async fn delete_project(&self, actor: &Actor, project_id: &str) -> ApplicationResult<()> {
         self.access.delete_project(actor, project_id).await
+    }
+
+    pub async fn read_fs_directory(
+        &self,
+        actor: &Actor,
+        path: Option<std::path::PathBuf>,
+    ) -> ApplicationResult<talos_types::FsDirectorySnapshot> {
+        self.fs.read_directory(actor, path).await
+    }
+
+    pub async fn create_fs_directory(
+        &self,
+        actor: &Actor,
+        parent: std::path::PathBuf,
+        name: String,
+    ) -> ApplicationResult<talos_types::FsDirectoryCreateResponse> {
+        self.fs.create_directory(actor, parent, name).await
     }
 }
 

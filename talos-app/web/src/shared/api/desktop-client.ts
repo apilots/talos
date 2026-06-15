@@ -185,6 +185,13 @@ export function createDesktopTalosClient(
       ) => client.patchProject(projectId, patch),
       delete: (projectId: string) => client.deleteProject(projectId).then(() => undefined),
     },
+    fs: {
+      directory: {
+        read: (query?: { path?: string | null }) => client.readFsDirectory(query?.path ?? null),
+        create: (body: { parent: string; name: string }) =>
+          client.createFsDirectory(body.parent, body.name),
+      },
+    },
     memory: {
       list: (query?: MemoryFileListParams) => client.listMemoryFiles(query?.limit),
       get: (date: string) => client.readMemoryFile(date),

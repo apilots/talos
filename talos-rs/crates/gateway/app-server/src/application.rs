@@ -5,8 +5,9 @@ use talos_app_protocol::errors::AppServerErrorBody;
 use talos_app_protocol::requests::{
     AuthSessionReadResponse, AuthSessionSnapshot, AuthSessionUserSnapshot, ClientRequest,
     ClientRequestParams, ConfigBatchWriteParams, ConfigReadParams, ConfigValueWriteParams,
-    EventSubscribeParams, MemoryFileReadParams, MemoryFileWriteParams, MessageCommandStatus,
-    OptionalPathPatch, OptionalStringPatch, ProjectCreateParams, ProjectPatchParams,
+    EventSubscribeParams, FsDirectoryCreateParams, FsDirectoryReadParams, MemoryFileReadParams,
+    MemoryFileWriteParams, MessageCommandStatus, OptionalPathPatch, OptionalStringPatch,
+    ProjectCreateParams, ProjectPatchParams,
     ProtocolInputItem, ProtocolTalosContext, SessionListParams, SessionPatchParams,
     TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
     TimelinePendingDynamicToolResult, TimelinePendingUserAction, TimelineRecoverySnapshot,
@@ -256,6 +257,12 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .await
                     .map_err(AppServerErrorBody::from_talos_error)?;
                 to_value(json!({ "success": true }))
+            }
+            ClientRequestParams::FsDirectoryRead(params) => {
+                to_value(self.read_fs_directory(actor, params).await?)
+            }
+            ClientRequestParams::FsDirectoryCreate(params) => {
+                to_value(self.create_fs_directory(actor, params).await?)
             }
             ClientRequestParams::TurnStart(params) => {
                 to_value(self.start_turn(actor, params).await?)
@@ -575,6 +582,28 @@ impl TalosApplicationAdapter {
                 &params.project_id,
                 ProjectPatch { name: params.name },
             )
+            .await
+            .map_err(AppServerErrorBody::from_talos_error)
+    }
+
+    async fn read_fs_directory(
+        &self,
+        actor: &Actor,
+        params: FsDirectoryReadParams,
+    ) -> ProtocolResult<talos_types::FsDirectorySnapshot> {
+        self.app
+            .read_fs_directory(actor, params.path)
+            .await
+            .map_err(AppServerErrorBody::from_talos_error)
+    }
+
+    async fn create_fs_directory(
+        &self,
+        actor: &Actor,
+        params: FsDirectoryCreateParams,
+    ) -> ProtocolResult<talos_types::FsDirectoryCreateResponse> {
+        self.app
+            .create_fs_directory(actor, params.parent, params.name)
             .await
             .map_err(AppServerErrorBody::from_talos_error)
     }

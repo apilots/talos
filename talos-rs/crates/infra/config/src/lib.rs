@@ -39,6 +39,7 @@ pub mod workspace;
 pub type TalosTimezone = chrono_tz::Tz;
 pub use domains::agent::{AgentConfig, PlannerMode};
 pub use domains::cloud::{CloudAuthConfig, CloudConfig};
+pub use domains::fs::{DirectoryPickerConfig, DirectoryPickerRoot, FsConfig};
 pub use domains::kernel::{
     AgentKernelCompactionConfig, AgentKernelConfig, AgentKernelOutputConfig,
     AgentKernelTimelineEventsConfig,
@@ -91,6 +92,10 @@ pub struct Config {
     #[serde(default)]
     pub cloud: CloudConfig,
 
+    /// Filesystem-facing UI capabilities.
+    #[serde(default)]
+    pub fs: FsConfig,
+
     /// 渠道配置
     #[serde(default)]
     pub channels: ChannelsConfig,
@@ -135,6 +140,7 @@ impl Default for Config {
             agent: AgentConfig::default(),
             gateway: GatewayConfig::default(),
             cloud: CloudConfig::default(),
+            fs: FsConfig::default(),
             channels: ChannelsConfig::default(),
             logging: LoggingConfig::default(),
             storage: StorageBackendConfig::default(),

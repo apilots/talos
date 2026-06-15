@@ -16,10 +16,19 @@ export interface ProjectRecord {
   id: string;
   name: string;
   directory?: string | null;
+  status?: ProjectStatus | null;
   createdAt: number;
   updatedAt: number;
   origin?: "default" | "server";
   sessionCount?: number;
+}
+
+export type ProjectStatusState = "available" | "missing" | "not_directory" | "permission_denied";
+export type ProjectUnavailableReason = "path_not_found" | "not_directory" | "permission_denied";
+
+export interface ProjectStatus {
+  state: ProjectStatusState;
+  reason?: ProjectUnavailableReason | null;
 }
 
 export interface MemoryRecord {
