@@ -149,4 +149,5 @@ const testLlmConfig = {
   openai: emptyProvider,
   bailian: emptyProvider,
   ollama: emptyProvider,
+  openrouter: emptyProvider,
 };

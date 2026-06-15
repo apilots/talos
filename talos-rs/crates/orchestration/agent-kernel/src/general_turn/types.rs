@@ -87,7 +87,8 @@ pub struct PreparedGeneralTurn {
     pub project_root: Option<PathBuf>,
     pub selected_model: String,
     pub max_output_tokens: Option<u32>,
-    pub native_thinking: Option<NativeThinkingConfig>,
+    pub reasoning_effort: Option<ReasoningEffort>,
+    pub speed: ModelSpeed,
     pub prompt_prefix_messages: Vec<ChatMessage>,
     pub messages: Vec<ChatMessage>,
     pub tool_definitions: Vec<ToolDefinition>,
@@ -304,7 +305,8 @@ pub struct GeneralTurnStepRequest {
     pub messages: Vec<ChatMessage>,
     pub tool_definitions: Vec<ToolDefinition>,
     pub parallel_tool_calls: bool,
-    pub native_thinking: Option<NativeThinkingConfig>,
+    pub reasoning_effort: Option<ReasoningEffort>,
+    pub speed: ModelSpeed,
     pub pre_final_execution_summary: Option<String>,
     pub stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
     pub streaming_tool_execution: Option<StreamingToolExecutionConfig>,
@@ -327,9 +329,11 @@ impl GeneralTurnStepRequest {
                 .parallel_tool_calls(self.parallel_tool_calls);
         }
 
-        if let Some(native_thinking) = self.native_thinking {
-            builder = builder.native_thinking(native_thinking);
+        if let Some(reasoning_effort) = self.reasoning_effort {
+            builder = builder.reasoning_effort(reasoning_effort);
         }
+
+        builder = builder.speed(self.speed);
 
         builder.build()
     }

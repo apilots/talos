@@ -17,8 +17,7 @@ use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
     AssistantTextPhaseHint, ChatMessage, ChatRequest, FunctionCall, LlmProvider, ModelBlockDelta,
-    ModelBlockKind, ModelBlockStreamEvent, NativeThinkingConfig, NativeThinkingEffort, ToolChoice,
-    ToolDefinition,
+    ModelBlockKind, ModelBlockStreamEvent, ModelSpeed, ReasoningEffort, ToolChoice, ToolDefinition,
 };
 use talos_memory::{
     strip_json_fences, Memory, MemoryGetResult, MemorySearchResponse, MemoryStore, RecordHeader,

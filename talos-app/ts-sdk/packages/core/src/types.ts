@@ -332,6 +332,8 @@ export interface ModelInfo {
   provider: string;
   context_window?: number;
   reasoning?: boolean;
+  reasoning_effort?: ReasoningEffort;
+  speed?: ModelSpeed;
   input?: string[];
   cost?: ModelCostConfig;
   compat?: ModelCompatConfig;
@@ -526,20 +528,28 @@ export interface ModelCostConfig {
   cache_write: number;
 }
 
+export type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
+export type ModelSpeed = "standard" | "fast";
+
 export interface ProviderModelConfig {
   id: string;
   name: string;
   context_window: number;
   reasoning: boolean;
+  reasoning_effort?: ReasoningEffort;
+  speed?: ModelSpeed;
   input: ModelInputKind[];
   cost: ModelCostConfig;
   compat: ModelCompatConfig;
 }
 
+export type LlmProtocol = "chat" | "responses" | "messages";
+
 export interface ProviderConfig {
   api_key?: string | null;
   base_url?: string | null;
   enabled: boolean;
+  protocol?: LlmProtocol | null;
   models: ProviderModelConfig[];
 }
 
@@ -550,6 +560,7 @@ export interface LlmConfig {
   openai: ProviderConfig;
   bailian: ProviderConfig;
   ollama: ProviderConfig;
+  openrouter: ProviderConfig;
 }
 
 export interface ModelReadiness {

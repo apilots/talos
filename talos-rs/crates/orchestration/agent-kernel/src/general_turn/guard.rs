@@ -135,7 +135,7 @@ pub(crate) async fn run_forced_finalization_step(
     model: String,
     llm_provider: Arc<dyn LlmProvider>,
     stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
-    _native_thinking: Option<NativeThinkingConfig>,
+    _reasoning_effort: Option<ReasoningEffort>,
     pre_final_execution_summary: Option<String>,
     cause: ForcedFinalizationCause,
 ) -> TalosResult<GeneralTurnStepResult> {
@@ -164,7 +164,8 @@ pub(crate) async fn run_forced_finalization_step(
             messages: messages.clone(),
             tool_definitions: Vec::new(),
             parallel_tool_calls: false,
-            native_thinking: None,
+            reasoning_effort: None,
+            speed: Default::default(),
             pre_final_execution_summary: pre_final_execution_summary.clone(),
             stream_tx: stream_tx.clone(),
             streaming_tool_execution: None,
@@ -210,7 +211,8 @@ async fn run_salvage_finalization_step(
             messages,
             tool_definitions: Vec::new(),
             parallel_tool_calls: false,
-            native_thinking: None,
+            reasoning_effort: None,
+            speed: Default::default(),
             pre_final_execution_summary: if prior_step.execution_summary_streamed {
                 None
             } else {
@@ -295,7 +297,7 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use talos_llm_provider::{ChatResponse, ChatStream, NativeThinkingEffort, Role, Usage};
+    use talos_llm_provider::{ChatResponse, ChatStream, ReasoningEffort, Role, Usage};
 
     #[test]
     fn forced_finalization_prompt_requires_visible_answer_without_tools() {
@@ -351,14 +353,14 @@ mod tests {
             .contains("Do not retry the same missing path"));
     }
 
-    struct FinalizationNativeThinkingProvider {
+    struct FinalizationReasoningProvider {
         calls: AtomicUsize,
     }
 
     #[async_trait]
-    impl LlmProvider for FinalizationNativeThinkingProvider {
+    impl LlmProvider for FinalizationReasoningProvider {
         fn name(&self) -> &str {
-            "finalization-native-thinking-provider"
+            "finalization-reasoning-provider"
         }
 
         async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
@@ -368,7 +370,7 @@ mod tests {
         async fn chat_with_tools(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             assert!(
-                request.native_thinking.is_none(),
+                request.reasoning_effort.is_none(),
                 "final-answer phase must use the visible response channel"
             );
             assert!(
@@ -398,13 +400,13 @@ mod tests {
         }
 
         fn default_model(&self) -> String {
-            "finalization-native-thinking-provider".to_string()
+            "finalization-reasoning-provider".to_string()
         }
     }
 
     #[tokio::test]
-    async fn forced_finalization_disables_native_thinking_for_visible_answer_phase() {
-        let provider = Arc::new(FinalizationNativeThinkingProvider {
+    async fn forced_finalization_disables_reasoning_effort_for_visible_answer_phase() {
+        let provider = Arc::new(FinalizationReasoningProvider {
             calls: AtomicUsize::new(0),
         });
 
@@ -413,10 +415,7 @@ mod tests {
             "mock-model".to_string(),
             provider.clone(),
             None,
-            Some(NativeThinkingConfig {
-                effort: NativeThinkingEffort::High,
-                budget_tokens: Some(1024),
-            }),
+            Some(ReasoningEffort::High),
             None,
             ForcedFinalizationCause::ToolRoundBudget,
         )

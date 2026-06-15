@@ -250,6 +250,65 @@ fn test_model_readiness_reports_missing_provider_api_key() {
 }
 
 #[test]
+fn test_provider_protocol_defaults_by_provider() {
+    assert_eq!(
+        default_llm_protocol("anthropic"),
+        Some(LlmProtocol::Messages)
+    );
+    assert_eq!(default_llm_protocol("openai"), Some(LlmProtocol::Chat));
+    assert_eq!(default_llm_protocol("bailian"), Some(LlmProtocol::Chat));
+    assert_eq!(default_llm_protocol("ollama"), Some(LlmProtocol::Chat));
+    assert_eq!(default_llm_protocol("openrouter"), Some(LlmProtocol::Chat));
+    assert_eq!(default_llm_protocol("unknown"), None);
+}
+
+#[test]
+fn test_provider_protocol_support_is_provider_scoped() {
+    assert!(llm_provider_supports_protocol(
+        "openai",
+        LlmProtocol::Responses
+    ));
+    assert!(llm_provider_supports_protocol("openai", LlmProtocol::Chat));
+    assert!(!llm_provider_supports_protocol(
+        "anthropic",
+        LlmProtocol::Chat
+    ));
+    assert!(!llm_provider_supports_protocol(
+        "bailian",
+        LlmProtocol::Messages
+    ));
+    assert!(llm_provider_supports_protocol(
+        "openrouter",
+        LlmProtocol::Chat
+    ));
+    assert!(!llm_provider_supports_protocol(
+        "openrouter",
+        LlmProtocol::Responses
+    ));
+}
+
+#[test]
+fn test_model_readiness_reports_unsupported_provider_protocol() {
+    let mut config = Config::default();
+    config.gateway.auth = false;
+    config.llm.provider = "bailian".to_string();
+    config.llm.model = "qwen-max".to_string();
+    config.agent.model = "qwen-max".to_string();
+    config.llm.bailian.api_key = Some("sk-test".to_string());
+    config.llm.bailian.base_url =
+        Some("https://dashscope.aliyuncs.com/compatible-mode/v1".to_string());
+    config.llm.bailian.protocol = Some(LlmProtocol::Messages);
+
+    let readiness = config.model_readiness();
+
+    assert!(!readiness.ready);
+    assert!(readiness
+        .issues
+        .iter()
+        .any(|issue| issue.contains("protocol") && issue.contains("messages")));
+}
+
+#[test]
 fn test_validate_runtime_rejects_invalid_timezone() {
     let mut config = Config::default();
     config.gateway.auth = false;
@@ -270,6 +329,7 @@ fn test_provider_models_are_strongly_typed() {
 enabled: true
 api_key: sk-test
 base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+protocol: chat
 models:
   - id: qwen-max
     name: qwen-max
@@ -288,6 +348,7 @@ models:
     let provider: ProviderConfig =
         serde_yaml::from_str(yaml).expect("provider config should parse");
     let model = &provider.models[0];
+    assert_eq!(provider.protocol, Some(LlmProtocol::Chat));
     assert_eq!(model.id, "qwen-max");
     assert_eq!(model.context_window, 32_768);
     assert_eq!(

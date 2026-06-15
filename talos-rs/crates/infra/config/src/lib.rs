@@ -46,9 +46,11 @@ pub use domains::kernel::{
 };
 pub use domains::memory::AgentKernelMemoryConfig;
 pub use domains::network::{
-    ChannelConfig, ChannelsConfig, DmPolicy, DmScope, GatewayAuthCacheConfig, GatewayConfig,
-    GroupPolicy, LlmConfig, ModelCompatConfig, ModelCostConfig, ModelInputKind, ProviderConfig,
-    ProviderModelConfig, TelegramAccountConfig, TelegramChannelsConfig, TelegramGroupConfig,
+    allowed_llm_protocols, default_llm_protocol, effective_llm_protocol,
+    llm_provider_supports_protocol, ChannelConfig, ChannelsConfig, DmPolicy, DmScope,
+    GatewayAuthCacheConfig, GatewayConfig, GroupPolicy, LlmConfig, LlmProtocol, ModelCompatConfig,
+    ModelCostConfig, ModelInputKind, ModelSpeed, ProviderConfig, ProviderModelConfig,
+    ReasoningEffort, TelegramAccountConfig, TelegramChannelsConfig, TelegramGroupConfig,
     TelegramMode, TelegramTopicConfig, ThinkingFormat,
 };
 pub use domains::prompt::{
@@ -187,6 +189,7 @@ impl Config {
             "openai" => Some(&self.llm.openai),
             "bailian" => Some(&self.llm.bailian),
             "ollama" => Some(&self.llm.ollama),
+            "openrouter" => Some(&self.llm.openrouter),
             _ => None,
         }
     }
@@ -197,6 +200,7 @@ impl Config {
             "openai" => Some(&self.llm.openai),
             "bailian" => Some(&self.llm.bailian),
             "ollama" => Some(&self.llm.ollama),
+            "openrouter" => Some(&self.llm.openrouter),
             _ => None,
         }
     }
@@ -257,6 +261,15 @@ pub fn model_readiness_for_llm(llm: &LlmConfig) -> ModelReadiness {
         issues.push(format!("llm provider '{}' is disabled", provider_name));
     }
 
+    if let Some(protocol) = provider.protocol {
+        if !llm_provider_supports_protocol(&provider_name, protocol) {
+            issues.push(format!(
+                "llm.{}.protocol '{}' is not supported",
+                provider_name, protocol
+            ));
+        }
+    }
+
     if provider_name != "ollama" {
         match provider.api_key.as_ref() {
             Some(api_key)
@@ -312,6 +325,7 @@ pub fn provider_config_for_llm<'a>(
         "openai" => Some(&llm.openai),
         "bailian" => Some(&llm.bailian),
         "ollama" => Some(&llm.ollama),
+        "openrouter" => Some(&llm.openrouter),
         _ => None,
     }
 }

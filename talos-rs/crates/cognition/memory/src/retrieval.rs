@@ -492,8 +492,7 @@ mod tests {
     use chrono::Utc;
     use talos_error::TalosResult;
     use talos_llm_provider::{
-        ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, NativeThinkingSupport,
-        Usage,
+        ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, ReasoningSupport, Usage,
     };
     use tempfile::TempDir;
 
@@ -539,8 +538,8 @@ mod tests {
             "mock-model".to_string()
         }
 
-        fn native_thinking_support(&self, _model: &str) -> NativeThinkingSupport {
-            NativeThinkingSupport::Unsupported
+        fn reasoning_support(&self, _model: &str) -> ReasoningSupport {
+            ReasoningSupport::Unsupported
         }
     }
 

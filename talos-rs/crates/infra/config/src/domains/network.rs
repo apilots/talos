@@ -331,6 +331,10 @@ pub struct LlmConfig {
     /// Ollama config
     #[serde(default)]
     pub ollama: ProviderConfig,
+
+    /// OpenRouter config
+    #[serde(default)]
+    pub openrouter: ProviderConfig,
 }
 
 fn default_provider() -> String {
@@ -350,8 +354,63 @@ impl Default for LlmConfig {
             openai: ProviderConfig::default(),
             bailian: ProviderConfig::default(),
             ollama: ProviderConfig::default(),
+            openrouter: ProviderConfig::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LlmProtocol {
+    Chat,
+    Responses,
+    Messages,
+}
+
+impl LlmProtocol {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Chat => "chat",
+            Self::Responses => "responses",
+            Self::Messages => "messages",
+        }
+    }
+}
+
+impl std::fmt::Display for LlmProtocol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+const CHAT_ONLY_PROTOCOLS: &[LlmProtocol] = &[LlmProtocol::Chat];
+const OPENAI_PROTOCOLS: &[LlmProtocol] = &[LlmProtocol::Chat, LlmProtocol::Responses];
+const MESSAGES_ONLY_PROTOCOLS: &[LlmProtocol] = &[LlmProtocol::Messages];
+
+pub fn default_llm_protocol(provider: &str) -> Option<LlmProtocol> {
+    match provider.trim().to_ascii_lowercase().as_str() {
+        "anthropic" => Some(LlmProtocol::Messages),
+        "openai" => Some(LlmProtocol::Chat),
+        "bailian" | "ollama" | "openrouter" => Some(LlmProtocol::Chat),
+        _ => None,
+    }
+}
+
+pub fn allowed_llm_protocols(provider: &str) -> Option<&'static [LlmProtocol]> {
+    match provider.trim().to_ascii_lowercase().as_str() {
+        "anthropic" => Some(MESSAGES_ONLY_PROTOCOLS),
+        "openai" => Some(OPENAI_PROTOCOLS),
+        "bailian" | "ollama" | "openrouter" => Some(CHAT_ONLY_PROTOCOLS),
+        _ => None,
+    }
+}
+
+pub fn effective_llm_protocol(provider: &str, config: &ProviderConfig) -> Option<LlmProtocol> {
+    config.protocol.or_else(|| default_llm_protocol(provider))
+}
+
+pub fn llm_provider_supports_protocol(provider: &str, protocol: LlmProtocol) -> bool {
+    allowed_llm_protocols(provider).is_some_and(|allowed| allowed.contains(&protocol))
 }
 
 /// Provider config
@@ -369,6 +428,10 @@ pub struct ProviderConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
 
+    /// Wire protocol used for this provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<LlmProtocol>,
+
     /// Provider-specific model metadata
     #[serde(default)]
     pub models: Vec<ProviderModelConfig>,
@@ -380,6 +443,7 @@ impl Default for ProviderConfig {
             api_key: None,
             base_url: None,
             enabled: true,
+            protocol: None,
             models: Vec::new(),
         }
     }
@@ -396,6 +460,10 @@ pub struct ProviderModelConfig {
     #[serde(default)]
     pub reasoning: bool,
     #[serde(default)]
+    pub reasoning_effort: ReasoningEffort,
+    #[serde(default)]
+    pub speed: ModelSpeed,
+    #[serde(default)]
     pub input: Vec<ModelInputKind>,
     #[serde(default)]
     pub cost: ModelCostConfig,
@@ -411,6 +479,25 @@ impl ProviderModelConfig {
             self.name.as_str()
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ReasoningEffort {
+    Low,
+    #[default]
+    Medium,
+    High,
+    #[serde(rename = "xhigh")]
+    XHigh,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelSpeed {
+    #[default]
+    Standard,
+    Fast,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
