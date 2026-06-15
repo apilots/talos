@@ -48,6 +48,7 @@ export function MessageList({ blocks, emptyTitle, emptyDetail, actions }: Messag
               <ToolCallBlock
                 argumentsText={JSON.stringify(block.arguments, null, 2)}
                 callId={block.callId}
+                contentItems={block.contentItems}
                 output={block.output}
                 progress={block.progress.map((entry) => ({ kind: entry.kind, message: entry.message }))}
                 prompt={block.prompt}
@@ -277,6 +278,7 @@ function MessageTimelineBlock({
                     <ToolCallBlock
                       argumentsText={formatArguments(item.arguments)}
                       callId={item.callId}
+                      contentItems={item.contentItems}
                       output={item.output}
                       progress={item.progress}
                       prompt={item.prompt}

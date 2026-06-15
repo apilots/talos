@@ -166,6 +166,11 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::talos::TalosTurnErrorEvent>());
     output.push_str(&export::<talos_types::talos::TalosJsonValue>());
     output.push_str(&export::<talos_types::talos::TalosContentItem>());
+    output.push_str(&export::<talos_types::talos::TalosToolTaskStatus>());
+    output.push_str(&export::<talos_types::talos::TalosToolFileDiff>());
+    output.push_str(&export::<talos_types::talos::TalosToolDiffHunk>());
+    output.push_str(&export::<talos_types::talos::TalosToolDiffLine>());
+    output.push_str(&export::<talos_types::talos::TalosToolSearchMatch>());
     output.push_str(&export::<talos_types::talos::TalosUsage>());
     output.push_str(&export::<talos_types::talos::TurnExecutionMetrics>());
     output.push_str(&export::<talos_types::talos::StopReason>());

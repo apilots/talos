@@ -50,10 +50,7 @@ impl TuiApp {
     pub(crate) fn tool_result_output_text(content: &[TalosContentItem]) -> String {
         content
             .iter()
-            .map(|item| match item {
-                TalosContentItem::Text { text } => text.clone(),
-                TalosContentItem::Json { value } => value.to_string(),
-            })
+            .map(TalosContentItem::display_text)
             .collect::<Vec<_>>()
             .join("\n")
     }
@@ -157,12 +154,14 @@ impl TuiApp {
         &mut self,
         call_id: &str,
         output: String,
+        content_items: Vec<TalosContentItem>,
         exit_ok: bool,
         timing_ms: Option<u64>,
     ) {
         if let Some(idx) = self.resolve_tool_call_block_idx(call_id) {
             if let Some(block) = self.chat_blocks.get_mut(idx) {
                 block.content = output;
+                block.tool_content_items = content_items;
                 block.tool_status = Some(ToolCallStatus::Completed { exit_ok });
                 if timing_ms.is_some() {
                     block.timing_ms = timing_ms;

@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use serde_json::Value;
 use talos_error::{TalosError, TalosResult};
+use talos_types::talos::TalosContentItem;
 
 use crate::runtimes::fs_read::{run, ReadFileRequest};
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
@@ -81,12 +82,20 @@ impl Tool for ReadTool {
         context: ToolContext,
     ) -> TalosResult<ToolOutputPayload> {
         let request = parse_read_request(&input)?;
-        let output = run(&request, &context).await?;
-        Ok(ToolOutputPayload::Function {
-            content: output.clone(),
-            success: true,
-            structured_content: Some(serde_json::json!({ "result": output })),
-        })
+        let result = run(&request, &context).await?;
+        let structured = serde_json::to_value(&result)
+            .map_err(|err| TalosError::ToolError(format!("serialize read response: {}", err)))?;
+        Ok(ToolOutputPayload::success_with_content_items(
+            structured,
+            vec![TalosContentItem::FileRead {
+                path: result.path,
+                offset: result.offset,
+                limit: result.limit,
+                total_lines: result.total_lines,
+                content: result.content,
+                truncated: result.truncated,
+            }],
+        ))
     }
 }
 
@@ -123,5 +132,29 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, TalosError::ValidationError(_)));
+    }
+
+    #[tokio::test]
+    async fn execute_payload_returns_file_read_content_item() {
+        let file = tempfile::NamedTempFile::new().expect("temp file should create");
+        tokio::fs::write(file.path(), "alpha\n")
+            .await
+            .expect("write should succeed");
+        let tool = ReadTool;
+        let payload = tool
+            .execute_payload(
+                serde_json::json!({"path": file.path(), "offset": 1, "limit": 10}),
+                ToolContext::new("session", "user"),
+            )
+            .await
+            .expect("read should succeed");
+
+        let ToolOutputPayload::Function { content_items, .. } = payload else {
+            panic!("read should return function payload");
+        };
+        assert!(matches!(
+            content_items.first(),
+            Some(TalosContentItem::FileRead { content, .. }) if content == "alpha"
+        ));
     }
 }

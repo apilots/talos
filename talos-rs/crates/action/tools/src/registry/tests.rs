@@ -83,11 +83,10 @@ impl Tool for LargeErrorTool {
         _input: Value,
         _context: ToolContext,
     ) -> TalosResult<ToolOutputPayload> {
-        Ok(ToolOutputPayload::Function {
-            content: String::new(),
-            success: false,
-            structured_content: Some(json!({ "error": "e".repeat(256) })),
-        })
+        Ok(ToolOutputPayload::failure_structured(
+            String::new(),
+            Some(json!({ "error": "e".repeat(256) })),
+        ))
     }
 }
 
@@ -554,13 +553,7 @@ fn test_register_dynamic_tool_appears_in_catalog() {
         default_governance_for_source(ToolSource::Dynamic),
     );
     let func: DynamicToolFn = Arc::new(|_args, _ctx| {
-        Box::pin(async move {
-            Ok(ToolOutputPayload::Function {
-                content: "Hello!".to_string(),
-                success: true,
-                structured_content: None,
-            })
-        })
+        Box::pin(async move { Ok(ToolOutputPayload::success_text("Hello!")) })
     });
     registry.register_dynamic_tool(spec, func);
 

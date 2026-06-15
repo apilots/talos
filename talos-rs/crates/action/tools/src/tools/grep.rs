@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use serde_json::Value;
 use talos_error::TalosResult;
+use talos_types::talos::TalosContentItem;
 
 use crate::runtimes::fs_search::{run, GrepFilesRequest};
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
@@ -39,6 +40,10 @@ impl Tool for GrepTool {
                     "type": "string",
                     "description": "Preferred file glob filter alias."
                 },
+                "type": {
+                    "type": "string",
+                    "description": "Ripgrep file type filter, such as rust, ts, js, py, or md."
+                },
                 "path": {
                     "type": "string",
                     "description": "Optional absolute path or workspace-relative path to limit the search scope."
@@ -53,6 +58,11 @@ impl Tool for GrepTool {
                     "minimum": 0,
                     "description": "Offset into the result set."
                 },
+                "head_limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Alias for maximum number of matches to return, matching ripgrep-oriented usage."
+                },
                 "output_mode": {
                     "type": "string",
                     "enum": ["content", "files_with_matches", "count"],
@@ -61,7 +71,17 @@ impl Tool for GrepTool {
                 "context": {
                     "type": "integer",
                     "minimum": 0,
-                    "description": "Reserved context line count for future richer output formatting."
+                    "description": "Number of before and after context lines to include."
+                },
+                "before_context": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Number of context lines before each match."
+                },
+                "after_context": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Number of context lines after each match."
                 },
                 "multiline": {
                     "type": "boolean",
@@ -70,6 +90,11 @@ impl Tool for GrepTool {
                 "case_insensitive": {
                     "type": "boolean",
                     "description": "Perform case-insensitive matching."
+                },
+                "timeout_ms": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Maximum time to allow ripgrep to run before returning partial output."
                 }
             }
         }))
@@ -101,6 +126,54 @@ impl Tool for GrepTool {
             talos_error::TalosError::ToolError(format!("invalid grep arguments: {}", err))
         })?;
         let response = run(&request, &context).await?;
-        Ok(ToolOutputPayload::success_text(response.content))
+        let structured = serde_json::to_value(&response).map_err(|err| {
+            talos_error::TalosError::ToolError(format!("serialize Grep response: {}", err))
+        })?;
+        Ok(ToolOutputPayload::success_with_content_items(
+            structured,
+            vec![TalosContentItem::SearchResults {
+                query: Some(response.query),
+                matches: response.matches,
+                offset: response.offset,
+                limit: response.limit,
+                total_matches: Some(response.total_matches),
+                more_available: response.more_available,
+                partial: response.partial,
+            }],
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn execute_payload_returns_search_results_content_item() {
+        let dir = tempfile::tempdir().expect("temp dir should create");
+        tokio::fs::write(dir.path().join("demo.rs"), "fn alpha() {}\n")
+            .await
+            .expect("write should succeed");
+        let context = ToolContext::new("session", "user").with_project_root(dir.path());
+
+        let payload = GrepTool
+            .execute_payload(
+                serde_json::json!({
+                    "pattern": "alpha",
+                    "glob": "*.rs",
+                    "output_mode": "content"
+                }),
+                context,
+            )
+            .await
+            .expect("grep should execute");
+
+        let ToolOutputPayload::Function { content_items, .. } = payload else {
+            panic!("grep should return function payload");
+        };
+        assert!(matches!(
+            content_items.first(),
+            Some(TalosContentItem::SearchResults { matches, .. }) if matches.len() == 1
+        ));
     }
 }

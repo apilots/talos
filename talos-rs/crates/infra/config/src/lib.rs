@@ -59,7 +59,8 @@ pub use domains::storage::{DatabaseType, StorageBackendConfig};
 pub use domains::tools::{
     AgentKernelMcpConfig, DynamicToolConfig, DynamicToolTimeoutBehavior, FileToolConfig,
     LocalExecToolConfig, McpServerConfig, McpToolConfig, McpTransportConfig, ToolSandboxModeConfig,
-    ToolSandboxPolicy, ToolsRuntimeConfig,
+    ToolSandboxPolicy, ToolsRuntimeConfig, WebSearchProviderConfig, WebSearchProviderRuntimeConfig,
+    WebSearchToolConfig,
 };
 pub use env::{EnvSecretStore, RuntimeEnv};
 pub use paths::{

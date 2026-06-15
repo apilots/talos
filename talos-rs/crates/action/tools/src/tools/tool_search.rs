@@ -24,6 +24,8 @@ pub struct ToolSearchRequest {
 pub struct ToolSearchResponse {
     pub query: String,
     pub matches: Vec<CatalogToolEntry>,
+    pub activated_tools: Vec<String>,
+    pub unavailable_tools: Vec<CatalogToolEntry>,
 }
 
 pub struct ToolSearchTool;
@@ -109,14 +111,23 @@ impl Tool for ToolSearchTool {
             .filter(|entry| matches_query(entry, &query))
             .take(request.limit)
             .collect::<Vec<_>>();
+        let mut activated_tools = Vec::new();
+        let mut unavailable_tools = Vec::new();
         for entry in &matches {
-            context
-                .deferred_tool_state()
-                .activate(entry.public_name.clone());
+            if entry.available {
+                context
+                    .deferred_tool_state()
+                    .activate(entry.public_name.clone());
+                activated_tools.push(entry.public_name.clone());
+            } else {
+                unavailable_tools.push(entry.clone());
+            }
         }
         let response = ToolSearchResponse {
             query: request.query,
             matches,
+            activated_tools,
+            unavailable_tools,
         };
 
         ToolOutputPayload::success_json(&response, "serialize tool_search response")
@@ -185,5 +196,11 @@ mod tests {
             context.deferred_tool_state().list(),
             vec!["WebSearch".to_string()]
         );
+        let activated = structured_content
+            .as_ref()
+            .and_then(|value| value.get("activated_tools"))
+            .and_then(|value| value.as_array())
+            .expect("activated tools should be exposed");
+        assert_eq!(activated.len(), 1);
     }
 }

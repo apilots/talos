@@ -38,14 +38,12 @@ export const ToolCallCard = {
     );
   },
   Header({
-    callId,
     open,
     onToggle,
     statusLabel,
     title,
     tone,
   }: {
-    callId: string;
     open: boolean;
     onToggle: () => void;
     statusLabel: string;
@@ -64,7 +62,6 @@ export const ToolCallCard = {
           </span>
           <div className="min-w-0">
             <div className="text-[13.5px] font-medium text-ink">{title}</div>
-            <div className="truncate text-[11px] text-muted">{callId}</div>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -131,6 +128,24 @@ export const ToolCallCard = {
           {content}
         </pre>
       </Section>
+    );
+  },
+  Details({ children, title }: { children: ReactNode; title: string }) {
+    return (
+      <details className="rounded-lg border border-border/65 bg-background/40">
+        <summary className="cursor-pointer px-3 py-2 text-[11px] uppercase tracking-[0.12em] text-muted">
+          {title}
+        </summary>
+        <div className="space-y-3 border-t border-border/60 p-3">{children}</div>
+      </details>
+    );
+  },
+  MetaLine({ label, value }: { label: string; value: string }) {
+    return (
+      <div className="grid grid-cols-[5rem_minmax(0,1fr)] gap-2 text-[12px]">
+        <span className="text-muted">{label}</span>
+        <span className="truncate font-mono text-ink">{value}</span>
+      </div>
     );
   },
   Prompt({

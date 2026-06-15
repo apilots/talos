@@ -14,22 +14,36 @@ pub enum PermissionMode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadFileStateSource {
+    Read,
+    Mutation,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReadFileStateEntry {
     pub path: PathBuf,
     pub observed_at_session_seq: u64,
     pub observed_at_turn: u64,
     pub content_hash: String,
     pub size_bytes: u64,
+    pub source: ReadFileStateSource,
 }
 
 impl ReadFileStateEntry {
-    pub fn from_content(path: PathBuf, content: &str, observed_at_session_seq: u64) -> Self {
+    pub fn from_content(
+        path: PathBuf,
+        content: &str,
+        observed_at_session_seq: u64,
+        source: ReadFileStateSource,
+    ) -> Self {
         Self {
             path,
             observed_at_session_seq,
             observed_at_turn: observed_at_session_seq,
             content_hash: sha256_hex(content.as_bytes()),
             size_bytes: content.len() as u64,
+            source,
         }
     }
 }
@@ -42,8 +56,21 @@ pub struct ReadFileStateStore {
 
 impl ReadFileStateStore {
     pub fn record_content(&self, path: PathBuf, content: &str) -> ReadFileStateEntry {
+        self.record_content_with_source(path, content, ReadFileStateSource::Read)
+    }
+
+    pub fn record_mutation_content(&self, path: PathBuf, content: &str) -> ReadFileStateEntry {
+        self.record_content_with_source(path, content, ReadFileStateSource::Mutation)
+    }
+
+    fn record_content_with_source(
+        &self,
+        path: PathBuf,
+        content: &str,
+        source: ReadFileStateSource,
+    ) -> ReadFileStateEntry {
         let sequence = self.seq.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-        let entry = ReadFileStateEntry::from_content(path.clone(), content, sequence);
+        let entry = ReadFileStateEntry::from_content(path.clone(), content, sequence, source);
         self.entries.insert(path, entry.clone());
         entry
     }

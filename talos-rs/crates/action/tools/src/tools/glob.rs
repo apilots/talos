@@ -1,24 +1,13 @@
 use async_trait::async_trait;
-use globset::Glob;
-use serde::Deserialize;
 use serde_json::Value;
 use talos_error::{TalosError, TalosResult};
-use walkdir::WalkDir;
+use talos_types::talos::TalosContentItem;
 
-use crate::runtimes::fs_read::resolve_tool_path;
+use crate::runtimes::fs_glob::{run, GlobFilesRequest};
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
 use crate::{Tool, ToolContext, ToolOutputPayload};
 
 pub struct GlobTool;
-
-#[derive(Debug, Deserialize)]
-struct GlobInput {
-    pattern: String,
-    #[serde(default)]
-    path: Option<String>,
-    #[serde(default)]
-    limit: Option<usize>,
-}
 
 #[async_trait]
 impl Tool for GlobTool {
@@ -31,7 +20,7 @@ impl Tool for GlobTool {
     }
 
     fn description(&self) -> &str {
-        "Find files by glob pattern within the workspace."
+        "Find files by glob pattern within the workspace.\n\nUsage:\n- Use Glob for path discovery instead of shell find.\n- Results are sorted and paginated.\n- Default noisy directories such as .git, node_modules, target, dist, and build are skipped."
     }
 
     fn parameters_schema(&self) -> Option<Value> {
@@ -41,7 +30,8 @@ impl Tool for GlobTool {
             "properties": {
                 "pattern": { "type": "string" },
                 "path": { "type": "string" },
-                "limit": { "type": "integer", "minimum": 1 }
+                "limit": { "type": "integer", "minimum": 1 },
+                "offset": { "type": "integer", "minimum": 0 }
             }
         }))
     }
@@ -68,35 +58,49 @@ impl Tool for GlobTool {
         input: Value,
         context: ToolContext,
     ) -> TalosResult<ToolOutputPayload> {
-        let input: GlobInput = serde_json::from_value(input)
+        let request: GlobFilesRequest = serde_json::from_value(input)
             .map_err(|err| TalosError::ToolError(format!("invalid Glob arguments: {}", err)))?;
-        let base = if let Some(path) = input.path.as_deref() {
-            resolve_tool_path(path, &context)?
-        } else {
-            crate::runtimes::resolve_base_dir(&context)?
-        };
-        let matcher = Glob::new(&input.pattern)
-            .map_err(|err| TalosError::ToolError(format!("invalid glob pattern: {}", err)))?
-            .compile_matcher();
-        let limit = input.limit.unwrap_or(200).min(2_000);
-        let mut results = Vec::new();
-        for entry in WalkDir::new(&base).into_iter().filter_map(Result::ok) {
-            if !entry.file_type().is_file() {
-                continue;
-            }
-            let relative = entry
-                .path()
-                .strip_prefix(&base)
-                .unwrap_or(entry.path())
-                .to_path_buf();
-            if matcher.is_match(&relative) || matcher.is_match(entry.path()) {
-                results.push(relative.display().to_string());
-                if results.len() >= limit {
-                    break;
-                }
-            }
-        }
+        let response = run(&request, &context).await?;
+        let structured = serde_json::to_value(&response)
+            .map_err(|err| TalosError::ToolError(format!("serialize Glob response: {}", err)))?;
+        Ok(ToolOutputPayload::success_with_content_items(
+            structured,
+            vec![TalosContentItem::SearchResults {
+                query: Some(response.query),
+                matches: response.matches,
+                offset: response.offset,
+                limit: response.limit,
+                total_matches: Some(response.total_matches),
+                more_available: response.more_available,
+                partial: response.partial,
+            }],
+        ))
+    }
+}
 
-        ToolOutputPayload::success_json(&results, "serialize glob results")
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn execute_payload_returns_search_results_content_item() {
+        let dir = tempfile::tempdir().expect("temp dir should create");
+        tokio::fs::write(dir.path().join("demo.rs"), "")
+            .await
+            .expect("write should succeed");
+        let context = ToolContext::new("session", "user").with_project_root(dir.path());
+
+        let payload = GlobTool
+            .execute_payload(serde_json::json!({"pattern": "*.rs"}), context)
+            .await
+            .expect("glob should execute");
+
+        let ToolOutputPayload::Function { content_items, .. } = payload else {
+            panic!("glob should return function payload");
+        };
+        assert!(matches!(
+            content_items.first(),
+            Some(TalosContentItem::SearchResults { matches, .. }) if matches.len() == 1
+        ));
     }
 }

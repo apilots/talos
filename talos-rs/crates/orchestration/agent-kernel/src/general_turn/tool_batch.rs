@@ -76,7 +76,7 @@ fn build_retrieved_memories_message(
 fn build_tool_result_payload(
     tool_name: &str,
     outcome: &ToolDispatchOutcome,
-) -> (Value, bool, Option<Value>) {
+) -> (Value, Vec<TalosContentItem>, bool, Option<Value>) {
     let envelope = outcome.envelope();
     let pending_arguments = envelope
         .pending
@@ -105,23 +105,38 @@ fn build_tool_result_payload(
                     "envelope": envelope,
                     "semantic_events": semantic_events,
                 }),
+                Vec::new(),
                 true,
                 pending_arguments,
             )
         }
         ToolDispatchOutcome::Executed { payload } => match payload {
+            _ if payload.validate_canonical_result().is_err() => {
+                let error = "canonical tool result requires content_items".to_string();
+                (
+                    serde_json::json!({
+                        "ok": false,
+                        "tool": tool_name,
+                        "error": error,
+                        "truncated": false,
+                        "semantic_events": semantic_events,
+                    }),
+                    vec![TalosContentItem::Text { text: error }],
+                    true,
+                    pending_arguments,
+                )
+            }
             ToolOutputPayload::Function {
                 content,
                 success,
                 structured_content,
+                ..
             } => {
                 let truncated = content.contains("[truncated]");
                 if *success {
                     (
-                        envelope
-                            .structured_content
-                            .clone()
-                            .unwrap_or(serde_json::Value::Null),
+                        model_payload_from_envelope(&envelope),
+                        envelope.content_items.clone(),
                         false,
                         pending_arguments,
                     )
@@ -149,14 +164,17 @@ fn build_tool_result_payload(
                             object.insert("next_turn_failure".to_string(), next_turn_failure);
                         }
                     }
-                    (value, true, pending_arguments)
+                    (
+                        value,
+                        envelope.content_items.clone(),
+                        true,
+                        pending_arguments,
+                    )
                 }
             }
             ToolOutputPayload::Resource { .. } => (
-                envelope
-                    .structured_content
-                    .clone()
-                    .unwrap_or(serde_json::Value::Null),
+                model_payload_from_envelope(&envelope),
+                envelope.content_items.clone(),
                 false,
                 pending_arguments,
             ),
@@ -175,13 +193,16 @@ fn build_tool_result_payload(
                             object.insert("next_turn_failure".to_string(), next_turn_failure);
                         }
                     }
-                    (value, true, pending_arguments)
+                    (
+                        value,
+                        envelope.content_items.clone(),
+                        true,
+                        pending_arguments,
+                    )
                 } else {
                     (
-                        envelope
-                            .structured_content
-                            .clone()
-                            .unwrap_or(serde_json::Value::Null),
+                        model_payload_from_envelope(&envelope),
+                        envelope.content_items.clone(),
                         false,
                         pending_arguments,
                     )
@@ -193,6 +214,7 @@ fn build_tool_result_payload(
 
 struct ReducedToolExecutionOutput {
     payload: Value,
+    content_items: Vec<TalosContentItem>,
     is_error: bool,
     pending_arguments: Option<Value>,
     memory_payload: Value,
@@ -203,7 +225,7 @@ struct ReducedToolExecutionOutput {
 
 fn reduce_tool_execution_output(output: &ToolExecutionOutput) -> ReducedToolExecutionOutput {
     let envelope = output.outcome.envelope();
-    let (payload, is_error, pending_arguments) =
+    let (payload, content_items, is_error, pending_arguments) =
         build_tool_result_payload(&output.tool_name, &output.outcome);
     let memory_payload = output
         .outcome
@@ -221,6 +243,7 @@ fn reduce_tool_execution_output(output: &ToolExecutionOutput) -> ReducedToolExec
         .and_then(|value| serde_json::to_value(value).ok());
     ReducedToolExecutionOutput {
         payload,
+        content_items,
         is_error,
         pending_arguments,
         memory_payload,
@@ -245,9 +268,7 @@ pub(crate) async fn emit_tool_result_stream_event(
         KernelStreamEventData::ToolResult(ToolResultStreamData {
             call_id: output.call_id.clone(),
             tool_name: output.tool_name.clone(),
-            content: vec![TalosContentItem::Json {
-                value: reduced.payload.into(),
-            }],
+            content: reduced.content_items,
             is_error: reduced.is_error,
             semantic_events: reduced.semantic_events,
             envelope: serde_json::to_value(&reduced.envelope).ok(),
@@ -288,9 +309,7 @@ pub(crate) fn collect_general_turn_tool_batch(
         output_items.push(TalosOutputItem::ToolResult {
             call_id: output.call_id.clone(),
             tool_name: output.tool_name.clone(),
-            content: vec![TalosContentItem::Json {
-                value: reduced.payload.clone().into(),
-            }],
+            content: reduced.content_items.clone(),
             is_error: reduced.is_error,
         });
         logs.push(ToolResultLog {
@@ -317,7 +336,7 @@ pub(crate) fn collect_general_turn_tool_batch(
         tool_messages.push(ChatMessage::tool(
             output.call_id,
             output.tool_name,
-            reduced.payload.to_string(),
+            build_model_tool_result_text(&reduced),
         ));
     }
 
@@ -329,6 +348,35 @@ pub(crate) fn collect_general_turn_tool_batch(
         logs,
         error_count,
     }
+}
+
+fn model_payload_from_envelope(envelope: &ToolResultEnvelope) -> Value {
+    if envelope.content_items.len() == 1 {
+        let mut value =
+            serde_json::to_value(&envelope.content_items[0]).unwrap_or(serde_json::Value::Null);
+        if let Some(object) = value.as_object_mut() {
+            object.insert(
+                "summary".to_string(),
+                envelope
+                    .compact_summary
+                    .clone()
+                    .map(Value::String)
+                    .unwrap_or(Value::Null),
+            );
+        }
+        return value;
+    }
+    serde_json::json!({
+        "summary": envelope.compact_summary.clone(),
+        "content_items": envelope.content_items.clone(),
+    })
+}
+
+fn build_model_tool_result_text(reduced: &ReducedToolExecutionOutput) -> String {
+    if reduced.is_error {
+        return reduced.payload.to_string();
+    }
+    model_payload_from_envelope(&reduced.envelope).to_string()
 }
 
 pub async fn execute_general_turn_tool_batch(
@@ -417,6 +465,9 @@ mod tests {
                     "suggested_action": "fix the arguments and retry",
                     "gate_source": "tool_semantic"
                 })),
+                content_items: vec![TalosContentItem::Text {
+                    text: "path is required".to_string(),
+                }],
             }),
             is_error: true,
         };
@@ -458,6 +509,9 @@ mod tests {
                     "suggested_action": "choose a less privileged tool or provide a dynamic tool result",
                     "gate_source": "allow_list"
                 })),
+                content_items: vec![TalosContentItem::Text {
+                    text: "authorization denied".to_string(),
+                }],
             }),
             is_error: true,
         };
@@ -504,11 +558,50 @@ mod tests {
         assert!(!reduced.is_error);
         assert_eq!(
             reduced.payload,
-            serde_json::json!({"result": "plain text result"})
+            serde_json::json!({
+                "type": "text",
+                "text": "plain text result",
+                "summary": "plain text result"
+            })
+        );
+        assert_eq!(
+            reduced.content_items,
+            vec![TalosContentItem::Text {
+                text: "plain text result".to_string()
+            }]
         );
         assert_eq!(
             reduced.memory_payload,
             serde_json::json!({"result": "plain text result"})
+        );
+    }
+
+    #[test]
+    fn reduce_tool_execution_output_rejects_structured_only_success_payload() {
+        let output = ToolExecutionOutput {
+            call_id: "call-4".to_string(),
+            tool_name: "BadTool".to_string(),
+            outcome: ToolDispatchOutcome::executed(ToolOutputPayload::Function {
+                content: "{}".to_string(),
+                success: true,
+                structured_content: Some(serde_json::json!({"result": "hidden"})),
+                content_items: Vec::new(),
+            }),
+            is_error: false,
+        };
+
+        let reduced = reduce_tool_execution_output(&output);
+        assert!(reduced.is_error);
+        assert_eq!(
+            reduced.content_items,
+            vec![TalosContentItem::Text {
+                text: "canonical tool result requires content_items".to_string()
+            }]
+        );
+        assert_ne!(
+            reduced.payload,
+            serde_json::json!({"result": "hidden"}),
+            "model projection must not use structured_content as the primary payload"
         );
     }
 }

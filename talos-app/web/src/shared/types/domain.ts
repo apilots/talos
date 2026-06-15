@@ -147,12 +147,52 @@ export function createDefaultFiles(): FileRecord[] {
 export function outputContentToText(content: TalosContentItem[]) {
   return content
     .map((item) => {
-      if (item.type === "text") {
-        return item.text;
+      switch (item.type) {
+        case "text":
+          return item.text;
+        case "json":
+          return JSON.stringify(unwrapTalosJsonValue(item.value), null, 2);
+        case "file_read":
+          return item.content;
+        case "diff":
+          return `diff: ${item.files.length} file(s)`;
+        case "search_results":
+          return item.matches
+            .map((match) => `${match.path}:${match.line}: ${match.text}`)
+            .join("\n");
+        case "bash_output":
+          return [item.stdout, item.stderr].filter(Boolean).join("\n") || `${item.status}`;
+        case "web_reference":
+          return [item.title ?? item.url, item.title ? item.url : "", item.snippet ?? ""]
+            .filter(Boolean)
+            .join("\n");
+        case "artifact_ref":
+          return item.label ?? item.artifact_id;
+        case "mcp_resource_ref":
+          return `${item.server}:${item.uri}`;
+        case "progress":
+          return item.message;
+        default:
+          return assertNeverToolContentItem(item);
       }
-      return JSON.stringify(item.value, null, 2);
     })
     .join("\n");
+}
+
+function unwrapTalosJsonValue(value: unknown) {
+  if (
+    value &&
+    typeof value === "object" &&
+    "value" in value &&
+    Object.keys(value).length === 1
+  ) {
+    return (value as { value: unknown }).value;
+  }
+  return value;
+}
+
+function assertNeverToolContentItem(item: never): string {
+  return JSON.stringify(item);
 }
 
 export function getSessionModel(session: TalosSession) {

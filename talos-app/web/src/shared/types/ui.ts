@@ -1,4 +1,5 @@
 import type {
+  TalosContentItem,
   TalosPendingUserAction,
   TalosTimelineItemKind,
   TalosTimelineItemStatus,
@@ -85,6 +86,7 @@ export type ChatRenderBlock =
       arguments: unknown;
       status: ChatToolStatus;
       output?: string;
+      contentItems?: TalosContentItem[];
       progress: Array<{ kind: TalosToolProgressKind; message: string }>;
       prompt?: string;
       timingMs?: number | null;
@@ -125,6 +127,7 @@ export type ChatTimelineItem =
       toolName: string;
       arguments: unknown;
       output?: string;
+      contentItems?: TalosContentItem[];
       isError?: boolean;
       progress: Array<{ kind: TalosToolProgressKind; message: string }>;
       prompt?: string;

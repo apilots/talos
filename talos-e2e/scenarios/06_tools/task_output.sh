@@ -121,7 +121,8 @@ results = [item for item in data.get("output", []) if item.get("type") == "tool_
 for bash_result in reversed(results):
     if bash_result.get("tool_name") != "Bash":
         continue
-    bash_content = (((bash_result.get("content") or [{}])[0].get("value") or {}).get("value", (bash_result.get("content") or [{}])[0].get("value") or {}))
+    bash_content = (bash_result.get("content") or [{}])[0]
+    assert bash_content.get("type") == "bash_output", bash_content
     if bash_content.get("status") == "running" and bash_content.get("session_id") is not None:
         print(bash_content["session_id"])
         raise SystemExit(0)
@@ -152,9 +153,11 @@ data = json.loads(os.environ["TASK_OUTPUT_JSON"])
 results = [item for item in data.get("output", []) if item.get("type") == "tool_result"]
 assert results, results
 task_result = next(item for item in results if item.get("tool_name") == "TaskOutput")
-task_content = (((task_result.get("content") or [{}])[0].get("value") or {}).get("value", (task_result.get("content") or [{}])[0].get("value") or {}))
-assert task_content.get("status") in {"running", "exited"}, task_content
-assert os.environ["TASK_MARKER"] in (task_content.get("output") or ""), task_content
+task_content = (task_result.get("content") or [{}])[0]
+assert task_content.get("type") == "bash_output", task_content
+assert task_content.get("status") in {"running", "completed", "failed"}, task_content
+combined = (task_content.get("stdout") or "") + (task_content.get("stderr") or "")
+assert os.environ["TASK_MARKER"] in combined, task_content
 PY
 
 echo "CASE tool_task_output PASS"

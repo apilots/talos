@@ -16,6 +16,8 @@ pub struct SkillRequest {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SkillResponse {
     pub skills: Vec<CatalogToolEntry>,
+    pub activated_skills: Vec<String>,
+    pub unavailable_skills: Vec<CatalogToolEntry>,
 }
 
 pub struct SkillTool;
@@ -101,7 +103,26 @@ impl Tool for SkillTool {
                 None => true,
             })
             .collect::<Vec<_>>();
-        ToolOutputPayload::success_json(&SkillResponse { skills }, "serialize skill response")
+        let mut activated_skills = Vec::new();
+        let mut unavailable_skills = Vec::new();
+        for entry in &skills {
+            if entry.available {
+                context
+                    .deferred_tool_state()
+                    .activate(entry.public_name.clone());
+                activated_skills.push(entry.public_name.clone());
+            } else {
+                unavailable_skills.push(entry.clone());
+            }
+        }
+        ToolOutputPayload::success_json(
+            &SkillResponse {
+                skills,
+                activated_skills,
+                unavailable_skills,
+            },
+            "serialize skill response",
+        )
     }
 }
 
@@ -136,7 +157,7 @@ mod tests {
 
         let tool = SkillTool;
         let result = tool
-            .execute_payload(serde_json::json!({}), context)
+            .execute_payload(serde_json::json!({}), context.clone())
             .await
             .expect("skill tool should succeed");
         let ToolOutputPayload::Function {
@@ -152,5 +173,9 @@ mod tests {
             .expect("structured skill response should expose skills");
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0]["public_name"], "skill_write_spec");
+        assert_eq!(
+            context.deferred_tool_state().list(),
+            vec!["skill_write_spec".to_string()]
+        );
     }
 }

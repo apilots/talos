@@ -32,13 +32,14 @@ pub use spec::{
 };
 pub use state::{
     get_session_tool_state, CatalogToolEntry, ContentReplacementState, DeferredToolState,
-    PermissionMode, ReadFileStateEntry, ReadFileStateStore, SessionToolState, TaskStateEntry,
-    TaskStateStore, ToolCatalogState, ToolPermissionContext, ToolResultBudgetState,
+    PermissionMode, ReadFileStateEntry, ReadFileStateSource, ReadFileStateStore, SessionToolState,
+    TaskStateEntry, TaskStateStore, ToolCatalogState, ToolPermissionContext, ToolResultBudgetState,
 };
 
 // Built-in tools
 pub mod tools {
     pub mod agent;
+    pub mod apply_patch;
     pub mod ask_user_question;
     pub mod bash;
     pub mod edit;
@@ -61,12 +62,12 @@ pub mod tools {
 
 // Re-export the built-in tools
 pub use tools::{
-    agent::AgentTool, ask_user_question::AskUserQuestionTool, bash::BashTool, edit::EditTool,
-    enter_plan_mode::EnterPlanModeTool, exit_plan_mode::ExitPlanModeTool, glob::GlobTool,
-    grep::GrepTool, memory_get::MemoryGetTool, memory_search::MemorySearchTool, read::ReadTool,
-    skill::SkillTool, task_output::TaskOutputTool, task_stop::TaskStopTool,
-    todo_write::TodoWriteTool, tool_search::ToolSearchTool, web_fetch::WebFetchTool,
-    web_search::WebSearchTool, write::WriteTool,
+    agent::AgentTool, apply_patch::ApplyPatchTool, ask_user_question::AskUserQuestionTool,
+    bash::BashTool, edit::EditTool, enter_plan_mode::EnterPlanModeTool,
+    exit_plan_mode::ExitPlanModeTool, glob::GlobTool, grep::GrepTool, memory_get::MemoryGetTool,
+    memory_search::MemorySearchTool, read::ReadTool, skill::SkillTool, task_output::TaskOutputTool,
+    task_stop::TaskStopTool, todo_write::TodoWriteTool, tool_search::ToolSearchTool,
+    web_fetch::WebFetchTool, web_search::WebSearchTool, write::WriteTool,
 };
 
 use std::sync::Arc;
@@ -76,6 +77,7 @@ pub fn register_core_local_tools(registry: &ToolRegistry) {
     registry.register(Arc::new(ReadTool));
     registry.register(Arc::new(WriteTool));
     registry.register(Arc::new(EditTool));
+    registry.register(Arc::new(ApplyPatchTool));
     registry.register(Arc::new(GlobTool));
     registry.register(Arc::new(GrepTool));
     // Exec tools (runtime-based)

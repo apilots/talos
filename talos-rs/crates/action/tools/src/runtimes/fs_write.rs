@@ -16,10 +16,17 @@ pub struct WriteFileRequest {
     pub content: String,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WriteFileChangeKind {
+    Create,
+    Update,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WriteFileResult {
     pub path: String,
-    pub kind: String,
+    pub kind: WriteFileChangeKind,
     pub original_file: Option<String>,
     pub structured_patch: String,
 }
@@ -51,14 +58,14 @@ pub async fn run(
         .map_err(|err| TalosError::ToolError(format!("failed to write file: {}", err)))?;
     context
         .read_file_state()
-        .record_content(path.clone(), &request.content);
+        .record_mutation_content(path.clone(), &request.content);
 
     Ok(WriteFileResult {
         path: path.display().to_string(),
         kind: if original_file.is_some() {
-            "update".to_string()
+            WriteFileChangeKind::Update
         } else {
-            "create".to_string()
+            WriteFileChangeKind::Create
         },
         structured_patch: build_patch(original_file.as_deref().unwrap_or(""), &request.content),
         original_file,

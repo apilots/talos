@@ -121,10 +121,12 @@ result = results[0]
 assert result.get("tool_name") == "WebFetch", result.get("tool_name")
 content_items = result.get("content") or []
 assert content_items, "missing content payload"
-content = ((content_items[0].get("value") or {}).get("value", content_items[0].get("value") or {}))
-assert content.get("title") == "Example Domain", content
-assert "example.com" in (content.get("final_url") or ""), content
-assert content.get("content"), content
+reference = content_items[0]
+assert reference.get("type") == "web_reference", reference
+assert reference.get("title") == "Example Domain", reference
+assert "example.com" in (reference.get("url") or ""), reference
+text_items = [item for item in content_items if item.get("type") == "text"]
+assert text_items and text_items[0].get("text"), content_items
 PY
 
 echo "CASE tool_web_fetch PASS"

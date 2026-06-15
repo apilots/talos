@@ -10,9 +10,8 @@ use talos_types::talos::{
 };
 use talos_types::{
     OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, ProjectPatch, ProjectRecord,
-    ProjectStatus,
-    SessionConf, SessionPatch, SessionPatchAck, SessionQuery, SessionRecord, TalosConfig,
-    TalosSession, DEFAULT_SESSION_TITLE,
+    ProjectStatus, SessionConf, SessionPatch, SessionPatchAck, SessionQuery, SessionRecord,
+    TalosConfig, TalosSession, DEFAULT_SESSION_TITLE,
 };
 use tokio::sync::mpsc;
 use uuid::Uuid;

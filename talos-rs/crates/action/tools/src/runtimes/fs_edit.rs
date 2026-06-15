@@ -29,6 +29,7 @@ pub struct EditFileResult {
     pub path: String,
     pub replacements: usize,
     pub original_file: String,
+    pub updated_file: String,
     pub structured_patch: String,
 }
 
@@ -87,12 +88,13 @@ pub async fn run(request: &EditFileRequest, context: &ToolContext) -> TalosResul
         .map_err(|err| TalosError::ToolError(format!("failed to write file: {}", err)))?;
     context
         .read_file_state()
-        .record_content(path.clone(), &updated);
+        .record_mutation_content(path.clone(), &updated);
 
     Ok(EditFileResult {
         path: path.display().to_string(),
         replacements: if request.replace_all { replacements } else { 1 },
         original_file: original_file.clone(),
+        updated_file: updated,
         structured_patch: format!("@@ find\n-{}\n@@ replace\n+{}", old_string, new_string),
     })
 }

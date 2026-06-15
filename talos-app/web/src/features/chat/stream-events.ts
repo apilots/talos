@@ -348,7 +348,8 @@ function applyItemDelta(
     case "tool_result":
       if (item?.callId) {
         state.updateTimelineTool(sessionId, messageId, itemId, {
-          output: outputContentToText(delta.content as never[]),
+          output: outputContentToText(delta.content),
+          contentItems: delta.content,
           isError: delta.is_error,
           status: delta.is_error ? "failed" : "completed",
           completedAtMs: Date.now(),
@@ -405,7 +406,8 @@ function applyItemCompleted(
     return;
   }
   useAppStore.getState().updateTimelineTool(sessionId, messageId, itemId, {
-    output: outputContentToText(result.content as never[]),
+    output: outputContentToText(result.content),
+    contentItems: result.content,
     isError: result.is_error,
     status: result.is_error ? "failed" : "completed",
     completedAtMs,
@@ -483,7 +485,8 @@ function toChatTimelineItem(item: TalosTimelineItem | TalosHistoryTimelineItem):
       callId: item.content.call_id,
       toolName: item.content.name,
       arguments: item.content.arguments,
-      output: item.content.result ? outputContentToText(item.content.result.content as never[]) : undefined,
+      output: item.content.result ? outputContentToText(item.content.result.content) : undefined,
+      contentItems: item.content.result?.content,
       isError: item.content.result?.is_error,
       progress: item.content.progress.map((entry) => ({
         kind: entry.progress_kind,

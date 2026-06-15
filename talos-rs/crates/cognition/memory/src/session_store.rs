@@ -334,10 +334,8 @@ fn truncate_chars(input: &str, max_chars: usize) -> String {
 fn render_tool_result_content(content: &[TalosContentItem]) -> String {
     content
         .iter()
-        .map(|item| match item {
-            TalosContentItem::Text { text } => text.trim().to_string(),
-            TalosContentItem::Json { value } => value.to_string(),
-        })
+        .map(TalosContentItem::display_text)
+        .map(|item| item.trim().to_string())
         .filter(|item| !item.is_empty())
         .collect::<Vec<_>>()
         .join("\n")

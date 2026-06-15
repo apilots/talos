@@ -121,7 +121,9 @@ result = results[0]
 assert result.get("tool_name") == "ToolSearch", result.get("tool_name")
 content_items = result.get("content") or []
 assert content_items, "missing content payload"
-content = ((content_items[0].get("value") or {}).get("value", content_items[0].get("value") or {}))
+item = content_items[0]
+assert item.get("type") == "json", item
+content = (item.get("value") or {}).get("value") or {}
 matches = content.get("matches") or []
 assert any(
     match.get("public_name") == "Skill"
@@ -131,7 +133,7 @@ assert any(
 ), matches
 PY
 
-skill_input="You must call tool 'Skill' exactly once with query write. After the tool call, respond with exactly SKILL_TOOL_OK"
+skill_input="Skill has already been activated by the previous ToolSearch result. Do not call ToolSearch again. You must call tool 'Skill' exactly once with query write. After the Skill tool call, respond with exactly SKILL_TOOL_OK"
 skill_payload="$(build_payload "${skill_input}")"
 skill_json="$(send_message_response "${session_id}" "${skill_payload}" "skill")"
 log_case_json "tool_skill" "${skill_payload}" "${skill_json}"
@@ -157,7 +159,9 @@ result = next((item for item in results if item.get("tool_name") == "Skill"), No
 assert result is not None, [item.get("tool_name") for item in results]
 content_items = result.get("content") or []
 assert content_items, "missing content payload"
-content = ((content_items[0].get("value") or {}).get("value", content_items[0].get("value") or {}))
+item = content_items[0]
+assert item.get("type") == "json", item
+content = (item.get("value") or {}).get("value") or {}
 skills = content.get("skills")
 assert isinstance(skills, list), content
 for item in skills:

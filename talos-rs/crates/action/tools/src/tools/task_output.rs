@@ -2,8 +2,9 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
 use talos_error::{TalosError, TalosResult};
+use talos_types::talos::{TalosContentItem, TalosToolTaskStatus};
 
-use crate::runtimes::bash::{read_task_output_with_context, TaskOutputRequest};
+use crate::runtimes::bash::{read_task_output_with_context, TaskOutputRequest, TaskStatus};
 use crate::spec::{ToolBehaviorFlags, ToolVisibility};
 use crate::{Tool, ToolContext, ToolOutputPayload};
 
@@ -84,8 +85,50 @@ impl Tool for TaskOutputTool {
             &context,
         )
         .await?;
-        ToolOutputPayload::success_json(&response, "serialize TaskOutput response")
+        let structured = serde_json::to_value(&response).map_err(|err| {
+            TalosError::ToolError(format!("serialize TaskOutput response: {err}"))
+        })?;
+        let status = match response.status {
+            TaskStatus::Running => TalosToolTaskStatus::Running,
+            TaskStatus::Stopped => TalosToolTaskStatus::Cancelled,
+            TaskStatus::Exited => {
+                if response.exit_code == Some(0) {
+                    TalosToolTaskStatus::Completed
+                } else {
+                    TalosToolTaskStatus::Failed
+                }
+            }
+        };
+        let (stdout, stderr) = task_output_chunk(&response);
+        Ok(ToolOutputPayload::success_with_content_items(
+            structured,
+            vec![TalosContentItem::BashOutput {
+                session_id: response.session_id,
+                status,
+                exit_code: response.exit_code,
+                stdout,
+                stderr,
+                truncated: response.truncated,
+                elapsed_ms: Some(response.elapsed_ms),
+            }],
+        ))
     }
+}
+
+fn task_output_chunk(response: &crate::runtimes::bash::TaskSessionResponse) -> (String, String) {
+    if response.output.is_empty() {
+        return (String::new(), String::new());
+    }
+
+    if response.stderr.is_empty() && response.stdout.ends_with(&response.output) {
+        return (response.output.clone(), String::new());
+    }
+
+    if response.stdout.is_empty() && response.stderr.ends_with(&response.output) {
+        return (String::new(), response.output.clone());
+    }
+
+    (response.output.clone(), String::new())
 }
 
 #[cfg(test)]
@@ -137,6 +180,7 @@ mod tests {
 
         let ToolOutputPayload::Function {
             structured_content: Some(content),
+            content_items,
             ..
         } = payload
         else {
@@ -151,5 +195,18 @@ mod tests {
             !output.starts_with(&"x".repeat(1200)),
             "offset output should not include the skipped prefix"
         );
+
+        let Some(TalosContentItem::BashOutput {
+            stdout, truncated, ..
+        }) = content_items.first()
+        else {
+            panic!("expected BashOutput content item");
+        };
+        assert!(stdout.contains(marker), "{stdout}");
+        assert!(
+            !stdout.starts_with(&"x".repeat(1200)),
+            "typed output should preserve TaskOutput offset"
+        );
+        assert!(!truncated);
     }
 }

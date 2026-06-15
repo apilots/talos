@@ -1,7 +1,8 @@
 use ratatui::text::Line;
 use talos_error::TalosResult;
 use talos_sdk::{
-    ModelInfo, SessionHistorySnapshot, TalosJsonValue, TalosSession, TimelineRecoverySnapshot,
+    ModelInfo, SessionHistorySnapshot, TalosContentItem, TalosJsonValue, TalosSession,
+    TimelineRecoverySnapshot,
 };
 
 // ── Suggestions ──────────────────────────────────────────────────────────────
@@ -141,6 +142,7 @@ pub(crate) struct ChatBlock {
     pub(crate) tool_call_id: Option<String>,
     pub(crate) tool_name: Option<String>,
     pub(crate) tool_input: Option<TalosJsonValue>,
+    pub(crate) tool_content_items: Vec<TalosContentItem>,
     pub(crate) tool_status: Option<ToolCallStatus>,
     pub(crate) tool_progress: Vec<String>,
     pub(crate) tool_iteration: Option<u64>,
@@ -158,6 +160,7 @@ impl ChatBlock {
             tool_call_id: None,
             tool_name: None,
             tool_input: None,
+            tool_content_items: Vec::new(),
             tool_status: None,
             tool_progress: Vec::new(),
             tool_iteration: None,
@@ -183,6 +186,7 @@ impl ChatBlock {
             tool_call_id: Some(call_id),
             tool_name: Some(tool_name),
             tool_input: Some(tool_input),
+            tool_content_items: Vec::new(),
             tool_status: Some(ToolCallStatus::Queued),
             tool_progress: Vec::new(),
             tool_iteration: Some(iteration),

@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use talos_error::{TalosError, TalosResult};
 
+use crate::runtimes::fs_diff::{build_file_diff_item, FileDiffInput};
 use crate::runtimes::fs_edit::{run, EditFileRequest};
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
 use crate::{Tool, ToolContext, ToolOutputPayload};
@@ -96,14 +97,16 @@ impl Tool for EditTool {
         let structured = serde_json::to_value(&result).map_err(|err| {
             talos_error::TalosError::ToolError(format!("serialize edit response: {}", err))
         })?;
-        let content = serde_json::to_string(&result).map_err(|err| {
-            talos_error::TalosError::ToolError(format!("serialize edit response: {}", err))
-        })?;
-        Ok(ToolOutputPayload::Function {
-            content,
-            success: true,
-            structured_content: Some(structured),
-        })
+        let diff = build_file_diff_item(FileDiffInput {
+            path: &result.path,
+            old_path: None,
+            original: &result.original_file,
+            updated: &result.updated_file,
+        });
+        Ok(ToolOutputPayload::success_with_content_items(
+            structured,
+            vec![diff],
+        ))
     }
 }
 
@@ -138,6 +141,7 @@ fn parse_edit_request(input: &Value) -> TalosResult<EditFileRequest> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use talos_types::talos::TalosContentItem;
 
     #[test]
     fn validate_input_rejects_missing_required_fields() {
@@ -147,5 +151,38 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, TalosError::ValidationError(_)));
+    }
+
+    #[tokio::test]
+    async fn execute_payload_returns_diff_content_item() {
+        let file = tempfile::NamedTempFile::new().expect("temp file should create");
+        tokio::fs::write(file.path(), "alpha\n")
+            .await
+            .expect("write should succeed");
+        let context = ToolContext::new("session", "user");
+        context
+            .read_file_state()
+            .record_content(file.path().to_path_buf(), "alpha\n");
+        let tool = EditTool;
+
+        let payload = tool
+            .execute_payload(
+                serde_json::json!({
+                    "path": file.path(),
+                    "old_string": "alpha",
+                    "new_string": "beta"
+                }),
+                context,
+            )
+            .await
+            .expect("edit should succeed");
+
+        let ToolOutputPayload::Function { content_items, .. } = payload else {
+            panic!("edit should return function payload");
+        };
+        assert!(matches!(
+            content_items.first(),
+            Some(TalosContentItem::Diff { files }) if files.len() == 1
+        ));
     }
 }

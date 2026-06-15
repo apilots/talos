@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::ToolDefinition;
+use talos_types::talos::TalosContentItem;
 use tokio::sync::RwLock;
 
 use crate::mcp::transport::{HttpTransport, McpTransport, StdioTransport};
@@ -353,7 +354,7 @@ impl McpConnectionManager {
         vec![
             RegisteredToolSpec::new(
                 ToolDefinition::new(
-                    "list_mcp_resources",
+                    "ListMcpResources",
                     "List available MCP resources from one server or all connected servers.",
                     Some(serde_json::json!({
                         "type": "object",
@@ -371,7 +372,7 @@ impl McpConnectionManager {
             ),
             RegisteredToolSpec::new(
                 ToolDefinition::new(
-                    "list_mcp_resource_templates",
+                    "ListMcpResourceTemplates",
                     "List MCP resource templates from one server or all connected servers.",
                     Some(serde_json::json!({
                         "type": "object",
@@ -389,7 +390,7 @@ impl McpConnectionManager {
             ),
             RegisteredToolSpec::new(
                 ToolDefinition::new(
-                    "read_mcp_resource",
+                    "ReadMcpResource",
                     "Read a specific MCP resource from a connected server.",
                     Some(serde_json::json!({
                         "type": "object",
@@ -483,17 +484,26 @@ async fn build_read_resource_payload(
     context: &ToolContext,
 ) -> TalosResult<ToolOutputPayload> {
     let mut entries = Vec::new();
+    let mut content_items = Vec::new();
     for (index, item) in contents.into_iter().enumerate() {
         match item {
             protocol::McpResourceContents::TextResourceContents {
                 uri,
                 mime_type,
                 text,
-            } => entries.push(McpReadResourceEntry::Text {
-                uri,
-                mime_type,
-                text,
-            }),
+            } => {
+                content_items.push(TalosContentItem::McpResourceRef {
+                    server: server.to_string(),
+                    uri: uri.clone(),
+                    mime_type: mime_type.clone(),
+                });
+                content_items.push(TalosContentItem::Text { text: text.clone() });
+                entries.push(McpReadResourceEntry::Text {
+                    uri,
+                    mime_type,
+                    text,
+                });
+            }
             protocol::McpResourceContents::BlobResourceContents {
                 uri,
                 mime_type,
@@ -508,6 +518,16 @@ async fn build_read_resource_payload(
                     &blob,
                 )
                 .await?;
+                content_items.push(TalosContentItem::McpResourceRef {
+                    server: server.to_string(),
+                    uri: uri.clone(),
+                    mime_type: mime_type.clone(),
+                });
+                content_items.push(TalosContentItem::ArtifactRef {
+                    artifact_id: artifact.path.display().to_string(),
+                    mime_type: mime_type.clone(),
+                    label: Some(uri.clone()),
+                });
                 entries.push(McpReadResourceEntry::Blob {
                     uri,
                     mime_type,
@@ -528,11 +548,10 @@ async fn build_read_resource_payload(
     };
     let structured_content = serde_json::to_value(&payload)
         .map_err(|err| TalosError::ToolError(format!("serialize MCP resource payload: {err}")))?;
-    Ok(ToolOutputPayload::Function {
-        content: structured_content.to_string(),
-        success: true,
-        structured_content: Some(structured_content),
-    })
+    Ok(ToolOutputPayload::success_with_content_items(
+        structured_content,
+        content_items,
+    ))
 }
 
 async fn persist_blob_artifact(
@@ -739,6 +758,20 @@ mod tests {
     }
 
     #[test]
+    fn test_resource_tool_specs_use_public_tool_names() {
+        let manager = McpConnectionManager::new();
+        let names = manager
+            .all_tool_specs()
+            .into_iter()
+            .map(|spec| spec.definition.name)
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"ListMcpResources".to_string()));
+        assert!(names.contains(&"ListMcpResourceTemplates".to_string()));
+        assert!(names.contains(&"ReadMcpResource".to_string()));
+    }
+
+    #[test]
     fn test_decode_base64_blob_rejects_invalid_padding() {
         let error = decode_base64_blob("ab=c").expect_err("invalid base64 should fail");
         assert!(error.to_string().contains("padding must be trailing"));
@@ -778,6 +811,8 @@ mod tests {
             content,
             success,
             structured_content,
+            content_items,
+            ..
         } = payload
         else {
             panic!("expected function payload");
@@ -785,6 +820,12 @@ mod tests {
 
         assert!(success);
         assert!(!content.contains("aGVsbG8="));
+        assert!(content_items
+            .iter()
+            .any(|item| matches!(item, TalosContentItem::McpResourceRef { .. })));
+        assert!(content_items
+            .iter()
+            .any(|item| matches!(item, TalosContentItem::ArtifactRef { .. })));
 
         let structured = structured_content.expect("structured content should exist");
         let blob = structured["contents"]

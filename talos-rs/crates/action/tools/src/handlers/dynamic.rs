@@ -80,11 +80,12 @@ impl ToolHandler for DynamicToolHandler {
                 if let Some(result) =
                     load_dynamic_tool_result(context.tool_context(), invocation.call_id.as_str())?
                 {
-                    Ok(ToolDispatchOutcome::executed(ToolOutputPayload::Function {
-                        content: result.output,
-                        success: result.success,
-                        structured_content: None,
-                    }))
+                    let payload = if result.success {
+                        ToolOutputPayload::success_text(result.output)
+                    } else {
+                        ToolOutputPayload::failure_structured(result.output, None)
+                    };
+                    Ok(ToolDispatchOutcome::executed(payload))
                 } else {
                     Ok(ToolDispatchOutcome::pending_dynamic(
                         invocation.tool_name,

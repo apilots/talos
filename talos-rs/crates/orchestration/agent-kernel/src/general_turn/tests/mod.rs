@@ -211,10 +211,14 @@ impl LlmProvider for ExecLoopProvider {
                     .and_then(Value::as_i64)
                     .expect("session_id should exist");
                 assert_eq!(
+                    payload.get("type").and_then(Value::as_str),
+                    Some("bash_output")
+                );
+                assert_eq!(
                     payload.get("status").and_then(Value::as_str),
                     Some("running")
                 );
-                assert!(payload.get("output").and_then(Value::as_str).is_some());
+                assert!(payload.get("stdout").and_then(Value::as_str).is_some());
                 Ok(ChatResponse {
                     content: "Check the background task output.".to_string(),
                     reasoning: Vec::new(),
@@ -244,7 +248,7 @@ impl LlmProvider for ExecLoopProvider {
                 let payload: Value = serde_json::from_str(&tool_message.content)
                     .expect("TaskOutput payload should parse");
                 let output = payload
-                    .get("output")
+                    .get("stdout")
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_string();

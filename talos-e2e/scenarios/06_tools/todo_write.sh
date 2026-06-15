@@ -121,9 +121,11 @@ results = [item for item in data.get("output", []) if item.get("type") == "tool_
 assert results, "missing tool_result"
 result = results[0]
 assert result.get("tool_name") == "TodoWrite", result.get("tool_name")
-content = result.get("content") or []
-assert content, "missing content payload"
-value = ((content[0].get("value") or {}).get("value", content[0].get("value") or {}))
+content_items = result.get("content") or []
+assert content_items, "missing content payload"
+item = content_items[0]
+assert item.get("type") == "json", item
+value = (item.get("value") or {}).get("value") or {}
 items = value.get("items") or []
 assert items, "missing todo items"
 first = items[0]

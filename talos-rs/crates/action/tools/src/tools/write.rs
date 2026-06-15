@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use talos_error::TalosResult;
 
+use crate::runtimes::fs_diff::{build_file_diff_item, FileDiffInput};
 use crate::runtimes::fs_write::{run, WriteFileRequest};
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
 use crate::{Tool, ToolContext, ToolOutputPayload};
@@ -74,6 +75,47 @@ impl Tool for WriteTool {
             talos_error::TalosError::ToolError(format!("invalid write arguments: {}", err))
         })?;
         let result = run(&request, &context).await?;
-        ToolOutputPayload::success_json(&result, "serialize write response")
+        let structured = serde_json::to_value(&result).map_err(|err| {
+            talos_error::TalosError::ToolError(format!("serialize write response: {}", err))
+        })?;
+        let diff = build_file_diff_item(FileDiffInput {
+            path: &result.path,
+            old_path: None,
+            original: result.original_file.as_deref().unwrap_or(""),
+            updated: &request.content,
+        });
+        Ok(ToolOutputPayload::success_with_content_items(
+            structured,
+            vec![diff],
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use talos_types::talos::TalosContentItem;
+
+    #[tokio::test]
+    async fn execute_payload_returns_diff_content_item() {
+        let dir = tempfile::tempdir().expect("temp dir should create");
+        let path = dir.path().join("demo.txt");
+        let tool = WriteTool;
+
+        let payload = tool
+            .execute_payload(
+                serde_json::json!({"path": path, "content": "alpha\n"}),
+                ToolContext::new("session", "user"),
+            )
+            .await
+            .expect("write should succeed");
+
+        let ToolOutputPayload::Function { content_items, .. } = payload else {
+            panic!("write should return function payload");
+        };
+        assert!(matches!(
+            content_items.first(),
+            Some(TalosContentItem::Diff { files }) if files.len() == 1
+        ));
     }
 }

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type {
   TalosActiveTurn,
+  TalosContentItem,
   TalosSessionHistorySnapshot,
   TalosTimelineEvent,
   TimelineEventEnvelope,
@@ -63,7 +64,18 @@ describe("timeline stream events", () => {
   it("updates tool progress on the same tool block", () => {
     applyStreamEvent("sess-1", itemStarted("tool-1", "tool_call", "acting", 1));
     applyStreamEvent("sess-1", toolProgress("tool-1", "running", 2));
-    applyStreamEvent("sess-1", toolResult("tool-1", "ok", 3));
+    applyStreamEvent("sess-1", toolResult("tool-1", [
+      {
+        type: "web_reference",
+        title: "Example",
+        url: "https://example.com",
+        citation_id: "web-1",
+        snippet: "Example snippet",
+        source_domain: "example.com",
+        published_at: null,
+        provider_rank: 1,
+      },
+    ], 3));
 
     const timeline = useAppStore.getState().streams["sess-1"]?.blocks.find((block) => block.kind === "timeline");
     expect(timeline).toMatchObject({
@@ -74,7 +86,7 @@ describe("timeline stream events", () => {
           callId: "call-1",
           toolName: "Shell",
           status: "completed",
-          output: "ok",
+          output: "Example\nhttps://example.com\nExample snippet",
           progress: [{ kind: "status", message: "running" }],
         }),
       ],
@@ -526,7 +538,11 @@ function toolProgress(itemId: string, text: string, sequence: number): TimelineE
   }, sequence);
 }
 
-function toolResult(itemId: string, text: string, sequence: number): TimelineEventEnvelope {
+function toolResult(
+  itemId: string,
+  content: string | TalosContentItem[],
+  sequence: number,
+): TimelineEventEnvelope {
   return baseEvent({
     type: "item_delta",
     request_id: "req-1",
@@ -534,7 +550,7 @@ function toolResult(itemId: string, text: string, sequence: number): TimelineEve
     item_id: itemId,
     delta: {
       type: "tool_result",
-      content: [{ type: "text", text }],
+      content: typeof content === "string" ? [{ type: "text", text: content }] : content,
       is_error: false,
     },
   }, sequence);

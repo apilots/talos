@@ -214,9 +214,11 @@ impl TuiApp {
                     );
                 }
                 if let Some(result) = result {
+                    let output = Self::tool_result_output_text(&result.content);
                     self.complete_tool_call_block(
                         call_id,
-                        Self::tool_result_output_text(&result.content),
+                        output,
+                        result.content.clone(),
                         !result.is_error,
                         timing_ms,
                     );
@@ -374,7 +376,13 @@ impl TuiApp {
             TalosTimelineDelta::ToolResult { content, is_error } => {
                 if let Some(call_id) = self.tool_call_id(item_id) {
                     let output = Self::tool_result_output_text(&content);
-                    self.complete_tool_call_block(&call_id, output, !is_error, None);
+                    self.complete_tool_call_block(
+                        &call_id,
+                        output,
+                        content.clone(),
+                        !is_error,
+                        None,
+                    );
                     self.clear_live_tool_progress(&call_id);
                     self.update_stored_tool_result(item_id, content, is_error);
                 }
@@ -440,6 +448,7 @@ impl TuiApp {
         self.complete_tool_call_block(
             &call_id,
             Self::tool_result_output_text(&result.content),
+            result.content.clone(),
             !result.is_error,
             None,
         );

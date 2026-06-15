@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use serde_json::Value;
 use talos_error::{TalosError, TalosResult};
+use talos_types::talos::TalosContentItem;
 
 use crate::runtimes::web_fetch::{run, WebFetchRequest};
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
@@ -73,6 +74,24 @@ impl Tool for WebFetchTool {
         let request: WebFetchRequest = serde_json::from_value(input)
             .map_err(|err| TalosError::ToolError(format!("invalid web_fetch arguments: {err}")))?;
         let response = run(&request).await?;
-        ToolOutputPayload::success_json(&response, "serialize web_fetch response")
+        let structured = serde_json::to_value(&response)
+            .map_err(|err| TalosError::ToolError(format!("serialize web_fetch response: {err}")))?;
+        Ok(ToolOutputPayload::success_with_content_items(
+            structured,
+            vec![
+                TalosContentItem::WebReference {
+                    url: response.final_url.clone(),
+                    title: response.title.clone(),
+                    citation_id: Some("web-fetch-1".to_string()),
+                    snippet: None,
+                    source_domain: None,
+                    published_at: None,
+                    provider_rank: None,
+                },
+                TalosContentItem::Text {
+                    text: response.content,
+                },
+            ],
+        ))
     }
 }

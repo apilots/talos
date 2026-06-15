@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
@@ -83,6 +83,27 @@ pub struct TaskOutputRequest {
 pub enum TaskStatus {
     Running,
     Exited,
+    Stopped,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BashCommandKind {
+    ReadOnly,
+    BuildOrTest,
+    FilesystemWrite,
+    Network,
+    ProcessControl,
+    Destructive,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BashCommandRisk {
+    Low,
+    Medium,
+    High,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,24 +111,48 @@ pub struct TaskSessionResponse {
     pub session_id: Option<i64>,
     pub status: TaskStatus,
     pub output: String,
+    pub stdout: String,
+    pub stderr: String,
     pub exit_code: Option<i32>,
     pub truncated: bool,
+    pub elapsed_ms: u64,
+    #[serde(default)]
+    pub output_offset: usize,
+    #[serde(default)]
+    pub next_offset: usize,
+    #[serde(default)]
+    pub command_kind: Option<BashCommandKind>,
+    #[serde(default)]
+    pub risk: Option<BashCommandRisk>,
 }
 
 struct BashSession {
     session_id: i64,
     owner_session_id: String,
     max_output_bytes: usize,
+    process_id: Option<u32>,
     stdin: Mutex<Option<ChildStdin>>,
     state: Mutex<BashSessionState>,
     notify: Notify,
+    started_at: Instant,
+    command_kind: BashCommandKind,
+    risk: BashCommandRisk,
 }
 
 #[derive(Default)]
 struct BashSessionState {
+    stdout: String,
+    stderr: String,
     output: String,
     delivered_bytes: usize,
     exit_code: Option<i32>,
+    stopped: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum OutputStreamKind {
+    Stdout,
+    Stderr,
 }
 
 struct BashSessionManager {
@@ -146,9 +191,11 @@ impl BashSessionManager {
             .map_err(|err| TalosError::ToolError(format!("failed to execute command: {}", err)))?;
 
         let session_id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let process_id = child.id();
         let stdin = child.stdin.take();
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
+        let (command_kind, risk) = classify_command(&request.cmd);
 
         let session = Arc::new(BashSession {
             session_id,
@@ -158,17 +205,21 @@ impl BashSessionManager {
                 .map(|config| config.tools.local_exec.max_output_bytes)
                 .unwrap_or(DEFAULT_MAX_OUTPUT_BYTES)
                 .max(DEFAULT_MAX_OUTPUT_BYTES),
+            process_id,
             stdin: Mutex::new(stdin),
             state: Mutex::new(BashSessionState::default()),
             notify: Notify::new(),
+            started_at: Instant::now(),
+            command_kind,
+            risk,
         });
         self.sessions.insert(session_id, session.clone());
 
         if let Some(stdout) = stdout {
-            spawn_reader(stdout, session.clone());
+            spawn_reader(stdout, session.clone(), OutputStreamKind::Stdout);
         }
         if let Some(stderr) = stderr {
-            spawn_reader(stderr, session.clone());
+            spawn_reader(stderr, session.clone(), OutputStreamKind::Stderr);
         }
         spawn_waiter(child, session.clone());
 
@@ -260,14 +311,19 @@ impl BashSessionManager {
         let (chunk, consumed_bytes, truncated) = truncate_prefix(pending, max_bytes);
         state.delivered_bytes = state.delivered_bytes.max(start + consumed_bytes);
 
-        let status = if state.exit_code.is_some() {
+        let status = if state.stopped {
+            TaskStatus::Stopped
+        } else if state.exit_code.is_some() {
             TaskStatus::Exited
         } else {
             TaskStatus::Running
         };
         let exit_code = state.exit_code;
+        let stdout = state.stdout.clone();
+        let stderr = state.stderr.clone();
         let keep_session =
             status == TaskStatus::Running || state.delivered_bytes < state.output.len();
+        let next_offset = state.delivered_bytes;
         drop(state);
 
         if !keep_session {
@@ -282,12 +338,23 @@ impl BashSessionManager {
             },
             status,
             output: chunk,
+            stdout,
+            stderr,
             exit_code,
             truncated,
+            elapsed_ms: elapsed_ms(&session),
+            output_offset: start,
+            next_offset,
+            command_kind: Some(session.command_kind.clone()),
+            risk: Some(session.risk.clone()),
         })
     }
 
-    async fn stop_session(&self, session_id: i64, context: &ToolContext) -> TalosResult<()> {
+    async fn stop_session(
+        &self,
+        session_id: i64,
+        context: &ToolContext,
+    ) -> TalosResult<TaskSessionResponse> {
         let session = self
             .sessions
             .get(&session_id)
@@ -303,14 +370,37 @@ impl BashSessionManager {
 
         let mut stdin_guard = session.stdin.lock().await;
         stdin_guard.take();
+        drop(stdin_guard);
+        if let Some(process_id) = session.process_id {
+            let _ = Command::new("kill")
+                .arg("-TERM")
+                .arg(process_id.to_string())
+                .status()
+                .await;
+        }
         let mut state = session.state.lock().await;
+        state.stopped = true;
         if state.exit_code.is_none() {
             state.exit_code = Some(130);
         }
+        let response = TaskSessionResponse {
+            session_id: None,
+            status: TaskStatus::Stopped,
+            output: state.output.clone(),
+            stdout: state.stdout.clone(),
+            stderr: state.stderr.clone(),
+            exit_code: state.exit_code,
+            truncated: false,
+            elapsed_ms: elapsed_ms(&session),
+            output_offset: 0,
+            next_offset: state.output.len(),
+            command_kind: Some(session.command_kind.clone()),
+            risk: Some(session.risk.clone()),
+        };
         drop(state);
         self.sessions.remove(&session_id);
         session.notify.notify_waiters();
-        Ok(())
+        Ok(response)
     }
 }
 
@@ -338,7 +428,10 @@ pub async fn read_task_output_with_context(
         .await
 }
 
-pub async fn stop_task_with_context(session_id: i64, context: &ToolContext) -> TalosResult<()> {
+pub async fn stop_task_with_context(
+    session_id: i64,
+    context: &ToolContext,
+) -> TalosResult<TaskSessionResponse> {
     BashSessionManager::global()
         .stop_session(session_id, context)
         .await
@@ -373,7 +466,7 @@ fn build_command(request: &BashCommandRequest, workdir: &PathBuf) -> TalosResult
     Ok(command)
 }
 
-fn spawn_reader<R>(reader: R, session: Arc<BashSession>)
+fn spawn_reader<R>(reader: R, session: Arc<BashSession>, stream_kind: OutputStreamKind)
 where
     R: AsyncRead + Unpin + Send + 'static,
 {
@@ -386,6 +479,10 @@ where
                 Ok(bytes_read) => {
                     let chunk = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
                     let mut state = session.state.lock().await;
+                    match stream_kind {
+                        OutputStreamKind::Stdout => state.stdout.push_str(&chunk),
+                        OutputStreamKind::Stderr => state.stderr.push_str(&chunk),
+                    }
                     state.output.push_str(&chunk);
                     drop(state);
                     session.notify.notify_waiters();
@@ -397,6 +494,55 @@ where
             }
         }
     });
+}
+
+fn elapsed_ms(session: &BashSession) -> u64 {
+    session
+        .started_at
+        .elapsed()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
+}
+
+fn classify_command(command: &str) -> (BashCommandKind, BashCommandRisk) {
+    let normalized = command.trim().to_lowercase();
+    let first = normalized
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .trim_matches([';', '&', '|']);
+    if normalized.contains("rm -rf")
+        || normalized.contains("mkfs")
+        || normalized.contains("dd if=")
+        || normalized.contains(":(){")
+    {
+        return (BashCommandKind::Destructive, BashCommandRisk::High);
+    }
+    if matches!(first, "kill" | "pkill" | "killall") {
+        return (BashCommandKind::ProcessControl, BashCommandRisk::High);
+    }
+    if normalized.contains(">")
+        || normalized.contains("tee ")
+        || matches!(first, "mv" | "cp" | "touch" | "mkdir" | "rmdir")
+    {
+        return (BashCommandKind::FilesystemWrite, BashCommandRisk::Medium);
+    }
+    if matches!(first, "curl" | "wget" | "ssh" | "scp" | "rsync" | "nc") {
+        return (BashCommandKind::Network, BashCommandRisk::Medium);
+    }
+    if matches!(
+        first,
+        "cargo" | "pnpm" | "npm" | "yarn" | "make" | "just" | "pytest" | "go" | "mvn" | "gradle"
+    ) {
+        return (BashCommandKind::BuildOrTest, BashCommandRisk::Medium);
+    }
+    if matches!(
+        first,
+        "ls" | "pwd" | "date" | "git" | "sed" | "awk" | "head" | "tail" | "wc" | "find" | "rg"
+    ) {
+        return (BashCommandKind::ReadOnly, BashCommandRisk::Low);
+    }
+    (BashCommandKind::Unknown, BashCommandRisk::Medium)
 }
 
 fn spawn_waiter(mut child: Child, session: Arc<BashSession>) {
@@ -526,6 +672,85 @@ mod tests {
         .expect("direct runtime execution should allow explicit sandbox escalation");
 
         assert!(result.output.contains("hi") || result.status == TaskStatus::Exited);
+    }
+
+    #[tokio::test]
+    async fn test_bash_runtime_separates_stdout_stderr_and_classifies_command() {
+        let context = crate::ToolContext::default()
+            .with_project_root(std::env::current_dir().expect("cwd should exist"));
+        let result = run_bash_command(
+            &BashCommandRequest {
+                cmd: "printf out; printf err >&2".to_string(),
+                workdir: None,
+                shell: Some("sh".to_string()),
+                login: false,
+                tty: false,
+                yield_time_ms: 100,
+                max_output_tokens: None,
+                sandbox_permissions: SandboxPermissions::UseDefault,
+                justification: None,
+                prefix_rule: None,
+            },
+            &context,
+        )
+        .await
+        .expect("bash command should succeed");
+
+        assert!(result.stdout.contains("out"));
+        assert!(result.stderr.contains("err"));
+        assert!(result.elapsed_ms <= 10_000);
+
+        let classified = run_bash_command(
+            &BashCommandRequest {
+                cmd: "git status --short".to_string(),
+                workdir: None,
+                shell: Some("sh".to_string()),
+                login: false,
+                tty: false,
+                yield_time_ms: 100,
+                max_output_tokens: None,
+                sandbox_permissions: SandboxPermissions::UseDefault,
+                justification: None,
+                prefix_rule: None,
+            },
+            &context,
+        )
+        .await
+        .expect("bash command should succeed");
+
+        assert_eq!(classified.command_kind, Some(BashCommandKind::ReadOnly));
+        assert_eq!(classified.risk, Some(BashCommandRisk::Low));
+    }
+
+    #[tokio::test]
+    async fn test_task_stop_terminates_running_process() {
+        let context = crate::ToolContext::new("stop-session", "user")
+            .with_project_root(std::env::current_dir().expect("cwd should exist"));
+        let exec = run_bash_command(
+            &BashCommandRequest {
+                cmd: "sleep 5".to_string(),
+                workdir: None,
+                shell: Some("sh".to_string()),
+                login: false,
+                tty: false,
+                yield_time_ms: 20,
+                max_output_tokens: None,
+                sandbox_permissions: SandboxPermissions::UseDefault,
+                justification: None,
+                prefix_rule: None,
+            },
+            &context,
+        )
+        .await
+        .expect("bash command should start");
+
+        let session_id = exec.session_id.expect("session id should be present");
+        let stopped = stop_task_with_context(session_id, &context)
+            .await
+            .expect("task stop should succeed");
+
+        assert_eq!(stopped.status, TaskStatus::Stopped);
+        assert_eq!(stopped.exit_code, Some(130));
     }
 
     #[tokio::test]

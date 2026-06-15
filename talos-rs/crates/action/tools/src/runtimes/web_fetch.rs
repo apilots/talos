@@ -24,10 +24,12 @@ pub struct WebFetchRequest {
 pub struct WebFetchResponse {
     pub requested_url: String,
     pub final_url: String,
+    pub redirected: bool,
     pub title: Option<String>,
     pub mime_type: Option<String>,
     pub content: String,
     pub truncated: bool,
+    pub auth_warning: Option<String>,
     pub prompt: Option<String>,
 }
 
@@ -39,6 +41,7 @@ pub async fn run(request: &WebFetchRequest) -> TalosResult<WebFetchResponse> {
     }
 
     let url = parse_http_url(&request.url)?;
+    let auth_warning = private_url_warning(&url);
     let client = reqwest::Client::builder()
         .user_agent(DEFAULT_WEB_USER_AGENT)
         .build()
@@ -75,13 +78,41 @@ pub async fn run(request: &WebFetchRequest) -> TalosResult<WebFetchResponse> {
 
     Ok(WebFetchResponse {
         requested_url: request.url.clone(),
+        redirected: final_url != request.url,
         final_url,
         title,
         mime_type,
         content,
         truncated,
+        auth_warning,
         prompt: request.prompt.clone(),
     })
+}
+
+fn private_url_warning(url: &reqwest::Url) -> Option<String> {
+    let host = url.host_str()?.to_ascii_lowercase();
+    if matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1")
+        || host.starts_with("10.")
+        || host.starts_with("192.168.")
+        || private_172_range(&host)
+    {
+        Some("URL appears to target a private or local network address".to_string())
+    } else {
+        None
+    }
+}
+
+fn private_172_range(host: &str) -> bool {
+    let Some(rest) = host.strip_prefix("172.") else {
+        return false;
+    };
+    let Some(second) = rest.split('.').next() else {
+        return false;
+    };
+    second
+        .parse::<u8>()
+        .map(|value| (16..=31).contains(&value))
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -100,5 +131,11 @@ mod tests {
         assert!(error
             .to_string()
             .contains("max_chars must be greater than zero"));
+    }
+
+    #[test]
+    fn web_fetch_warns_for_private_urls() {
+        let url = reqwest::Url::parse("http://127.0.0.1:3000").expect("url should parse");
+        assert!(private_url_warning(&url).is_some());
     }
 }

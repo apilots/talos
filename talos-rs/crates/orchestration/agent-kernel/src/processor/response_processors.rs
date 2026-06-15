@@ -44,10 +44,7 @@ impl ResponseProcessor for EventProjectionProcessor {
                 } => {
                     let payload = serde_json::to_value(content).unwrap_or_else(|_| {
                         serde_json::json!({
-                            "content": content.iter().map(|entry| match entry {
-                                TalosContentItem::Text { text } => serde_json::json!({"text": text}),
-                                TalosContentItem::Json { value } => value.clone().into(),
-                            }).collect::<Vec<_>>()
+                            "content": content.iter().map(TalosContentItem::display_text).collect::<Vec<_>>()
                         })
                     });
                     events.push(ExecutionEvent::tool_result(

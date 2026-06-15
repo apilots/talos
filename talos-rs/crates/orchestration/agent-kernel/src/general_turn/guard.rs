@@ -38,8 +38,9 @@ pub(crate) fn is_read_only_tool_name(tool_name: &str) -> bool {
             | "MemoryGet"
             | "WebSearch"
             | "WebFetch"
-            | "list_mcp_resources"
-            | "list_mcp_resource_templates"
+            | "ListMcpResources"
+            | "ListMcpResourceTemplates"
+            | "ReadMcpResource"
             | "web_search"
             | "web_fetch"
     )

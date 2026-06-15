@@ -117,8 +117,9 @@ if results:
     assert result.get("tool_name") == "Agent", result.get("tool_name")
     content_items = result.get("content") or []
     assert content_items, "missing content payload"
-    content = ((content_items[0].get("value") or {}).get("value", content_items[0].get("value") or {}))
-    envelope = content.get("envelope") or {}
+    item = content_items[0]
+    assert item.get("type") == "json", item
+    content = (item.get("value") or {}).get("value") or {}
     assert content.get("session_id"), content
     assert content.get("agent_kind") in {"general_purpose", "review", "implementation", "research"}, content
     assert content.get("execution_mode") == "background", content

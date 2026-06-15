@@ -50,10 +50,10 @@ impl ToolHandler for McpToolHandler {
                     .await?,
             )),
             ToolCallPayload::Function { arguments } => match invocation.tool_name.as_str() {
-                "list_mcp_resources" => {
+                "ListMcpResources" => {
                     let args: ListArgs = serde_json::from_value(arguments).map_err(|err| {
                         TalosError::ToolError(format!(
-                            "invalid list_mcp_resources arguments: {}",
+                            "invalid ListMcpResources arguments: {}",
                             err
                         ))
                     })?;
@@ -65,10 +65,10 @@ impl ToolHandler for McpToolHandler {
                         )?,
                     ))
                 }
-                "list_mcp_resource_templates" => {
+                "ListMcpResourceTemplates" => {
                     let args: ListArgs = serde_json::from_value(arguments).map_err(|err| {
                         TalosError::ToolError(format!(
-                            "invalid list_mcp_resource_templates arguments: {}",
+                            "invalid ListMcpResourceTemplates arguments: {}",
                             err
                         ))
                     })?;
@@ -80,11 +80,11 @@ impl ToolHandler for McpToolHandler {
                         )?,
                     ))
                 }
-                "read_mcp_resource" => {
+                "ReadMcpResource" => {
                     let args: ReadResourceArgs =
                         serde_json::from_value(arguments).map_err(|err| {
                             TalosError::ToolError(format!(
-                                "invalid read_mcp_resource arguments: {}",
+                                "invalid ReadMcpResource arguments: {}",
                                 err
                             ))
                         })?;
@@ -111,18 +111,13 @@ fn function_payload_from_mcp_result(
     result: TalosResult<serde_json::Value>,
 ) -> TalosResult<ToolOutputPayload> {
     match result {
-        Ok(value) => Ok(ToolOutputPayload::Function {
-            content: value.to_string(),
-            success: true,
-            structured_content: None,
-        }),
+        Ok(value) => Ok(ToolOutputPayload::success_structured(value)),
         Err(TalosError::ToolError(message)) => {
             let mapped = map_mcp_json_rpc_error(message.as_str());
-            Ok(ToolOutputPayload::Function {
-                content: mapped.clone(),
-                success: false,
-                structured_content: Some(serde_json::json!({ "error": mapped })),
-            })
+            Ok(ToolOutputPayload::failure_structured(
+                mapped.clone(),
+                Some(serde_json::json!({ "error": mapped })),
+            ))
         }
         Err(error) => Err(error),
     }

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::Value;
 use talos_error::{TalosError, TalosResult};
+use talos_types::talos::{TalosContentItem, TalosJsonValue};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -79,6 +80,10 @@ pub struct ToolResultEnvelope {
     pub status: ToolResultStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub structured_content: Option<Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub content_items: Vec<TalosContentItem>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compact_summary: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<ToolResultError>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -99,6 +104,7 @@ pub enum ToolOutputPayload {
         content: String,
         success: bool,
         structured_content: Option<Value>,
+        content_items: Vec<TalosContentItem>,
     },
     Resource {
         uri: String,
@@ -128,6 +134,9 @@ impl ToolOutputPayload {
         let content = content.into();
         Self::Function {
             structured_content: Some(canonical_success_content(&content, None)),
+            content_items: vec![TalosContentItem::Text {
+                text: content.clone(),
+            }],
             content,
             success: true,
         }
@@ -144,8 +153,62 @@ impl ToolOutputPayload {
         Ok(Self::Function {
             content,
             success: true,
-            structured_content: Some(structured_content),
+            structured_content: Some(structured_content.clone()),
+            content_items: vec![TalosContentItem::Json {
+                value: TalosJsonValue::from(structured_content),
+            }],
         })
+    }
+
+    pub fn success_structured(value: Value) -> Self {
+        Self::Function {
+            content: value.to_string(),
+            success: true,
+            structured_content: Some(value.clone()),
+            content_items: vec![TalosContentItem::Json {
+                value: TalosJsonValue::from(value),
+            }],
+        }
+    }
+
+    pub fn success_with_content_items(value: Value, content_items: Vec<TalosContentItem>) -> Self {
+        Self::Function {
+            content: value.to_string(),
+            success: true,
+            structured_content: Some(value),
+            content_items,
+        }
+    }
+
+    pub fn failure_structured(
+        content: impl Into<String>,
+        structured_content: Option<Value>,
+    ) -> Self {
+        let content = content.into();
+        Self::Function {
+            content: content.clone(),
+            success: false,
+            structured_content,
+            content_items: vec![TalosContentItem::Text { text: content }],
+        }
+    }
+
+    pub fn validate_canonical_result(&self) -> TalosResult<()> {
+        if let Self::Function {
+            success,
+            structured_content,
+            content_items,
+            ..
+        } = self
+        {
+            if *success && content_items.is_empty() && structured_content.is_some() {
+                return Err(TalosError::ToolError(
+                    "canonical tool result requires content_items when structured_content is present"
+                        .to_string(),
+                ));
+            }
+        }
+        Ok(())
     }
 
     pub fn is_error(&self) -> bool {
@@ -179,6 +242,7 @@ impl ToolOutputPayload {
                 content,
                 success,
                 structured_content,
+                ..
             } => {
                 if *success {
                     return None;
@@ -253,6 +317,7 @@ impl ToolOutputPayload {
                 content,
                 success,
                 structured_content,
+                content_items,
             } => {
                 if *success {
                     ToolResultEnvelope {
@@ -260,6 +325,12 @@ impl ToolOutputPayload {
                         structured_content: Some(canonical_success_content(
                             content,
                             structured_content.as_ref(),
+                        )),
+                        content_items: content_items.clone(),
+                        compact_summary: Some(build_content_items_summary(
+                            content_items,
+                            content,
+                            "completed",
                         )),
                         error: None,
                         pending: None,
@@ -284,6 +355,14 @@ impl ToolOutputPayload {
                     ToolResultEnvelope {
                         status: status_for_error_kind(error.error_kind),
                         structured_content: structured_content.clone(),
+                        content_items: if content_items.is_empty() {
+                            vec![TalosContentItem::Text {
+                                text: error.message.clone(),
+                            }]
+                        } else {
+                            content_items.clone()
+                        },
+                        compact_summary: Some(error.message.clone()),
                         error: Some(error),
                         pending: None,
                         policy: None,
@@ -301,6 +380,14 @@ impl ToolOutputPayload {
                     "mime_type": mime_type,
                     "content": content,
                 })),
+                content_items: vec![TalosContentItem::Json {
+                    value: TalosJsonValue::from(serde_json::json!({
+                        "uri": uri,
+                        "mime_type": mime_type,
+                        "content": content,
+                    })),
+                }],
+                compact_summary: Some(build_compact_summary(content, "returned resource")),
                 error: None,
                 pending: None,
                 policy: None,
@@ -311,6 +398,10 @@ impl ToolOutputPayload {
                     ToolResultEnvelope {
                         status: status_for_error_kind(error.error_kind),
                         structured_content: None,
+                        content_items: vec![TalosContentItem::Text {
+                            text: error.message.clone(),
+                        }],
+                        compact_summary: Some(error.message.clone()),
                         error: Some(error),
                         pending: None,
                         policy: None,
@@ -319,6 +410,10 @@ impl ToolOutputPayload {
                     ToolResultEnvelope {
                         status: ToolResultStatus::Success,
                         structured_content: Some(canonical_success_content(content, None)),
+                        content_items: vec![TalosContentItem::Text {
+                            text: content.clone(),
+                        }],
+                        compact_summary: Some(build_compact_summary(content, "completed")),
                         error: None,
                         pending: None,
                         policy: None,
@@ -438,6 +533,8 @@ impl ToolDispatchOutcome {
                 ToolResultEnvelope {
                     status: ToolResultStatus::Pending,
                     structured_content: None,
+                    content_items: Vec::new(),
+                    compact_summary: Some("waiting for dynamic tool result".to_string()),
                     error: None,
                     pending: Some(pending),
                     policy: None,
@@ -654,18 +751,32 @@ fn build_compact_summary(content: &str, fallback: &str) -> String {
     }
 }
 
+fn build_content_items_summary(
+    content_items: &[TalosContentItem],
+    content: &str,
+    fallback: &str,
+) -> String {
+    let rendered = content_items
+        .iter()
+        .map(TalosContentItem::display_text)
+        .filter(|item| !item.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if rendered.trim().is_empty() {
+        build_compact_summary(content, fallback)
+    } else {
+        build_compact_summary(&rendered, fallback)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn tool_result_envelope_preserves_structured_success_payload() {
-        let envelope = ToolOutputPayload::Function {
-            content: serde_json::json!({"result": "ok"}).to_string(),
-            success: true,
-            structured_content: Some(serde_json::json!({"result": "ok"})),
-        }
-        .envelope();
+        let envelope =
+            ToolOutputPayload::success_structured(serde_json::json!({"result": "ok"})).envelope();
         assert_eq!(envelope.status, ToolResultStatus::Success);
         assert_eq!(
             envelope.structured_content,
@@ -680,6 +791,62 @@ mod tests {
         assert_eq!(
             envelope.structured_content,
             Some(serde_json::json!({"result": "plain text result"}))
+        );
+        assert_eq!(
+            envelope.content_items,
+            vec![TalosContentItem::Text {
+                text: "plain text result".to_string()
+            }]
+        );
+        assert_eq!(
+            envelope.compact_summary.as_deref(),
+            Some("plain text result")
+        );
+    }
+
+    #[test]
+    fn function_payload_rejects_structured_content_without_content_items() {
+        let payload = ToolOutputPayload::Function {
+            content: "{}".to_string(),
+            success: true,
+            structured_content: Some(serde_json::json!({"result": "hidden"})),
+            content_items: Vec::new(),
+        };
+
+        assert!(payload.validate_canonical_result().is_err());
+    }
+
+    #[test]
+    fn tool_content_item_serializes_as_flat_json() {
+        let value = serde_json::to_value(TalosContentItem::Text {
+            text: "hello".to_string(),
+        })
+        .expect("content item should serialize");
+
+        assert_eq!(value, serde_json::json!({"type": "text", "text": "hello"}));
+        let web_reference = serde_json::to_value(TalosContentItem::WebReference {
+            url: "https://example.com".to_string(),
+            title: Some("Example".to_string()),
+            citation_id: Some("web-1".to_string()),
+            snippet: Some("Example snippet".to_string()),
+            source_domain: Some("example.com".to_string()),
+            published_at: Some("2026-06-15".to_string()),
+            provider_rank: Some(1),
+        })
+        .expect("web reference should serialize");
+
+        assert_eq!(
+            web_reference,
+            serde_json::json!({
+                "type": "web_reference",
+                "url": "https://example.com",
+                "title": "Example",
+                "citation_id": "web-1",
+                "snippet": "Example snippet",
+                "source_domain": "example.com",
+                "published_at": "2026-06-15",
+                "provider_rank": 1
+            })
         );
     }
 
@@ -709,6 +876,9 @@ mod tests {
                 "suggested_action": "fix the arguments and retry",
                 "gate_source": "tool_semantic"
             })),
+            content_items: vec![TalosContentItem::Text {
+                text: "path is required".to_string(),
+            }],
         }
         .envelope();
         assert_eq!(envelope.status, ToolResultStatus::Failure);

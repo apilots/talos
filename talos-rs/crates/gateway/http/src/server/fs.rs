@@ -53,15 +53,21 @@ pub(super) async fn create_directory_handler(
 
 fn map_fs_error(error: talos_error::TalosError) -> ApiError {
     match error {
-        talos_error::TalosError::AuthorizationDenied => {
-            ApiError::new(StatusCode::FORBIDDEN, "permission_denied", "permission denied")
-        }
-        talos_error::TalosError::ResourceNotFound(message) => {
-            ApiError::new(StatusCode::NOT_FOUND, fs_code(&message, "path_not_found"), message)
-        }
-        talos_error::TalosError::Conflict(message) => {
-            ApiError::new(StatusCode::CONFLICT, fs_code(&message, "already_exists"), message)
-        }
+        talos_error::TalosError::AuthorizationDenied => ApiError::new(
+            StatusCode::FORBIDDEN,
+            "permission_denied",
+            "permission denied",
+        ),
+        talos_error::TalosError::ResourceNotFound(message) => ApiError::new(
+            StatusCode::NOT_FOUND,
+            fs_code(&message, "path_not_found"),
+            message,
+        ),
+        talos_error::TalosError::Conflict(message) => ApiError::new(
+            StatusCode::CONFLICT,
+            fs_code(&message, "already_exists"),
+            message,
+        ),
         talos_error::TalosError::ValidationError(message) => {
             let code = fs_code(&message, "invalid_path");
             let status = match code {

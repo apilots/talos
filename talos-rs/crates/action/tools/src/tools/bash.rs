@@ -2,8 +2,9 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
 use talos_error::{TalosError, TalosResult};
+use talos_types::talos::{TalosContentItem, TalosToolTaskStatus};
 
-use crate::runtimes::bash::{run_bash_command, BashCommandRequest, SandboxPermissions};
+use crate::runtimes::bash::{run_bash_command, BashCommandRequest, SandboxPermissions, TaskStatus};
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy, ToolVisibility};
 use crate::{Tool, ToolContext, ToolOutputPayload};
 
@@ -112,14 +113,47 @@ impl Tool for BashTool {
         let response = run_bash_command(&request, &context).await?;
         let structured = serde_json::to_value(&response)
             .map_err(|err| TalosError::ToolError(format!("serialize Bash response: {}", err)))?;
-        let content = serde_json::to_string(&response)
-            .map_err(|err| TalosError::ToolError(format!("serialize Bash response: {}", err)))?;
-        Ok(ToolOutputPayload::Function {
-            content,
-            success: true,
-            structured_content: Some(structured),
-        })
+        let status = match response.status {
+            TaskStatus::Running => TalosToolTaskStatus::Running,
+            TaskStatus::Stopped => TalosToolTaskStatus::Cancelled,
+            TaskStatus::Exited => {
+                if response.exit_code == Some(0) {
+                    TalosToolTaskStatus::Completed
+                } else {
+                    TalosToolTaskStatus::Failed
+                }
+            }
+        };
+        let (stdout, stderr) = bash_output_chunk(&response);
+        Ok(ToolOutputPayload::success_with_content_items(
+            structured,
+            vec![TalosContentItem::BashOutput {
+                session_id: response.session_id,
+                status,
+                exit_code: response.exit_code,
+                stdout,
+                stderr,
+                truncated: response.truncated,
+                elapsed_ms: Some(response.elapsed_ms),
+            }],
+        ))
     }
+}
+
+fn bash_output_chunk(response: &crate::runtimes::bash::TaskSessionResponse) -> (String, String) {
+    if response.output.is_empty() {
+        return (String::new(), String::new());
+    }
+
+    if response.stderr.is_empty() && response.stdout.ends_with(&response.output) {
+        return (response.output.clone(), String::new());
+    }
+
+    if response.stdout.is_empty() && response.stderr.ends_with(&response.output) {
+        return (String::new(), response.output.clone());
+    }
+
+    (response.output.clone(), String::new())
 }
 
 fn parse_bash_input(input: &Value) -> TalosResult<BashInput> {
@@ -158,5 +192,41 @@ mod tests {
 
         let error = tool.check_permissions(&input, &context).unwrap_err();
         assert!(matches!(error, TalosError::AuthorizationDenied));
+    }
+
+    #[tokio::test]
+    async fn execute_payload_uses_truncated_output_chunk_for_typed_result() {
+        let tool = BashTool;
+        let context = ToolContext::default()
+            .with_project_root(std::env::current_dir().expect("cwd should exist"));
+        let payload = tool
+            .execute_payload(
+                serde_json::json!({
+                    "command": "python3 -c \"print('x' * 20000)\""
+                }),
+                context,
+            )
+            .await
+            .expect("Bash should execute");
+
+        let ToolOutputPayload::Function { content_items, .. } = payload else {
+            panic!("expected function payload");
+        };
+        let Some(TalosContentItem::BashOutput {
+            stdout,
+            stderr,
+            truncated,
+            ..
+        }) = content_items.first()
+        else {
+            panic!("expected BashOutput content item");
+        };
+
+        assert!(stderr.is_empty());
+        assert!(*truncated);
+        assert!(
+            stdout.len() < 20_000,
+            "typed output should use the returned chunk, not cumulative stdout"
+        );
     }
 }

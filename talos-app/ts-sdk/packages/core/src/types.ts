@@ -10,6 +10,7 @@ import type {
   TurnExecutionMetrics as ProtocolTurnExecutionMetrics,
   SessionHistoryMessage as ProtocolSessionHistoryMessage,
   SessionHistorySnapshot as ProtocolSessionHistorySnapshot,
+  TalosContentItem as ProtocolTalosContentItem,
 } from "./generated/app-protocol";
 
 export type {
@@ -137,9 +138,7 @@ export type TalosInputItem =
     }
   | { type: "video"; url?: string | null; mime_type?: string | null };
 
-export type TalosContentItem =
-  | { type: "text"; text: string }
-  | { type: "json"; value: unknown };
+export type TalosContentItem = ProtocolTalosContentItem;
 
 export type TalosOutputItem =
   | { type: "user_input"; text: string }

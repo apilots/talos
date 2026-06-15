@@ -6,9 +6,9 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | Type | Next ID |
 | --- | ---: |
-| `feat` | 024 |
+| `feat` | 025 |
 | `fix` | 004 |
-| `refactor` | 025 |
+| `refactor` | 026 |
 | `docs` | 001 |
 
 ## Active Specs
@@ -19,8 +19,10 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | feat-021 | `feat-021-user-scoped-agent-workspace` | draft |
 | feat-022 | `feat-022-release-cloud-production-readiness` | draft |
 | feat-023 | `feat-023-unified-cloud-login-adapter` | draft |
+| feat-024 | `feat-024-project-directory-picker` | draft |
 | refactor-023 | `refactor-023-agent-kernel-simplification` | draft |
 | refactor-024 | `refactor-024-agent-kernel-final-answer-simplification` | draft |
+| refactor-025 | `refactor-025-talos-tool-capability-alignment` | draft |
 
 ## Archived Specs
 

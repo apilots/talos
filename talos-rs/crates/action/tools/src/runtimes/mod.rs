@@ -1,5 +1,8 @@
 pub mod bash;
+pub mod fs_apply_patch;
+pub mod fs_diff;
 pub mod fs_edit;
+pub mod fs_glob;
 pub mod fs_read;
 pub mod fs_search;
 pub mod fs_write;

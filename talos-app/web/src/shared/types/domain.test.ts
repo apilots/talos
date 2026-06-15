@@ -7,6 +7,7 @@ import {
   describeProjectDirectory,
   resolveProjectRecord,
   hasRealSessionTitle,
+  outputContentToText,
   UNBOUND_PROJECT_ID,
 } from "@/shared/types/domain";
 
@@ -53,5 +54,55 @@ describe("domain helpers", () => {
     expect(hasRealSessionTitle("Untitled Session")).toBe(false);
     expect(hasRealSessionTitle("  ")).toBe(false);
     expect(hasRealSessionTitle("Plan Talos Desktop Smoke")).toBe(true);
+  });
+
+  it("formats canonical tool content items without parsing JSON strings", () => {
+    const rendered = outputContentToText([
+      {
+        type: "web_reference",
+        title: "Example",
+        url: "https://example.com",
+        citation_id: "web-1",
+        snippet: "Example snippet",
+        source_domain: "example.com",
+        published_at: null,
+        provider_rank: 1,
+      },
+      {
+        type: "search_results",
+        query: "needle",
+        matches: [
+          {
+            path: "src/lib.rs",
+            line: 7,
+            column: 3,
+            text: "needle",
+            before: [],
+            after: [],
+          },
+        ],
+        offset: 0,
+        limit: 10,
+        total_matches: 1,
+        more_available: false,
+        partial: false,
+      },
+      {
+        type: "bash_output",
+        session_id: null,
+        status: "completed",
+        exit_code: 0,
+        stdout: "ok",
+        stderr: "",
+        truncated: false,
+        elapsed_ms: null,
+      },
+    ]);
+
+    expect(rendered).toContain("Example");
+    expect(rendered).toContain("https://example.com");
+    expect(rendered).toContain("Example snippet");
+    expect(rendered).toContain("src/lib.rs:7: needle");
+    expect(rendered).toContain("ok");
   });
 });

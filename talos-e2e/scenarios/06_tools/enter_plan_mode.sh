@@ -121,7 +121,9 @@ result = results[0]
 assert result.get("tool_name") == "EnterPlanMode", result.get("tool_name")
 content_items = result.get("content") or []
 assert content_items, "missing content payload"
-content = ((content_items[0].get("value") or {}).get("value", content_items[0].get("value") or {}))
+item = content_items[0]
+assert item.get("type") == "json", item
+content = (item.get("value") or {}).get("value") or {}
 assert content.get("mode") == "plan", content
 PY
 

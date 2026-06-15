@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use talos_config::{DirectoryPickerConfig, DirectoryPickerRoot};
 use talos_error::{TalosError, TalosResult};
 use talos_types::{
-    FsDirectoryCreateResponse, FsDirectoryEntry, FsDirectorySnapshot, FsEntryKind,
-    ProjectRecord, ProjectStatus, ProjectStatusState, ProjectUnavailableReason,
+    FsDirectoryCreateResponse, FsDirectoryEntry, FsDirectorySnapshot, FsEntryKind, ProjectRecord,
+    ProjectStatus, ProjectStatusState, ProjectUnavailableReason,
 };
 
 use crate::Actor;
@@ -330,7 +330,11 @@ mod tests {
         std::env::set_var("HOME", home.path());
 
         let response = service()
-            .create_directory(&actor(), home.path().to_path_buf(), "new-project".to_string())
+            .create_directory(
+                &actor(),
+                home.path().to_path_buf(),
+                "new-project".to_string(),
+            )
             .await
             .unwrap();
 

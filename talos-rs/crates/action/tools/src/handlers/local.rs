@@ -96,11 +96,9 @@ mod tests {
             _input: serde_json::Value,
             _context: ToolContext,
         ) -> TalosResult<ToolOutputPayload> {
-            Ok(ToolOutputPayload::Function {
-                content: "payload".to_string(),
-                success: true,
-                structured_content: Some(json!({"result": "payload"})),
-            })
+            Ok(ToolOutputPayload::success_structured(
+                json!({"result": "payload"}),
+            ))
         }
     }
 

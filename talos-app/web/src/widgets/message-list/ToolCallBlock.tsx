@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import type { TalosContentItem, TalosToolProgressKind } from "@/shared/types/protocol";
 import { ToolCallCard } from "@/widgets/tool-call-card/ToolCallCard";
 import { formatDuration } from "./formatDuration";
+import { ToolResultPreview, ToolResultRenderer, ToolResultSummary } from "./ToolResultRenderer";
 
 function resolveTone(status: string) {
   if (status === "done") {
@@ -20,6 +22,7 @@ function resolveTone(status: string) {
 export function ToolCallBlock({
   argumentsText,
   callId,
+  contentItems,
   output,
   progress,
   prompt,
@@ -30,8 +33,9 @@ export function ToolCallBlock({
 }: {
   argumentsText: string;
   callId: string;
+  contentItems?: TalosContentItem[];
   output?: string;
-  progress: Array<{ kind: string; message: string }>;
+  progress: Array<{ kind: TalosToolProgressKind; message: string }>;
   prompt?: string;
   status: "queued" | "running" | "waiting_dynamic_input" | "done" | "error";
   timingMs?: number | null;
@@ -40,28 +44,48 @@ export function ToolCallBlock({
 }) {
   const { t } = useTranslation("chat");
   const [open, setOpen] = useState(status === "waiting_dynamic_input");
+  const resultSummary = ToolResultSummary({
+    contentItems,
+    fallbackOutput: output,
+    progress,
+    status,
+  });
 
   return (
     <ToolCallCard.Root compact={variant === "timeline"}>
       <ToolCallCard.Header
-        callId={callId}
         onToggle={() => setOpen((value) => !value)}
         open={open}
-        statusLabel={status.replaceAll("_", " ")}
+        statusLabel={resultSummary || status.replaceAll("_", " ")}
         title={toolName}
         tone={resolveTone(status)}
       />
       {open ? (
         <ToolCallCard.Body>
-          <ToolCallCard.Input content={argumentsText} title={t("arguments")} />
+          <ToolResultRenderer
+            contentItems={contentItems}
+            fallbackOutput={output}
+            progress={progress}
+            status={status}
+          />
           {prompt ? <ToolCallCard.Prompt prompt={prompt} title={t("dynamicToolPrompt")} /> : null}
-          {progress.length > 0 ? <ToolCallCard.Progress entries={progress} title={t("progress")} /> : null}
-          {output ? <ToolCallCard.Output content={output} title={t("output")} /> : null}
+          <ToolCallCard.Details title={t("details")}>
+            <ToolCallCard.MetaLine label="call_id" value={callId} />
+            <ToolCallCard.Input content={argumentsText} title={t("arguments")} />
+            {progress.length > 0 ? <ToolCallCard.Progress entries={progress} title={t("progress")} /> : null}
+          </ToolCallCard.Details>
           {timingMs !== null && timingMs !== undefined ? (
             <div className="text-[11px] text-muted">{t("duration", { value: formatDuration(timingMs) })}</div>
           ) : null}
         </ToolCallCard.Body>
-      ) : null}
+      ) : (
+        <ToolResultPreview
+          contentItems={contentItems}
+          fallbackOutput={output}
+          progress={progress}
+          status={status}
+        />
+      )}
     </ToolCallCard.Root>
   );
 }

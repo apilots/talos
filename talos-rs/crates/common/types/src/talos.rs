@@ -329,8 +329,225 @@ pub enum TalosInputItem {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TalosContentItem {
-    Text { text: String },
-    Json { value: TalosJsonValue },
+    Text {
+        text: String,
+    },
+    Json {
+        value: TalosJsonValue,
+    },
+    FileRead {
+        path: String,
+        offset: usize,
+        limit: usize,
+        total_lines: usize,
+        content: String,
+        truncated: bool,
+    },
+    Diff {
+        files: Vec<TalosToolFileDiff>,
+    },
+    SearchResults {
+        #[serde(default)]
+        query: Option<String>,
+        matches: Vec<TalosToolSearchMatch>,
+        offset: usize,
+        limit: usize,
+        #[serde(default)]
+        total_matches: Option<usize>,
+        more_available: bool,
+        partial: bool,
+    },
+    BashOutput {
+        #[serde(default)]
+        session_id: Option<i64>,
+        status: TalosToolTaskStatus,
+        #[serde(default)]
+        exit_code: Option<i32>,
+        stdout: String,
+        stderr: String,
+        truncated: bool,
+        #[serde(default)]
+        elapsed_ms: Option<u64>,
+    },
+    WebReference {
+        url: String,
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default)]
+        citation_id: Option<String>,
+        #[serde(default)]
+        snippet: Option<String>,
+        #[serde(default)]
+        source_domain: Option<String>,
+        #[serde(default)]
+        published_at: Option<String>,
+        #[serde(default)]
+        provider_rank: Option<usize>,
+    },
+    ArtifactRef {
+        artifact_id: String,
+        #[serde(default)]
+        mime_type: Option<String>,
+        #[serde(default)]
+        label: Option<String>,
+    },
+    McpResourceRef {
+        server: String,
+        uri: String,
+        #[serde(default)]
+        mime_type: Option<String>,
+    },
+    Progress {
+        message: String,
+        #[serde(default)]
+        elapsed_ms: Option<u64>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TalosToolTaskStatus {
+    Queued,
+    Running,
+    Completed,
+    Failed,
+    TimedOut,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct TalosToolFileDiff {
+    pub path: String,
+    #[serde(default)]
+    pub old_path: Option<String>,
+    pub hunks: Vec<TalosToolDiffHunk>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct TalosToolDiffHunk {
+    #[serde(default)]
+    pub old_start: Option<u32>,
+    #[serde(default)]
+    pub old_lines: Option<u32>,
+    #[serde(default)]
+    pub new_start: Option<u32>,
+    #[serde(default)]
+    pub new_lines: Option<u32>,
+    pub lines: Vec<TalosToolDiffLine>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TalosToolDiffLine {
+    Context { text: String },
+    Added { text: String },
+    Removed { text: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct TalosToolSearchMatch {
+    pub path: String,
+    pub line: u32,
+    #[serde(default)]
+    pub column: Option<u32>,
+    pub text: String,
+    #[serde(default)]
+    pub before: Vec<String>,
+    #[serde(default)]
+    pub after: Vec<String>,
+}
+
+impl TalosContentItem {
+    pub fn display_text(&self) -> String {
+        match self {
+            Self::Text { text } => text.clone(),
+            Self::Json { value } => value.to_string(),
+            Self::FileRead { content, .. } => content.clone(),
+            Self::Diff { files } => format!("diff: {} file(s)", files.len()),
+            Self::SearchResults {
+                matches,
+                more_available,
+                partial,
+                ..
+            } => {
+                let suffix = if *partial {
+                    " partial"
+                } else if *more_available {
+                    " more_available"
+                } else {
+                    ""
+                };
+                format!("search_results: {} match(es){suffix}", matches.len())
+            }
+            Self::BashOutput {
+                stdout,
+                stderr,
+                exit_code,
+                status,
+                ..
+            } => {
+                let mut parts = Vec::new();
+                if !stdout.trim().is_empty() {
+                    parts.push(stdout.trim().to_string());
+                }
+                if !stderr.trim().is_empty() {
+                    parts.push(stderr.trim().to_string());
+                }
+                if parts.is_empty() {
+                    parts.push(format!("bash: {:?} exit_code={exit_code:?}", status));
+                }
+                parts.join("\n")
+            }
+            Self::WebReference {
+                url,
+                title,
+                citation_id,
+                snippet,
+                ..
+            } => format!(
+                "web_reference: {}{}{}{}",
+                title.as_deref().unwrap_or(url),
+                title
+                    .as_ref()
+                    .map(|_| format!(" ({url})"))
+                    .unwrap_or_default(),
+                citation_id
+                    .as_ref()
+                    .map(|id| format!(" [{id}]"))
+                    .unwrap_or_default(),
+                snippet
+                    .as_ref()
+                    .filter(|value| !value.trim().is_empty())
+                    .map(|value| format!("\n{value}"))
+                    .unwrap_or_default()
+            ),
+            Self::ArtifactRef {
+                artifact_id,
+                label,
+                mime_type,
+            } => format!(
+                "artifact: {}{}",
+                label.as_deref().unwrap_or(artifact_id),
+                mime_type
+                    .as_ref()
+                    .map(|mime| format!(" ({mime})"))
+                    .unwrap_or_default()
+            ),
+            Self::McpResourceRef {
+                server,
+                uri,
+                mime_type,
+            } => format!(
+                "mcp_resource: {server}:{uri}{}",
+                mime_type
+                    .as_ref()
+                    .map(|mime| format!(" ({mime})"))
+                    .unwrap_or_default()
+            ),
+            Self::Progress { message, .. } => message.clone(),
+        }
+    }
 }
 
 /// Talos message output item.
@@ -739,4 +956,20 @@ pub enum TalosToolProgressKind {
     Status,
     Stdout,
     Stderr,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_content_item_rejects_unknown_type() {
+        let error = serde_json::from_value::<TalosContentItem>(serde_json::json!({
+            "type": "future_item",
+            "value": {}
+        }))
+        .expect_err("unknown content item type should fail fast");
+
+        assert!(error.to_string().contains("future_item"));
+    }
 }

@@ -119,11 +119,14 @@ assert "WebSearch" in tool_names, tool_names
 result = next(item for item in results if item.get("tool_name") == "WebSearch")
 content_items = result.get("content") or []
 assert content_items, "missing content payload"
-content = ((content_items[0].get("value") or {}).get("value", content_items[0].get("value") or {}))
-hits = content.get("hits")
-assert isinstance(hits, list), content
-assert content.get("query") == "site:example.com Example Domain", content
-assert content.get("summary"), content
+item = content_items[0]
+item_type = item.get("type")
+assert item_type in {"web_reference", "text"}, item
+if item_type == "web_reference":
+    assert item.get("url"), item
+    assert item.get("citation_id"), item
+else:
+    assert "No search results" in item.get("text", ""), item
 PY
 
 echo "CASE tool_web_search PASS"

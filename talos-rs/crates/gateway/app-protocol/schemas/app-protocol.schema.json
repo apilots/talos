@@ -2517,6 +2517,333 @@
             "value"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "content": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "offset": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "path": {
+              "type": "string"
+            },
+            "total_lines": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "truncated": {
+              "type": "boolean"
+            },
+            "type": {
+              "enum": [
+                "file_read"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "content",
+            "limit",
+            "offset",
+            "path",
+            "total_lines",
+            "truncated",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "files": {
+              "items": {
+                "$ref": "#/definitions/TalosToolFileDiff"
+              },
+              "type": "array"
+            },
+            "type": {
+              "enum": [
+                "diff"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "files",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "limit": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "matches": {
+              "items": {
+                "$ref": "#/definitions/TalosToolSearchMatch"
+              },
+              "type": "array"
+            },
+            "more_available": {
+              "type": "boolean"
+            },
+            "offset": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "partial": {
+              "type": "boolean"
+            },
+            "query": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "total_matches": {
+              "default": null,
+              "format": "uint",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "search_results"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "limit",
+            "matches",
+            "more_available",
+            "offset",
+            "partial",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "elapsed_ms": {
+              "default": null,
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "exit_code": {
+              "default": null,
+              "format": "int32",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "session_id": {
+              "default": null,
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "status": {
+              "$ref": "#/definitions/TalosToolTaskStatus"
+            },
+            "stderr": {
+              "type": "string"
+            },
+            "stdout": {
+              "type": "string"
+            },
+            "truncated": {
+              "type": "boolean"
+            },
+            "type": {
+              "enum": [
+                "bash_output"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "stderr",
+            "stdout",
+            "truncated",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "citation_id": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "provider_rank": {
+              "default": null,
+              "format": "uint",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "published_at": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "snippet": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source_domain": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "web_reference"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "url"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "artifact_id": {
+              "type": "string"
+            },
+            "label": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "mime_type": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "artifact_ref"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "artifact_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "mime_type": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "server": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "mcp_resource_ref"
+              ],
+              "type": "string"
+            },
+            "uri": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "server",
+            "type",
+            "uri"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "elapsed_ms": {
+              "default": null,
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "progress"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "message",
+            "type"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -3225,6 +3552,143 @@
       ],
       "type": "string"
     },
+    "TalosToolDiffHunk": {
+      "properties": {
+        "lines": {
+          "items": {
+            "$ref": "#/definitions/TalosToolDiffLine"
+          },
+          "type": "array"
+        },
+        "new_lines": {
+          "default": null,
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "new_start": {
+          "default": null,
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "old_lines": {
+          "default": null,
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "old_start": {
+          "default": null,
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "lines"
+      ],
+      "type": "object"
+    },
+    "TalosToolDiffLine": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "context"
+              ],
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "added"
+              ],
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "removed"
+              ],
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TalosToolFileDiff": {
+      "properties": {
+        "hunks": {
+          "items": {
+            "$ref": "#/definitions/TalosToolDiffHunk"
+          },
+          "type": "array"
+        },
+        "old_path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hunks",
+        "path",
+        "truncated"
+      ],
+      "type": "object"
+    },
     "TalosToolProgressEntry": {
       "properties": {
         "progress_kind": {
@@ -3271,6 +3735,61 @@
         "is_error"
       ],
       "type": "object"
+    },
+    "TalosToolSearchMatch": {
+      "properties": {
+        "after": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "before": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "column": {
+          "default": null,
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "line": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "line",
+        "path",
+        "text"
+      ],
+      "type": "object"
+    },
+    "TalosToolTaskStatus": {
+      "enum": [
+        "queued",
+        "running",
+        "completed",
+        "failed",
+        "timed_out",
+        "cancelled"
+      ],
+      "type": "string"
     },
     "TalosUsage": {
       "description": "Token usage values.",

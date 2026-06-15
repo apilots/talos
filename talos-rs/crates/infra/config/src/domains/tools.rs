@@ -10,6 +10,8 @@ pub struct ToolsRuntimeConfig {
     #[serde(default)]
     pub file: FileToolConfig,
     #[serde(default)]
+    pub web_search: WebSearchToolConfig,
+    #[serde(default)]
     pub mcp_runtime: McpToolConfig,
     #[serde(default)]
     pub dynamic: DynamicToolConfig,
@@ -29,12 +31,79 @@ impl Default for ToolsRuntimeConfig {
             sandbox_policy: ToolSandboxPolicy::default(),
             local_exec: LocalExecToolConfig::default(),
             file: FileToolConfig::default(),
+            web_search: WebSearchToolConfig::default(),
             mcp_runtime: McpToolConfig::default(),
             dynamic: DynamicToolConfig::default(),
             enable_apply_patch: true,
             enable_mcp_tools: true,
             enable_dynamic_tools: false,
             enable_collaboration_tools: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSearchToolConfig {
+    #[serde(default)]
+    pub provider: WebSearchProviderConfig,
+    #[serde(default)]
+    pub duckduckgo: WebSearchProviderRuntimeConfig,
+    #[serde(default)]
+    pub brave: WebSearchProviderRuntimeConfig,
+    #[serde(default)]
+    pub tavily: WebSearchProviderRuntimeConfig,
+}
+
+impl Default for WebSearchToolConfig {
+    fn default() -> Self {
+        Self {
+            provider: WebSearchProviderConfig::default(),
+            duckduckgo: WebSearchProviderRuntimeConfig {
+                base_url: Some("https://api.duckduckgo.com/".to_string()),
+                ..WebSearchProviderRuntimeConfig::default()
+            },
+            brave: WebSearchProviderRuntimeConfig {
+                api_key_env: Some("TALOS_WEB_SEARCH_BRAVE_API_KEY".to_string()),
+                base_url: Some("https://api.search.brave.com/res/v1/web/search".to_string()),
+                ..WebSearchProviderRuntimeConfig::default()
+            },
+            tavily: WebSearchProviderRuntimeConfig {
+                api_key_env: Some("TALOS_WEB_SEARCH_TAVILY_API_KEY".to_string()),
+                base_url: Some("https://api.tavily.com/search".to_string()),
+                ..WebSearchProviderRuntimeConfig::default()
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WebSearchProviderConfig {
+    #[default]
+    DuckDuckGoInstantAnswer,
+    Brave,
+    Tavily,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSearchProviderRuntimeConfig {
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub api_key_env: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default = "default_tools_web_search_timeout_ms")]
+    pub timeout_ms: u64,
+}
+
+impl Default for WebSearchProviderRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            api_key: None,
+            api_key_env: None,
+            base_url: None,
+            timeout_ms: default_tools_web_search_timeout_ms(),
         }
     }
 }
@@ -197,6 +266,10 @@ fn default_tools_exec_timeout_ms() -> u64 {
     60_000
 }
 
+fn default_tools_web_search_timeout_ms() -> u64 {
+    15_000
+}
+
 fn default_tools_dynamic_timeout_ms() -> u64 {
     300_000
 }
@@ -215,11 +288,48 @@ fn default_tools_file_list_limit() -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::ToolsRuntimeConfig;
+    use super::{ToolsRuntimeConfig, WebSearchProviderConfig};
 
     #[test]
     fn collaboration_tools_are_enabled_by_default() {
         let config = ToolsRuntimeConfig::default();
         assert!(config.enable_collaboration_tools);
+    }
+
+    #[test]
+    fn web_search_defaults_to_keyless_base_provider() {
+        let config = ToolsRuntimeConfig::default();
+        assert_eq!(
+            config.web_search.provider,
+            WebSearchProviderConfig::DuckDuckGoInstantAnswer
+        );
+        assert!(config.web_search.brave.api_key_env.is_some());
+        assert!(config.web_search.tavily.api_key_env.is_some());
+    }
+
+    #[test]
+    fn web_search_provider_config_deserializes_from_snake_case() {
+        let config: ToolsRuntimeConfig = serde_json::from_value(serde_json::json!({
+            "web_search": {
+                "provider": "brave",
+                "brave": {
+                    "api_key_env": "BRAVE_SEARCH_API_KEY",
+                    "base_url": "https://search.example/v1",
+                    "timeout_ms": 5000
+                }
+            }
+        }))
+        .expect("web search config should deserialize");
+
+        assert_eq!(config.web_search.provider, WebSearchProviderConfig::Brave);
+        assert_eq!(
+            config.web_search.brave.api_key_env.as_deref(),
+            Some("BRAVE_SEARCH_API_KEY")
+        );
+        assert_eq!(
+            config.web_search.brave.base_url.as_deref(),
+            Some("https://search.example/v1")
+        );
+        assert_eq!(config.web_search.brave.timeout_ms, 5000);
     }
 }

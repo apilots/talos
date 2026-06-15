@@ -240,7 +240,17 @@ export type TalosTurnErrorEvent = { request_id: string, turn_id: string, error: 
 
 export type TalosJsonValue = { value: unknown, };
 
-export type TalosContentItem = { "type": "text", text: string, } | { "type": "json", value: TalosJsonValue, };
+export type TalosContentItem = { "type": "text", text: string, } | { "type": "json", value: TalosJsonValue, } | { "type": "file_read", path: string, offset: number, limit: number, total_lines: number, content: string, truncated: boolean, } | { "type": "diff", files: Array<TalosToolFileDiff>, } | { "type": "search_results", query: string | null, matches: Array<TalosToolSearchMatch>, offset: number, limit: number, total_matches: number | null, more_available: boolean, partial: boolean, } | { "type": "bash_output", session_id: bigint | null, status: TalosToolTaskStatus, exit_code: number | null, stdout: string, stderr: string, truncated: boolean, elapsed_ms: bigint | null, } | { "type": "web_reference", url: string, title: string | null, citation_id: string | null, snippet: string | null, source_domain: string | null, published_at: string | null, provider_rank: number | null, } | { "type": "artifact_ref", artifact_id: string, mime_type: string | null, label: string | null, } | { "type": "mcp_resource_ref", server: string, uri: string, mime_type: string | null, } | { "type": "progress", message: string, elapsed_ms: bigint | null, };
+
+export type TalosToolTaskStatus = "queued" | "running" | "completed" | "failed" | "timed_out" | "cancelled";
+
+export type TalosToolFileDiff = { path: string, old_path: string | null, hunks: Array<TalosToolDiffHunk>, truncated: boolean, };
+
+export type TalosToolDiffHunk = { old_start: number | null, old_lines: number | null, new_start: number | null, new_lines: number | null, lines: Array<TalosToolDiffLine>, };
+
+export type TalosToolDiffLine = { "kind": "context", text: string, } | { "kind": "added", text: string, } | { "kind": "removed", text: string, };
+
+export type TalosToolSearchMatch = { path: string, line: number, column: number | null, text: string, before: Array<string>, after: Array<string>, };
 
 export type TalosUsage = { input_tokens: number, output_tokens: number, total_tokens: number, cache_creation_input_tokens: number | null, cache_read_input_tokens: number | null, };
 

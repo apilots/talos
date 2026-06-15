@@ -2,6 +2,8 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
 };
+use talos_sdk::TalosContentItem;
+use talos_types::talos::{TalosToolDiffLine, TalosToolTaskStatus};
 
 use crate::types::{ChatBlock, CopyProjection, RenderedChatLine, ToolCallStatus, ToolRenderData};
 use crate::utils::{display_tool_name, line_plain_text, wrap_line_visual};
@@ -18,12 +20,6 @@ impl TuiApp {
         let display_tool_name = display_tool_name(tool_name);
         let mut lines = vec![];
 
-        let arg_summary = if let Some(input) = &block.tool_input {
-            Self::tool_arg_summary(tool_name, input.as_inner())
-        } else {
-            String::new()
-        };
-
         let (icon_str, icon_color) = match block.tool_status {
             Some(ToolCallStatus::Queued) => ("◌", Color::Blue),
             Some(ToolCallStatus::Running) => ("⏳", Color::Yellow),
@@ -33,11 +29,7 @@ impl TuiApp {
             None => ("●", Color::Gray),
         };
 
-        let header_text = if arg_summary.is_empty() {
-            format!("{} {}", icon_str, display_tool_name)
-        } else {
-            format!("{} {}({})", icon_str, display_tool_name, arg_summary)
-        };
+        let header_text = format!("{} {}", icon_str, display_tool_name);
 
         let header_style = Style::default().fg(icon_color).add_modifier(Modifier::BOLD);
         lines.push(RenderedChatLine {
@@ -74,11 +66,7 @@ impl TuiApp {
         let preview_lines = render_data.preview_lines;
         let output_lines = render_data.output_lines;
         let has_output = !output_lines.is_empty();
-        let progress_lines = block
-            .tool_progress
-            .iter()
-            .map(|line| format!("  {}", line))
-            .collect::<Vec<_>>();
+        let progress_lines = Self::visible_tool_progress_lines(block);
         let collapsed_lines =
             Self::build_collapsed_tool_lines(block, tool_name, &detail_lines, &preview_lines);
         let has_extra_details = !detail_lines.is_empty()
@@ -181,6 +169,9 @@ impl TuiApp {
     }
 
     pub(crate) fn build_tool_render_data(block: &ChatBlock, tool_name: &str) -> ToolRenderData {
+        if !block.tool_content_items.is_empty() {
+            return Self::build_typed_tool_render_data(block);
+        }
         match tool_name {
             "MemorySearch" | "memory_search" => Self::build_memory_search_render_data(block),
             "bash" | "Bash" => Self::build_bash_render_data(block),
@@ -188,6 +179,503 @@ impl TuiApp {
             "glob" | "Glob" => Self::build_glob_render_data(block),
             "grep" | "Grep" => Self::build_grep_render_data(block),
             _ => Self::build_fallback_tool_render_data(block, tool_name),
+        }
+    }
+
+    fn build_typed_tool_render_data(block: &ChatBlock) -> ToolRenderData {
+        let items = &block.tool_content_items;
+        if items
+            .iter()
+            .any(|item| matches!(item, TalosContentItem::BashOutput { .. }))
+        {
+            return Self::build_task_render_data(block, items);
+        }
+        if items
+            .iter()
+            .any(|item| matches!(item, TalosContentItem::Diff { .. }))
+        {
+            return Self::build_diff_render_data(block, items);
+        }
+        if items
+            .iter()
+            .any(|item| matches!(item, TalosContentItem::FileRead { .. }))
+        {
+            return Self::build_file_render_data(block, items);
+        }
+        if items
+            .iter()
+            .any(|item| matches!(item, TalosContentItem::SearchResults { .. }))
+        {
+            return Self::build_explored_render_data(block, items);
+        }
+        if items.iter().any(|item| {
+            matches!(
+                item,
+                TalosContentItem::WebReference { .. }
+                    | TalosContentItem::ArtifactRef { .. }
+                    | TalosContentItem::McpResourceRef { .. }
+            )
+        }) {
+            return Self::build_reference_render_data(block, items);
+        }
+        Self::build_text_json_render_data(block, items)
+    }
+
+    fn build_task_render_data(block: &ChatBlock, items: &[TalosContentItem]) -> ToolRenderData {
+        let mut stdout = String::new();
+        let mut stderr = String::new();
+        let mut exit_code = None;
+        let mut task_status = None;
+        let mut elapsed_ms = None;
+        let mut truncated = false;
+        for item in items {
+            if let TalosContentItem::BashOutput {
+                status,
+                exit_code: item_exit_code,
+                stdout: item_stdout,
+                stderr: item_stderr,
+                truncated: item_truncated,
+                elapsed_ms: item_elapsed_ms,
+                ..
+            } = item
+            {
+                if !item_stdout.is_empty() {
+                    if !stdout.is_empty() {
+                        stdout.push('\n');
+                    }
+                    stdout.push_str(item_stdout);
+                }
+                if !item_stderr.is_empty() {
+                    if !stderr.is_empty() {
+                        stderr.push('\n');
+                    }
+                    stderr.push_str(item_stderr);
+                }
+                exit_code = *item_exit_code;
+                task_status = Some(*status);
+                elapsed_ms = *item_elapsed_ms;
+                truncated |= *item_truncated;
+            }
+        }
+
+        let timing = elapsed_ms
+            .or(block.timing_ms)
+            .map(|ms| format!(" · {:.1}s", ms as f64 / 1000.0))
+            .unwrap_or_default();
+        let summary = match block.tool_status {
+            Some(ToolCallStatus::Queued) => "Queued…".to_string(),
+            Some(ToolCallStatus::Running) => "Running…".to_string(),
+            Some(ToolCallStatus::PendingDynamicInput) => "Input needed".to_string(),
+            Some(ToolCallStatus::Completed { exit_ok: true }) => exit_code
+                .map(|code| format!("Done · exit {code}{timing}"))
+                .unwrap_or_else(|| format!("Done{timing}")),
+            Some(ToolCallStatus::Completed { exit_ok: false }) => exit_code
+                .map(|code| format!("Error · exit {code}{timing}"))
+                .unwrap_or_else(|| format!("Error{timing}")),
+            None => task_status
+                .map(Self::format_task_status)
+                .unwrap_or_else(|| "Unknown".to_string()),
+        };
+
+        let mut preview_lines = Vec::new();
+        if let Some(line) = stderr
+            .lines()
+            .chain(stdout.lines())
+            .find(|line| !line.trim().is_empty())
+        {
+            preview_lines.push(line.trim().to_string());
+        }
+        if truncated {
+            preview_lines.push("output truncated".to_string());
+        }
+
+        let mut output_lines = Vec::new();
+        if !stdout.trim().is_empty() {
+            output_lines.extend(stdout.lines().map(str::to_string));
+        }
+        if !stderr.trim().is_empty() {
+            if !output_lines.is_empty() {
+                output_lines.push(String::new());
+            }
+            output_lines.push("stderr:".to_string());
+            output_lines.extend(stderr.lines().map(str::to_string));
+        }
+
+        ToolRenderData {
+            summary,
+            detail_lines: Vec::new(),
+            preview_lines,
+            output_lines,
+        }
+    }
+
+    fn build_diff_render_data(block: &ChatBlock, items: &[TalosContentItem]) -> ToolRenderData {
+        let mut file_count = 0usize;
+        let mut added = 0usize;
+        let mut removed = 0usize;
+        let mut truncated = false;
+        let mut output_lines = Vec::new();
+
+        for item in items {
+            let TalosContentItem::Diff { files } = item else {
+                continue;
+            };
+            file_count += files.len();
+            for file in files {
+                truncated |= file.truncated;
+                output_lines.push(format!("diff -- {}", file.path));
+                if let Some(old_path) = &file.old_path {
+                    output_lines.push(format!("rename from {}", old_path));
+                    output_lines.push(format!("rename to {}", file.path));
+                }
+                for hunk in &file.hunks {
+                    output_lines.push(format!(
+                        "@@ -{},{} +{},{} @@",
+                        hunk.old_start.unwrap_or(0),
+                        hunk.old_lines.unwrap_or(0),
+                        hunk.new_start.unwrap_or(0),
+                        hunk.new_lines.unwrap_or(0)
+                    ));
+                    for line in &hunk.lines {
+                        match line {
+                            TalosToolDiffLine::Context { text } => {
+                                output_lines.push(format!(" {}", text));
+                            }
+                            TalosToolDiffLine::Added { text } => {
+                                added += 1;
+                                output_lines.push(format!("+{}", text));
+                            }
+                            TalosToolDiffLine::Removed { text } => {
+                                removed += 1;
+                                output_lines.push(format!("-{}", text));
+                            }
+                        }
+                    }
+                }
+                output_lines.push(String::new());
+            }
+        }
+        while output_lines.last().is_some_and(|line| line.is_empty()) {
+            output_lines.pop();
+        }
+
+        let timing = Self::timing_suffix(block.timing_ms);
+        let summary = match block.tool_status {
+            Some(ToolCallStatus::Completed { exit_ok: false }) => format!("Error{timing}"),
+            Some(ToolCallStatus::Queued) => "Queued…".to_string(),
+            Some(ToolCallStatus::Running) => "Running…".to_string(),
+            Some(ToolCallStatus::PendingDynamicInput) => "Input needed".to_string(),
+            _ => format!("Done · {file_count} file(s) · +{added} -{removed}{timing}"),
+        };
+        let mut preview_lines = vec![format!(
+            "{file_count} file(s) changed · +{added} -{removed}"
+        )];
+        if truncated {
+            preview_lines.push("diff truncated".to_string());
+        }
+
+        ToolRenderData {
+            summary,
+            detail_lines: Vec::new(),
+            preview_lines,
+            output_lines,
+        }
+    }
+
+    fn build_file_render_data(block: &ChatBlock, items: &[TalosContentItem]) -> ToolRenderData {
+        let mut total_lines = 0usize;
+        let mut truncated = false;
+        let mut detail_lines = Vec::new();
+        let mut output_lines = Vec::new();
+        for item in items {
+            match item {
+                TalosContentItem::FileRead {
+                    path,
+                    offset,
+                    limit,
+                    total_lines: item_total_lines,
+                    content,
+                    truncated: item_truncated,
+                } => {
+                    let start = offset.saturating_add(1);
+                    let end = offset.saturating_add(*limit).min(*item_total_lines);
+                    detail_lines.push(format!("range: {}:{}-{}", path, start, end));
+                    total_lines += content.lines().count();
+                    truncated |= *item_truncated;
+                    for (index, line) in content.lines().enumerate() {
+                        output_lines.push(format!("{:>4} {}", start + index, line));
+                    }
+                }
+                TalosContentItem::Text { text } => {
+                    total_lines += text.lines().count();
+                    output_lines.extend(text.lines().map(str::to_string));
+                }
+                _ => {}
+            }
+        }
+        let timing = Self::timing_suffix(block.timing_ms);
+        let summary = match block.tool_status {
+            Some(ToolCallStatus::Completed { exit_ok: false }) => format!("Error{timing}"),
+            Some(ToolCallStatus::Queued) => "Queued…".to_string(),
+            Some(ToolCallStatus::Running) => "Running…".to_string(),
+            Some(ToolCallStatus::PendingDynamicInput) => "Input needed".to_string(),
+            _ => format!("Done · {total_lines} lines{timing}"),
+        };
+        let mut preview_lines = output_lines
+            .iter()
+            .find(|line| !line.trim().is_empty())
+            .map(|line| vec![Self::compact_preview_text(line, TOOL_PREVIEW_CHAR_LIMIT)])
+            .unwrap_or_default();
+        if truncated {
+            preview_lines.push("content truncated".to_string());
+        }
+
+        ToolRenderData {
+            summary,
+            detail_lines,
+            preview_lines,
+            output_lines,
+        }
+    }
+
+    fn build_explored_render_data(block: &ChatBlock, items: &[TalosContentItem]) -> ToolRenderData {
+        let mut matches_count = 0usize;
+        let mut more_available = false;
+        let mut partial = false;
+        let mut output_lines = Vec::new();
+        for item in items {
+            match item {
+                TalosContentItem::SearchResults {
+                    matches,
+                    more_available: item_more_available,
+                    partial: item_partial,
+                    ..
+                } => {
+                    matches_count += matches.len();
+                    more_available |= *item_more_available;
+                    partial |= *item_partial;
+                    for item_match in matches {
+                        output_lines.push(format!(
+                            "{}:{} {}",
+                            item_match.path, item_match.line, item_match.text
+                        ));
+                        for before in item_match.before.iter().take(2) {
+                            output_lines.push(format!("  {}", before));
+                        }
+                        for after in item_match.after.iter().take(2) {
+                            output_lines.push(format!("  {}", after));
+                        }
+                    }
+                }
+                TalosContentItem::WebReference {
+                    url,
+                    title,
+                    snippet,
+                    source_domain,
+                    citation_id,
+                    ..
+                } => {
+                    matches_count += 1;
+                    output_lines.push(title.clone().unwrap_or_else(|| url.clone()));
+                    if let Some(domain) = source_domain {
+                        output_lines.push(format!("  {}", domain));
+                    } else {
+                        output_lines.push(format!("  {}", url));
+                    }
+                    if let Some(id) = citation_id {
+                        output_lines.push(format!("  citation: {}", id));
+                    }
+                    if let Some(snippet) = snippet {
+                        output_lines.push(format!("  {}", snippet));
+                    }
+                }
+                TalosContentItem::Json { value } => {
+                    output_lines.extend(Self::json_lines(value.as_inner()));
+                }
+                _ => {}
+            }
+        }
+        let timing = Self::timing_suffix(block.timing_ms);
+        let marker = if partial {
+            " · partial"
+        } else if more_available {
+            " · more"
+        } else {
+            ""
+        };
+        let summary = match block.tool_status {
+            Some(ToolCallStatus::Completed { exit_ok: false }) => format!("Error{timing}"),
+            Some(ToolCallStatus::Queued) => "Queued…".to_string(),
+            Some(ToolCallStatus::Running) => "Running…".to_string(),
+            Some(ToolCallStatus::PendingDynamicInput) => "Input needed".to_string(),
+            _ => format!("Done · {matches_count} result(s){marker}{timing}"),
+        };
+        let preview_lines = output_lines
+            .iter()
+            .filter(|line| !line.trim().is_empty())
+            .take(2)
+            .map(|line| Self::compact_preview_text(line, TOOL_PREVIEW_CHAR_LIMIT))
+            .collect();
+
+        ToolRenderData {
+            summary,
+            detail_lines: Vec::new(),
+            preview_lines,
+            output_lines,
+        }
+    }
+
+    fn build_reference_render_data(
+        block: &ChatBlock,
+        items: &[TalosContentItem],
+    ) -> ToolRenderData {
+        let mut output_lines = Vec::new();
+        for item in items {
+            match item {
+                TalosContentItem::WebReference {
+                    url,
+                    title,
+                    snippet,
+                    source_domain,
+                    ..
+                } => {
+                    output_lines.push(title.clone().unwrap_or_else(|| url.clone()));
+                    output_lines.push(format!("  {}", source_domain.as_deref().unwrap_or(url)));
+                    if let Some(snippet) = snippet {
+                        output_lines.push(format!("  {}", snippet));
+                    }
+                }
+                TalosContentItem::ArtifactRef {
+                    artifact_id,
+                    mime_type,
+                    label,
+                } => {
+                    output_lines.push(format!(
+                        "artifact: {}{}",
+                        label.as_deref().unwrap_or(artifact_id),
+                        mime_type
+                            .as_ref()
+                            .map(|mime| format!(" · {mime}"))
+                            .unwrap_or_default()
+                    ));
+                }
+                TalosContentItem::McpResourceRef {
+                    server,
+                    uri,
+                    mime_type,
+                } => {
+                    output_lines.push(format!(
+                        "mcp: {}:{}{}",
+                        server,
+                        uri,
+                        mime_type
+                            .as_ref()
+                            .map(|mime| format!(" · {mime}"))
+                            .unwrap_or_default()
+                    ));
+                }
+                TalosContentItem::Text { text } => {
+                    output_lines.extend(text.lines().map(str::to_string))
+                }
+                _ => {}
+            }
+        }
+        let timing = Self::timing_suffix(block.timing_ms);
+        let summary = match block.tool_status {
+            Some(ToolCallStatus::Completed { exit_ok: false }) => format!("Error{timing}"),
+            Some(ToolCallStatus::Queued) => "Queued…".to_string(),
+            Some(ToolCallStatus::Running) => "Running…".to_string(),
+            Some(ToolCallStatus::PendingDynamicInput) => "Input needed".to_string(),
+            _ => format!("Done · {} reference(s){timing}", output_lines.len().max(1)),
+        };
+        let preview_lines = output_lines
+            .iter()
+            .filter(|line| !line.trim().is_empty())
+            .take(2)
+            .cloned()
+            .collect();
+
+        ToolRenderData {
+            summary,
+            detail_lines: Vec::new(),
+            preview_lines,
+            output_lines,
+        }
+    }
+
+    fn build_text_json_render_data(
+        block: &ChatBlock,
+        items: &[TalosContentItem],
+    ) -> ToolRenderData {
+        let mut output_lines = Vec::new();
+        for item in items {
+            match item {
+                TalosContentItem::Text { text } => {
+                    output_lines.extend(text.lines().map(str::to_string))
+                }
+                TalosContentItem::Json { value } => {
+                    output_lines.extend(Self::json_lines(value.as_inner()))
+                }
+                TalosContentItem::Progress { message, .. } => output_lines.push(message.clone()),
+                other => output_lines.extend(other.display_text().lines().map(str::to_string)),
+            }
+        }
+        let timing = Self::timing_suffix(block.timing_ms);
+        let summary = match block.tool_status {
+            Some(ToolCallStatus::Queued) => "Queued…".to_string(),
+            Some(ToolCallStatus::Running) => "Running…".to_string(),
+            Some(ToolCallStatus::PendingDynamicInput) => "Input needed".to_string(),
+            Some(ToolCallStatus::Completed { exit_ok: true }) => format!("Done{timing}"),
+            Some(ToolCallStatus::Completed { exit_ok: false }) => format!("Error{timing}"),
+            None => "Unknown".to_string(),
+        };
+        let preview_lines = output_lines
+            .iter()
+            .filter(|line| !line.trim().is_empty())
+            .take(1)
+            .cloned()
+            .collect();
+
+        ToolRenderData {
+            summary,
+            detail_lines: Vec::new(),
+            preview_lines,
+            output_lines,
+        }
+    }
+
+    fn json_lines(value: &serde_json::Value) -> Vec<String> {
+        serde_json::to_string_pretty(value)
+            .unwrap_or_else(|_| value.to_string())
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    fn visible_tool_progress_lines(block: &ChatBlock) -> Vec<String> {
+        block
+            .tool_progress
+            .iter()
+            .filter(|line| {
+                let trimmed = line.trim_start();
+                trimmed.starts_with("stdout:")
+                    || trimmed.starts_with("stderr:")
+                    || (Self::is_live_tool_status(block.tool_status.as_ref())
+                        && !trimmed.starts_with("status: execution started")
+                        && !trimmed.starts_with("status: Executing "))
+            })
+            .map(|line| format!("  {}", line))
+            .collect()
+    }
+
+    fn format_task_status(status: TalosToolTaskStatus) -> String {
+        match status {
+            TalosToolTaskStatus::Queued => "Queued…".to_string(),
+            TalosToolTaskStatus::Running => "Running…".to_string(),
+            TalosToolTaskStatus::Completed => "Done".to_string(),
+            TalosToolTaskStatus::Failed => "Error".to_string(),
+            TalosToolTaskStatus::TimedOut => "Timed out".to_string(),
+            TalosToolTaskStatus::Cancelled => "Cancelled".to_string(),
         }
     }
 
@@ -633,91 +1121,5 @@ impl TuiApp {
         timing_ms
             .map(|ms| format!(" · {:.1}s", ms as f64 / 1000.0))
             .unwrap_or_default()
-    }
-
-    fn join_tool_summary_parts(parts: Vec<String>) -> String {
-        parts
-            .into_iter()
-            .filter(|part| !part.trim().is_empty())
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-
-    pub(crate) fn tool_arg_summary(tool_name: &str, input: &serde_json::Value) -> String {
-        let summary = match tool_name {
-            "bash" | "Bash" => input
-                .get("cmd")
-                .or_else(|| input.get("command"))
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_default(),
-            "read" | "Read" => input
-                .get("file_path")
-                .or_else(|| input.get("path"))
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_default(),
-            "glob" | "Glob" => {
-                let mut parts = vec![];
-                if let Some(pattern) = input.get("pattern").and_then(|v| v.as_str()) {
-                    parts.push(format!("{:?}", pattern));
-                }
-                if let Some(path) = input.get("path").and_then(|v| v.as_str()) {
-                    parts.push(format!("path={}", path));
-                }
-                Self::join_tool_summary_parts(parts)
-            }
-            "write_file" | "Write" => input
-                .get("path")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_default(),
-            "grep" | "Grep" => {
-                let mut parts = vec![];
-                if let Some(pattern) = input.get("pattern").and_then(|v| v.as_str()) {
-                    parts.push(format!("{:?}", pattern));
-                }
-                if let Some(path) = input.get("path").and_then(|v| v.as_str()) {
-                    parts.push(format!("path={}", path));
-                }
-                if let Some(include) = input.get("include").and_then(|v| v.as_str()) {
-                    parts.push(format!("include={}", include));
-                }
-                Self::join_tool_summary_parts(parts)
-            }
-            "MemorySearch" | "memory_search" => input
-                .get("query")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_default(),
-            "web_search" | "WebSearch" => input
-                .get("query")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_default(),
-            "web_fetch" | "WebFetch" => input
-                .get("url")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_default(),
-            _ => input
-                .as_object()
-                .and_then(|m| {
-                    let parts = m
-                        .iter()
-                        .filter_map(|(key, value)| {
-                            value.as_str().map(|value| format!("{}={}", key, value))
-                        })
-                        .take(2)
-                        .collect::<Vec<_>>();
-                    (!parts.is_empty()).then(|| Self::join_tool_summary_parts(parts))
-                })
-                .unwrap_or_default(),
-        };
-        if summary.len() > 70 {
-            format!("{}...", &summary[..67])
-        } else {
-            summary
-        }
     }
 }
