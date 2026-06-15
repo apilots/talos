@@ -1,21 +1,22 @@
 //! Talos LLM OpenAI provider.
 
 use async_trait::async_trait;
-use futures_util::StreamExt;
 use reqwest::{header, Client};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::collections::HashMap;
 use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
-    ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider,
-    ModelBlockCompleted, ModelBlockDelta, ModelBlockKind, ModelBlockStarted, ModelBlockStream,
-    ModelBlockStreamEvent, ModelToolCallStart, NativeThinkingConfig, NativeThinkingEffort,
-    NativeThinkingSupport, Role, SseLineDecoder, ToolChoice, ToolDefinition, Usage,
+    protocols::{chat as chat_protocol, responses as responses_protocol},
+    ChatRequest, ChatResponse, ChatStream, LlmProvider, ModelBlockStream, ReasoningEffort,
+    ReasoningSupport,
 };
-use tokio::sync::mpsc;
 use tracing::{debug, error, info};
+
+/// OpenAI wire protocol selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenAIProtocol {
+    Chat,
+    Responses,
+}
 
 /// OpenAI API configuration.
 #[derive(Debug, Clone)]
@@ -23,6 +24,11 @@ pub struct OpenAIConfig {
     pub api_key: String,
     pub base_url: String,
     pub timeout_secs: u64,
+    pub provider_name: String,
+    pub display_name: String,
+    pub item_prefix: String,
+    pub default_model: String,
+    pub protocol: OpenAIProtocol,
 }
 
 impl OpenAIConfig {
@@ -31,6 +37,11 @@ impl OpenAIConfig {
             api_key: api_key.into(),
             base_url: "https://api.openai.com/v1".to_string(),
             timeout_secs: 60,
+            provider_name: "openai".to_string(),
+            display_name: "OpenAI".to_string(),
+            item_prefix: "openai".to_string(),
+            default_model: "gpt-5.5".to_string(),
+            protocol: OpenAIProtocol::Chat,
         }
     }
 
@@ -43,142 +54,24 @@ impl OpenAIConfig {
         self.timeout_secs = secs;
         self
     }
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct OpenAIMessage {
-    role: String,
-    content: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tool_call_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tool_calls: Option<Vec<OpenAIToolCall>>,
-}
+    pub fn with_identity(
+        mut self,
+        provider_name: impl Into<String>,
+        display_name: impl Into<String>,
+        default_model: impl Into<String>,
+    ) -> Self {
+        self.provider_name = provider_name.into();
+        self.display_name = display_name.into();
+        self.item_prefix = self.provider_name.clone();
+        self.default_model = default_model.into();
+        self
+    }
 
-#[derive(Debug, Clone, Serialize)]
-struct OpenAITool {
-    r#type: String,
-    function: OpenAIFunctionDefinition,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct OpenAIFunctionDefinition {
-    name: String,
-    description: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    parameters: Option<Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct OpenAIToolCall {
-    id: String,
-    r#type: String,
-    function: OpenAIFunctionCall,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct OpenAIFunctionCall {
-    name: String,
-    arguments: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(untagged)]
-enum OpenAIToolChoice {
-    Simple(String),
-    Named {
-        r#type: String,
-        function: OpenAIToolChoiceFunction,
-    },
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct OpenAIToolChoiceFunction {
-    name: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct OpenAIRequest {
-    model: String,
-    messages: Vec<OpenAIMessage>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    temperature: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    max_tokens: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    top_p: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    stop: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tools: Option<Vec<OpenAITool>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tool_choice: Option<OpenAIToolChoice>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    parallel_tool_calls: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    reasoning_effort: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    stream: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    stream_options: Option<OpenAIStreamOptions>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct OpenAIStreamOptions {
-    include_usage: bool,
-}
-
-#[derive(Debug, Default)]
-struct OpenAIModelBlockStreamState {
-    reasoning_started: HashMap<usize, bool>,
-    assistant_started: HashMap<usize, bool>,
-    tool_started: HashMap<usize, bool>,
-}
-
-#[derive(Debug, Default)]
-struct OpenAIModelToolAcc {
-    id: Option<String>,
-    name: Option<String>,
-    arguments: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct OpenAIResponse {
-    #[allow(dead_code)]
-    id: String,
-    #[allow(dead_code)]
-    object: String,
-    #[allow(dead_code)]
-    created: u64,
-    model: String,
-    choices: Vec<OpenAIChoice>,
-    #[serde(default)]
-    usage: Option<OpenAIUsage>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct OpenAIChoice {
-    #[allow(dead_code)]
-    index: u32,
-    message: OpenAIResponseMessage,
-    finish_reason: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct OpenAIResponseMessage {
-    #[serde(default)]
-    content: Option<String>,
-    #[serde(default)]
-    tool_calls: Option<Vec<OpenAIToolCall>>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct OpenAIUsage {
-    prompt_tokens: u32,
-    completion_tokens: u32,
-    total_tokens: u32,
+    pub fn with_protocol(mut self, protocol: OpenAIProtocol) -> Self {
+        self.protocol = protocol;
+        self
+    }
 }
 
 /// OpenAI LLM provider.
@@ -236,323 +129,36 @@ impl OpenAIProvider {
         headers
     }
 
-    fn convert_tool_choice(choice: Option<ToolChoice>) -> Option<OpenAIToolChoice> {
-        match choice {
-            Some(ToolChoice::Auto) => Some(OpenAIToolChoice::Simple("auto".to_string())),
-            Some(ToolChoice::Required) => Some(OpenAIToolChoice::Simple("required".to_string())),
-            Some(ToolChoice::None) => Some(OpenAIToolChoice::Simple("none".to_string())),
-            Some(ToolChoice::Named { name }) => Some(OpenAIToolChoice::Named {
-                r#type: "function".to_string(),
-                function: OpenAIToolChoiceFunction { name },
-            }),
-            None => None,
+    fn request_options(request: &ChatRequest) -> chat_protocol::ChatCompletionRequestOptions {
+        chat_protocol::ChatCompletionRequestOptions {
+            reasoning_effort: request.reasoning_effort.map(Self::convert_reasoning_effort),
+            ..Default::default()
         }
     }
 
-    fn convert_tools(tools: Option<Vec<ToolDefinition>>) -> Option<Vec<OpenAITool>> {
-        tools.map(|definitions| {
-            definitions
-                .into_iter()
-                .map(|tool| OpenAITool {
-                    r#type: "function".to_string(),
-                    function: OpenAIFunctionDefinition {
-                        name: tool.name,
-                        description: tool.description,
-                        parameters: tool.parameters,
-                    },
-                })
-                .collect()
-        })
+    fn build_request(request: ChatRequest, stream: bool) -> chat_protocol::ChatCompletionRequest {
+        let options = Self::request_options(&request);
+        chat_protocol::request(request, stream, options)
     }
 
-    fn convert_messages(messages: Vec<ChatMessage>) -> Vec<OpenAIMessage> {
-        messages
-            .into_iter()
-            .map(|msg| {
-                let role = match msg.role {
-                    Role::System => "system",
-                    Role::User => "user",
-                    Role::Assistant => "assistant",
-                    Role::Tool => "tool",
-                }
-                .to_string();
-
-                let tool_calls = msg.tool_calls.map(|calls| {
-                    calls
-                        .into_iter()
-                        .map(|call| OpenAIToolCall {
-                            id: call.id,
-                            r#type: "function".to_string(),
-                            function: OpenAIFunctionCall {
-                                name: call.name,
-                                arguments: call.arguments.to_string(),
-                            },
-                        })
-                        .collect()
-                });
-
-                OpenAIMessage {
-                    role,
-                    content: Some(msg.content),
-                    name: msg.name,
-                    tool_call_id: msg.tool_call_id,
-                    tool_calls,
-                }
-            })
-            .collect()
+    fn responses_request(
+        request: ChatRequest,
+        stream: Option<bool>,
+    ) -> responses_protocol::ResponsesRequest {
+        responses_protocol::request(request, stream)
     }
 
-    fn parse_tool_calls(tool_calls: Option<Vec<OpenAIToolCall>>) -> Option<Vec<FunctionCall>> {
-        tool_calls.map(|calls| {
-            calls
-                .into_iter()
-                .map(|call| {
-                    let parsed = serde_json::from_str::<Value>(&call.function.arguments)
-                        .unwrap_or_else(|_| Value::String(call.function.arguments.clone()));
-                    FunctionCall::new(call.id, call.function.name, parsed)
-                })
-                .collect()
-        })
+    fn endpoint_url(&self, endpoint: &str) -> String {
+        let base_url = self.config.base_url.trim_end_matches('/');
+        let endpoint = endpoint.trim_start_matches('/');
+        format!("{base_url}/{endpoint}")
     }
 
-    fn extract_reasoning_delta(delta: &Value) -> Option<String> {
-        for key in ["reasoning"] {
-            if let Some(value) = delta.get(key) {
-                match value {
-                    Value::String(text) if !text.is_empty() => return Some(text.clone()),
-                    Value::Array(items) => {
-                        let mut merged = String::new();
-                        for item in items {
-                            if let Some(text) = item
-                                .get("text")
-                                .and_then(|v| v.as_str())
-                                .or_else(|| item.get("content").and_then(|v| v.as_str()))
-                                .or_else(|| item.as_str())
-                            {
-                                merged.push_str(text);
-                            }
-                        }
-                        if !merged.is_empty() {
-                            return Some(merged);
-                        }
-                    }
-                    Value::Object(map) => {
-                        if let Some(text) = map
-                            .get("text")
-                            .and_then(|v| v.as_str())
-                            .or_else(|| map.get("content").and_then(|v| v.as_str()))
-                        {
-                            if !text.is_empty() {
-                                return Some(text.to_string());
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        None
+    fn convert_reasoning_effort(effort: ReasoningEffort) -> String {
+        chat_protocol::reasoning_effort(effort)
     }
 
-    fn choice_index(choice: Option<&Value>) -> usize {
-        choice
-            .and_then(|c| c.get("index"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as usize
-    }
-
-    fn reasoning_model_item_id(choice_index: usize) -> String {
-        format!("openai-choice-{choice_index}-reasoning")
-    }
-
-    fn assistant_model_item_id(choice_index: usize) -> String {
-        format!("openai-choice-{choice_index}-assistant")
-    }
-
-    fn tool_model_item_id(index: usize) -> String {
-        format!("openai-tool-{index}")
-    }
-
-    async fn send_model_block_event(
-        tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
-        event: ModelBlockStreamEvent,
-    ) -> bool {
-        tx.send(Ok(event)).await.is_ok()
-    }
-
-    async fn ensure_reasoning_model_block(
-        tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
-        state: &mut OpenAIModelBlockStreamState,
-        choice_index: usize,
-    ) -> bool {
-        if state.reasoning_started.get(&choice_index) == Some(&true) {
-            return true;
-        }
-        state.reasoning_started.insert(choice_index, true);
-        Self::send_model_block_event(
-            tx,
-            ModelBlockStreamEvent::BlockStarted(ModelBlockStarted {
-                model_item_id: Self::reasoning_model_item_id(choice_index),
-                provider_item_id: Some(format!("choice:{choice_index}:reasoning")),
-                kind: ModelBlockKind::Reasoning,
-                assistant_text_phase_hint: None,
-                assistant_text_phase_hint_source: None,
-                tool_call: None,
-            }),
-        )
-        .await
-    }
-
-    async fn ensure_assistant_model_block(
-        tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
-        state: &mut OpenAIModelBlockStreamState,
-        choice_index: usize,
-    ) -> bool {
-        if state.assistant_started.get(&choice_index) == Some(&true) {
-            return true;
-        }
-        state.assistant_started.insert(choice_index, true);
-        Self::send_model_block_event(
-            tx,
-            ModelBlockStreamEvent::BlockStarted(ModelBlockStarted {
-                model_item_id: Self::assistant_model_item_id(choice_index),
-                provider_item_id: Some(format!("choice:{choice_index}:message")),
-                kind: ModelBlockKind::AssistantText,
-                assistant_text_phase_hint: None,
-                assistant_text_phase_hint_source: None,
-                tool_call: None,
-            }),
-        )
-        .await
-    }
-
-    async fn ensure_tool_model_block(
-        tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
-        state: &mut OpenAIModelBlockStreamState,
-        index: usize,
-        acc: &OpenAIModelToolAcc,
-    ) -> bool {
-        if state.tool_started.get(&index) == Some(&true) {
-            return true;
-        }
-        state.tool_started.insert(index, true);
-        Self::send_model_block_event(
-            tx,
-            ModelBlockStreamEvent::BlockStarted(ModelBlockStarted {
-                model_item_id: Self::tool_model_item_id(index),
-                provider_item_id: acc.id.clone(),
-                kind: ModelBlockKind::ToolCall,
-                assistant_text_phase_hint: None,
-                assistant_text_phase_hint_source: None,
-                tool_call: Some(ModelToolCallStart {
-                    index,
-                    call_id: acc.id.clone(),
-                    tool_name: acc.name.clone(),
-                }),
-            }),
-        )
-        .await
-    }
-
-    async fn complete_open_model_blocks(
-        tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
-        state: &mut OpenAIModelBlockStreamState,
-    ) -> bool {
-        let reasoning_ids: Vec<_> = state
-            .reasoning_started
-            .iter()
-            .filter_map(|(index, started)| started.then_some(*index))
-            .collect();
-        for index in reasoning_ids {
-            state.reasoning_started.insert(index, false);
-            if !Self::send_model_block_event(
-                tx,
-                ModelBlockStreamEvent::BlockCompleted(ModelBlockCompleted {
-                    model_item_id: Self::reasoning_model_item_id(index),
-                }),
-            )
-            .await
-            {
-                return false;
-            }
-        }
-
-        let assistant_ids: Vec<_> = state
-            .assistant_started
-            .iter()
-            .filter_map(|(index, started)| started.then_some(*index))
-            .collect();
-        for index in assistant_ids {
-            state.assistant_started.insert(index, false);
-            if !Self::send_model_block_event(
-                tx,
-                ModelBlockStreamEvent::BlockCompleted(ModelBlockCompleted {
-                    model_item_id: Self::assistant_model_item_id(index),
-                }),
-            )
-            .await
-            {
-                return false;
-            }
-        }
-
-        let tool_ids: Vec<_> = state
-            .tool_started
-            .iter()
-            .filter_map(|(index, started)| started.then_some(*index))
-            .collect();
-        for index in tool_ids {
-            state.tool_started.insert(index, false);
-            if !Self::send_model_block_event(
-                tx,
-                ModelBlockStreamEvent::BlockCompleted(ModelBlockCompleted {
-                    model_item_id: Self::tool_model_item_id(index),
-                }),
-            )
-            .await
-            {
-                return false;
-            }
-        }
-        true
-    }
-
-    fn build_request(request: ChatRequest, stream: bool) -> OpenAIRequest {
-        OpenAIRequest {
-            model: request.model,
-            messages: Self::convert_messages(request.messages),
-            temperature: request.temperature,
-            max_tokens: request.max_tokens,
-            top_p: request.top_p,
-            stop: request.stop,
-            tools: Self::convert_tools(request.tools),
-            tool_choice: Self::convert_tool_choice(request.tool_choice),
-            parallel_tool_calls: request.parallel_tool_calls,
-            reasoning_effort: request
-                .native_thinking
-                .as_ref()
-                .map(Self::convert_native_thinking_effort),
-            stream: Some(stream),
-            stream_options: if stream {
-                Some(OpenAIStreamOptions {
-                    include_usage: true,
-                })
-            } else {
-                None
-            },
-        }
-    }
-
-    fn convert_native_thinking_effort(config: &NativeThinkingConfig) -> String {
-        match config.effort {
-            NativeThinkingEffort::Low => "low",
-            NativeThinkingEffort::Medium => "medium",
-            NativeThinkingEffort::High => "high",
-        }
-        .to_string()
-    }
-
-    fn supports_native_thinking_model(model: &str) -> bool {
+    fn supports_reasoning_model(model: &str) -> bool {
         let normalized = model.trim().to_ascii_lowercase();
         normalized.starts_with("o1")
             || normalized.starts_with("o3")
@@ -561,9 +167,16 @@ impl OpenAIProvider {
     }
 
     async fn send_chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+        match self.config.protocol {
+            OpenAIProtocol::Chat => self.send_chat_completion(request).await,
+            OpenAIProtocol::Responses => self.send_responses(request).await,
+        }
+    }
+
+    async fn send_chat_completion(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
         let openai_req = Self::build_request(request, false);
 
-        let url = format!("{}/chat/completions", self.config.base_url);
+        let url = self.endpoint_url("chat/completions");
         let headers = self.build_headers();
 
         debug!("Request URL: {}", url);
@@ -584,48 +197,32 @@ impl OpenAIProvider {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            error!("OpenAI API error: {} - {}", status, error_text);
+            error!(
+                "{} API error: {} - {}",
+                self.config.display_name, status, error_text
+            );
             return Err(TalosError::InternalError(format!(
-                "OpenAI API error: {} - {}",
-                status, error_text
+                "{} API error: {} - {}",
+                self.config.display_name, status, error_text
             )));
         }
 
-        let openai_resp: OpenAIResponse = response
+        let openai_resp: chat_protocol::ChatCompletionResponse = response
             .json()
             .await
             .map_err(|e| TalosError::InternalError(format!("Failed to parse response: {}", e)))?;
 
-        let choice = openai_resp.choices.into_iter().next().ok_or_else(|| {
-            TalosError::InternalError("No choices in OpenAI response".to_string())
-        })?;
-
-        let usage = openai_resp.usage.unwrap_or(OpenAIUsage {
-            prompt_tokens: 0,
-            completion_tokens: 0,
-            total_tokens: 0,
-        });
-
-        Ok(ChatResponse {
-            content: choice.message.content.unwrap_or_default(),
-            reasoning: Vec::new(),
-            model: openai_resp.model,
-            usage: Usage {
-                prompt_tokens: usage.prompt_tokens,
-                completion_tokens: usage.completion_tokens,
-                total_tokens: usage.total_tokens,
-                cache_creation_input_tokens: None,
-                cache_read_input_tokens: None,
-            },
-            finish_reason: choice.finish_reason,
-            tool_calls: Self::parse_tool_calls(choice.message.tool_calls),
-        })
+        chat_protocol::chat_response(openai_resp, &self.config.display_name)
     }
 
-    async fn send_stream(&self, request: ChatRequest) -> TalosResult<reqwest::Response> {
-        let openai_req = Self::build_request(request, true);
-        let url = format!("{}/chat/completions", self.config.base_url);
+    async fn send_responses(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+        let openai_req = Self::responses_request(request, None);
+
+        let url = self.endpoint_url("responses");
         let headers = self.build_headers();
+
+        debug!("Request URL: {}", url);
+        debug!("Request model: {}", openai_req.model);
 
         let response = self
             .client
@@ -642,9 +239,59 @@ impl OpenAIProvider {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
+            error!(
+                "{} API error: {} - {}",
+                self.config.display_name, status, error_text
+            );
             return Err(TalosError::InternalError(format!(
-                "OpenAI API error: {} - {}",
-                status, error_text
+                "{} API error: {} - {}",
+                self.config.display_name, status, error_text
+            )));
+        }
+
+        let openai_resp: responses_protocol::ResponsesResponse = response
+            .json()
+            .await
+            .map_err(|e| TalosError::InternalError(format!("Failed to parse response: {}", e)))?;
+
+        Ok(responses_protocol::chat_response(openai_resp))
+    }
+
+    async fn send_stream(&self, request: ChatRequest) -> TalosResult<reqwest::Response> {
+        let (url, body) = match self.config.protocol {
+            OpenAIProtocol::Chat => (
+                self.endpoint_url("chat/completions"),
+                serde_json::to_value(Self::build_request(request, true)).map_err(|e| {
+                    TalosError::InternalError(format!("Failed to serialize request: {}", e))
+                })?,
+            ),
+            OpenAIProtocol::Responses => (
+                self.endpoint_url("responses"),
+                serde_json::to_value(Self::responses_request(request, Some(true))).map_err(
+                    |e| TalosError::InternalError(format!("Failed to serialize request: {}", e)),
+                )?,
+            ),
+        };
+        let headers = self.build_headers();
+
+        let response = self
+            .client
+            .post(&url)
+            .headers(headers)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| TalosError::InternalError(format!("HTTP request failed: {}", e)))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(TalosError::InternalError(format!(
+                "{} API error: {} - {}",
+                self.config.display_name, status, error_text
             )));
         }
 
@@ -655,358 +302,76 @@ impl OpenAIProvider {
 #[async_trait]
 impl LlmProvider for OpenAIProvider {
     fn name(&self) -> &str {
-        "openai"
+        &self.config.provider_name
     }
 
     fn default_model(&self) -> String {
-        "gpt-5.5".to_string()
+        self.config.default_model.clone()
     }
 
-    fn native_thinking_support(&self, model: &str) -> NativeThinkingSupport {
-        if Self::supports_native_thinking_model(model) {
-            NativeThinkingSupport::Supported
+    fn reasoning_support(&self, model: &str) -> ReasoningSupport {
+        if Self::supports_reasoning_model(model) {
+            ReasoningSupport::Supported
         } else {
-            NativeThinkingSupport::Unsupported
+            ReasoningSupport::Unsupported
         }
     }
 
     async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
-        info!("Sending chat request to OpenAI API");
+        info!("Sending chat request to {} API", self.config.display_name);
         self.send_chat(request).await
     }
 
     async fn chat_with_tools(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
-        info!("Sending tool-aware chat request to OpenAI API");
+        info!(
+            "Sending tool-aware chat request to {} API",
+            self.config.display_name
+        );
         self.send_chat(request).await
     }
 
     async fn stream(&self, request: ChatRequest) -> TalosResult<ChatStream> {
         let response = self.send_stream(request).await?;
-        let (tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(100);
-
-        tokio::spawn(async move {
-            let mut stream = response.bytes_stream();
-            let mut decoder = SseLineDecoder::new();
-            let mut final_finish_reason: Option<String> = None;
-            while let Some(chunk_result) = stream.next().await {
-                match chunk_result {
-                    Ok(bytes) => {
-                        for line in decoder.push(&bytes) {
-                            let line = match line {
-                                Ok(line) => line,
-                                Err(err) => {
-                                    let _ = tx.send(Err(err)).await;
-                                    return;
-                                }
-                            };
-                            let Some(data) = line.strip_prefix("data:") else {
-                                continue;
-                            };
-
-                            let data = data.trim_start();
-                            if data.is_empty() {
-                                continue;
-                            }
-                            if data == "[DONE]" {
-                                let _ = tx
-                                    .send(Ok(ChatChunk {
-                                        delta: String::new(),
-                                        finish_reason: final_finish_reason
-                                            .clone()
-                                            .or_else(|| Some("stop".to_string())),
-                                    }))
-                                    .await;
-                                return;
-                            }
-
-                            let event = match serde_json::from_str::<Value>(data) {
-                                Ok(event) => event,
-                                Err(error) => {
-                                    let _ = tx
-                                        .send(Err(TalosError::InternalError(format!(
-                                            "OpenAI stream invalid SSE JSON: {error}"
-                                        ))))
-                                        .await;
-                                    return;
-                                }
-                            };
-                            let choice = event
-                                .get("choices")
-                                .and_then(|c| c.as_array())
-                                .and_then(|arr| arr.first());
-
-                            if let Some(delta) = choice
-                                .and_then(|c| c.get("delta"))
-                                .and_then(|d| d.get("content"))
-                                .and_then(|t| t.as_str())
-                            {
-                                let _ = tx
-                                    .send(Ok(ChatChunk {
-                                        delta: delta.to_string(),
-                                        finish_reason: None,
-                                    }))
-                                    .await;
-                            }
-
-                            if let Some(finish_reason) = choice
-                                .and_then(|c| c.get("finish_reason"))
-                                .and_then(|r| r.as_str())
-                            {
-                                final_finish_reason = Some(finish_reason.to_string());
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let _ = tx
-                            .send(Err(TalosError::InternalError(format!(
-                                "Stream error: {}",
-                                e
-                            ))))
-                            .await;
-                        return;
-                    }
-                }
-            }
-        });
-
-        Ok(ChatStream::new(rx))
+        match self.config.protocol {
+            OpenAIProtocol::Chat => Ok(chat_protocol::stream(
+                response,
+                self.config.display_name.clone(),
+            )),
+            OpenAIProtocol::Responses => Ok(responses_protocol::stream(
+                response,
+                self.config.display_name.clone(),
+            )),
+        }
     }
 
     async fn stream_model_blocks(&self, request: ChatRequest) -> TalosResult<ModelBlockStream> {
         let response = self.send_stream(request).await?;
-        let (tx, rx) = mpsc::channel::<TalosResult<ModelBlockStreamEvent>>(100);
-
-        tokio::spawn(async move {
-            let mut stream = response.bytes_stream();
-            let mut decoder = SseLineDecoder::new();
-            let mut state = OpenAIModelBlockStreamState::default();
-            let mut tool_acc: HashMap<usize, OpenAIModelToolAcc> = HashMap::new();
-            let mut final_finish_reason: Option<String> = None;
-            let mut final_usage: Option<Usage> = None;
-
-            while let Some(chunk_result) = stream.next().await {
-                match chunk_result {
-                    Ok(bytes) => {
-                        for line in decoder.push(&bytes) {
-                            let line = match line {
-                                Ok(line) => line,
-                                Err(err) => {
-                                    let _ = tx.send(Err(err)).await;
-                                    return;
-                                }
-                            };
-                            let Some(data) = line.strip_prefix("data:") else {
-                                continue;
-                            };
-
-                            let data = data.trim_start();
-                            if data.is_empty() {
-                                continue;
-                            }
-
-                            if data == "[DONE]" {
-                                if !Self::complete_open_model_blocks(&tx, &mut state).await {
-                                    return;
-                                }
-                                let _ = tx
-                                    .send(Ok(ModelBlockStreamEvent::Done {
-                                        finish_reason: final_finish_reason
-                                            .clone()
-                                            .or_else(|| Some("stop".to_string())),
-                                        usage: final_usage.clone(),
-                                    }))
-                                    .await;
-                                return;
-                            }
-
-                            let event = match serde_json::from_str::<Value>(data) {
-                                Ok(event) => event,
-                                Err(error) => {
-                                    let _ = tx
-                                        .send(Err(TalosError::InternalError(format!(
-                                            "OpenAI model block stream invalid SSE JSON: {error}"
-                                        ))))
-                                        .await;
-                                    return;
-                                }
-                            };
-
-                            if let Some(usage) = event.get("usage").and_then(|value| {
-                                serde_json::from_value::<OpenAIUsage>(value.clone()).ok()
-                            }) {
-                                final_usage = Some(Usage {
-                                    prompt_tokens: usage.prompt_tokens,
-                                    completion_tokens: usage.completion_tokens,
-                                    total_tokens: usage.total_tokens,
-                                    cache_creation_input_tokens: None,
-                                    cache_read_input_tokens: None,
-                                });
-                            }
-
-                            let choice = event
-                                .get("choices")
-                                .and_then(|c| c.as_array())
-                                .and_then(|arr| arr.first());
-                            let choice_index = Self::choice_index(choice);
-                            let delta_object = choice.and_then(|c| c.get("delta"));
-
-                            if let Some(reasoning_delta) =
-                                delta_object.and_then(Self::extract_reasoning_delta)
-                            {
-                                if !Self::ensure_reasoning_model_block(
-                                    &tx,
-                                    &mut state,
-                                    choice_index,
-                                )
-                                .await
-                                    || !Self::send_model_block_event(
-                                        &tx,
-                                        ModelBlockStreamEvent::BlockDelta {
-                                            model_item_id: Self::reasoning_model_item_id(
-                                                choice_index,
-                                            ),
-                                            delta: ModelBlockDelta::ReasoningText {
-                                                delta: reasoning_delta,
-                                            },
-                                        },
-                                    )
-                                    .await
-                                {
-                                    return;
-                                }
-                            }
-
-                            if let Some(delta) = delta_object
-                                .and_then(|d| d.get("content"))
-                                .and_then(|t| t.as_str())
-                            {
-                                if !Self::ensure_assistant_model_block(
-                                    &tx,
-                                    &mut state,
-                                    choice_index,
-                                )
-                                .await
-                                    || !Self::send_model_block_event(
-                                        &tx,
-                                        ModelBlockStreamEvent::BlockDelta {
-                                            model_item_id: Self::assistant_model_item_id(
-                                                choice_index,
-                                            ),
-                                            delta: ModelBlockDelta::AssistantText {
-                                                delta: delta.to_string(),
-                                            },
-                                        },
-                                    )
-                                    .await
-                                {
-                                    return;
-                                }
-                            }
-
-                            if let Some(tool_calls) = delta_object
-                                .and_then(|d| d.get("tool_calls"))
-                                .and_then(|t| t.as_array())
-                            {
-                                for tool_call_delta in tool_calls {
-                                    let index = tool_call_delta
-                                        .get("index")
-                                        .and_then(|v| v.as_u64())
-                                        .unwrap_or(0)
-                                        as usize;
-                                    let mut should_start = false;
-                                    {
-                                        let entry = tool_acc.entry(index).or_default();
-                                        if let Some(id) = tool_call_delta
-                                            .get("id")
-                                            .and_then(|v| v.as_str())
-                                            .map(str::to_string)
-                                        {
-                                            entry.id = Some(id);
-                                            should_start = true;
-                                        }
-                                        if let Some(name) = tool_call_delta
-                                            .get("function")
-                                            .and_then(|f| f.get("name"))
-                                            .and_then(|v| v.as_str())
-                                            .map(str::to_string)
-                                        {
-                                            entry.name = Some(name);
-                                            should_start = true;
-                                        }
-                                    }
-
-                                    let arguments_delta = tool_call_delta
-                                        .get("function")
-                                        .and_then(|f| f.get("arguments"))
-                                        .and_then(|v| v.as_str())
-                                        .map(str::to_string);
-                                    if arguments_delta.is_some() {
-                                        should_start = true;
-                                    }
-
-                                    if should_start {
-                                        let entry = tool_acc.entry(index).or_default();
-                                        if !Self::ensure_tool_model_block(
-                                            &tx, &mut state, index, entry,
-                                        )
-                                        .await
-                                        {
-                                            return;
-                                        }
-                                    }
-
-                                    if let Some(arguments_delta) = arguments_delta {
-                                        let entry = tool_acc.entry(index).or_default();
-                                        entry.arguments.push_str(&arguments_delta);
-                                        if !Self::send_model_block_event(
-                                            &tx,
-                                            ModelBlockStreamEvent::BlockDelta {
-                                                model_item_id: Self::tool_model_item_id(index),
-                                                delta: ModelBlockDelta::ToolArguments {
-                                                    delta: arguments_delta,
-                                                },
-                                            },
-                                        )
-                                        .await
-                                        {
-                                            return;
-                                        }
-                                    }
-                                }
-                            }
-
-                            if let Some(finish_reason) = choice
-                                .and_then(|c| c.get("finish_reason"))
-                                .and_then(|r| r.as_str())
-                            {
-                                final_finish_reason = Some(finish_reason.to_string());
-                                if !Self::complete_open_model_blocks(&tx, &mut state).await {
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let _ = tx
-                            .send(Err(TalosError::InternalError(format!(
-                                "Stream error: {}",
-                                e
-                            ))))
-                            .await;
-                        return;
-                    }
-                }
-            }
-        });
-
-        Ok(ModelBlockStream::new(rx))
+        match self.config.protocol {
+            OpenAIProtocol::Chat => Ok(chat_protocol::model_blocks(
+                response,
+                chat_protocol::ChatCompletionModelBlocks::openai().with_identity(
+                    self.config.display_name.clone(),
+                    self.config.item_prefix.clone(),
+                ),
+            )),
+            OpenAIProtocol::Responses => Ok(responses_protocol::model_blocks(
+                response,
+                responses_protocol::ResponsesModelBlocks::openai().with_identity(
+                    self.config.display_name.clone(),
+                    self.config.item_prefix.clone(),
+                ),
+            )),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use talos_llm_provider::{CacheControl, CacheControlKind, PromptCacheSupport};
+    use talos_llm_provider::{
+        CacheControl, CacheControlKind, ChatMessage, ModelBlockDelta, ModelBlockKind,
+        ModelBlockStreamEvent, PromptCacheSupport, ReasoningEffort, ToolDefinition,
+    };
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
@@ -1075,6 +440,31 @@ mod tests {
         assert_eq!(config.api_key, "test-api-key");
         assert_eq!(config.base_url, "https://custom.openai.com/v1");
         assert_eq!(config.timeout_secs, 120);
+        assert_eq!(config.protocol, OpenAIProtocol::Chat);
+    }
+
+    #[test]
+    fn test_openai_config_can_select_responses_protocol() {
+        let config = OpenAIConfig::new("test-api-key").with_protocol(OpenAIProtocol::Responses);
+
+        assert_eq!(config.protocol, OpenAIProtocol::Responses);
+    }
+
+    #[test]
+    fn test_endpoint_url_appends_protocol_endpoint_to_base_url() {
+        let provider = OpenAIProvider::new(
+            OpenAIConfig::new("test-api-key")
+                .with_base_url("https://dashscope.aliyuncs.com/compatible-mode/v1/"),
+        );
+
+        assert_eq!(
+            provider.endpoint_url("chat/completions"),
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+        );
+        assert_eq!(
+            provider.endpoint_url("responses"),
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/responses"
+        );
     }
 
     #[tokio::test]
@@ -1152,6 +542,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_stream_model_blocks_maps_responses_events() {
+        let body = concat!(
+            "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\"}}\n\n",
+            "data: {\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":0,\"delta\":\"think\"}\n\n",
+            "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\"}}\n\n",
+            "data: {\"type\":\"response.output_text.delta\",\"output_index\":1,\"delta\":\"hello\"}\n\n",
+            "data: {\"type\":\"response.output_item.added\",\"output_index\":2,\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"read\"}}\n\n",
+            "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":2,\"delta\":\"{\\\"path\\\"\"}\n\n",
+            "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":2,\"delta\":\":\\\"/tmp/a\\\"}\"}\n\n",
+            "data: {\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"read\"}}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n"
+        )
+        .to_string();
+        let base_url = spawn_sse_server(body).await;
+        let provider = OpenAIProvider::new(
+            OpenAIConfig::new("test-api-key")
+                .with_base_url(base_url)
+                .with_protocol(OpenAIProtocol::Responses),
+        );
+        let stream = provider
+            .stream_model_blocks(ChatRequest::new_user("test", "gpt-test"))
+            .await
+            .expect("stream should start");
+
+        let events = collect_model_events(stream).await;
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ModelBlockStreamEvent::BlockStarted(started)
+                if started.model_item_id == "openai-response-0-reasoning"
+                    && started.provider_item_id.as_deref() == Some("rs_1")
+                    && started.kind == ModelBlockKind::Reasoning
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ModelBlockStreamEvent::BlockDelta { model_item_id, delta: ModelBlockDelta::ReasoningText { delta } }
+                if model_item_id == "openai-response-0-reasoning" && delta == "think"
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ModelBlockStreamEvent::BlockDelta { model_item_id, delta: ModelBlockDelta::AssistantText { delta } }
+                if model_item_id == "openai-response-1-text" && delta == "hello"
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ModelBlockStreamEvent::BlockStarted(started)
+                if started.model_item_id == "openai-response-2-tool"
+                    && started.provider_item_id.as_deref() == Some("fc_1")
+                    && started.tool_call.as_ref().and_then(|call| call.call_id.as_deref()) == Some("call_1")
+                    && started.tool_call.as_ref().and_then(|call| call.tool_name.as_deref()) == Some("read")
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ModelBlockStreamEvent::BlockDelta { model_item_id, delta: ModelBlockDelta::ToolArguments { delta } }
+                if model_item_id == "openai-response-2-tool" && delta == "{\"path\""
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ModelBlockStreamEvent::BlockCompleted(completed)
+                if completed.model_item_id == "openai-response-2-tool"
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ModelBlockStreamEvent::Done { usage: Some(usage), finish_reason: Some(reason) }
+                if usage.total_tokens == 3 && reason == "stop"
+        )));
+    }
+
+    #[tokio::test]
     async fn test_stream_model_blocks_fails_invalid_sse_json() {
         let base_url = spawn_sse_server("data: {not-json}\n\n".to_string()).await;
         let provider =
@@ -1174,49 +633,46 @@ mod tests {
             ChatMessage::assistant("Hi there!"),
         ];
 
-        let openai_msgs = OpenAIProvider::convert_messages(messages);
+        let openai_msgs = chat_protocol::messages(messages, false);
 
         assert_eq!(openai_msgs.len(), 3);
         assert_eq!(openai_msgs[0].role, "system");
-        assert_eq!(
-            openai_msgs[0].content.as_deref(),
-            Some("You are a helpful assistant")
-        );
+        assert!(matches!(
+            openai_msgs[0].content.as_ref(),
+            Some(chat_protocol::ChatCompletionMessageContent::Text(text))
+                if text == "You are a helpful assistant"
+        ));
         assert_eq!(openai_msgs[1].role, "user");
-        assert_eq!(openai_msgs[1].content.as_deref(), Some("Hello"));
+        assert!(matches!(
+            openai_msgs[1].content.as_ref(),
+            Some(chat_protocol::ChatCompletionMessageContent::Text(text)) if text == "Hello"
+        ));
         assert_eq!(openai_msgs[2].role, "assistant");
-        assert_eq!(openai_msgs[2].content.as_deref(), Some("Hi there!"));
+        assert!(matches!(
+            openai_msgs[2].content.as_ref(),
+            Some(chat_protocol::ChatCompletionMessageContent::Text(text)) if text == "Hi there!"
+        ));
     }
 
     #[test]
     fn test_openai_request_serialization_with_tools() {
-        let req = OpenAIRequest {
-            model: "gpt-4o".to_string(),
-            messages: vec![OpenAIMessage {
-                role: "user".to_string(),
-                content: Some("Hello".to_string()),
-                name: None,
-                tool_call_id: None,
-                tool_calls: None,
-            }],
-            temperature: Some(0.7),
-            max_tokens: Some(100),
-            top_p: None,
-            stop: None,
-            tools: Some(vec![OpenAITool {
-                r#type: "function".to_string(),
-                function: OpenAIFunctionDefinition {
-                    name: "read".to_string(),
-                    description: "Read file".to_string(),
-                    parameters: Some(serde_json::json!({"type": "object"})),
-                },
-            }]),
-            tool_choice: Some(OpenAIToolChoice::Simple("auto".to_string())),
-            parallel_tool_calls: Some(true),
-            reasoning_effort: None,
-            stream: None,
-            stream_options: None,
-        };
+        let req = chat_protocol::request(
+            ChatRequest::builder()
+                .model("gpt-4o")
+                .messages(vec![ChatMessage::user("Hello")])
+                .temperature(0.7)
+                .max_tokens(100)
+                .tools(vec![ToolDefinition::new(
+                    "read",
+                    "Read file",
+                    Some(serde_json::json!({"type": "object"})),
+                )])
+                .tool_choice(talos_llm_provider::ToolChoice::Auto)
+                .parallel_tool_calls(true)
+                .build(),
+            false,
+            chat_protocol::ChatCompletionRequestOptions::default(),
+        );
 
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("\"model\":\"gpt-4o\""));
@@ -1225,14 +681,11 @@ mod tests {
     }
 
     #[test]
-    fn test_build_request_maps_native_thinking_effort() {
+    fn test_build_request_maps_reasoning_effort() {
         let request = ChatRequest::builder()
             .model("gpt-4o")
             .messages(vec![ChatMessage::user("hello")])
-            .native_thinking(NativeThinkingConfig {
-                effort: NativeThinkingEffort::High,
-                budget_tokens: Some(2048),
-            })
+            .reasoning_effort(ReasoningEffort::High)
             .build();
 
         let built = OpenAIProvider::build_request(request, false);
@@ -1242,16 +695,16 @@ mod tests {
 
     #[test]
     fn test_parse_tool_calls() {
-        let calls = vec![OpenAIToolCall {
+        let calls = vec![chat_protocol::ChatCompletionToolCall {
             id: "call_1".to_string(),
             r#type: "function".to_string(),
-            function: OpenAIFunctionCall {
+            function: chat_protocol::ChatCompletionFunctionCall {
                 name: "read".to_string(),
                 arguments: "{\"path\":\"/tmp/a\"}".to_string(),
             },
         }];
 
-        let parsed = OpenAIProvider::parse_tool_calls(Some(calls)).unwrap();
+        let parsed = chat_protocol::tool_calls(Some(calls)).unwrap();
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].name, "read");
         assert_eq!(parsed[0].arguments["path"], "/tmp/a");
@@ -1267,6 +720,19 @@ mod tests {
             provider.prompt_cache_support(),
             PromptCacheSupport::Unsupported
         );
+    }
+
+    #[test]
+    fn test_provider_identity_can_be_overridden() {
+        let config = OpenAIConfig::new("test-key").with_identity(
+            "openrouter",
+            "OpenRouter",
+            "anthropic/claude-sonnet-4.5",
+        );
+        let provider = OpenAIProvider::new(config);
+
+        assert_eq!(provider.name(), "openrouter");
+        assert_eq!(provider.default_model(), "anthropic/claude-sonnet-4.5");
     }
 
     #[test]
@@ -1288,20 +754,20 @@ mod tests {
     }
 
     #[test]
-    fn test_native_thinking_support_is_model_gated() {
+    fn test_reasoning_support_is_model_gated() {
         let provider = OpenAIProvider::new(OpenAIConfig::new("test-key"));
 
         assert_eq!(
-            provider.native_thinking_support("o3-mini"),
-            NativeThinkingSupport::Supported
+            provider.reasoning_support("o3-mini"),
+            ReasoningSupport::Supported
         );
         assert_eq!(
-            provider.native_thinking_support("gpt-5"),
-            NativeThinkingSupport::Supported
+            provider.reasoning_support("gpt-5"),
+            ReasoningSupport::Supported
         );
         assert_eq!(
-            provider.native_thinking_support("gpt-4o"),
-            NativeThinkingSupport::Unsupported
+            provider.reasoning_support("gpt-4o"),
+            ReasoningSupport::Unsupported
         );
     }
 
@@ -1310,7 +776,7 @@ mod tests {
         let delta = serde_json::json!({
             "reasoning_content": "bailian-only"
         });
-        assert!(OpenAIProvider::extract_reasoning_delta(&delta).is_none());
+        assert!(chat_protocol::reasoning_delta(&delta, &["reasoning"]).is_none());
     }
 
     #[test]
@@ -1355,7 +821,7 @@ mod tests {
             "Read file",
             Some(serde_json::json!({"type":"object"})),
         )];
-        let converted = OpenAIProvider::convert_tools(Some(defs)).unwrap();
+        let converted = chat_protocol::tools(Some(defs)).unwrap();
         assert_eq!(converted.len(), 1);
         assert_eq!(converted[0].function.name, "read");
     }

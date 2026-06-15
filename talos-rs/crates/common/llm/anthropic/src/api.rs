@@ -1,21 +1,13 @@
 //! Talos LLM Anthropic provider.
 
 use async_trait::async_trait;
-use futures_util::StreamExt;
 use reqwest::{header, Client};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::collections::HashMap;
 use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
-    CacheControl, ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall,
-    LlmProvider, ModelBlockCompleted, ModelBlockDelta, ModelBlockKind, ModelBlockStarted,
-    ModelBlockStream, ModelBlockStreamEvent, ModelToolCallStart, NativeThinkingConfig,
-    NativeThinkingSupport, PromptCacheSupport, Role, SseLineDecoder, ToolChoice, ToolDefinition,
-    Usage,
+    protocols::messages as messages_protocol, ChatRequest, ChatResponse, ChatStream, LlmProvider,
+    ModelBlockStream, PromptCacheSupport, ReasoningSupport,
 };
-use tokio::sync::mpsc;
 use tracing::{debug, error, info};
 
 /// Anthropic API configuration.
@@ -51,107 +43,6 @@ impl AnthropicConfig {
         self.default_model = Some(model.into());
         self
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct AnthropicMessage {
-    role: String,
-    content: Value,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct AnthropicTool {
-    name: String,
-    description: String,
-    #[serde(rename = "input_schema")]
-    input_schema: Value,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub(crate) enum AnthropicToolChoice {
-    Auto,
-    Any,
-    Tool { name: String },
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct AnthropicRequest {
-    model: String,
-    messages: Vec<AnthropicMessage>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<Vec<AnthropicTextBlock>>,
-    max_tokens: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    temperature: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    top_p: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    stop_sequences: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tools: Option<Vec<AnthropicTool>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tool_choice: Option<AnthropicToolChoice>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    thinking: Option<AnthropicThinkingConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    stream: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct AnthropicThinkingConfig {
-    r#type: String,
-    budget_tokens: u32,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct AnthropicResponse {
-    #[allow(dead_code)]
-    id: String,
-    #[allow(dead_code)]
-    #[serde(rename = "type")]
-    response_type: String,
-    #[allow(dead_code)]
-    role: String,
-    content: Vec<AnthropicContent>,
-    model: String,
-    stop_reason: Option<String>,
-    usage: AnthropicUsage,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct AnthropicContent {
-    #[serde(rename = "type")]
-    content_type: String,
-    #[serde(default)]
-    text: Option<String>,
-    #[serde(default)]
-    thinking: Option<String>,
-    #[serde(default)]
-    id: Option<String>,
-    #[serde(default)]
-    name: Option<String>,
-    #[serde(default)]
-    input: Option<Value>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct AnthropicUsage {
-    input_tokens: u32,
-    output_tokens: u32,
-    #[serde(default)]
-    cache_creation_input_tokens: Option<u32>,
-    #[serde(default)]
-    cache_read_input_tokens: Option<u32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub(crate) struct AnthropicTextBlock {
-    #[serde(rename = "type")]
-    block_type: String,
-    text: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    cache_control: Option<CacheControl>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -245,191 +136,20 @@ impl AnthropicProvider {
         headers
     }
 
-    pub(crate) fn text_block(text: String, cache_control: Option<CacheControl>) -> Value {
-        serde_json::to_value(AnthropicTextBlock {
-            block_type: "text".to_string(),
-            text,
-            cache_control,
-        })
-        .expect("anthropic text block should serialize")
+    pub(crate) fn build_request(
+        request: ChatRequest,
+        stream: Option<bool>,
+    ) -> messages_protocol::MessagesRequest {
+        messages_protocol::request(request, stream)
     }
 
-    pub(crate) fn convert_tool_choice(choice: Option<ToolChoice>) -> Option<AnthropicToolChoice> {
-        match choice {
-            Some(ToolChoice::Auto) => Some(AnthropicToolChoice::Auto),
-            Some(ToolChoice::Required) => Some(AnthropicToolChoice::Any),
-            Some(ToolChoice::Named { name }) => Some(AnthropicToolChoice::Tool { name }),
-            Some(ToolChoice::None) | None => None,
-        }
-    }
-
-    pub(crate) fn convert_tools(tools: Option<Vec<ToolDefinition>>) -> Option<Vec<AnthropicTool>> {
-        tools.map(|defs| {
-            defs.into_iter()
-                .map(|tool| AnthropicTool {
-                    name: tool.name,
-                    description: tool.description,
-                    input_schema: tool
-                        .parameters
-                        .unwrap_or_else(|| serde_json::json!({"type": "object", "properties": {}})),
-                })
-                .collect()
-        })
-    }
-
-    pub(crate) fn convert_messages(
-        messages: Vec<ChatMessage>,
-    ) -> (Option<Vec<AnthropicTextBlock>>, Vec<AnthropicMessage>) {
-        let mut system_blocks: Option<Vec<AnthropicTextBlock>> = None;
-        let mut anthropic_messages = Vec::new();
-
-        for msg in messages {
-            match msg.role {
-                Role::System => {
-                    system_blocks
-                        .get_or_insert_with(Vec::new)
-                        .push(AnthropicTextBlock {
-                            block_type: "text".to_string(),
-                            text: msg.content,
-                            cache_control: msg.cache_control,
-                        });
-                }
-                Role::User => {
-                    anthropic_messages.push(AnthropicMessage {
-                        role: "user".to_string(),
-                        content: Value::Array(vec![Self::text_block(
-                            msg.content,
-                            msg.cache_control,
-                        )]),
-                    });
-                }
-                Role::Assistant => {
-                    if let Some(tool_calls) = msg.tool_calls {
-                        let mut blocks = Vec::new();
-                        if !msg.content.is_empty() {
-                            blocks.push(Self::text_block(msg.content, msg.cache_control));
-                        }
-                        for call in tool_calls {
-                            blocks.push(serde_json::json!({
-                                "type": "tool_use",
-                                "id": call.id,
-                                "name": call.name,
-                                "input": call.arguments,
-                            }));
-                        }
-                        anthropic_messages.push(AnthropicMessage {
-                            role: "assistant".to_string(),
-                            content: Value::Array(blocks),
-                        });
-                    } else {
-                        anthropic_messages.push(AnthropicMessage {
-                            role: "assistant".to_string(),
-                            content: Value::Array(vec![Self::text_block(
-                                msg.content,
-                                msg.cache_control,
-                            )]),
-                        });
-                    }
-                }
-                Role::Tool => {
-                    let tool_use_id = msg.tool_call_id.unwrap_or_default();
-                    anthropic_messages.push(AnthropicMessage {
-                        role: "user".to_string(),
-                        content: Value::Array(vec![serde_json::json!({
-                            "type": "tool_result",
-                            "tool_use_id": tool_use_id,
-                            "content": msg.content,
-                            "is_error": false,
-                        })]),
-                    });
-                }
-            }
-        }
-
-        (system_blocks, anthropic_messages)
-    }
-
-    pub(crate) fn parse_response_content(
-        content: &[AnthropicContent],
-    ) -> (String, Vec<String>, Option<Vec<FunctionCall>>) {
-        let mut text = Vec::new();
-        let mut reasoning = Vec::new();
-        let mut calls = Vec::new();
-
-        for block in content {
-            match block.content_type.as_str() {
-                "text" => {
-                    if let Some(fragment) = block.text.as_ref() {
-                        text.push(fragment.clone());
-                    }
-                }
-                "thinking" => {
-                    if let Some(fragment) = block.thinking.as_ref() {
-                        reasoning.push(fragment.clone());
-                    }
-                }
-                "tool_use" => {
-                    calls.push(FunctionCall::new(
-                        block.id.clone().unwrap_or_default(),
-                        block.name.clone().unwrap_or_default(),
-                        block.input.clone().unwrap_or(Value::Null),
-                    ));
-                }
-                _ => {}
-            }
-        }
-
-        let tool_calls = if calls.is_empty() { None } else { Some(calls) };
-        (text.join(""), reasoning, tool_calls)
-    }
-
-    pub(crate) fn build_request(request: ChatRequest, stream: Option<bool>) -> AnthropicRequest {
-        let (system, messages) = Self::convert_messages(request.messages);
-        AnthropicRequest {
-            model: request.model,
-            messages,
-            system,
-            max_tokens: request.max_tokens.unwrap_or(1024),
-            temperature: request.temperature,
-            top_p: request.top_p,
-            stop_sequences: request.stop,
-            tools: Self::convert_tools(request.tools),
-            tool_choice: Self::convert_tool_choice(request.tool_choice),
-            thinking: request
-                .native_thinking
-                .as_ref()
-                .map(Self::convert_native_thinking),
-            stream,
-        }
-    }
-
-    pub(crate) fn convert_native_thinking(
-        config: &NativeThinkingConfig,
-    ) -> AnthropicThinkingConfig {
-        AnthropicThinkingConfig {
-            r#type: "enabled".to_string(),
-            budget_tokens: config.budget_tokens.unwrap_or(2048),
-        }
-    }
-
-    pub(crate) fn supports_native_thinking_model(model: &str) -> bool {
+    pub(crate) fn supports_reasoning_model(model: &str) -> bool {
         let normalized = model.trim().to_ascii_lowercase();
         normalized.starts_with("claude-3-7-sonnet")
             || normalized.starts_with("claude-haiku-4")
             || normalized.starts_with("claude-sonnet-4")
             || normalized.starts_with("claude-opus-4")
             || normalized.starts_with("claude-4")
-    }
-
-    fn block_model_item_id(index: usize, kind: &str) -> String {
-        format!("anthropic-block-{index}-{kind}")
-    }
-
-    async fn send_model_block_event(
-        tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
-        event: ModelBlockStreamEvent,
-    ) -> bool {
-        tx.send(Ok(event)).await.is_ok()
     }
 
     async fn send_chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
@@ -462,29 +182,12 @@ impl AnthropicProvider {
             )));
         }
 
-        let anthropic_resp: AnthropicResponse = response
+        let anthropic_resp: messages_protocol::MessagesResponse = response
             .json()
             .await
             .map_err(|e| TalosError::InternalError(format!("Failed to parse response: {}", e)))?;
 
-        let (content, reasoning, tool_calls) =
-            Self::parse_response_content(&anthropic_resp.content);
-
-        Ok(ChatResponse {
-            content,
-            reasoning,
-            model: anthropic_resp.model,
-            usage: Usage {
-                prompt_tokens: anthropic_resp.usage.input_tokens,
-                completion_tokens: anthropic_resp.usage.output_tokens,
-                total_tokens: anthropic_resp.usage.input_tokens
-                    + anthropic_resp.usage.output_tokens,
-                cache_creation_input_tokens: anthropic_resp.usage.cache_creation_input_tokens,
-                cache_read_input_tokens: anthropic_resp.usage.cache_read_input_tokens,
-            },
-            finish_reason: anthropic_resp.stop_reason,
-            tool_calls,
-        })
+        Ok(messages_protocol::chat_response(anthropic_resp))
     }
 
     async fn send_stream(&self, request: ChatRequest) -> TalosResult<reqwest::Response> {
@@ -532,11 +235,11 @@ impl LlmProvider for AnthropicProvider {
             .to_string()
     }
 
-    fn native_thinking_support(&self, model: &str) -> NativeThinkingSupport {
-        if Self::supports_native_thinking_model(model) {
-            NativeThinkingSupport::Supported
+    fn reasoning_support(&self, model: &str) -> ReasoningSupport {
+        if Self::supports_reasoning_model(model) {
+            ReasoningSupport::Supported
         } else {
-            NativeThinkingSupport::Unsupported
+            ReasoningSupport::Unsupported
         }
     }
 
@@ -556,434 +259,15 @@ impl LlmProvider for AnthropicProvider {
 
     async fn stream(&self, request: ChatRequest) -> TalosResult<ChatStream> {
         let response = self.send_stream(request).await?;
-        let (tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(100);
-
-        tokio::spawn(async move {
-            let mut stream = response.bytes_stream();
-            let mut stop_reason: Option<String> = None;
-            let mut decoder = SseLineDecoder::new();
-            while let Some(chunk_result) = stream.next().await {
-                match chunk_result {
-                    Ok(bytes) => {
-                        for line in decoder.push(&bytes) {
-                            let line = match line {
-                                Ok(line) => line,
-                                Err(err) => {
-                                    let _ = tx.send(Err(err)).await;
-                                    return;
-                                }
-                            };
-                            let Some(data) = line.strip_prefix("data:") else {
-                                continue;
-                            };
-                            let data = data.trim_start();
-                            if data.is_empty() {
-                                continue;
-                            };
-                            let event = match serde_json::from_str::<Value>(data) {
-                                Ok(event) => event,
-                                Err(error) => {
-                                    let _ = tx
-                                        .send(Err(TalosError::InternalError(format!(
-                                            "Anthropic stream invalid SSE JSON: {error}"
-                                        ))))
-                                        .await;
-                                    return;
-                                }
-                            };
-
-                            let event_type =
-                                event.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                            match event_type {
-                                "error" => {
-                                    let msg = event
-                                        .get("error")
-                                        .and_then(|e| e.get("message"))
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("unknown error");
-                                    let _ = tx
-                                        .send(Err(TalosError::InternalError(format!(
-                                            "Anthropic stream error: {}",
-                                            msg
-                                        ))))
-                                        .await;
-                                    return;
-                                }
-                                "content_block_delta" => {
-                                    if let Some(delta) = event
-                                        .get("delta")
-                                        .and_then(|d| d.get("text"))
-                                        .and_then(|t| t.as_str())
-                                    {
-                                        let _ = tx
-                                            .send(Ok(ChatChunk {
-                                                delta: delta.to_string(),
-                                                finish_reason: None,
-                                            }))
-                                            .await;
-                                    }
-                                }
-                                "message_delta" => {
-                                    if let Some(reason) = event
-                                        .get("delta")
-                                        .and_then(|d| d.get("stop_reason"))
-                                        .and_then(|v| v.as_str())
-                                    {
-                                        stop_reason = Some(reason.to_string());
-                                    }
-                                }
-                                "message_stop" => {
-                                    let _ = tx
-                                        .send(Ok(ChatChunk {
-                                            delta: String::new(),
-                                            finish_reason: Some(
-                                                stop_reason
-                                                    .take()
-                                                    .unwrap_or_else(|| "stop".to_string()),
-                                            ),
-                                        }))
-                                        .await;
-                                    return;
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let _ = tx
-                            .send(Err(TalosError::InternalError(format!(
-                                "Stream error: {}",
-                                e
-                            ))))
-                            .await;
-                        return;
-                    }
-                }
-            }
-        });
-
-        Ok(ChatStream::new(rx))
+        Ok(messages_protocol::stream(response, "Anthropic"))
     }
 
     async fn stream_model_blocks(&self, request: ChatRequest) -> TalosResult<ModelBlockStream> {
         let response = self.send_stream(request).await?;
-        let (tx, rx) = mpsc::channel::<TalosResult<ModelBlockStreamEvent>>(100);
-
-        tokio::spawn(async move {
-            #[derive(Debug, Clone)]
-            enum ActiveAnthropicBlock {
-                Reasoning { model_item_id: String },
-                AssistantText { model_item_id: String },
-                ToolCall { model_item_id: String },
-            }
-
-            let mut stream = response.bytes_stream();
-            let mut active_blocks: HashMap<usize, ActiveAnthropicBlock> = HashMap::new();
-            let mut stop_reason: Option<String> = None;
-            let mut output_tokens: Option<u32> = None;
-            let mut decoder = SseLineDecoder::new();
-
-            while let Some(chunk_result) = stream.next().await {
-                match chunk_result {
-                    Ok(bytes) => {
-                        for line in decoder.push(&bytes) {
-                            let line = match line {
-                                Ok(line) => line,
-                                Err(err) => {
-                                    let _ = tx.send(Err(err)).await;
-                                    return;
-                                }
-                            };
-                            let Some(data) = line.strip_prefix("data:") else {
-                                continue;
-                            };
-                            let data = data.trim_start();
-                            if data.is_empty() {
-                                continue;
-                            };
-                            let event = match serde_json::from_str::<Value>(data) {
-                                Ok(event) => event,
-                                Err(error) => {
-                                    let _ = tx
-                                        .send(Err(TalosError::InternalError(format!(
-                                            "Anthropic model block stream invalid SSE JSON: {error}"
-                                        ))))
-                                        .await;
-                                    return;
-                                }
-                            };
-
-                            let event_type =
-                                event.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                            match event_type {
-                                "error" => {
-                                    let msg = event
-                                        .get("error")
-                                        .and_then(|e| e.get("message"))
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("unknown error");
-                                    let _ = tx
-                                        .send(Err(TalosError::InternalError(format!(
-                                            "Anthropic stream error: {}",
-                                            msg
-                                        ))))
-                                        .await;
-                                    return;
-                                }
-                                "content_block_start" => {
-                                    let index =
-                                        event.get("index").and_then(|v| v.as_u64()).unwrap_or(0)
-                                            as usize;
-                                    let block = event.get("content_block");
-                                    let block_type = block
-                                        .and_then(|b| b.get("type"))
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("");
-                                    let provider_item_id = block
-                                        .and_then(|b| b.get("id"))
-                                        .and_then(|v| v.as_str())
-                                        .map(str::to_string)
-                                        .or_else(|| Some(format!("content_block:{index}")));
-
-                                    let (active, started) = match block_type {
-                                        "thinking" => {
-                                            let model_item_id =
-                                                AnthropicProvider::block_model_item_id(
-                                                    index, "thinking",
-                                                );
-                                            (
-                                                ActiveAnthropicBlock::Reasoning {
-                                                    model_item_id: model_item_id.clone(),
-                                                },
-                                                ModelBlockStarted {
-                                                    model_item_id,
-                                                    provider_item_id,
-                                                    kind: ModelBlockKind::Reasoning,
-                                                    assistant_text_phase_hint: None,
-                                                    assistant_text_phase_hint_source: None,
-                                                    tool_call: None,
-                                                },
-                                            )
-                                        }
-                                        "text" => {
-                                            let model_item_id =
-                                                AnthropicProvider::block_model_item_id(
-                                                    index, "text",
-                                                );
-                                            (
-                                                ActiveAnthropicBlock::AssistantText {
-                                                    model_item_id: model_item_id.clone(),
-                                                },
-                                                ModelBlockStarted {
-                                                    model_item_id,
-                                                    provider_item_id,
-                                                    kind: ModelBlockKind::AssistantText,
-                                                    assistant_text_phase_hint: None,
-                                                    assistant_text_phase_hint_source: None,
-                                                    tool_call: None,
-                                                },
-                                            )
-                                        }
-                                        "tool_use" => {
-                                            let call_id = block
-                                                .and_then(|b| b.get("id"))
-                                                .and_then(|v| v.as_str())
-                                                .map(str::to_string);
-                                            let tool_name = block
-                                                .and_then(|b| b.get("name"))
-                                                .and_then(|v| v.as_str())
-                                                .map(str::to_string);
-                                            let model_item_id =
-                                                AnthropicProvider::block_model_item_id(
-                                                    index, "tool",
-                                                );
-                                            (
-                                                ActiveAnthropicBlock::ToolCall {
-                                                    model_item_id: model_item_id.clone(),
-                                                },
-                                                ModelBlockStarted {
-                                                    model_item_id,
-                                                    provider_item_id: call_id.clone(),
-                                                    kind: ModelBlockKind::ToolCall,
-                                                    assistant_text_phase_hint: None,
-                                                    assistant_text_phase_hint_source: None,
-                                                    tool_call: Some(ModelToolCallStart {
-                                                        index,
-                                                        call_id,
-                                                        tool_name,
-                                                    }),
-                                                },
-                                            )
-                                        }
-                                        _ => continue,
-                                    };
-                                    active_blocks.insert(index, active);
-                                    if !AnthropicProvider::send_model_block_event(
-                                        &tx,
-                                        ModelBlockStreamEvent::BlockStarted(started),
-                                    )
-                                    .await
-                                    {
-                                        return;
-                                    }
-                                }
-                                "content_block_delta" => {
-                                    let index =
-                                        event.get("index").and_then(|v| v.as_u64()).unwrap_or(0)
-                                            as usize;
-                                    let delta = event.get("delta");
-                                    let delta_type = delta
-                                        .and_then(|d| d.get("type"))
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("");
-                                    let Some(active_block) = active_blocks.get(&index) else {
-                                        continue;
-                                    };
-                                    let mapped_delta = match (delta_type, active_block) {
-                                        (
-                                            "thinking_delta",
-                                            ActiveAnthropicBlock::Reasoning { model_item_id },
-                                        ) => delta
-                                            .and_then(|d| d.get("thinking"))
-                                            .and_then(|v| v.as_str())
-                                            .map(|text| {
-                                                (
-                                                    model_item_id.clone(),
-                                                    ModelBlockDelta::ReasoningText {
-                                                        delta: text.to_string(),
-                                                    },
-                                                )
-                                            }),
-                                        (
-                                            "text_delta",
-                                            ActiveAnthropicBlock::AssistantText { model_item_id },
-                                        ) => delta
-                                            .and_then(|d| d.get("text"))
-                                            .and_then(|v| v.as_str())
-                                            .map(|text| {
-                                                (
-                                                    model_item_id.clone(),
-                                                    ModelBlockDelta::AssistantText {
-                                                        delta: text.to_string(),
-                                                    },
-                                                )
-                                            }),
-                                        (
-                                            "input_json_delta",
-                                            ActiveAnthropicBlock::ToolCall { model_item_id },
-                                        ) => delta
-                                            .and_then(|d| d.get("partial_json"))
-                                            .and_then(|v| v.as_str())
-                                            .map(|partial_json| {
-                                                (
-                                                    model_item_id.clone(),
-                                                    ModelBlockDelta::ToolArguments {
-                                                        delta: partial_json.to_string(),
-                                                    },
-                                                )
-                                            }),
-                                        _ => None,
-                                    };
-
-                                    if let Some((model_item_id, delta)) = mapped_delta {
-                                        if !AnthropicProvider::send_model_block_event(
-                                            &tx,
-                                            ModelBlockStreamEvent::BlockDelta {
-                                                model_item_id,
-                                                delta,
-                                            },
-                                        )
-                                        .await
-                                        {
-                                            return;
-                                        }
-                                    }
-                                }
-                                "content_block_stop" => {
-                                    let index =
-                                        event.get("index").and_then(|v| v.as_u64()).unwrap_or(0)
-                                            as usize;
-                                    let Some(active_block) = active_blocks.remove(&index) else {
-                                        continue;
-                                    };
-                                    let model_item_id = match active_block {
-                                        ActiveAnthropicBlock::Reasoning { model_item_id }
-                                        | ActiveAnthropicBlock::AssistantText { model_item_id }
-                                        | ActiveAnthropicBlock::ToolCall { model_item_id } => {
-                                            model_item_id
-                                        }
-                                    };
-                                    if !AnthropicProvider::send_model_block_event(
-                                        &tx,
-                                        ModelBlockStreamEvent::BlockCompleted(
-                                            ModelBlockCompleted { model_item_id },
-                                        ),
-                                    )
-                                    .await
-                                    {
-                                        return;
-                                    }
-                                }
-                                "message_delta" => {
-                                    if let Some(reason) = event
-                                        .get("delta")
-                                        .and_then(|d| d.get("stop_reason"))
-                                        .and_then(|v| v.as_str())
-                                    {
-                                        stop_reason = Some(reason.to_string());
-                                    }
-                                    if let Some(tokens) = event
-                                        .get("usage")
-                                        .and_then(|u| u.get("output_tokens"))
-                                        .and_then(|v| v.as_u64())
-                                    {
-                                        output_tokens = Some(tokens as u32);
-                                    }
-                                }
-                                "message_stop" => {
-                                    if !active_blocks.is_empty() {
-                                        let _ = tx
-                                            .send(Err(TalosError::InternalError(
-                                                "Anthropic stream stopped with active content blocks"
-                                                    .to_string(),
-                                            )))
-                                            .await;
-                                        return;
-                                    }
-                                    let usage = output_tokens.map(|out| Usage {
-                                        prompt_tokens: 0,
-                                        completion_tokens: out,
-                                        total_tokens: out,
-                                        cache_creation_input_tokens: None,
-                                        cache_read_input_tokens: None,
-                                    });
-                                    let _ = tx
-                                        .send(Ok(ModelBlockStreamEvent::Done {
-                                            finish_reason: stop_reason
-                                                .take()
-                                                .or_else(|| Some("stop".to_string())),
-                                            usage,
-                                        }))
-                                        .await;
-                                    return;
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        let _ = tx
-                            .send(Err(TalosError::InternalError(format!(
-                                "Stream error: {}",
-                                e
-                            ))))
-                            .await;
-                        return;
-                    }
-                }
-            }
-        });
-
-        Ok(ModelBlockStream::new(rx))
+        Ok(messages_protocol::model_blocks(
+            response,
+            "Anthropic",
+            "anthropic",
+        ))
     }
 }

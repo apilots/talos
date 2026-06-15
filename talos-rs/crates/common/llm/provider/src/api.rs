@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use talos_error::{TalosError, TalosResult};
+pub use talos_types::{ModelSpeed, ReasoningEffort};
 use thiserror::Error;
 use tokio::sync::mpsc;
 
@@ -146,8 +147,8 @@ pub trait LlmProvider: Send + Sync {
     async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse>;
     async fn stream(&self, request: ChatRequest) -> TalosResult<ChatStream>;
     fn default_model(&self) -> String;
-    fn native_thinking_support(&self, _model: &str) -> NativeThinkingSupport {
-        NativeThinkingSupport::Unsupported
+    fn reasoning_support(&self, _model: &str) -> ReasoningSupport {
+        ReasoningSupport::Unsupported
     }
 
     fn prompt_cache_support(&self) -> PromptCacheSupport {
@@ -180,7 +181,8 @@ pub struct ChatRequest {
     pub tools: Option<Vec<ToolDefinition>>,
     pub tool_choice: Option<ToolChoice>,
     pub parallel_tool_calls: Option<bool>,
-    pub native_thinking: Option<NativeThinkingConfig>,
+    pub reasoning_effort: Option<ReasoningEffort>,
+    pub speed: Option<ModelSpeed>,
 }
 
 impl ChatRequest {
@@ -199,35 +201,30 @@ impl ChatRequest {
             tools: None,
             tool_choice: None,
             parallel_tool_calls: None,
-            native_thinking: None,
+            reasoning_effort: None,
+            speed: None,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum NativeThinkingEffort {
-    Low,
-    Medium,
-    High,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct NativeThinkingConfig {
-    pub effort: NativeThinkingEffort,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub budget_tokens: Option<u32>,
+pub fn reasoning_budget_tokens(effort: ReasoningEffort) -> u32 {
+    match effort {
+        ReasoningEffort::Low => 1024,
+        ReasoningEffort::Medium => 2048,
+        ReasoningEffort::High => 4096,
+        ReasoningEffort::XHigh => 8192,
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum NativeThinkingSupport {
+pub enum ReasoningSupport {
     #[default]
     Unsupported,
     Supported,
 }
 
-impl NativeThinkingSupport {
+impl ReasoningSupport {
     pub fn is_supported(self) -> bool {
         matches!(self, Self::Supported)
     }
@@ -656,7 +653,8 @@ pub struct ChatRequestBuilder {
     tools: Option<Vec<ToolDefinition>>,
     tool_choice: Option<ToolChoice>,
     parallel_tool_calls: Option<bool>,
-    native_thinking: Option<NativeThinkingConfig>,
+    reasoning_effort: Option<ReasoningEffort>,
+    speed: Option<ModelSpeed>,
 }
 
 impl ChatRequestBuilder {
@@ -711,8 +709,13 @@ impl ChatRequestBuilder {
         self
     }
 
-    pub fn native_thinking(mut self, config: NativeThinkingConfig) -> Self {
-        self.native_thinking = Some(config);
+    pub fn reasoning_effort(mut self, effort: ReasoningEffort) -> Self {
+        self.reasoning_effort = Some(effort);
+        self
+    }
+
+    pub fn speed(mut self, speed: ModelSpeed) -> Self {
+        self.speed = Some(speed);
         self
     }
 
@@ -727,7 +730,8 @@ impl ChatRequestBuilder {
             tools: self.tools,
             tool_choice: self.tool_choice,
             parallel_tool_calls: self.parallel_tool_calls,
-            native_thinking: self.native_thinking,
+            reasoning_effort: self.reasoning_effort,
+            speed: self.speed,
         }
     }
 }

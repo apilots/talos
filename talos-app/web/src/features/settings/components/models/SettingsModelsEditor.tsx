@@ -1,6 +1,15 @@
 import React, { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { LlmConfig, LlmConfigRead, ModelInputKind, ProviderConfig, ProviderModelConfig } from "@talos/sdk-browser";
+import type {
+  LlmConfig,
+  LlmConfigRead,
+  LlmProtocol,
+  ModelInputKind,
+  ModelSpeed,
+  ProviderConfig,
+  ProviderModelConfig,
+  ReasoningEffort,
+} from "@talos/sdk-browser";
 import { useTranslation } from "react-i18next";
 import { Brain, File, Image, Mic, Pencil, Plus, Trash2, Type, Video, X } from "lucide-react";
 
@@ -10,16 +19,35 @@ import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
 import { Panel } from "@/shared/ui/Panel";
 
-type ProviderKey = "anthropic" | "openai" | "bailian" | "ollama";
+type ProviderKey = "anthropic" | "openai" | "bailian" | "ollama" | "openrouter";
 
 const PROVIDERS: { key: ProviderKey; label: string }[] = [
   { key: "anthropic", label: "Anthropic" },
   { key: "openai", label: "OpenAI" },
   { key: "bailian", label: "Bailian" },
   { key: "ollama", label: "Ollama" },
+  { key: "openrouter", label: "OpenRouter" },
 ];
 
+const PROVIDER_PROTOCOLS: Record<ProviderKey, LlmProtocol[]> = {
+  anthropic: ["messages"],
+  openai: ["chat", "responses"],
+  bailian: ["chat"],
+  ollama: ["chat"],
+  openrouter: ["chat"],
+};
+
+const DEFAULT_PROTOCOLS: Record<ProviderKey, LlmProtocol> = {
+  anthropic: "messages",
+  openai: "chat",
+  bailian: "chat",
+  ollama: "chat",
+  openrouter: "chat",
+};
+
 const INPUT_KINDS: ModelInputKind[] = ["text", "image", "audio", "video", "file"];
+const REASONING_EFFORTS: ReasoningEffort[] = ["low", "medium", "high", "xhigh"];
+const MODEL_SPEEDS: ModelSpeed[] = ["standard", "fast"];
 
 const INPUT_KIND_ICONS: Record<ModelInputKind, React.ElementType> = {
   text: Type,
@@ -34,26 +62,31 @@ interface ModelFormState {
   name: string;
   context_window: string;
   reasoning: boolean;
+  reasoning_effort: ReasoningEffort;
+  speed: ModelSpeed;
   input: ModelInputKind[];
 }
 
 const emptyModelForm: ModelFormState = {
   id: "", name: "", context_window: "200000",
-  reasoning: false, input: ["text"],
+  reasoning: false, reasoning_effort: "medium", speed: "standard", input: ["text"],
 };
 
 function modelToForm(m: ProviderModelConfig): ModelFormState {
   return {
     id: m.id, name: m.name,
     context_window: String(m.context_window),
-    reasoning: m.reasoning, input: m.input,
+    reasoning: m.reasoning,
+    reasoning_effort: m.reasoning_effort ?? "medium",
+    speed: m.speed ?? "standard",
+    input: m.input,
   };
 }
 
 function formToModel(f: ModelFormState, existing?: ProviderModelConfig): ProviderModelConfig {
   const base: ProviderModelConfig = existing ?? {
     id: f.id, name: f.name, context_window: 0,
-    reasoning: false, input: ["text"],
+    reasoning: false, reasoning_effort: "medium", speed: "standard", input: ["text"],
     cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
     compat: {},
   };
@@ -62,6 +95,8 @@ function formToModel(f: ModelFormState, existing?: ProviderModelConfig): Provide
     id: f.id.trim(), name: f.name.trim(),
     context_window: parseInt(f.context_window, 10) || 0,
     reasoning: f.reasoning,
+    reasoning_effort: f.reasoning_effort,
+    speed: f.speed,
     input: f.input.length > 0 ? f.input : ["text"],
   };
 }
@@ -74,6 +109,17 @@ function fmtContext(n: number): string {
 function parseErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return "Request failed.";
+}
+
+function protocolLabel(protocol: LlmProtocol, t: (key: string) => string): string {
+  switch (protocol) {
+    case "chat":
+      return t("modelsPanel.protocolChat");
+    case "responses":
+      return t("modelsPanel.protocolResponses");
+    case "messages":
+      return t("modelsPanel.protocolMessages");
+  }
 }
 
 // ─── Model add/edit modal ─────────────────────────────────────────────────────
@@ -120,6 +166,35 @@ function ModelModal({ mode, form, saving, error, onChange, onSave, onClose }: Mo
           <div className="col-span-2">
             <label className="mb-1.5 block text-sm font-medium text-ink">{t("modelsPanel.contextWindow")}</label>
             <Input value={form.context_window} onChange={(e) => onChange({ ...form, context_window: e.target.value })} />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-ink">{t("modelsPanel.reasoningEffort")}</label>
+            <select
+              value={form.reasoning_effort}
+              onChange={(e) => onChange({ ...form, reasoning_effort: e.target.value as ReasoningEffort })}
+              disabled={!form.reasoning}
+              className="w-full rounded-lg border border-border/70 bg-card px-3 py-2 text-sm text-ink disabled:opacity-50"
+            >
+              {REASONING_EFFORTS.map((effort) => (
+                <option key={effort} value={effort}>
+                  {t(`modelsPanel.reasoningEffort_${effort}`)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-ink">{t("modelsPanel.speed")}</label>
+            <select
+              value={form.speed}
+              onChange={(e) => onChange({ ...form, speed: e.target.value as ModelSpeed })}
+              className="w-full rounded-lg border border-border/70 bg-card px-3 py-2 text-sm text-ink"
+            >
+              {MODEL_SPEEDS.map((speed) => (
+                <option key={speed} value={speed}>
+                  {t(`modelsPanel.speed_${speed}`)}
+                </option>
+              ))}
+            </select>
           </div>
           {/* Caps */}
           <div className="col-span-2">
@@ -175,12 +250,14 @@ interface ProviderTabProps {
   onChange: (patch: Partial<ProviderConfig>) => void;
 }
 
-function ProviderTab({ config, keyConfigured, onChange }: ProviderTabProps) {
+function ProviderTab({ providerKey, config, keyConfigured, onChange }: ProviderTabProps) {
   const { t } = useTranslation("settings");
   const [modalMode, setModalMode] = useState<"add" | "edit" | null>(null);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [modelForm, setModelForm] = useState<ModelFormState>(emptyModelForm);
   const [modelFormError, setModelFormError] = useState("");
+  const protocols = PROVIDER_PROTOCOLS[providerKey];
+  const protocol = config.protocol ?? DEFAULT_PROTOCOLS[providerKey];
 
   function openAddModal() { setModalMode("add"); setEditingIdx(null); setModelForm(emptyModelForm); setModelFormError(""); }
   function openEditModal(idx: number) { setModalMode("edit"); setEditingIdx(idx); setModelForm(modelToForm(config.models[idx])); setModelFormError(""); }
@@ -211,6 +288,25 @@ function ProviderTab({ config, keyConfigured, onChange }: ProviderTabProps) {
           <span className={["text-sm font-semibold", config.enabled ? "text-accent" : "text-muted"].join(" ")}>
             {config.enabled ? t("modelsPanel.on") : t("modelsPanel.off")}
           </span>
+        </div>
+
+        <div className="flex items-center gap-4 rounded-[1.2rem] border border-border/70 bg-background/40 px-4 py-3">
+          <span className="w-24 text-sm text-muted">{t("modelsPanel.protocol")}</span>
+          {protocols.length > 1 ? (
+            <select
+              value={protocol}
+              onChange={(e) => onChange({ protocol: e.target.value as LlmProtocol })}
+              className="rounded-lg border border-border/70 bg-card px-3 py-1.5 text-sm text-ink focus:outline-none"
+            >
+              {protocols.map((option) => (
+                <option key={option} value={option}>
+                  {protocolLabel(option, t)}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="text-sm font-medium text-ink">{protocolLabel(protocol, t)}</span>
+          )}
         </div>
 
         {/* API Key */}

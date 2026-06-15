@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-pub use talos_config::{LlmConfig, ModelCompatConfig, ModelCostConfig, ModelInputKind};
+pub use talos_config::{
+    LlmConfig, LlmProtocol, ModelCompatConfig, ModelCostConfig, ModelInputKind, ModelSpeed,
+    ReasoningEffort,
+};
 
 pub type TalosConfig = talos_config::Config;
 
@@ -12,6 +15,7 @@ pub fn resolve_model_catalog(llm: &LlmConfig) -> Vec<ModelInfo> {
         "openai" => llm.openai.models.clone(),
         "bailian" => llm.bailian.models.clone(),
         "ollama" => llm.ollama.models.clone(),
+        "openrouter" => llm.openrouter.models.clone(),
         _ => Vec::new(),
     };
 
@@ -24,6 +28,8 @@ pub fn resolve_model_catalog(llm: &LlmConfig) -> Vec<ModelInfo> {
             provider: provider.clone(),
             context_window: m.context_window,
             reasoning: m.reasoning,
+            reasoning_effort: m.reasoning_effort,
+            speed: m.speed,
             input: m.input.clone(),
             cost: m.cost.clone(),
             compat: m.compat.clone(),
@@ -37,6 +43,8 @@ pub fn resolve_model_catalog(llm: &LlmConfig) -> Vec<ModelInfo> {
             provider: provider.clone(),
             context_window: 0,
             reasoning: false,
+            reasoning_effort: ReasoningEffort::default(),
+            speed: ModelSpeed::default(),
             input: Vec::new(),
             cost: Default::default(),
             compat: Default::default(),
@@ -58,6 +66,10 @@ pub struct ModelInfo {
     pub context_window: u32,
     #[serde(default)]
     pub reasoning: bool,
+    #[serde(default)]
+    pub reasoning_effort: ReasoningEffort,
+    #[serde(default)]
+    pub speed: ModelSpeed,
     #[serde(default)]
     pub input: Vec<ModelInputKind>,
     #[serde(default)]

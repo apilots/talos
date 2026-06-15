@@ -48,6 +48,8 @@ fn mock_ctx() -> InvocationContext {
             provider: "p1".to_string(),
             context_window: 0,
             reasoning: false,
+            reasoning_effort: Default::default(),
+            speed: Default::default(),
             input: Vec::new(),
             cost: Default::default(),
             compat: Default::default(),
@@ -104,7 +106,7 @@ async fn test_planning_response_processor_emits_typed_branch_override_event() {
 }
 
 #[tokio::test]
-async fn test_planning_request_processor_applies_built_in_native_thinking() {
+async fn test_planning_request_processor_applies_built_in_reasoning_effort() {
     let planner: Arc<dyn Planner> = Arc::new(BuiltInPlanner::new());
     let processor = PlanningRequestProcessor::new(planner);
     let mut ctx = mock_ctx();
@@ -116,6 +118,8 @@ async fn test_planning_request_processor_applies_built_in_native_thinking() {
             provider: "p1".to_string(),
             context_window: 0,
             reasoning: true,
+            reasoning_effort: talos_types::ReasoningEffort::XHigh,
+            speed: Default::default(),
             input: Vec::new(),
             cost: Default::default(),
             compat: Default::default(),
@@ -125,7 +129,10 @@ async fn test_planning_request_processor_applies_built_in_native_thinking() {
 
     processor.run(&mut ctx, &mut request).await.unwrap();
 
-    assert!(request.native_thinking.is_some());
+    assert_eq!(
+        request.reasoning_effort,
+        Some(talos_types::ReasoningEffort::XHigh)
+    );
     assert!(request.planning_instruction.is_none());
 }
 

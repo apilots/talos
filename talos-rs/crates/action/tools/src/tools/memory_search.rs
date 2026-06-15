@@ -115,7 +115,7 @@ mod tests {
     use talos_config::AgentKernelConfig;
     use talos_error::TalosResult;
     use talos_llm_provider::{
-        ChatRequest, ChatResponse, ChatStream, LlmProvider, NativeThinkingSupport, Usage,
+        ChatRequest, ChatResponse, ChatStream, LlmProvider, ReasoningSupport, Usage,
     };
     use talos_memory::MemoryStore;
 
@@ -158,8 +158,8 @@ mod tests {
             "mock-model".to_string()
         }
 
-        fn native_thinking_support(&self, _model: &str) -> NativeThinkingSupport {
-            NativeThinkingSupport::Unsupported
+        fn reasoning_support(&self, _model: &str) -> ReasoningSupport {
+            ReasoningSupport::Unsupported
         }
     }
 

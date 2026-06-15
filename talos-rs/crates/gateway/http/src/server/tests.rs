@@ -51,6 +51,8 @@ fn test_model_info() -> ModelInfo {
         provider: "bailian".to_string(),
         context_window: 32_768,
         reasoning: true,
+        reasoning_effort: Default::default(),
+        speed: Default::default(),
         input: vec![talos_types::ModelInputKind::Text],
         cost: talos_types::ModelCostConfig::default(),
         compat: talos_types::ModelCompatConfig::default(),

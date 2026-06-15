@@ -532,6 +532,8 @@ mod tests {
             name: id.to_string(),
             context_window: 32_768,
             reasoning: false,
+            reasoning_effort: Default::default(),
+            speed: Default::default(),
             input: Vec::new(),
             cost: Default::default(),
             compat: Default::default(),

@@ -1,0 +1,910 @@
+use crate::{
+    ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall,
+    ModelBlockCompleted, ModelBlockDelta, ModelBlockKind, ModelBlockStarted, ModelBlockStream,
+    ModelBlockStreamEvent, ModelToolCallStart, ReasoningEffort, Role, SseLineDecoder, ToolChoice,
+    ToolDefinition, Usage,
+};
+use futures_util::StreamExt;
+use serde_json::Value;
+use std::collections::HashMap;
+use talos_error::{TalosError, TalosResult};
+use tokio::sync::mpsc;
+
+mod types;
+
+pub use types::*;
+
+#[derive(Debug, Clone)]
+pub struct ChatCompletionModelBlocks {
+    pub provider_name: String,
+    pub item_prefix: String,
+    pub reasoning_keys: &'static [&'static str],
+    pub segment_after_boundary: bool,
+    pub ignore_empty_text: bool,
+    pub ignore_reasoning_after_assistant: bool,
+}
+
+impl ChatCompletionModelBlocks {
+    pub fn openai() -> Self {
+        Self {
+            provider_name: "OpenAI".to_string(),
+            item_prefix: "openai".to_string(),
+            reasoning_keys: &["reasoning"],
+            segment_after_boundary: false,
+            ignore_empty_text: false,
+            ignore_reasoning_after_assistant: false,
+        }
+    }
+
+    pub fn bailian() -> Self {
+        Self {
+            provider_name: "Bailian".to_string(),
+            item_prefix: "bailian".to_string(),
+            reasoning_keys: &["reasoning_content", "thinking", "reasoning"],
+            segment_after_boundary: true,
+            ignore_empty_text: true,
+            ignore_reasoning_after_assistant: true,
+        }
+    }
+
+    pub fn with_identity(
+        mut self,
+        provider_name: impl Into<String>,
+        item_prefix: impl Into<String>,
+    ) -> Self {
+        self.provider_name = provider_name.into();
+        self.item_prefix = item_prefix.into();
+        self
+    }
+}
+
+#[derive(Debug, Default)]
+struct ModelBlockState {
+    reasoning_started: HashMap<usize, bool>,
+    reasoning_segment: HashMap<usize, usize>,
+    assistant_started: HashMap<usize, bool>,
+    assistant_segment: HashMap<usize, usize>,
+    tool_started: HashMap<usize, bool>,
+}
+
+#[derive(Debug, Default)]
+struct ModelToolAcc {
+    id: Option<String>,
+    name: Option<String>,
+    arguments: String,
+}
+
+pub fn request(
+    chat_request: ChatRequest,
+    stream: bool,
+    options: ChatCompletionRequestOptions,
+) -> ChatCompletionRequest {
+    ChatCompletionRequest {
+        model: chat_request.model,
+        messages: messages(chat_request.messages, options.cache_control),
+        temperature: chat_request.temperature,
+        max_tokens: chat_request.max_tokens,
+        top_p: chat_request.top_p,
+        stop: chat_request.stop,
+        tools: tools(chat_request.tools),
+        tool_choice: tool_choice(chat_request.tool_choice),
+        parallel_tool_calls: chat_request.parallel_tool_calls,
+        reasoning_effort: options.reasoning_effort,
+        enable_thinking: options.enable_thinking,
+        thinking_budget: options.thinking_budget,
+        stream: Some(stream),
+        stream_options: if stream {
+            Some(ChatCompletionStreamOptions {
+                include_usage: true,
+            })
+        } else {
+            None
+        },
+    }
+}
+
+pub fn reasoning_effort(effort: ReasoningEffort) -> String {
+    match effort {
+        ReasoningEffort::Low => "low",
+        ReasoningEffort::Medium => "medium",
+        ReasoningEffort::High => "high",
+        ReasoningEffort::XHigh => "xhigh",
+    }
+    .to_string()
+}
+
+pub fn messages(
+    chat_messages: Vec<ChatMessage>,
+    cache_control: bool,
+) -> Vec<ChatCompletionMessage> {
+    chat_messages
+        .into_iter()
+        .map(|message| {
+            let role = match message.role {
+                Role::System => "system",
+                Role::User => "user",
+                Role::Assistant => "assistant",
+                Role::Tool => "tool",
+            }
+            .to_string();
+
+            let tool_calls = message.tool_calls.map(|calls| {
+                calls
+                    .into_iter()
+                    .map(|call| ChatCompletionToolCall {
+                        id: call.id,
+                        r#type: "function".to_string(),
+                        function: ChatCompletionFunctionCall {
+                            name: call.name,
+                            arguments: call.arguments.to_string(),
+                        },
+                    })
+                    .collect()
+            });
+
+            let content = if cache_control {
+                match message.cache_control {
+                    Some(cache_control) => Some(ChatCompletionMessageContent::Blocks(vec![
+                        ChatCompletionContentBlock {
+                            block_type: "text".to_string(),
+                            text: message.content,
+                            cache_control: Some(cache_control),
+                        },
+                    ])),
+                    None => Some(ChatCompletionMessageContent::Text(message.content)),
+                }
+            } else {
+                Some(ChatCompletionMessageContent::Text(message.content))
+            };
+
+            ChatCompletionMessage {
+                role,
+                content,
+                name: message.name,
+                tool_call_id: message.tool_call_id,
+                tool_calls,
+            }
+        })
+        .collect()
+}
+
+pub fn tools(definitions: Option<Vec<ToolDefinition>>) -> Option<Vec<ChatCompletionTool>> {
+    definitions.map(|definitions| {
+        definitions
+            .into_iter()
+            .map(|tool| ChatCompletionTool {
+                r#type: "function".to_string(),
+                function: ChatCompletionFunctionDefinition {
+                    name: tool.name,
+                    description: tool.description,
+                    parameters: tool.parameters,
+                },
+            })
+            .collect()
+    })
+}
+
+pub fn tool_choice(choice: Option<ToolChoice>) -> Option<ChatCompletionToolChoice> {
+    match choice {
+        Some(ToolChoice::Auto) => Some(ChatCompletionToolChoice::Simple("auto".to_string())),
+        Some(ToolChoice::Required) => {
+            Some(ChatCompletionToolChoice::Simple("required".to_string()))
+        }
+        Some(ToolChoice::None) => Some(ChatCompletionToolChoice::Simple("none".to_string())),
+        Some(ToolChoice::Named { name }) => Some(ChatCompletionToolChoice::Named {
+            r#type: "function".to_string(),
+            function: ChatCompletionToolChoiceFunction { name },
+        }),
+        None => None,
+    }
+}
+
+pub fn tool_calls(tool_calls: Option<Vec<ChatCompletionToolCall>>) -> Option<Vec<FunctionCall>> {
+    tool_calls.map(|calls| {
+        calls
+            .into_iter()
+            .map(|call| {
+                let parsed = serde_json::from_str::<Value>(&call.function.arguments)
+                    .unwrap_or_else(|_| Value::String(call.function.arguments.clone()));
+                FunctionCall::new(call.id, call.function.name, parsed)
+            })
+            .collect()
+    })
+}
+
+pub fn content_text(
+    content: Option<ChatCompletionMessageContent>,
+    provider_name: &str,
+) -> TalosResult<String> {
+    match content {
+        Some(ChatCompletionMessageContent::Text(text)) => Ok(text),
+        Some(ChatCompletionMessageContent::Blocks(blocks)) => {
+            let mut text = String::new();
+            for block in blocks {
+                if block.block_type != "text" {
+                    return Err(TalosError::ValidationError(format!(
+                        "{provider_name} response contains unsupported content block type: {}",
+                        block.block_type
+                    )));
+                }
+                text.push_str(&block.text);
+            }
+            Ok(text)
+        }
+        None => Ok(String::new()),
+    }
+}
+
+pub fn usage(usage: ChatCompletionUsage) -> TalosResult<Usage> {
+    Ok(Usage {
+        prompt_tokens: usage.prompt_tokens,
+        completion_tokens: usage.completion_tokens,
+        total_tokens: usage.total_tokens,
+        cache_creation_input_tokens: match usage.cache_creation.as_ref() {
+            Some(creation) => cache_creation_tokens(creation)?,
+            None => None,
+        },
+        cache_read_input_tokens: usage
+            .prompt_tokens_details
+            .as_ref()
+            .and_then(|details| details.cached_tokens),
+    })
+}
+
+pub fn chat_response(
+    response: ChatCompletionResponse,
+    provider_name: &str,
+) -> TalosResult<ChatResponse> {
+    let choice = response.choices.into_iter().next().ok_or_else(|| {
+        TalosError::InternalError(format!("No choices in {provider_name} response"))
+    })?;
+
+    let usage_value = response.usage.unwrap_or(ChatCompletionUsage {
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+        prompt_tokens_details: None,
+        cache_creation: None,
+    });
+
+    Ok(ChatResponse {
+        content: content_text(choice.message.content, provider_name)?,
+        reasoning: Vec::new(),
+        model: response.model,
+        usage: usage(usage_value)?,
+        finish_reason: choice.finish_reason,
+        tool_calls: tool_calls(choice.message.tool_calls),
+    })
+}
+
+pub fn reasoning_delta(delta: &Value, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        if let Some(value) = delta.get(*key) {
+            match value {
+                Value::String(text) if !text.is_empty() => return Some(text.clone()),
+                Value::Array(items) => {
+                    let mut merged = String::new();
+                    for item in items {
+                        if let Some(text) = item
+                            .get("text")
+                            .and_then(|v| v.as_str())
+                            .or_else(|| item.get("content").and_then(|v| v.as_str()))
+                            .or_else(|| item.as_str())
+                        {
+                            merged.push_str(text);
+                        }
+                    }
+                    if !merged.is_empty() {
+                        return Some(merged);
+                    }
+                }
+                Value::Object(map) => {
+                    if let Some(text) = map
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| map.get("content").and_then(|v| v.as_str()))
+                    {
+                        if !text.is_empty() {
+                            return Some(text.to_string());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
+pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> ChatStream {
+    let (tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(100);
+    let provider_name = provider_name.into();
+
+    tokio::spawn(async move {
+        let mut stream = response.bytes_stream();
+        let mut decoder = SseLineDecoder::new();
+        let mut final_finish_reason: Option<String> = None;
+        while let Some(chunk_result) = stream.next().await {
+            match chunk_result {
+                Ok(bytes) => {
+                    for line in decoder.push(&bytes) {
+                        let line = match line {
+                            Ok(line) => line,
+                            Err(err) => {
+                                let _ = tx.send(Err(err)).await;
+                                return;
+                            }
+                        };
+                        let Some(data) = line.strip_prefix("data:") else {
+                            continue;
+                        };
+
+                        let data = data.trim_start();
+                        if data.is_empty() {
+                            continue;
+                        }
+                        if data == "[DONE]" {
+                            let _ = tx
+                                .send(Ok(ChatChunk {
+                                    delta: String::new(),
+                                    finish_reason: final_finish_reason
+                                        .clone()
+                                        .or_else(|| Some("stop".to_string())),
+                                }))
+                                .await;
+                            return;
+                        }
+
+                        let event = match serde_json::from_str::<Value>(data) {
+                            Ok(event) => event,
+                            Err(error) => {
+                                let _ = tx
+                                    .send(Err(TalosError::InternalError(format!(
+                                        "{provider_name} stream invalid SSE JSON: {error}"
+                                    ))))
+                                    .await;
+                                return;
+                            }
+                        };
+                        let choice = first_choice(&event);
+
+                        if let Some(delta) = choice
+                            .and_then(|c| c.get("delta"))
+                            .and_then(|d| d.get("content"))
+                            .and_then(|t| t.as_str())
+                        {
+                            let _ = tx
+                                .send(Ok(ChatChunk {
+                                    delta: delta.to_string(),
+                                    finish_reason: None,
+                                }))
+                                .await;
+                        }
+
+                        if let Some(finish_reason) = finish_reason(choice) {
+                            final_finish_reason = Some(finish_reason.to_string());
+                        }
+                    }
+                }
+                Err(error) => {
+                    let _ = tx
+                        .send(Err(TalosError::InternalError(format!(
+                            "Stream error: {error}"
+                        ))))
+                        .await;
+                    return;
+                }
+            }
+        }
+    });
+
+    ChatStream::new(rx)
+}
+
+pub fn model_blocks(
+    response: reqwest::Response,
+    options: ChatCompletionModelBlocks,
+) -> ModelBlockStream {
+    let (tx, rx) = mpsc::channel::<TalosResult<ModelBlockStreamEvent>>(100);
+
+    tokio::spawn(async move {
+        let mut stream = response.bytes_stream();
+        let mut decoder = SseLineDecoder::new();
+        let mut state = ModelBlockState::default();
+        let mut tool_acc: HashMap<usize, ModelToolAcc> = HashMap::new();
+        let mut final_finish_reason: Option<String> = None;
+        let mut final_usage: Option<Usage> = None;
+
+        while let Some(chunk_result) = stream.next().await {
+            match chunk_result {
+                Ok(bytes) => {
+                    for line in decoder.push(&bytes) {
+                        let line = match line {
+                            Ok(line) => line,
+                            Err(err) => {
+                                let _ = tx.send(Err(err)).await;
+                                return;
+                            }
+                        };
+                        let Some(data) = line.strip_prefix("data:") else {
+                            continue;
+                        };
+
+                        let data = data.trim_start();
+                        if data.is_empty() {
+                            continue;
+                        }
+
+                        if data == "[DONE]" {
+                            if !complete_open_model_blocks(&tx, &mut state, &options).await {
+                                return;
+                            }
+                            let _ = tx
+                                .send(Ok(ModelBlockStreamEvent::Done {
+                                    finish_reason: final_finish_reason
+                                        .clone()
+                                        .or_else(|| Some("stop".to_string())),
+                                    usage: final_usage.clone(),
+                                }))
+                                .await;
+                            return;
+                        }
+
+                        let event = match serde_json::from_str::<Value>(data) {
+                            Ok(event) => event,
+                            Err(error) => {
+                                let _ = tx
+                                    .send(Err(TalosError::InternalError(format!(
+                                        "{} model block stream invalid SSE JSON: {error}",
+                                        options.provider_name
+                                    ))))
+                                    .await;
+                                return;
+                            }
+                        };
+
+                        if let Some(parsed_usage) = event.get("usage").and_then(|value| {
+                            serde_json::from_value::<ChatCompletionUsage>(value.clone()).ok()
+                        }) {
+                            match usage(parsed_usage) {
+                                Ok(mapped_usage) => final_usage = Some(mapped_usage),
+                                Err(err) => {
+                                    let _ = tx.send(Err(err)).await;
+                                    return;
+                                }
+                            }
+                        }
+
+                        let choice = first_choice(&event);
+                        let choice_index = choice_index(choice);
+                        let delta_object = choice.and_then(|c| c.get("delta"));
+
+                        if let Some(reasoning_delta) = delta_object
+                            .and_then(|delta| reasoning_delta(delta, options.reasoning_keys))
+                        {
+                            if options.ignore_empty_text && reasoning_delta.trim().is_empty() {
+                                continue;
+                            }
+                            if options.ignore_reasoning_after_assistant
+                                && has_seen_assistant_text(&state, choice_index)
+                            {
+                                continue;
+                            }
+                            if !ensure_reasoning_model_block(
+                                &tx,
+                                &mut state,
+                                choice_index,
+                                &options,
+                            )
+                            .await
+                                || !send_model_block_event(
+                                    &tx,
+                                    ModelBlockStreamEvent::BlockDelta {
+                                        model_item_id: current_reasoning_model_item_id(
+                                            &state,
+                                            choice_index,
+                                            &options,
+                                        ),
+                                        delta: ModelBlockDelta::ReasoningText {
+                                            delta: reasoning_delta,
+                                        },
+                                    },
+                                )
+                                .await
+                            {
+                                return;
+                            }
+                        }
+
+                        if let Some(delta) = delta_object
+                            .and_then(|d| d.get("content"))
+                            .and_then(|t| t.as_str())
+                        {
+                            if options.ignore_empty_text && delta.is_empty() {
+                                continue;
+                            }
+                            if !ensure_assistant_model_block(
+                                &tx,
+                                &mut state,
+                                choice_index,
+                                &options,
+                            )
+                            .await
+                                || !send_model_block_event(
+                                    &tx,
+                                    ModelBlockStreamEvent::BlockDelta {
+                                        model_item_id: current_assistant_model_item_id(
+                                            &state,
+                                            choice_index,
+                                            &options,
+                                        ),
+                                        delta: ModelBlockDelta::AssistantText {
+                                            delta: delta.to_string(),
+                                        },
+                                    },
+                                )
+                                .await
+                            {
+                                return;
+                            }
+                        }
+
+                        if let Some(tool_calls) = delta_object
+                            .and_then(|d| d.get("tool_calls"))
+                            .and_then(|t| t.as_array())
+                        {
+                            for tool_call_delta in tool_calls {
+                                let index = tool_call_delta
+                                    .get("index")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0)
+                                    as usize;
+                                let mut should_start = false;
+                                {
+                                    let entry = tool_acc.entry(index).or_default();
+                                    if let Some(id) = tool_call_delta
+                                        .get("id")
+                                        .and_then(|v| v.as_str())
+                                        .map(str::to_string)
+                                    {
+                                        entry.id = Some(id);
+                                        should_start = true;
+                                    }
+                                    if let Some(name) = tool_call_delta
+                                        .get("function")
+                                        .and_then(|f| f.get("name"))
+                                        .and_then(|v| v.as_str())
+                                        .map(str::to_string)
+                                    {
+                                        entry.name = Some(name);
+                                        should_start = true;
+                                    }
+                                }
+
+                                let arguments_delta = tool_call_delta
+                                    .get("function")
+                                    .and_then(|f| f.get("arguments"))
+                                    .and_then(|v| v.as_str())
+                                    .map(str::to_string);
+                                if arguments_delta.is_some() {
+                                    should_start = true;
+                                }
+
+                                if should_start {
+                                    let entry = tool_acc.entry(index).or_default();
+                                    if !ensure_tool_model_block(
+                                        &tx, &mut state, index, entry, &options,
+                                    )
+                                    .await
+                                    {
+                                        return;
+                                    }
+                                }
+
+                                if let Some(arguments_delta) = arguments_delta {
+                                    let entry = tool_acc.entry(index).or_default();
+                                    entry.arguments.push_str(&arguments_delta);
+                                    if !send_model_block_event(
+                                        &tx,
+                                        ModelBlockStreamEvent::BlockDelta {
+                                            model_item_id: tool_model_item_id(index, &options),
+                                            delta: ModelBlockDelta::ToolArguments {
+                                                delta: arguments_delta,
+                                            },
+                                        },
+                                    )
+                                    .await
+                                    {
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some(finish_reason) = finish_reason(choice) {
+                            final_finish_reason = Some(finish_reason.to_string());
+                            if !complete_open_model_blocks(&tx, &mut state, &options).await {
+                                return;
+                            }
+                        }
+                    }
+                }
+                Err(error) => {
+                    let _ = tx
+                        .send(Err(TalosError::InternalError(format!(
+                            "Stream error: {error}"
+                        ))))
+                        .await;
+                    return;
+                }
+            }
+        }
+    });
+
+    ModelBlockStream::new(rx)
+}
+
+fn first_choice(event: &Value) -> Option<&Value> {
+    event
+        .get("choices")
+        .and_then(|c| c.as_array())
+        .and_then(|arr| arr.first())
+}
+
+fn choice_index(choice: Option<&Value>) -> usize {
+    choice
+        .and_then(|c| c.get("index"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize
+}
+
+fn finish_reason(choice: Option<&Value>) -> Option<&str> {
+    choice
+        .and_then(|c| c.get("finish_reason"))
+        .and_then(|r| r.as_str())
+}
+
+fn cache_creation_tokens(creation: &ChatCompletionCacheCreation) -> TalosResult<Option<u32>> {
+    match (
+        creation.cache_creation_input_tokens,
+        creation.ephemeral_5m_input_tokens,
+    ) {
+        (Some(cache_creation_input_tokens), Some(ephemeral_5m_input_tokens))
+            if cache_creation_input_tokens != ephemeral_5m_input_tokens =>
+        {
+            Err(TalosError::ValidationError(format!(
+                "Bailian cache creation token fields disagree: cache_creation_input_tokens={} ephemeral_5m_input_tokens={}",
+                cache_creation_input_tokens, ephemeral_5m_input_tokens
+            )))
+        }
+        (Some(cache_creation_input_tokens), _) => Ok(Some(cache_creation_input_tokens)),
+        (None, Some(ephemeral_5m_input_tokens)) => Ok(Some(ephemeral_5m_input_tokens)),
+        (None, None) => Ok(None),
+    }
+}
+
+fn reasoning_model_item_id(
+    choice_index: usize,
+    segment: usize,
+    options: &ChatCompletionModelBlocks,
+) -> String {
+    if !options.segment_after_boundary || segment == 0 {
+        format!("{}-choice-{choice_index}-reasoning", options.item_prefix)
+    } else {
+        format!(
+            "{}-choice-{choice_index}-reasoning-{segment}",
+            options.item_prefix
+        )
+    }
+}
+
+fn current_reasoning_model_item_id(
+    state: &ModelBlockState,
+    choice_index: usize,
+    options: &ChatCompletionModelBlocks,
+) -> String {
+    let segment = state
+        .reasoning_segment
+        .get(&choice_index)
+        .copied()
+        .unwrap_or(0);
+    reasoning_model_item_id(choice_index, segment, options)
+}
+
+fn assistant_model_item_id(
+    choice_index: usize,
+    segment: usize,
+    options: &ChatCompletionModelBlocks,
+) -> String {
+    if !options.segment_after_boundary || segment == 0 {
+        format!("{}-choice-{choice_index}-assistant", options.item_prefix)
+    } else {
+        format!(
+            "{}-choice-{choice_index}-assistant-{segment}",
+            options.item_prefix
+        )
+    }
+}
+
+fn current_assistant_model_item_id(
+    state: &ModelBlockState,
+    choice_index: usize,
+    options: &ChatCompletionModelBlocks,
+) -> String {
+    let segment = state
+        .assistant_segment
+        .get(&choice_index)
+        .copied()
+        .unwrap_or(0);
+    assistant_model_item_id(choice_index, segment, options)
+}
+
+fn has_seen_assistant_text(state: &ModelBlockState, choice_index: usize) -> bool {
+    state.assistant_started.get(&choice_index) == Some(&true)
+        || state
+            .assistant_segment
+            .get(&choice_index)
+            .copied()
+            .unwrap_or(0)
+            > 0
+}
+
+fn tool_model_item_id(index: usize, options: &ChatCompletionModelBlocks) -> String {
+    format!("{}-tool-{index}", options.item_prefix)
+}
+
+async fn send_model_block_event(
+    tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
+    event: ModelBlockStreamEvent,
+) -> bool {
+    tx.send(Ok(event)).await.is_ok()
+}
+
+async fn ensure_reasoning_model_block(
+    tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
+    state: &mut ModelBlockState,
+    choice_index: usize,
+    options: &ChatCompletionModelBlocks,
+) -> bool {
+    if state.reasoning_started.get(&choice_index) == Some(&true) {
+        return true;
+    }
+    state.reasoning_started.insert(choice_index, true);
+    send_model_block_event(
+        tx,
+        ModelBlockStreamEvent::BlockStarted(ModelBlockStarted {
+            model_item_id: current_reasoning_model_item_id(state, choice_index, options),
+            provider_item_id: Some(format!("choice:{choice_index}:reasoning")),
+            kind: ModelBlockKind::Reasoning,
+            assistant_text_phase_hint: None,
+            assistant_text_phase_hint_source: None,
+            tool_call: None,
+        }),
+    )
+    .await
+}
+
+async fn ensure_assistant_model_block(
+    tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
+    state: &mut ModelBlockState,
+    choice_index: usize,
+    options: &ChatCompletionModelBlocks,
+) -> bool {
+    if state.assistant_started.get(&choice_index) == Some(&true) {
+        return true;
+    }
+    state.assistant_started.insert(choice_index, true);
+    send_model_block_event(
+        tx,
+        ModelBlockStreamEvent::BlockStarted(ModelBlockStarted {
+            model_item_id: current_assistant_model_item_id(state, choice_index, options),
+            provider_item_id: Some(format!("choice:{choice_index}:message")),
+            kind: ModelBlockKind::AssistantText,
+            assistant_text_phase_hint: None,
+            assistant_text_phase_hint_source: None,
+            tool_call: None,
+        }),
+    )
+    .await
+}
+
+async fn ensure_tool_model_block(
+    tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
+    state: &mut ModelBlockState,
+    index: usize,
+    acc: &ModelToolAcc,
+    options: &ChatCompletionModelBlocks,
+) -> bool {
+    if state.tool_started.get(&index) == Some(&true) {
+        return true;
+    }
+    state.tool_started.insert(index, true);
+    send_model_block_event(
+        tx,
+        ModelBlockStreamEvent::BlockStarted(ModelBlockStarted {
+            model_item_id: tool_model_item_id(index, options),
+            provider_item_id: acc.id.clone(),
+            kind: ModelBlockKind::ToolCall,
+            assistant_text_phase_hint: None,
+            assistant_text_phase_hint_source: None,
+            tool_call: Some(ModelToolCallStart {
+                index,
+                call_id: acc.id.clone(),
+                tool_name: acc.name.clone(),
+            }),
+        }),
+    )
+    .await
+}
+
+async fn complete_open_model_blocks(
+    tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
+    state: &mut ModelBlockState,
+    options: &ChatCompletionModelBlocks,
+) -> bool {
+    let reasoning_ids: Vec<_> = state
+        .reasoning_started
+        .iter()
+        .filter_map(|(index, started)| started.then_some(*index))
+        .collect();
+    for index in reasoning_ids {
+        let segment = state.reasoning_segment.get(&index).copied().unwrap_or(0);
+        state.reasoning_started.insert(index, false);
+        if !send_model_block_event(
+            tx,
+            ModelBlockStreamEvent::BlockCompleted(ModelBlockCompleted {
+                model_item_id: reasoning_model_item_id(index, segment, options),
+            }),
+        )
+        .await
+        {
+            return false;
+        }
+        if options.segment_after_boundary {
+            state.reasoning_segment.insert(index, segment + 1);
+        }
+    }
+
+    let assistant_ids: Vec<_> = state
+        .assistant_started
+        .iter()
+        .filter_map(|(index, started)| started.then_some(*index))
+        .collect();
+    for index in assistant_ids {
+        let segment = state.assistant_segment.get(&index).copied().unwrap_or(0);
+        state.assistant_started.insert(index, false);
+        if !send_model_block_event(
+            tx,
+            ModelBlockStreamEvent::BlockCompleted(ModelBlockCompleted {
+                model_item_id: assistant_model_item_id(index, segment, options),
+            }),
+        )
+        .await
+        {
+            return false;
+        }
+        if options.segment_after_boundary {
+            state.assistant_segment.insert(index, segment + 1);
+        }
+    }
+
+    let tool_ids: Vec<_> = state
+        .tool_started
+        .iter()
+        .filter_map(|(index, started)| started.then_some(*index))
+        .collect();
+    for index in tool_ids {
+        state.tool_started.insert(index, false);
+        if !send_model_block_event(
+            tx,
+            ModelBlockStreamEvent::BlockCompleted(ModelBlockCompleted {
+                model_item_id: tool_model_item_id(index, options),
+            }),
+        )
+        .await
+        {
+            return false;
+        }
+    }
+    true
+}

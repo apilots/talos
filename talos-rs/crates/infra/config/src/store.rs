@@ -13,6 +13,7 @@ const ANTHROPIC_API_KEY_ENV: &str = "TALOS_LLM_ANTHROPIC_API_KEY";
 const OPENAI_API_KEY_ENV: &str = "TALOS_LLM_OPENAI_API_KEY";
 const BAILIAN_API_KEY_ENV: &str = "TALOS_LLM_BAILIAN_API_KEY";
 const OLLAMA_API_KEY_ENV: &str = "TALOS_LLM_OLLAMA_API_KEY";
+const OPENROUTER_API_KEY_ENV: &str = "TALOS_LLM_OPENROUTER_API_KEY";
 const REDACTED_API_KEY: &str = "********";
 
 pub trait LlmConfigStore: Send + Sync {
@@ -124,6 +125,13 @@ impl LlmConfigStore for YamlLlmConfigStore {
             false,
             &mut safe_llm.ollama,
             Some(&existing_llm.ollama),
+        )?;
+        persist_provider_secret(
+            &self.env_path,
+            OPENROUTER_API_KEY_ENV,
+            true,
+            &mut safe_llm.openrouter,
+            Some(&existing_llm.openrouter),
         )?;
 
         let llm_value = serde_yaml::to_value(&safe_llm).map_err(|e| {
@@ -241,6 +249,7 @@ fn sanitize_llm_for_read(llm: &mut LlmConfig) {
     sanitize_provider_for_read(&mut llm.openai);
     sanitize_provider_for_read(&mut llm.bailian);
     sanitize_provider_for_read(&mut llm.ollama);
+    sanitize_provider_for_read(&mut llm.openrouter);
 }
 
 fn sanitize_provider_for_read(provider: &mut ProviderConfig) {
@@ -255,6 +264,11 @@ fn build_llm_config_read(mut raw: LlmConfig, runtime_env: &RuntimeEnv) -> LlmCon
     resolve_provider_api_key(&mut resolved.openai, OPENAI_API_KEY_ENV, runtime_env);
     resolve_provider_api_key(&mut resolved.bailian, BAILIAN_API_KEY_ENV, runtime_env);
     resolve_provider_api_key(&mut resolved.ollama, OLLAMA_API_KEY_ENV, runtime_env);
+    resolve_provider_api_key(
+        &mut resolved.openrouter,
+        OPENROUTER_API_KEY_ENV,
+        runtime_env,
+    );
 
     let provider_keys = provider_key_statuses(&raw, runtime_env);
     sanitize_llm_for_read(&mut raw);
@@ -274,6 +288,7 @@ fn apply_provider_api_key_displays(
     apply_provider_api_key_display(&mut llm.openai, provider_keys.get("openai"));
     apply_provider_api_key_display(&mut llm.bailian, provider_keys.get("bailian"));
     apply_provider_api_key_display(&mut llm.ollama, provider_keys.get("ollama"));
+    apply_provider_api_key_display(&mut llm.openrouter, provider_keys.get("openrouter"));
 }
 
 fn apply_provider_api_key_display(
@@ -294,6 +309,7 @@ fn provider_key_statuses(
         ("openai", OPENAI_API_KEY_ENV, &llm.openai),
         ("bailian", BAILIAN_API_KEY_ENV, &llm.bailian),
         ("ollama", OLLAMA_API_KEY_ENV, &llm.ollama),
+        ("openrouter", OPENROUTER_API_KEY_ENV, &llm.openrouter),
     ]
     .into_iter()
     .map(|(provider, env_key, config)| {
@@ -425,6 +441,9 @@ llm:
   ollama:
     enabled: false
     models: []
+  openrouter:
+    enabled: false
+    models: []
 "#
         )
     }
@@ -510,6 +529,8 @@ llm:
             name: "Test Model".to_string(),
             context_window: 32768,
             reasoning: false,
+            reasoning_effort: Default::default(),
+            speed: Default::default(),
             input: vec![],
             cost: Default::default(),
             compat: Default::default(),

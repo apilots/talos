@@ -1,5 +1,4 @@
 use crate::{InvocationContext, LlmRequestEnvelope, Planner, PlannerKind, PlanningRequestEffect};
-use talos_llm_provider::{NativeThinkingConfig, NativeThinkingEffort};
 
 fn built_in_tool_guidance() -> String {
     "Use available tools whenever they can verify facts, inspect the workspace, execute commands, \
@@ -31,16 +30,16 @@ impl Planner for BuiltInPlanner {
         _ctx: &InvocationContext,
         request: &LlmRequestEnvelope,
     ) -> PlanningRequestEffect {
-        let native_thinking = if request
+        let reasoning_effort = if request
             .selected_model_info
             .as_ref()
             .map(|model| model.reasoning)
             .unwrap_or(false)
         {
-            Some(NativeThinkingConfig {
-                effort: NativeThinkingEffort::Medium,
-                budget_tokens: Some(2048),
-            })
+            request
+                .selected_model_info
+                .as_ref()
+                .map(|model| model.reasoning_effort)
         } else {
             None
         };
@@ -48,7 +47,7 @@ impl Planner for BuiltInPlanner {
             (!request.tool_definitions.is_empty()).then(built_in_tool_guidance);
         PlanningRequestEffect {
             planning_instruction,
-            native_thinking,
+            reasoning_effort,
             clear_request_thoughts: false,
         }
     }
@@ -75,6 +74,8 @@ mod tests {
                 provider: "p1".to_string(),
                 context_window: 0,
                 reasoning: false,
+                reasoning_effort: Default::default(),
+                speed: Default::default(),
                 input: Vec::new(),
                 cost: Default::default(),
                 compat: Default::default(),
@@ -105,7 +106,7 @@ mod tests {
     }
 
     #[test]
-    fn test_built_in_planner_gates_native_thinking_by_request_support() {
+    fn test_built_in_planner_gates_reasoning_effort_by_request_support() {
         let planner = BuiltInPlanner::new();
         let ctx = mock_ctx("hello");
 
@@ -116,19 +117,22 @@ mod tests {
             provider: "p1".to_string(),
             context_window: 0,
             reasoning: true,
+            reasoning_effort: talos_types::ReasoningEffort::High,
+            speed: Default::default(),
             input: Vec::new(),
             cost: Default::default(),
             compat: Default::default(),
         });
-        assert!(planner
+        let effect = planner
             .build_request_effect(&ctx, &supported_request)
-            .native_thinking
-            .is_some());
+            .reasoning_effort
+            .expect("reasoning effort should be enabled");
+        assert_eq!(effect, talos_types::ReasoningEffort::High);
 
         let unsupported_request = crate::LlmRequestEnvelope::default();
         assert!(planner
             .build_request_effect(&ctx, &unsupported_request)
-            .native_thinking
+            .reasoning_effort
             .is_none());
     }
 

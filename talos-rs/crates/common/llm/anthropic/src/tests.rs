@@ -1,9 +1,9 @@
 use super::*;
 use talos_error::TalosError;
 use talos_llm_provider::{
-    CacheControl, CacheControlKind, ChatMessage, ChatRequest, LlmProvider, ModelBlockDelta,
-    ModelBlockKind, ModelBlockStream, ModelBlockStreamEvent, NativeThinkingConfig,
-    NativeThinkingEffort, NativeThinkingSupport, PromptCacheSupport, ToolDefinition,
+    protocols::messages as messages_protocol, CacheControl, CacheControlKind, ChatMessage,
+    ChatRequest, LlmProvider, ModelBlockDelta, ModelBlockKind, ModelBlockStream,
+    ModelBlockStreamEvent, PromptCacheSupport, ReasoningEffort, ReasoningSupport, ToolDefinition,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -180,7 +180,7 @@ fn test_convert_messages() {
         ChatMessage::assistant("Hi there!"),
     ];
 
-    let (system, anthropic_msgs) = AnthropicProvider::convert_messages(messages);
+    let (system, anthropic_msgs) = messages_protocol::messages(messages);
     let first = serde_json::to_value(&anthropic_msgs[0]).expect("message should serialize");
     let second = serde_json::to_value(&anthropic_msgs[1]).expect("message should serialize");
 
@@ -195,7 +195,7 @@ fn test_convert_messages() {
 #[test]
 fn test_convert_messages_with_tool_result() {
     let messages = vec![ChatMessage::tool("call_1", "read", "done")];
-    let (_system, anthropic_msgs) = AnthropicProvider::convert_messages(messages);
+    let (_system, anthropic_msgs) = messages_protocol::messages(messages);
     let first = serde_json::to_value(&anthropic_msgs[0]).expect("message should serialize");
     assert_eq!(anthropic_msgs.len(), 1);
     assert_eq!(first["role"], "user");
@@ -215,28 +215,28 @@ fn test_provider_name() {
 }
 
 #[test]
-fn test_native_thinking_support_is_model_gated() {
+fn test_reasoning_support_is_model_gated() {
     let provider = AnthropicProvider::new(AnthropicConfig::new("test-key"));
 
     assert_eq!(
-        provider.native_thinking_support("claude-3-5-sonnet-20241022"),
-        NativeThinkingSupport::Unsupported
+        provider.reasoning_support("claude-3-5-sonnet-20241022"),
+        ReasoningSupport::Unsupported
     );
     assert_eq!(
-        provider.native_thinking_support("claude-3-7-sonnet-20250219"),
-        NativeThinkingSupport::Supported
+        provider.reasoning_support("claude-3-7-sonnet-20250219"),
+        ReasoningSupport::Supported
     );
     assert_eq!(
-        provider.native_thinking_support("claude-opus-4-8"),
-        NativeThinkingSupport::Supported
+        provider.reasoning_support("claude-opus-4-8"),
+        ReasoningSupport::Supported
     );
     assert_eq!(
-        provider.native_thinking_support("claude-sonnet-4-6"),
-        NativeThinkingSupport::Supported
+        provider.reasoning_support("claude-sonnet-4-6"),
+        ReasoningSupport::Supported
     );
     assert_eq!(
-        provider.native_thinking_support("claude-haiku-4-5-20251001"),
-        NativeThinkingSupport::Supported
+        provider.reasoning_support("claude-haiku-4-5-20251001"),
+        ReasoningSupport::Supported
     );
 }
 
@@ -293,21 +293,18 @@ fn test_convert_tools() {
         "Search docs",
         Some(serde_json::json!({"type": "object"})),
     )];
-    let converted = AnthropicProvider::convert_tools(Some(tools)).unwrap();
+    let converted = messages_protocol::tools(Some(tools)).unwrap();
     let json = serde_json::to_value(&converted[0]).expect("tool should serialize");
     assert_eq!(converted.len(), 1);
     assert_eq!(json["name"], "search");
 }
 
 #[test]
-fn test_build_request_maps_native_thinking_budget() {
+fn test_build_request_maps_reasoning_budget() {
     let request = ChatRequest::builder()
         .model("claude-3-5-sonnet-20241022")
         .messages(vec![ChatMessage::user("hello")])
-        .native_thinking(NativeThinkingConfig {
-            effort: NativeThinkingEffort::Medium,
-            budget_tokens: Some(4096),
-        })
+        .reasoning_effort(ReasoningEffort::High)
         .build();
 
     let built = AnthropicProvider::build_request(request, None);
@@ -324,7 +321,7 @@ fn test_convert_messages_preserves_multiple_system_blocks_and_cache_control() {
     });
     let messages = vec![first, ChatMessage::system("Workspace context")];
 
-    let (system_blocks, anthropic_msgs) = AnthropicProvider::convert_messages(messages);
+    let (system_blocks, anthropic_msgs) = messages_protocol::messages(messages);
     let serialized = serde_json::to_value(&system_blocks.expect("system blocks should exist"))
         .expect("system blocks should serialize");
 
@@ -336,7 +333,7 @@ fn test_convert_messages_preserves_multiple_system_blocks_and_cache_control() {
 
 #[test]
 fn test_text_block_serialization_skips_null_cache_control() {
-    let block = AnthropicProvider::text_block("hello".to_string(), None);
+    let block = messages_protocol::text_block("hello".to_string(), None);
     let json = serde_json::to_string(&block).expect("text block should serialize");
     assert!(!json.contains("cache_control"));
     assert!(!json.contains("null"));

@@ -664,6 +664,8 @@ fn build_ctx_with_stream(
             provider: "p1".to_string(),
             context_window: 0,
             reasoning: false,
+            reasoning_effort: Default::default(),
+            speed: Default::default(),
             input: Vec::new(),
             cost: Default::default(),
             compat: Default::default(),

@@ -1,9 +1,9 @@
 use super::*;
 use talos_error::TalosError;
 use talos_llm_provider::{
-    CacheControl, CacheControlKind, ChatMessage, ChatRequest, LlmProvider, ModelBlockDelta,
-    ModelBlockKind, ModelBlockStream, ModelBlockStreamEvent, NativeThinkingConfig,
-    NativeThinkingEffort, NativeThinkingSupport, PromptCacheSupport,
+    protocols::chat as chat_protocol, CacheControl, CacheControlKind, ChatMessage, ChatRequest,
+    LlmProvider, ModelBlockDelta, ModelBlockKind, ModelBlockStream, ModelBlockStreamEvent,
+    PromptCacheSupport, ReasoningEffort, ReasoningSupport,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -289,35 +289,32 @@ async fn test_stream_model_blocks_fails_invalid_sse_json() {
 }
 
 #[test]
-fn test_native_thinking_support_is_qwen_gated() {
+fn test_reasoning_support_is_qwen_gated() {
     let provider = BailianProvider::new(BailianConfig::new("test-key"));
     assert_eq!(
         provider.prompt_cache_support(),
         PromptCacheSupport::RequestLevel
     );
     assert_eq!(
-        provider.native_thinking_support("qwen3.7-plus"),
-        NativeThinkingSupport::Supported
+        provider.reasoning_support("qwen3.7-plus"),
+        ReasoningSupport::Supported
     );
     assert_eq!(
-        provider.native_thinking_support("qwen3.7-max"),
-        NativeThinkingSupport::Supported
+        provider.reasoning_support("qwen3.7-max"),
+        ReasoningSupport::Supported
     );
     assert_eq!(
-        provider.native_thinking_support("qwen3.6-flash"),
-        NativeThinkingSupport::Supported
+        provider.reasoning_support("qwen3.6-flash"),
+        ReasoningSupport::Supported
     );
 }
 
 #[test]
-fn test_build_request_maps_native_thinking_to_bailian_fields() {
+fn test_build_request_maps_reasoning_to_bailian_fields() {
     let request = ChatRequest::builder()
         .model("qwen3.7-plus")
         .messages(vec![ChatMessage::user("hello")])
-        .native_thinking(NativeThinkingConfig {
-            effort: NativeThinkingEffort::Medium,
-            budget_tokens: Some(1024),
-        })
+        .reasoning_effort(ReasoningEffort::Low)
         .build();
 
     let built = BailianProvider::build_request(request, true);
@@ -336,7 +333,8 @@ fn test_extract_reasoning_delta_reads_reasoning_content() {
         ]
     });
     assert_eq!(
-        BailianProvider::extract_reasoning_delta(&delta).as_deref(),
+        chat_protocol::reasoning_delta(&delta, &["reasoning_content", "thinking", "reasoning"])
+            .as_deref(),
         Some("first second")
     );
 }
@@ -389,14 +387,14 @@ fn test_bailian_request_serializes_cache_control_as_content_block() {
 
 #[test]
 fn test_usage_from_bailian_maps_cache_fields() {
-    let usage = BailianProvider::usage_from_bailian(BailianUsage {
+    let usage = chat_protocol::usage(chat_protocol::ChatCompletionUsage {
         prompt_tokens: 128,
         completion_tokens: 32,
         total_tokens: 160,
-        prompt_tokens_details: Some(BailianPromptTokensDetails {
+        prompt_tokens_details: Some(chat_protocol::ChatCompletionPromptTokensDetails {
             cached_tokens: Some(96),
         }),
-        cache_creation: Some(BailianCacheCreation {
+        cache_creation: Some(chat_protocol::ChatCompletionCacheCreation {
             cache_creation_input_tokens: Some(48),
             ephemeral_5m_input_tokens: Some(48),
         }),
@@ -412,14 +410,14 @@ fn test_usage_from_bailian_maps_cache_fields() {
 
 #[test]
 fn test_usage_from_bailian_maps_ephemeral_cache_creation_fallback() {
-    let usage = BailianProvider::usage_from_bailian(BailianUsage {
+    let usage = chat_protocol::usage(chat_protocol::ChatCompletionUsage {
         prompt_tokens: 256,
         completion_tokens: 64,
         total_tokens: 320,
-        prompt_tokens_details: Some(BailianPromptTokensDetails {
+        prompt_tokens_details: Some(chat_protocol::ChatCompletionPromptTokensDetails {
             cached_tokens: Some(128),
         }),
-        cache_creation: Some(BailianCacheCreation {
+        cache_creation: Some(chat_protocol::ChatCompletionCacheCreation {
             cache_creation_input_tokens: None,
             ephemeral_5m_input_tokens: Some(72),
         }),
@@ -435,14 +433,14 @@ fn test_usage_from_bailian_maps_ephemeral_cache_creation_fallback() {
 
 #[test]
 fn test_usage_from_bailian_rejects_conflicting_cache_creation_fields() {
-    let err = BailianProvider::usage_from_bailian(BailianUsage {
+    let err = chat_protocol::usage(chat_protocol::ChatCompletionUsage {
         prompt_tokens: 256,
         completion_tokens: 64,
         total_tokens: 320,
-        prompt_tokens_details: Some(BailianPromptTokensDetails {
+        prompt_tokens_details: Some(chat_protocol::ChatCompletionPromptTokensDetails {
             cached_tokens: Some(128),
         }),
-        cache_creation: Some(BailianCacheCreation {
+        cache_creation: Some(chat_protocol::ChatCompletionCacheCreation {
             cache_creation_input_tokens: Some(72),
             ephemeral_5m_input_tokens: Some(96),
         }),

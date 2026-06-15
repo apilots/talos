@@ -104,6 +104,8 @@ mod tests {
                 provider: "bailian".to_string(),
                 context_window: 32_768,
                 reasoning: true,
+                reasoning_effort: Default::default(),
+                speed: Default::default(),
                 input: Vec::new(),
                 cost: ModelCostConfig::default(),
                 compat: ModelCompatConfig::default(),

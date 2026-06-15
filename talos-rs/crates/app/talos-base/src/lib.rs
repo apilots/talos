@@ -7,16 +7,19 @@ use talos_app_server::BackgroundTaskDrain;
 use talos_application_service::TalosApplicationService;
 use talos_auth::{AuthService, CloudAuthService, OpenModeUserService, UserService};
 use talos_channel::{ChannelServer, TelegramChannel};
-use talos_config::{Config, LlmConfigManager, LlmConfigService, TalosPaths, YamlLlmConfigStore};
+use talos_config::{
+    effective_llm_protocol, Config, LlmConfigManager, LlmConfigService, LlmProtocol,
+    ProviderConfig, TalosPaths, YamlLlmConfigStore,
+};
 use talos_coordinator::{Coordinator, CoordinatorImpl};
 use talos_error::{TalosError, TalosResult};
 use talos_gateway::{Gateway, GatewayImpl};
 use talos_gateway_http::{HttpServer, ServerLifecycle, ServerLifecycleState};
 use talos_llm_anthropic::AnthropicProvider;
 use talos_llm_bailian::BailianProvider;
-use talos_llm_openai::OpenAIProvider;
+use talos_llm_openai::{OpenAIProtocol, OpenAIProvider};
 use talos_llm_provider::{
-    ChatRequest, ChatResponse, ChatStream, LlmProvider, NativeThinkingSupport, PromptCacheSupport,
+    ChatRequest, ChatResponse, ChatStream, LlmProvider, PromptCacheSupport, ReasoningSupport,
 };
 use talos_logging::LogGuard;
 use talos_router::{Binding, MatchRule, Router, RouterImpl};
@@ -590,10 +593,8 @@ fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
             let api_key = config.llm.openai.api_key.clone().ok_or_else(|| {
                 TalosError::InvalidConfiguration("llm.openai.api_key is required".to_string())
             })?;
-            let mut openai_config = talos_llm_openai::OpenAIConfig::new(&api_key);
-            if let Some(base_url) = &config.llm.openai.base_url {
-                openai_config = openai_config.with_base_url(base_url);
-            }
+            let openai_config = openai_config(&api_key, config.llm.openai.base_url.as_deref())
+                .with_protocol(openai_protocol("openai", &config.llm.openai)?);
             Ok(Arc::new(OpenAIProvider::new(openai_config)))
         }
         "bailian" if config.llm.bailian.enabled => {
@@ -611,13 +612,74 @@ fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
             let base_url = config.llm.ollama.base_url.clone().ok_or_else(|| {
                 TalosError::InvalidConfiguration("llm.ollama.base_url is required".to_string())
             })?;
-            let openai_config =
-                talos_llm_openai::OpenAIConfig::new("ollama").with_base_url(&base_url);
+            let openai_config = openai_compatible_config(
+                "ollama",
+                "Ollama",
+                "ollama",
+                &base_url,
+                &config.llm.model,
+                &config.llm.ollama,
+            )?;
+            Ok(Arc::new(OpenAIProvider::new(openai_config)))
+        }
+        "openrouter" if config.llm.openrouter.enabled => {
+            let api_key = config.llm.openrouter.api_key.clone().ok_or_else(|| {
+                TalosError::InvalidConfiguration("llm.openrouter.api_key is required".to_string())
+            })?;
+            let base_url = config
+                .llm
+                .openrouter
+                .base_url
+                .clone()
+                .unwrap_or_else(|| "https://openrouter.ai/api/v1".to_string());
+            let openai_config = openai_compatible_config(
+                "openrouter",
+                "OpenRouter",
+                &api_key,
+                &base_url,
+                &config.llm.model,
+                &config.llm.openrouter,
+            )?;
             Ok(Arc::new(OpenAIProvider::new(openai_config)))
         }
         _ => Err(TalosError::InvalidConfiguration(format!(
             "unsupported or disabled provider '{}'",
             config.llm.provider
+        ))),
+    }
+}
+
+fn openai_config(api_key: &str, base_url: Option<&str>) -> talos_llm_openai::OpenAIConfig {
+    let mut config = talos_llm_openai::OpenAIConfig::new(api_key);
+    if let Some(base_url) = base_url {
+        config = config.with_base_url(base_url);
+    }
+    config
+}
+
+fn openai_compatible_config(
+    provider: &str,
+    display_name: &str,
+    api_key: &str,
+    base_url: &str,
+    default_model: &str,
+    provider_config: &ProviderConfig,
+) -> TalosResult<talos_llm_openai::OpenAIConfig> {
+    Ok(talos_llm_openai::OpenAIConfig::new(api_key)
+        .with_base_url(base_url)
+        .with_identity(provider, display_name, default_model)
+        .with_protocol(openai_protocol(provider, provider_config)?))
+}
+
+fn openai_protocol(
+    provider: &str,
+    provider_config: &ProviderConfig,
+) -> TalosResult<OpenAIProtocol> {
+    match effective_llm_protocol(provider, provider_config).unwrap_or(LlmProtocol::Chat) {
+        LlmProtocol::Chat => Ok(OpenAIProtocol::Chat),
+        LlmProtocol::Responses if provider == "openai" => Ok(OpenAIProtocol::Responses),
+        protocol => Err(TalosError::InvalidConfiguration(format!(
+            "llm.{provider}.protocol does not support {protocol}"
         ))),
     }
 }
@@ -660,8 +722,8 @@ impl LlmProvider for ReloadableLlmProvider {
         self.current().default_model()
     }
 
-    fn native_thinking_support(&self, model: &str) -> NativeThinkingSupport {
-        self.current().native_thinking_support(model)
+    fn reasoning_support(&self, model: &str) -> ReasoningSupport {
+        self.current().reasoning_support(model)
     }
 
     fn prompt_cache_support(&self) -> PromptCacheSupport {
@@ -702,18 +764,29 @@ impl LlmProvider for ModelSetupRequiredProvider {
     fn default_model(&self) -> String {
         self.model.clone()
     }
+
+    async fn stream_model_blocks(
+        &self,
+        _request: ChatRequest,
+    ) -> TalosResult<talos_llm_provider::ModelBlockStream> {
+        Err(TalosError::InvalidConfiguration(self.message.clone()))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_runtime_options, build_application_runtime, ReloadableLlmProvider, TalosServerHandle,
-        TalosServerOptions, SERVER_SHUTDOWN_WAIT_TIMEOUT,
+        apply_runtime_options, build_application_runtime, create_llm_provider,
+        ModelSetupRequiredProvider, ReloadableLlmProvider, TalosServerHandle, TalosServerOptions,
+        SERVER_SHUTDOWN_WAIT_TIMEOUT,
     };
     use std::sync::Arc;
-    use talos_config::Config;
+    use talos_config::{Config, LlmProtocol};
     use talos_gateway_http::{ServerLifecycle, ServerLifecycleState};
     use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
     use tokio::time::Duration;
     use tokio_util::sync::CancellationToken;
 
@@ -748,6 +821,132 @@ mod tests {
             .expect("runtime should start before model setup is complete");
 
         assert_eq!(runtime.config.llm.provider, "anthropic");
+    }
+
+    #[tokio::test]
+    async fn setup_required_provider_reports_configuration_error_for_model_blocks() {
+        let provider = ModelSetupRequiredProvider {
+            model: "missing-model".to_string(),
+            message: "model setup required: missing key".to_string(),
+        };
+
+        let result = provider
+            .stream_model_blocks(ChatRequest::new_user("hello", "missing-model"))
+            .await;
+        let err = match result {
+            Ok(_) => panic!("setup-required provider should fail"),
+            Err(err) => err,
+        };
+
+        assert!(format!("{err}").contains("model setup required: missing key"));
+    }
+
+    #[tokio::test]
+    async fn openrouter_provider_uses_chat_completions_path_and_identity() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test server should bind");
+        let addr = listener
+            .local_addr()
+            .expect("test server addr should exist");
+        let (path_tx, path_rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("request should arrive");
+            let mut buf = vec![0; 4096];
+            let n = socket.read(&mut buf).await.expect("request should read");
+            let request = String::from_utf8_lossy(&buf[..n]);
+            let path = request
+                .lines()
+                .next()
+                .and_then(|line| line.split_whitespace().nth(1))
+                .unwrap_or("")
+                .to_string();
+            let _ = path_tx.send(path);
+            let body = r#"{"model":"test-model","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            socket
+                .write_all(response.as_bytes())
+                .await
+                .expect("response should write");
+        });
+
+        let mut config = Config::default();
+        config.llm.provider = "openrouter".to_string();
+        config.llm.model = "test-model".to_string();
+        config.llm.openrouter.enabled = true;
+        config.llm.openrouter.api_key = Some("test-key".to_string());
+        config.llm.openrouter.base_url = Some(format!("http://{addr}"));
+
+        let provider = create_llm_provider(&config).expect("provider should be created");
+        assert_eq!(provider.name(), "openrouter");
+        assert_eq!(provider.default_model(), "test-model");
+
+        let response = provider
+            .chat(ChatRequest::new_user("hello", "test-model"))
+            .await
+            .expect("chat should succeed");
+        let path = path_rx.await.expect("path should be captured");
+
+        assert_eq!(path, "/chat/completions");
+        assert_eq!(response.content, "ok");
+    }
+
+    #[tokio::test]
+    async fn openai_provider_uses_responses_path_when_protocol_selected() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test server should bind");
+        let addr = listener
+            .local_addr()
+            .expect("test server addr should exist");
+        let (path_tx, path_rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("request should arrive");
+            let mut buf = vec![0; 4096];
+            let n = socket.read(&mut buf).await.expect("request should read");
+            let request = String::from_utf8_lossy(&buf[..n]);
+            let path = request
+                .lines()
+                .next()
+                .and_then(|line| line.split_whitespace().nth(1))
+                .unwrap_or("")
+                .to_string();
+            let _ = path_tx.send(path);
+            let body = r#"{"id":"resp_1","model":"gpt-test","status":"completed","output_text":"ok","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            socket
+                .write_all(response.as_bytes())
+                .await
+                .expect("response should write");
+        });
+
+        let mut config = Config::default();
+        config.llm.provider = "openai".to_string();
+        config.llm.model = "gpt-test".to_string();
+        config.llm.openai.enabled = true;
+        config.llm.openai.api_key = Some("test-key".to_string());
+        config.llm.openai.base_url = Some(format!("http://{addr}"));
+        config.llm.openai.protocol = Some(LlmProtocol::Responses);
+
+        let provider = create_llm_provider(&config).expect("provider should be created");
+        assert_eq!(provider.name(), "openai");
+
+        let response = provider
+            .chat(ChatRequest::new_user("hello", "gpt-test"))
+            .await
+            .expect("chat should succeed");
+        let path = path_rx.await.expect("path should be captured");
+
+        assert_eq!(path, "/responses");
+        assert_eq!(response.content, "ok");
     }
 
     #[tokio::test]
