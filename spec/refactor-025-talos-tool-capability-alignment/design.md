@@ -84,7 +84,7 @@ agent:
   kernel:
     tools:
       web_search:
-        provider: duck_duck_go_instant_answer # duck_duck_go_instant_answer | brave | tavily
+        provider: duckduckgo # duckduckgo | brave | tavily
         duckduckgo:
           base_url: https://api.duckduckgo.com/
           timeout_ms: 15000
@@ -100,7 +100,7 @@ agent:
 
 Provider 约束：
 
-- `duck_duck_go_instant_answer` 是默认无 key base provider，用于本地开发和基础可用性。
+- `duckduckgo` 是默认无 key base provider，用于本地开发和基础可用性。
 - `brave` / `tavily` 通过 provider adapter 接入，API key 可来自配置值或环境变量。
 - `recency_days`、domain allow/block、limit 在标准 request 中表达，由 provider adapter 映射到厂商参数；response 必须暴露 `provider`、`recency_days`、`freshness_applied` 和标准 hits。
 - Tool 层只把标准 response 映射到 canonical `WebReference` / `Text` content items，不把 provider 原始响应作为 UI/SDK/replay 主路径。

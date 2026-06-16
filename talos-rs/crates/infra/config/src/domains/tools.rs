@@ -80,6 +80,7 @@ impl Default for WebSearchToolConfig {
 #[serde(rename_all = "snake_case")]
 pub enum WebSearchProviderConfig {
     #[default]
+    #[serde(rename = "duckduckgo")]
     DuckDuckGoInstantAnswer,
     Brave,
     Tavily,
@@ -309,6 +310,25 @@ mod tests {
 
     #[test]
     fn web_search_provider_config_deserializes_from_snake_case() {
+        let config: ToolsRuntimeConfig = serde_json::from_value(serde_json::json!({
+            "web_search": {
+                "provider": "duckduckgo",
+                "duckduckgo": {
+                    "base_url": "https://duckduckgo.example/"
+                }
+            }
+        }))
+        .expect("web search config should deserialize");
+
+        assert_eq!(
+            config.web_search.provider,
+            WebSearchProviderConfig::DuckDuckGoInstantAnswer
+        );
+        assert_eq!(
+            config.web_search.duckduckgo.base_url.as_deref(),
+            Some("https://duckduckgo.example/")
+        );
+
         let config: ToolsRuntimeConfig = serde_json::from_value(serde_json::json!({
             "web_search": {
                 "provider": "brave",

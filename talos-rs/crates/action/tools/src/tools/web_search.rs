@@ -206,7 +206,7 @@ mod tests {
                 .as_ref()
                 .and_then(|value| value.get("provider"))
                 .and_then(Value::as_str),
-            Some("duck_duck_go_instant_answer")
+            Some("duckduckgo")
         );
         assert!(matches!(
             content_items.first(),
