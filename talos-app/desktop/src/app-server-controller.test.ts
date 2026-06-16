@@ -23,7 +23,7 @@ class FakeBridge implements AppServerBridge {
       protocol_version: { major: 0, minor: 3 },
       server_info: {
         name: "fake",
-        version: "0.1.1",
+        version: "0.1.2",
         auth_enabled: false,
         cloud_auth_url: null,
       },

@@ -1,6 +1,6 @@
 [package]
 name = "talos-sdk"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "Talos SDK library for connecting to App Server and gateway APIs"
 

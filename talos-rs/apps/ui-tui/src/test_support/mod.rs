@@ -52,6 +52,8 @@ pub(crate) fn mock_model_info(id: &str, context_window: u32) -> ModelInfo {
         provider: "mock".to_string(),
         context_window,
         reasoning: false,
+        reasoning_effort: Default::default(),
+        speed: Default::default(),
         input: vec![talos_types::ModelInputKind::Text],
         cost: talos_types::ModelCostConfig::default(),
         compat: talos_types::ModelCompatConfig::default(),
