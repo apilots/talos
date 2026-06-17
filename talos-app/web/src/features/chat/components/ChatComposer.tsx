@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowUp,
-  Check,
   ChevronDown,
   FolderOpen,
   FolderPlus,
@@ -22,6 +21,7 @@ import { cn } from "@/shared/lib/cn";
 import { Panel } from "@/shared/ui/Panel";
 import { Textarea } from "@/shared/ui/Input";
 import { describeProjectDirectory, isUnboundProject } from "@/shared/types/domain";
+import { ComposerDropdown, type DropdownItem } from "./ComposerDropdown";
 import type {
   ProjectRecord,
   ReasoningLevel,
@@ -52,90 +52,6 @@ interface ChatComposerProps {
   showProjectSelector?: boolean;
   showRuntimeModeSelector?: boolean;
   compact?: boolean;
-}
-
-// ─── small floating dropdown ────────────────────────────────────────────────
-
-interface DropdownItem {
-  value: string;
-  label: string;
-  description?: string;
-  disabled?: boolean;
-  icon?: React.ReactNode;
-}
-
-interface ComposerDropdownProps {
-  header: string;
-  items: DropdownItem[];
-  value: string | undefined;
-  onChange: (v: string) => void;
-  triggerIcon?: React.ReactNode;
-  className?: string;
-}
-
-function ComposerDropdown({ header, items, value, onChange, triggerIcon, className }: ComposerDropdownProps) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const selectedItem = items.find((i) => i.value === value);
-
-  useEffect(() => {
-    if (!open) return;
-    function onPointerDown(e: PointerEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [open]);
-
-  return (
-    <div className={cn("relative", className)} ref={ref}>
-      <button
-        className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[12px] font-medium text-ink/70 outline-none transition hover:bg-muted/15 focus:outline-none"
-        onClick={() => setOpen((v) => !v)}
-        type="button"
-      >
-        {triggerIcon}
-        <span className="max-w-[120px] truncate">{selectedItem?.label ?? value}</span>
-        <ChevronDown size={11} className="shrink-0 text-muted" />
-      </button>
-
-      {open && (
-        <div className="absolute bottom-[calc(100%+6px)] left-0 z-50 min-w-[160px] overflow-hidden rounded-xl border border-border/60 bg-card py-1 shadow-lg">
-          <div className="px-3 pb-1 pt-1.5 text-[11px] font-medium text-muted">{header}</div>
-          {items.map((item) => (
-            <button
-              aria-disabled={item.disabled}
-              className={cn(
-                "flex w-full items-start gap-2 px-3 py-2 text-left text-[13px] text-ink transition focus:outline-none",
-                item.disabled ? "cursor-not-allowed opacity-45" : "hover:bg-muted/10",
-              )}
-              disabled={item.disabled}
-              key={item.value}
-              onClick={() => {
-                if (item.disabled) {
-                  return;
-                }
-                onChange(item.value);
-                setOpen(false);
-              }}
-              type="button"
-            >
-              {item.icon && <span className="mt-0.5 shrink-0 text-muted">{item.icon}</span>}
-              <span className="min-w-0 flex-1">
-                <span className="block">{item.label}</span>
-                {item.description ? (
-                  <span className="mt-0.5 block text-[12px] leading-snug text-muted">
-                    {item.description}
-                  </span>
-                ) : null}
-              </span>
-              {item.value === value && <Check size={12} className="shrink-0 text-brand" />}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
 }
 
 const EMPTY_INPUT_HISTORY_ITEMS: InputHistoryNavigationItem[] = [];
@@ -393,7 +309,6 @@ export function ChatComposer({
   return (
     <div className="relative">
       <Panel className="overflow-visible rounded-[1.5rem] border-border/80 bg-card/95 p-0 backdrop-blur">
-        {/* Compact: inline model + project row at top */}
         {showInlineProject && (
           <div className="flex flex-wrap items-center gap-2 border-b border-border/70 px-3 py-2">
             <select
@@ -423,7 +338,6 @@ export function ChatComposer({
           </div>
         )}
 
-        {/* Textarea */}
         <div>
           <Textarea
             className={cn(
@@ -452,7 +366,6 @@ export function ChatComposer({
           />
         </div>
 
-        {/* Bottom toolbar */}
         <div className="flex flex-wrap items-center gap-1 px-3 pb-3 pt-1.5">
           <button
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border/70 text-muted outline-none transition hover:border-brand/40 hover:text-brand focus:outline-none"
@@ -477,7 +390,6 @@ export function ChatComposer({
 
           <div className="min-w-4 flex-1" />
 
-          {/* Model + Reasoning — non-compact only */}
           {!compact && (
             <>
               <ComposerDropdown
@@ -499,7 +411,6 @@ export function ChatComposer({
           {sendButton}
         </div>
 
-        {/* Bottom context row — project picker + runtime mode */}
         <div className="border-t border-border/50">
           <div className="flex flex-wrap items-center gap-1 px-3">
             {showCollapsibleProject && (
@@ -542,7 +453,6 @@ export function ChatComposer({
               </>
             )}
 
-            {/* Runtime mode without project selector */}
             {showRuntimeModeSelector && !showCollapsibleProject && !compact && (
               <ComposerDropdown
                 header={t("common:runtimeMode")}
@@ -563,7 +473,6 @@ export function ChatComposer({
         </div>
       </Panel>
 
-      {/* Floating project dropdown — outside Panel so it doesn't shift card height */}
       {showCollapsibleProject && projectOpen && (
         <div
           className="absolute left-0 right-0 top-[calc(100%-1px)] z-50 rounded-b-[1.5rem] border border-t-0 border-border/70 bg-card/98 px-2 pb-2 pt-1 shadow-lg backdrop-blur"

@@ -1,23 +1,28 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   LlmConfig,
   LlmConfigRead,
   LlmProtocol,
-  ModelInputKind,
-  ModelSpeed,
   ProviderConfig,
-  ProviderModelConfig,
-  ReasoningEffort,
 } from "@talos/sdk-browser";
 import { useTranslation } from "react-i18next";
-import { Brain, File, Image, Mic, Pencil, Plus, Trash2, Type, Video, X } from "lucide-react";
+import { Brain, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { getLlmConfig, updateLlmConfig } from "@/features/settings/api";
 import { useConnectionKey } from "@/features/chat";
 import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
 import { Panel } from "@/shared/ui/Panel";
+import { SettingsModelModal } from "./SettingsModelModal";
+import {
+  INPUT_KIND_ICONS,
+  INPUT_KINDS,
+  emptyModelForm,
+  formToModel,
+  modelToForm,
+  type ModelFormState,
+} from "./modelForm";
 
 type ProviderKey = "anthropic" | "openai" | "bailian" | "ollama" | "openrouter";
 
@@ -45,62 +50,6 @@ const DEFAULT_PROTOCOLS: Record<ProviderKey, LlmProtocol> = {
   openrouter: "chat",
 };
 
-const INPUT_KINDS: ModelInputKind[] = ["text", "image", "audio", "video", "file"];
-const REASONING_EFFORTS: ReasoningEffort[] = ["low", "medium", "high", "xhigh"];
-const MODEL_SPEEDS: ModelSpeed[] = ["standard", "fast"];
-
-const INPUT_KIND_ICONS: Record<ModelInputKind, React.ElementType> = {
-  text: Type,
-  image: Image,
-  audio: Mic,
-  video: Video,
-  file: File,
-};
-
-interface ModelFormState {
-  id: string;
-  name: string;
-  context_window: string;
-  reasoning: boolean;
-  reasoning_effort: ReasoningEffort;
-  speed: ModelSpeed;
-  input: ModelInputKind[];
-}
-
-const emptyModelForm: ModelFormState = {
-  id: "", name: "", context_window: "200000",
-  reasoning: false, reasoning_effort: "medium", speed: "standard", input: ["text"],
-};
-
-function modelToForm(m: ProviderModelConfig): ModelFormState {
-  return {
-    id: m.id, name: m.name,
-    context_window: String(m.context_window),
-    reasoning: m.reasoning,
-    reasoning_effort: m.reasoning_effort ?? "medium",
-    speed: m.speed ?? "standard",
-    input: m.input,
-  };
-}
-
-function formToModel(f: ModelFormState, existing?: ProviderModelConfig): ProviderModelConfig {
-  const base: ProviderModelConfig = existing ?? {
-    id: f.id, name: f.name, context_window: 0,
-    reasoning: false, reasoning_effort: "medium", speed: "standard", input: ["text"],
-    cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
-    compat: {},
-  };
-  return {
-    ...base,
-    id: f.id.trim(), name: f.name.trim(),
-    context_window: parseInt(f.context_window, 10) || 0,
-    reasoning: f.reasoning,
-    reasoning_effort: f.reasoning_effort,
-    speed: f.speed,
-    input: f.input.length > 0 ? f.input : ["text"],
-  };
-}
-
 function fmtContext(n: number): string {
   if (n >= 1000) return `${Math.round(n / 1000)}K`;
   return String(n);
@@ -120,125 +69,6 @@ function protocolLabel(protocol: LlmProtocol, t: (key: string) => string): strin
     case "messages":
       return t("modelsPanel.protocolMessages");
   }
-}
-
-// ─── Model add/edit modal ─────────────────────────────────────────────────────
-
-interface ModelModalProps {
-  mode: "add" | "edit";
-  form: ModelFormState;
-  saving: boolean;
-  error: string;
-  onChange: (f: ModelFormState) => void;
-  onSave: () => void;
-  onClose: () => void;
-}
-
-function ModelModal({ mode, form, saving, error, onChange, onSave, onClose }: ModelModalProps) {
-  const { t } = useTranslation("settings");
-  const isAdd = mode === "add";
-  return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(28,22,16,0.46)] px-6 py-10">
-      <div className="absolute inset-0" onClick={onClose} />
-      <Panel className="relative z-10 w-full max-w-[520px] rounded-[1.5rem] border-border/75 bg-card p-6 shadow-[0_24px_80px_rgba(69,55,34,0.18)]">
-        <div className="flex items-start justify-between gap-6">
-          <div>
-            <div className="text-lg font-semibold text-ink">
-              {isAdd ? t("modelsPanel.addModelTitle") : t("modelsPanel.editModelTitle")}
-            </div>
-            <div className="mt-1 text-sm text-muted">
-              {isAdd ? t("modelsPanel.addModelDetail") : t("modelsPanel.editModelDetail")}
-            </div>
-          </div>
-          <button className="inline-flex h-10 w-10 items-center justify-center rounded-full text-muted transition hover:bg-surface hover:text-ink" onClick={onClose} type="button">
-            <X size={18} />
-          </button>
-        </div>
-        <div className="mt-5 grid grid-cols-2 gap-4">
-          <div className="col-span-2">
-            <label className="mb-1.5 block text-sm font-medium text-ink">{t("modelsPanel.modelId")}</label>
-            <Input value={form.id} onChange={(e) => onChange({ ...form, id: e.target.value })} placeholder="claude-3-5-sonnet" disabled={!isAdd} />
-          </div>
-          <div className="col-span-2">
-            <label className="mb-1.5 block text-sm font-medium text-ink">{t("modelsPanel.modelName")}</label>
-            <Input value={form.name} onChange={(e) => onChange({ ...form, name: e.target.value })} placeholder="Claude 3.5 Sonnet" />
-          </div>
-          <div className="col-span-2">
-            <label className="mb-1.5 block text-sm font-medium text-ink">{t("modelsPanel.contextWindow")}</label>
-            <Input value={form.context_window} onChange={(e) => onChange({ ...form, context_window: e.target.value })} />
-          </div>
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-ink">{t("modelsPanel.reasoningEffort")}</label>
-            <select
-              value={form.reasoning_effort}
-              onChange={(e) => onChange({ ...form, reasoning_effort: e.target.value as ReasoningEffort })}
-              disabled={!form.reasoning}
-              className="w-full rounded-lg border border-border/70 bg-card px-3 py-2 text-sm text-ink disabled:opacity-50"
-            >
-              {REASONING_EFFORTS.map((effort) => (
-                <option key={effort} value={effort}>
-                  {t(`modelsPanel.reasoningEffort_${effort}`)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-ink">{t("modelsPanel.speed")}</label>
-            <select
-              value={form.speed}
-              onChange={(e) => onChange({ ...form, speed: e.target.value as ModelSpeed })}
-              className="w-full rounded-lg border border-border/70 bg-card px-3 py-2 text-sm text-ink"
-            >
-              {MODEL_SPEEDS.map((speed) => (
-                <option key={speed} value={speed}>
-                  {t(`modelsPanel.speed_${speed}`)}
-                </option>
-              ))}
-            </select>
-          </div>
-          {/* Caps */}
-          <div className="col-span-2">
-            <div className="mb-2 text-sm font-medium text-ink">{t("modelsPanel.caps")}</div>
-            <div className="flex flex-wrap gap-2">
-              {/* Reasoning */}
-              <label className={["flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition select-none", form.reasoning ? "border-ink bg-ink text-background" : "border-border/60 bg-background/40 text-muted hover:border-ink/40 hover:text-ink"].join(" ")}>
-                <input type="checkbox" className="hidden" checked={form.reasoning} onChange={(e) => onChange({ ...form, reasoning: e.target.checked })} />
-                <Brain size={13} />
-                {t("modelsPanel.capReasoning")}
-              </label>
-              {/* Input kinds */}
-              {INPUT_KINDS.map((kind) => {
-                const checked = form.input.includes(kind);
-                const KindIcon = INPUT_KIND_ICONS[kind];
-                return (
-                  <label key={kind} className={["flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition select-none", checked ? "border-ink bg-ink text-background" : "border-border/60 bg-background/40 text-muted hover:border-ink/40 hover:text-ink"].join(" ")}>
-                    <input
-                      type="checkbox"
-                      className="hidden"
-                      checked={checked}
-                      onChange={(e) => {
-                        const next = e.target.checked ? [...form.input, kind] : form.input.filter((k) => k !== kind);
-                        onChange({ ...form, input: next });
-                      }}
-                    />
-                    <KindIcon size={13} />
-                    {kind}
-                  </label>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-        {error && <div className="mt-4 rounded-[1rem] border border-danger/20 bg-danger/8 px-4 py-3 text-sm text-danger">{error}</div>}
-        <div className="mt-6 flex justify-end gap-3">
-          <Button variant="ghost" onClick={onClose} type="button">{t("modelsPanel.cancel")}</Button>
-          <Button onClick={onSave} disabled={saving || !form.id.trim()} type="button">
-            {saving ? t("modelsPanel.saving") : t("modelsPanel.save")}
-          </Button>
-        </div>
-      </Panel>
-    </div>
-  );
 }
 
 // ─── Provider tab content ─────────────────────────────────────────────────────
@@ -387,7 +217,7 @@ function ProviderTab({ providerKey, config, keyConfigured, onChange }: ProviderT
       )}
 
       {modalMode && (
-        <ModelModal
+        <SettingsModelModal
           mode={modalMode}
           form={modelForm}
           saving={false}

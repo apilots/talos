@@ -18,6 +18,7 @@ import { MessageList } from "@/widgets/message-list/MessageList";
 import { ChatContextBar } from "@/widgets/chat-context-bar/ChatContextBar";
 import { Panel } from "@/shared/ui/Panel";
 import { Button } from "@/shared/ui/Button";
+import { ChatSessionReconnectPanel } from "./ChatSessionReconnectPanel";
 
 interface SessionLocationState {
   initialPrompt?: string;
@@ -234,42 +235,13 @@ export function ChatSessionPage() {
             </Panel>
           ) : null}
           {showReconnectControls ? (
-            <Panel className="rounded-xl border-border/70 bg-surface/70 px-3 py-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="min-w-0 text-sm text-muted">
-                  <span className="font-medium text-ink">{t("chat:liveResponseInterrupted")}</span>
-                  <span className="ml-2">{t("chat:interruptedDetail")}</span>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <Button
-                    className="px-2.5 py-1.5 text-xs"
-                    disabled={isCancelling}
-                    onClick={() => void retryStream()}
-                    variant="secondary"
-                  >
-                    {t("common:refreshNow")}
-                  </Button>
-                  {canRetryResponse ? (
-                    <Button
-                      className="px-2.5 py-1.5 text-xs"
-                      disabled={isCancelling}
-                      onClick={() => void retryResponse()}
-                      variant="secondary"
-                    >
-                      {t("common:retryResponse")}
-                    </Button>
-                  ) : null}
-                  <Button
-                    className="px-2.5 py-1.5 text-xs"
-                    disabled={isCancelling}
-                    onClick={() => void stopResponse()}
-                    variant="ghost"
-                  >
-                    {t("common:stopResponse")}
-                  </Button>
-                </div>
-              </div>
-            </Panel>
+            <ChatSessionReconnectPanel
+              canRetryResponse={canRetryResponse}
+              isCancelling={isCancelling}
+              onRetryResponse={() => void retryResponse()}
+              onRetryStream={() => void retryStream()}
+              onStopResponse={() => void stopResponse()}
+            />
           ) : null}
           <div aria-hidden="true" ref={messageEndRef} />
         </div>

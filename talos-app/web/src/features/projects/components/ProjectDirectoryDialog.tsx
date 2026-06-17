@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, FolderOpen, TriangleAlert, X } from "lucide-react";
+import { FolderOpen, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { FsDirectoryCreateResponse, FsDirectoryEntry, FsDirectorySnapshot } from "@talos/sdk-browser";
 
-import { cn } from "@/shared/lib/cn";
+import { ProjectDirectoryActions } from "./ProjectDirectoryActions";
+import { ProjectDirectoryBrowser } from "./ProjectDirectoryBrowser";
 
 export type ProjectDirectoryDialogMode = "existing" | "create";
 
@@ -191,116 +192,29 @@ export function ProjectDirectoryDialog({
           </div>
 
           <div className="flex min-h-0 flex-1 flex-col gap-3 bg-card p-4">
-            <form
-              className="flex gap-2"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void loadDirectory(pathInput);
-              }}
-            >
-              <input
-                className="min-w-0 flex-1 rounded-xl border border-border/50 bg-card px-3 py-2 text-[13px] outline-none placeholder:text-muted focus:border-brand/50 focus:ring-0"
-                onChange={(event) => setPathInput(event.target.value)}
-                value={pathInput}
-              />
-              <button
-                className="rounded-xl border border-border/50 bg-card px-3 py-2 text-[13px] outline-none transition hover:border-brand/50 focus:outline-none"
-                disabled={loading}
-                type="submit"
-              >
-                {loading ? t("common:loading") : t("chat:openPath")}
-              </button>
-              <button
-                className="rounded-xl border border-border/50 bg-card px-3 py-2 text-[13px] outline-none transition hover:border-brand/50 focus:outline-none"
-                onClick={() => void loadDirectory(null)}
-                type="button"
-              >
-                {t("chat:openHome")}
-              </button>
-            </form>
-
-            {error ? (
-              <div className="rounded-xl border border-danger/20 bg-danger/5 px-3 py-2 text-[12px] leading-snug text-danger">
-                {error}
-              </div>
-            ) : null}
-
-          <div className="min-h-[220px] flex-1 overflow-y-auto rounded-xl border border-border/45 bg-card p-1">
-            {snapshot?.parent ? (
-              <button
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-muted transition hover:bg-muted/10 hover:text-ink"
-                onClick={() => void loadDirectory(snapshot.parent)}
-                type="button"
-              >
-                <ArrowLeft size={13} />
-                {t("chat:parentDirectory")}
-              </button>
-            ) : null}
-            {loading ? (
-              <div className="px-2 py-10 text-center text-[13px] text-muted">{t("common:loading")}</div>
-            ) : snapshot && snapshot.entries.length > 0 ? (
-              snapshot.entries.map((entry) => (
-                <button
-                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] transition hover:bg-muted/10"
-                  key={entry.path}
-                  onClick={() => void enterDirectory(entry)}
-                  title={entry.is_symlink ? t("chat:symlinkNotSupported") : entry.path}
-                  type="button"
-                >
-                  <FolderOpen className={cn("shrink-0", entry.is_symlink ? "text-danger" : "text-muted")} size={13} />
-                  <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-                  {entry.is_symlink ? <TriangleAlert className="shrink-0 text-danger" size={13} /> : null}
-                </button>
-              ))
-            ) : (
-              <div className="px-2 py-10 text-center text-[13px] text-muted">{t("chat:noDirectories")}</div>
-            )}
+            <ProjectDirectoryBrowser
+              error={error}
+              loading={loading}
+              onEnterDirectory={(entry) => void enterDirectory(entry)}
+              onLoadDirectory={(path) => void loadDirectory(path)}
+              onPathInputChange={setPathInput}
+              pathInput={pathInput}
+              snapshot={snapshot}
+            />
+            <ProjectDirectoryActions
+              createdDirectoryPath={createdDirectoryPath}
+              mode={mode}
+              newDirectoryName={newDirectoryName}
+              newProjectName={newProjectName}
+              onCreateDirectoryProject={() => void createDirectoryProject()}
+              onNewDirectoryNameChange={setNewDirectoryName}
+              onNewProjectNameChange={setNewProjectName}
+              onResetCreatedDirectoryPath={() => setCreatedDirectoryPath(null)}
+              onUseExistingDirectory={() => void useExistingDirectory()}
+              snapshot={snapshot}
+              submitting={submitting}
+            />
           </div>
-
-          {mode === "create" ? (
-            <div className="grid gap-2 border-t border-border/50 pt-3">
-              <input
-                className="rounded-xl border border-border/50 bg-card px-3 py-2 text-[13px] outline-none placeholder:text-muted focus:border-brand/50 focus:ring-0"
-                disabled={Boolean(createdDirectoryPath)}
-                onChange={(event) => {
-                  setCreatedDirectoryPath(null);
-                  setNewDirectoryName(event.target.value);
-                }}
-                placeholder={t("chat:newFolderName")}
-                value={newDirectoryName}
-              />
-              <input
-                className="rounded-xl border border-border/50 bg-card px-3 py-2 text-[13px] outline-none placeholder:text-muted focus:border-brand/50 focus:ring-0"
-                onChange={(event) => setNewProjectName(event.target.value)}
-                placeholder={t("chat:projectNameOptional")}
-                value={newProjectName}
-              />
-              <button
-                className="rounded-xl border border-brand/25 bg-brand/10 px-3 py-2 text-[13px] font-medium text-brand outline-none transition hover:bg-brand/15 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={(!newDirectoryName.trim() && !createdDirectoryPath) || submitting}
-                onClick={() => void createDirectoryProject()}
-                type="button"
-              >
-                {submitting
-                  ? t("common:loading")
-                  : createdDirectoryPath
-                    ? t("chat:retryProjectRegistration")
-                    : t("chat:createAndUseProject")}
-              </button>
-            </div>
-          ) : (
-            <div className="flex justify-end border-t border-border/50 pt-3">
-              <button
-                className="rounded-xl border border-brand/25 bg-brand/10 px-4 py-2 text-[13px] font-medium text-brand outline-none transition hover:bg-brand/15 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={!snapshot || submitting}
-                onClick={() => void useExistingDirectory()}
-                type="button"
-              >
-                {submitting ? t("common:loading") : t("chat:useThisFolder")}
-              </button>
-            </div>
-          )}
-        </div>
         </div>
       </div>
     </div>

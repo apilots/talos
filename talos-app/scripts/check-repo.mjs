@@ -8,13 +8,15 @@ const webSrcRoot = join(webRoot, "src");
 const featuresRoot = join(webSrcRoot, "features");
 const ignoredDirectories = new Set(["dist", "node_modules", ".git"]);
 const maxEffectiveLinesPerFile = 1000;
+const maxEffectiveLinesPerTestFile = 300;
 const legacyLineBaselines = new Map([
   ["src/features/settings/components/models/SettingsModelsEditor.tsx", 417],
-  ["src/features/chat/components/ChatComposer.test.tsx", 250],
   ["src/features/chat/components/ChatComposer.tsx", 574],
+  ["src/features/chat/__tests__/streaming.test.ts", 637],
   ["src/features/chat/store.ts", 516],
   ["src/features/settings/components/SettingsAgentWorkspaceSection.tsx", 374],
   ["src/shared/i18n/resources.ts", 1037],
+  ["src/widgets/message-list/MessageList.test.tsx", 442],
 ]);
 
 const lineRules = [
@@ -30,6 +32,10 @@ function toPosixPath(filePath) {
 
 function countNonEmptyLines(filePath) {
   return readFileSync(filePath, "utf8").split(/\r?\n/).filter((line) => line.trim().length > 0).length;
+}
+
+function isTestFile(relativePath) {
+  return /\.(test|spec)\.tsx?$/.test(relativePath);
 }
 
 function collectFiles(dirPath, files = []) {
@@ -87,6 +93,15 @@ function validateLineRules(errors) {
       if (lineCount > legacyBaseline) {
         errors.push(
           `File exceeds legacy line baseline (${legacyBaseline}): ${relativePath} (${lineCount})`,
+        );
+      }
+      continue;
+    }
+
+    if (isTestFile(relativePath)) {
+      if (lineCount > maxEffectiveLinesPerTestFile) {
+        errors.push(
+          `File exceeds test line limit (${maxEffectiveLinesPerTestFile}): ${relativePath} (${lineCount})`,
         );
       }
       continue;
