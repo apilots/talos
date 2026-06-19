@@ -33,8 +33,11 @@ describe("createDesktopTalosClient", () => {
         provider: "sdk",
         user_id: "anonymous",
         channel_id: "web",
+        thread_id: null,
         message_id: "msg-1",
         trace_id: "trace-1",
+        project_root: null,
+        environment: null,
       },
       model: "kimi-k2.5",
       project_id: undefined,
@@ -45,12 +48,14 @@ describe("createDesktopTalosClient", () => {
         method: "turn.start",
         params: expect.objectContaining({
           session_id: "session-1",
-          context: expect.objectContaining({
-            source_type: "desktop",
-            provider: "sdk",
-            channel_id: "web",
-            message_id: "msg-1",
-            trace_id: "trace-1",
+          request: expect.objectContaining({
+            context: expect.objectContaining({
+              source_type: "desktop",
+              provider: "sdk",
+              channel_id: "web",
+              message_id: "msg-1",
+              trace_id: "trace-1",
+            }),
           }),
         }),
       },

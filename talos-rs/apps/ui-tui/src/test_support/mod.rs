@@ -11,11 +11,12 @@ pub(crate) use std::path::PathBuf;
 use std::sync::Mutex;
 use talos_error::TalosError;
 pub(crate) use talos_sdk::{
-    SessionHistorySnapshot, StopReason, TalosContentItem, TalosInputItem, TalosMessageRequest,
-    TalosTimelineContent, TalosTimelineDelta, TalosTimelineEvent, TalosTimelineEventPayload,
-    TalosTimelineEventType, TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus,
-    TalosTimelinePhase, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
-    TimelineEventEnvelope, TimelineRecoverySnapshot, TimelineReplay, TurnExecutionMetrics,
+    ProtocolSkillSuggestion, SessionHistorySnapshot, StopReason, TalosContentItem, TalosInputItem,
+    TalosMessageRequest, TalosTimelineContent, TalosTimelineDelta, TalosTimelineEvent,
+    TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItem, TalosTimelineItemKind,
+    TalosTimelineItemStatus, TalosTimelinePhase, TimelineActiveTurnSnapshot,
+    TimelineActiveTurnStatus, TimelineCursorStatus, TimelineEventEnvelope,
+    TimelineRecoverySnapshot, TimelineReplay, TurnExecutionMetrics,
 };
 
 #[derive(Default)]
@@ -39,6 +40,7 @@ pub(crate) struct MockGatewayState {
     pub(crate) reconnect_calls: usize,
     pub(crate) reconnect_since_event_ids: Vec<Option<String>>,
     pub(crate) reconnect_events: Vec<TimelineEventEnvelope>,
+    pub(crate) sent_requests: Vec<TalosMessageRequest>,
 }
 
 pub(crate) struct MockGatewayClient {
@@ -511,6 +513,7 @@ impl MockGatewayClient {
                 reconnect_calls: 0,
                 reconnect_since_event_ids: Vec::new(),
                 reconnect_events: Vec::new(),
+                sent_requests: Vec::new(),
             })),
         }
     }
@@ -558,6 +561,10 @@ impl GatewayClient for MockGatewayClient {
             ));
         }
         Ok(state.models.clone())
+    }
+
+    async fn suggest_skills(&self, _query: &str) -> TalosResult<Vec<ProtocolSkillSuggestion>> {
+        Ok(Vec::new())
     }
 
     async fn list_sessions(&self) -> TalosResult<Vec<TalosSession>> {
@@ -772,6 +779,7 @@ impl GatewayClient for MockGatewayClient {
     ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>> {
         let (delay, should_fail) = {
             let mut state = self.state.lock().unwrap();
+            state.sent_requests.push(request.clone());
             let should_fail = if state.stream_failures_remaining > 0 {
                 state.stream_failures_remaining -= 1;
                 true

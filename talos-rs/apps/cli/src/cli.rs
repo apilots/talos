@@ -9,9 +9,10 @@ use std::io::Write;
 use std::time::Duration;
 use talos_sdk::{
     now_ms, open_external_url, AppServerClient, AppServerClientConfig, CloudLoginClientKind,
-    CloudLoginStatusResponse, TalosContext, TalosInputItem, TalosMessageRequest, TalosProvider,
-    TalosSourceType, TalosTimelineContent, TalosTimelineDelta, TalosTimelineEventPayload,
-    TalosTimelineItemKind, TalosTimelinePhase, TimelineEventEnvelope,
+    CloudLoginStatusResponse, ProtocolSkillSelector, SkillsListParams, SkillsReadParams,
+    SkillsRefreshParams, SkillsSuggestParams, TalosContext, TalosInputItem, TalosMessageRequest,
+    TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta,
+    TalosTimelineEventPayload, TalosTimelineItemKind, TalosTimelinePhase, TimelineEventEnvelope,
 };
 use tracing::{debug, error};
 
@@ -19,6 +20,7 @@ mod types;
 
 use types::{
     AppServerSmokeCmd, AuthCommands, ChatCommands, Cli, Commands, ModelsCmd, SessionCommands,
+    SkillsCommands,
 };
 
 /// Main function to run the CLI
@@ -46,6 +48,7 @@ async fn run_app_server_cli(cli: Cli) -> Result<(), Box<dyn std::error::Error>> 
         Commands::Chat(cmd) => execute_app_server_chat_command(&mut client, cmd).await,
         Commands::Session(cmd) => execute_app_server_session_command(&mut client, cmd).await,
         Commands::Models(cmd) => execute_app_server_models_command(&mut client, cmd).await,
+        Commands::Skills(cmd) => execute_app_server_skills_command(&mut client, cmd).await,
         Commands::Status => execute_app_server_status_command(&mut client).await,
         Commands::Auth(cmd) => execute_auth_command(&mut client, cmd).await,
         Commands::Info => execute_app_server_info_command().await,
@@ -57,6 +60,79 @@ async fn run_app_server_cli(cli: Cli) -> Result<(), Box<dyn std::error::Error>> 
     result?;
     shutdown_result?;
     Ok(())
+}
+
+async fn execute_app_server_skills_command(
+    client: &mut AppServerClient,
+    cmd: SkillsCommands,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match cmd {
+        SkillsCommands::List { include_disabled } => {
+            let response = client
+                .list_skills(SkillsListParams { include_disabled })
+                .await?;
+            print_skills_snapshot(response);
+        }
+        SkillsCommands::Refresh => {
+            let response = client.refresh_skills(SkillsRefreshParams {}).await?;
+            print_skills_snapshot(response);
+        }
+        SkillsCommands::Suggest { query, limit } => {
+            let response = client
+                .suggest_skills(SkillsSuggestParams {
+                    query,
+                    limit: Some(limit),
+                })
+                .await?;
+            for skill in response.data {
+                println!(
+                    "${} [{}] {}",
+                    skill.name,
+                    format!("{:?}", skill.scope).to_lowercase(),
+                    skill.description
+                );
+            }
+        }
+        SkillsCommands::Read { name, path } => {
+            let selector = ProtocolSkillSelector {
+                name,
+                path: path.map(Into::into),
+            };
+            if selector.name.is_none() && selector.path.is_none() {
+                return Err("skills read requires --name or --path".into());
+            }
+            let document = client.read_skill(SkillsReadParams { selector }).await?;
+            println!("# {}", document.summary.name);
+            println!("Path: {}", document.summary.path.display());
+            println!();
+            println!("{}", document.contents);
+        }
+    }
+    Ok(())
+}
+
+fn print_skills_snapshot(response: talos_sdk::SkillsListResponse) {
+    for skill in response.data {
+        println!(
+            "${} [{}] {}{}",
+            skill.name,
+            format!("{:?}", skill.scope).to_lowercase(),
+            skill.description,
+            if skill.enabled { "" } else { " (disabled)" }
+        );
+    }
+    for error in response.errors {
+        eprintln!(
+            "load error: root={} path={} message={}",
+            error.root.display(),
+            error
+                .path
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            error.message
+        );
+    }
 }
 
 async fn execute_auth_command(

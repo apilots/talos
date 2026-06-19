@@ -55,6 +55,7 @@ impl TuiApp {
             received_output_delta: false,
             active_message: None,
             active_message_raw: None,
+            active_message_skills: Vec::new(),
             active_retry_count: 0,
             active_user_idx: None,
             transcript: Default::default(),
@@ -89,6 +90,10 @@ impl TuiApp {
             command_suggestions: Vec::new(),
             command_autocomplete_selected: 0,
             command_input_buffer: String::new(),
+            show_skill_autocomplete: false,
+            skill_suggestions: Vec::new(),
+            skill_autocomplete_selected: 0,
+            selected_skills: Vec::new(),
             close_in_progress: false,
             close_started_at: None,
             close_timeout_reported: false,
@@ -253,6 +258,7 @@ impl TuiApp {
         self.chat_selection = None;
         self.active_message = None;
         self.active_message_raw = None;
+        self.active_message_skills.clear();
         self.active_user_idx = None;
         self.turn_metrics = None;
         self.turn_metrics_live = false;

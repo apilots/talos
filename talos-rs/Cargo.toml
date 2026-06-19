@@ -19,6 +19,7 @@ members = [
     # Cognition
     "crates/cognition/memory",
     # Action
+    "crates/action/skills",
     "crates/action/tools",
     "crates/action/tools-policy",
     "crates/action/tools-sandbox",
@@ -100,6 +101,7 @@ cloud-sdk-rs = { path = "../../talos-cloud/cloud-rs/crates/cloud-sdk-rs" }
 # Internal crates
 talos-error = { path = "crates/infra/error" }
 talos-types = { path = "crates/common/types" }
+talos-skills = { path = "crates/action/skills" }
 talos-tools = { path = "crates/action/tools" }
 talos-tools-policy = { path = "crates/action/tools-policy" }
 talos-tools-sandbox = { path = "crates/action/tools-sandbox" }

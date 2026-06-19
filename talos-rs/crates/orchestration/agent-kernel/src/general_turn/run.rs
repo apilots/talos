@@ -28,6 +28,7 @@ pub async fn run_general_turn(
         memory_store,
         kernel_config,
         None,
+        None,
     )
     .await
 }
@@ -44,6 +45,7 @@ pub async fn run_general_turn_with_resume(
     memory_store: Arc<MemoryStore>,
     kernel_config: &AgentKernelConfig,
     resume: Option<GeneralTurnResume>,
+    skill_options: Option<GeneralTurnSkillOptions>,
 ) -> TalosResult<GeneralTurnResult> {
     let prepared = prepare_general_turn(
         ctx,
@@ -54,6 +56,7 @@ pub async fn run_general_turn_with_resume(
         tool_definition_provider,
         memory_store.clone(),
         kernel_config,
+        skill_options.clone(),
     )
     .await?;
     let mut prompt_diagnostics = prepared.prompt_diagnostics.clone();

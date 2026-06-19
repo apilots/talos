@@ -30,6 +30,10 @@ pub(super) enum Commands {
     /// Available models
     Models(ModelsCmd),
 
+    /// Skill catalog commands
+    #[command(subcommand)]
+    Skills(SkillsCommands),
+
     /// System status check
     Status,
 
@@ -42,6 +46,38 @@ pub(super) enum Commands {
 
     /// Run a local app-server protocol smoke scenario
     AppServerSmoke(AppServerSmokeCmd),
+}
+
+#[derive(Subcommand)]
+pub(super) enum SkillsCommands {
+    /// List available skills
+    List {
+        /// Include disabled skills
+        #[arg(long, default_value_t = false)]
+        include_disabled: bool,
+    },
+
+    /// Refresh and list available skills
+    Refresh,
+
+    /// Suggest skills by query
+    Suggest {
+        /// Query text after `$`
+        query: String,
+        /// Maximum number of suggestions
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
+
+    /// Read a skill document
+    Read {
+        /// Skill name selector
+        #[arg(long)]
+        name: Option<String>,
+        /// SKILL.md path selector
+        #[arg(long)]
+        path: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]

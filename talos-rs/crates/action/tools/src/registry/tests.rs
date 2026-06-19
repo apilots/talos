@@ -1,7 +1,7 @@
 use super::*;
 use crate::register_core_local_tools;
 use crate::trait_impl::EchoTestTool;
-use crate::{MemoryGetTool, MemorySearchTool, SkillTool, ToolSearchTool};
+use crate::{MemoryGetTool, MemorySearchTool, ToolSearchTool};
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -518,9 +518,25 @@ fn test_request_time_selection_activates_memory_tools_only_for_memory_requests()
 
 #[test]
 fn test_request_time_selection_includes_tool_search_for_deferred_tools() {
+    use crate::spec::{
+        default_governance_for_source, RegisteredToolSpec, ToolParallelism, ToolPayloadKind,
+        ToolSource, ToolVisibility,
+    };
+    use talos_llm_provider::ToolDefinition;
+
     let registry = ToolRegistry::new();
     registry.register(Arc::new(ToolSearchTool));
-    registry.register(Arc::new(SkillTool));
+    registry.register_external_dynamic_tool(
+        RegisteredToolSpec::new(
+            ToolDefinition::new("deferred_greet", "Greet the user", None),
+            ToolSource::Dynamic,
+            ToolPayloadKind::Function,
+            ToolParallelism::ParallelSafe,
+            false,
+            default_governance_for_source(ToolSource::Dynamic),
+        )
+        .with_visibility(ToolVisibility::Deferred),
+    );
 
     let request = ToolSelectionRequest::default().with_session_id("session-selection");
     let names = registry
@@ -530,7 +546,6 @@ fn test_request_time_selection_includes_tool_search_for_deferred_tools() {
         .collect::<Vec<_>>();
 
     assert!(names.contains(&"ToolSearch".to_string()));
-    assert!(!names.contains(&"Skill".to_string()));
 }
 
 #[test]
@@ -545,7 +560,7 @@ fn test_register_dynamic_tool_appears_in_catalog() {
 
     let registry = ToolRegistry::new();
     let spec = RegisteredToolSpec::new(
-        ToolDefinition::new("skill_greet", "Greet the user", None),
+        ToolDefinition::new("dynamic_greet", "Greet the user", None),
         ToolSource::Dynamic,
         ToolPayloadKind::Function,
         ToolParallelism::ParallelSafe,
@@ -559,10 +574,10 @@ fn test_register_dynamic_tool_appears_in_catalog() {
 
     // The tool is registered in the catalog even if the default policy doesn't list it.
     let defs = registry.get_tool_definitions();
-    assert!(defs.iter().any(|d| d.name == "skill_greet"));
+    assert!(defs.iter().any(|d| d.name == "dynamic_greet"));
     assert!(registry
         .list_tool_names()
-        .contains(&"skill_greet".to_string()));
+        .contains(&"dynamic_greet".to_string()));
 }
 
 #[tokio::test]

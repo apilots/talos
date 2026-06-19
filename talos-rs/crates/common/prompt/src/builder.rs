@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use talos_error::TalosResult;
 use talos_llm_provider::ChatMessage;
 use talos_memory::{MemoryStore, RetrievedMemoryItem};
+use talos_skills::{SkillPromptContext, SkillPromptRequest, SkillProvider};
 use talos_tools::{ToolDefinitionProvider, ToolSelectionPhase, ToolSelectionRequest};
 use talos_types::{talos::TalosSessionEnvironment, ModelInfo};
 use tokio::fs;
@@ -19,6 +21,9 @@ pub struct PromptBuilder<'a> {
     pub(crate) planning_instruction: Option<String>,
     pub(crate) user_input: Option<String>,
     pub(crate) tool_registry: Option<&'a dyn ToolDefinitionProvider>,
+    pub(crate) skill_provider: Option<Arc<dyn SkillProvider>>,
+    pub(crate) skill_prompt_request: Option<SkillPromptRequest>,
+    pub(crate) skill_prompt_context: Option<SkillPromptContext>,
     pub(crate) memory_store: Option<&'a MemoryStore>,
     pub(crate) session_id: Option<&'a str>,
     pub(crate) retrieved_memories: Vec<RetrievedMemoryItem>,
@@ -47,6 +52,9 @@ impl<'a> PromptBuilder<'a> {
             planning_instruction: None,
             user_input: None,
             tool_registry: None,
+            skill_provider: None,
+            skill_prompt_request: None,
+            skill_prompt_context: None,
             memory_store: None,
             session_id: None,
             retrieved_memories: Vec::new(),
@@ -87,6 +95,21 @@ impl<'a> PromptBuilder<'a> {
 
     pub fn tools(mut self, tool_registry: &'a dyn ToolDefinitionProvider) -> Self {
         self.tool_registry = Some(tool_registry);
+        self
+    }
+
+    pub fn skills(
+        mut self,
+        skill_provider: Arc<dyn SkillProvider>,
+        request: SkillPromptRequest,
+    ) -> Self {
+        self.skill_provider = Some(skill_provider);
+        self.skill_prompt_request = Some(request);
+        self
+    }
+
+    pub fn skill_prompt_context(mut self, context: SkillPromptContext) -> Self {
+        self.skill_prompt_context = Some(context);
         self
     }
 

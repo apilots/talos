@@ -228,6 +228,52 @@ fn test_command_autocomplete_panel_height_is_inline_and_capped() {
 }
 
 #[tokio::test]
+async fn test_skill_autocomplete_keyboard_selects_structured_skill() {
+    let mut app = create_app_server_app();
+    app.input_buffer = "$".to_string();
+    app.cursor_index = 1;
+    app.show_skill_autocomplete = true;
+    app.skill_suggestions = vec![
+        ProtocolSkillSuggestion {
+            name: "browser".to_string(),
+            description: "Control the in-app browser with Codex".to_string(),
+            short_description: None,
+            root: PathBuf::from("/tmp/skills/browser"),
+            path: PathBuf::from("/tmp/skills/browser/SKILL.md"),
+            scope: talos_sdk::ProtocolSkillScope::Plugin,
+            source_plugin: Some("browser".to_string()),
+        },
+        ProtocolSkillSuggestion {
+            name: "web-design-guidelines".to_string(),
+            description: "Review UI code for Web Interface Guidelines compliance".to_string(),
+            short_description: None,
+            root: PathBuf::from("/tmp/skills/web-design-guidelines"),
+            path: PathBuf::from("/tmp/skills/web-design-guidelines/SKILL.md"),
+            scope: talos_sdk::ProtocolSkillScope::External,
+            source_plugin: None,
+        },
+    ];
+
+    let _ = app
+        .handle_input(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await
+        .unwrap();
+    let _ = app
+        .handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .unwrap();
+
+    assert_eq!(app.input_buffer, "$web-design-guidelines ");
+    assert_eq!(app.selected_skills.len(), 1);
+    assert_eq!(app.selected_skills[0].name, "web-design-guidelines");
+    assert_eq!(
+        app.selected_skills[0].path,
+        PathBuf::from("/tmp/skills/web-design-guidelines/SKILL.md")
+    );
+    assert!(!app.show_skill_autocomplete);
+}
+
+#[tokio::test]
 async fn test_history_enter_switches_session() {
     let mut app = create_app_server_app();
     app.initialize_session().await;

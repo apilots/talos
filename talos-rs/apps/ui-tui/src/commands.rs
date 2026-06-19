@@ -9,7 +9,7 @@ use crate::client::GatewayClient;
 use crate::types::{AppState, ChatRole, CommandUpdate, QueuedMessage, SessionHistoryLoad};
 use crate::utils::summarize_for_queue;
 use crate::{TuiApp, MAX_QUEUE_LEN, SESSION_CLOSE_TIMEOUT};
-use talos_sdk::{TalosSession, TimelineActiveTurnStatus};
+use talos_sdk::{ProtocolSkillSuggestion, TalosSession, TimelineActiveTurnStatus};
 
 impl TuiApp {
     pub(crate) async fn submit_input(&mut self) -> TalosResult<bool> {
@@ -20,6 +20,7 @@ impl TuiApp {
 
         let original_input = self.input_buffer.clone();
         let original_pasted_blocks = self.pasted_blocks.clone();
+        let original_selected_skills = self.selected_skills.clone();
         let user_input = self.compose_user_input_text();
 
         let result = if self.is_command_input() {
@@ -29,10 +30,14 @@ impl TuiApp {
             self.execute_command(&command_line).await
         } else {
             self.reset_input();
-            match self.send_user_message(user_input.clone()).await {
+            match self
+                .send_user_message_with_skills(user_input.clone(), original_selected_skills.clone())
+                .await
+            {
                 Ok(true) => Ok(false),
                 Ok(false) => {
                     self.restore_input_state(original_input, original_pasted_blocks);
+                    self.selected_skills = original_selected_skills;
                     Ok(false)
                 }
                 Err(err) => Err(err),
@@ -216,7 +221,17 @@ impl TuiApp {
         self.message_history_index = None;
     }
 
+    #[cfg(test)]
     pub(crate) async fn send_user_message(&mut self, user_message: String) -> TalosResult<bool> {
+        self.send_user_message_with_skills(user_message, Vec::new())
+            .await
+    }
+
+    pub(crate) async fn send_user_message_with_skills(
+        &mut self,
+        user_message: String,
+        skills: Vec<ProtocolSkillSuggestion>,
+    ) -> TalosResult<bool> {
         if self.close_in_progress {
             self.show_status_hint(
                 "Session is closing. New messages are blocked.",
@@ -252,7 +267,7 @@ impl TuiApp {
         }
 
         self.message_queue
-            .push_back(QueuedMessage::new(user_message.clone()));
+            .push_back(QueuedMessage::with_skills(user_message.clone(), skills));
         self.add_message_to_history(user_message.clone());
         self.push_right_event(format!(
             "queued ({}/{}): {}",
@@ -273,7 +288,10 @@ impl TuiApp {
         };
 
         if let Err(err) = self
-            .start_stream_for_message(next_message.text.clone())
+            .start_stream_for_message_with_skills(
+                next_message.text.clone(),
+                next_message.skills.clone(),
+            )
             .await
         {
             if let Some(front) = self.message_queue.front_mut() {

@@ -179,6 +179,8 @@ pub enum PromptSectionKind {
     RequestedToolPreferenceHint,
     FailureRecoveryPolicy,
     ExpandedToolCatalog,
+    SkillCatalog,
+    ActiveSkillInstructions,
     TaskProtocolLibrary,
     CommunicationPolicy,
     PlanningInstruction,

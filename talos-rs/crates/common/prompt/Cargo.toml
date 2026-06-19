@@ -16,6 +16,7 @@ talos-error = { workspace = true }
 talos-config = { workspace = true }
 talos-llm-provider = { workspace = true }
 talos-memory = { workspace = true }
+talos-skills = { workspace = true }
 talos-tools = { workspace = true }
 talos-types = { workspace = true }
 uuid = { workspace = true }

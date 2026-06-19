@@ -46,12 +46,7 @@ export function createDesktopTalosClient(
     start: async (sessionId: string, request: TalosMessageRequest): Promise<TalosMessageAck> => {
       return client.startTurn({
         session_id: sessionId,
-        input: request.input as AppProtocol.ProtocolInputItem[],
-        workspace_id: request.workspace_id ?? null,
-        context: toProtocolContext(request.context),
-        model: request.model ?? null,
-        project_id: request.project_id ?? null,
-        current_directory: request.current_directory ?? null,
+        request: toProtocolMessageRequest(request),
         client_request_id: createClientRequestId(),
       });
     },
@@ -62,22 +57,14 @@ export function createDesktopTalosClient(
     ): Promise<TalosMessageAck> => {
       return client.startTurn({
         session_id: sessionId,
-        input: request.input as AppProtocol.ProtocolInputItem[],
-        workspace_id: request.workspace_id ?? null,
-        context: toProtocolContext(request.context),
-        model: request.model ?? null,
-        project_id: request.project_id ?? null,
-        current_directory: request.current_directory ?? null,
+        request: toProtocolMessageRequest(request),
         client_request_id: idempotencyKey,
       });
     },
     retry: (sessionId: string, request: TalosMessageRetryRequest) =>
       client.retryTurn({
         session_id: sessionId,
-        input: request.input as AppProtocol.ProtocolInputItem[],
-        workspace_id: request.workspace_id ?? null,
-        client_message_id: request.client_message_id,
-        retry_of_message_id: request.retry_of_message_id,
+        request: toProtocolRetryRequest(request),
       }),
     retryWithIdempotencyKey: (
       sessionId: string,
@@ -86,10 +73,10 @@ export function createDesktopTalosClient(
     ) =>
       client.retryTurn({
         session_id: sessionId,
-        input: request.input as AppProtocol.ProtocolInputItem[],
-        workspace_id: request.workspace_id ?? null,
-        client_message_id: idempotencyKey,
-        retry_of_message_id: request.retry_of_message_id,
+        request: toProtocolRetryRequest({
+          ...request,
+          client_message_id: idempotencyKey,
+        }),
       }),
     events: (
       sessionId: string,
@@ -220,12 +207,7 @@ async function startTurnAndStream(
   const clientRequestId = createClientRequestId();
   const ack = await client.startTurn({
     session_id: sessionId,
-    input: request.input as AppProtocol.ProtocolInputItem[],
-    workspace_id: request.workspace_id ?? null,
-    context: toProtocolContext(request.context),
-    model: request.model ?? null,
-    project_id: request.project_id ?? null,
-    current_directory: request.current_directory ?? null,
+    request: toProtocolMessageRequest(request),
     client_request_id: clientRequestId,
   });
   if (!ack.message_id) {
@@ -252,10 +234,7 @@ async function retryTurnAndStream(
 ): Promise<void> {
   const ack = await client.retryTurn({
     session_id: sessionId,
-    input: request.input as AppProtocol.ProtocolInputItem[],
-    workspace_id: request.workspace_id ?? null,
-    client_message_id: request.client_message_id,
-    retry_of_message_id: request.retry_of_message_id,
+    request: toProtocolRetryRequest(request),
   });
   if (!ack.message_id) {
     throw new Error(`Retry ack did not include message_id: ${ack.turn_id}`);
@@ -425,19 +404,32 @@ function toProtocolDirectoryPatch(
     : { type: "clear" };
 }
 
-function toProtocolContext(
-  context: TalosMessageRequest["context"] | undefined | null,
-): AppProtocol.ProtocolTalosContext | null {
-  if (!context) {
-    return null;
-  }
+function toProtocolMessageRequest(request: TalosMessageRequest): AppProtocol.TalosMessageRequest {
   return {
-    source_type: "desktop",
-    provider: context.provider,
-    channel_id: context.channel_id ?? "desktop",
-    thread_id: context.thread_id ?? null,
-    message_id: context.message_id,
-    trace_id: context.trace_id,
+    input: request.input as AppProtocol.TalosInputItem[],
+    workspace_id: request.workspace_id ?? null,
+    context: request.context
+      ? ({
+          ...request.context,
+          source_type: "desktop",
+          channel_id: request.context.channel_id ?? "desktop",
+          thread_id: request.context.thread_id ?? null,
+          project_root: null,
+          environment: request.context.environment ?? null,
+        } as AppProtocol.TalosContext)
+      : null,
+    model: request.model ?? null,
+    project_id: request.project_id ?? null,
+    current_directory: request.current_directory ?? null,
+  };
+}
+
+function toProtocolRetryRequest(request: TalosMessageRetryRequest): AppProtocol.TalosMessageRetryRequest {
+  return {
+    input: request.input as AppProtocol.TalosInputItem[],
+    workspace_id: request.workspace_id ?? null,
+    client_message_id: request.client_message_id,
+    retry_of_message_id: request.retry_of_message_id,
   };
 }
 

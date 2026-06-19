@@ -19,12 +19,18 @@ import { ChatContextBar } from "@/widgets/chat-context-bar/ChatContextBar";
 import { Panel } from "@/shared/ui/Panel";
 import { Button } from "@/shared/ui/Button";
 import { ChatSessionReconnectPanel } from "./ChatSessionReconnectPanel";
+import type { ProtocolSkillSuggestion } from "@talos/sdk-browser";
 
 interface SessionLocationState {
   initialPrompt?: string;
   initialModel?: string;
   initialProjectId?: string;
   initialProject?: ProjectRecord;
+  initialSkills?: ProtocolSkillSuggestion[];
+}
+
+function selectedSkillsOption(skills?: ProtocolSkillSuggestion[]) {
+  return skills && skills.length > 0 ? skills : undefined;
 }
 
 export function ChatSessionPage() {
@@ -120,6 +126,7 @@ export function ChatSessionPage() {
     void sendText(initialPrompt, {
       model: locationState?.initialModel,
       project: initialProject,
+      skills: selectedSkillsOption(locationState?.initialSkills),
     })
       .catch(() => undefined)
       .finally(() => {
@@ -133,6 +140,7 @@ export function ChatSessionPage() {
     locationState?.initialProject,
     locationState?.initialProjectId,
     locationState?.initialPrompt,
+    locationState?.initialSkills,
     navigate,
     projects,
     sendText,
@@ -281,7 +289,7 @@ export function ChatSessionPage() {
                 setConnection({ runtimeMode: mode });
               }
             }}
-            onSend={() => {
+            onSend={(skills) => {
               stickToBottomRef.current = true;
               window.requestAnimationFrame(scrollToBottom);
               if (!session) {
@@ -289,9 +297,10 @@ export function ChatSessionPage() {
                 return sendTurn({
                   model: currentModel,
                   project: selectedProject,
+                  skills: selectedSkillsOption(skills),
                 });
               }
-              return sendTurn();
+              return sendTurn({ skills: selectedSkillsOption(skills) });
             }}
             projects={projects}
             runtimeMode={connection.runtimeMode}

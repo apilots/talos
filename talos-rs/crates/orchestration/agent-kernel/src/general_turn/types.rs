@@ -3,6 +3,7 @@ use crate::{ToolExecutionMode, ToolExecutionOutput};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::PathBuf;
+use talos_skills::{SkillRoots, SkillSelector};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -310,6 +311,12 @@ pub struct GeneralTurnStepRequest {
     pub pre_final_execution_summary: Option<String>,
     pub stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
     pub streaming_tool_execution: Option<StreamingToolExecutionConfig>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct GeneralTurnSkillOptions {
+    pub selected: Vec<SkillSelector>,
+    pub roots: Option<SkillRoots>,
 }
 
 impl GeneralTurnStepRequest {

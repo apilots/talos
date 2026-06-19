@@ -16,7 +16,9 @@ impl TuiApp {
             }
             AppState::Chat => {
                 self.render_left_panel(f, f.area());
-                if self.show_command_autocomplete {
+                if self.show_skill_autocomplete {
+                    self.render_skill_autocomplete(f, f.area());
+                } else if self.show_command_autocomplete {
                     self.render_command_autocomplete(f, f.area());
                 } else if self.show_model_picker {
                     self.render_model_picker(f, f.area());

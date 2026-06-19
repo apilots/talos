@@ -42,6 +42,15 @@ agent:
           api_key_env: "TALOS_WEB_SEARCH_TAVILY_API_KEY"
           base_url: "https://api.tavily.com/search"
           timeout_ms: 15000
+    skills:
+      enabled: true
+      roots:
+        - "~/.talos/skills"
+        - "~/.agents/skills"
+      install_root: "~/.talos/skills"
+      state_path: "~/.talos/skills-state.json"
+      max_skill_md_bytes: 65536
+      max_available_summary_bytes: 8192
     planner_mode: "built_in"
     prompt:
       window:

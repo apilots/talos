@@ -416,7 +416,15 @@
         "workspace.doc.read",
         "workspace.doc.write",
         "workspace.info",
-        "skill.list",
+        "skills.list",
+        "skills.refresh",
+        "skills.suggest",
+        "skills.read",
+        "skills.resolve",
+        "skills.install",
+        "skills.uninstall",
+        "skills.enable",
+        "skills.disable",
         "app.list",
         "tool.list",
         "auth.logout",
@@ -1100,12 +1108,156 @@
           "properties": {
             "method": {
               "enum": [
-                "skill.list"
+                "skills.list"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/SkillListParams"
+              "$ref": "#/definitions/SkillsListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "skills.refresh"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SkillsRefreshParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "skills.suggest"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SkillsSuggestParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "skills.read"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SkillsReadParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "skills.resolve"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SkillsResolveParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "skills.install"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SkillsInstallParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "skills.uninstall"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SkillsUninstallParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "skills.enable"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SkillsEnableParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "skills.disable"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SkillsDisableParams"
             }
           },
           "required": [
@@ -1881,60 +2033,23 @@
       ],
       "type": "object"
     },
-    "ProtocolInputItem": {
-      "oneOf": [
-        {
-          "properties": {
-            "text": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "text"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "text",
-            "type"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "ProtocolTalosContext": {
+    "ProtocolSkillSelector": {
       "properties": {
-        "channel_id": {
-          "type": "string"
-        },
-        "message_id": {
-          "type": "string"
-        },
-        "provider": {
-          "type": "string"
-        },
-        "source_type": {
-          "type": "string"
-        },
-        "thread_id": {
+        "name": {
           "default": null,
           "type": [
             "string",
             "null"
           ]
         },
-        "trace_id": {
-          "type": "string"
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
-      "required": [
-        "channel_id",
-        "message_id",
-        "provider",
-        "source_type",
-        "trace_id"
-      ],
       "type": "object"
     },
     "ProtocolVersion": {
@@ -2429,7 +2544,105 @@
       ],
       "type": "object"
     },
-    "SkillListParams": {
+    "SkillsDisableParams": {
+      "properties": {
+        "selector": {
+          "$ref": "#/definitions/ProtocolSkillSelector"
+        }
+      },
+      "required": [
+        "selector"
+      ],
+      "type": "object"
+    },
+    "SkillsEnableParams": {
+      "properties": {
+        "selector": {
+          "$ref": "#/definitions/ProtocolSkillSelector"
+        }
+      },
+      "required": [
+        "selector"
+      ],
+      "type": "object"
+    },
+    "SkillsInstallParams": {
+      "properties": {
+        "source_path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_path"
+      ],
+      "type": "object"
+    },
+    "SkillsListParams": {
+      "properties": {
+        "include_disabled": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "SkillsReadParams": {
+      "properties": {
+        "selector": {
+          "$ref": "#/definitions/ProtocolSkillSelector"
+        }
+      },
+      "required": [
+        "selector"
+      ],
+      "type": "object"
+    },
+    "SkillsRefreshParams": {
+      "type": "object"
+    },
+    "SkillsResolveParams": {
+      "properties": {
+        "selected": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ProtocolSkillSelector"
+          },
+          "type": "array"
+        },
+        "text": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SkillsSuggestParams": {
+      "properties": {
+        "limit": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "query": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SkillsUninstallParams": {
+      "properties": {
+        "selector": {
+          "$ref": "#/definitions/ProtocolSkillSelector"
+        }
+      },
+      "required": [
+        "selector"
+      ],
       "type": "object"
     },
     "StopReason": {
@@ -2476,6 +2689,14 @@
         "session_deleted",
         "lagged",
         "slow_consumer"
+      ],
+      "type": "string"
+    },
+    "TalosConnectionMode": {
+      "description": "Talos gateway protocol types shared by server and client components.",
+      "enum": [
+        "embedded",
+        "remote"
       ],
       "type": "string"
     },
@@ -2847,6 +3068,234 @@
         }
       ]
     },
+    "TalosContext": {
+      "description": "Cross-channel request context.",
+      "properties": {
+        "channel_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TalosSessionEnvironment"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "project_root": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "$ref": "#/definitions/TalosProvider"
+        },
+        "source_type": {
+          "$ref": "#/definitions/TalosSourceType"
+        },
+        "thread_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trace_id": {
+          "type": "string"
+        },
+        "user_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message_id",
+        "provider",
+        "source_type",
+        "trace_id",
+        "user_id"
+      ],
+      "type": "object"
+    },
+    "TalosInputItem": {
+      "description": "Talos message input item.",
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "skill_selection"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "path",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "mime_type": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "image"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "url"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "file_id": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "mime_type": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "file"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "data_base64": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "mime_type": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "voice"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "mime_type": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "video"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "TalosJsonValue": {
       "properties": {
         "value": {
@@ -2857,6 +3306,133 @@
         "value"
       ],
       "type": "object"
+    },
+    "TalosMessageRequest": {
+      "description": "Talos message request payload for session interactions.",
+      "properties": {
+        "context": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TalosContext"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "current_directory": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "input": {
+          "items": {
+            "$ref": "#/definitions/TalosInputItem"
+          },
+          "type": "array"
+        },
+        "model": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workspace_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "input"
+      ],
+      "type": "object"
+    },
+    "TalosMessageRetryRequest": {
+      "description": "Talos retry request payload for session interactions.",
+      "properties": {
+        "client_message_id": {
+          "type": "string"
+        },
+        "input": {
+          "items": {
+            "$ref": "#/definitions/TalosInputItem"
+          },
+          "type": "array"
+        },
+        "retry_of_message_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "client_message_id",
+        "input",
+        "retry_of_message_id"
+      ],
+      "type": "object"
+    },
+    "TalosProvider": {
+      "description": "Concrete source provider.",
+      "enum": [
+        "http",
+        "sdk",
+        "cli",
+        "telegram",
+        "web_socket",
+        "system"
+      ],
+      "type": "string"
+    },
+    "TalosSessionEnvironment": {
+      "properties": {
+        "connection_mode": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/TalosConnectionMode"
+            }
+          ],
+          "default": "remote"
+        },
+        "directory": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "directory"
+      ],
+      "type": "object"
+    },
+    "TalosSourceType": {
+      "description": "High-level source category.",
+      "enum": [
+        "http",
+        "desktop",
+        "im",
+        "cli",
+        "ws",
+        "system"
+      ],
+      "type": "string"
     },
     "TalosTimelineContent": {
       "description": "Current full content for a timeline item.",
@@ -4154,33 +4730,15 @@
     },
     "TurnRetryParams": {
       "properties": {
-        "client_message_id": {
-          "type": "string"
-        },
-        "input": {
-          "items": {
-            "$ref": "#/definitions/ProtocolInputItem"
-          },
-          "type": "array"
-        },
-        "retry_of_message_id": {
-          "type": "string"
+        "request": {
+          "$ref": "#/definitions/TalosMessageRetryRequest"
         },
         "session_id": {
           "type": "string"
-        },
-        "workspace_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [
-        "client_message_id",
-        "input",
-        "retry_of_message_id",
+        "request",
         "session_id"
       ],
       "type": "object"
@@ -4194,57 +4752,15 @@
             "null"
           ]
         },
-        "context": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/ProtocolTalosContext"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "current_directory": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "input": {
-          "items": {
-            "$ref": "#/definitions/ProtocolInputItem"
-          },
-          "type": "array"
-        },
-        "model": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "project_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
+        "request": {
+          "$ref": "#/definitions/TalosMessageRequest"
         },
         "session_id": {
           "type": "string"
-        },
-        "workspace_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [
-        "input",
+        "request",
         "session_id"
       ],
       "type": "object"

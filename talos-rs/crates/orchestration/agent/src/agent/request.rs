@@ -1,6 +1,7 @@
 use super::AgentHarness;
 use crate::service::{AgentRequest, OrchestratorRequest};
 use talos_agent_kernel::TurnPhase;
+use talos_skills::SkillSelector;
 use talos_types::talos::{TalosInputItem, TalosOutputItem, TalosReasoning};
 use talos_types::{ModelInfo, TalosSession};
 
@@ -66,6 +67,18 @@ impl AgentHarness {
             .join("\n\n")
     }
 
+    pub(crate) fn extract_skill_selections(input: &[TalosInputItem]) -> Vec<SkillSelector> {
+        input
+            .iter()
+            .filter_map(|item| match item {
+                TalosInputItem::SkillSelection { name, path } if !path.trim().is_empty() => {
+                    Some(SkillSelector::selection(name.trim(), path.trim()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
     pub(crate) fn collect_reasoning(output_items: &[TalosOutputItem]) -> Vec<TalosReasoning> {
         output_items
             .iter()
@@ -84,5 +97,36 @@ impl AgentHarness {
             planning_instruction: None,
             transfer_to: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn extracts_structured_skill_selections_with_path() {
+        let selections = AgentHarness::extract_skill_selections(&[
+            TalosInputItem::Text {
+                text: "Use $review".to_string(),
+            },
+            TalosInputItem::SkillSelection {
+                name: " review ".to_string(),
+                path: " /tmp/review/SKILL.md ".to_string(),
+            },
+            TalosInputItem::SkillSelection {
+                name: "ignored".to_string(),
+                path: " ".to_string(),
+            },
+        ]);
+
+        assert_eq!(
+            selections,
+            vec![SkillSelector::Selection {
+                name: "review".to_string(),
+                path: PathBuf::from("/tmp/review/SKILL.md"),
+            }]
+        );
     }
 }

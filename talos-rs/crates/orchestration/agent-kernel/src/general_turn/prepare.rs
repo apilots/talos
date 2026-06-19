@@ -4,7 +4,11 @@ use crate::{
     KernelTranscriptPayload,
 };
 use serde::de::DeserializeOwned;
+use talos_config::{resolve_runtime_path, SkillsRuntimeConfig};
 use talos_prompt::{DynamicTrimPolicy, PromptSectionKind};
+use talos_skills::{
+    LocalSkillProvider, SkillPromptBudget, SkillPromptRequest, SkillRoot, SkillRoots,
+};
 use talos_tools::{PermissionMode, ToolSelectionPhase, ToolSelectionRequest};
 
 pub(crate) const SESSION_CONTINUITY_STATE_KEY: &str = "session_continuity";
@@ -128,8 +132,9 @@ fn build_prompt_builder<'a>(
     session_continuity: Option<SessionContinuity>,
     load_policy: PromptLoadPolicy,
     dynamic_trim_policy: DynamicTrimPolicy,
+    skill_options: Option<GeneralTurnSkillOptions>,
 ) -> TalosResult<PromptBuilder<'a>> {
-    Ok(PromptBuilder::new()
+    let mut builder = PromptBuilder::new()
         .agent(agent_name.to_string(), agent_description.to_string())
         .phase(phase)
         .planner_mode(kernel_config.planner_mode.as_str())?
@@ -149,7 +154,55 @@ fn build_prompt_builder<'a>(
         .project_root(project_root)
         .session_continuity(session_continuity)
         .dynamic_trim_policy(dynamic_trim_policy)
-        .user_input(input.to_string()))
+        .user_input(input.to_string());
+
+    if kernel_config.skills.enabled {
+        let skill_options = skill_options.unwrap_or_default();
+        let roots = skill_options
+            .roots
+            .unwrap_or_else(|| build_skill_roots(&kernel_config.skills));
+        let provider = std::sync::Arc::new(LocalSkillProvider::new(roots));
+        builder = builder.skills(
+            provider,
+            SkillPromptRequest {
+                text: input.to_string(),
+                selected: skill_options.selected,
+                budget: build_skill_prompt_budget(&kernel_config.skills),
+            },
+        );
+    }
+
+    Ok(builder)
+}
+
+fn build_skill_roots(config: &SkillsRuntimeConfig) -> SkillRoots {
+    let install_root = resolve_runtime_path(&config.install_root);
+    let roots = config
+        .roots
+        .iter()
+        .map(|path| {
+            let path = resolve_runtime_path(path);
+            if path == install_root {
+                SkillRoot::user(path)
+            } else {
+                SkillRoot::external(path)
+            }
+        })
+        .collect::<Vec<_>>();
+    SkillRoots {
+        roots,
+        state_path: resolve_runtime_path(&config.state_path),
+        install_root,
+        max_skill_md_bytes: config.max_skill_md_bytes,
+        max_available_summary_bytes: config.max_available_summary_bytes,
+    }
+}
+
+fn build_skill_prompt_budget(config: &SkillsRuntimeConfig) -> SkillPromptBudget {
+    SkillPromptBudget {
+        max_available_summary_bytes: config.max_available_summary_bytes,
+        max_skill_md_bytes: config.max_skill_md_bytes,
+    }
 }
 
 fn count_section_kind(sections: &[talos_prompt::PromptSection], kind: PromptSectionKind) -> usize {
@@ -236,6 +289,7 @@ async fn rebuild_prompt_assembly(
     session_continuity: Option<SessionContinuity>,
     load_policy: PromptLoadPolicy,
     dynamic_trim_policy: DynamicTrimPolicy,
+    skill_options: Option<GeneralTurnSkillOptions>,
 ) -> TalosResult<talos_prompt::PromptAssembly> {
     build_prompt_builder(
         agent_name,
@@ -253,6 +307,7 @@ async fn rebuild_prompt_assembly(
         session_continuity,
         load_policy,
         dynamic_trim_policy,
+        skill_options,
     )?
     .assemble()
     .await
@@ -276,6 +331,7 @@ async fn compact_session_history_if_needed(
     session_environment: Option<talos_types::talos::TalosSessionEnvironment>,
     project_root: Option<std::path::PathBuf>,
     session_continuity: Option<SessionContinuity>,
+    skill_options: Option<GeneralTurnSkillOptions>,
 ) -> TalosResult<
     Option<(
         Option<talos_prompt::PromptAssembly>,
@@ -350,6 +406,7 @@ async fn compact_session_history_if_needed(
         session_continuity,
         build_compacted_prompt_load_policy(kernel_config),
         DynamicTrimPolicy::PreserveAll,
+        skill_options,
     )
     .await?;
     let summary_sections_after = count_section_kind(
@@ -727,6 +784,7 @@ pub async fn prepare_general_turn(
     tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
     memory_store: Arc<MemoryStore>,
     kernel_config: &AgentKernelConfig,
+    skill_options: Option<GeneralTurnSkillOptions>,
 ) -> TalosResult<PreparedGeneralTurn> {
     let session_id = ctx.session_id.clone();
     let message_id = ctx.message_id.clone();
@@ -768,6 +826,7 @@ pub async fn prepare_general_turn(
         session_continuity.clone(),
         initial_load_policy.clone(),
         DynamicTrimPolicy::PreserveAll,
+        skill_options.clone(),
     )
     .await?;
     let mut session_history_compaction = None;
@@ -800,6 +859,7 @@ pub async fn prepare_general_turn(
         ctx.session_environment.clone(),
         ctx.project_root.clone(),
         session_continuity.clone(),
+        skill_options.clone(),
     )
     .await?
     {
@@ -847,6 +907,7 @@ pub async fn prepare_general_turn(
             session_continuity,
             fallback_load_policy,
             DynamicTrimPolicy::TrimToBudget,
+            skill_options,
         )
         .await?;
     }

@@ -20,6 +20,13 @@ use tokio::sync::mpsc;
 static SESSION_COUNTER: AtomicUsize = AtomicUsize::new(1);
 
 fn extract_tool_result_text(payload: &Value) -> Option<String> {
+    if payload.get("type").and_then(Value::as_str) == Some("text") {
+        return payload
+            .get("text")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+    }
+
     let result = payload.get("result")?;
     result.as_str().map(str::to_string).or_else(|| {
         result
@@ -30,6 +37,10 @@ fn extract_tool_result_text(payload: &Value) -> Option<String> {
 }
 
 fn tool_message_reports_success(payload: &Value) -> bool {
+    if payload.get("type").and_then(Value::as_str) == Some("text") {
+        return true;
+    }
+
     payload
         .get("ok")
         .and_then(|value| value.as_bool())

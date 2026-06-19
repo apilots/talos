@@ -3,12 +3,15 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use talos_app_protocol::errors::AppServerErrorBody;
 use talos_app_protocol::requests::{
+    protocol_skill_document, protocol_skill_load_error, protocol_skill_selector,
+    protocol_skill_suggestion, protocol_skill_summary, protocol_skill_warning,
     AuthSessionReadResponse, AuthSessionSnapshot, AuthSessionUserSnapshot, ClientRequest,
     ClientRequestParams, ConfigBatchWriteParams, ConfigReadParams, ConfigValueWriteParams,
     EventSubscribeParams, FsDirectoryCreateParams, FsDirectoryReadParams, MemoryFileReadParams,
     MemoryFileWriteParams, MessageCommandStatus, OptionalPathPatch, OptionalStringPatch,
-    ProjectCreateParams, ProjectPatchParams, ProtocolInputItem, ProtocolTalosContext,
-    SessionListParams, SessionPatchParams, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus,
+    ProjectCreateParams, ProjectPatchParams, SessionListParams, SessionPatchParams,
+    SkillsListParams, SkillsListResponse, SkillsResolveResponse, SkillsSuggestParams,
+    SkillsSuggestResponse, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus,
     TimelineCursorStatus, TimelinePendingDynamicToolResult, TimelinePendingUserAction,
     TimelineRecoverySnapshot, TimelineReplay, TurnStartParams, TurnStartResponse,
     WorkspaceInfoResponse,
@@ -28,9 +31,7 @@ use talos_session_store::{
     ActiveTurnRecord, ActiveTurnStatus, IdempotencyStatus, PendingUserAction, TimelineEventId,
 };
 use talos_tools::ToolRegistry;
-use talos_types::talos::{
-    TalosContext, TalosInputItem, TalosMessageRequest, TalosProvider, TalosSourceType,
-};
+use talos_types::talos::TalosInputItem;
 use talos_types::{
     DocUpdateRequest, ExpectedFileVersion, OptionalCurrentDirectoryPatch, OptionalProjectIdPatch,
     ProjectPatch, SessionConf, SessionConfigOverridePolicy, SessionPatch, SessionQuery,
@@ -272,16 +273,17 @@ impl AppServerApplication for TalosApplicationAdapter {
                 to_value(json!({ "success": true }))
             }
             ClientRequestParams::TurnRetry(params) => {
+                validate_app_server_input(&params.request.input)?;
                 let ack = self
                     .app
                     .submit_retry(
                         actor,
                         &params.session_id,
                         TurnRetryRequest {
-                            input: params.input.into_iter().map(map_input_item).collect(),
-                            workspace_id: params.workspace_id,
-                            client_message_id: params.client_message_id,
-                            retry_of_message_id: params.retry_of_message_id,
+                            input: params.request.input,
+                            workspace_id: params.request.workspace_id,
+                            client_message_id: params.request.client_message_id,
+                            retry_of_message_id: params.request.retry_of_message_id,
                         },
                     )
                     .await
@@ -401,7 +403,71 @@ impl AppServerApplication for TalosApplicationAdapter {
                 to_value(self.write_config_batch(actor, params).await?)
             }
             ClientRequestParams::ConfigReload(_) => to_value(json!({ "success": true })),
-            ClientRequestParams::SkillList(_) => to_value(json!({ "data": self.list_skills() })),
+            ClientRequestParams::SkillsList(params) => self.list_skills(params),
+            ClientRequestParams::SkillsRefresh(_) => self.refresh_skills(),
+            ClientRequestParams::SkillsSuggest(params) => self.suggest_skills(params),
+            ClientRequestParams::SkillsRead(params) => {
+                let selector = protocol_skill_selector(params.selector)
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(protocol_skill_document(
+                    self.app
+                        .skills
+                        .read_document(&selector)
+                        .map_err(AppServerErrorBody::from_talos_error)?,
+                ))
+            }
+            ClientRequestParams::SkillsResolve(params) => {
+                let selected = params
+                    .selected
+                    .into_iter()
+                    .map(protocol_skill_selector)
+                    .collect::<TalosResult<Vec<_>>>()
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                let (skills, warnings) = self
+                    .app
+                    .skills
+                    .resolve(&params.text, &selected)
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(SkillsResolveResponse {
+                    data: skills.into_iter().map(protocol_skill_summary).collect(),
+                    warnings: warnings.into_iter().map(protocol_skill_warning).collect(),
+                })
+            }
+            ClientRequestParams::SkillsInstall(params) => to_value(protocol_skill_summary(
+                self.app
+                    .skills
+                    .install(params.source_path)
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            )),
+            ClientRequestParams::SkillsUninstall(params) => {
+                let selector = protocol_skill_selector(params.selector)
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                self.app
+                    .skills
+                    .uninstall(&selector)
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(json!({ "success": true }))
+            }
+            ClientRequestParams::SkillsEnable(params) => {
+                let selector = protocol_skill_selector(params.selector)
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(protocol_skill_summary(
+                    self.app
+                        .skills
+                        .enable(&selector)
+                        .map_err(AppServerErrorBody::from_talos_error)?,
+                ))
+            }
+            ClientRequestParams::SkillsDisable(params) => {
+                let selector = protocol_skill_selector(params.selector)
+                    .map_err(AppServerErrorBody::from_talos_error)?;
+                to_value(protocol_skill_summary(
+                    self.app
+                        .skills
+                        .disable(&selector)
+                        .map_err(AppServerErrorBody::from_talos_error)?,
+                ))
+            }
             ClientRequestParams::AppList(_) => to_value(json!({ "data": self.list_apps() })),
             ClientRequestParams::ToolList(_) => to_value(json!({ "data": self.list_tools() })),
             ClientRequestParams::AuthLogout(_) => {
@@ -613,21 +679,11 @@ impl TalosApplicationAdapter {
         actor: &Actor,
         params: TurnStartParams,
     ) -> ProtocolResult<TurnStartResponse> {
+        let request = params.request;
+        validate_app_server_input(&request.input)?;
         let ack = self
             .app
-            .submit_message(
-                actor,
-                &params.session_id,
-                TalosMessageRequest {
-                    input: params.input.into_iter().map(map_input_item).collect(),
-                    workspace_id: params.workspace_id,
-                    context: params.context.map(map_context).transpose()?,
-                    model: params.model,
-                    project_id: params.project_id,
-                    current_directory: params.current_directory,
-                },
-                params.client_request_id,
-            )
+            .submit_message(actor, &params.session_id, request, params.client_request_id)
             .await
             .map_err(AppServerErrorBody::from_talos_error)?;
         Ok(TurnStartResponse {
@@ -733,20 +789,51 @@ impl TalosApplicationAdapter {
             .collect()
     }
 
-    fn list_skills(&self) -> Vec<Value> {
-        self.list_tools()
-            .into_iter()
-            .filter(|tool| tool.get("source").and_then(Value::as_str) == Some("Skill"))
-            .map(|tool| {
-                json!({
-                    "id": tool.get("internal_name").cloned().unwrap_or_else(|| json!("skill")),
-                    "name": tool.get("name").cloned().unwrap_or_else(|| json!("Skill")),
-                    "description": tool.get("description").cloned().unwrap_or_else(|| json!("")),
-                    "source": "tool_registry",
-                    "tool": tool,
-                })
-            })
-            .collect()
+    fn list_skills(&self, params: SkillsListParams) -> ProtocolResult<Value> {
+        let snapshot = self
+            .app
+            .skills
+            .list(params.include_disabled)
+            .map_err(AppServerErrorBody::from_talos_error)?;
+        self.skill_snapshot_response(snapshot)
+    }
+
+    fn refresh_skills(&self) -> ProtocolResult<Value> {
+        let snapshot = self
+            .app
+            .skills
+            .refresh()
+            .map_err(AppServerErrorBody::from_talos_error)?;
+        self.skill_snapshot_response(snapshot)
+    }
+
+    fn skill_snapshot_response(
+        &self,
+        snapshot: talos_skills::SkillSnapshot,
+    ) -> ProtocolResult<Value> {
+        to_value(SkillsListResponse {
+            data: snapshot
+                .skills
+                .into_iter()
+                .map(protocol_skill_summary)
+                .collect(),
+            errors: snapshot
+                .errors
+                .into_iter()
+                .map(protocol_skill_load_error)
+                .collect(),
+        })
+    }
+
+    fn suggest_skills(&self, params: SkillsSuggestParams) -> ProtocolResult<Value> {
+        let skills = self
+            .app
+            .skills
+            .suggest(&params.query, params.limit.unwrap_or(20))
+            .map_err(AppServerErrorBody::from_talos_error)?;
+        to_value(SkillsSuggestResponse {
+            data: skills.into_iter().map(protocol_skill_suggestion).collect(),
+        })
     }
 
     fn list_apps(&self) -> Vec<Value> {
@@ -796,46 +883,6 @@ impl TalosApplicationAdapter {
             )),
         }
     }
-}
-
-fn map_context(context: ProtocolTalosContext) -> ProtocolResult<TalosContext> {
-    let source_type = match context.source_type.as_str() {
-        "http" => TalosSourceType::Http,
-        "desktop" => TalosSourceType::Desktop,
-        "im" => TalosSourceType::Im,
-        "cli" => TalosSourceType::Cli,
-        "ws" => TalosSourceType::Ws,
-        "system" => TalosSourceType::System,
-        other => {
-            return Err(AppServerErrorBody::from_talos_error(
-                TalosError::ValidationError(format!("unsupported source_type: {other}")),
-            ))
-        }
-    };
-    let provider = match context.provider.as_str() {
-        "http" => TalosProvider::Http,
-        "sdk" => TalosProvider::Sdk,
-        "cli" => TalosProvider::Cli,
-        "telegram" => TalosProvider::Telegram,
-        "websocket" => TalosProvider::WebSocket,
-        "system" => TalosProvider::System,
-        other => {
-            return Err(AppServerErrorBody::from_talos_error(
-                TalosError::ValidationError(format!("unsupported provider: {other}")),
-            ))
-        }
-    };
-    Ok(TalosContext {
-        source_type,
-        provider,
-        user_id: String::new(),
-        message_id: context.message_id,
-        trace_id: context.trace_id,
-        channel_id: Some(context.channel_id),
-        thread_id: context.thread_id,
-        project_root: None,
-        environment: None,
-    })
 }
 
 fn render_active_turn(session_id: &str, active_turn: Option<ActiveTurnRecord>) -> Value {
@@ -905,10 +952,24 @@ fn current_time_millis() -> i64 {
         .unwrap_or(0)
 }
 
-fn map_input_item(item: ProtocolInputItem) -> TalosInputItem {
-    match item {
-        ProtocolInputItem::Text { text } => TalosInputItem::Text { text },
+fn validate_app_server_input(input: &[TalosInputItem]) -> ProtocolResult<()> {
+    for item in input {
+        match item {
+            TalosInputItem::Text { .. } | TalosInputItem::SkillSelection { .. } => {}
+            TalosInputItem::Image { .. }
+            | TalosInputItem::File { .. }
+            | TalosInputItem::Voice { .. }
+            | TalosInputItem::Video { .. } => {
+                return Err(AppServerErrorBody::from_talos_error(
+                    TalosError::ValidationError(
+                        "app-server protocol currently supports text and skill selection input items"
+                            .to_string(),
+                    ),
+                ));
+            }
+        }
     }
+    Ok(())
 }
 
 fn map_project_patch(patch: OptionalStringPatch) -> OptionalProjectIdPatch {

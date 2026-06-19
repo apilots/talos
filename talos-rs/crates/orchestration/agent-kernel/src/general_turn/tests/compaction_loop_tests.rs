@@ -5,9 +5,118 @@ use talos_prompt::{
     CompactionTrimUnitKind, PromptSectionKind, SessionHistoryCompactionOutcome,
     SessionHistoryCompactionTrigger,
 };
+use talos_skills::{SkillRoot, SkillRoots, SkillSelector};
 
 #[tokio::test]
+async fn test_prepare_general_turn_injects_selected_skill_prompt_context() {
+    let provider = Arc::new(NoopLlmProvider);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    let skill_root = workspace_dir.join("skills").join("review");
+    std::fs::create_dir_all(&skill_root).expect("skill root should exist");
+    std::fs::write(
+        skill_root.join("SKILL.md"),
+        "---\nname: review\ndescription: Review code changes.\n---\n\n# Review\n\nUse verified repository evidence.",
+    )
+    .expect("skill document should exist");
+    let roots = SkillRoots {
+        roots: vec![SkillRoot::user(workspace_dir.join("skills"))],
+        state_path: workspace_dir.join("skills-state.json"),
+        install_root: workspace_dir.join("skills"),
+        max_skill_md_bytes: 64 * 1024,
+        max_available_summary_bytes: 8 * 1024,
+    };
+    let mut ctx = build_ctx_with_stream(None);
 
+    let prepared = prepare_general_turn(
+        &mut ctx,
+        "talos",
+        "assistant",
+        "Use $review",
+        provider,
+        tool_registry.clone(),
+        memory_store,
+        &AgentKernelConfig::default(),
+        Some(GeneralTurnSkillOptions {
+            selected: vec![SkillSelector::selection(
+                "review",
+                skill_root.join("SKILL.md"),
+            )],
+            roots: Some(roots),
+        }),
+    )
+    .await
+    .expect("turn should prepare with selected skill");
+
+    assert!(prepared
+        .prompt_diagnostics
+        .included_sections
+        .contains(&PromptSectionKind::SkillCatalog));
+    assert!(prepared
+        .prompt_diagnostics
+        .included_sections
+        .contains(&PromptSectionKind::ActiveSkillInstructions));
+    let rendered_prompt = prepared
+        .messages
+        .iter()
+        .map(|message| message.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered_prompt.contains("&lt;skill name=\"review\""));
+    assert!(rendered_prompt.contains("Use verified repository evidence."));
+}
+
+#[tokio::test]
+async fn test_prepare_general_turn_uses_configured_skill_prompt_budget() {
+    let provider = Arc::new(NoopLlmProvider);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    let skills_root = workspace_dir.join("skills");
+    for name in ["review", "docs", "design", "testing"] {
+        let skill_root = skills_root.join(name);
+        std::fs::create_dir_all(&skill_root).expect("skill root should exist");
+        std::fs::write(
+            skill_root.join("SKILL.md"),
+            format!(
+                "---\nname: {name}\ndescription: This is a long skill description for budget testing.\n---\n\n# {name}\n"
+            ),
+        )
+        .expect("skill document should exist");
+    }
+    let mut config = AgentKernelConfig::default();
+    config.skills.roots = vec![skills_root.display().to_string()];
+    config.skills.max_available_summary_bytes = 96;
+    let mut ctx = build_ctx_with_stream(None);
+
+    let prepared = prepare_general_turn(
+        &mut ctx,
+        "talos",
+        "assistant",
+        "Which skills are available?",
+        provider,
+        tool_registry.clone(),
+        memory_store,
+        &config,
+        None,
+    )
+    .await
+    .expect("turn should prepare with configured skill budget");
+
+    let rendered_prompt = prepared
+        .messages
+        .iter()
+        .map(|message| message.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered_prompt.contains("Available skills:"));
+    assert!(rendered_prompt.contains("- ..."));
+}
+
+#[tokio::test]
 async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_budget() {
     let provider = Arc::new(SummaryProvider {
         responses: std::sync::Mutex::new(std::collections::VecDeque::from(vec![
@@ -76,6 +185,7 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
         tool_registry,
         memory_store.clone(),
         &config,
+        None,
     )
     .await
     .expect("prompt prepare should succeed");
@@ -213,6 +323,7 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_reaches_
         tool_registry,
         memory_store,
         &config,
+        None,
     )
     .await
     .expect("prompt prepare should succeed");
@@ -381,6 +492,7 @@ async fn test_prepare_general_turn_drops_sections_only_after_compaction_exhauste
         tool_registry,
         memory_store,
         &config,
+        None,
     )
     .await
     .expect("prompt prepare should succeed");
@@ -470,6 +582,7 @@ async fn test_prepare_general_turn_records_rejected_compaction_when_summary_is_m
         tool_registry,
         memory_store,
         &config,
+        None,
     )
     .await
     .expect("prompt prepare should succeed");
@@ -519,6 +632,7 @@ async fn test_prepare_general_turn_rejects_blocked_session_state() {
         tool_registry,
         memory_store,
         &config,
+        None,
     )
     .await
     .expect_err("blocked session should reject new execution");
@@ -639,6 +753,7 @@ async fn test_prepare_general_turn_uses_compacted_load_policy_during_recovery() 
         tool_registry.clone(),
         memory_store.clone(),
         &config,
+        None,
     )
     .await
     .expect("normal prepare should succeed");
@@ -669,6 +784,7 @@ async fn test_prepare_general_turn_uses_compacted_load_policy_during_recovery() 
         tool_registry,
         memory_store,
         &config,
+        None,
     )
     .await
     .expect("recovery prepare should succeed");

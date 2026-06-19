@@ -14,9 +14,12 @@ pub use login::{now_ms, open_external_url};
 pub use message::{MessageCommandAck, MessageCommandStatus};
 pub use talos_app_protocol::events::{canonical_method, ApplicationEvent};
 pub use talos_app_protocol::requests::{
-    EventSubscribeParams, EventSubscribeResponse, ProtocolTalosContext, SessionHistoryParams,
-    TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
-    TimelineRecoveryParams, TimelineRecoverySnapshot, TimelineReplay,
+    EventSubscribeParams, EventSubscribeResponse, ProtocolSkillDocument, ProtocolSkillScope,
+    ProtocolSkillSelector, ProtocolSkillSuggestion, ProtocolSkillSummary, ProtocolTalosContext,
+    SessionHistoryParams, SkillsListParams, SkillsListResponse, SkillsReadParams,
+    SkillsRefreshParams, SkillsResolveParams, SkillsResolveResponse, SkillsSuggestParams,
+    SkillsSuggestResponse, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus,
+    TimelineCursorStatus, TimelineRecoveryParams, TimelineRecoverySnapshot, TimelineReplay,
     ToolDynamicResultSubmitParams,
 };
 pub use talos_auth::{
@@ -29,12 +32,12 @@ pub use talos_types::talos::{
     SessionHistoryMessage, SessionHistorySnapshot, StopReason, TalosAssistantTextCommittedEvent,
     TalosContentItem, TalosContext, TalosInputItem, TalosItemCompletedEvent, TalosItemDeltaEvent,
     TalosItemStartedEvent, TalosJsonValue, TalosMessageRequest, TalosMessageResponse,
-    TalosOutputItem, TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta,
-    TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItem,
-    TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelineNoticeLevel, TalosTimelinePhase,
-    TalosToolProgressEntry, TalosToolProgressKind, TalosToolResult, TalosTurnCompletedEvent,
-    TalosTurnErrorEvent, TalosTurnMetricsEvent, TalosTurnStartedEvent, TalosUsage,
-    TimelineEventEnvelope, TurnExecutionMetrics,
+    TalosMessageRetryRequest, TalosOutputItem, TalosProvider, TalosSourceType,
+    TalosTimelineContent, TalosTimelineDelta, TalosTimelineEvent, TalosTimelineEventPayload,
+    TalosTimelineEventType, TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus,
+    TalosTimelineNoticeLevel, TalosTimelinePhase, TalosToolProgressEntry, TalosToolProgressKind,
+    TalosToolResult, TalosTurnCompletedEvent, TalosTurnErrorEvent, TalosTurnMetricsEvent,
+    TalosTurnStartedEvent, TalosUsage, TimelineEventEnvelope, TurnExecutionMetrics,
 };
 pub use talos_types::{
     DocUpdateRequest, ExpectedFileVersion, MemoryFileDetail, MemoryFileSummary, ModelInfo,

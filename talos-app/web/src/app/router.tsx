@@ -26,6 +26,9 @@ const WorkspaceDocsPage = lazy(() =>
 const FilesPage = lazy(() =>
   import("@/pages/files/FilesPage").then((module) => ({ default: module.FilesPage })),
 );
+const PluginsPage = lazy(() =>
+  import("@/pages/plugins/PluginsPage").then((module) => ({ default: module.PluginsPage })),
+);
 const SettingsPage = lazy(() =>
   import("@/pages/settings/SettingsPage").then((module) => ({ default: module.SettingsPage })),
 );
@@ -103,6 +106,10 @@ export const router = createRouter([
       {
         path: "files",
         element: withSuspense(<FilesPage />),
+      },
+      {
+        path: "plugins",
+        element: withSuspense(<PluginsPage />),
       },
       {
         path: "settings",

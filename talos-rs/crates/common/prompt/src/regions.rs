@@ -79,10 +79,13 @@ pub const DYNAMIC_SUFFIX_ORDER: &[PromptSectionKind] = &[
     PromptSectionKind::RecentToolOutputs,
     PromptSectionKind::RetrievedMemories,
     PromptSectionKind::ExpandedToolCatalog,
+    PromptSectionKind::SkillCatalog,
+    PromptSectionKind::ActiveSkillInstructions,
 ];
 
 pub const DYNAMIC_SUFFIX_DROP_ORDER: &[PromptSectionKind] = &[
     PromptSectionKind::ExpandedToolCatalog,
+    PromptSectionKind::SkillCatalog,
     PromptSectionKind::RetrievedMemories,
     PromptSectionKind::RecentToolOutputs,
     PromptSectionKind::RecentToolHistory,
@@ -200,6 +203,34 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             SectionCacheScope::DynamicOnly,
             BudgetTier::Important,
             false,
+            RegionEnvelopePolicy::XmlEnvelopeRequired,
+            None
+        ),
+        PromptSectionKind::SkillCatalog => template!(
+            PromptSectionKind::SkillCatalog,
+            "skill_catalog",
+            "# Skill Catalog",
+            RegionPriority::Low,
+            RegionPlacement::DynamicSuffixRequired,
+            "skill_reference",
+            "This section describes portable skills available in the current turn.\nA skill teaches the model how to work; it is not a tool and does not grant execution permissions.\nUse full skill instructions only when a skill is explicitly selected or mentioned.",
+            SectionCacheScope::DynamicOnly,
+            BudgetTier::Supplemental,
+            false,
+            RegionEnvelopePolicy::XmlEnvelopeRequired,
+            None
+        ),
+        PromptSectionKind::ActiveSkillInstructions => template!(
+            PromptSectionKind::ActiveSkillInstructions,
+            "active_skill_instructions",
+            "# Active Skill Instructions",
+            RegionPriority::High,
+            RegionPlacement::DynamicSuffixRequired,
+            "turn_local_skill_instructions",
+            "This section contains full SKILL.md instructions selected for the current turn.\nRelative paths mentioned by a skill are relative to that skill's root.\nDo not read bundled resources unless the skill instructs you to and the task needs them.",
+            SectionCacheScope::DynamicOnly,
+            BudgetTier::Critical,
+            true,
             RegionEnvelopePolicy::XmlEnvelopeRequired,
             None
         ),

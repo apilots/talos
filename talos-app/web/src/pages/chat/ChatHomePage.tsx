@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import {
   ChatComposer,
@@ -11,10 +11,22 @@ import {
 } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
 import { resolveProjectRecord } from "@/shared/types/domain";
+import type { ProtocolSkillSuggestion } from "@talos/sdk-browser";
+
+interface HomeLocationState {
+  initialDraft?: string;
+  initialSkills?: ProtocolSkillSuggestion[];
+}
+
+function initialSkillsState(skills: ProtocolSkillSuggestion[]) {
+  return skills.length > 0 ? skills : undefined;
+}
 
 export function ChatHomePage() {
   const { t } = useTranslation(["chat"]);
   const navigate = useNavigate();
+  const location = useLocation();
+  const locationState = location.state as HomeLocationState | null;
   const { data: models } = useModelsQuery();
   useProjectsQuery();
   const createProject = useCreateProjectMutation();
@@ -23,7 +35,8 @@ export function ChatHomePage() {
   const setActiveProjectId = useAppStore((state) => state.setActiveProjectId);
   const connection = useAppStore((state) => state.connection);
   const setConnection = useAppStore((state) => state.setConnection);
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(locationState?.initialDraft ?? "");
+  const [initialSkills] = useState<ProtocolSkillSuggestion[]>(locationState?.initialSkills ?? []);
   const [selectedModel, setSelectedModel] = useState<string | undefined>(models?.[0]?.id);
 
   const activeProject = useMemo(
@@ -43,7 +56,14 @@ export function ChatHomePage() {
     }
   }, [activeProject, activeProjectId, setActiveProjectId]);
 
-  async function handleStartDraft(initialPrompt?: string) {
+  useEffect(() => {
+    if (!locationState?.initialDraft && !locationState?.initialSkills?.length) {
+      return;
+    }
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.pathname, locationState?.initialDraft, locationState?.initialSkills, navigate]);
+
+  async function handleStartDraft(initialPrompt?: string, skills: ProtocolSkillSuggestion[] = []) {
     const trimmed = initialPrompt?.trim();
     const sessionId = generateSessionId();
     navigate(`/sessions/${sessionId}`, {
@@ -53,6 +73,7 @@ export function ChatHomePage() {
             initialModel: selectedModel ?? models?.[0]?.id,
             initialProjectId: activeProject?.id,
             initialProject: activeProject,
+            initialSkills: initialSkillsState(skills),
           }
         : undefined,
     });
@@ -78,6 +99,7 @@ export function ChatHomePage() {
             models={(models ?? []).map((model) => ({ id: model.id, name: model.name }))}
             onCreateProject={handleCreateProject}
             onDraftChange={setDraft}
+            initialSelectedSkills={initialSkills}
             onModelChange={setSelectedModel}
             onProjectChange={setActiveProjectId}
             onRuntimeModeChange={(mode) => {
@@ -85,7 +107,7 @@ export function ChatHomePage() {
                 setConnection({ runtimeMode: mode });
               }
             }}
-            onSend={() => handleStartDraft(draft)}
+            onSend={(skills) => handleStartDraft(draft, skills)}
             projects={projects}
             runtimeMode={connection.runtimeMode}
             selectedModel={selectedModel}

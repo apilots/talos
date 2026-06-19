@@ -57,6 +57,7 @@ pub use domains::prompt::{
     AgentKernelBootstrapPromptConfig, AgentKernelPromptConfig, BootstrapPromptWarningMode,
     PromptWindowPolicy, ReservedOutputPolicy,
 };
+pub use domains::skills::SkillsRuntimeConfig;
 pub use domains::storage::{DatabaseType, StorageBackendConfig};
 pub use domains::tools::{
     AgentKernelMcpConfig, DynamicToolConfig, DynamicToolTimeoutBehavior, FileToolConfig,

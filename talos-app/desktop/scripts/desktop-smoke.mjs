@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,9 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(desktopDir, "../..");
 const artifactDir = path.resolve(repoRoot, ".tmp/desktop-smoke", timestamp());
+const smokeHome = path.join(artifactDir, "home");
+const talosHome = path.join(smokeHome, ".talos");
+const talosConfig = path.join(repoRoot, "conf/talos-dev.yaml");
 const explicitAppServerBin = process.env.TALOS_APP_SERVER_BIN;
 const appServerBin = explicitAppServerBin ?? path.resolve(repoRoot, "talos-rs/target/debug/app-server");
 const appExecutable = process.env.TALOS_DESKTOP_SMOKE_APP;
@@ -22,6 +25,7 @@ if (!appExecutable && !existsSync(appServerBin)) {
 }
 
 mkdirSync(artifactDir, { recursive: true });
+configureSmokeHome();
 
 const debugPort = await findAvailablePort(Number(process.env.TALOS_DESKTOP_DEBUG_PORT ?? 9223));
 const appCommand = appExecutable ?? "electron";
@@ -30,10 +34,31 @@ const appArgs = appExecutable
   : [desktopDir, `--remote-debugging-port=${debugPort}`];
 const childEnv = {
   ...process.env,
+  HOME: smokeHome,
+  TALOS_HOME: talosHome,
+  TALOS_CONFIG: talosConfig,
   TALOS_LLM_ANTHROPIC_API_KEY: process.env.TALOS_LLM_ANTHROPIC_API_KEY ?? "desktop-smoke-dummy",
 };
 if (!appExecutable || explicitAppServerBin) {
   childEnv.TALOS_APP_SERVER_BIN = appServerBin;
+}
+
+function configureSmokeHome() {
+  const confRoot = path.join(talosHome, "conf");
+  const skillRoot = path.join(talosHome, "skills", "desktop-smoke");
+  mkdirSync(confRoot, { recursive: true });
+  mkdirSync(skillRoot, { recursive: true });
+  copyFileSync(talosConfig, path.join(confRoot, "talos.yaml"));
+  writeFileSync(
+    path.join(skillRoot, "SKILL.md"),
+    `---
+name: desktop-smoke
+description: Desktop smoke skill.
+---
+
+Desktop smoke skill.
+`,
+  );
 }
 
 const electron = spawn(appCommand, appArgs, {
@@ -105,7 +130,12 @@ try {
   );
   const skillCount = await waitForEvaluate(
     cdp,
-    "window.__talosSmokeInvoke('skill.list', {}).then((r) => r.skills?.length ?? r.data?.length ?? 0)",
+    "window.__talosSmokeInvoke('skills.list', { include_disabled: false }).then((r) => r.data?.length ?? 0)",
+    30_000,
+  );
+  const skillSuggestionCount = await waitForEvaluate(
+    cdp,
+    "window.__talosSmokeInvoke('skills.suggest', { query: '', limit: 5 }).then((r) => r.data?.length ?? 0)",
     30_000,
   );
   const appCount = await waitForEvaluate(
@@ -120,7 +150,8 @@ try {
 
   assert(Number.isInteger(modelCount) && modelCount >= 0, "model.list did not return a model count.");
   assert(toolCount > 0, "tool.list returned no tools.");
-  assert(skillCount > 0, "skill.list returned no discoverable skills.");
+  assert(skillCount > 0, "skills.list returned no discoverable skills.");
+  assert(skillSuggestionCount > 0, "skills.suggest returned no discoverable skills.");
   assert(appCount > 0, "app.list returned no app shells.");
   assert(typeof serverInfo?.auth_enabled === "boolean", `desktop server info did not include auth state: ${JSON.stringify(serverInfo)}`);
   if (serverInfo.auth_enabled) {
@@ -175,6 +206,7 @@ try {
   const linkedRoutes = [
     ["home", "#/"],
     ["projects", "#/projects"],
+    ["plugins", "#/plugins"],
     ["files", "#/files"],
   ];
 

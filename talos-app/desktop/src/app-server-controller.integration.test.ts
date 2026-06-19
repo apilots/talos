@@ -121,19 +121,24 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
       });
       await rendererClient.startTurn({
         session_id: sessionId,
-        input: [{ type: "text", text: "Answer exactly: desktop-crash-recovery-before" }],
-        workspace_id: null,
-        context: {
-          source_type: "cli",
-          provider: "cli",
-          channel_id: "desktop-crash-recovery",
-          thread_id: null,
-          message_id: `msg_${Date.now()}`,
-          trace_id: `trace_${Date.now()}`,
+        request: {
+          input: [{ type: "text", text: "Answer exactly: desktop-crash-recovery-before" }],
+          workspace_id: null,
+          context: {
+            source_type: "cli",
+            provider: "cli",
+            user_id: "desktop-crash-recovery",
+            channel_id: "desktop-crash-recovery",
+            thread_id: null,
+            message_id: `msg_${Date.now()}`,
+            trace_id: `trace_${Date.now()}`,
+            project_root: null,
+            environment: null,
+          },
+          model: null,
+          project_id: null,
+          current_directory: null,
         },
-        model: null,
-        project_id: null,
-        current_directory: null,
         client_request_id: "desktop-crash-recovery-before",
       });
       await waitForEvent(
@@ -157,12 +162,14 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
 
       await rendererClient.startTurn({
         session_id: sessionId,
-        input: [{ type: "text", text: "Answer exactly: desktop-crash-recovery-after" }],
-        workspace_id: null,
-        context: null,
-        model: null,
-        project_id: null,
-        current_directory: null,
+        request: {
+          input: [{ type: "text", text: "Answer exactly: desktop-crash-recovery-after" }],
+          workspace_id: null,
+          context: null,
+          model: null,
+          project_id: null,
+          current_directory: null,
+        },
         client_request_id: "desktop-crash-recovery-after",
       });
       await waitForEvent(

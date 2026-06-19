@@ -10,6 +10,7 @@ use std::process::Command;
 use talos_config::parse_timezone;
 use talos_error::{TalosError, TalosResult};
 use talos_memory::{Memory, SessionPromptContextConfig};
+use talos_skills::{SkillPromptContext, SkillPromptInjection};
 
 fn section(kind: PromptSectionKind, payload: impl Into<String>) -> PromptSection {
     PromptSection {
@@ -163,6 +164,38 @@ fn build_planning_instruction_payload(builder: &PromptBuilder<'_>) -> Option<Str
         .map(str::trim)
         .filter(|text| !text.is_empty())
         .map(|text| format!("- current_goal: {}", text))
+}
+
+fn load_skill_prompt_context(
+    builder: &PromptBuilder<'_>,
+) -> TalosResult<Option<SkillPromptContext>> {
+    if let Some(context) = builder.skill_prompt_context.clone() {
+        return Ok(Some(context));
+    }
+    let (Some(provider), Some(request)) = (
+        builder.skill_provider.clone(),
+        builder.skill_prompt_request.clone(),
+    ) else {
+        return Ok(None);
+    };
+    provider.prompt_context(request).map(Some)
+}
+
+fn build_skill_injection_payload(injections: &[SkillPromptInjection]) -> Option<String> {
+    if injections.is_empty() {
+        return None;
+    }
+    let mut blocks = Vec::new();
+    for injection in injections {
+        blocks.push(format!(
+            "<skill name=\"{}\" root=\"{}\" path=\"{}\">\nRelative paths mentioned by this skill are relative to the skill root.\nDo not read bundled resources unless the skill instructs you to and the task needs them.\n\n{}\n</skill>",
+            injection.name,
+            injection.root.display(),
+            injection.path.display(),
+            injection.contents.trim()
+        ));
+    }
+    Some(blocks.join("\n\n"))
 }
 
 fn build_recent_task_continuity_payload(builder: &PromptBuilder<'_>) -> Option<String> {
@@ -684,6 +717,27 @@ async fn load_dynamic_sections(builder: &PromptBuilder<'_>) -> TalosResult<Vec<P
 
     if let Some(payload) = build_expanded_tool_catalog_payload(builder) {
         sections.push(section(PromptSectionKind::ExpandedToolCatalog, payload));
+    }
+
+    if let Some(skill_context) = load_skill_prompt_context(builder)? {
+        if !skill_context.available_summary.trim().is_empty() {
+            sections.push(section(
+                PromptSectionKind::SkillCatalog,
+                skill_context.available_summary,
+            ));
+        }
+        if let Some(payload) = build_skill_injection_payload(&skill_context.injections) {
+            sections.push(section(PromptSectionKind::ActiveSkillInstructions, payload));
+        }
+        if !skill_context.warnings.is_empty() {
+            let payload = skill_context
+                .warnings
+                .iter()
+                .map(|warning| format!("- {}: {}", warning.code, warning.message))
+                .collect::<Vec<_>>()
+                .join("\n");
+            sections.push(section(PromptSectionKind::ActiveSkillInstructions, payload));
+        }
     }
 
     if let (Some(memory_store), Some(session_id)) = (builder.memory_store, builder.session_id) {

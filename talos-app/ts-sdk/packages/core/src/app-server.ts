@@ -132,10 +132,40 @@ export class AppServerClient {
     return this.transport.request("user.current", {});
   }
 
-  listSkills(): Promise<unknown[]> {
-    return this.transport
-      .request<ListResponse<unknown>>("skill.list", {})
-      .then((response) => response.data);
+  listSkills(params: AppProtocol.SkillsListParams = { include_disabled: false }): Promise<AppProtocol.SkillsListResponse> {
+    return this.transport.request("skills.list", params);
+  }
+
+  refreshSkills(params: AppProtocol.SkillsRefreshParams = {}): Promise<AppProtocol.SkillsListResponse> {
+    return this.transport.request("skills.refresh", params);
+  }
+
+  suggestSkills(params: AppProtocol.SkillsSuggestParams): Promise<AppProtocol.SkillsSuggestResponse> {
+    return this.transport.request("skills.suggest", params);
+  }
+
+  readSkill(params: AppProtocol.SkillsReadParams): Promise<AppProtocol.ProtocolSkillDocument> {
+    return this.transport.request("skills.read", params);
+  }
+
+  resolveSkills(params: AppProtocol.SkillsResolveParams): Promise<AppProtocol.SkillsResolveResponse> {
+    return this.transport.request("skills.resolve", params);
+  }
+
+  installSkill(params: AppProtocol.SkillsInstallParams): Promise<AppProtocol.ProtocolSkillSummary> {
+    return this.transport.request("skills.install", params);
+  }
+
+  uninstallSkill(params: AppProtocol.SkillsUninstallParams): Promise<unknown> {
+    return this.transport.request("skills.uninstall", params);
+  }
+
+  enableSkill(params: AppProtocol.SkillsEnableParams): Promise<AppProtocol.ProtocolSkillSummary> {
+    return this.transport.request("skills.enable", params);
+  }
+
+  disableSkill(params: AppProtocol.SkillsDisableParams): Promise<AppProtocol.ProtocolSkillSummary> {
+    return this.transport.request("skills.disable", params);
   }
 
   listApps(): Promise<unknown[]> {

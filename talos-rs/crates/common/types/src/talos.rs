@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 /// Talos gateway protocol types shared by server and client components.
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum TalosConnectionMode {
     Embedded,
@@ -84,7 +84,7 @@ impl std::fmt::Display for TalosJsonValue {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 pub struct TalosSessionEnvironment {
     pub directory: PathBuf,
     #[serde(default)]
@@ -92,7 +92,7 @@ pub struct TalosSessionEnvironment {
 }
 
 /// High-level source category.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum TalosSourceType {
     Http,
@@ -140,7 +140,7 @@ impl fmt::Display for TalosSourceType {
 }
 
 /// Concrete source provider.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum TalosProvider {
     Http,
@@ -188,7 +188,7 @@ impl fmt::Display for TalosProvider {
 }
 
 /// Cross-channel request context.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 pub struct TalosContext {
     pub source_type: TalosSourceType,
     pub provider: TalosProvider,
@@ -290,11 +290,15 @@ impl TalosContext {
 }
 
 /// Talos message input item.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TalosInputItem {
     Text {
         text: String,
+    },
+    SkillSelection {
+        name: String,
+        path: String,
     },
     Image {
         url: String,
@@ -587,7 +591,7 @@ pub struct TalosReasoning {
 }
 
 /// Talos message request payload for session interactions.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 pub struct TalosMessageRequest {
     pub input: Vec<TalosInputItem>,
     #[serde(default)]
@@ -600,6 +604,16 @@ pub struct TalosMessageRequest {
     pub project_id: Option<String>,
     #[serde(default)]
     pub current_directory: Option<PathBuf>,
+}
+
+/// Talos retry request payload for session interactions.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct TalosMessageRetryRequest {
+    pub input: Vec<TalosInputItem>,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+    pub client_message_id: String,
+    pub retry_of_message_id: String,
 }
 
 /// Token usage values.

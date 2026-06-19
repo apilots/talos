@@ -7,6 +7,7 @@ pub mod fs;
 pub mod history;
 pub mod memory;
 pub mod session;
+pub mod skills;
 pub mod turn;
 pub mod workspace;
 pub mod workspace_docs;
@@ -27,6 +28,7 @@ pub use fs::FsService;
 pub use history::SessionHistoryService;
 pub use memory::{MemoryDate, MemoryListParams, MemorySearchParams, MemoryService};
 pub use session::SessionService;
+pub use skills::SkillsService;
 pub use turn::{message_request_hash, TurnRetryRequest, TurnService};
 pub use workspace::{AgentWorkspaceInfo, EffectiveAgentWorkspace, EffectiveWorkspaceResolver};
 pub use workspace_docs::WorkspaceDocService;
@@ -59,6 +61,7 @@ pub struct TalosApplicationService {
     pub config: ConfigService,
     pub fs: FsService,
     pub memory: MemoryService,
+    pub skills: SkillsService,
     pub workspace_docs: WorkspaceDocService,
 }
 
@@ -139,6 +142,7 @@ impl TalosApplicationService {
             config: ConfigService::new_with_reload_hook(llm_config_service, models, reload_hook),
             fs: FsService::new(base_config.fs.directory_picker.clone()),
             memory: MemoryService::new(base_config.clone(), llm_provider, file_locks.clone()),
+            skills: SkillsService::new(base_config.agent.kernel.skills.clone()),
             workspace_docs: WorkspaceDocService::new(base_config, file_locks),
         }
     }

@@ -112,9 +112,9 @@ pub use tool_batch::{apply_general_turn_tool_batch, execute_general_turn_tool_ba
 pub use types::{
     BuiltInGeneralTurnPolicy, DynamicToolResultResume, ExecutedTurnArtifacts, GeneralTurnLoopState,
     GeneralTurnOutcome, GeneralTurnPolicy, GeneralTurnPolicyStop, GeneralTurnResult,
-    GeneralTurnResume, GeneralTurnStepDisposition, GeneralTurnStepRequest, GeneralTurnStepResult,
-    GeneralTurnToolBatch, ModelFinishReason, PendingGeneralTurnAction, PreparedGeneralTurn,
-    ResumeToolCall, SessionCompactionState, StreamingToolExecutionConfig,
+    GeneralTurnResume, GeneralTurnSkillOptions, GeneralTurnStepDisposition, GeneralTurnStepRequest,
+    GeneralTurnStepResult, GeneralTurnToolBatch, ModelFinishReason, PendingGeneralTurnAction,
+    PreparedGeneralTurn, ResumeToolCall, SessionCompactionState, StreamingToolExecutionConfig,
 };
 pub(crate) use types::{
     ForcedFinalizationCause, PendingDynamicToolRequest, ReadOnlyRoundFingerprint,

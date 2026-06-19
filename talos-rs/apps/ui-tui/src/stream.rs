@@ -77,6 +77,7 @@ impl TuiApp {
                     }
                 }
                 let retry_message = self.active_message_raw.clone();
+                let retry_skills = self.active_message_skills.clone();
                 let can_retry_once = self.active_retry_count == 0 && retry_message.is_some();
                 self.discard_active_pending_blocks();
                 self.finish_active_stream("stream connect failed", true, true);
@@ -88,8 +89,9 @@ impl TuiApp {
                             "Failed to open stream. Retrying once...",
                             Duration::from_secs(3),
                         );
-                        if let Err(retry_err) =
-                            self.start_stream_for_message_internal(message, false).await
+                        if let Err(retry_err) = self
+                            .start_stream_for_message_internal(message, retry_skills, false)
+                            .await
                         {
                             self.active_message_raw = None;
                             self.active_retry_count = 0;

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     default_timezone, AgentKernelMcpConfig, AgentKernelMemoryConfig, AgentKernelPromptConfig,
-    PlannerMode, ToolsRuntimeConfig,
+    PlannerMode, SkillsRuntimeConfig, ToolsRuntimeConfig,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -355,6 +355,10 @@ pub struct AgentKernelConfig {
     #[serde(default)]
     pub tools: ToolsRuntimeConfig,
 
+    /// Skills runtime defaults
+    #[serde(default)]
+    pub skills: SkillsRuntimeConfig,
+
     /// MCP server connections available to this kernel
     #[serde(default)]
     pub mcp: AgentKernelMcpConfig,
@@ -408,6 +412,7 @@ impl Default for AgentKernelConfig {
             timeline_events: AgentKernelTimelineEventsConfig::default(),
             memory: AgentKernelMemoryConfig::default(),
             tools: ToolsRuntimeConfig::default(),
+            skills: SkillsRuntimeConfig::default(),
             mcp: AgentKernelMcpConfig::default(),
         }
     }

@@ -7,7 +7,14 @@ use ts_rs::TS;
 
 use crate::errors::AppServerErrorBody;
 use crate::version::ProtocolVersion;
-use talos_types::talos::{SessionHistorySnapshot, TimelineEventEnvelope};
+use talos_error::{TalosError, TalosResult};
+use talos_skills::{
+    SkillDocument, SkillLoadError, SkillScope, SkillSelector, SkillSuggestion, SkillSummary,
+    SkillWarning,
+};
+use talos_types::talos::{
+    SessionHistorySnapshot, TalosMessageRequest, TalosMessageRetryRequest, TimelineEventEnvelope,
+};
 
 pub const DEFERRED_CLIENT_METHODS: &[DeferredClientMethod] = &[];
 
@@ -91,8 +98,24 @@ pub enum ClientMethod {
     WorkspaceDocWrite,
     #[serde(rename = "workspace.info")]
     WorkspaceInfo,
-    #[serde(rename = "skill.list")]
-    SkillList,
+    #[serde(rename = "skills.list")]
+    SkillsList,
+    #[serde(rename = "skills.refresh")]
+    SkillsRefresh,
+    #[serde(rename = "skills.suggest")]
+    SkillsSuggest,
+    #[serde(rename = "skills.read")]
+    SkillsRead,
+    #[serde(rename = "skills.resolve")]
+    SkillsResolve,
+    #[serde(rename = "skills.install")]
+    SkillsInstall,
+    #[serde(rename = "skills.uninstall")]
+    SkillsUninstall,
+    #[serde(rename = "skills.enable")]
+    SkillsEnable,
+    #[serde(rename = "skills.disable")]
+    SkillsDisable,
     #[serde(rename = "app.list")]
     AppList,
     #[serde(rename = "tool.list")]
@@ -156,7 +179,15 @@ impl ClientMethod {
             Self::WorkspaceDocRead => "workspace.doc.read",
             Self::WorkspaceDocWrite => "workspace.doc.write",
             Self::WorkspaceInfo => "workspace.info",
-            Self::SkillList => "skill.list",
+            Self::SkillsList => "skills.list",
+            Self::SkillsRefresh => "skills.refresh",
+            Self::SkillsSuggest => "skills.suggest",
+            Self::SkillsRead => "skills.read",
+            Self::SkillsResolve => "skills.resolve",
+            Self::SkillsInstall => "skills.install",
+            Self::SkillsUninstall => "skills.uninstall",
+            Self::SkillsEnable => "skills.enable",
+            Self::SkillsDisable => "skills.disable",
             Self::AppList => "app.list",
             Self::ToolList => "tool.list",
             Self::AuthLogout => "auth.logout",
@@ -219,7 +250,15 @@ impl FromStr for ClientMethod {
             "workspace.doc.read" => Ok(Self::WorkspaceDocRead),
             "workspace.doc.write" => Ok(Self::WorkspaceDocWrite),
             "workspace.info" => Ok(Self::WorkspaceInfo),
-            "skill.list" => Ok(Self::SkillList),
+            "skills.list" => Ok(Self::SkillsList),
+            "skills.refresh" => Ok(Self::SkillsRefresh),
+            "skills.suggest" => Ok(Self::SkillsSuggest),
+            "skills.read" => Ok(Self::SkillsRead),
+            "skills.resolve" => Ok(Self::SkillsResolve),
+            "skills.install" => Ok(Self::SkillsInstall),
+            "skills.uninstall" => Ok(Self::SkillsUninstall),
+            "skills.enable" => Ok(Self::SkillsEnable),
+            "skills.disable" => Ok(Self::SkillsDisable),
             "app.list" => Ok(Self::AppList),
             "tool.list" => Ok(Self::ToolList),
             "auth.logout" => Ok(Self::AuthLogout),
@@ -311,8 +350,24 @@ pub enum ClientRequestParams {
     WorkspaceDocWrite(WorkspaceDocWriteParams),
     #[serde(rename = "workspace.info")]
     WorkspaceInfo(WorkspaceInfoParams),
-    #[serde(rename = "skill.list")]
-    SkillList(SkillListParams),
+    #[serde(rename = "skills.list")]
+    SkillsList(SkillsListParams),
+    #[serde(rename = "skills.refresh")]
+    SkillsRefresh(SkillsRefreshParams),
+    #[serde(rename = "skills.suggest")]
+    SkillsSuggest(SkillsSuggestParams),
+    #[serde(rename = "skills.read")]
+    SkillsRead(SkillsReadParams),
+    #[serde(rename = "skills.resolve")]
+    SkillsResolve(SkillsResolveParams),
+    #[serde(rename = "skills.install")]
+    SkillsInstall(SkillsInstallParams),
+    #[serde(rename = "skills.uninstall")]
+    SkillsUninstall(SkillsUninstallParams),
+    #[serde(rename = "skills.enable")]
+    SkillsEnable(SkillsEnableParams),
+    #[serde(rename = "skills.disable")]
+    SkillsDisable(SkillsDisableParams),
     #[serde(rename = "app.list")]
     AppList(AppListParams),
     #[serde(rename = "tool.list")]
@@ -431,7 +486,27 @@ impl ClientRequest {
             ClientMethod::WorkspaceInfo => {
                 ClientRequestParams::WorkspaceInfo(decode(params_value)?)
             }
-            ClientMethod::SkillList => ClientRequestParams::SkillList(decode(params_value)?),
+            ClientMethod::SkillsList => ClientRequestParams::SkillsList(decode(params_value)?),
+            ClientMethod::SkillsRefresh => {
+                ClientRequestParams::SkillsRefresh(decode(params_value)?)
+            }
+            ClientMethod::SkillsSuggest => {
+                ClientRequestParams::SkillsSuggest(decode(params_value)?)
+            }
+            ClientMethod::SkillsRead => ClientRequestParams::SkillsRead(decode(params_value)?),
+            ClientMethod::SkillsResolve => {
+                ClientRequestParams::SkillsResolve(decode(params_value)?)
+            }
+            ClientMethod::SkillsInstall => {
+                ClientRequestParams::SkillsInstall(decode(params_value)?)
+            }
+            ClientMethod::SkillsUninstall => {
+                ClientRequestParams::SkillsUninstall(decode(params_value)?)
+            }
+            ClientMethod::SkillsEnable => ClientRequestParams::SkillsEnable(decode(params_value)?),
+            ClientMethod::SkillsDisable => {
+                ClientRequestParams::SkillsDisable(decode(params_value)?)
+            }
             ClientMethod::AppList => ClientRequestParams::AppList(decode(params_value)?),
             ClientMethod::ToolList => ClientRequestParams::ToolList(decode(params_value)?),
             ClientMethod::AuthLogout => ClientRequestParams::AuthLogout(decode(params_value)?),
@@ -685,17 +760,7 @@ pub struct FsDirectoryCreateParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct TurnStartParams {
     pub session_id: String,
-    pub input: Vec<ProtocolInputItem>,
-    #[serde(default)]
-    pub workspace_id: Option<String>,
-    #[serde(default)]
-    pub context: Option<ProtocolTalosContext>,
-    #[serde(default)]
-    pub model: Option<String>,
-    #[serde(default)]
-    pub project_id: Option<String>,
-    #[serde(default)]
-    pub current_directory: Option<PathBuf>,
+    pub request: TalosMessageRequest,
     #[serde(default)]
     pub client_request_id: Option<String>,
 }
@@ -727,11 +792,7 @@ pub struct TurnInterruptParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct TurnRetryParams {
     pub session_id: String,
-    pub input: Vec<ProtocolInputItem>,
-    #[serde(default)]
-    pub workspace_id: Option<String>,
-    pub client_message_id: String,
-    pub retry_of_message_id: String,
+    pub request: TalosMessageRetryRequest,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
@@ -843,7 +904,233 @@ pub struct WorkspaceInfoResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct SkillListParams {}
+pub struct SkillsListParams {
+    #[serde(default)]
+    pub include_disabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct SkillsRefreshParams {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct SkillsSuggestParams {
+    #[serde(default)]
+    pub query: String,
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct ProtocolSkillSelector {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct SkillsReadParams {
+    pub selector: ProtocolSkillSelector,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub struct SkillsResolveParams {
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub selected: Vec<ProtocolSkillSelector>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct SkillsInstallParams {
+    pub source_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct SkillsUninstallParams {
+    pub selector: ProtocolSkillSelector,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct SkillsEnableParams {
+    pub selector: ProtocolSkillSelector,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct SkillsDisableParams {
+    pub selector: ProtocolSkillSelector,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProtocolSkillScope {
+    User,
+    External,
+    Project,
+    Plugin,
+    System,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct ProtocolSkillMetadata {
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub argument_hint: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct ProtocolSkillSummary {
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub short_description: Option<String>,
+    pub root: PathBuf,
+    pub path: PathBuf,
+    pub scope: ProtocolSkillScope,
+    #[serde(default)]
+    pub source_plugin: Option<String>,
+    pub enabled: bool,
+    pub read_only: bool,
+    #[serde(default)]
+    pub metadata: Option<ProtocolSkillMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct ProtocolSkillSuggestion {
+    pub name: String,
+    pub description: String,
+    #[serde(default)]
+    pub short_description: Option<String>,
+    pub root: PathBuf,
+    pub path: PathBuf,
+    pub scope: ProtocolSkillScope,
+    #[serde(default)]
+    pub source_plugin: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct ProtocolSkillLoadError {
+    pub root: PathBuf,
+    #[serde(default)]
+    pub path: Option<PathBuf>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct SkillsListResponse {
+    pub data: Vec<ProtocolSkillSummary>,
+    #[serde(default)]
+    pub errors: Vec<ProtocolSkillLoadError>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct SkillsSuggestResponse {
+    pub data: Vec<ProtocolSkillSuggestion>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct ProtocolSkillDocument {
+    pub summary: ProtocolSkillSummary,
+    pub contents: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct ProtocolSkillWarning {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct SkillsResolveResponse {
+    pub data: Vec<ProtocolSkillSummary>,
+    #[serde(default)]
+    pub warnings: Vec<ProtocolSkillWarning>,
+}
+
+pub fn protocol_skill_selector(selector: ProtocolSkillSelector) -> TalosResult<SkillSelector> {
+    match (selector.name, selector.path) {
+        (Some(name), Some(path)) if !name.trim().is_empty() => {
+            Ok(SkillSelector::selection(name, path))
+        }
+        (Some(name), None) if !name.trim().is_empty() => Ok(SkillSelector::by_name(name)),
+        (None, Some(path)) => Ok(SkillSelector::by_path(path)),
+        _ => Err(TalosError::ValidationError(
+            "skill selector requires name, path, or both".to_string(),
+        )),
+    }
+}
+
+pub fn protocol_skill_document(document: SkillDocument) -> ProtocolSkillDocument {
+    ProtocolSkillDocument {
+        summary: protocol_skill_summary(document.summary),
+        contents: document.contents,
+    }
+}
+
+pub fn protocol_skill_summary(skill: SkillSummary) -> ProtocolSkillSummary {
+    ProtocolSkillSummary {
+        name: skill.name,
+        description: skill.description,
+        short_description: skill.short_description,
+        root: skill.root,
+        path: skill.path,
+        scope: protocol_skill_scope(skill.scope),
+        source_plugin: skill.source_plugin,
+        enabled: skill.enabled,
+        read_only: skill.read_only,
+        metadata: skill.metadata.map(|metadata| ProtocolSkillMetadata {
+            display_name: metadata.display_name,
+            icon: metadata.icon,
+            author: metadata.author,
+            version: metadata.version,
+            argument_hint: metadata.argument_hint,
+        }),
+    }
+}
+
+pub fn protocol_skill_suggestion(skill: SkillSuggestion) -> ProtocolSkillSuggestion {
+    ProtocolSkillSuggestion {
+        name: skill.name,
+        description: skill.description,
+        short_description: skill.short_description,
+        root: skill.root,
+        path: skill.path,
+        scope: protocol_skill_scope(skill.scope),
+        source_plugin: skill.source_plugin,
+    }
+}
+
+pub fn protocol_skill_load_error(error: SkillLoadError) -> ProtocolSkillLoadError {
+    ProtocolSkillLoadError {
+        root: error.root,
+        path: error.path,
+        message: error.message,
+    }
+}
+
+pub fn protocol_skill_warning(warning: SkillWarning) -> ProtocolSkillWarning {
+    ProtocolSkillWarning {
+        code: warning.code,
+        message: warning.message,
+    }
+}
+
+pub fn protocol_skill_scope(scope: SkillScope) -> ProtocolSkillScope {
+    match scope {
+        SkillScope::User => ProtocolSkillScope::User,
+        SkillScope::External => ProtocolSkillScope::External,
+        SkillScope::Project => ProtocolSkillScope::Project,
+        SkillScope::Plugin => ProtocolSkillScope::Plugin,
+        SkillScope::System => ProtocolSkillScope::System,
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
 pub struct AppListParams {}
@@ -927,16 +1214,11 @@ pub struct ProtocolTalosContext {
     pub trace_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ProtocolInputItem {
-    Text { text: String },
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+    use talos_types::talos::TalosInputItem;
 
     #[test]
     fn method_parses_dot_name() {
@@ -958,6 +1240,63 @@ mod tests {
         assert!(matches!(
             request.params,
             ClientRequestParams::SessionRead(SessionReadParams { .. })
+        ));
+    }
+
+    #[test]
+    fn turn_start_input_uses_shared_talos_input_item() {
+        let value = json!({
+            "type": "skill_selection",
+            "name": "review",
+            "path": "/tmp/review/SKILL.md"
+        });
+
+        let item: TalosInputItem =
+            serde_json::from_value(value).expect("skill selection should decode");
+
+        assert_eq!(
+            item,
+            TalosInputItem::SkillSelection {
+                name: "review".to_string(),
+                path: "/tmp/review/SKILL.md".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn skills_methods_parse_without_legacy_skill_list_alias() {
+        assert_eq!(
+            ClientMethod::from_str("skills.list").unwrap(),
+            ClientMethod::SkillsList
+        );
+        assert_eq!(
+            ClientMethod::from_str("skills.refresh").unwrap(),
+            ClientMethod::SkillsRefresh
+        );
+        assert_eq!(
+            ClientMethod::from_str("skills.suggest").unwrap(),
+            ClientMethod::SkillsSuggest
+        );
+        assert!(ClientMethod::from_str("skill.list").is_err());
+
+        let request = ClientRequest::decode(
+            "skills.resolve",
+            Some(json!({
+                "text": "Use $review",
+                "selected": [{ "name": "review", "path": "/tmp/review/SKILL.md" }]
+            })),
+        )
+        .expect("skills resolve request should decode");
+        assert!(matches!(
+            request.params,
+            ClientRequestParams::SkillsResolve(SkillsResolveParams { .. })
+        ));
+
+        let request = ClientRequest::decode("skills.refresh", None)
+            .expect("skills refresh request should decode");
+        assert!(matches!(
+            request.params,
+            ClientRequestParams::SkillsRefresh(SkillsRefreshParams {})
         ));
     }
 

@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use talos_error::TalosResult;
-use talos_sdk::{TalosInputItem, TalosMessageRequest};
+use talos_sdk::{ProtocolSkillSuggestion, TalosInputItem, TalosMessageRequest};
 use tokio::sync::mpsc;
 use tracing::error;
 
@@ -10,17 +10,19 @@ use crate::utils::summarize_for_queue;
 use crate::TuiApp;
 
 impl TuiApp {
-    pub(crate) async fn start_stream_for_message(
+    pub(crate) async fn start_stream_for_message_with_skills(
         &mut self,
         user_message: String,
+        skills: Vec<ProtocolSkillSuggestion>,
     ) -> TalosResult<()> {
-        self.start_stream_for_message_internal(user_message, true)
+        self.start_stream_for_message_internal(user_message, skills, true)
             .await
     }
 
     pub(crate) async fn start_stream_for_message_internal(
         &mut self,
         user_message: String,
+        skills: Vec<ProtocolSkillSuggestion>,
         reset_retry_state: bool,
     ) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {
@@ -39,10 +41,15 @@ impl TuiApp {
         let is_first_turn =
             self.session_usage.total_tokens == 0 && self.active_stream_message_id.is_none();
         let active_summary = summarize_for_queue(&user_message);
+        let mut input = vec![TalosInputItem::Text {
+            text: user_message.clone(),
+        }];
+        input.extend(skills.iter().map(|skill| TalosInputItem::SkillSelection {
+            name: skill.name.clone(),
+            path: skill.path.to_string_lossy().to_string(),
+        }));
         let request = TalosMessageRequest {
-            input: vec![TalosInputItem::Text {
-                text: user_message.clone(),
-            }],
+            input,
             workspace_id: None,
             context: is_first_turn.then(|| self.build_talos_context()),
             model: is_first_turn
@@ -60,6 +67,7 @@ impl TuiApp {
         if reset_retry_state {
             self.active_retry_count = 0;
             self.active_message_raw = Some(user_message.clone());
+            self.active_message_skills = skills.clone();
         }
         self.stream_started_at = Some(Instant::now());
         self.last_stream_event_at = Some(Instant::now());
@@ -132,6 +140,7 @@ impl TuiApp {
         self.rebuild_chat_history();
         if !keep_active_payload {
             self.active_message_raw = None;
+            self.active_message_skills.clear();
             self.active_retry_count = 0;
         }
         self.push_right_event(if is_error {

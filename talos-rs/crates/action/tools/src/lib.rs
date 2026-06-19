@@ -50,7 +50,6 @@ pub mod tools {
     pub mod memory_get;
     pub mod memory_search;
     pub mod read;
-    pub mod skill;
     pub mod task_output;
     pub mod task_stop;
     pub mod todo_write;
@@ -65,7 +64,7 @@ pub use tools::{
     agent::AgentTool, apply_patch::ApplyPatchTool, ask_user_question::AskUserQuestionTool,
     bash::BashTool, edit::EditTool, enter_plan_mode::EnterPlanModeTool,
     exit_plan_mode::ExitPlanModeTool, glob::GlobTool, grep::GrepTool, memory_get::MemoryGetTool,
-    memory_search::MemorySearchTool, read::ReadTool, skill::SkillTool, task_output::TaskOutputTool,
+    memory_search::MemorySearchTool, read::ReadTool, task_output::TaskOutputTool,
     task_stop::TaskStopTool, todo_write::TodoWriteTool, tool_search::ToolSearchTool,
     web_fetch::WebFetchTool, web_search::WebSearchTool, write::WriteTool,
 };
@@ -89,7 +88,6 @@ pub fn register_core_local_tools(registry: &ToolRegistry) {
     registry.register(Arc::new(MemoryGetTool));
     // Catalog and workflow tools
     registry.register(Arc::new(ToolSearchTool));
-    registry.register(Arc::new(SkillTool));
     registry.register(Arc::new(TodoWriteTool));
     registry.register(Arc::new(EnterPlanModeTool));
     registry.register(Arc::new(ExitPlanModeTool));

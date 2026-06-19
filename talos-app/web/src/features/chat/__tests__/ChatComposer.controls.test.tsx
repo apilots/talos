@@ -8,16 +8,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "@/shared/i18n/setup";
 import { ChatComposer } from "../components/ChatComposer";
 import { createDefaultProjects, UNBOUND_PROJECT_ID } from "@/shared/types/domain";
-import { renderComposer } from "./ChatComposer.test-utils";
+import { getComposerInput, renderComposer, renderControlledComposer } from "./ChatComposer.test-utils";
 
 const apiMocks = vi.hoisted(() => ({
   createFsDirectory: vi.fn(),
   readFsDirectory: vi.fn(),
+  suggestSkills: vi.fn(),
 }));
 
 vi.mock("../api", () => ({
   createFsDirectory: apiMocks.createFsDirectory,
   readFsDirectory: apiMocks.readFsDirectory,
+  suggestSkills: apiMocks.suggestSkills,
 }));
 
 describe("ChatComposer controls", () => {
@@ -42,6 +44,26 @@ describe("ChatComposer controls", () => {
       path: `/Users/xujiang/${name}`,
       created: true,
     }));
+    apiMocks.suggestSkills.mockResolvedValue([
+      {
+        name: "algorithmic-art",
+        description: "Creating algorithmic art using p5.js with seeded randomness.",
+        short_description: null,
+        root: "/Users/test/.talos/skills/algorithmic-art",
+        path: "/Users/test/.talos/skills/algorithmic-art/SKILL.md",
+        scope: "user",
+        source_plugin: null,
+      },
+      {
+        name: "browser",
+        description: "Control the in-app browser with Codex.",
+        short_description: null,
+        root: "/Users/test/.talos/skills/browser",
+        path: "/Users/test/.talos/skills/browser/SKILL.md",
+        scope: "plugin",
+        source_plugin: "browser",
+      },
+    ]);
     Object.defineProperty(window, "localStorage", {
       configurable: true,
       value: {
@@ -55,6 +77,7 @@ describe("ChatComposer controls", () => {
     cleanup();
     apiMocks.createFsDirectory.mockReset();
     apiMocks.readFsDirectory.mockReset();
+    apiMocks.suggestSkills.mockReset();
     vi.restoreAllMocks();
   });
 
@@ -83,6 +106,20 @@ describe("ChatComposer controls", () => {
     expect(
       screen.getByText("Unrestricted access to the internet and any file on your computer."),
     ).toBeInTheDocument();
+  });
+
+  it("shows skill suggestions above the composer and inserts the selected skill", async () => {
+    renderControlledComposer({ initialDraft: "$" });
+
+    expect(await screen.findByTestId("skill-suggestions")).toBeInTheDocument();
+    expect(screen.getByText("Algorithmic Art")).toBeInTheDocument();
+    expect(screen.getByText("Creating algorithmic art using p5.js with seeded randomness.")).toBeInTheDocument();
+    expect(screen.getByText("Personal")).toBeInTheDocument();
+    expect(screen.getByText("Plugin")).toBeInTheDocument();
+
+    fireEvent.mouseDown(screen.getByText("Browser"));
+
+    expect(getComposerInput()).toHaveValue("$browser ");
   });
 
   it("keeps local runtime selected and shows cloud as unavailable", () => {

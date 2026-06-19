@@ -14,6 +14,16 @@ import type {
   FsDirectorySnapshot,
   ProjectPatch,
   ProjectRecord,
+  ProtocolSkillDocument,
+  ProtocolSkillSummary,
+  SkillsListParams,
+  SkillsListResponse,
+  SkillsReadParams,
+  SkillsRefreshParams,
+  SkillsResolveParams,
+  SkillsResolveResponse,
+  SkillsSuggestParams,
+  SkillsSuggestResponse,
   SessionQuery,
   SessionUpdate,
   TalosUsage,
@@ -105,6 +115,47 @@ export class TalosClient {
       const response = await this.http.request<ListResponse<ModelInfo>>(this.url("/v1/models"));
       return response.data;
     },
+  };
+
+  skills = {
+    list: (query?: SkillsListParams): Promise<SkillsListResponse> =>
+      this.http.request<SkillsListResponse>(this.urlWithQuery("/v1/skills", query)),
+    refresh: (_request: SkillsRefreshParams = {}): Promise<SkillsListResponse> =>
+      this.http.request<SkillsListResponse>(this.url("/v1/skills/refresh"), {
+        method: "POST",
+      }),
+    suggest: (query: SkillsSuggestParams): Promise<SkillsSuggestResponse> =>
+      this.http.request<SkillsSuggestResponse>(this.urlWithQuery("/v1/skills/suggest", query)),
+    read: (request: SkillsReadParams): Promise<ProtocolSkillDocument> =>
+      this.http.request<ProtocolSkillDocument>(this.url("/v1/skills/read"), {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
+    resolve: (request: SkillsResolveParams): Promise<SkillsResolveResponse> =>
+      this.http.request<SkillsResolveResponse>(this.url("/v1/skills/resolve"), {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
+    install: (request: { source_path: string }): Promise<ProtocolSkillSummary> =>
+      this.http.request<ProtocolSkillSummary>(this.url("/v1/skills/install"), {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
+    uninstall: (request: { selector: SkillsReadParams["selector"] }): Promise<void> =>
+      this.http.request<void>(this.url("/v1/skills/uninstall"), {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
+    enable: (request: { selector: SkillsReadParams["selector"] }): Promise<ProtocolSkillSummary> =>
+      this.http.request<ProtocolSkillSummary>(this.url("/v1/skills/enable"), {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
+    disable: (request: { selector: SkillsReadParams["selector"] }): Promise<ProtocolSkillSummary> =>
+      this.http.request<ProtocolSkillSummary>(this.url("/v1/skills/disable"), {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
   };
 
   sessions = {

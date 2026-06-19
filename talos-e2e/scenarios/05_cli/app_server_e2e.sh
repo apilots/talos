@@ -9,6 +9,47 @@ load_env
 build_binaries
 prepare_talos_home
 
+configure_cli_skills_fixture() {
+  local config_path="${TALOS_HOME}/conf/talos.yaml"
+  local skill_root="${TALOS_HOME}/skills/cli-review"
+  mkdir -p "${skill_root}"
+  cat >"${skill_root}/SKILL.md" <<'EOF'
+---
+name: cli-review
+description: Review from CLI smoke.
+---
+
+CLI smoke skill.
+EOF
+
+  CONFIG_PATH="${config_path}" TALOS_HOME_PATH="${TALOS_HOME}" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+config_path = Path(os.environ["CONFIG_PATH"])
+talos_home = Path(os.environ["TALOS_HOME_PATH"])
+text = config_path.read_text()
+skills_block = (
+    "    skills:\n"
+    "      enabled: true\n"
+    "      roots:\n"
+    f"        - {json.dumps(str(talos_home / 'skills'))}\n"
+    f"        - {json.dumps(str(talos_home / 'agents-skills'))}\n"
+    f"      install_root: {json.dumps(str(talos_home / 'skills'))}\n"
+    f"      state_path: {json.dumps(str(talos_home / 'skills-state.json'))}\n"
+    "      max_skill_md_bytes: 65536\n"
+    "      max_available_summary_bytes: 8192\n"
+)
+marker = '    planner_mode: "built_in"\n'
+if "    skills:\n" not in text:
+    text = text.replace(marker, skills_block + marker)
+config_path.write_text(text)
+PY
+}
+
+configure_cli_skills_fixture
+
 export TALOS_APP_SERVER_BIN="${TALOS_RS_DIR}/target/debug/app-server"
 
 cli="${TALOS_RS_DIR}/target/debug/talos-cli"
@@ -84,3 +125,35 @@ if ! echo "${smoke_output}" | grep -q "App-server scenario passed"; then
   exit 1
 fi
 echo "CASE cli_app_server_smoke PASS"
+
+skills_list_output="$(run_cli skills list)"
+log_case_json "cli_skills_list" "{\"command\":\"skills list\"}" "${skills_list_output}"
+if ! echo "${skills_list_output}" | grep -Fq '$cli-review'; then
+  echo "CASE cli_skills_list FAIL output=${skills_list_output}"
+  exit 1
+fi
+echo "CASE cli_skills_list PASS"
+
+skills_refresh_output="$(run_cli skills refresh)"
+log_case_json "cli_skills_refresh" "{\"command\":\"skills refresh\"}" "${skills_refresh_output}"
+if ! echo "${skills_refresh_output}" | grep -Fq '$cli-review'; then
+  echo "CASE cli_skills_refresh FAIL output=${skills_refresh_output}"
+  exit 1
+fi
+echo "CASE cli_skills_refresh PASS"
+
+skills_suggest_output="$(run_cli skills suggest cli)"
+log_case_json "cli_skills_suggest" "{\"command\":\"skills suggest\",\"query\":\"cli\"}" "${skills_suggest_output}"
+if ! echo "${skills_suggest_output}" | grep -Fq '$cli-review'; then
+  echo "CASE cli_skills_suggest FAIL output=${skills_suggest_output}"
+  exit 1
+fi
+echo "CASE cli_skills_suggest PASS"
+
+skills_read_output="$(run_cli skills read --name cli-review)"
+log_case_json "cli_skills_read" "{\"command\":\"skills read\",\"name\":\"cli-review\"}" "${skills_read_output}"
+if ! echo "${skills_read_output}" | grep -q "CLI smoke skill"; then
+  echo "CASE cli_skills_read FAIL output=${skills_read_output}"
+  exit 1
+fi
+echo "CASE cli_skills_read PASS"

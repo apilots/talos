@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 talos-error = { workspace = true }
 talos-auth = { workspace = true }
+talos-skills = { workspace = true }
 talos-types = { workspace = true }
 schemars = { workspace = true, features = ["derive"] }
 serde = { workspace = true }

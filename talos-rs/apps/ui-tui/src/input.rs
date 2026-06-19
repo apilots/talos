@@ -132,6 +132,49 @@ impl TuiApp {
             return Ok(false);
         }
 
+        // Skill autocomplete navigation
+        if self.show_skill_autocomplete {
+            match key_event.code {
+                KeyCode::Esc => {
+                    self.show_skill_autocomplete = false;
+                    self.skill_suggestions.clear();
+                    return Ok(false);
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.skill_autocomplete_selected =
+                        self.skill_autocomplete_selected.saturating_sub(1);
+                    return Ok(false);
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    let max = self.skill_suggestions.len().saturating_sub(1);
+                    if self.skill_autocomplete_selected < max {
+                        self.skill_autocomplete_selected += 1;
+                    }
+                    return Ok(false);
+                }
+                KeyCode::Enter | KeyCode::Tab => {
+                    self.select_current_skill_suggestion();
+                    return Ok(false);
+                }
+                KeyCode::Backspace => {
+                    self.handle_backspace();
+                    self.refresh_skill_suggestions().await;
+                    return Ok(false);
+                }
+                KeyCode::Char(c)
+                    if !key_event
+                        .modifiers
+                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                {
+                    self.insert_char(c);
+                    self.refresh_skill_suggestions().await;
+                    return Ok(false);
+                }
+                _ => {}
+            }
+            return Ok(false);
+        }
+
         // Command autocomplete navigation
         if self.show_command_autocomplete {
             match key_event.code {
@@ -207,6 +250,7 @@ impl TuiApp {
             }
             KeyCode::Backspace => {
                 self.handle_backspace();
+                self.refresh_skill_suggestions().await;
                 Ok(false)
             }
             KeyCode::Left => {
@@ -262,6 +306,7 @@ impl TuiApp {
                     .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
                 {
                     self.insert_char(c);
+                    self.refresh_skill_suggestions().await;
                 }
                 Ok(false)
             }
@@ -321,6 +366,10 @@ impl TuiApp {
         self.cursor_index = 0;
         self.pasted_blocks.clear();
         self.selected_pasted_block = None;
+        self.show_skill_autocomplete = false;
+        self.skill_suggestions.clear();
+        self.skill_autocomplete_selected = 0;
+        self.selected_skills.clear();
     }
 
     pub(crate) fn restore_input_state(
@@ -356,6 +405,64 @@ impl TuiApp {
             composed = composed.replacen(&block.marker, &block.text, 1);
         }
         composed
+    }
+
+    pub(crate) async fn refresh_skill_suggestions(&mut self) {
+        let Some(trigger) = active_skill_trigger(&self.input_buffer, self.cursor_index) else {
+            self.show_skill_autocomplete = false;
+            self.skill_suggestions.clear();
+            self.skill_autocomplete_selected = 0;
+            self.selected_skills
+                .retain(|skill| self.input_buffer.contains(&format!("${}", skill.name)));
+            return;
+        };
+        if self.show_command_autocomplete {
+            return;
+        }
+        let Some(client) = self.gateway_client.clone() else {
+            return;
+        };
+        match client.suggest_skills(&trigger.query).await {
+            Ok(skills) => {
+                self.skill_suggestions = skills;
+                self.skill_autocomplete_selected = 0;
+                self.show_skill_autocomplete = !self.skill_suggestions.is_empty();
+            }
+            Err(err) => {
+                self.show_skill_autocomplete = false;
+                self.skill_suggestions.clear();
+                self.push_right_event(format!("skill suggest failed: {}", err));
+            }
+        }
+    }
+
+    pub(crate) fn select_current_skill_suggestion(&mut self) {
+        let Some(trigger) = active_skill_trigger(&self.input_buffer, self.cursor_index) else {
+            self.show_skill_autocomplete = false;
+            return;
+        };
+        let Some(skill) = self
+            .skill_suggestions
+            .get(self.skill_autocomplete_selected)
+            .cloned()
+            .or_else(|| self.skill_suggestions.first().cloned())
+        else {
+            self.show_skill_autocomplete = false;
+            return;
+        };
+        self.input_buffer
+            .replace_range(trigger.start..trigger.end, &format!("${} ", skill.name));
+        self.cursor_index = self.input_buffer.chars().count();
+        if !self
+            .selected_skills
+            .iter()
+            .any(|existing| existing.path == skill.path)
+        {
+            self.selected_skills.push(skill);
+        }
+        self.show_skill_autocomplete = false;
+        self.skill_suggestions.clear();
+        self.skill_autocomplete_selected = 0;
     }
 
     pub(crate) fn show_status_hint(&mut self, message: impl Into<String>, ttl: Duration) {
@@ -487,4 +594,45 @@ impl TuiApp {
             column: mouse_event.column.saturating_sub(rect.x) as usize,
         })
     }
+}
+
+struct SkillTrigger {
+    start: usize,
+    end: usize,
+    query: String,
+}
+
+fn active_skill_trigger(input: &str, cursor_index: usize) -> Option<SkillTrigger> {
+    if cursor_index != input.chars().count() {
+        return None;
+    }
+    let mut start = None;
+    for (idx, ch) in input.char_indices().rev() {
+        if ch == '$' {
+            start = Some(idx);
+            break;
+        }
+        if ch.is_whitespace() {
+            return None;
+        }
+    }
+    let start = start?;
+    if start > 0 {
+        let previous = input[..start].chars().next_back();
+        if previous.is_some_and(|ch| !ch.is_whitespace()) {
+            return None;
+        }
+    }
+    let query = &input[start + 1..];
+    if !query
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.')
+    {
+        return None;
+    }
+    Some(SkillTrigger {
+        start,
+        end: input.len(),
+        query: query.to_string(),
+    })
 }

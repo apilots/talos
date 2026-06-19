@@ -1268,8 +1268,10 @@ mod tests {
                 "method": "turn.start",
                 "params": {
                     "session_id": "s1",
-                    "input": [{ "type": "text", "text": "hello" }],
-                    "workspace_id": null,
+                    "request": {
+                        "input": [{ "type": "text", "text": "hello" }],
+                        "workspace_id": null
+                    },
                     "client_request_id": "request-1"
                 }
             })

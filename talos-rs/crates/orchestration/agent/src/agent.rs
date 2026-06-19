@@ -24,11 +24,11 @@ use crate::{
 use talos_agent_kernel::{
     default_plugin_manager, run_general_turn_with_resume, ContextStateBags,
     DynamicToolResultResume, GeneralTurnOutcome, GeneralTurnResult, GeneralTurnResume,
-    InvocationContext, InvocationExecutionState, InvocationLimits, InvocationSession,
-    KernelAssistantTextPhase, KernelEvent, KernelEventData, KernelEventLabel, KernelEventType,
-    KernelStreamEvent, KernelStreamEventData, KernelStreamEventType, KernelStreamItemKey,
-    ResumeToolCall, StopReason as KernelStopReason, TimelineBuilder, ToolProgressKind,
-    ToolStreamKey, UserInputEventData,
+    GeneralTurnSkillOptions, InvocationContext, InvocationExecutionState, InvocationLimits,
+    InvocationSession, KernelAssistantTextPhase, KernelEvent, KernelEventData, KernelEventLabel,
+    KernelEventType, KernelStreamEvent, KernelStreamEventData, KernelStreamEventType,
+    KernelStreamItemKey, ResumeToolCall, StopReason as KernelStopReason, TimelineBuilder,
+    ToolProgressKind, ToolStreamKey, UserInputEventData,
 };
 use talos_config::{AgentKernelConfig, PlannerMode};
 use talos_error::{TalosError, TalosResult};
@@ -389,6 +389,10 @@ After receiving tool outputs, continue reasoning and provide the final response.
         let resume_context = request.resume_context.clone();
         let agent_request = self.to_agent_request(request);
         let input = Self::extract_text_input(&agent_request.input);
+        let skill_options = GeneralTurnSkillOptions {
+            selected: Self::extract_skill_selections(&agent_request.input),
+            roots: None,
+        };
         let invocation_id = format!("inv-{}", Utc::now().timestamp_millis());
         let session_id = agent_request.session.context.session_id.clone();
         let (kernel_config, memory_store) = self
@@ -423,6 +427,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
                     memory_store,
                     &kernel_config,
                     resume,
+                    Some(skill_options),
                 )
                 .await
             }
@@ -560,6 +565,10 @@ After receiving tool outputs, continue reasoning and provide the final response.
             let agent_description = this.description.clone();
             let title_input = input.clone();
             let kernel_input = input;
+            let skill_options = GeneralTurnSkillOptions {
+                selected: Self::extract_skill_selections(&agent_request.input),
+                roots: None,
+            };
             let run_handle = tokio::spawn(async move {
                 run_general_turn_with_resume(
                     &mut kernel_ctx,
@@ -572,6 +581,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
                     memory_store,
                     &kernel_config,
                     resume,
+                    Some(skill_options),
                 )
                 .await
             });

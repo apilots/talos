@@ -4,11 +4,10 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Json, Response};
 use serde::Deserialize;
-
 use talos_application_service::TurnRetryRequest;
 use talos_auth::RequestIdentity;
 use talos_session_store::MessageCommandAck;
-use talos_types::talos::TalosMessageRequest;
+use talos_types::talos::{TalosMessageRequest, TalosMessageRetryRequest};
 
 use super::access::shared_actor;
 use super::errors::ApiError;
@@ -25,20 +24,12 @@ pub(super) async fn session_message_handler(
     Ok((StatusCode::ACCEPTED, Json(ack)).into_response())
 }
 
-#[derive(Deserialize)]
-pub(super) struct MessageRetryRequest {
-    input: Vec<talos_types::talos::TalosInputItem>,
-    workspace_id: Option<String>,
-    client_message_id: String,
-    retry_of_message_id: String,
-}
-
 pub(super) async fn retry_message_attempt_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
     _headers: HeaderMap,
     Path(session_id): Path<String>,
-    Json(request): Json<MessageRetryRequest>,
+    Json(request): Json<TalosMessageRetryRequest>,
 ) -> Result<Response, ApiError> {
     let ack = state
         .app

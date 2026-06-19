@@ -20,9 +20,9 @@ export type ToolErrorData = { tool_name: string, reason: string, };
 
 export type ConfigErrorData = { path: string, reason: string, };
 
-export type ClientMethod = "initialize" | "session.list" | "session.read" | "session.patch" | "session.delete" | "session.close" | "session.compact" | "session.clear" | "session.active_turn" | "session.history" | "session.recover" | "project.create" | "project.list" | "project.read" | "project.patch" | "project.delete" | "fs.directory.read" | "fs.directory.create" | "turn.start" | "turn.interrupt" | "turn.retry" | "event.subscribe" | "event.unsubscribe" | "tool.dynamic_result.submit" | "model.list" | "config.read" | "config.value.write" | "config.batch.write" | "config.reload" | "memory.file.list" | "memory.file.read" | "memory.file.write" | "workspace.doc.list" | "workspace.doc.read" | "workspace.doc.write" | "workspace.info" | "skill.list" | "app.list" | "tool.list" | "auth.logout" | "auth.login.start" | "auth.login.status" | "auth.login.cancel" | "auth.session.read" | "auth.session.store" | "auth.session.clear" | "user.current" | "memory.search";
+export type ClientMethod = "initialize" | "session.list" | "session.read" | "session.patch" | "session.delete" | "session.close" | "session.compact" | "session.clear" | "session.active_turn" | "session.history" | "session.recover" | "project.create" | "project.list" | "project.read" | "project.patch" | "project.delete" | "fs.directory.read" | "fs.directory.create" | "turn.start" | "turn.interrupt" | "turn.retry" | "event.subscribe" | "event.unsubscribe" | "tool.dynamic_result.submit" | "model.list" | "config.read" | "config.value.write" | "config.batch.write" | "config.reload" | "memory.file.list" | "memory.file.read" | "memory.file.write" | "workspace.doc.list" | "workspace.doc.read" | "workspace.doc.write" | "workspace.info" | "skills.list" | "skills.refresh" | "skills.suggest" | "skills.read" | "skills.resolve" | "skills.install" | "skills.uninstall" | "skills.enable" | "skills.disable" | "app.list" | "tool.list" | "auth.logout" | "auth.login.start" | "auth.login.status" | "auth.login.cancel" | "auth.session.read" | "auth.session.store" | "auth.session.clear" | "user.current" | "memory.search";
 
-export type ClientRequestParams = { "method": "initialize", "params": InitializeParams } | { "method": "session.list", "params": SessionListParams } | { "method": "session.read", "params": SessionReadParams } | { "method": "session.patch", "params": SessionPatchParams } | { "method": "session.delete", "params": SessionDeleteParams } | { "method": "session.close", "params": SessionCloseParams } | { "method": "session.compact", "params": SessionCompactParams } | { "method": "session.clear", "params": SessionClearParams } | { "method": "session.active_turn", "params": SessionActiveTurnParams } | { "method": "session.history", "params": SessionHistoryParams } | { "method": "session.recover", "params": TimelineRecoveryParams } | { "method": "project.create", "params": ProjectCreateParams } | { "method": "project.list", "params": ProjectListParams } | { "method": "project.read", "params": ProjectReadParams } | { "method": "project.patch", "params": ProjectPatchParams } | { "method": "project.delete", "params": ProjectDeleteParams } | { "method": "fs.directory.read", "params": FsDirectoryReadParams } | { "method": "fs.directory.create", "params": FsDirectoryCreateParams } | { "method": "turn.start", "params": TurnStartParams } | { "method": "turn.interrupt", "params": TurnInterruptParams } | { "method": "turn.retry", "params": TurnRetryParams } | { "method": "event.subscribe", "params": EventSubscribeParams } | { "method": "event.unsubscribe", "params": EventUnsubscribeParams } | { "method": "tool.dynamic_result.submit", "params": ToolDynamicResultSubmitParams } | { "method": "model.list", "params": ModelListParams } | { "method": "config.read", "params": ConfigReadParams } | { "method": "config.value.write", "params": ConfigValueWriteParams } | { "method": "config.batch.write", "params": ConfigBatchWriteParams } | { "method": "config.reload", "params": ConfigReloadParams } | { "method": "memory.file.list", "params": MemoryFileListParams } | { "method": "memory.file.read", "params": MemoryFileReadParams } | { "method": "memory.file.write", "params": MemoryFileWriteParams } | { "method": "workspace.doc.list", "params": WorkspaceDocListParams } | { "method": "workspace.doc.read", "params": WorkspaceDocReadParams } | { "method": "workspace.doc.write", "params": WorkspaceDocWriteParams } | { "method": "workspace.info", "params": WorkspaceInfoParams } | { "method": "skill.list", "params": SkillListParams } | { "method": "app.list", "params": AppListParams } | { "method": "tool.list", "params": ToolListParams } | { "method": "auth.logout", "params": AuthLogoutParams } | { "method": "auth.login.start", "params": CloudLoginStartRequest } | { "method": "auth.login.status", "params": CloudLoginStatusRequest } | { "method": "auth.login.cancel", "params": CloudLoginCancelRequest } | { "method": "auth.session.read", "params": AuthSessionReadParams } | { "method": "auth.session.store", "params": AuthSessionStoreParams } | { "method": "auth.session.clear", "params": AuthSessionClearParams } | { "method": "user.current", "params": UserCurrentParams } | { "method": "memory.search", "params": MemorySearchParams };
+export type ClientRequestParams = { "method": "initialize", "params": InitializeParams } | { "method": "session.list", "params": SessionListParams } | { "method": "session.read", "params": SessionReadParams } | { "method": "session.patch", "params": SessionPatchParams } | { "method": "session.delete", "params": SessionDeleteParams } | { "method": "session.close", "params": SessionCloseParams } | { "method": "session.compact", "params": SessionCompactParams } | { "method": "session.clear", "params": SessionClearParams } | { "method": "session.active_turn", "params": SessionActiveTurnParams } | { "method": "session.history", "params": SessionHistoryParams } | { "method": "session.recover", "params": TimelineRecoveryParams } | { "method": "project.create", "params": ProjectCreateParams } | { "method": "project.list", "params": ProjectListParams } | { "method": "project.read", "params": ProjectReadParams } | { "method": "project.patch", "params": ProjectPatchParams } | { "method": "project.delete", "params": ProjectDeleteParams } | { "method": "fs.directory.read", "params": FsDirectoryReadParams } | { "method": "fs.directory.create", "params": FsDirectoryCreateParams } | { "method": "turn.start", "params": TurnStartParams } | { "method": "turn.interrupt", "params": TurnInterruptParams } | { "method": "turn.retry", "params": TurnRetryParams } | { "method": "event.subscribe", "params": EventSubscribeParams } | { "method": "event.unsubscribe", "params": EventUnsubscribeParams } | { "method": "tool.dynamic_result.submit", "params": ToolDynamicResultSubmitParams } | { "method": "model.list", "params": ModelListParams } | { "method": "config.read", "params": ConfigReadParams } | { "method": "config.value.write", "params": ConfigValueWriteParams } | { "method": "config.batch.write", "params": ConfigBatchWriteParams } | { "method": "config.reload", "params": ConfigReloadParams } | { "method": "memory.file.list", "params": MemoryFileListParams } | { "method": "memory.file.read", "params": MemoryFileReadParams } | { "method": "memory.file.write", "params": MemoryFileWriteParams } | { "method": "workspace.doc.list", "params": WorkspaceDocListParams } | { "method": "workspace.doc.read", "params": WorkspaceDocReadParams } | { "method": "workspace.doc.write", "params": WorkspaceDocWriteParams } | { "method": "workspace.info", "params": WorkspaceInfoParams } | { "method": "skills.list", "params": SkillsListParams } | { "method": "skills.refresh", "params": SkillsRefreshParams } | { "method": "skills.suggest", "params": SkillsSuggestParams } | { "method": "skills.read", "params": SkillsReadParams } | { "method": "skills.resolve", "params": SkillsResolveParams } | { "method": "skills.install", "params": SkillsInstallParams } | { "method": "skills.uninstall", "params": SkillsUninstallParams } | { "method": "skills.enable", "params": SkillsEnableParams } | { "method": "skills.disable", "params": SkillsDisableParams } | { "method": "app.list", "params": AppListParams } | { "method": "tool.list", "params": ToolListParams } | { "method": "auth.logout", "params": AuthLogoutParams } | { "method": "auth.login.start", "params": CloudLoginStartRequest } | { "method": "auth.login.status", "params": CloudLoginStatusRequest } | { "method": "auth.login.cancel", "params": CloudLoginCancelRequest } | { "method": "auth.session.read", "params": AuthSessionReadParams } | { "method": "auth.session.store", "params": AuthSessionStoreParams } | { "method": "auth.session.clear", "params": AuthSessionClearParams } | { "method": "user.current", "params": UserCurrentParams } | { "method": "memory.search", "params": MemorySearchParams };
 
 export type ClientRequest = { method: ClientMethod, params: ClientRequestParams, };
 
@@ -100,7 +100,23 @@ export type FsEntryKind = "directory";
 
 export type FsDirectoryCreateResponse = { path: string, };
 
-export type TurnStartParams = { session_id: string, input: Array<ProtocolInputItem>, workspace_id: string | null, context: ProtocolTalosContext | null, model: string | null, project_id: string | null, current_directory: string | null, client_request_id: string | null, };
+export type TurnStartParams = { session_id: string, request: TalosMessageRequest, client_request_id: string | null, };
+
+export type TalosMessageRequest = { input: Array<TalosInputItem>, workspace_id: string | null, context: TalosContext | null, model: string | null, project_id: string | null, current_directory: string | null, };
+
+export type TalosMessageRetryRequest = { input: Array<TalosInputItem>, workspace_id: string | null, client_message_id: string, retry_of_message_id: string, };
+
+export type TalosContext = { source_type: TalosSourceType, provider: TalosProvider, user_id: string, message_id: string, trace_id: string, channel_id: string | null, thread_id: string | null, project_root: string | null, environment: TalosSessionEnvironment | null, };
+
+export type TalosSourceType = "http" | "desktop" | "im" | "cli" | "ws" | "system";
+
+export type TalosProvider = "http" | "sdk" | "cli" | "telegram" | "web_socket" | "system";
+
+export type TalosSessionEnvironment = { directory: string, connection_mode: TalosConnectionMode, };
+
+export type TalosConnectionMode = "embedded" | "remote";
+
+export type TalosInputItem = { "type": "text", text: string, } | { "type": "skill_selection", name: string, path: string, } | { "type": "image", url: string, mime_type: string | null, } | { "type": "file", url: string | null, file_id: string | null, mime_type: string | null, } | { "type": "voice", url: string | null, data_base64: string | null, mime_type: string | null, } | { "type": "video", url: string | null, mime_type: string | null, };
 
 export type MessageCommandStatus = "pending" | "accepted" | "failed" | "failed_no_first_event";
 
@@ -108,7 +124,7 @@ export type TurnStartResponse = { request_id: string, message_id: string | null,
 
 export type TurnInterruptParams = { session_id: string, };
 
-export type TurnRetryParams = { session_id: string, input: Array<ProtocolInputItem>, workspace_id: string | null, client_message_id: string, retry_of_message_id: string, };
+export type TurnRetryParams = { session_id: string, request: TalosMessageRetryRequest, };
 
 export type EventSubscribeParams = { session_id: string, since_event_id: string | null, replay_limit: number | null, close_when_idle: boolean | null, close_on_terminal: boolean | null, };
 
@@ -146,7 +162,45 @@ export type WorkspaceInfoParams = Record<string, never>;
 
 export type WorkspaceInfoResponse = { user_id: string, username: string | null, base_workspace_dir: string, user_workspace_dir: string, };
 
-export type SkillListParams = Record<string, never>;
+export type SkillsListParams = { include_disabled: boolean, };
+
+export type SkillsRefreshParams = Record<string, never>;
+
+export type SkillsSuggestParams = { query: string, limit: number | null, };
+
+export type SkillsReadParams = { selector: ProtocolSkillSelector, };
+
+export type SkillsResolveParams = { text: string, selected: Array<ProtocolSkillSelector>, };
+
+export type SkillsInstallParams = { source_path: string, };
+
+export type SkillsUninstallParams = { selector: ProtocolSkillSelector, };
+
+export type SkillsEnableParams = { selector: ProtocolSkillSelector, };
+
+export type SkillsDisableParams = { selector: ProtocolSkillSelector, };
+
+export type ProtocolSkillSelector = { name: string | null, path: string | null, };
+
+export type ProtocolSkillScope = "user" | "external" | "project" | "plugin" | "system";
+
+export type ProtocolSkillMetadata = { display_name: string | null, icon: string | null, author: string | null, version: string | null, argument_hint: string | null, };
+
+export type ProtocolSkillSummary = { name: string, description: string, short_description: string | null, root: string, path: string, scope: ProtocolSkillScope, source_plugin: string | null, enabled: boolean, read_only: boolean, metadata: ProtocolSkillMetadata | null, };
+
+export type ProtocolSkillSuggestion = { name: string, description: string, short_description: string | null, root: string, path: string, scope: ProtocolSkillScope, source_plugin: string | null, };
+
+export type ProtocolSkillLoadError = { root: string, path: string | null, message: string, };
+
+export type ProtocolSkillDocument = { summary: ProtocolSkillSummary, contents: string, };
+
+export type ProtocolSkillWarning = { code: string, message: string, };
+
+export type SkillsListResponse = { data: Array<ProtocolSkillSummary>, errors: Array<ProtocolSkillLoadError>, };
+
+export type SkillsSuggestResponse = { data: Array<ProtocolSkillSuggestion>, };
+
+export type SkillsResolveResponse = { data: Array<ProtocolSkillSummary>, warnings: Array<ProtocolSkillWarning>, };
 
 export type AppListParams = Record<string, never>;
 
@@ -193,8 +247,6 @@ export type OptionalStringPatch = { "type": "set", value: string, } | { "type": 
 export type OptionalPathPatch = { "type": "set", path: string, } | { "type": "clear" };
 
 export type ProtocolTalosContext = { source_type: string, provider: string, channel_id: string, thread_id: string | null, message_id: string, trace_id: string, };
-
-export type ProtocolInputItem = { "type": "text", text: string, };
 
 export type TalosTimelineEvent = { event_seq: bigint | null, event_id: string | null, created_at_ms: bigint | null, event_type: TalosTimelineEventType, turn_id: string, message_id: string, session_id: string, sequence: bigint, payload: TalosTimelineEventPayload, };
 

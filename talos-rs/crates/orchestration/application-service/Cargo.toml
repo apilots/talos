@@ -11,6 +11,7 @@ talos-auth = { workspace = true }
 talos-llm-provider = { workspace = true }
 talos-memory = { workspace = true }
 talos-session-store = { path = "../../orchestration/session-store" }
+talos-skills = { workspace = true }
 talos-types = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }

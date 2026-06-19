@@ -15,11 +15,13 @@ use talos_app_protocol::requests::{
     InitializeResponse, MemoryFileListParams as ProtocolMemoryFileListParams, MemoryFileReadParams,
     MemoryFileWriteParams, MessageCommandStatus as ProtocolMessageCommandStatus, ModelListParams,
     ProjectCreateParams, ProjectDeleteParams, ProjectListParams, ProjectPatchParams,
-    ProjectReadParams, ProtocolInputItem, ProtocolTalosContext, SessionActiveTurnParams,
-    SessionCloseParams, SessionDeleteParams, SessionHistoryParams, SessionListParams,
-    SessionPatchParams, SessionReadParams, TimelineActiveTurnSnapshot, TimelineRecoveryParams,
-    TimelineRecoverySnapshot, ToolDynamicResultSubmitParams, TurnInterruptParams, TurnStartParams,
-    TurnStartResponse, WorkspaceDocListParams, WorkspaceDocReadParams, WorkspaceDocWriteParams,
+    ProjectReadParams, SessionActiveTurnParams, SessionCloseParams, SessionDeleteParams,
+    SessionHistoryParams, SessionListParams, SessionPatchParams, SessionReadParams,
+    SkillsListParams, SkillsListResponse, SkillsReadParams, SkillsRefreshParams,
+    SkillsResolveParams, SkillsResolveResponse, SkillsSuggestParams, SkillsSuggestResponse,
+    TimelineActiveTurnSnapshot, TimelineRecoveryParams, TimelineRecoverySnapshot,
+    ToolDynamicResultSubmitParams, TurnInterruptParams, TurnStartParams, TurnStartResponse,
+    WorkspaceDocListParams, WorkspaceDocReadParams, WorkspaceDocWriteParams,
 };
 use talos_app_protocol::version::ProtocolVersion;
 use talos_auth::{
@@ -40,7 +42,7 @@ use crate::{
     ProjectRecord, WorkspaceDocDetail, WorkspaceDocKind, WorkspaceDocSummary,
 };
 use crate::{ModelInfo, TalosInputItem, TalosMessageRequest, TalosSession};
-use talos_types::talos::{SessionHistorySnapshot, TalosContext, TimelineEventEnvelope};
+use talos_types::talos::{SessionHistorySnapshot, TimelineEventEnvelope};
 
 #[derive(Debug, Clone)]
 pub struct AppServerClientConfig {
@@ -257,6 +259,41 @@ impl AppServerClient {
         self.request_typed::<_, ListResponse<ModelInfo>>("model.list", ModelListParams {})
             .await
             .map(|response| response.data)
+    }
+
+    pub async fn list_skills(
+        &mut self,
+        params: SkillsListParams,
+    ) -> TalosResult<SkillsListResponse> {
+        self.request_typed("skills.list", params).await
+    }
+
+    pub async fn refresh_skills(
+        &mut self,
+        params: SkillsRefreshParams,
+    ) -> TalosResult<SkillsListResponse> {
+        self.request_typed("skills.refresh", params).await
+    }
+
+    pub async fn suggest_skills(
+        &mut self,
+        params: SkillsSuggestParams,
+    ) -> TalosResult<SkillsSuggestResponse> {
+        self.request_typed("skills.suggest", params).await
+    }
+
+    pub async fn read_skill(
+        &mut self,
+        params: SkillsReadParams,
+    ) -> TalosResult<talos_app_protocol::requests::ProtocolSkillDocument> {
+        self.request_typed("skills.read", params).await
+    }
+
+    pub async fn resolve_skills(
+        &mut self,
+        params: SkillsResolveParams,
+    ) -> TalosResult<SkillsResolveResponse> {
+        self.request_typed("skills.resolve", params).await
     }
 
     pub async fn config_read(&mut self) -> TalosResult<Value> {
@@ -550,12 +587,14 @@ impl AppServerClient {
                 "turn.start",
                 TurnStartParams {
                     session_id: session_id.to_string(),
-                    input: map_input(request.input)?,
-                    workspace_id: request.workspace_id,
-                    context: request.context.map(map_protocol_context),
-                    model: request.model,
-                    project_id: request.project_id,
-                    current_directory: request.current_directory,
+                    request: TalosMessageRequest {
+                        input: validate_app_server_input(request.input)?,
+                        workspace_id: request.workspace_id,
+                        context: request.context,
+                        model: request.model,
+                        project_id: request.project_id,
+                        current_directory: request.current_directory,
+                    },
                     client_request_id,
                 },
             )
@@ -812,17 +851,6 @@ impl AppServerClient {
     }
 }
 
-fn map_protocol_context(context: TalosContext) -> ProtocolTalosContext {
-    ProtocolTalosContext {
-        source_type: context.source_type.to_string(),
-        provider: context.provider.to_string(),
-        channel_id: context.channel_id.unwrap_or_else(|| "default".to_string()),
-        thread_id: context.thread_id,
-        message_id: context.message_id,
-        trace_id: context.trace_id,
-    }
-}
-
 fn send_timeline_subscription_params(session_id: &str) -> EventSubscribeParams {
     EventSubscribeParams {
         session_id: session_id.to_string(),
@@ -966,16 +994,22 @@ async fn dispatch_application_event(
     }
 }
 
-fn map_input(input: Vec<TalosInputItem>) -> TalosResult<Vec<ProtocolInputItem>> {
-    input
-        .into_iter()
-        .map(|item| match item {
-            TalosInputItem::Text { text } => Ok(ProtocolInputItem::Text { text }),
-            _ => Err(TalosError::ValidationError(
-                "app-server protocol currently supports text input items".to_string(),
-            )),
-        })
-        .collect()
+fn validate_app_server_input(input: Vec<TalosInputItem>) -> TalosResult<Vec<TalosInputItem>> {
+    for item in &input {
+        match item {
+            TalosInputItem::Text { .. } | TalosInputItem::SkillSelection { .. } => {}
+            TalosInputItem::Image { .. }
+            | TalosInputItem::File { .. }
+            | TalosInputItem::Voice { .. }
+            | TalosInputItem::Video { .. } => {
+                return Err(TalosError::ValidationError(
+                    "app-server protocol currently supports text and skill selection input items"
+                        .to_string(),
+                ));
+            }
+        }
+    }
+    Ok(input)
 }
 
 fn map_turn_start_response(response: TurnStartResponse) -> MessageCommandAck {
@@ -1072,12 +1106,29 @@ mod tests {
 
     #[test]
     fn rejects_non_text_input() {
-        let result = map_input(vec![TalosInputItem::Image {
+        let result = validate_app_server_input(vec![TalosInputItem::Image {
             url: "file://image.png".to_string(),
             mime_type: None,
         }]);
 
         assert!(matches!(result, Err(TalosError::ValidationError(_))));
+    }
+
+    #[test]
+    fn accepts_skill_selection_input_without_protocol_mapping() {
+        let result = validate_app_server_input(vec![TalosInputItem::SkillSelection {
+            name: "review".to_string(),
+            path: "/tmp/review/SKILL.md".to_string(),
+        }])
+        .expect("skill selection should be supported");
+
+        assert_eq!(
+            result,
+            vec![TalosInputItem::SkillSelection {
+                name: "review".to_string(),
+                path: "/tmp/review/SKILL.md".to_string(),
+            }]
+        );
     }
 
     #[test]

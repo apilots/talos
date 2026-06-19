@@ -32,6 +32,12 @@ const authLoginStartParams = (params: unknown) =>
   typeof params.client_kind === "string" &&
   ["web", "desktop", "tui", "cli"].includes(params.client_kind);
 const authLoginSessionParams = (params: unknown) => isRecord(params) && hasString(params, "login_id");
+const skillSelector = (selector: unknown) =>
+  isRecord(selector) &&
+  (selector.name === undefined || typeof selector.name === "string") &&
+  (selector.path === undefined || typeof selector.path === "string") &&
+  (typeof selector.name === "string" || typeof selector.path === "string");
+const skillSelectorParams = (params: unknown) => isRecord(params) && skillSelector(params.selector);
 
 const DESKTOP_RENDERER_METHOD_GUARDS = {
   "app.list": emptyParams,
@@ -73,7 +79,22 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "session.patch": sessionParams,
   "session.read": sessionParams,
   "session.recover": sessionParams,
-  "skill.list": emptyParams,
+  "skills.list": emptyParams,
+  "skills.refresh": emptyParams,
+  "skills.suggest": (params) =>
+    isRecord(params) &&
+    typeof params.query === "string" &&
+    (params.limit === undefined || typeof params.limit === "number"),
+  "skills.read": skillSelectorParams,
+  "skills.resolve": (params) =>
+    isRecord(params) &&
+    typeof params.text === "string" &&
+    Array.isArray(params.selected) &&
+    params.selected.every(skillSelector),
+  "skills.install": (params) => hasString(params, "source_path"),
+  "skills.uninstall": skillSelectorParams,
+  "skills.enable": skillSelectorParams,
+  "skills.disable": skillSelectorParams,
   "tool.dynamic_result.submit": (params) =>
     hasString(params, "session_id") &&
     hasString(params, "call_id") &&

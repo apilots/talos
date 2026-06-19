@@ -27,6 +27,29 @@ describe("chat api initial turn request", () => {
     });
     expect(request).not.toHaveProperty("conf");
   });
+
+  it("keeps selected skills as structured input items", () => {
+    const request = createInitialTurnRequest("user-1", "use $docs", undefined, undefined, [
+      {
+        name: "docs",
+        description: "Write docs",
+        short_description: null,
+        root: "/Users/test/.talos/skills/docs",
+        path: "/Users/test/.talos/skills/docs/SKILL.md",
+        scope: "user",
+        source_plugin: null,
+      },
+    ]);
+
+    expect(request.input).toEqual([
+      { type: "text", text: "use $docs" },
+      {
+        type: "skill_selection",
+        name: "docs",
+        path: "/Users/test/.talos/skills/docs/SKILL.md",
+      },
+    ]);
+  });
 });
 
 describe("chat message api", () => {

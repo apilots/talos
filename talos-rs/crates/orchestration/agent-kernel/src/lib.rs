@@ -37,9 +37,10 @@ pub use general_turn::{
     prepare_general_turn, run_general_turn, run_general_turn_with_resume, BuiltInGeneralTurnPolicy,
     DynamicToolResultResume, ExecutedTurnArtifacts, GeneralTurnLoopState, GeneralTurnOutcome,
     GeneralTurnPolicy, GeneralTurnPolicyStop, GeneralTurnResult, GeneralTurnResume,
-    GeneralTurnStepDisposition, GeneralTurnStepRequest, GeneralTurnStepResult,
-    GeneralTurnToolBatch, MemoryFlushPolicy, MemoryFlushUsageReport, ModelFinishReason,
-    PendingGeneralTurnAction, PreparedGeneralTurn, ResumeToolCall, StreamingToolExecutionConfig,
+    GeneralTurnSkillOptions, GeneralTurnStepDisposition, GeneralTurnStepRequest,
+    GeneralTurnStepResult, GeneralTurnToolBatch, MemoryFlushPolicy, MemoryFlushUsageReport,
+    ModelFinishReason, PendingGeneralTurnAction, PreparedGeneralTurn, ResumeToolCall,
+    StreamingToolExecutionConfig,
 };
 pub use planner::BuiltInPlanner;
 pub use plugin::{InvocationPluginManager, PluginRegistry};

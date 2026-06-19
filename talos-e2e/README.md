@@ -45,7 +45,6 @@ frontend and SDK mock-flow regression tests that do not start a real gateway.
   - `enter_plan_mode.sh`
   - `exit_plan_mode.sh`
   - `agent.sh`
-  - `skill.sh`
   - `task_output.sh`
   - `task_stop.sh`
 
@@ -61,9 +60,10 @@ frontend and SDK mock-flow regression tests that do not start a real gateway.
   - `embedded_quit_flushes_memory.sh`
 
 9. `scenarios/09_app_server/`
-- Scope: JSON-RPC app-server protocol and resource parity
+- Scope: JSON-RPC app-server protocol, resource parity, and skills turn path
 - Files:
   - `protocol_e2e.sh`
+  - `skills_e2e.sh`
 
 11. `scenarios/10_talos_app/`
 - Scope: `talos-app` mock e2e and component/API regression tests
@@ -80,6 +80,7 @@ talos-e2e/run_e2e.sh --group 06_tools
 talos-e2e/run_e2e.sh --case 05_cli/full_flow
 talos-e2e/run_e2e.sh --case 05_cli/app_server_e2e
 talos-e2e/run_e2e.sh --case 09_app_server/protocol_e2e
+talos-e2e/run_e2e.sh --case 09_app_server/skills_e2e
 talos-e2e/run_e2e.sh --case 10_talos_app/mock_e2e
 ```
 
@@ -87,6 +88,12 @@ talos-e2e/run_e2e.sh --case 10_talos_app/mock_e2e
 client and verifies initialize, model/config/session/event flows, replay,
 multi-subscriber ordering, active-turn conflict handling, memory files,
 workspace docs, project CRUD, and protocol error mapping.
+
+`skills_e2e.sh` creates a local localizer fixture skill under the prepared E2E
+`TALOS_HOME`, then validates `skills.suggest`, `skills.resolve`, `turn.start`,
+and `event.subscribe` through the real app-server path. The turn asks the
+selected skill to localize UI text with a glossary, and asserts the structured
+translation output instead of a simple acknowledgement token.
 
 Protocol fixtures are generated from Rust with:
 

@@ -31,6 +31,7 @@ impl Default for ToolPolicy {
                 "Write".to_string(),
                 "Edit".to_string(),
                 "Grep".to_string(),
+                "ApplyPatch".to_string(),
                 // Exec tools
                 "Bash".to_string(),
                 "TaskOutput".to_string(),
@@ -45,7 +46,6 @@ impl Default for ToolPolicy {
                 "echo_test".to_string(),
                 // State and discovery tools
                 "ToolSearch".to_string(),
-                "Skill".to_string(),
                 "TodoWrite".to_string(),
                 "EnterPlanMode".to_string(),
                 "ExitPlanMode".to_string(),
@@ -229,6 +229,7 @@ mod tests {
         assert!(policy.is_allowed("Bash"));
         assert!(policy.is_allowed("Read"));
         assert!(policy.is_allowed("Grep"));
-        assert!(policy.is_allowed("Skill"));
+        assert!(policy.is_allowed("ApplyPatch"));
+        assert!(!policy.is_allowed("Skill"));
     }
 }

@@ -10,6 +10,7 @@ talos-config = { workspace = true }
 talos-types = { workspace = true }
 talos-llm-provider = { workspace = true }
 talos-memory = { workspace = true }
+talos-skills = { workspace = true }
 talos-tools = { workspace = true }
 talos-tools-policy = { workspace = true }
 talos-session-store = { path = "../session-store" }

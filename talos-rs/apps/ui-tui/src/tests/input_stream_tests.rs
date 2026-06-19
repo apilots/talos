@@ -223,6 +223,51 @@ async fn test_submit_input_composes_pasted_blocks_into_plain_text_message() {
     assert!(app.input_buffer.is_empty());
 }
 
+#[tokio::test]
+async fn test_submit_input_sends_structured_skill_selection() {
+    let client = Arc::new(MockGatewayClient::new());
+    let state = client.state.clone();
+    let gateway_client: Arc<dyn GatewayClient> = client;
+    let mut app = TuiApp::new_with_gateway_client(gateway_client);
+    app.initialize_session().await;
+    app.session_id = Some("sess-test".to_string());
+    app.input_buffer = "please use $web-design-guidelines".to_string();
+    app.cursor_index = app.input_buffer.chars().count();
+    app.selected_skills = vec![ProtocolSkillSuggestion {
+        name: "web-design-guidelines".to_string(),
+        description: "Review web UI against design guidelines.".to_string(),
+        short_description: None,
+        root: PathBuf::from("/tmp/skills/web-design-guidelines"),
+        path: PathBuf::from("/tmp/skills/web-design-guidelines/SKILL.md"),
+        scope: talos_sdk::ProtocolSkillScope::External,
+        source_plugin: None,
+    }];
+
+    let should_quit = app.submit_input().await.unwrap();
+    for _ in 0..10 {
+        app.on_tick().await;
+        tokio::task::yield_now().await;
+        if !state.lock().unwrap().sent_requests.is_empty() {
+            break;
+        }
+    }
+
+    assert!(!should_quit);
+    let state = state.lock().unwrap();
+    let request = state.sent_requests.last().expect("expected sent request");
+    assert_eq!(request.input.len(), 2);
+    assert!(matches!(
+        &request.input[0],
+        TalosInputItem::Text { text } if text == "please use $web-design-guidelines"
+    ));
+    assert!(matches!(
+        &request.input[1],
+        TalosInputItem::SkillSelection { name, path }
+            if name == "web-design-guidelines"
+                && path == "/tmp/skills/web-design-guidelines/SKILL.md"
+    ));
+}
+
 #[test]
 fn test_compose_user_input_text_expands_pasted_blocks_without_markers() {
     let mut app = create_embedded_app();

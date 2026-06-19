@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { FolderOpen, HardDriveUpload, LogOut, Plus, Settings2, SlidersHorizontal, Trash2 } from "lucide-react";
-import { Link, NavLink } from "react-router-dom";
+import { Blocks, FolderOpen, HardDriveUpload, Plus, SlidersHorizontal, Trash2 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { formatRelativeTime } from "@/shared/lib/time";
 import { cn } from "@/shared/lib/cn";
 import { Badge } from "@/shared/ui/Badge";
 import type { SessionUiStatus, ThreadFilter } from "@/shared/types/ui";
+import { SidebarAccountMenu } from "./SidebarAccountMenu";
+import { SidebarNavItem } from "./SidebarNavItem";
 
 type AuthConnectionState = {
   authStatus:
@@ -68,40 +69,10 @@ export function Sidebar({
   onDeleteThread,
 }: SidebarProps) {
   const { t } = useTranslation(["sidebar", "common"]);
-  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
-  const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const filterLabel =
     threadFilter === "all"
       ? t("sidebar:allThreads")
       : threadFilter.replaceAll("_", " ");
-  const roleLabel =
-    connection.authStatus === "open" ? "Open" : connection.authRole === "admin" ? "Admin" : "Pro";
-  const avatarLabel = connection.authUsername.trim().charAt(0).toUpperCase() || "U";
-
-  useEffect(() => {
-    if (!accountMenuOpen) {
-      return;
-    }
-
-    function handlePointerDown(event: MouseEvent) {
-      if (!accountMenuRef.current?.contains(event.target as Node)) {
-        setAccountMenuOpen(false);
-      }
-    }
-
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setAccountMenuOpen(false);
-      }
-    }
-
-    window.addEventListener("mousedown", handlePointerDown);
-    window.addEventListener("keydown", handleEscape);
-    return () => {
-      window.removeEventListener("mousedown", handlePointerDown);
-      window.removeEventListener("keydown", handleEscape);
-    };
-  }, [accountMenuOpen]);
 
   return (
     <aside className="sticky top-0 flex h-screen w-full shrink-0 flex-col border-r border-border/80 bg-card px-4 py-4">
@@ -119,7 +90,8 @@ export function Sidebar({
       </Link>
 
       <div className="mb-5 border-b border-border/80 pb-4">
-        <NavItem icon={<FolderOpen size={16} />} label={t("sidebar:projects")} to="/projects" />
+        <SidebarNavItem icon={<FolderOpen size={16} />} label={t("sidebar:projects")} to="/projects" />
+        <SidebarNavItem icon={<Blocks size={16} />} label="Plugins" to="/plugins" />
       </div>
 
       <div className="mb-3 flex items-end justify-between gap-3">
@@ -197,75 +169,15 @@ export function Sidebar({
       </div>
 
       <nav className="mt-5 space-y-1 border-t border-border/80 pt-5">
-        <NavItem icon={<HardDriveUpload size={16} />} label={t("sidebar:files")} to="/files" />
+        <SidebarNavItem icon={<HardDriveUpload size={16} />} label={t("sidebar:files")} to="/files" />
       </nav>
 
-      <div className="relative mt-4 border-t border-border/80 pt-4" ref={accountMenuRef}>
-        {accountMenuOpen ? (
-          <div className="absolute bottom-[calc(100%+0.5rem)] left-0 right-0 z-20 rounded-[1rem] border border-border/80 bg-card p-1.5 shadow-[0_20px_36px_rgba(95,84,64,0.16)]">
-            <NavLink
-              className="flex w-full items-center gap-2 rounded-[0.85rem] px-3 py-2 text-sm text-ink transition hover:bg-background/75"
-              onClick={() => setAccountMenuOpen(false)}
-              to="/settings"
-            >
-              <Settings2 size={14} />
-              {t("sidebar:settings")}
-            </NavLink>
-            {connection.authStatus !== "open" ? (
-              <button
-              className="flex w-full items-center gap-2 rounded-[0.85rem] px-3 py-2 text-sm text-ink transition hover:bg-background/75"
-              onClick={() => {
-                setAccountMenuOpen(false);
-                void onLogout();
-              }}
-              type="button"
-              >
-                <LogOut size={14} />
-                {t("sidebar:logout")}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-        <button
-          aria-expanded={accountMenuOpen}
-          className="flex w-full items-center gap-3 rounded-[0.95rem] px-2 py-2 text-left transition hover:bg-card/70"
-          onClick={() => setAccountMenuOpen((open) => !open)}
-          type="button"
-        >
-          <div className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-background/85 text-xs font-semibold text-ink">
-            {avatarLabel}
-          </div>
-          <div className="min-w-0">
-            <div className="truncate text-[13px] font-medium leading-4 text-ink">{connection.authUsername}</div>
-            <div className="mt-0.5 text-[11px] leading-4 text-muted">{roleLabel}</div>
-          </div>
-        </button>
-      </div>
+      <SidebarAccountMenu
+        authRole={connection.authRole}
+        authStatus={connection.authStatus}
+        authUsername={connection.authUsername}
+        onLogout={onLogout}
+      />
     </aside>
-  );
-}
-
-function NavItem({
-  icon,
-  label,
-  to,
-}: {
-  icon: ReactNode;
-  label: string;
-  to: string;
-}) {
-  return (
-    <NavLink
-      className={({ isActive }) =>
-        cn(
-          "flex items-center gap-3 rounded-[var(--radius-control)] px-3 py-2.5 text-sm text-muted transition hover:bg-card/88 hover:text-ink",
-          isActive && "bg-card/92 text-ink shadow-[inset_0_0_0_1px_rgba(224,218,209,0.5)]",
-        )
-      }
-      to={to}
-    >
-      {icon}
-      <span>{label}</span>
-    </NavLink>
   );
 }

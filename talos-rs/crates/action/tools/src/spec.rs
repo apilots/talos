@@ -11,7 +11,6 @@ pub enum ToolSource {
     Mcp,
     Dynamic,
     Collaboration,
-    Skill,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -312,7 +311,7 @@ impl ToolCatalog {
 
 pub fn default_governance_for_source(source: ToolSource) -> ToolGovernanceSpec {
     match source {
-        ToolSource::Collaboration | ToolSource::Skill => ToolGovernanceSpec::default(),
+        ToolSource::Collaboration => ToolGovernanceSpec::default(),
         ToolSource::Local | ToolSource::Mcp | ToolSource::Dynamic => ToolGovernanceSpec::default(),
     }
 }

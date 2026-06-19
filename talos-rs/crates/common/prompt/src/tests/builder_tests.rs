@@ -1,4 +1,7 @@
 use super::*;
+use talos_skills::{
+    LocalSkillProvider, SkillPromptBudget, SkillPromptRequest, SkillRoot, SkillRoots, SkillSelector,
+};
 
 #[tokio::test]
 async fn test_prompt_builder_basic() {
@@ -82,6 +85,64 @@ async fn test_prompt_builder_includes_tool_summary_and_planning_instruction() {
         .expect("dynamic block should exist");
     assert!(dynamic.text.contains("build a short plan first"));
     assert!(dynamic.text.contains("echo"));
+}
+
+#[tokio::test]
+async fn test_prompt_builder_includes_skills_summary_and_active_skill_instructions() {
+    let temp = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    let skill_root = temp.join("skills").join("review");
+    std::fs::create_dir_all(&skill_root).expect("skill root should be created");
+    std::fs::write(
+        skill_root.join("SKILL.md"),
+        "---\nname: review\ndescription: Review code changes.\n---\n\n# Review\n\nUse the repository evidence first.",
+    )
+    .expect("skill document should be written");
+
+    let roots = SkillRoots {
+        roots: vec![SkillRoot::user(temp.join("skills"))],
+        state_path: temp.join("skills-state.json"),
+        install_root: temp.join("skills"),
+        max_skill_md_bytes: 64 * 1024,
+        max_available_summary_bytes: 8 * 1024,
+    };
+    let provider = Arc::new(LocalSkillProvider::new(roots));
+
+    let assembly = PromptBuilder::new()
+        .skills(
+            provider,
+            SkillPromptRequest {
+                text: "Use $review".to_string(),
+                selected: vec![SkillSelector::selection(
+                    "review",
+                    skill_root.join("SKILL.md"),
+                )],
+                budget: SkillPromptBudget::default(),
+            },
+        )
+        .user_input("Use $review")
+        .assemble()
+        .await
+        .expect("prompt should build with skills");
+
+    let skill_catalog = assembly
+        .dynamic_suffix_sections
+        .iter()
+        .find(|section| section.kind == PromptSectionKind::SkillCatalog)
+        .expect("skill catalog section should exist");
+    assert!(skill_catalog.payload.contains("review"));
+
+    let active = assembly
+        .dynamic_suffix_sections
+        .iter()
+        .find(|section| section.kind == PromptSectionKind::ActiveSkillInstructions)
+        .expect("active skill instructions should exist");
+    assert!(active.payload.contains("<skill name=\"review\""));
+    assert!(active
+        .payload
+        .contains("Relative paths mentioned by this skill"));
+    assert!(active
+        .payload
+        .contains("Use the repository evidence first."));
 }
 
 #[tokio::test]

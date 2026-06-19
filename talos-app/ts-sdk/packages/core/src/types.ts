@@ -10,7 +10,15 @@ import type {
   TurnExecutionMetrics as ProtocolTurnExecutionMetrics,
   SessionHistoryMessage as ProtocolSessionHistoryMessage,
   SessionHistorySnapshot as ProtocolSessionHistorySnapshot,
+  TalosConnectionMode as ProtocolTalosConnectionMode,
   TalosContentItem as ProtocolTalosContentItem,
+  TalosContext as ProtocolTalosContext,
+  TalosInputItem as ProtocolTalosInputItem,
+  TalosMessageRequest as ProtocolTalosMessageRequest,
+  TalosMessageRetryRequest as ProtocolTalosMessageRetryRequest,
+  TalosProvider as ProtocolTalosProvider,
+  TalosSessionEnvironment as ProtocolTalosSessionEnvironment,
+  TalosSourceType as ProtocolTalosSourceType,
 } from "./generated/app-protocol";
 
 export type {
@@ -47,6 +55,22 @@ export type {
   FsDirectoryReadParams,
   FsDirectorySnapshot,
   FsEntryKind,
+  ProtocolSkillDocument,
+  ProtocolSkillLoadError,
+  ProtocolSkillMetadata,
+  ProtocolSkillScope,
+  ProtocolSkillSelector,
+  ProtocolSkillSuggestion,
+  ProtocolSkillSummary,
+  ProtocolSkillWarning,
+  SkillsListParams,
+  SkillsListResponse,
+  SkillsReadParams,
+  SkillsRefreshParams,
+  SkillsResolveParams,
+  SkillsResolveResponse,
+  SkillsSuggestParams,
+  SkillsSuggestResponse,
 } from "./generated/app-protocol";
 export type {
   AuthSessionReadResponse,
@@ -55,7 +79,7 @@ export type {
   AuthSessionUserSnapshot,
 } from "./generated/app-protocol";
 
-export type TalosConnectionMode = "embedded" | "remote";
+export type TalosConnectionMode = ProtocolTalosConnectionMode;
 
 export type StopReason =
   | "end_turn"
@@ -66,30 +90,10 @@ export type StopReason =
   | "after_model_callback_stopped"
   | "cancelled";
 
-export interface TalosSessionEnvironment {
-  directory: string;
-  connection_mode?: TalosConnectionMode;
-}
-
-export type TalosSourceType = "http" | "im" | "cli" | "ws" | "system";
-export type TalosProvider =
-  | "http"
-  | "sdk"
-  | "cli"
-  | "telegram"
-  | "websocket"
-  | "system";
-
-export interface TalosContext {
-  source_type: TalosSourceType;
-  provider: TalosProvider;
-  user_id: string;
-  message_id: string;
-  trace_id: string;
-  channel_id?: string | null;
-  thread_id?: string | null;
-  environment?: TalosSessionEnvironment | null;
-}
+export type TalosSessionEnvironment = ProtocolTalosSessionEnvironment;
+export type TalosSourceType = ProtocolTalosSourceType;
+export type TalosProvider = ProtocolTalosProvider;
+export type TalosContext = ProtocolTalosContext;
 
 export type UserRole = "user" | "admin";
 
@@ -121,22 +125,7 @@ export interface TalosReasoning {
   text: string;
 }
 
-export type TalosInputItem =
-  | { type: "text"; text: string }
-  | { type: "image"; url: string; mime_type?: string | null }
-  | {
-      type: "file";
-      url?: string | null;
-      file_id?: string | null;
-      mime_type?: string | null;
-    }
-  | {
-      type: "voice";
-      url?: string | null;
-      data_base64?: string | null;
-      mime_type?: string | null;
-    }
-  | { type: "video"; url?: string | null; mime_type?: string | null };
+export type TalosInputItem = ProtocolTalosInputItem;
 
 export type TalosContentItem = ProtocolTalosContentItem;
 
@@ -159,19 +148,23 @@ export type TalosOutputItem =
       is_error?: boolean;
     };
 
-export interface TalosMessageRequest {
-  input: TalosInputItem[];
-  workspace_id?: string | null;
-  context?: TalosContext | null;
-  model?: string | null;
-  project_id?: string | null;
-  current_directory?: string | null;
-}
+export type TalosMessageRequest = Omit<
+  ProtocolTalosMessageRequest,
+  "workspace_id" | "context" | "model" | "project_id" | "current_directory"
+> & {
+  workspace_id?: ProtocolTalosMessageRequest["workspace_id"];
+  context?: ProtocolTalosMessageRequest["context"];
+  model?: ProtocolTalosMessageRequest["model"];
+  project_id?: ProtocolTalosMessageRequest["project_id"];
+  current_directory?: ProtocolTalosMessageRequest["current_directory"];
+};
 
-export interface TalosMessageRetryRequest extends TalosMessageRequest {
-  client_message_id: string;
-  retry_of_message_id: string;
-}
+export type TalosMessageRetryRequest = Omit<
+  ProtocolTalosMessageRetryRequest,
+  "workspace_id"
+> & {
+  workspace_id?: ProtocolTalosMessageRetryRequest["workspace_id"];
+};
 
 export interface TalosMessageResponse {
   request_id: string;

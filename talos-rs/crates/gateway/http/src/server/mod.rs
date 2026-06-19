@@ -10,6 +10,7 @@ mod messages;
 mod misc;
 mod projects;
 mod sessions;
+mod skills;
 mod state;
 mod user_profile;
 mod workspace_docs;
@@ -53,6 +54,11 @@ use self::sessions::{
     cancel_active_turn_handler, clear_session_handler, close_session_handler,
     compact_session_handler, delete_session_handler, get_session_handler,
     get_session_history_handler, list_sessions_handler, patch_session_handler,
+};
+use self::skills::{
+    disable_skill_handler, enable_skill_handler, install_skill_handler, list_skills_handler,
+    read_skill_handler, refresh_skills_handler, resolve_skills_handler, suggest_skills_handler,
+    uninstall_skill_handler,
 };
 use self::state::HttpApiState;
 use self::user_profile::{current_user_handler, logout_handler};
@@ -191,6 +197,15 @@ impl HttpServer {
             .route("/v1/memory/search", get(search_memory_files_handler))
             .route("/v1/workspace/docs", get(list_workspace_docs_handler))
             .route("/v1/workspace/info", get(get_workspace_info_handler))
+            .route("/v1/skills", get(list_skills_handler))
+            .route("/v1/skills/refresh", post(refresh_skills_handler))
+            .route("/v1/skills/suggest", get(suggest_skills_handler))
+            .route("/v1/skills/read", post(read_skill_handler))
+            .route("/v1/skills/resolve", post(resolve_skills_handler))
+            .route("/v1/skills/install", post(install_skill_handler))
+            .route("/v1/skills/uninstall", post(uninstall_skill_handler))
+            .route("/v1/skills/enable", post(enable_skill_handler))
+            .route("/v1/skills/disable", post(disable_skill_handler))
             .route(
                 "/v1/workspace/docs/:kind",
                 get(get_workspace_doc_handler).put(put_workspace_doc_handler),

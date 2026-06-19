@@ -1,9 +1,11 @@
 import { TalosHttpError } from "@talos/sdk-browser";
 import type {
   ModelInfo,
+  ProtocolSkillSuggestion,
   ProjectRecord as ApiProjectRecord,
   SessionUpdate,
   TalosContext,
+  TalosInputItem,
   TalosMessageRequest,
   TalosMessageRetryRequest,
   TalosSession,
@@ -24,6 +26,9 @@ function createContext(userId: string): TalosContext {
     message_id: `msg_${randomPart}`,
     trace_id: `trace_${randomPart}`,
     channel_id: "web",
+    thread_id: null,
+    project_root: null,
+    environment: null,
   };
 }
 
@@ -83,13 +88,27 @@ export function createInitialTurnRequest(
   text: string,
   model: string | undefined,
   project: ProjectRecord | undefined,
+  skills: ProtocolSkillSuggestion[] = [],
 ): TalosMessageRequest {
+  const input: TalosInputItem[] = [
+    { type: "text", text },
+    ...skills.map((skill) => ({
+      type: "skill_selection" as const,
+      name: skill.name,
+      path: skill.path,
+    })),
+  ];
   return {
-    input: [{ type: "text", text }],
+    input,
     context: createContext(userId),
     model,
     project_id: project && !isUnboundProject(project.id) ? project.id : undefined,
   };
+}
+
+export async function suggestSkills(query: string, limit = 8) {
+  const response = await getTalosClient().skills.suggest({ query, limit });
+  return response.data;
 }
 
 export async function createProject(input: string | CreateProjectInput) {
