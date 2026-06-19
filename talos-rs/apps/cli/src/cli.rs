@@ -9,8 +9,8 @@ use std::io::Write;
 use std::time::Duration;
 use talos_sdk::{
     now_ms, open_external_url, AppServerClient, AppServerClientConfig, CloudLoginClientKind,
-    CloudLoginStatusResponse, ProtocolSkillSelector, SkillsListParams, SkillsReadParams,
-    SkillsRefreshParams, SkillsSuggestParams, TalosContext, TalosInputItem, TalosMessageRequest,
+    CloudLoginStatusResponse, ProtocolSkillSelector, SkillsListRequest, SkillsReadRequest,
+    SkillsRefreshRequest, SkillsSuggestRequest, TalosContext, TalosInputItem, TalosMessageRequest,
     TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta,
     TalosTimelineEventPayload, TalosTimelineItemKind, TalosTimelinePhase, TimelineEventEnvelope,
 };
@@ -69,17 +69,17 @@ async fn execute_app_server_skills_command(
     match cmd {
         SkillsCommands::List { include_disabled } => {
             let response = client
-                .list_skills(SkillsListParams { include_disabled })
+                .list_skills(SkillsListRequest { include_disabled })
                 .await?;
             print_skills_snapshot(response);
         }
         SkillsCommands::Refresh => {
-            let response = client.refresh_skills(SkillsRefreshParams {}).await?;
+            let response = client.refresh_skills(SkillsRefreshRequest {}).await?;
             print_skills_snapshot(response);
         }
         SkillsCommands::Suggest { query, limit } => {
             let response = client
-                .suggest_skills(SkillsSuggestParams {
+                .suggest_skills(SkillsSuggestRequest {
                     query,
                     limit: Some(limit),
                 })
@@ -101,7 +101,7 @@ async fn execute_app_server_skills_command(
             if selector.name.is_none() && selector.path.is_none() {
                 return Err("skills read requires --name or --path".into());
             }
-            let document = client.read_skill(SkillsReadParams { selector }).await?;
+            let document = client.read_skill(SkillsReadRequest { selector }).await?;
             println!("# {}", document.summary.name);
             println!("Path: {}", document.summary.path.display());
             println!();

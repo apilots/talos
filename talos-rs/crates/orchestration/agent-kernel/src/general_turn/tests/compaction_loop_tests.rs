@@ -22,9 +22,11 @@ async fn test_prepare_general_turn_injects_selected_skill_prompt_context() {
     )
     .expect("skill document should exist");
     let roots = SkillRoots {
-        roots: vec![SkillRoot::user(workspace_dir.join("skills"))],
-        state_path: workspace_dir.join("skills-state.json"),
-        install_root: workspace_dir.join("skills"),
+        roots: vec![SkillRoot::configured(workspace_dir.join("skills"))],
+        state_path: workspace_dir
+            .join("plugins")
+            .join("skills")
+            .join("skills-state.json"),
         max_skill_md_bytes: 64 * 1024,
         max_available_summary_bytes: 8 * 1024,
     };
@@ -88,7 +90,11 @@ async fn test_prepare_general_turn_uses_configured_skill_prompt_budget() {
         .expect("skill document should exist");
     }
     let mut config = AgentKernelConfig::default();
-    config.skills.roots = vec![skills_root.display().to_string()];
+    config.plugins.roots = vec![talos_config::PluginRootConfig {
+        kind: talos_config::PluginRootKind::Skill,
+        path: skills_root.display().to_string(),
+        read_only: true,
+    }];
     config.skills.max_available_summary_bytes = 96;
     let mut ctx = build_ctx_with_stream(None);
 

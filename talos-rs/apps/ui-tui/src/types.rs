@@ -138,7 +138,6 @@ pub(crate) enum ToolCallStatus {
 pub(crate) struct ChatBlock {
     pub(crate) role: ChatRole,
     pub(crate) content: String,
-    #[allow(dead_code)]
     pub(crate) tool_call_id: Option<String>,
     pub(crate) tool_name: Option<String>,
     pub(crate) tool_input: Option<TalosJsonValue>,

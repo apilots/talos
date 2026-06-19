@@ -6,6 +6,7 @@ pub mod file;
 pub mod fs;
 pub mod history;
 pub mod memory;
+pub mod plugin;
 pub mod session;
 pub mod skills;
 pub mod turn;
@@ -27,6 +28,7 @@ pub use file::{
 pub use fs::FsService;
 pub use history::SessionHistoryService;
 pub use memory::{MemoryDate, MemoryListParams, MemorySearchParams, MemoryService};
+pub use plugin::PluginManagerService;
 pub use session::SessionService;
 pub use skills::SkillsService;
 pub use turn::{message_request_hash, TurnRetryRequest, TurnService};
@@ -61,6 +63,7 @@ pub struct TalosApplicationService {
     pub config: ConfigService,
     pub fs: FsService,
     pub memory: MemoryService,
+    pub plugins: PluginManagerService,
     pub skills: SkillsService,
     pub workspace_docs: WorkspaceDocService,
 }
@@ -128,6 +131,13 @@ impl TalosApplicationService {
             }))
         };
         let file_locks = FileLockRegistry::default();
+        let plugins = PluginManagerService::new(base_config.agent.kernel.plugins.clone());
+        let skills = SkillsService::new(
+            base_config.agent.kernel.skills.clone(),
+            base_config.agent.kernel.plugins.clone(),
+        )
+        .with_plugin_manager(plugins.clone());
+
         Self {
             access: ResourceAccessService::with_records(session_runtime, session_records),
             account: AccountService::new(auth_service, user_service),
@@ -142,7 +152,8 @@ impl TalosApplicationService {
             config: ConfigService::new_with_reload_hook(llm_config_service, models, reload_hook),
             fs: FsService::new(base_config.fs.directory_picker.clone()),
             memory: MemoryService::new(base_config.clone(), llm_provider, file_locks.clone()),
-            skills: SkillsService::new(base_config.agent.kernel.skills.clone()),
+            plugins,
+            skills,
             workspace_docs: WorkspaceDocService::new(base_config, file_locks),
         }
     }

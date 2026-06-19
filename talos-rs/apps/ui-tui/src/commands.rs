@@ -88,13 +88,7 @@ impl TuiApp {
             "model" => {
                 let requested = args.trim();
                 if requested.is_empty() {
-                    // No argument: open model picker
-                    self.show_model_picker = true;
-                    self.model_picker_selected = self
-                        .available_models
-                        .iter()
-                        .position(|m| m == &self.current_model)
-                        .unwrap_or(0);
+                    self.toggle_model_picker();
                     return Ok(false);
                 }
 
@@ -466,7 +460,6 @@ impl TuiApp {
         });
     }
 
-    #[allow(dead_code)]
     pub(crate) fn toggle_model_picker(&mut self) {
         if self.show_model_picker {
             self.show_model_picker = false;

@@ -132,40 +132,74 @@ export class AppServerClient {
     return this.transport.request("user.current", {});
   }
 
-  listSkills(params: AppProtocol.SkillsListParams = { include_disabled: false }): Promise<AppProtocol.SkillsListResponse> {
+  listPluginSources(
+    params: AppProtocol.PluginSourceListRequest = { include_disabled: false },
+  ): Promise<AppProtocol.PluginSourceListResponse> {
+    return this.transport.request("plugin.source.list", params);
+  }
+
+  addPluginSource(params: AppProtocol.PluginSourceAddRequest): Promise<AppProtocol.PluginSourceAddResponse> {
+    return this.transport.request("plugin.source.add", params);
+  }
+
+  refreshPluginSource(
+    params: AppProtocol.PluginSourceRefreshRequest,
+  ): Promise<AppProtocol.PluginSourceRefreshResponse> {
+    return this.transport.request("plugin.source.refresh", params);
+  }
+
+  removePluginSource(
+    params: AppProtocol.PluginSourceRemoveRequest,
+  ): Promise<AppProtocol.PluginSourceRemoveResponse> {
+    return this.transport.request("plugin.source.remove", params);
+  }
+
+  searchPlugins(params: AppProtocol.PluginSearchRequest): Promise<AppProtocol.PluginSearchResponse> {
+    return this.transport.request("plugin.search", params);
+  }
+
+  listPlugins(params: AppProtocol.PluginListRequest): Promise<AppProtocol.PluginListResponse> {
+    return this.transport.request("plugin.list", params);
+  }
+
+  installPlugin(params: AppProtocol.PluginInstallRequest): Promise<AppProtocol.PluginInstallResponse> {
+    return this.transport.request("plugin.install", params);
+  }
+
+  updatePlugin(params: AppProtocol.PluginUpdateRequest): Promise<AppProtocol.PluginUpdateResponse> {
+    return this.transport.request("plugin.update", params);
+  }
+
+  uninstallPlugin(params: AppProtocol.PluginUninstallRequest): Promise<AppProtocol.PluginUninstallResponse> {
+    return this.transport.request("plugin.uninstall", params);
+  }
+
+  enablePlugin(params: AppProtocol.PluginEnableRequest): Promise<AppProtocol.PluginEnableResponse> {
+    return this.transport.request("plugin.enable", params);
+  }
+
+  disablePlugin(params: AppProtocol.PluginDisableRequest): Promise<AppProtocol.PluginDisableResponse> {
+    return this.transport.request("plugin.disable", params);
+  }
+
+  listSkills(params: AppProtocol.SkillsListRequest = { include_disabled: false }): Promise<AppProtocol.SkillsListResponse> {
     return this.transport.request("skills.list", params);
   }
 
-  refreshSkills(params: AppProtocol.SkillsRefreshParams = {}): Promise<AppProtocol.SkillsListResponse> {
+  refreshSkills(params: AppProtocol.SkillsRefreshRequest = {}): Promise<AppProtocol.SkillsListResponse> {
     return this.transport.request("skills.refresh", params);
   }
 
-  suggestSkills(params: AppProtocol.SkillsSuggestParams): Promise<AppProtocol.SkillsSuggestResponse> {
+  suggestSkills(params: AppProtocol.SkillsSuggestRequest): Promise<AppProtocol.SkillsSuggestResponse> {
     return this.transport.request("skills.suggest", params);
   }
 
-  readSkill(params: AppProtocol.SkillsReadParams): Promise<AppProtocol.ProtocolSkillDocument> {
+  readSkill(params: AppProtocol.SkillsReadRequest): Promise<AppProtocol.ProtocolSkillDocument> {
     return this.transport.request("skills.read", params);
   }
 
-  resolveSkills(params: AppProtocol.SkillsResolveParams): Promise<AppProtocol.SkillsResolveResponse> {
+  resolveSkills(params: AppProtocol.SkillsResolveRequest): Promise<AppProtocol.SkillsResolveResponse> {
     return this.transport.request("skills.resolve", params);
-  }
-
-  installSkill(params: AppProtocol.SkillsInstallParams): Promise<AppProtocol.ProtocolSkillSummary> {
-    return this.transport.request("skills.install", params);
-  }
-
-  uninstallSkill(params: AppProtocol.SkillsUninstallParams): Promise<unknown> {
-    return this.transport.request("skills.uninstall", params);
-  }
-
-  enableSkill(params: AppProtocol.SkillsEnableParams): Promise<AppProtocol.ProtocolSkillSummary> {
-    return this.transport.request("skills.enable", params);
-  }
-
-  disableSkill(params: AppProtocol.SkillsDisableParams): Promise<AppProtocol.ProtocolSkillSummary> {
-    return this.transport.request("skills.disable", params);
   }
 
   listApps(): Promise<unknown[]> {

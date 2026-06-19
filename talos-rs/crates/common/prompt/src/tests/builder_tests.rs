@@ -1,6 +1,8 @@
 use super::*;
+use talos_config::ReservedOutputPolicy;
 use talos_skills::{
-    LocalSkillProvider, SkillPromptBudget, SkillPromptRequest, SkillRoot, SkillRoots, SkillSelector,
+    LocalSkillProvider, SkillPromptBudget, SkillPromptContext, SkillPromptInjection,
+    SkillPromptRequest, SkillRoot, SkillRoots, SkillSelector,
 };
 
 #[tokio::test]
@@ -99,9 +101,11 @@ async fn test_prompt_builder_includes_skills_summary_and_active_skill_instructio
     .expect("skill document should be written");
 
     let roots = SkillRoots {
-        roots: vec![SkillRoot::user(temp.join("skills"))],
-        state_path: temp.join("skills-state.json"),
-        install_root: temp.join("skills"),
+        roots: vec![SkillRoot::configured(temp.join("skills"))],
+        state_path: temp
+            .join("plugins")
+            .join("skills")
+            .join("skills-state.json"),
         max_skill_md_bytes: 64 * 1024,
         max_available_summary_bytes: 8 * 1024,
     };
@@ -143,6 +147,57 @@ async fn test_prompt_builder_includes_skills_summary_and_active_skill_instructio
     assert!(active
         .payload
         .contains("Use the repository evidence first."));
+}
+
+#[tokio::test]
+async fn test_prompt_builder_keeps_active_skill_instructions_when_trimming_dynamic_budget() {
+    let mut config = PromptBuildConfig::default();
+    config.prompt.window.reserved_output_tokens = ReservedOutputPolicy::Fixed { tokens: 0 };
+    config.prompt.window.compaction_buffer_tokens = 0;
+
+    let assembly = PromptBuilder::new()
+        .config(config)
+        .model_info(ModelInfo {
+            id: "tiny-window".to_string(),
+            name: "tiny-window".to_string(),
+            provider: "test".to_string(),
+            context_window: 256,
+            reasoning: false,
+            reasoning_effort: Default::default(),
+            speed: Default::default(),
+            input: Vec::new(),
+            cost: Default::default(),
+            compat: Default::default(),
+        })
+        .skill_prompt_context(SkillPromptContext {
+            available_summary: "available skill summary\n".repeat(500),
+            injections: vec![SkillPromptInjection {
+                name: "large".to_string(),
+                root: "/tmp/skills/large".into(),
+                path: "/tmp/skills/large/SKILL.md".into(),
+                contents: "# Large\n\nACTIVE_SKILL_MARKER\n".repeat(200),
+            }],
+            warnings: Vec::new(),
+        })
+        .user_input("Use $large")
+        .assemble()
+        .await
+        .expect("prompt should build with active skill under tiny budget");
+
+    assert!(assembly
+        .diagnostics
+        .dropped_sections
+        .contains(&PromptSectionKind::SkillCatalog));
+    assert!(!assembly
+        .diagnostics
+        .dropped_sections
+        .contains(&PromptSectionKind::ActiveSkillInstructions));
+    let active = assembly
+        .dynamic_suffix_sections
+        .iter()
+        .find(|section| section.kind == PromptSectionKind::ActiveSkillInstructions)
+        .expect("active skill instructions should be retained");
+    assert!(active.payload.contains("ACTIVE_SKILL_MARKER"));
 }
 
 #[tokio::test]

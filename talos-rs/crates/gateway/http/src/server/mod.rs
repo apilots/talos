@@ -8,6 +8,7 @@ mod lifecycle;
 mod memory_files;
 mod messages;
 mod misc;
+mod plugin;
 mod projects;
 mod sessions;
 mod skills;
@@ -46,6 +47,12 @@ use self::messages::{
 use self::misc::{
     get_llm_handler, health_handler, list_models_handler, put_llm_handler, shutdown_signal,
 };
+use self::plugin::{
+    add_plugin_source_handler, disable_plugin_handler, enable_plugin_handler,
+    install_plugin_handler, list_plugin_sources_handler, list_plugins_handler,
+    refresh_plugin_source_handler, remove_plugin_source_handler, search_plugins_handler,
+    uninstall_plugin_handler, update_plugin_handler,
+};
 use self::projects::{
     create_project_handler, delete_project_handler, get_project_handler, list_projects_handler,
     patch_project_handler,
@@ -56,9 +63,8 @@ use self::sessions::{
     get_session_history_handler, list_sessions_handler, patch_session_handler,
 };
 use self::skills::{
-    disable_skill_handler, enable_skill_handler, install_skill_handler, list_skills_handler,
-    read_skill_handler, refresh_skills_handler, resolve_skills_handler, suggest_skills_handler,
-    uninstall_skill_handler,
+    list_skills_handler, read_skill_handler, refresh_skills_handler, resolve_skills_handler,
+    suggest_skills_handler,
 };
 use self::state::HttpApiState;
 use self::user_profile::{current_user_handler, logout_handler};
@@ -197,15 +203,30 @@ impl HttpServer {
             .route("/v1/memory/search", get(search_memory_files_handler))
             .route("/v1/workspace/docs", get(list_workspace_docs_handler))
             .route("/v1/workspace/info", get(get_workspace_info_handler))
+            .route(
+                "/v1/plugin/sources",
+                get(list_plugin_sources_handler).post(add_plugin_source_handler),
+            )
+            .route(
+                "/v1/plugin/sources/refresh",
+                post(refresh_plugin_source_handler),
+            )
+            .route(
+                "/v1/plugin/sources/remove",
+                post(remove_plugin_source_handler),
+            )
+            .route("/v1/plugin/search", post(search_plugins_handler))
+            .route("/v1/plugin/list", post(list_plugins_handler))
+            .route("/v1/plugin/install", post(install_plugin_handler))
+            .route("/v1/plugin/update", post(update_plugin_handler))
+            .route("/v1/plugin/uninstall", post(uninstall_plugin_handler))
+            .route("/v1/plugin/enable", post(enable_plugin_handler))
+            .route("/v1/plugin/disable", post(disable_plugin_handler))
             .route("/v1/skills", get(list_skills_handler))
             .route("/v1/skills/refresh", post(refresh_skills_handler))
             .route("/v1/skills/suggest", get(suggest_skills_handler))
             .route("/v1/skills/read", post(read_skill_handler))
             .route("/v1/skills/resolve", post(resolve_skills_handler))
-            .route("/v1/skills/install", post(install_skill_handler))
-            .route("/v1/skills/uninstall", post(uninstall_skill_handler))
-            .route("/v1/skills/enable", post(enable_skill_handler))
-            .route("/v1/skills/disable", post(disable_skill_handler))
             .route(
                 "/v1/workspace/docs/:kind",
                 get(get_workspace_doc_handler).put(put_workspace_doc_handler),

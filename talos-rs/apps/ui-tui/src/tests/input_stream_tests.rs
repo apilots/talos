@@ -241,6 +241,7 @@ async fn test_submit_input_sends_structured_skill_selection() {
         path: PathBuf::from("/tmp/skills/web-design-guidelines/SKILL.md"),
         scope: talos_sdk::ProtocolSkillScope::External,
         source_plugin: None,
+        source_install: None,
     }];
 
     let should_quit = app.submit_input().await.unwrap();

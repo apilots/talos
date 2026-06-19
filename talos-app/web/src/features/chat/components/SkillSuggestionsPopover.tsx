@@ -65,8 +65,6 @@ function skillDisplayName(name: string) {
 
 function skillSourceLabel(scope: ProtocolSkillSuggestion["scope"]) {
   switch (scope) {
-    case "user":
-      return "Personal";
     case "external":
       return "External";
     case "project":

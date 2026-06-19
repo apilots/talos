@@ -16,8 +16,8 @@ pub use talos_app_protocol::events::{canonical_method, ApplicationEvent};
 pub use talos_app_protocol::requests::{
     EventSubscribeParams, EventSubscribeResponse, ProtocolSkillDocument, ProtocolSkillScope,
     ProtocolSkillSelector, ProtocolSkillSuggestion, ProtocolSkillSummary, ProtocolTalosContext,
-    SessionHistoryParams, SkillsListParams, SkillsListResponse, SkillsReadParams,
-    SkillsRefreshParams, SkillsResolveParams, SkillsResolveResponse, SkillsSuggestParams,
+    SessionHistoryParams, SkillsListRequest, SkillsListResponse, SkillsReadRequest,
+    SkillsRefreshRequest, SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest,
     SkillsSuggestResponse, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus,
     TimelineCursorStatus, TimelineRecoveryParams, TimelineRecoverySnapshot, TimelineReplay,
     ToolDynamicResultSubmitParams,
@@ -44,6 +44,18 @@ pub use talos_types::{
     OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, ProjectPatch, ProjectRecord,
     SessionAgentConf, SessionConf, SessionQuery, TalosSession, WorkspaceDocDetail,
     WorkspaceDocKind, WorkspaceDocSummary,
+};
+pub use talos_types::{
+    MarketplaceSource, MarketplaceSourceInput, Plugin, PluginDefinition, PluginDisableRequest,
+    PluginDisableResponse, PluginEnableRequest, PluginEnableResponse, PluginInstall,
+    PluginInstallConflictPolicy, PluginInstallId, PluginInstallRequest, PluginInstallResponse,
+    PluginInstallSource, PluginInstallTarget, PluginListRequest, PluginListResponse,
+    PluginListStatusFilter, PluginSearchRefreshPolicy, PluginSearchRequest, PluginSearchResponse,
+    PluginSearchStatusFilter, PluginSourceAddRequest, PluginSourceAddResponse,
+    PluginSourceListRequest, PluginSourceListResponse, PluginSourceRefreshRequest,
+    PluginSourceRefreshResponse, PluginSourceRemoveRequest, PluginSourceRemoveResponse,
+    PluginUninstallRequest, PluginUninstallResponse, PluginUpdateConflictPolicy,
+    PluginUpdateRequest, PluginUpdateResponse, SkillPlugin,
 };
 
 pub async fn connect_app_server(config: AppServerClientConfig) -> TalosResult<AppServerClient> {

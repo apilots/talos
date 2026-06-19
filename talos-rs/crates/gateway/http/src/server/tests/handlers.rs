@@ -1,5 +1,48 @@
 use super::*;
 
+fn test_state_with_config_and_plugin_manager(
+    config: talos_types::TalosConfig,
+    plugin_manager: talos_application_service::PluginManagerService,
+    auth_disabled: bool,
+) -> Arc<HttpApiState> {
+    let (auth_service, user_service) = test_auth_services();
+    let event_store = Arc::new(RecordingEventStore::default());
+    let event_service = event_service_from_store(event_store.clone());
+    let llm_config_service: Arc<dyn LlmConfigService> = Arc::new(LlmConfigManager::new(Arc::new(
+        InMemoryLlmConfigStore::new(config.llm.clone()),
+    )));
+    let app = TalosApplicationService::new_with_session_store(
+        Arc::new(MockGateway),
+        Arc::new(SessionServiceRuntimeAdapter::new(Arc::new(
+            MockSessionService,
+        ))),
+        Arc::new(SessionStoreAdapter::new(Arc::new(MockSessionService))),
+        event_service.clone(),
+        event_store,
+        config.clone(),
+        Arc::new(MockLlmProvider),
+        llm_config_service,
+        vec![test_model_info()],
+        auth_service.clone(),
+        user_service,
+    );
+    let mut app = app;
+    app.plugins = plugin_manager.clone();
+    app.skills = talos_application_service::SkillsService::new(
+        config.agent.kernel.skills.clone(),
+        config.agent.kernel.plugins.clone(),
+    )
+    .with_plugin_manager(plugin_manager);
+    Arc::new(HttpApiState::from_application_service(
+        Arc::new(app),
+        event_service,
+        config,
+        auth_service,
+        auth_disabled,
+        Arc::new(ServerLifecycle::new()),
+    ))
+}
+
 #[tokio::test]
 async fn test_health() {
     let state = test_state(false);
@@ -377,6 +420,88 @@ async fn test_http_and_app_server_adapters_share_application_service_contract() 
         .await
         .expect_err("app-server invalid workspace kind should fail");
     assert_eq!(invalid_workspace_kind.code, VALIDATION_FAILED);
+
+    let _ = std::fs::remove_dir_all(workspace_dir);
+}
+
+#[tokio::test]
+async fn test_plugin_http_and_app_server_adapters_share_application_service_contract() {
+    use talos_app_protocol::requests::{ClientMethod, ClientRequest, ClientRequestParams};
+    use talos_app_server::{AppServerApplication, TalosApplicationAdapter};
+    use talos_application_service::PluginManagerService;
+    use talos_config::PluginsRuntimeConfig;
+    use talos_plugin::{PluginManager, PluginStateStore};
+    use talos_types::{
+        MarketplaceSourceInput, PluginKind, PluginSearchRefreshPolicy, PluginSearchRequest,
+        PluginSearchStatusFilter, PluginSourceAddRequest,
+    };
+
+    let temp = tempfile::tempdir().expect("temp dir should exist");
+    let repo = temp.path().join("repo");
+    let skill_dir = repo.join("skills").join("contract-skill");
+    std::fs::create_dir_all(&skill_dir).expect("skill dir should be created");
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        r#"---
+name: contract-skill
+description: Verify shared plugin service contract.
+---
+
+Use this skill for protocol contract verification.
+"#,
+    )
+    .expect("skill should be written");
+
+    let (config, workspace_dir) = isolated_test_config();
+    let plugin_manager = PluginManagerService::with_manager(PluginManager::with_state_store(
+        PluginsRuntimeConfig {
+            sources: Vec::new(),
+            roots: Vec::new(),
+        },
+        PluginStateStore::new(temp.path().join("plugin-state")),
+    ));
+    let state = test_state_with_config_and_plugin_manager(config, plugin_manager, false);
+
+    let added = add_plugin_source_handler(
+        State(state.clone()),
+        Json(PluginSourceAddRequest {
+            source: MarketplaceSourceInput::LocalFolder {
+                path: repo,
+                sparse_paths: vec!["skills".to_string()],
+            },
+            refresh: true,
+        }),
+    )
+    .await
+    .expect("HTTP plugin source add should succeed");
+    assert_eq!(added.0.plugins[0].name, "contract-skill");
+    assert!(added.0.warnings.is_empty());
+
+    let adapter = TalosApplicationAdapter::new(state.app.clone(), 32);
+    let actor = talos_application_service::Actor::regular("static-token");
+    let app_server_search = adapter
+        .dispatch(
+            &actor,
+            ClientRequest {
+                method: ClientMethod::PluginSearch,
+                params: ClientRequestParams::PluginSearch(PluginSearchRequest {
+                    query: Some("contract".to_string()),
+                    source_id: Some(added.0.source.id),
+                    kind: Some(PluginKind::Skill),
+                    status: Some(PluginSearchStatusFilter::Any),
+                    refresh: PluginSearchRefreshPolicy::CacheOnly,
+                    limit: Some(10),
+                }),
+            },
+        )
+        .await
+        .expect("app-server plugin search should use shared service");
+
+    assert_eq!(app_server_search["plugins"][0]["name"], "contract-skill");
+    assert_eq!(
+        app_server_search["warnings"].as_array().map(Vec::len),
+        Some(0)
+    );
 
     let _ = std::fs::remove_dir_all(workspace_dir);
 }

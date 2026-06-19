@@ -5,15 +5,39 @@ import { X } from "lucide-react";
 interface AddPluginMarketplaceDialogProps {
   open: boolean;
   onClose: () => void;
+  onSubmit: (input: { source: string; gitRef: string; sparsePaths: string }) => Promise<void> | void;
 }
 
-export function AddPluginMarketplaceDialog({ open, onClose }: AddPluginMarketplaceDialogProps) {
+export function AddPluginMarketplaceDialog({
+  open,
+  onClose,
+  onSubmit,
+}: AddPluginMarketplaceDialogProps) {
   const [source, setSource] = useState("");
   const [gitRef, setGitRef] = useState("main");
   const [sparsePaths, setSparsePaths] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   if (!open) {
     return null;
   }
+
+  async function submit() {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onSubmit({ source, gitRef, sparsePaths });
+      setSource("");
+      setGitRef("main");
+      setSparsePaths("");
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add marketplace.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/25 px-6 backdrop-blur-[2px]">
       <div className="w-full max-w-[760px] rounded-[1.6rem] border border-border/80 bg-card p-7 shadow-[0_30px_80px_rgba(31,28,24,0.22)]">
@@ -64,6 +88,7 @@ export function AddPluginMarketplaceDialog({ open, onClose }: AddPluginMarketpla
               value={sparsePaths}
             />
           </Field>
+          {error ? <div className="text-sm text-danger">{error}</div> : null}
         </div>
 
         <div className="mt-9 flex justify-end gap-3">
@@ -76,11 +101,11 @@ export function AddPluginMarketplaceDialog({ open, onClose }: AddPluginMarketpla
           </button>
           <button
             className="rounded-[0.8rem] bg-ink px-6 py-3 text-[17px] text-background transition disabled:bg-muted/40 disabled:text-background"
-            disabled={!source.trim()}
-            onClick={onClose}
+            disabled={!source.trim() || submitting}
+            onClick={() => void submit()}
             type="button"
           >
-            Add marketplace
+            {submitting ? "Adding..." : "Add marketplace"}
           </button>
         </div>
       </div>

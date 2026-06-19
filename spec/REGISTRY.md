@@ -6,7 +6,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | Type | Next ID |
 | --- | ---: |
-| `feat` | 027 |
+| `feat` | 028 |
 | `fix` | 004 |
 | `refactor` | 027 |
 | `docs` | 001 |
@@ -21,6 +21,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | feat-023 | `feat-023-unified-cloud-login-adapter` | draft |
 | feat-024 | `feat-024-project-directory-picker` | draft |
 | feat-026 | `feat-026-talos-skills-system` | draft |
+| feat-027 | `feat-027-plugin-marketplace-skill-install` | draft |
 | refactor-023 | `refactor-023-agent-kernel-simplification` | draft |
 | refactor-024 | `refactor-024-agent-kernel-final-answer-simplification` | draft |
 | refactor-025 | `refactor-025-talos-tool-capability-alignment` | draft |

@@ -1,23 +1,37 @@
-use talos_config::{resolve_runtime_path, SkillsRuntimeConfig};
+use talos_config::{
+    resolve_runtime_path, PluginRootKind, PluginsRuntimeConfig, SkillsRuntimeConfig,
+};
 use talos_error::{TalosError, TalosResult};
 use talos_skills::{
-    disable_skill, enable_skill, install_skill, read_document, refresh, resolve, suggest,
-    uninstall_skill, SkillAdminContext, SkillDocument, SkillInstallSource, SkillRoot, SkillRoots,
-    SkillSelector, SkillSnapshot, SkillSuggestion, SkillSummary, SkillWarning,
+    read_document, refresh, resolve, suggest, SkillDocument, SkillRoot, SkillRoots, SkillSelector,
+    SkillSnapshot, SkillSuggestion, SkillSummary, SkillWarning,
 };
+
+use crate::PluginManagerService;
 
 #[derive(Clone)]
 pub struct SkillsService {
     enabled: bool,
     roots: SkillRoots,
+    config: SkillsRuntimeConfig,
+    plugins: PluginsRuntimeConfig,
+    plugin_manager: Option<PluginManagerService>,
 }
 
 impl SkillsService {
-    pub fn new(config: SkillsRuntimeConfig) -> Self {
+    pub fn new(config: SkillsRuntimeConfig, plugins: PluginsRuntimeConfig) -> Self {
         Self {
             enabled: config.enabled,
-            roots: skill_roots_from_config(&config),
+            roots: skill_roots_from_config(&config, &plugins),
+            config,
+            plugins,
+            plugin_manager: None,
         }
+    }
+
+    pub fn with_plugin_manager(mut self, plugin_manager: PluginManagerService) -> Self {
+        self.plugin_manager = Some(plugin_manager);
+        self
     }
 
     pub fn roots(&self) -> &SkillRoots {
@@ -28,7 +42,7 @@ impl SkillsService {
         if !self.enabled {
             return Ok(empty_snapshot());
         }
-        refresh(&self.roots)
+        refresh(&self.current_roots()?)
     }
 
     pub fn list(&self, include_disabled: bool) -> TalosResult<SkillSnapshot> {
@@ -43,12 +57,12 @@ impl SkillsService {
         if !self.enabled {
             return Ok(Vec::new());
         }
-        suggest(&self.roots, query, limit)
+        suggest(&self.current_roots()?, query, limit)
     }
 
     pub fn read_document(&self, selector: &SkillSelector) -> TalosResult<SkillDocument> {
         self.ensure_enabled()?;
-        read_document(&self.roots, selector)
+        read_document(&self.current_roots()?, selector)
     }
 
     pub fn resolve(
@@ -57,31 +71,7 @@ impl SkillsService {
         selected: &[SkillSelector],
     ) -> TalosResult<(Vec<SkillSummary>, Vec<SkillWarning>)> {
         self.ensure_enabled()?;
-        resolve(&self.roots, text, selected)
-    }
-
-    pub fn install(&self, source_path: impl Into<std::path::PathBuf>) -> TalosResult<SkillSummary> {
-        self.ensure_enabled()?;
-        let ctx = SkillAdminContext::new(self.roots.clone());
-        install_skill(&ctx, SkillInstallSource::LocalPath(source_path.into()))
-    }
-
-    pub fn uninstall(&self, selector: &SkillSelector) -> TalosResult<()> {
-        self.ensure_enabled()?;
-        let ctx = SkillAdminContext::new(self.roots.clone());
-        uninstall_skill(&ctx, selector)
-    }
-
-    pub fn enable(&self, selector: &SkillSelector) -> TalosResult<SkillSummary> {
-        self.ensure_enabled()?;
-        let ctx = SkillAdminContext::new(self.roots.clone());
-        enable_skill(&ctx, selector)
-    }
-
-    pub fn disable(&self, selector: &SkillSelector) -> TalosResult<SkillSummary> {
-        self.ensure_enabled()?;
-        let ctx = SkillAdminContext::new(self.roots.clone());
-        disable_skill(&ctx, selector)
+        resolve(&self.current_roots()?, text, selected)
     }
 
     fn ensure_enabled(&self) -> TalosResult<()> {
@@ -93,26 +83,34 @@ impl SkillsService {
             ))
         }
     }
+
+    fn current_roots(&self) -> TalosResult<SkillRoots> {
+        let mut roots = skill_roots_from_config(&self.config, &self.plugins);
+        if let Some(plugin_manager) = &self.plugin_manager {
+            roots
+                .roots
+                .extend(plugin_manager.manager().installed_skill_roots()?);
+        }
+        Ok(roots)
+    }
 }
 
-fn skill_roots_from_config(config: &SkillsRuntimeConfig) -> SkillRoots {
-    let install_root = resolve_runtime_path(&config.install_root);
-    let roots = config
+fn skill_roots_from_config(
+    config: &SkillsRuntimeConfig,
+    plugins: &PluginsRuntimeConfig,
+) -> SkillRoots {
+    let roots = plugins
         .roots
         .iter()
-        .map(|path| {
-            let path = resolve_runtime_path(path);
-            if path == install_root {
-                SkillRoot::user(path)
-            } else {
-                SkillRoot::external(path)
-            }
+        .filter(|root| root.kind == PluginRootKind::Skill && root.read_only)
+        .map(|root| {
+            let path = resolve_runtime_path(&root.path);
+            SkillRoot::configured(path)
         })
         .collect::<Vec<_>>();
     SkillRoots {
         roots,
-        state_path: resolve_runtime_path(&config.state_path),
-        install_root,
+        state_path: resolve_runtime_path("${TALOS_HOME}/plugins/skills/skills-state.json"),
         max_skill_md_bytes: config.max_skill_md_bytes,
         max_available_summary_bytes: config.max_available_summary_bytes,
     }
@@ -133,9 +131,8 @@ mod tests {
     #[test]
     fn skills_service_lists_suggests_reads_and_resolves_from_configured_roots() {
         let temp = tempfile::tempdir().expect("temp dir should be created");
-        let user_root = temp.path().join("user-skills");
-        let state_path = temp.path().join("skills-state.json");
-        let skill_root = user_root.join("review");
+        let external_root = temp.path().join("external-skills");
+        let skill_root = external_root.join("review");
         fs::create_dir_all(&skill_root).expect("skill root should be created");
         fs::write(
             skill_root.join("SKILL.md"),
@@ -143,14 +140,21 @@ mod tests {
         )
         .expect("skill should be written");
 
-        let service = SkillsService::new(SkillsRuntimeConfig {
-            enabled: true,
-            roots: vec![user_root.display().to_string()],
-            install_root: user_root.display().to_string(),
-            state_path: state_path.display().to_string(),
-            max_skill_md_bytes: 64 * 1024,
-            max_available_summary_bytes: 8 * 1024,
-        });
+        let service = SkillsService::new(
+            SkillsRuntimeConfig {
+                enabled: true,
+                max_skill_md_bytes: 64 * 1024,
+                max_available_summary_bytes: 8 * 1024,
+            },
+            PluginsRuntimeConfig {
+                sources: Vec::new(),
+                roots: vec![talos_config::PluginRootConfig {
+                    kind: talos_config::PluginRootKind::Skill,
+                    path: external_root.display().to_string(),
+                    read_only: true,
+                }],
+            },
+        );
 
         let listed = service.list(false).expect("skills should list");
         assert_eq!(listed.skills.len(), 1);
@@ -182,52 +186,10 @@ mod tests {
     }
 
     #[test]
-    fn skills_service_filters_disabled_skills_from_default_list() {
-        let temp = tempfile::tempdir().expect("temp dir should be created");
-        let user_root = temp.path().join("user-skills");
-        let state_path = temp.path().join("skills-state.json");
-        let skill_root = user_root.join("review");
-        fs::create_dir_all(&skill_root).expect("skill root should be created");
-        fs::write(
-            skill_root.join("SKILL.md"),
-            "---\nname: review\ndescription: Review code changes.\n---\n",
-        )
-        .expect("skill should be written");
-
-        let service = SkillsService::new(SkillsRuntimeConfig {
-            enabled: true,
-            roots: vec![user_root.display().to_string()],
-            install_root: user_root.display().to_string(),
-            state_path: state_path.display().to_string(),
-            max_skill_md_bytes: 64 * 1024,
-            max_available_summary_bytes: 8 * 1024,
-        });
-
-        service
-            .disable(&SkillSelector::by_path(skill_root.join("SKILL.md")))
-            .expect("skill should disable");
-
-        assert!(service
-            .list(false)
-            .expect("enabled skills should list")
-            .skills
-            .is_empty());
-        assert_eq!(
-            service
-                .list(true)
-                .expect("all skills should list")
-                .skills
-                .len(),
-            1
-        );
-    }
-
-    #[test]
     fn skills_disabled_returns_empty_catalog_and_rejects_mutations() {
         let temp = tempfile::tempdir().expect("temp dir should be created");
-        let user_root = temp.path().join("user-skills");
-        let state_path = temp.path().join("skills-state.json");
-        let skill_root = user_root.join("review");
+        let external_root = temp.path().join("external-skills");
+        let skill_root = external_root.join("review");
         fs::create_dir_all(&skill_root).expect("skill root should be created");
         fs::write(
             skill_root.join("SKILL.md"),
@@ -235,14 +197,21 @@ mod tests {
         )
         .expect("skill should be written");
 
-        let service = SkillsService::new(SkillsRuntimeConfig {
-            enabled: false,
-            roots: vec![user_root.display().to_string()],
-            install_root: user_root.display().to_string(),
-            state_path: state_path.display().to_string(),
-            max_skill_md_bytes: 64 * 1024,
-            max_available_summary_bytes: 8 * 1024,
-        });
+        let service = SkillsService::new(
+            SkillsRuntimeConfig {
+                enabled: false,
+                max_skill_md_bytes: 64 * 1024,
+                max_available_summary_bytes: 8 * 1024,
+            },
+            PluginsRuntimeConfig {
+                sources: Vec::new(),
+                roots: vec![talos_config::PluginRootConfig {
+                    kind: talos_config::PluginRootKind::Skill,
+                    path: external_root.display().to_string(),
+                    read_only: true,
+                }],
+            },
+        );
 
         assert!(service
             .list(false)

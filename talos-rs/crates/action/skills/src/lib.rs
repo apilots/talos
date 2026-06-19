@@ -1,14 +1,9 @@
-pub mod admin;
 pub mod catalog;
 pub mod loader;
 pub mod model;
 pub mod prompt;
 pub mod state;
 
-pub use admin::{
-    disable_skill, enable_skill, install_skill, uninstall_skill, SkillAdminContext,
-    SkillInstallSource,
-};
 pub use catalog::{read_document, refresh, resolve, suggest};
 pub use model::{
     SkillDocument, SkillLoadError, SkillMetadata, SkillRoot, SkillRoots, SkillScope, SkillSelector,
@@ -18,7 +13,7 @@ pub use prompt::{
     LocalSkillProvider, SkillPromptBudget, SkillPromptContext, SkillPromptInjection,
     SkillPromptRequest, SkillPromptWarning, SkillProvider,
 };
-pub use state::{load_skill_state, save_skill_state, SkillState};
+pub use state::{load_skill_state, save_skill_state, PluginSkillStateKey, SkillState};
 
 #[cfg(test)]
 mod tests {
@@ -34,22 +29,26 @@ mod tests {
     }
 
     fn test_roots(temp: &TempDir) -> SkillRoots {
-        let user_root = temp.path().join(".talos").join("skills");
-        let external_root = temp.path().join(".agents").join("skills");
+        let plugin_root = temp.path().join(".talos").join("plugins").join("review");
+        let configured_root = temp.path().join(".agents").join("skills");
         SkillRoots {
             roots: vec![
-                SkillRoot::user(&user_root),
-                SkillRoot::external(&external_root),
+                SkillRoot::plugin(&plugin_root, "plugin-review", "install-review"),
+                SkillRoot::configured(&configured_root),
             ],
-            state_path: temp.path().join(".talos").join("skills-state.json"),
-            install_root: user_root,
+            state_path: temp
+                .path()
+                .join(".talos")
+                .join("plugins")
+                .join("skills")
+                .join("skills-state.json"),
             max_skill_md_bytes: 64 * 1024,
             max_available_summary_bytes: 8 * 1024,
         }
     }
 
     #[test]
-    fn loader_scans_user_and_external_roots_with_loose_frontmatter() {
+    fn loader_scans_plugin_and_configured_roots_with_loose_frontmatter() {
         let temp = tempfile::tempdir().expect("temp dir should be created");
         let roots = test_roots(&temp);
         write_skill(
@@ -83,7 +82,7 @@ Write docs.
 
         assert_eq!(snapshot.errors, Vec::new());
         assert_eq!(snapshot.skills.len(), 2);
-        assert_eq!(snapshot.skills[0].scope, SkillScope::User);
+        assert_eq!(snapshot.skills[0].scope, SkillScope::Plugin);
         assert_eq!(snapshot.skills[1].scope, SkillScope::External);
         assert!(snapshot.skills[1].read_only);
         assert_eq!(
@@ -313,107 +312,5 @@ Sentinel skill.
         assert_eq!(context.injections.len(), 1);
         assert_eq!(context.injections[0].name, "e2e-sentinel");
         assert_eq!(context.warnings, Vec::new());
-    }
-
-    #[test]
-    fn install_copies_whole_directory_and_excludes_dependency_caches() {
-        let temp = tempfile::tempdir().expect("temp dir should be created");
-        let roots = test_roots(&temp);
-        let source = temp.path().join("source-review");
-        fs::create_dir_all(source.join("templates")).expect("templates dir should be created");
-        fs::create_dir_all(source.join("node_modules"))
-            .expect("node_modules dir should be created");
-        fs::write(
-            source.join("SKILL.md"),
-            r#"---
-name: review
-description: Review code
----
-Use templates/base.md.
-"#,
-        )
-        .expect("skill should be written");
-        fs::write(source.join("templates").join("base.md"), "template")
-            .expect("template should be written");
-        fs::write(source.join("node_modules").join("ignored.txt"), "ignored")
-            .expect("ignored cache should be written");
-        let ctx = SkillAdminContext::new(roots.clone());
-
-        let installed = install_skill(&ctx, SkillInstallSource::LocalPath(source))
-            .expect("skill should install");
-
-        assert_eq!(installed.scope, SkillScope::User);
-        assert!(roots
-            .install_root
-            .join("review")
-            .join("templates")
-            .join("base.md")
-            .exists());
-        assert!(!roots
-            .install_root
-            .join("review")
-            .join("node_modules")
-            .join("ignored.txt")
-            .exists());
-    }
-
-    #[test]
-    fn install_rejects_name_that_already_exists_in_external_root() {
-        let temp = tempfile::tempdir().expect("temp dir should be created");
-        let roots = test_roots(&temp);
-        write_skill(
-            &roots.roots[1].path,
-            "external-review",
-            r#"---
-name: review
-description: External review
----
-External review skill.
-"#,
-        );
-        let source = temp.path().join("source-review");
-        fs::create_dir_all(&source).expect("source skill dir should be created");
-        fs::write(
-            source.join("SKILL.md"),
-            r#"---
-name: review
-description: User review
----
-User review skill.
-"#,
-        )
-        .expect("source skill should be written");
-        let ctx = SkillAdminContext::new(roots.clone());
-
-        let error = install_skill(&ctx, SkillInstallSource::LocalPath(source))
-            .expect_err("same-name external skill should block install");
-
-        assert!(matches!(error, talos_error::TalosError::Conflict(_)));
-        assert!(!roots.install_root.join("review").exists());
-    }
-
-    #[test]
-    fn external_skill_cannot_be_uninstalled_but_can_be_disabled() {
-        let temp = tempfile::tempdir().expect("temp dir should be created");
-        let roots = test_roots(&temp);
-        write_skill(
-            &roots.roots[1].path,
-            "docs",
-            r#"---
-name: docs
-description: Write docs
----
-Write docs.
-"#,
-        );
-        let ctx = SkillAdminContext::new(roots.clone());
-
-        let error = uninstall_skill(&ctx, &SkillSelector::by_name("docs"))
-            .expect_err("external skill should not uninstall");
-        assert!(error.to_string().contains("Authorization denied"));
-
-        let disabled = disable_skill(&ctx, &SkillSelector::by_name("docs"))
-            .expect("external skill can be disabled");
-        assert!(!disabled.enabled);
     }
 }

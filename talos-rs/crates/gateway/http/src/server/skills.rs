@@ -3,14 +3,11 @@ use std::sync::Arc;
 use axum::extract::{Query, State};
 use axum::response::Json;
 use axum::Json as BodyJson;
-use serde_json::{json, Value};
 use talos_app_protocol::requests::{
     protocol_skill_document, protocol_skill_load_error, protocol_skill_selector,
     protocol_skill_suggestion, protocol_skill_summary, protocol_skill_warning,
-    ProtocolSkillDocument, ProtocolSkillSummary, SkillsDisableParams, SkillsEnableParams,
-    SkillsInstallParams, SkillsListParams, SkillsListResponse, SkillsReadParams,
-    SkillsResolveParams, SkillsResolveResponse, SkillsSuggestParams, SkillsSuggestResponse,
-    SkillsUninstallParams,
+    ProtocolSkillDocument, SkillsListRequest, SkillsListResponse, SkillsReadRequest,
+    SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse,
 };
 
 use super::errors::ApiError;
@@ -18,7 +15,7 @@ use super::state::HttpApiState;
 
 pub(super) async fn list_skills_handler(
     State(state): State<Arc<HttpApiState>>,
-    Query(params): Query<SkillsListParams>,
+    Query(params): Query<SkillsListRequest>,
 ) -> Result<Json<SkillsListResponse>, ApiError> {
     let snapshot = state
         .app
@@ -63,7 +60,7 @@ pub(super) async fn refresh_skills_handler(
 
 pub(super) async fn suggest_skills_handler(
     State(state): State<Arc<HttpApiState>>,
-    Query(params): Query<SkillsSuggestParams>,
+    Query(params): Query<SkillsSuggestRequest>,
 ) -> Result<Json<SkillsSuggestResponse>, ApiError> {
     let skills = state
         .app
@@ -77,7 +74,7 @@ pub(super) async fn suggest_skills_handler(
 
 pub(super) async fn read_skill_handler(
     State(state): State<Arc<HttpApiState>>,
-    BodyJson(params): BodyJson<SkillsReadParams>,
+    BodyJson(params): BodyJson<SkillsReadRequest>,
 ) -> Result<Json<ProtocolSkillDocument>, ApiError> {
     let selector = protocol_skill_selector(params.selector).map_err(ApiError::from_talos_error)?;
     let document = state
@@ -90,7 +87,7 @@ pub(super) async fn read_skill_handler(
 
 pub(super) async fn resolve_skills_handler(
     State(state): State<Arc<HttpApiState>>,
-    BodyJson(params): BodyJson<SkillsResolveParams>,
+    BodyJson(params): BodyJson<SkillsResolveRequest>,
 ) -> Result<Json<SkillsResolveResponse>, ApiError> {
     let selected = params
         .selected
@@ -107,55 +104,4 @@ pub(super) async fn resolve_skills_handler(
         data: skills.into_iter().map(protocol_skill_summary).collect(),
         warnings: warnings.into_iter().map(protocol_skill_warning).collect(),
     }))
-}
-
-pub(super) async fn install_skill_handler(
-    State(state): State<Arc<HttpApiState>>,
-    BodyJson(params): BodyJson<SkillsInstallParams>,
-) -> Result<Json<ProtocolSkillSummary>, ApiError> {
-    let skill = state
-        .app
-        .skills
-        .install(params.source_path)
-        .map_err(ApiError::from_talos_error)?;
-    Ok(Json(protocol_skill_summary(skill)))
-}
-
-pub(super) async fn uninstall_skill_handler(
-    State(state): State<Arc<HttpApiState>>,
-    BodyJson(params): BodyJson<SkillsUninstallParams>,
-) -> Result<Json<Value>, ApiError> {
-    let selector = protocol_skill_selector(params.selector).map_err(ApiError::from_talos_error)?;
-    state
-        .app
-        .skills
-        .uninstall(&selector)
-        .map_err(ApiError::from_talos_error)?;
-    Ok(Json(json!({ "success": true })))
-}
-
-pub(super) async fn enable_skill_handler(
-    State(state): State<Arc<HttpApiState>>,
-    BodyJson(params): BodyJson<SkillsEnableParams>,
-) -> Result<Json<ProtocolSkillSummary>, ApiError> {
-    let selector = protocol_skill_selector(params.selector).map_err(ApiError::from_talos_error)?;
-    let skill = state
-        .app
-        .skills
-        .enable(&selector)
-        .map_err(ApiError::from_talos_error)?;
-    Ok(Json(protocol_skill_summary(skill)))
-}
-
-pub(super) async fn disable_skill_handler(
-    State(state): State<Arc<HttpApiState>>,
-    BodyJson(params): BodyJson<SkillsDisableParams>,
-) -> Result<Json<ProtocolSkillSummary>, ApiError> {
-    let selector = protocol_skill_selector(params.selector).map_err(ApiError::from_talos_error)?;
-    let skill = state
-        .app
-        .skills
-        .disable(&selector)
-        .map_err(ApiError::from_talos_error)?;
-    Ok(Json(protocol_skill_summary(skill)))
 }

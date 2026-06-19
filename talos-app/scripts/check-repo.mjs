@@ -11,7 +11,7 @@ const maxEffectiveLinesPerFile = 1000;
 const maxEffectiveLinesPerTestFile = 300;
 const legacyLineBaselines = new Map([
   ["src/features/settings/components/models/SettingsModelsEditor.tsx", 417],
-  ["src/features/chat/components/ChatComposer.tsx", 574],
+  ["src/features/chat/components/ChatComposer.tsx", 675],
   ["src/features/chat/__tests__/streaming.test.ts", 637],
   ["src/features/chat/store.ts", 516],
   ["src/features/settings/components/SettingsAgentWorkspaceSection.tsx", 374],

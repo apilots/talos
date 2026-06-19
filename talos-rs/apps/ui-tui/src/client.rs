@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use talos_error::{TalosError, TalosResult};
 use talos_sdk::{
     AppServerClient, ModelInfo, ProtocolSkillSuggestion, SessionHistorySnapshot,
-    SkillsSuggestParams, TalosMessageRequest, TalosSession, TimelineActiveTurnSnapshot,
+    SkillsSuggestRequest, TalosMessageRequest, TalosSession, TimelineActiveTurnSnapshot,
     TimelineEventEnvelope, TimelineRecoverySnapshot,
 };
 use tokio::sync::mpsc;
@@ -54,7 +54,7 @@ impl GatewayClient for Mutex<AppServerClient> {
     async fn suggest_skills(&self, query: &str) -> TalosResult<Vec<ProtocolSkillSuggestion>> {
         self.lock()
             .await
-            .suggest_skills(SkillsSuggestParams {
+            .suggest_skills(SkillsSuggestRequest {
                 query: query.to_string(),
                 limit: Some(8),
             })

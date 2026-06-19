@@ -11,7 +11,7 @@ prepare_talos_home
 
 configure_cli_skills_fixture() {
   local config_path="${TALOS_HOME}/conf/talos.yaml"
-  local skill_root="${TALOS_HOME}/skills/cli-review"
+  local skill_root="${TALOS_HOME}/agents-skills/cli-review"
   mkdir -p "${skill_root}"
   cat >"${skill_root}/SKILL.md" <<'EOF'
 ---
@@ -33,13 +33,13 @@ text = config_path.read_text()
 skills_block = (
     "    skills:\n"
     "      enabled: true\n"
-    "      roots:\n"
-    f"        - {json.dumps(str(talos_home / 'skills'))}\n"
-    f"        - {json.dumps(str(talos_home / 'agents-skills'))}\n"
-    f"      install_root: {json.dumps(str(talos_home / 'skills'))}\n"
-    f"      state_path: {json.dumps(str(talos_home / 'skills-state.json'))}\n"
     "      max_skill_md_bytes: 65536\n"
     "      max_available_summary_bytes: 8192\n"
+    "    plugins:\n"
+    "      roots:\n"
+    "        - kind: skill\n"
+    f"          path: {json.dumps(str(talos_home / 'agents-skills'))}\n"
+    "          read_only: true\n"
 )
 marker = '    planner_mode: "built_in"\n'
 if "    skills:\n" not in text:

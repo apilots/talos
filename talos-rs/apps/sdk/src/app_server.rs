@@ -17,8 +17,8 @@ use talos_app_protocol::requests::{
     ProjectCreateParams, ProjectDeleteParams, ProjectListParams, ProjectPatchParams,
     ProjectReadParams, SessionActiveTurnParams, SessionCloseParams, SessionDeleteParams,
     SessionHistoryParams, SessionListParams, SessionPatchParams, SessionReadParams,
-    SkillsListParams, SkillsListResponse, SkillsReadParams, SkillsRefreshParams,
-    SkillsResolveParams, SkillsResolveResponse, SkillsSuggestParams, SkillsSuggestResponse,
+    SkillsListRequest, SkillsListResponse, SkillsReadRequest, SkillsRefreshRequest,
+    SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse,
     TimelineActiveTurnSnapshot, TimelineRecoveryParams, TimelineRecoverySnapshot,
     ToolDynamicResultSubmitParams, TurnInterruptParams, TurnStartParams, TurnStartResponse,
     WorkspaceDocListParams, WorkspaceDocReadParams, WorkspaceDocWriteParams,
@@ -30,6 +30,14 @@ use talos_auth::{
 };
 use talos_config::{LlmConfig, LlmConfigRead};
 use talos_error::{TalosError, TalosResult};
+use talos_types::{
+    PluginDisableRequest, PluginDisableResponse, PluginEnableRequest, PluginEnableResponse,
+    PluginInstallRequest, PluginInstallResponse, PluginListRequest, PluginListResponse,
+    PluginSearchRequest, PluginSearchResponse, PluginSourceAddRequest, PluginSourceAddResponse,
+    PluginSourceListRequest, PluginSourceListResponse, PluginSourceRefreshRequest,
+    PluginSourceRefreshResponse, PluginSourceRemoveRequest, PluginSourceRemoveResponse,
+    PluginUninstallRequest, PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse,
+};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{mpsc, oneshot, Mutex};
@@ -263,37 +271,114 @@ impl AppServerClient {
 
     pub async fn list_skills(
         &mut self,
-        params: SkillsListParams,
+        params: SkillsListRequest,
     ) -> TalosResult<SkillsListResponse> {
         self.request_typed("skills.list", params).await
     }
 
     pub async fn refresh_skills(
         &mut self,
-        params: SkillsRefreshParams,
+        params: SkillsRefreshRequest,
     ) -> TalosResult<SkillsListResponse> {
         self.request_typed("skills.refresh", params).await
     }
 
     pub async fn suggest_skills(
         &mut self,
-        params: SkillsSuggestParams,
+        params: SkillsSuggestRequest,
     ) -> TalosResult<SkillsSuggestResponse> {
         self.request_typed("skills.suggest", params).await
     }
 
     pub async fn read_skill(
         &mut self,
-        params: SkillsReadParams,
+        params: SkillsReadRequest,
     ) -> TalosResult<talos_app_protocol::requests::ProtocolSkillDocument> {
         self.request_typed("skills.read", params).await
     }
 
     pub async fn resolve_skills(
         &mut self,
-        params: SkillsResolveParams,
+        params: SkillsResolveRequest,
     ) -> TalosResult<SkillsResolveResponse> {
         self.request_typed("skills.resolve", params).await
+    }
+
+    pub async fn list_plugin_sources(
+        &mut self,
+        params: PluginSourceListRequest,
+    ) -> TalosResult<PluginSourceListResponse> {
+        self.request_typed("plugin.source.list", params).await
+    }
+
+    pub async fn add_plugin_source(
+        &mut self,
+        params: PluginSourceAddRequest,
+    ) -> TalosResult<PluginSourceAddResponse> {
+        self.request_typed("plugin.source.add", params).await
+    }
+
+    pub async fn refresh_plugin_source(
+        &mut self,
+        params: PluginSourceRefreshRequest,
+    ) -> TalosResult<PluginSourceRefreshResponse> {
+        self.request_typed("plugin.source.refresh", params).await
+    }
+
+    pub async fn remove_plugin_source(
+        &mut self,
+        params: PluginSourceRemoveRequest,
+    ) -> TalosResult<PluginSourceRemoveResponse> {
+        self.request_typed("plugin.source.remove", params).await
+    }
+
+    pub async fn search_plugins(
+        &mut self,
+        params: PluginSearchRequest,
+    ) -> TalosResult<PluginSearchResponse> {
+        self.request_typed("plugin.search", params).await
+    }
+
+    pub async fn list_plugins(
+        &mut self,
+        params: PluginListRequest,
+    ) -> TalosResult<PluginListResponse> {
+        self.request_typed("plugin.list", params).await
+    }
+
+    pub async fn install_plugin(
+        &mut self,
+        params: PluginInstallRequest,
+    ) -> TalosResult<PluginInstallResponse> {
+        self.request_typed("plugin.install", params).await
+    }
+
+    pub async fn update_plugin(
+        &mut self,
+        params: PluginUpdateRequest,
+    ) -> TalosResult<PluginUpdateResponse> {
+        self.request_typed("plugin.update", params).await
+    }
+
+    pub async fn uninstall_plugin(
+        &mut self,
+        params: PluginUninstallRequest,
+    ) -> TalosResult<PluginUninstallResponse> {
+        self.request_typed("plugin.uninstall", params).await
+    }
+
+    pub async fn enable_plugin(
+        &mut self,
+        params: PluginEnableRequest,
+    ) -> TalosResult<PluginEnableResponse> {
+        self.request_typed("plugin.enable", params).await
+    }
+
+    pub async fn disable_plugin(
+        &mut self,
+        params: PluginDisableRequest,
+    ) -> TalosResult<PluginDisableResponse> {
+        self.request_typed("plugin.disable", params).await
     }
 
     pub async fn config_read(&mut self) -> TalosResult<Value> {

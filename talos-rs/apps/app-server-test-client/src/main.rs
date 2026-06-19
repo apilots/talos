@@ -4,8 +4,8 @@ use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 use talos_sdk::{
     canonical_method, AppServerClient, AppServerClientConfig, EventSubscribeParams,
-    ExpectedFileVersion, ProjectPatch, ProtocolSkillSelector, SkillsResolveParams,
-    SkillsSuggestParams, TalosContext, TalosError, TalosInputItem, TalosMessageRequest,
+    ExpectedFileVersion, ProjectPatch, ProtocolSkillSelector, SkillsResolveRequest,
+    SkillsSuggestRequest, TalosContext, TalosError, TalosInputItem, TalosMessageRequest,
     TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta,
     TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItemKind,
     TimelineEventEnvelope, WorkspaceDocKind,
@@ -339,7 +339,7 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
 async fn skills_e2e(client: &mut AppServerClient) -> Result<()> {
     eprintln!("skills-e2e suggest");
     let suggestions = client
-        .suggest_skills(SkillsSuggestParams {
+        .suggest_skills(SkillsSuggestRequest {
             query: "localizer".to_string(),
             limit: Some(8),
         })
@@ -352,7 +352,7 @@ async fn skills_e2e(client: &mut AppServerClient) -> Result<()> {
 
     eprintln!("skills-e2e resolve");
     let resolved = client
-        .resolve_skills(SkillsResolveParams {
+        .resolve_skills(SkillsResolveRequest {
             text: "Use $e2e-localizer.".to_string(),
             selected: vec![ProtocolSkillSelector {
                 name: Some(skill.name.clone()),
@@ -446,7 +446,7 @@ fn assert_skill_localizer_output(output: &str) -> Result<()> {
 fn prepare_skills_fixture() -> Result<()> {
     let talos_home = std::env::var("TALOS_HOME").context("TALOS_HOME is required")?;
     let skill_root = std::path::Path::new(&talos_home)
-        .join("skills")
+        .join("agents-skills")
         .join("e2e-localizer");
     std::fs::create_dir_all(&skill_root)
         .with_context(|| format!("create skill fixture {}", skill_root.display()))?;

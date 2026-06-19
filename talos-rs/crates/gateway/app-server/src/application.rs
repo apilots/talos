@@ -10,7 +10,7 @@ use talos_app_protocol::requests::{
     EventSubscribeParams, FsDirectoryCreateParams, FsDirectoryReadParams, MemoryFileReadParams,
     MemoryFileWriteParams, MessageCommandStatus, OptionalPathPatch, OptionalStringPatch,
     ProjectCreateParams, ProjectPatchParams, SessionListParams, SessionPatchParams,
-    SkillsListParams, SkillsListResponse, SkillsResolveResponse, SkillsSuggestParams,
+    SkillsListRequest, SkillsListResponse, SkillsResolveResponse, SkillsSuggestRequest,
     SkillsSuggestResponse, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus,
     TimelineCursorStatus, TimelinePendingDynamicToolResult, TimelinePendingUserAction,
     TimelineRecoverySnapshot, TimelineReplay, TurnStartParams, TurnStartResponse,
@@ -433,41 +433,72 @@ impl AppServerApplication for TalosApplicationAdapter {
                     warnings: warnings.into_iter().map(protocol_skill_warning).collect(),
                 })
             }
-            ClientRequestParams::SkillsInstall(params) => to_value(protocol_skill_summary(
+            ClientRequestParams::PluginSourceList(params) => to_value(
                 self.app
-                    .skills
-                    .install(params.source_path)
+                    .plugins
+                    .list_sources(params)
                     .map_err(AppServerErrorBody::from_talos_error)?,
-            )),
-            ClientRequestParams::SkillsUninstall(params) => {
-                let selector = protocol_skill_selector(params.selector)
-                    .map_err(AppServerErrorBody::from_talos_error)?;
+            ),
+            ClientRequestParams::PluginSourceAdd(params) => to_value(
                 self.app
-                    .skills
-                    .uninstall(&selector)
-                    .map_err(AppServerErrorBody::from_talos_error)?;
-                to_value(json!({ "success": true }))
-            }
-            ClientRequestParams::SkillsEnable(params) => {
-                let selector = protocol_skill_selector(params.selector)
-                    .map_err(AppServerErrorBody::from_talos_error)?;
-                to_value(protocol_skill_summary(
-                    self.app
-                        .skills
-                        .enable(&selector)
-                        .map_err(AppServerErrorBody::from_talos_error)?,
-                ))
-            }
-            ClientRequestParams::SkillsDisable(params) => {
-                let selector = protocol_skill_selector(params.selector)
-                    .map_err(AppServerErrorBody::from_talos_error)?;
-                to_value(protocol_skill_summary(
-                    self.app
-                        .skills
-                        .disable(&selector)
-                        .map_err(AppServerErrorBody::from_talos_error)?,
-                ))
-            }
+                    .plugins
+                    .add_source(params)
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
+            ClientRequestParams::PluginSourceRefresh(params) => to_value(
+                self.app
+                    .plugins
+                    .refresh_source(params)
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
+            ClientRequestParams::PluginSourceRemove(params) => to_value(
+                self.app
+                    .plugins
+                    .remove_source(params)
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
+            ClientRequestParams::PluginSearch(params) => to_value(
+                self.app
+                    .plugins
+                    .search(params)
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
+            ClientRequestParams::PluginList(params) => to_value(
+                self.app
+                    .plugins
+                    .list_plugins(params)
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
+            ClientRequestParams::PluginInstall(params) => to_value(
+                self.app
+                    .plugins
+                    .install(params)
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
+            ClientRequestParams::PluginUpdate(params) => to_value(
+                self.app
+                    .plugins
+                    .update(params)
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
+            ClientRequestParams::PluginUninstall(params) => to_value(
+                self.app
+                    .plugins
+                    .uninstall(params)
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
+            ClientRequestParams::PluginEnable(params) => to_value(
+                self.app
+                    .plugins
+                    .enable(params)
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
+            ClientRequestParams::PluginDisable(params) => to_value(
+                self.app
+                    .plugins
+                    .disable(params)
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
             ClientRequestParams::AppList(_) => to_value(json!({ "data": self.list_apps() })),
             ClientRequestParams::ToolList(_) => to_value(json!({ "data": self.list_tools() })),
             ClientRequestParams::AuthLogout(_) => {
@@ -789,7 +820,7 @@ impl TalosApplicationAdapter {
             .collect()
     }
 
-    fn list_skills(&self, params: SkillsListParams) -> ProtocolResult<Value> {
+    fn list_skills(&self, params: SkillsListRequest) -> ProtocolResult<Value> {
         let snapshot = self
             .app
             .skills
@@ -825,7 +856,7 @@ impl TalosApplicationAdapter {
         })
     }
 
-    fn suggest_skills(&self, params: SkillsSuggestParams) -> ProtocolResult<Value> {
+    fn suggest_skills(&self, params: SkillsSuggestRequest) -> ProtocolResult<Value> {
         let skills = self
             .app
             .skills

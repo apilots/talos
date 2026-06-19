@@ -242,6 +242,7 @@ async fn test_skill_autocomplete_keyboard_selects_structured_skill() {
             path: PathBuf::from("/tmp/skills/browser/SKILL.md"),
             scope: talos_sdk::ProtocolSkillScope::Plugin,
             source_plugin: Some("browser".to_string()),
+            source_install: Some("install_browser".to_string()),
         },
         ProtocolSkillSuggestion {
             name: "web-design-guidelines".to_string(),
@@ -251,6 +252,7 @@ async fn test_skill_autocomplete_keyboard_selects_structured_skill() {
             path: PathBuf::from("/tmp/skills/web-design-guidelines/SKILL.md"),
             scope: talos_sdk::ProtocolSkillScope::External,
             source_plugin: None,
+            source_install: None,
         },
     ];
 

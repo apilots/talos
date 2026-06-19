@@ -4,6 +4,7 @@ pub mod fs;
 pub mod kernel;
 pub mod memory;
 pub mod network;
+pub mod plugins;
 pub mod prompt;
 pub mod skills;
 pub mod storage;

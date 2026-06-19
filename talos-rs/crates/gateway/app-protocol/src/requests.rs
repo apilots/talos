@@ -15,6 +15,12 @@ use talos_skills::{
 use talos_types::talos::{
     SessionHistorySnapshot, TalosMessageRequest, TalosMessageRetryRequest, TimelineEventEnvelope,
 };
+use talos_types::{
+    PluginDisableRequest, PluginEnableRequest, PluginInstallRequest, PluginListRequest,
+    PluginSearchRequest, PluginSourceAddRequest, PluginSourceListRequest,
+    PluginSourceRefreshRequest, PluginSourceRemoveRequest, PluginUninstallRequest,
+    PluginUpdateRequest,
+};
 
 pub const DEFERRED_CLIENT_METHODS: &[DeferredClientMethod] = &[];
 
@@ -108,14 +114,28 @@ pub enum ClientMethod {
     SkillsRead,
     #[serde(rename = "skills.resolve")]
     SkillsResolve,
-    #[serde(rename = "skills.install")]
-    SkillsInstall,
-    #[serde(rename = "skills.uninstall")]
-    SkillsUninstall,
-    #[serde(rename = "skills.enable")]
-    SkillsEnable,
-    #[serde(rename = "skills.disable")]
-    SkillsDisable,
+    #[serde(rename = "plugin.source.list")]
+    PluginSourceList,
+    #[serde(rename = "plugin.source.add")]
+    PluginSourceAdd,
+    #[serde(rename = "plugin.source.refresh")]
+    PluginSourceRefresh,
+    #[serde(rename = "plugin.source.remove")]
+    PluginSourceRemove,
+    #[serde(rename = "plugin.search")]
+    PluginSearch,
+    #[serde(rename = "plugin.list")]
+    PluginList,
+    #[serde(rename = "plugin.install")]
+    PluginInstall,
+    #[serde(rename = "plugin.update")]
+    PluginUpdate,
+    #[serde(rename = "plugin.uninstall")]
+    PluginUninstall,
+    #[serde(rename = "plugin.enable")]
+    PluginEnable,
+    #[serde(rename = "plugin.disable")]
+    PluginDisable,
     #[serde(rename = "app.list")]
     AppList,
     #[serde(rename = "tool.list")]
@@ -184,10 +204,17 @@ impl ClientMethod {
             Self::SkillsSuggest => "skills.suggest",
             Self::SkillsRead => "skills.read",
             Self::SkillsResolve => "skills.resolve",
-            Self::SkillsInstall => "skills.install",
-            Self::SkillsUninstall => "skills.uninstall",
-            Self::SkillsEnable => "skills.enable",
-            Self::SkillsDisable => "skills.disable",
+            Self::PluginSourceList => "plugin.source.list",
+            Self::PluginSourceAdd => "plugin.source.add",
+            Self::PluginSourceRefresh => "plugin.source.refresh",
+            Self::PluginSourceRemove => "plugin.source.remove",
+            Self::PluginSearch => "plugin.search",
+            Self::PluginList => "plugin.list",
+            Self::PluginInstall => "plugin.install",
+            Self::PluginUpdate => "plugin.update",
+            Self::PluginUninstall => "plugin.uninstall",
+            Self::PluginEnable => "plugin.enable",
+            Self::PluginDisable => "plugin.disable",
             Self::AppList => "app.list",
             Self::ToolList => "tool.list",
             Self::AuthLogout => "auth.logout",
@@ -255,10 +282,17 @@ impl FromStr for ClientMethod {
             "skills.suggest" => Ok(Self::SkillsSuggest),
             "skills.read" => Ok(Self::SkillsRead),
             "skills.resolve" => Ok(Self::SkillsResolve),
-            "skills.install" => Ok(Self::SkillsInstall),
-            "skills.uninstall" => Ok(Self::SkillsUninstall),
-            "skills.enable" => Ok(Self::SkillsEnable),
-            "skills.disable" => Ok(Self::SkillsDisable),
+            "plugin.source.list" => Ok(Self::PluginSourceList),
+            "plugin.source.add" => Ok(Self::PluginSourceAdd),
+            "plugin.source.refresh" => Ok(Self::PluginSourceRefresh),
+            "plugin.source.remove" => Ok(Self::PluginSourceRemove),
+            "plugin.search" => Ok(Self::PluginSearch),
+            "plugin.list" => Ok(Self::PluginList),
+            "plugin.install" => Ok(Self::PluginInstall),
+            "plugin.update" => Ok(Self::PluginUpdate),
+            "plugin.uninstall" => Ok(Self::PluginUninstall),
+            "plugin.enable" => Ok(Self::PluginEnable),
+            "plugin.disable" => Ok(Self::PluginDisable),
             "app.list" => Ok(Self::AppList),
             "tool.list" => Ok(Self::ToolList),
             "auth.logout" => Ok(Self::AuthLogout),
@@ -351,23 +385,37 @@ pub enum ClientRequestParams {
     #[serde(rename = "workspace.info")]
     WorkspaceInfo(WorkspaceInfoParams),
     #[serde(rename = "skills.list")]
-    SkillsList(SkillsListParams),
+    SkillsList(SkillsListRequest),
     #[serde(rename = "skills.refresh")]
-    SkillsRefresh(SkillsRefreshParams),
+    SkillsRefresh(SkillsRefreshRequest),
     #[serde(rename = "skills.suggest")]
-    SkillsSuggest(SkillsSuggestParams),
+    SkillsSuggest(SkillsSuggestRequest),
     #[serde(rename = "skills.read")]
-    SkillsRead(SkillsReadParams),
+    SkillsRead(SkillsReadRequest),
     #[serde(rename = "skills.resolve")]
-    SkillsResolve(SkillsResolveParams),
-    #[serde(rename = "skills.install")]
-    SkillsInstall(SkillsInstallParams),
-    #[serde(rename = "skills.uninstall")]
-    SkillsUninstall(SkillsUninstallParams),
-    #[serde(rename = "skills.enable")]
-    SkillsEnable(SkillsEnableParams),
-    #[serde(rename = "skills.disable")]
-    SkillsDisable(SkillsDisableParams),
+    SkillsResolve(SkillsResolveRequest),
+    #[serde(rename = "plugin.source.list")]
+    PluginSourceList(PluginSourceListRequest),
+    #[serde(rename = "plugin.source.add")]
+    PluginSourceAdd(PluginSourceAddRequest),
+    #[serde(rename = "plugin.source.refresh")]
+    PluginSourceRefresh(PluginSourceRefreshRequest),
+    #[serde(rename = "plugin.source.remove")]
+    PluginSourceRemove(PluginSourceRemoveRequest),
+    #[serde(rename = "plugin.search")]
+    PluginSearch(PluginSearchRequest),
+    #[serde(rename = "plugin.list")]
+    PluginList(PluginListRequest),
+    #[serde(rename = "plugin.install")]
+    PluginInstall(PluginInstallRequest),
+    #[serde(rename = "plugin.update")]
+    PluginUpdate(PluginUpdateRequest),
+    #[serde(rename = "plugin.uninstall")]
+    PluginUninstall(PluginUninstallRequest),
+    #[serde(rename = "plugin.enable")]
+    PluginEnable(PluginEnableRequest),
+    #[serde(rename = "plugin.disable")]
+    PluginDisable(PluginDisableRequest),
     #[serde(rename = "app.list")]
     AppList(AppListParams),
     #[serde(rename = "tool.list")]
@@ -497,15 +545,30 @@ impl ClientRequest {
             ClientMethod::SkillsResolve => {
                 ClientRequestParams::SkillsResolve(decode(params_value)?)
             }
-            ClientMethod::SkillsInstall => {
-                ClientRequestParams::SkillsInstall(decode(params_value)?)
+            ClientMethod::PluginSourceList => {
+                ClientRequestParams::PluginSourceList(decode(params_value)?)
             }
-            ClientMethod::SkillsUninstall => {
-                ClientRequestParams::SkillsUninstall(decode(params_value)?)
+            ClientMethod::PluginSourceAdd => {
+                ClientRequestParams::PluginSourceAdd(decode(params_value)?)
             }
-            ClientMethod::SkillsEnable => ClientRequestParams::SkillsEnable(decode(params_value)?),
-            ClientMethod::SkillsDisable => {
-                ClientRequestParams::SkillsDisable(decode(params_value)?)
+            ClientMethod::PluginSourceRefresh => {
+                ClientRequestParams::PluginSourceRefresh(decode(params_value)?)
+            }
+            ClientMethod::PluginSourceRemove => {
+                ClientRequestParams::PluginSourceRemove(decode(params_value)?)
+            }
+            ClientMethod::PluginSearch => ClientRequestParams::PluginSearch(decode(params_value)?),
+            ClientMethod::PluginList => ClientRequestParams::PluginList(decode(params_value)?),
+            ClientMethod::PluginInstall => {
+                ClientRequestParams::PluginInstall(decode(params_value)?)
+            }
+            ClientMethod::PluginUpdate => ClientRequestParams::PluginUpdate(decode(params_value)?),
+            ClientMethod::PluginUninstall => {
+                ClientRequestParams::PluginUninstall(decode(params_value)?)
+            }
+            ClientMethod::PluginEnable => ClientRequestParams::PluginEnable(decode(params_value)?),
+            ClientMethod::PluginDisable => {
+                ClientRequestParams::PluginDisable(decode(params_value)?)
             }
             ClientMethod::AppList => ClientRequestParams::AppList(decode(params_value)?),
             ClientMethod::ToolList => ClientRequestParams::ToolList(decode(params_value)?),
@@ -904,16 +967,16 @@ pub struct WorkspaceInfoResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct SkillsListParams {
+pub struct SkillsListRequest {
     #[serde(default)]
     pub include_disabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct SkillsRefreshParams {}
+pub struct SkillsRefreshRequest {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct SkillsSuggestParams {
+pub struct SkillsSuggestRequest {
     #[serde(default)]
     pub query: String,
     #[serde(default)]
@@ -929,12 +992,12 @@ pub struct ProtocolSkillSelector {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct SkillsReadParams {
+pub struct SkillsReadRequest {
     pub selector: ProtocolSkillSelector,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct SkillsResolveParams {
+pub struct SkillsResolveRequest {
     #[serde(default)]
     pub text: String,
     #[serde(default)]
@@ -942,32 +1005,11 @@ pub struct SkillsResolveParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct SkillsInstallParams {
-    pub source_path: PathBuf,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct SkillsUninstallParams {
-    pub selector: ProtocolSkillSelector,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct SkillsEnableParams {
-    pub selector: ProtocolSkillSelector,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct SkillsDisableParams {
-    pub selector: ProtocolSkillSelector,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ProtocolSkillScope {
-    User,
-    External,
     Project,
     Plugin,
+    External,
     System,
 }
 
@@ -996,6 +1038,8 @@ pub struct ProtocolSkillSummary {
     pub scope: ProtocolSkillScope,
     #[serde(default)]
     pub source_plugin: Option<String>,
+    #[serde(default)]
+    pub source_install: Option<String>,
     pub enabled: bool,
     pub read_only: bool,
     #[serde(default)]
@@ -1013,6 +1057,8 @@ pub struct ProtocolSkillSuggestion {
     pub scope: ProtocolSkillScope,
     #[serde(default)]
     pub source_plugin: Option<String>,
+    #[serde(default)]
+    pub source_install: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
@@ -1083,6 +1129,7 @@ pub fn protocol_skill_summary(skill: SkillSummary) -> ProtocolSkillSummary {
         path: skill.path,
         scope: protocol_skill_scope(skill.scope),
         source_plugin: skill.source_plugin,
+        source_install: skill.source_install,
         enabled: skill.enabled,
         read_only: skill.read_only,
         metadata: skill.metadata.map(|metadata| ProtocolSkillMetadata {
@@ -1104,6 +1151,7 @@ pub fn protocol_skill_suggestion(skill: SkillSuggestion) -> ProtocolSkillSuggest
         path: skill.path,
         scope: protocol_skill_scope(skill.scope),
         source_plugin: skill.source_plugin,
+        source_install: skill.source_install,
     }
 }
 
@@ -1124,10 +1172,9 @@ pub fn protocol_skill_warning(warning: SkillWarning) -> ProtocolSkillWarning {
 
 pub fn protocol_skill_scope(scope: SkillScope) -> ProtocolSkillScope {
     match scope {
-        SkillScope::User => ProtocolSkillScope::User,
-        SkillScope::External => ProtocolSkillScope::External,
         SkillScope::Project => ProtocolSkillScope::Project,
         SkillScope::Plugin => ProtocolSkillScope::Plugin,
+        SkillScope::External => ProtocolSkillScope::External,
         SkillScope::System => ProtocolSkillScope::System,
     }
 }
@@ -1289,14 +1336,14 @@ mod tests {
         .expect("skills resolve request should decode");
         assert!(matches!(
             request.params,
-            ClientRequestParams::SkillsResolve(SkillsResolveParams { .. })
+            ClientRequestParams::SkillsResolve(SkillsResolveRequest { .. })
         ));
 
         let request = ClientRequest::decode("skills.refresh", None)
             .expect("skills refresh request should decode");
         assert!(matches!(
             request.params,
-            ClientRequestParams::SkillsRefresh(SkillsRefreshParams {})
+            ClientRequestParams::SkillsRefresh(SkillsRefreshRequest {})
         ));
     }
 

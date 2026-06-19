@@ -193,6 +193,43 @@ export function createDesktopTalosClient(
       put: (kind: WorkspaceDocKind, request: DocUpdateRequest) =>
         client.writeWorkspaceDoc(kind, request.content, expectedVersionToken(request)),
     },
+    skills: {
+      list: (query?: Parameters<TalosWebClient["skills"]["list"]>[0]) => client.listSkills(query),
+      refresh: (request?: Parameters<TalosWebClient["skills"]["refresh"]>[0]) =>
+        client.refreshSkills(request),
+      suggest: (query: Parameters<TalosWebClient["skills"]["suggest"]>[0]) =>
+        client.suggestSkills(query),
+      read: (request: Parameters<TalosWebClient["skills"]["read"]>[0]) =>
+        client.readSkill(request),
+      resolve: (request: Parameters<TalosWebClient["skills"]["resolve"]>[0]) =>
+        client.resolveSkills(request),
+    },
+    plugin: {
+      search: (request: Parameters<TalosWebClient["plugin"]["search"]>[0]) =>
+        client.searchPlugins(request),
+      list: (request: Parameters<TalosWebClient["plugin"]["list"]>[0]) =>
+        client.listPlugins(request),
+      install: (request: Parameters<TalosWebClient["plugin"]["install"]>[0]) =>
+        client.installPlugin(request),
+      update: (request: Parameters<TalosWebClient["plugin"]["update"]>[0]) =>
+        client.updatePlugin(request),
+      uninstall: (request: Parameters<TalosWebClient["plugin"]["uninstall"]>[0]) =>
+        client.uninstallPlugin(request),
+      enable: (request: Parameters<TalosWebClient["plugin"]["enable"]>[0]) =>
+        client.enablePlugin(request),
+      disable: (request: Parameters<TalosWebClient["plugin"]["disable"]>[0]) =>
+        client.disablePlugin(request),
+      sources: {
+        list: (query?: Parameters<TalosWebClient["plugin"]["sources"]["list"]>[0]) =>
+          client.listPluginSources(query),
+        add: (request: Parameters<TalosWebClient["plugin"]["sources"]["add"]>[0]) =>
+          client.addPluginSource(request),
+        refresh: (request: Parameters<TalosWebClient["plugin"]["sources"]["refresh"]>[0]) =>
+          client.refreshPluginSource(request),
+        remove: (request: Parameters<TalosWebClient["plugin"]["sources"]["remove"]>[0]) =>
+          client.removePluginSource(request),
+      },
+    },
     turns,
   } as unknown as TalosWebClient;
 }

@@ -38,6 +38,59 @@ const skillSelector = (selector: unknown) =>
   (selector.path === undefined || typeof selector.path === "string") &&
   (typeof selector.name === "string" || typeof selector.path === "string");
 const skillSelectorParams = (params: unknown) => isRecord(params) && skillSelector(params.selector);
+const stringArray = (value: unknown) =>
+  Array.isArray(value) && value.every((item) => typeof item === "string");
+const marketplaceSourceInput = (source: unknown) =>
+  isRecord(source) &&
+  ((source.kind === "git" &&
+    typeof source.url === "string" &&
+    typeof source.reference === "string" &&
+    stringArray(source.sparse_paths)) ||
+    (source.kind === "local_folder" &&
+      typeof source.path === "string" &&
+      stringArray(source.sparse_paths)));
+const pluginSourceAddParams = (params: unknown) =>
+  isRecord(params) &&
+  marketplaceSourceInput(params.source) &&
+  (params.refresh === undefined || typeof params.refresh === "boolean");
+const pluginSourceIdParams = (params: unknown) => isRecord(params) && hasString(params, "source_id");
+const pluginSearchParams = (params: unknown) =>
+  isRecord(params) &&
+  (params.query === null || typeof params.query === "string") &&
+  (params.source_id === null || typeof params.source_id === "string") &&
+  (params.kind === null || ["skill", "mcp_server", "package", "feature"].includes(String(params.kind))) &&
+  (params.status === null ||
+    ["any", "not_installed", "installed", "update_available", "conflict"].includes(String(params.status))) &&
+  ["cache_only", "refresh_stale", "force_refresh"].includes(String(params.refresh)) &&
+  (params.limit === null || typeof params.limit === "number");
+const pluginKind = (value: unknown) =>
+  value === null || value === undefined || ["skill", "mcp_server", "package", "feature"].includes(String(value));
+const pluginListParams = (params: unknown) =>
+  isRecord(params) &&
+  pluginKind(params.kind) &&
+  (params.status === null ||
+    params.status === undefined ||
+    ["installed", "disabled", "update_available", "source_missing", "conflict"].includes(String(params.status))) &&
+  (params.source_id === null || params.source_id === undefined || typeof params.source_id === "string") &&
+  typeof params.include_disabled === "boolean";
+const pluginInstallParams = (params: unknown) =>
+  isRecord(params) &&
+  isRecord(params.target) &&
+  params.target.kind === "plugin" &&
+  typeof params.target.plugin_id === "string" &&
+  (params.target.expected_source_commit === null ||
+    params.target.expected_source_commit === undefined ||
+    typeof params.target.expected_source_commit === "string") &&
+  (params.enable === null || params.enable === undefined || typeof params.enable === "boolean") &&
+  ["reject", "replace"].includes(String(params.conflict_policy));
+const pluginInstallIdParams = (params: unknown) => isRecord(params) && hasString(params, "install_id");
+const pluginUpdateParams = (params: unknown) =>
+  isRecord(params) &&
+  hasString(params, "install_id") &&
+  (params.expected_source_commit === null ||
+    params.expected_source_commit === undefined ||
+    typeof params.expected_source_commit === "string") &&
+  ["reject_local_changes", "replace_local_changes"].includes(String(params.conflict_policy));
 
 const DESKTOP_RENDERER_METHOD_GUARDS = {
   "app.list": emptyParams,
@@ -79,6 +132,19 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "session.patch": sessionParams,
   "session.read": sessionParams,
   "session.recover": sessionParams,
+  "plugin.source.list": (params) =>
+    isRecord(params) &&
+    (params.include_disabled === undefined || typeof params.include_disabled === "boolean"),
+  "plugin.source.add": pluginSourceAddParams,
+  "plugin.source.refresh": pluginSourceIdParams,
+  "plugin.source.remove": pluginSourceIdParams,
+  "plugin.search": pluginSearchParams,
+  "plugin.list": pluginListParams,
+  "plugin.install": pluginInstallParams,
+  "plugin.update": pluginUpdateParams,
+  "plugin.uninstall": pluginInstallIdParams,
+  "plugin.enable": pluginInstallIdParams,
+  "plugin.disable": pluginInstallIdParams,
   "skills.list": emptyParams,
   "skills.refresh": emptyParams,
   "skills.suggest": (params) =>
@@ -91,10 +157,6 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
     typeof params.text === "string" &&
     Array.isArray(params.selected) &&
     params.selected.every(skillSelector),
-  "skills.install": (params) => hasString(params, "source_path"),
-  "skills.uninstall": skillSelectorParams,
-  "skills.enable": skillSelectorParams,
-  "skills.disable": skillSelectorParams,
   "tool.dynamic_result.submit": (params) =>
     hasString(params, "session_id") &&
     hasString(params, "call_id") &&

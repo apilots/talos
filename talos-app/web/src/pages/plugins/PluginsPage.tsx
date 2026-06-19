@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import type { ProtocolSkillSuggestion, ProtocolSkillSummary } from "@talos/sdk-browser";
+import type { Plugin, ProtocolSkillSuggestion, ProtocolSkillSummary } from "@talos/sdk-browser";
 
 import { AddPluginMarketplaceDialog } from "@/features/plugins/components/AddPluginMarketplaceDialog";
-import { listSkills } from "@/features/plugins/api";
+import { addMarketplaceSource, listSkills, searchSkillPlugins } from "@/features/plugins/api";
 import { PluginCatalogActions } from "@/features/plugins/components/PluginCatalogActions";
 import { PluginCatalogSearch } from "@/features/plugins/components/PluginCatalogSearch";
 import { PluginCatalogTabs } from "@/features/plugins/components/PluginCatalogTabs";
@@ -29,9 +29,14 @@ export function PluginsPage() {
     queryKey: ["talos", "skills", "catalog"],
     queryFn: () => listSkills(true),
   });
+  const marketplaceQuery = useQuery({
+    enabled: tab === "skills",
+    queryKey: ["talos", "plugins", "skills", "search", query],
+    queryFn: () => searchSkillPlugins(query),
+  });
   const skills = useMemo(
-    () => filterSkills(skillsQuery.data?.data ?? [], query),
-    [query, skillsQuery.data?.data],
+    () => buildSkillItems(skillsQuery.data?.data ?? [], marketplaceQuery.data?.plugins ?? [], query),
+    [marketplaceQuery.data?.plugins, query, skillsQuery.data?.data],
   );
 
   function createSkill() {
@@ -53,6 +58,18 @@ export function PluginsPage() {
   function addMarketplace() {
     setMenuOpen(false);
     setMarketplaceOpen(true);
+  }
+
+  async function refresh() {
+    if (tab !== "skills") {
+      return;
+    }
+    await Promise.all([skillsQuery.refetch(), marketplaceQuery.refetch()]);
+  }
+
+  async function submitMarketplace(input: { source: string; gitRef: string; sparsePaths: string }) {
+    await addMarketplaceSource(input);
+    await marketplaceQuery.refetch();
   }
 
   return (
@@ -77,7 +94,7 @@ export function PluginsPage() {
             onCreatePlugin={createPlugin}
             onCreateSkill={createSkill}
             onMenuOpenChange={setMenuOpen}
-            onRefresh={() => skillsQuery.refetch()}
+            onRefresh={refresh}
           />
         </div>
         <PluginCatalogSearch onQueryChange={setQuery} query={query} />
@@ -85,7 +102,7 @@ export function PluginsPage() {
           <PluginsEmptyState />
         ) : (
           <SkillsCatalogList
-            loading={skillsQuery.isLoading}
+            loading={skillsQuery.isLoading || marketplaceQuery.isLoading}
             onSkillOpen={setSelectedSkill}
             skills={skills}
           />
@@ -93,11 +110,20 @@ export function PluginsPage() {
       </div>
       <AddPluginMarketplaceDialog
         onClose={() => setMarketplaceOpen(false)}
+        onSubmit={submitMarketplace}
         open={marketplaceOpen}
       />
       <SkillDocumentDialog onClose={() => setSelectedSkill(null)} skill={selectedSkill} />
     </div>
   );
+}
+
+function buildSkillItems(
+  localSkills: ProtocolSkillSummary[],
+  marketplacePlugins: Plugin[],
+  query: string,
+): Array<ProtocolSkillSummary | Plugin> {
+  return [...filterSkills(localSkills, query), ...marketplacePlugins];
 }
 
 function filterSkills(skills: ProtocolSkillSummary[], query: string) {
@@ -126,5 +152,6 @@ function toSuggestion(skill: ProtocolSkillSummary): ProtocolSkillSuggestion {
     path: skill.path,
     scope: skill.scope,
     source_plugin: skill.source_plugin,
+    source_install: skill.source_install,
   };
 }

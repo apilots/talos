@@ -4,7 +4,9 @@ use crate::{
     KernelTranscriptPayload,
 };
 use serde::de::DeserializeOwned;
-use talos_config::{resolve_runtime_path, SkillsRuntimeConfig};
+use talos_config::{
+    resolve_runtime_path, PluginRootKind, PluginsRuntimeConfig, SkillsRuntimeConfig,
+};
 use talos_prompt::{DynamicTrimPolicy, PromptSectionKind};
 use talos_skills::{
     LocalSkillProvider, SkillPromptBudget, SkillPromptRequest, SkillRoot, SkillRoots,
@@ -160,7 +162,7 @@ fn build_prompt_builder<'a>(
         let skill_options = skill_options.unwrap_or_default();
         let roots = skill_options
             .roots
-            .unwrap_or_else(|| build_skill_roots(&kernel_config.skills));
+            .unwrap_or_else(|| build_skill_roots(&kernel_config.skills, &kernel_config.plugins));
         let provider = std::sync::Arc::new(LocalSkillProvider::new(roots));
         builder = builder.skills(
             provider,
@@ -175,24 +177,19 @@ fn build_prompt_builder<'a>(
     Ok(builder)
 }
 
-fn build_skill_roots(config: &SkillsRuntimeConfig) -> SkillRoots {
-    let install_root = resolve_runtime_path(&config.install_root);
-    let roots = config
+fn build_skill_roots(config: &SkillsRuntimeConfig, plugins: &PluginsRuntimeConfig) -> SkillRoots {
+    let roots = plugins
         .roots
         .iter()
-        .map(|path| {
-            let path = resolve_runtime_path(path);
-            if path == install_root {
-                SkillRoot::user(path)
-            } else {
-                SkillRoot::external(path)
-            }
+        .filter(|root| root.kind == PluginRootKind::Skill && root.read_only)
+        .map(|root| {
+            let path = resolve_runtime_path(&root.path);
+            SkillRoot::configured(path)
         })
         .collect::<Vec<_>>();
     SkillRoots {
         roots,
-        state_path: resolve_runtime_path(&config.state_path),
-        install_root,
+        state_path: resolve_runtime_path("${TALOS_HOME}/plugins/skills/skills-state.json"),
         max_skill_md_bytes: config.max_skill_md_bytes,
         max_available_summary_bytes: config.max_available_summary_bytes,
     }

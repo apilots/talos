@@ -19,6 +19,7 @@ members = [
     # Cognition
     "crates/cognition/memory",
     # Action
+    "crates/action/plugin",
     "crates/action/skills",
     "crates/action/tools",
     "crates/action/tools-policy",
@@ -85,6 +86,8 @@ redis = "0.24"
 
 # Networking
 futures-util = "0.3"
+fs4 = "1"
+wait-timeout = "0.2"
 
 # Utils
 uuid = { version = "1", features = ["v4", "serde"] }
@@ -101,6 +104,7 @@ cloud-sdk-rs = { path = "../../talos-cloud/cloud-rs/crates/cloud-sdk-rs" }
 # Internal crates
 talos-error = { path = "crates/infra/error" }
 talos-types = { path = "crates/common/types" }
+talos-plugin = { path = "crates/action/plugin" }
 talos-skills = { path = "crates/action/skills" }
 talos-tools = { path = "crates/action/tools" }
 talos-tools-policy = { path = "crates/action/tools-policy" }

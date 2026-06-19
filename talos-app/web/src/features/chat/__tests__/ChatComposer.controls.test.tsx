@@ -49,10 +49,11 @@ describe("ChatComposer controls", () => {
         name: "algorithmic-art",
         description: "Creating algorithmic art using p5.js with seeded randomness.",
         short_description: null,
-        root: "/Users/test/.talos/skills/algorithmic-art",
-        path: "/Users/test/.talos/skills/algorithmic-art/SKILL.md",
-        scope: "user",
+        root: "/Users/test/.agents/skills/algorithmic-art",
+        path: "/Users/test/.agents/skills/algorithmic-art/SKILL.md",
+        scope: "external",
         source_plugin: null,
+        source_install: null,
       },
       {
         name: "browser",
@@ -62,6 +63,7 @@ describe("ChatComposer controls", () => {
         path: "/Users/test/.talos/skills/browser/SKILL.md",
         scope: "plugin",
         source_plugin: "browser",
+        source_install: "browser",
       },
     ]);
     Object.defineProperty(window, "localStorage", {
@@ -114,7 +116,7 @@ describe("ChatComposer controls", () => {
     expect(await screen.findByTestId("skill-suggestions")).toBeInTheDocument();
     expect(screen.getByText("Algorithmic Art")).toBeInTheDocument();
     expect(screen.getByText("Creating algorithmic art using p5.js with seeded randomness.")).toBeInTheDocument();
-    expect(screen.getByText("Personal")).toBeInTheDocument();
+    expect(screen.getByText("External")).toBeInTheDocument();
     expect(screen.getByText("Plugin")).toBeInTheDocument();
 
     fireEvent.mouseDown(screen.getByText("Browser"));

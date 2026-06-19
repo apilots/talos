@@ -5,9 +5,8 @@ use std::path::PathBuf;
 #[serde(rename_all = "snake_case")]
 pub enum SkillScope {
     Project,
-    User,
-    External,
     Plugin,
+    External,
     System,
 }
 
@@ -15,19 +14,17 @@ impl SkillScope {
     pub fn priority(self) -> u8 {
         match self {
             Self::Project => 0,
-            Self::User => 1,
+            Self::Plugin => 1,
             Self::External => 2,
-            Self::Plugin => 3,
-            Self::System => 4,
+            Self::System => 3,
         }
     }
 
     pub fn source_hint(self) -> &'static str {
         match self {
             Self::Project => "project",
-            Self::User => "user",
-            Self::External => "external",
             Self::Plugin => "plugin",
+            Self::External => "external",
             Self::System => "system",
         }
     }
@@ -40,24 +37,18 @@ pub struct SkillRoot {
     #[serde(default)]
     pub source_plugin: Option<String>,
     #[serde(default)]
+    pub source_install: Option<String>,
+    #[serde(default)]
     pub read_only: bool,
 }
 
 impl SkillRoot {
-    pub fn user(path: impl Into<PathBuf>) -> Self {
-        Self {
-            path: path.into(),
-            scope: SkillScope::User,
-            source_plugin: None,
-            read_only: false,
-        }
-    }
-
-    pub fn external(path: impl Into<PathBuf>) -> Self {
+    pub fn configured(path: impl Into<PathBuf>) -> Self {
         Self {
             path: path.into(),
             scope: SkillScope::External,
             source_plugin: None,
+            source_install: None,
             read_only: true,
         }
     }
@@ -67,15 +58,21 @@ impl SkillRoot {
             path: path.into(),
             scope: SkillScope::Project,
             source_plugin: None,
+            source_install: None,
             read_only: true,
         }
     }
 
-    pub fn plugin(path: impl Into<PathBuf>, plugin_id: impl Into<String>) -> Self {
+    pub fn plugin(
+        path: impl Into<PathBuf>,
+        plugin_id: impl Into<String>,
+        install_id: impl Into<String>,
+    ) -> Self {
         Self {
             path: path.into(),
             scope: SkillScope::Plugin,
             source_plugin: Some(plugin_id.into()),
+            source_install: Some(install_id.into()),
             read_only: true,
         }
     }
@@ -85,7 +82,6 @@ impl SkillRoot {
 pub struct SkillRoots {
     pub roots: Vec<SkillRoot>,
     pub state_path: PathBuf,
-    pub install_root: PathBuf,
     pub max_skill_md_bytes: usize,
     pub max_available_summary_bytes: usize,
 }
@@ -93,14 +89,13 @@ pub struct SkillRoots {
 impl SkillRoots {
     pub fn from_home(home: impl Into<PathBuf>) -> Self {
         let home = home.into();
-        let user_root = home.join(".talos").join("skills");
         Self {
-            roots: vec![
-                SkillRoot::user(user_root.clone()),
-                SkillRoot::external(home.join(".agents").join("skills")),
-            ],
-            state_path: home.join(".talos").join("skills-state.json"),
-            install_root: user_root,
+            roots: vec![SkillRoot::configured(home.join(".agents").join("skills"))],
+            state_path: home
+                .join(".talos")
+                .join("plugins")
+                .join("skills")
+                .join("skills-state.json"),
             max_skill_md_bytes: 64 * 1024,
             max_available_summary_bytes: 8 * 1024,
         }
@@ -120,6 +115,8 @@ pub struct SkillSource {
     pub scope: SkillScope,
     #[serde(default)]
     pub source_plugin: Option<String>,
+    #[serde(default)]
+    pub source_install: Option<String>,
     pub read_only: bool,
 }
 
@@ -158,6 +155,8 @@ pub struct SkillSummary {
     pub scope: SkillScope,
     #[serde(default)]
     pub source_plugin: Option<String>,
+    #[serde(default)]
+    pub source_install: Option<String>,
     pub enabled: bool,
     pub read_only: bool,
     #[serde(default)]
@@ -175,6 +174,8 @@ pub struct SkillSuggestion {
     pub scope: SkillScope,
     #[serde(default)]
     pub source_plugin: Option<String>,
+    #[serde(default)]
+    pub source_install: Option<String>,
 }
 
 impl From<&SkillSummary> for SkillSuggestion {
@@ -187,6 +188,7 @@ impl From<&SkillSummary> for SkillSuggestion {
             path: skill.path.clone(),
             scope: skill.scope,
             source_plugin: skill.source_plugin.clone(),
+            source_install: skill.source_install.clone(),
         }
     }
 }

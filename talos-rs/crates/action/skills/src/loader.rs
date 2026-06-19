@@ -1,5 +1,5 @@
 use crate::model::{SkillLoadError, SkillMetadata, SkillRoot, SkillSnapshot, SkillSummary};
-use crate::state::SkillState;
+use crate::state::{plugin_skill_state_key, SkillState};
 use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -136,7 +136,10 @@ pub fn parse_skill_dir(
         path: skill_path.clone(),
         scope: source.scope,
         source_plugin: source.source_plugin.clone(),
-        enabled: !state.is_disabled(&skill_path),
+        source_install: source.source_install.clone(),
+        enabled: !state.is_disabled(
+            plugin_skill_state_key(source.source_install.as_deref(), &root, &skill_path).as_ref(),
+        ),
         read_only: source.read_only,
         metadata,
     })

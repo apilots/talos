@@ -53,6 +53,10 @@ pub use domains::network::{
     ReasoningEffort, TelegramAccountConfig, TelegramChannelsConfig, TelegramGroupConfig,
     TelegramMode, TelegramTopicConfig, ThinkingFormat,
 };
+pub use domains::plugins::{
+    PluginRootConfig, PluginRootKind, PluginSourceConfig, PluginSourceKind, PluginSourceType,
+    PluginsRuntimeConfig,
+};
 pub use domains::prompt::{
     AgentKernelBootstrapPromptConfig, AgentKernelPromptConfig, BootstrapPromptWarningMode,
     PromptWindowPolicy, ReservedOutputPolicy,

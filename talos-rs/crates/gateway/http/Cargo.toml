@@ -29,4 +29,5 @@ async-trait = "0.1"
 
 [dev-dependencies]
 talos-app-server = { workspace = true }
+talos-plugin = { workspace = true }
 tempfile = "3"

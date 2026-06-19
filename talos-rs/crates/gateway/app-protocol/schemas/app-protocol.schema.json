@@ -421,10 +421,17 @@
         "skills.suggest",
         "skills.read",
         "skills.resolve",
-        "skills.install",
-        "skills.uninstall",
-        "skills.enable",
-        "skills.disable",
+        "plugin.source.list",
+        "plugin.source.add",
+        "plugin.source.refresh",
+        "plugin.source.remove",
+        "plugin.search",
+        "plugin.list",
+        "plugin.install",
+        "plugin.update",
+        "plugin.uninstall",
+        "plugin.enable",
+        "plugin.disable",
         "app.list",
         "tool.list",
         "auth.logout",
@@ -1113,7 +1120,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/SkillsListParams"
+              "$ref": "#/definitions/SkillsListRequest"
             }
           },
           "required": [
@@ -1131,7 +1138,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/SkillsRefreshParams"
+              "$ref": "#/definitions/SkillsRefreshRequest"
             }
           },
           "required": [
@@ -1149,7 +1156,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/SkillsSuggestParams"
+              "$ref": "#/definitions/SkillsSuggestRequest"
             }
           },
           "required": [
@@ -1167,7 +1174,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/SkillsReadParams"
+              "$ref": "#/definitions/SkillsReadRequest"
             }
           },
           "required": [
@@ -1185,7 +1192,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/SkillsResolveParams"
+              "$ref": "#/definitions/SkillsResolveRequest"
             }
           },
           "required": [
@@ -1198,12 +1205,12 @@
           "properties": {
             "method": {
               "enum": [
-                "skills.install"
+                "plugin.source.list"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/SkillsInstallParams"
+              "$ref": "#/definitions/PluginSourceListRequest"
             }
           },
           "required": [
@@ -1216,12 +1223,12 @@
           "properties": {
             "method": {
               "enum": [
-                "skills.uninstall"
+                "plugin.source.add"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/SkillsUninstallParams"
+              "$ref": "#/definitions/PluginSourceAddRequest"
             }
           },
           "required": [
@@ -1234,12 +1241,12 @@
           "properties": {
             "method": {
               "enum": [
-                "skills.enable"
+                "plugin.source.refresh"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/SkillsEnableParams"
+              "$ref": "#/definitions/PluginSourceRefreshRequest"
             }
           },
           "required": [
@@ -1252,12 +1259,138 @@
           "properties": {
             "method": {
               "enum": [
-                "skills.disable"
+                "plugin.source.remove"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/SkillsDisableParams"
+              "$ref": "#/definitions/PluginSourceRemoveRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "plugin.search"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/PluginSearchRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "plugin.list"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/PluginListRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "plugin.install"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/PluginInstallRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "plugin.update"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/PluginUpdateRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "plugin.uninstall"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/PluginUninstallRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "plugin.enable"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/PluginEnableRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "plugin.disable"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/PluginDisableRequest"
             }
           },
           "required": [
@@ -1824,6 +1957,67 @@
       ],
       "type": "object"
     },
+    "MarketplaceSourceId": {
+      "type": "string"
+    },
+    "MarketplaceSourceInput": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "git"
+              ],
+              "type": "string"
+            },
+            "reference": {
+              "type": "string"
+            },
+            "sparse_paths": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "reference",
+            "sparse_paths",
+            "url"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "local_folder"
+              ],
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "sparse_paths": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "path",
+            "sparse_paths"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "MemoryFileListParams": {
       "properties": {
         "limit": {
@@ -1974,6 +2168,308 @@
           "type": "object"
         }
       ]
+    },
+    "PluginDisableRequest": {
+      "properties": {
+        "install_id": {
+          "$ref": "#/definitions/PluginInstallId"
+        }
+      },
+      "required": [
+        "install_id"
+      ],
+      "type": "object"
+    },
+    "PluginEnableRequest": {
+      "properties": {
+        "install_id": {
+          "$ref": "#/definitions/PluginInstallId"
+        }
+      },
+      "required": [
+        "install_id"
+      ],
+      "type": "object"
+    },
+    "PluginId": {
+      "type": "string"
+    },
+    "PluginInstallConflictPolicy": {
+      "enum": [
+        "reject",
+        "replace"
+      ],
+      "type": "string"
+    },
+    "PluginInstallId": {
+      "type": "string"
+    },
+    "PluginInstallRequest": {
+      "properties": {
+        "conflict_policy": {
+          "$ref": "#/definitions/PluginInstallConflictPolicy"
+        },
+        "enable": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "target": {
+          "$ref": "#/definitions/PluginInstallTarget"
+        }
+      },
+      "required": [
+        "conflict_policy",
+        "target"
+      ],
+      "type": "object"
+    },
+    "PluginInstallTarget": {
+      "oneOf": [
+        {
+          "properties": {
+            "expected_source_commit": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "enum": [
+                "plugin"
+              ],
+              "type": "string"
+            },
+            "plugin_id": {
+              "$ref": "#/definitions/PluginId"
+            }
+          },
+          "required": [
+            "kind",
+            "plugin_id"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PluginKind": {
+      "enum": [
+        "skill",
+        "mcp_server",
+        "package",
+        "feature"
+      ],
+      "type": "string"
+    },
+    "PluginListRequest": {
+      "properties": {
+        "include_disabled": {
+          "type": "boolean"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_id": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MarketplaceSourceId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginListStatusFilter"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "include_disabled"
+      ],
+      "type": "object"
+    },
+    "PluginListStatusFilter": {
+      "enum": [
+        "installed",
+        "disabled",
+        "update_available",
+        "source_missing",
+        "conflict"
+      ],
+      "type": "string"
+    },
+    "PluginSearchRefreshPolicy": {
+      "enum": [
+        "cache_only",
+        "refresh_stale",
+        "force_refresh"
+      ],
+      "type": "string"
+    },
+    "PluginSearchRequest": {
+      "properties": {
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limit": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "query": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "refresh": {
+          "$ref": "#/definitions/PluginSearchRefreshPolicy"
+        },
+        "source_id": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MarketplaceSourceId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PluginSearchStatusFilter"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "refresh"
+      ],
+      "type": "object"
+    },
+    "PluginSearchStatusFilter": {
+      "enum": [
+        "any",
+        "not_installed",
+        "installed",
+        "update_available",
+        "conflict"
+      ],
+      "type": "string"
+    },
+    "PluginSourceAddRequest": {
+      "properties": {
+        "refresh": {
+          "default": false,
+          "type": "boolean"
+        },
+        "source": {
+          "$ref": "#/definitions/MarketplaceSourceInput"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "type": "object"
+    },
+    "PluginSourceListRequest": {
+      "properties": {
+        "include_disabled": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "PluginSourceRefreshRequest": {
+      "properties": {
+        "source_id": {
+          "$ref": "#/definitions/MarketplaceSourceId"
+        }
+      },
+      "required": [
+        "source_id"
+      ],
+      "type": "object"
+    },
+    "PluginSourceRemoveRequest": {
+      "properties": {
+        "source_id": {
+          "$ref": "#/definitions/MarketplaceSourceId"
+        }
+      },
+      "required": [
+        "source_id"
+      ],
+      "type": "object"
+    },
+    "PluginUninstallRequest": {
+      "properties": {
+        "install_id": {
+          "$ref": "#/definitions/PluginInstallId"
+        }
+      },
+      "required": [
+        "install_id"
+      ],
+      "type": "object"
+    },
+    "PluginUpdateConflictPolicy": {
+      "enum": [
+        "reject_local_changes",
+        "replace_local_changes"
+      ],
+      "type": "string"
+    },
+    "PluginUpdateRequest": {
+      "properties": {
+        "conflict_policy": {
+          "$ref": "#/definitions/PluginUpdateConflictPolicy"
+        },
+        "expected_source_commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "install_id": {
+          "$ref": "#/definitions/PluginInstallId"
+        }
+      },
+      "required": [
+        "conflict_policy",
+        "install_id"
+      ],
+      "type": "object"
     },
     "ProjectCreateParams": {
       "properties": {
@@ -2544,40 +3040,7 @@
       ],
       "type": "object"
     },
-    "SkillsDisableParams": {
-      "properties": {
-        "selector": {
-          "$ref": "#/definitions/ProtocolSkillSelector"
-        }
-      },
-      "required": [
-        "selector"
-      ],
-      "type": "object"
-    },
-    "SkillsEnableParams": {
-      "properties": {
-        "selector": {
-          "$ref": "#/definitions/ProtocolSkillSelector"
-        }
-      },
-      "required": [
-        "selector"
-      ],
-      "type": "object"
-    },
-    "SkillsInstallParams": {
-      "properties": {
-        "source_path": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "source_path"
-      ],
-      "type": "object"
-    },
-    "SkillsListParams": {
+    "SkillsListRequest": {
       "properties": {
         "include_disabled": {
           "default": false,
@@ -2586,7 +3049,7 @@
       },
       "type": "object"
     },
-    "SkillsReadParams": {
+    "SkillsReadRequest": {
       "properties": {
         "selector": {
           "$ref": "#/definitions/ProtocolSkillSelector"
@@ -2597,10 +3060,10 @@
       ],
       "type": "object"
     },
-    "SkillsRefreshParams": {
+    "SkillsRefreshRequest": {
       "type": "object"
     },
-    "SkillsResolveParams": {
+    "SkillsResolveRequest": {
       "properties": {
         "selected": {
           "default": [],
@@ -2616,7 +3079,7 @@
       },
       "type": "object"
     },
-    "SkillsSuggestParams": {
+    "SkillsSuggestRequest": {
       "properties": {
         "limit": {
           "default": null,
@@ -2632,17 +3095,6 @@
           "type": "string"
         }
       },
-      "type": "object"
-    },
-    "SkillsUninstallParams": {
-      "properties": {
-        "selector": {
-          "$ref": "#/definitions/ProtocolSkillSelector"
-        }
-      },
-      "required": [
-        "selector"
-      ],
       "type": "object"
     },
     "StopReason": {

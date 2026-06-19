@@ -34,10 +34,11 @@ describe("chat api initial turn request", () => {
         name: "docs",
         description: "Write docs",
         short_description: null,
-        root: "/Users/test/.talos/skills/docs",
-        path: "/Users/test/.talos/skills/docs/SKILL.md",
-        scope: "user",
+        root: "/Users/test/.agents/skills/docs",
+        path: "/Users/test/.agents/skills/docs/SKILL.md",
+        scope: "external",
         source_plugin: null,
+        source_install: null,
       },
     ]);
 
@@ -46,7 +47,7 @@ describe("chat api initial turn request", () => {
       {
         type: "skill_selection",
         name: "docs",
-        path: "/Users/test/.talos/skills/docs/SKILL.md",
+        path: "/Users/test/.agents/skills/docs/SKILL.md",
       },
     ]);
   });

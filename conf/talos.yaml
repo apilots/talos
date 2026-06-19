@@ -44,13 +44,24 @@ agent:
           timeout_ms: 15000
     skills:
       enabled: true
-      roots:
-        - "~/.talos/skills"
-        - "~/.agents/skills"
-      install_root: "~/.talos/skills"
-      state_path: "~/.talos/skills-state.json"
       max_skill_md_bytes: 65536
       max_available_summary_bytes: 8192
+    plugins:
+      sources:
+        - source_type: "official"
+          display_name: "Apilots Skills"
+          kind: "git"
+          url: "https://github.com/apilots/skills"
+          reference: "main"
+          sparse_paths:
+            - "skills"
+      roots:
+        - kind: "skill"
+          path: "~/.agents/skills"
+          read_only: true
+        - kind: "skill"
+          path: "~/.codex/skills"
+          read_only: true
     planner_mode: "built_in"
     prompt:
       window:

@@ -9,20 +9,41 @@ import type {
   MemorySearchParams,
   MemorySearchResult,
   ModelInfo,
+  PluginDisableRequest,
+  PluginDisableResponse,
+  PluginEnableRequest,
+  PluginEnableResponse,
+  PluginInstallRequest,
+  PluginInstallResponse,
+  PluginListRequest,
+  PluginListResponse,
+  PluginSearchRequest,
+  PluginSearchResponse,
+  PluginSourceAddRequest,
+  PluginSourceAddResponse,
+  PluginSourceListRequest,
+  PluginSourceListResponse,
+  PluginSourceRefreshRequest,
+  PluginSourceRefreshResponse,
+  PluginSourceRemoveRequest,
+  PluginSourceRemoveResponse,
+  PluginUpdateRequest,
+  PluginUpdateResponse,
+  PluginUninstallRequest,
+  PluginUninstallResponse,
   UserDto,
   FsDirectoryCreateResponse,
   FsDirectorySnapshot,
   ProjectPatch,
   ProjectRecord,
   ProtocolSkillDocument,
-  ProtocolSkillSummary,
-  SkillsListParams,
+  SkillsListRequest,
   SkillsListResponse,
-  SkillsReadParams,
-  SkillsRefreshParams,
-  SkillsResolveParams,
+  SkillsReadRequest,
+  SkillsRefreshRequest,
+  SkillsResolveRequest,
   SkillsResolveResponse,
-  SkillsSuggestParams,
+  SkillsSuggestRequest,
   SkillsSuggestResponse,
   SessionQuery,
   SessionUpdate,
@@ -118,44 +139,81 @@ export class TalosClient {
   };
 
   skills = {
-    list: (query?: SkillsListParams): Promise<SkillsListResponse> =>
+    list: (query?: SkillsListRequest): Promise<SkillsListResponse> =>
       this.http.request<SkillsListResponse>(this.urlWithQuery("/v1/skills", query)),
-    refresh: (_request: SkillsRefreshParams = {}): Promise<SkillsListResponse> =>
+    refresh: (_request: SkillsRefreshRequest = {}): Promise<SkillsListResponse> =>
       this.http.request<SkillsListResponse>(this.url("/v1/skills/refresh"), {
         method: "POST",
       }),
-    suggest: (query: SkillsSuggestParams): Promise<SkillsSuggestResponse> =>
+    suggest: (query: SkillsSuggestRequest): Promise<SkillsSuggestResponse> =>
       this.http.request<SkillsSuggestResponse>(this.urlWithQuery("/v1/skills/suggest", query)),
-    read: (request: SkillsReadParams): Promise<ProtocolSkillDocument> =>
+    read: (request: SkillsReadRequest): Promise<ProtocolSkillDocument> =>
       this.http.request<ProtocolSkillDocument>(this.url("/v1/skills/read"), {
         method: "POST",
         body: JSON.stringify(request),
       }),
-    resolve: (request: SkillsResolveParams): Promise<SkillsResolveResponse> =>
+    resolve: (request: SkillsResolveRequest): Promise<SkillsResolveResponse> =>
       this.http.request<SkillsResolveResponse>(this.url("/v1/skills/resolve"), {
         method: "POST",
         body: JSON.stringify(request),
       }),
-    install: (request: { source_path: string }): Promise<ProtocolSkillSummary> =>
-      this.http.request<ProtocolSkillSummary>(this.url("/v1/skills/install"), {
+  };
+
+  plugin = {
+    search: (request: PluginSearchRequest): Promise<PluginSearchResponse> =>
+      this.http.request<PluginSearchResponse>(this.url("/v1/plugin/search"), {
         method: "POST",
         body: JSON.stringify(request),
       }),
-    uninstall: (request: { selector: SkillsReadParams["selector"] }): Promise<void> =>
-      this.http.request<void>(this.url("/v1/skills/uninstall"), {
+    list: (request: PluginListRequest): Promise<PluginListResponse> =>
+      this.http.request<PluginListResponse>(this.url("/v1/plugin/list"), {
         method: "POST",
         body: JSON.stringify(request),
       }),
-    enable: (request: { selector: SkillsReadParams["selector"] }): Promise<ProtocolSkillSummary> =>
-      this.http.request<ProtocolSkillSummary>(this.url("/v1/skills/enable"), {
+    install: (request: PluginInstallRequest): Promise<PluginInstallResponse> =>
+      this.http.request<PluginInstallResponse>(this.url("/v1/plugin/install"), {
         method: "POST",
         body: JSON.stringify(request),
       }),
-    disable: (request: { selector: SkillsReadParams["selector"] }): Promise<ProtocolSkillSummary> =>
-      this.http.request<ProtocolSkillSummary>(this.url("/v1/skills/disable"), {
+    update: (request: PluginUpdateRequest): Promise<PluginUpdateResponse> =>
+      this.http.request<PluginUpdateResponse>(this.url("/v1/plugin/update"), {
         method: "POST",
         body: JSON.stringify(request),
       }),
+    uninstall: (request: PluginUninstallRequest): Promise<PluginUninstallResponse> =>
+      this.http.request<PluginUninstallResponse>(this.url("/v1/plugin/uninstall"), {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
+    enable: (request: PluginEnableRequest): Promise<PluginEnableResponse> =>
+      this.http.request<PluginEnableResponse>(this.url("/v1/plugin/enable"), {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
+    disable: (request: PluginDisableRequest): Promise<PluginDisableResponse> =>
+      this.http.request<PluginDisableResponse>(this.url("/v1/plugin/disable"), {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
+    sources: {
+      list: (query: PluginSourceListRequest = { include_disabled: false }): Promise<PluginSourceListResponse> =>
+        this.http.request<PluginSourceListResponse>(this.urlWithQuery("/v1/plugin/sources", query)),
+      add: (request: PluginSourceAddRequest): Promise<PluginSourceAddResponse> =>
+        this.http.request<PluginSourceAddResponse>(this.url("/v1/plugin/sources"), {
+          method: "POST",
+          body: JSON.stringify(request),
+        }),
+      refresh: (request: PluginSourceRefreshRequest): Promise<PluginSourceRefreshResponse> =>
+        this.http.request<PluginSourceRefreshResponse>(this.url("/v1/plugin/sources/refresh"), {
+          method: "POST",
+          body: JSON.stringify(request),
+        }),
+      remove: (request: PluginSourceRemoveRequest): Promise<PluginSourceRemoveResponse> =>
+        this.http.request<PluginSourceRemoveResponse>(this.url("/v1/plugin/sources/remove"), {
+          method: "POST",
+          body: JSON.stringify(request),
+        }),
+    },
   };
 
   sessions = {
