@@ -55,14 +55,14 @@ export type {
   FsDirectoryReadParams,
   FsDirectorySnapshot,
   FsEntryKind,
-  ProtocolSkillDocument,
-  ProtocolSkillLoadError,
-  ProtocolSkillMetadata,
-  ProtocolSkillScope,
-  ProtocolSkillSelector,
-  ProtocolSkillSuggestion,
-  ProtocolSkillSummary,
-  ProtocolSkillWarning,
+  SkillDocument,
+  SkillLoadError,
+  SkillMetadata,
+  SkillScope,
+  SkillSelector,
+  SkillSuggestion,
+  SkillSummary,
+  SkillWarning,
   MarketplaceSource,
   MarketplaceSourceId,
   MarketplaceSourceInput,
@@ -85,6 +85,8 @@ export type {
   PluginListRequest,
   PluginListResponse,
   PluginListStatusFilter,
+  PluginReadRequest,
+  PluginReadResponse,
   PluginSearchRefreshPolicy,
   PluginSearchRequest,
   PluginSearchResponse,
@@ -125,9 +127,8 @@ export type StopReason =
   | "end_turn"
   | "model_output_limit"
   | "tool_round_limit"
+  | "waiting_dynamic_input"
   | "transfer_unresolved"
-  | "before_model_callback_stopped"
-  | "after_model_callback_stopped"
   | "cancelled";
 
 export type TalosSessionEnvironment = ProtocolTalosSessionEnvironment;

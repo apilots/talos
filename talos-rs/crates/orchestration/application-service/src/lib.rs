@@ -131,7 +131,10 @@ impl TalosApplicationService {
             }))
         };
         let file_locks = FileLockRegistry::default();
-        let plugins = PluginManagerService::new(base_config.agent.kernel.plugins.clone());
+        let plugins = PluginManagerService::new(
+            base_config.agent.kernel.plugins.clone(),
+            base_config.agent.kernel.skills.clone(),
+        );
         let skills = SkillsService::new(
             base_config.agent.kernel.skills.clone(),
             base_config.agent.kernel.plugins.clone(),

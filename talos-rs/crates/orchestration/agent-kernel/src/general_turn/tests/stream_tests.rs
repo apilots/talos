@@ -1082,6 +1082,7 @@ async fn test_run_general_turn_ends_loop_terminal_without_extra_finalization() {
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    configure_test_skill_root(&mut config, &workspace_dir);
     let (tx, mut rx) = mpsc::channel(16);
     let mut ctx = build_ctx_with_stream(Some(tx));
 
@@ -1095,6 +1096,7 @@ async fn test_run_general_turn_ends_loop_terminal_without_extra_finalization() {
         tool_registry,
         memory_store,
         &config,
+        skill_options_from_config(&workspace_dir, &config),
     )
     .await
     .expect("general turn should succeed");

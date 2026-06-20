@@ -7,13 +7,16 @@ use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::json;
 use std::collections::{HashMap, VecDeque};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+use talos_config::{resolve_runtime_path, AgentKernelConfig, PluginRootConfig, PluginRootKind};
 use talos_llm_provider::{
     ChatChunk, ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider,
     ModelBlockCompleted, ModelBlockDelta, ModelBlockStarted, ModelBlockStream,
     ModelBlockStreamEvent, Usage,
 };
+use talos_skills::{SkillRoot, SkillRoots, SkillSelector};
 use talos_tools::{register_core_local_tools, ToolRegistry};
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -61,6 +64,51 @@ struct SummaryProvider {
 struct RecordingSummaryProvider {
     responses: Mutex<VecDeque<String>>,
     user_prompts: Mutex<Vec<String>>,
+}
+
+fn configure_test_skill_root(config: &mut AgentKernelConfig, workspace_dir: &Path) -> PathBuf {
+    let skill_root = workspace_dir.join("agents-skills");
+    std::fs::create_dir_all(&skill_root).expect("test skill root should exist");
+    config.plugins.roots = vec![PluginRootConfig {
+        kind: PluginRootKind::Skill,
+        path: skill_root.to_string_lossy().to_string(),
+        read_only: true,
+    }];
+    skill_root
+}
+
+fn skill_options_from_config(
+    workspace_dir: &Path,
+    config: &AgentKernelConfig,
+) -> GeneralTurnSkillOptions {
+    skill_options_from_config_with_selected(workspace_dir, config, Vec::new())
+}
+
+fn skill_options_from_config_with_selected(
+    workspace_dir: &Path,
+    config: &AgentKernelConfig,
+    selected: Vec<SkillSelector>,
+) -> GeneralTurnSkillOptions {
+    let roots = config
+        .plugins
+        .roots
+        .iter()
+        .filter(|root| root.kind == PluginRootKind::Skill && root.read_only)
+        .map(|root| SkillRoot::configured(resolve_runtime_path(&root.path)))
+        .collect();
+
+    GeneralTurnSkillOptions {
+        selected,
+        roots: Some(SkillRoots {
+            roots,
+            state_path: workspace_dir
+                .join("plugins")
+                .join("skills")
+                .join("skills-state.json"),
+            max_skill_md_bytes: config.skills.max_skill_md_bytes,
+            max_available_summary_bytes: config.skills.max_available_summary_bytes,
+        }),
+    }
 }
 
 impl SummaryProvider {
@@ -683,7 +731,6 @@ fn build_ctx_with_stream(
         state_bags: ContextStateBags::default(),
         limits: InvocationLimits::default(),
         events: Vec::new(),
-        plugin_manager: crate::default_plugin_manager(),
         transcript_service: None,
         stream_tx,
     }

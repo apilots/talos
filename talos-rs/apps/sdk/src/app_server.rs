@@ -293,7 +293,7 @@ impl AppServerClient {
     pub async fn read_skill(
         &mut self,
         params: SkillsReadRequest,
-    ) -> TalosResult<talos_app_protocol::requests::ProtocolSkillDocument> {
+    ) -> TalosResult<talos_types::SkillDocument> {
         self.request_typed("skills.read", params).await
     }
 

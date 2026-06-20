@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use talos_error::{TalosError, TalosResult};
 use talos_sdk::{
-    AppServerClient, ModelInfo, ProtocolSkillSuggestion, SessionHistorySnapshot,
-    SkillsSuggestRequest, TalosMessageRequest, TalosSession, TimelineActiveTurnSnapshot,
-    TimelineEventEnvelope, TimelineRecoverySnapshot,
+    AppServerClient, ModelInfo, SessionHistorySnapshot, SkillSuggestion, SkillsSuggestRequest,
+    TalosMessageRequest, TalosSession, TimelineActiveTurnSnapshot, TimelineEventEnvelope,
+    TimelineRecoverySnapshot,
 };
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 #[async_trait]
 pub trait GatewayClient: Send + Sync {
     async fn list_models(&self) -> TalosResult<Vec<ModelInfo>>;
-    async fn suggest_skills(&self, query: &str) -> TalosResult<Vec<ProtocolSkillSuggestion>>;
+    async fn suggest_skills(&self, query: &str) -> TalosResult<Vec<SkillSuggestion>>;
     async fn list_sessions(&self) -> TalosResult<Vec<TalosSession>>;
     async fn get_session(&self, session_id: &str) -> TalosResult<TalosSession>;
     async fn close_session(&self, session_id: &str) -> TalosResult<()>;
@@ -51,7 +51,7 @@ impl GatewayClient for Mutex<AppServerClient> {
         self.lock().await.list_models().await
     }
 
-    async fn suggest_skills(&self, query: &str) -> TalosResult<Vec<ProtocolSkillSuggestion>> {
+    async fn suggest_skills(&self, query: &str) -> TalosResult<Vec<SkillSuggestion>> {
         self.lock()
             .await
             .suggest_skills(SkillsSuggestRequest {

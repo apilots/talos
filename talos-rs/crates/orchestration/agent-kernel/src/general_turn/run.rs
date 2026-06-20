@@ -16,6 +16,7 @@ pub async fn run_general_turn(
     tool_executor_port: Arc<dyn ToolExecutorPort>,
     memory_store: Arc<MemoryStore>,
     kernel_config: &AgentKernelConfig,
+    skill_options: GeneralTurnSkillOptions,
 ) -> TalosResult<GeneralTurnResult> {
     run_general_turn_with_resume(
         ctx,
@@ -28,7 +29,7 @@ pub async fn run_general_turn(
         memory_store,
         kernel_config,
         None,
-        None,
+        Some(skill_options),
     )
     .await
 }

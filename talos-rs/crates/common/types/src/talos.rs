@@ -34,8 +34,6 @@ pub enum StopReason {
     ToolRoundLimit,
     WaitingDynamicInput,
     TransferUnresolved,
-    BeforeModelCallbackStopped,
-    AfterModelCallbackStopped,
     Cancelled,
 }
 

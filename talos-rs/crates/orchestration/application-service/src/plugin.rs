@@ -1,13 +1,15 @@
-use talos_config::PluginsRuntimeConfig;
+use talos_config::{AgentKernelConfig, PluginsRuntimeConfig, SkillsRuntimeConfig};
 use talos_error::TalosResult;
 use talos_plugin::PluginManager;
+use talos_skills::SkillRoots;
 use talos_types::{
     PluginDisableRequest, PluginDisableResponse, PluginEnableRequest, PluginEnableResponse,
     PluginInstallRequest, PluginInstallResponse, PluginListRequest, PluginListResponse,
-    PluginSearchRequest, PluginSearchResponse, PluginSourceAddRequest, PluginSourceAddResponse,
-    PluginSourceListRequest, PluginSourceListResponse, PluginSourceRefreshRequest,
-    PluginSourceRefreshResponse, PluginSourceRemoveRequest, PluginSourceRemoveResponse,
-    PluginUninstallRequest, PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse,
+    PluginReadRequest, PluginReadResponse, PluginSearchRequest, PluginSearchResponse,
+    PluginSourceAddRequest, PluginSourceAddResponse, PluginSourceListRequest,
+    PluginSourceListResponse, PluginSourceRefreshRequest, PluginSourceRefreshResponse,
+    PluginSourceRemoveRequest, PluginSourceRemoveResponse, PluginUninstallRequest,
+    PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse,
 };
 
 #[derive(Clone)]
@@ -16,9 +18,9 @@ pub struct PluginManagerService {
 }
 
 impl PluginManagerService {
-    pub fn new(config: PluginsRuntimeConfig) -> Self {
+    pub fn new(config: PluginsRuntimeConfig, skills: SkillsRuntimeConfig) -> Self {
         Self {
-            manager: PluginManager::new(config),
+            manager: PluginManager::new(config).with_max_skill_md_bytes(skills.max_skill_md_bytes),
         }
     }
 
@@ -62,6 +64,10 @@ impl PluginManagerService {
         self.manager.list_plugins(request)
     }
 
+    pub fn read(&self, request: PluginReadRequest) -> TalosResult<PluginReadResponse> {
+        self.manager.read(request)
+    }
+
     pub fn install(&self, request: PluginInstallRequest) -> TalosResult<PluginInstallResponse> {
         self.manager.install(request)
     }
@@ -85,7 +91,14 @@ impl PluginManagerService {
         self.manager.disable(request)
     }
 
-    pub fn manager(&self) -> &PluginManager {
-        &self.manager
+    pub fn skill_roots(&self, config: &SkillsRuntimeConfig) -> TalosResult<SkillRoots> {
+        self.manager.skill_roots(config)
+    }
+
+    pub fn skill_roots_for_kernel_config(
+        &self,
+        config: &AgentKernelConfig,
+    ) -> TalosResult<SkillRoots> {
+        PluginManager::new(config.plugins.clone()).skill_roots(&config.skills)
     }
 }

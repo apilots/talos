@@ -1,13 +1,13 @@
 import { Package } from "lucide-react";
-import type { ProtocolSkillSuggestion } from "@talos/sdk-browser";
+import type { SkillSuggestion } from "@talos/sdk-browser";
 
 import { cn } from "@/shared/lib/cn";
 
 interface SkillSuggestionsPopoverProps {
-  suggestions: ProtocolSkillSuggestion[];
+  suggestions: SkillSuggestion[];
   selectedIndex: number;
   onHover: (index: number) => void;
-  onSelect: (skill: ProtocolSkillSuggestion) => void;
+  onSelect: (skill: SkillSuggestion) => void;
 }
 
 export function SkillSuggestionsPopover({
@@ -22,7 +22,7 @@ export function SkillSuggestionsPopover({
 
   return (
     <div
-      className="absolute bottom-[calc(100%+8px)] left-0 right-0 z-50 mx-auto max-h-72 w-[min(880px,calc(100%-1rem))] overflow-hidden rounded-[1.4rem] border border-border/70 bg-card/92 px-2 py-2 shadow-2xl backdrop-blur-xl"
+      className="absolute bottom-[calc(100%+8px)] left-0 right-0 z-50 mx-auto max-h-72 w-[min(880px,calc(100%-1rem))] overflow-hidden rounded-[1.4rem] border border-border/70 bg-card px-2 py-2 shadow-2xl"
       data-testid="skill-suggestions"
     >
       <div className="max-h-64 overflow-y-auto">
@@ -30,7 +30,7 @@ export function SkillSuggestionsPopover({
           <button
             className={cn(
               "grid w-full grid-cols-[1rem_minmax(9rem,auto)_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl px-3 py-2.5 text-left outline-none transition",
-              index === selectedIndex ? "bg-muted/15" : "hover:bg-muted/10",
+              index === selectedIndex ? "bg-muted/20" : "hover:bg-muted/15",
             )}
             key={skill.path}
             onMouseEnter={() => onHover(index)}
@@ -63,7 +63,7 @@ function skillDisplayName(name: string) {
     .join(" ");
 }
 
-function skillSourceLabel(scope: ProtocolSkillSuggestion["scope"]) {
+function skillSourceLabel(scope: SkillSuggestion["scope"]) {
   switch (scope) {
     case "external":
       return "External";

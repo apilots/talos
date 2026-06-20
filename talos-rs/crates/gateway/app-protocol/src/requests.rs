@@ -7,19 +7,20 @@ use ts_rs::TS;
 
 use crate::errors::AppServerErrorBody;
 use crate::version::ProtocolVersion;
-use talos_error::{TalosError, TalosResult};
-use talos_skills::{
-    SkillDocument, SkillLoadError, SkillScope, SkillSelector, SkillSuggestion, SkillSummary,
-    SkillWarning,
-};
 use talos_types::talos::{
     SessionHistorySnapshot, TalosMessageRequest, TalosMessageRetryRequest, TimelineEventEnvelope,
 };
 use talos_types::{
     PluginDisableRequest, PluginEnableRequest, PluginInstallRequest, PluginListRequest,
-    PluginSearchRequest, PluginSourceAddRequest, PluginSourceListRequest,
+    PluginReadRequest, PluginSearchRequest, PluginSourceAddRequest, PluginSourceListRequest,
     PluginSourceRefreshRequest, PluginSourceRemoveRequest, PluginUninstallRequest,
     PluginUpdateRequest,
+};
+pub use talos_types::{
+    SkillDocument, SkillLoadError, SkillMetadata, SkillScope, SkillSelector, SkillSuggestion,
+    SkillSummary, SkillWarning, SkillsListRequest, SkillsListResponse, SkillsReadRequest,
+    SkillsRefreshRequest, SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest,
+    SkillsSuggestResponse,
 };
 
 pub const DEFERRED_CLIENT_METHODS: &[DeferredClientMethod] = &[];
@@ -126,6 +127,8 @@ pub enum ClientMethod {
     PluginSearch,
     #[serde(rename = "plugin.list")]
     PluginList,
+    #[serde(rename = "plugin.read")]
+    PluginRead,
     #[serde(rename = "plugin.install")]
     PluginInstall,
     #[serde(rename = "plugin.update")]
@@ -210,6 +213,7 @@ impl ClientMethod {
             Self::PluginSourceRemove => "plugin.source.remove",
             Self::PluginSearch => "plugin.search",
             Self::PluginList => "plugin.list",
+            Self::PluginRead => "plugin.read",
             Self::PluginInstall => "plugin.install",
             Self::PluginUpdate => "plugin.update",
             Self::PluginUninstall => "plugin.uninstall",
@@ -288,6 +292,7 @@ impl FromStr for ClientMethod {
             "plugin.source.remove" => Ok(Self::PluginSourceRemove),
             "plugin.search" => Ok(Self::PluginSearch),
             "plugin.list" => Ok(Self::PluginList),
+            "plugin.read" => Ok(Self::PluginRead),
             "plugin.install" => Ok(Self::PluginInstall),
             "plugin.update" => Ok(Self::PluginUpdate),
             "plugin.uninstall" => Ok(Self::PluginUninstall),
@@ -406,6 +411,8 @@ pub enum ClientRequestParams {
     PluginSearch(PluginSearchRequest),
     #[serde(rename = "plugin.list")]
     PluginList(PluginListRequest),
+    #[serde(rename = "plugin.read")]
+    PluginRead(PluginReadRequest),
     #[serde(rename = "plugin.install")]
     PluginInstall(PluginInstallRequest),
     #[serde(rename = "plugin.update")]
@@ -559,6 +566,7 @@ impl ClientRequest {
             }
             ClientMethod::PluginSearch => ClientRequestParams::PluginSearch(decode(params_value)?),
             ClientMethod::PluginList => ClientRequestParams::PluginList(decode(params_value)?),
+            ClientMethod::PluginRead => ClientRequestParams::PluginRead(decode(params_value)?),
             ClientMethod::PluginInstall => {
                 ClientRequestParams::PluginInstall(decode(params_value)?)
             }
@@ -964,219 +972,6 @@ pub struct WorkspaceInfoResponse {
     pub username: Option<String>,
     pub base_workspace_dir: String,
     pub user_workspace_dir: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct SkillsListRequest {
-    #[serde(default)]
-    pub include_disabled: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct SkillsRefreshRequest {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct SkillsSuggestRequest {
-    #[serde(default)]
-    pub query: String,
-    #[serde(default)]
-    pub limit: Option<usize>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct ProtocolSkillSelector {
-    #[serde(default)]
-    pub name: Option<String>,
-    #[serde(default)]
-    pub path: Option<PathBuf>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct SkillsReadRequest {
-    pub selector: ProtocolSkillSelector,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct SkillsResolveRequest {
-    #[serde(default)]
-    pub text: String,
-    #[serde(default)]
-    pub selected: Vec<ProtocolSkillSelector>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ProtocolSkillScope {
-    Project,
-    Plugin,
-    External,
-    System,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct ProtocolSkillMetadata {
-    #[serde(default)]
-    pub display_name: Option<String>,
-    #[serde(default)]
-    pub icon: Option<String>,
-    #[serde(default)]
-    pub author: Option<String>,
-    #[serde(default)]
-    pub version: Option<String>,
-    #[serde(default)]
-    pub argument_hint: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct ProtocolSkillSummary {
-    pub name: String,
-    pub description: String,
-    #[serde(default)]
-    pub short_description: Option<String>,
-    pub root: PathBuf,
-    pub path: PathBuf,
-    pub scope: ProtocolSkillScope,
-    #[serde(default)]
-    pub source_plugin: Option<String>,
-    #[serde(default)]
-    pub source_install: Option<String>,
-    pub enabled: bool,
-    pub read_only: bool,
-    #[serde(default)]
-    pub metadata: Option<ProtocolSkillMetadata>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct ProtocolSkillSuggestion {
-    pub name: String,
-    pub description: String,
-    #[serde(default)]
-    pub short_description: Option<String>,
-    pub root: PathBuf,
-    pub path: PathBuf,
-    pub scope: ProtocolSkillScope,
-    #[serde(default)]
-    pub source_plugin: Option<String>,
-    #[serde(default)]
-    pub source_install: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct ProtocolSkillLoadError {
-    pub root: PathBuf,
-    #[serde(default)]
-    pub path: Option<PathBuf>,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct SkillsListResponse {
-    pub data: Vec<ProtocolSkillSummary>,
-    #[serde(default)]
-    pub errors: Vec<ProtocolSkillLoadError>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct SkillsSuggestResponse {
-    pub data: Vec<ProtocolSkillSuggestion>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct ProtocolSkillDocument {
-    pub summary: ProtocolSkillSummary,
-    pub contents: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct ProtocolSkillWarning {
-    pub code: String,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct SkillsResolveResponse {
-    pub data: Vec<ProtocolSkillSummary>,
-    #[serde(default)]
-    pub warnings: Vec<ProtocolSkillWarning>,
-}
-
-pub fn protocol_skill_selector(selector: ProtocolSkillSelector) -> TalosResult<SkillSelector> {
-    match (selector.name, selector.path) {
-        (Some(name), Some(path)) if !name.trim().is_empty() => {
-            Ok(SkillSelector::selection(name, path))
-        }
-        (Some(name), None) if !name.trim().is_empty() => Ok(SkillSelector::by_name(name)),
-        (None, Some(path)) => Ok(SkillSelector::by_path(path)),
-        _ => Err(TalosError::ValidationError(
-            "skill selector requires name, path, or both".to_string(),
-        )),
-    }
-}
-
-pub fn protocol_skill_document(document: SkillDocument) -> ProtocolSkillDocument {
-    ProtocolSkillDocument {
-        summary: protocol_skill_summary(document.summary),
-        contents: document.contents,
-    }
-}
-
-pub fn protocol_skill_summary(skill: SkillSummary) -> ProtocolSkillSummary {
-    ProtocolSkillSummary {
-        name: skill.name,
-        description: skill.description,
-        short_description: skill.short_description,
-        root: skill.root,
-        path: skill.path,
-        scope: protocol_skill_scope(skill.scope),
-        source_plugin: skill.source_plugin,
-        source_install: skill.source_install,
-        enabled: skill.enabled,
-        read_only: skill.read_only,
-        metadata: skill.metadata.map(|metadata| ProtocolSkillMetadata {
-            display_name: metadata.display_name,
-            icon: metadata.icon,
-            author: metadata.author,
-            version: metadata.version,
-            argument_hint: metadata.argument_hint,
-        }),
-    }
-}
-
-pub fn protocol_skill_suggestion(skill: SkillSuggestion) -> ProtocolSkillSuggestion {
-    ProtocolSkillSuggestion {
-        name: skill.name,
-        description: skill.description,
-        short_description: skill.short_description,
-        root: skill.root,
-        path: skill.path,
-        scope: protocol_skill_scope(skill.scope),
-        source_plugin: skill.source_plugin,
-        source_install: skill.source_install,
-    }
-}
-
-pub fn protocol_skill_load_error(error: SkillLoadError) -> ProtocolSkillLoadError {
-    ProtocolSkillLoadError {
-        root: error.root,
-        path: error.path,
-        message: error.message,
-    }
-}
-
-pub fn protocol_skill_warning(warning: SkillWarning) -> ProtocolSkillWarning {
-    ProtocolSkillWarning {
-        code: warning.code,
-        message: warning.message,
-    }
-}
-
-pub fn protocol_skill_scope(scope: SkillScope) -> ProtocolSkillScope {
-    match scope {
-        SkillScope::Project => ProtocolSkillScope::Project,
-        SkillScope::Plugin => ProtocolSkillScope::Plugin,
-        SkillScope::External => ProtocolSkillScope::External,
-        SkillScope::System => ProtocolSkillScope::System,
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]

@@ -34,7 +34,7 @@ use std::{
 };
 use talos_error::TalosResult;
 use talos_sdk::{
-    ModelInfo, ProtocolSkillSuggestion, TalosSession, TalosTimelineItem, TimelineEventEnvelope,
+    ModelInfo, SkillSuggestion, TalosSession, TalosTimelineItem, TimelineEventEnvelope,
 };
 use talos_types::talos::{TalosUsage, TurnExecutionMetrics};
 use tokio::sync::mpsc;
@@ -113,7 +113,7 @@ pub struct TuiApp {
     pub(crate) received_output_delta: bool,
     pub(crate) active_message: Option<String>,
     pub(crate) active_message_raw: Option<String>,
-    pub(crate) active_message_skills: Vec<ProtocolSkillSuggestion>,
+    pub(crate) active_message_skills: Vec<SkillSuggestion>,
     pub(crate) active_retry_count: u8,
     pub(crate) active_user_idx: Option<usize>,
     pub(crate) transcript: TranscriptState,
@@ -150,9 +150,9 @@ pub struct TuiApp {
     pub(crate) command_autocomplete_selected: usize,
     pub(crate) command_input_buffer: String,
     pub(crate) show_skill_autocomplete: bool,
-    pub(crate) skill_suggestions: Vec<ProtocolSkillSuggestion>,
+    pub(crate) skill_suggestions: Vec<SkillSuggestion>,
     pub(crate) skill_autocomplete_selected: usize,
-    pub(crate) selected_skills: Vec<ProtocolSkillSuggestion>,
+    pub(crate) selected_skills: Vec<SkillSuggestion>,
     pub(crate) close_in_progress: bool,
     pub(crate) close_started_at: Option<Instant>,
     pub(crate) close_timeout_reported: bool,

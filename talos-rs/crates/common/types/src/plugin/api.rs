@@ -7,10 +7,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS, Default)]
-pub struct PluginSourceListRequest {
-    #[serde(default)]
-    pub include_disabled: bool,
-}
+pub struct PluginSourceListRequest {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct PluginSourceListResponse {
@@ -76,6 +73,17 @@ pub enum PluginListStatusFilter {
 pub struct PluginListResponse {
     pub plugins: Vec<Plugin>,
     pub warnings: Vec<PluginWarning>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct PluginReadRequest {
+    pub plugin_id: PluginId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct PluginReadResponse {
+    pub plugin: Plugin,
+    pub contents: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]

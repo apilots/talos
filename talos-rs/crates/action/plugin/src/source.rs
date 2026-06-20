@@ -22,7 +22,6 @@ pub(crate) fn config_source(source: &PluginSourceConfig) -> Option<MarketplaceSo
         },
         kind: MarketplaceSourceKind::Git,
         display_name: source.display_name.clone(),
-        enabled: true,
         location: MarketplaceSourceLocation::Git {
             url: source.url.clone(),
             reference: source.reference.clone(),
@@ -51,7 +50,6 @@ pub(crate) fn source_from_input(input: MarketplaceSourceInput) -> TalosResult<Ma
                 source_type: MarketplaceSourceType::User,
                 kind: MarketplaceSourceKind::Git,
                 display_name: display_name_for_git_url(&url),
-                enabled: true,
                 location: MarketplaceSourceLocation::Git { url, reference },
                 sparse_paths,
                 last_checked_commit: None,
@@ -84,7 +82,6 @@ pub(crate) fn source_from_input(input: MarketplaceSourceInput) -> TalosResult<Ma
                     .and_then(|name| name.to_str())
                     .unwrap_or("Local Plugin Source")
                     .to_string(),
-                enabled: true,
                 location: MarketplaceSourceLocation::LocalFolder { path },
                 sparse_paths,
                 last_checked_commit: None,

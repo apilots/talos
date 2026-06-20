@@ -9,7 +9,7 @@ use std::io::Write;
 use std::time::Duration;
 use talos_sdk::{
     now_ms, open_external_url, AppServerClient, AppServerClientConfig, CloudLoginClientKind,
-    CloudLoginStatusResponse, ProtocolSkillSelector, SkillsListRequest, SkillsReadRequest,
+    CloudLoginStatusResponse, SkillSelector, SkillsListRequest, SkillsReadRequest,
     SkillsRefreshRequest, SkillsSuggestRequest, TalosContext, TalosInputItem, TalosMessageRequest,
     TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta,
     TalosTimelineEventPayload, TalosTimelineItemKind, TalosTimelinePhase, TimelineEventEnvelope,
@@ -94,7 +94,7 @@ async fn execute_app_server_skills_command(
             }
         }
         SkillsCommands::Read { name, path } => {
-            let selector = ProtocolSkillSelector {
+            let selector = SkillSelector {
                 name,
                 path: path.map(Into::into),
             };

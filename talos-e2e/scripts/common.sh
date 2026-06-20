@@ -16,6 +16,7 @@ E2E_TMP_ROOT="${TALOS_E2E_TMP_ROOT}"
 
 scenario_report_path() {
   local name="$1"
+  mkdir -p "${SCENARIO_REPORT_DIR}"
   printf '%s/%s\n' "${SCENARIO_REPORT_DIR}" "${name}"
 }
 
@@ -174,6 +175,7 @@ import json
 from pathlib import Path
 
 config_path = Path(os.environ["CONFIG_PATH"])
+talos_home = Path(os.environ["TALOS_HOME"])
 text = config_path.read_text()
 
 def replace_section_value(content: str, section: str, key: str, value: str) -> str:
@@ -192,6 +194,27 @@ def replace_section_value(content: str, section: str, key: str, value: str) -> s
             return "".join(lines)
     raise SystemExit(f"missing config key: {section}.{key}")
 
+def replace_agent_kernel_skills_and_plugins(content: str, talos_home: Path) -> str:
+    marker = '    planner_mode: "built_in"\n'
+    block = (
+        "    skills:\n"
+        "      max_skill_md_bytes: 65536\n"
+        "      max_available_summary_bytes: 8192\n"
+        "    plugins:\n"
+        "      sources: []\n"
+        "      roots:\n"
+        "        - kind: skill\n"
+        f"          path: {json.dumps(str(talos_home / 'agents-skills'))}\n"
+        "          read_only: true\n"
+    )
+    start = content.find("    skills:\n")
+    end = content.find(marker)
+    if start >= 0 and end > start:
+        return content[:start] + block + content[end:]
+    if "    skills:\n" not in content:
+        return content.replace(marker, block + marker)
+    raise SystemExit("unable to locate agent.kernel skills/plugins block")
+
 gateway_auth = os.environ.get("TALOS_TEST_GATEWAY_AUTH")
 if gateway_auth is None:
     # Most Talos scenarios exercise local product flows. Cloud auth has a
@@ -204,6 +227,8 @@ else:
 gateway_port = os.environ.get("TALOS_TEST_PORT")
 if gateway_port:
     text = replace_section_value(text, "gateway", "port", gateway_port)
+
+text = replace_agent_kernel_skills_and_plugins(text, talos_home)
 
 cloud_api_base_url = os.environ.get("TALOS_TEST_CLOUD_API_BASE_URL")
 if cloud_api_base_url:

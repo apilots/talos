@@ -1,11 +1,11 @@
 import { X } from "lucide-react";
-import type { ProtocolSkillSuggestion } from "@talos/sdk-browser";
+import type { SkillSuggestion } from "@talos/sdk-browser";
 
 interface SelectedSkillChipsProps {
   draft: string;
-  skills: ProtocolSkillSuggestion[];
+  skills: SkillSuggestion[];
   onDraftChange: (value: string) => void;
-  onSkillsChange: (skills: ProtocolSkillSuggestion[]) => void;
+  onSkillsChange: (skills: SkillSuggestion[]) => void;
 }
 
 export function SelectedSkillChips({

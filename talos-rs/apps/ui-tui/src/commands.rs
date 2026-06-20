@@ -9,7 +9,7 @@ use crate::client::GatewayClient;
 use crate::types::{AppState, ChatRole, CommandUpdate, QueuedMessage, SessionHistoryLoad};
 use crate::utils::summarize_for_queue;
 use crate::{TuiApp, MAX_QUEUE_LEN, SESSION_CLOSE_TIMEOUT};
-use talos_sdk::{ProtocolSkillSuggestion, TalosSession, TimelineActiveTurnStatus};
+use talos_sdk::{SkillSuggestion, TalosSession, TimelineActiveTurnStatus};
 
 impl TuiApp {
     pub(crate) async fn submit_input(&mut self) -> TalosResult<bool> {
@@ -224,7 +224,7 @@ impl TuiApp {
     pub(crate) async fn send_user_message_with_skills(
         &mut self,
         user_message: String,
-        skills: Vec<ProtocolSkillSuggestion>,
+        skills: Vec<SkillSuggestion>,
     ) -> TalosResult<bool> {
         if self.close_in_progress {
             self.show_status_hint(

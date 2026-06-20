@@ -2,14 +2,14 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use talos_agent::{AgentHarness, AgentOrchestrator};
+use talos_agent::{AgentHarness, AgentOrchestrator, SkillRootsResolver};
 use talos_app_server::BackgroundTaskDrain;
-use talos_application_service::TalosApplicationService;
+use talos_application_service::{PluginManagerService, TalosApplicationService};
 use talos_auth::{AuthService, CloudAuthService, OpenModeUserService, UserService};
 use talos_channel::{ChannelServer, TelegramChannel};
 use talos_config::{
-    effective_llm_protocol, Config, LlmConfigManager, LlmConfigService, LlmProtocol,
-    ProviderConfig, TalosPaths, YamlLlmConfigStore,
+    effective_llm_protocol, AgentKernelConfig, Config, LlmConfigManager, LlmConfigService,
+    LlmProtocol, ProviderConfig, TalosPaths, YamlLlmConfigStore,
 };
 use talos_coordinator::{Coordinator, CoordinatorImpl};
 use talos_error::{TalosError, TalosResult};
@@ -37,6 +37,20 @@ use tokio::signal;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
+
+#[derive(Clone)]
+struct AgentSkillRootsResolver {
+    plugins: PluginManagerService,
+}
+
+impl SkillRootsResolver for AgentSkillRootsResolver {
+    fn skill_roots(
+        &self,
+        kernel_config: &AgentKernelConfig,
+    ) -> TalosResult<talos_skills::SkillRoots> {
+        self.plugins.skill_roots_for_kernel_config(kernel_config)
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct TalosServerOptions {
@@ -435,8 +449,15 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
     let tool_registry = Arc::new(ToolRegistry::new());
     register_core_local_tools(tool_registry.as_ref());
     register_network_tools(tool_registry.as_ref());
+    let plugin_manager_service = PluginManagerService::new(
+        config.agent.kernel.plugins.clone(),
+        config.agent.kernel.skills.clone(),
+    );
+    let skill_roots_resolver = Arc::new(AgentSkillRootsResolver {
+        plugins: plugin_manager_service.clone(),
+    });
 
-    let agent = AgentHarness::new(
+    let agent = AgentHarness::new_with_skill_roots_resolver(
         "default".to_string(),
         config.agent.name.clone(),
         "Default AI assistant".to_string(),
@@ -444,6 +465,7 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
         config.llm.model.clone(),
         tool_registry.clone(),
         config.agent.kernel.clone(),
+        skill_roots_resolver,
     );
     let agent: Arc<dyn AgentOrchestrator> = Arc::new(agent);
 

@@ -1,13 +1,13 @@
-import type { Plugin, ProtocolSkillSummary } from "@talos/sdk-browser";
+import type { Plugin, SkillSummary } from "@talos/sdk-browser";
 
 import { LocalSkillRow } from "./LocalSkillRow";
 import { MarketplaceSkillRow } from "./MarketplaceSkillRow";
 
-type SkillListItem = ProtocolSkillSummary | Plugin;
+type SkillListItem = SkillSummary | Plugin;
 
 interface SkillsCatalogListProps {
   loading: boolean;
-  onSkillOpen: (skill: ProtocolSkillSummary) => void;
+  onSkillOpen: (skill: SkillSummary) => void;
   skills: SkillListItem[];
 }
 
@@ -41,12 +41,22 @@ export function SkillsCatalogList({ loading, onSkillOpen, skills }: SkillsCatalo
 function groupSkills(skills: SkillListItem[]) {
   const groups = new Map<string, SkillListItem[]>();
   for (const skill of skills) {
-    const key = isPlugin(skill) ? "Marketplace" : "Local";
+    const key = isExtensionSkill(skill) ? "Extensions" : "User";
     const items = groups.get(key) ?? [];
     items.push(skill);
     groups.set(key, items);
   }
   return Array.from(groups.entries());
+}
+
+function isExtensionSkill(skill: SkillListItem) {
+  if (isPlugin(skill)) {
+    return false;
+  }
+  if (skill.scope === "plugin") {
+    return false;
+  }
+  return skill.read_only;
 }
 
 function isPlugin(item: SkillListItem): item is Plugin {

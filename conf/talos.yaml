@@ -43,7 +43,6 @@ agent:
           base_url: "https://api.tavily.com/search"
           timeout_ms: 15000
     skills:
-      enabled: true
       max_skill_md_bytes: 65536
       max_available_summary_bytes: 8192
     plugins:

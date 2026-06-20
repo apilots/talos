@@ -17,6 +17,8 @@ import type {
   PluginInstallResponse,
   PluginListRequest,
   PluginListResponse,
+  PluginReadRequest,
+  PluginReadResponse,
   PluginSearchRequest,
   PluginSearchResponse,
   PluginSourceAddRequest,
@@ -36,7 +38,7 @@ import type {
   FsDirectorySnapshot,
   ProjectPatch,
   ProjectRecord,
-  ProtocolSkillDocument,
+  SkillDocument,
   SkillsListRequest,
   SkillsListResponse,
   SkillsReadRequest,
@@ -147,8 +149,8 @@ export class TalosClient {
       }),
     suggest: (query: SkillsSuggestRequest): Promise<SkillsSuggestResponse> =>
       this.http.request<SkillsSuggestResponse>(this.urlWithQuery("/v1/skills/suggest", query)),
-    read: (request: SkillsReadRequest): Promise<ProtocolSkillDocument> =>
-      this.http.request<ProtocolSkillDocument>(this.url("/v1/skills/read"), {
+    read: (request: SkillsReadRequest): Promise<SkillDocument> =>
+      this.http.request<SkillDocument>(this.url("/v1/skills/read"), {
         method: "POST",
         body: JSON.stringify(request),
       }),
@@ -167,6 +169,11 @@ export class TalosClient {
       }),
     list: (request: PluginListRequest): Promise<PluginListResponse> =>
       this.http.request<PluginListResponse>(this.url("/v1/plugin/list"), {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
+    read: (request: PluginReadRequest): Promise<PluginReadResponse> =>
+      this.http.request<PluginReadResponse>(this.url("/v1/plugin/read"), {
         method: "POST",
         body: JSON.stringify(request),
       }),
@@ -194,9 +201,9 @@ export class TalosClient {
       this.http.request<PluginDisableResponse>(this.url("/v1/plugin/disable"), {
         method: "POST",
         body: JSON.stringify(request),
-      }),
+    }),
     sources: {
-      list: (query: PluginSourceListRequest = { include_disabled: false }): Promise<PluginSourceListResponse> =>
+      list: (query: PluginSourceListRequest = {}): Promise<PluginSourceListResponse> =>
         this.http.request<PluginSourceListResponse>(this.urlWithQuery("/v1/plugin/sources", query)),
       add: (request: PluginSourceAddRequest): Promise<PluginSourceAddResponse> =>
         this.http.request<PluginSourceAddResponse>(this.url("/v1/plugin/sources"), {

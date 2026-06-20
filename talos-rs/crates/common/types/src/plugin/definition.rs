@@ -149,6 +149,7 @@ pub enum PluginWarningCode {
     PathEscapedSource,
     InvalidSourceLayout,
     OrphanInstallDirectory,
+    SourceRefreshFailed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]

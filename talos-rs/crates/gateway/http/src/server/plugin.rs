@@ -5,10 +5,11 @@ use axum::response::Json as JsonResponse;
 use talos_types::{
     PluginDisableRequest, PluginDisableResponse, PluginEnableRequest, PluginEnableResponse,
     PluginInstallRequest, PluginInstallResponse, PluginListRequest, PluginListResponse,
-    PluginSearchRequest, PluginSearchResponse, PluginSourceAddRequest, PluginSourceAddResponse,
-    PluginSourceListRequest, PluginSourceListResponse, PluginSourceRefreshRequest,
-    PluginSourceRefreshResponse, PluginSourceRemoveRequest, PluginSourceRemoveResponse,
-    PluginUninstallRequest, PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse,
+    PluginReadRequest, PluginReadResponse, PluginSearchRequest, PluginSearchResponse,
+    PluginSourceAddRequest, PluginSourceAddResponse, PluginSourceListRequest,
+    PluginSourceListResponse, PluginSourceRefreshRequest, PluginSourceRefreshResponse,
+    PluginSourceRemoveRequest, PluginSourceRemoveResponse, PluginUninstallRequest,
+    PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse,
 };
 
 use super::errors::ApiError;
@@ -82,6 +83,18 @@ pub(super) async fn list_plugins_handler(
         .app
         .plugins
         .list_plugins(request)
+        .map_err(ApiError::from_talos_error)?;
+    Ok(JsonResponse(response))
+}
+
+pub(super) async fn read_plugin_handler(
+    State(state): State<Arc<HttpApiState>>,
+    Json(request): Json<PluginReadRequest>,
+) -> Result<JsonResponse<PluginReadResponse>, ApiError> {
+    let response = state
+        .app
+        .plugins
+        .read(request)
         .map_err(ApiError::from_talos_error)?;
     Ok(JsonResponse(response))
 }

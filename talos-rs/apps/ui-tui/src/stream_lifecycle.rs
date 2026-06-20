@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use talos_error::TalosResult;
-use talos_sdk::{ProtocolSkillSuggestion, TalosInputItem, TalosMessageRequest};
+use talos_sdk::{SkillSuggestion, TalosInputItem, TalosMessageRequest};
 use tokio::sync::mpsc;
 use tracing::error;
 
@@ -13,7 +13,7 @@ impl TuiApp {
     pub(crate) async fn start_stream_for_message_with_skills(
         &mut self,
         user_message: String,
-        skills: Vec<ProtocolSkillSuggestion>,
+        skills: Vec<SkillSuggestion>,
     ) -> TalosResult<()> {
         self.start_stream_for_message_internal(user_message, skills, true)
             .await
@@ -22,7 +22,7 @@ impl TuiApp {
     pub(crate) async fn start_stream_for_message_internal(
         &mut self,
         user_message: String,
-        skills: Vec<ProtocolSkillSuggestion>,
+        skills: Vec<SkillSuggestion>,
         reset_retry_state: bool,
     ) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {

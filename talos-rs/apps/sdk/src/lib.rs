@@ -14,12 +14,9 @@ pub use login::{now_ms, open_external_url};
 pub use message::{MessageCommandAck, MessageCommandStatus};
 pub use talos_app_protocol::events::{canonical_method, ApplicationEvent};
 pub use talos_app_protocol::requests::{
-    EventSubscribeParams, EventSubscribeResponse, ProtocolSkillDocument, ProtocolSkillScope,
-    ProtocolSkillSelector, ProtocolSkillSuggestion, ProtocolSkillSummary, ProtocolTalosContext,
-    SessionHistoryParams, SkillsListRequest, SkillsListResponse, SkillsReadRequest,
-    SkillsRefreshRequest, SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest,
-    SkillsSuggestResponse, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus,
-    TimelineCursorStatus, TimelineRecoveryParams, TimelineRecoverySnapshot, TimelineReplay,
+    EventSubscribeParams, EventSubscribeResponse, ProtocolTalosContext, SessionHistoryParams,
+    TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
+    TimelineRecoveryParams, TimelineRecoverySnapshot, TimelineReplay,
     ToolDynamicResultSubmitParams,
 };
 pub use talos_auth::{
@@ -49,13 +46,19 @@ pub use talos_types::{
     MarketplaceSource, MarketplaceSourceInput, Plugin, PluginDefinition, PluginDisableRequest,
     PluginDisableResponse, PluginEnableRequest, PluginEnableResponse, PluginInstall,
     PluginInstallConflictPolicy, PluginInstallId, PluginInstallRequest, PluginInstallResponse,
-    PluginInstallSource, PluginInstallTarget, PluginListRequest, PluginListResponse,
+    PluginInstallSource, PluginInstallTarget, PluginKind, PluginListRequest, PluginListResponse,
     PluginListStatusFilter, PluginSearchRefreshPolicy, PluginSearchRequest, PluginSearchResponse,
     PluginSearchStatusFilter, PluginSourceAddRequest, PluginSourceAddResponse,
     PluginSourceListRequest, PluginSourceListResponse, PluginSourceRefreshRequest,
     PluginSourceRefreshResponse, PluginSourceRemoveRequest, PluginSourceRemoveResponse,
     PluginUninstallRequest, PluginUninstallResponse, PluginUpdateConflictPolicy,
     PluginUpdateRequest, PluginUpdateResponse, SkillPlugin,
+};
+pub use talos_types::{
+    SkillDocument, SkillLoadError, SkillMetadata, SkillScope, SkillSelector, SkillSuggestion,
+    SkillSummary, SkillWarning, SkillsListRequest, SkillsListResponse, SkillsReadRequest,
+    SkillsRefreshRequest, SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest,
+    SkillsSuggestResponse,
 };
 
 pub async fn connect_app_server(config: AppServerClientConfig) -> TalosResult<AppServerClient> {

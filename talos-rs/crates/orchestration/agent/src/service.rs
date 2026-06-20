@@ -1,8 +1,11 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::time::Duration;
 use talos_agent_kernel::TurnPhase;
+use talos_config::{resolve_talos_home, AgentKernelConfig};
 use talos_error::TalosResult;
+use talos_skills::SkillRoots;
 use talos_types::gateway::GatewayResumeContext;
 use talos_types::talos::{
     StopReason, TalosInputItem, TalosOutputItem, TalosReasoning, TalosTimelineEvent, TalosUsage,
@@ -49,6 +52,31 @@ pub struct AgentRequest {
     pub phase: TurnPhase,
     pub planning_instruction: Option<String>,
     pub transfer_to: Option<String>,
+}
+
+pub trait SkillRootsResolver: Send + Sync {
+    fn skill_roots(&self, kernel_config: &AgentKernelConfig) -> TalosResult<SkillRoots>;
+}
+
+#[derive(Debug, Default)]
+pub struct EmptySkillRootsResolver;
+
+impl SkillRootsResolver for EmptySkillRootsResolver {
+    fn skill_roots(&self, kernel_config: &AgentKernelConfig) -> TalosResult<SkillRoots> {
+        Ok(SkillRoots {
+            roots: Vec::new(),
+            state_path: resolve_talos_home()
+                .join("plugins")
+                .join("skills")
+                .join("skills-state.json"),
+            max_skill_md_bytes: kernel_config.skills.max_skill_md_bytes,
+            max_available_summary_bytes: kernel_config.skills.max_available_summary_bytes,
+        })
+    }
+}
+
+pub fn empty_skill_roots_resolver() -> Arc<dyn SkillRootsResolver> {
+    Arc::new(EmptySkillRootsResolver)
 }
 
 #[async_trait]

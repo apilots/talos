@@ -54,6 +54,7 @@ const pluginSourceAddParams = (params: unknown) =>
   marketplaceSourceInput(params.source) &&
   (params.refresh === undefined || typeof params.refresh === "boolean");
 const pluginSourceIdParams = (params: unknown) => isRecord(params) && hasString(params, "source_id");
+const pluginReadParams = (params: unknown) => isRecord(params) && hasString(params, "plugin_id");
 const pluginSearchParams = (params: unknown) =>
   isRecord(params) &&
   (params.query === null || typeof params.query === "string") &&
@@ -132,14 +133,13 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "session.patch": sessionParams,
   "session.read": sessionParams,
   "session.recover": sessionParams,
-  "plugin.source.list": (params) =>
-    isRecord(params) &&
-    (params.include_disabled === undefined || typeof params.include_disabled === "boolean"),
+  "plugin.source.list": emptyParams,
   "plugin.source.add": pluginSourceAddParams,
   "plugin.source.refresh": pluginSourceIdParams,
   "plugin.source.remove": pluginSourceIdParams,
   "plugin.search": pluginSearchParams,
   "plugin.list": pluginListParams,
+  "plugin.read": pluginReadParams,
   "plugin.install": pluginInstallParams,
   "plugin.update": pluginUpdateParams,
   "plugin.uninstall": pluginInstallIdParams,

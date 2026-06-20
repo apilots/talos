@@ -123,10 +123,10 @@ mod tests {
 
         assert_eq!(
             selections,
-            vec![SkillSelector::Selection {
-                name: "review".to_string(),
-                path: PathBuf::from("/tmp/review/SKILL.md"),
-            }]
+            vec![SkillSelector::selection(
+                "review",
+                PathBuf::from("/tmp/review/SKILL.md")
+            )]
         );
     }
 }

@@ -3,8 +3,6 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use talos_app_protocol::errors::AppServerErrorBody;
 use talos_app_protocol::requests::{
-    protocol_skill_document, protocol_skill_load_error, protocol_skill_selector,
-    protocol_skill_suggestion, protocol_skill_summary, protocol_skill_warning,
     AuthSessionReadResponse, AuthSessionSnapshot, AuthSessionUserSnapshot, ClientRequest,
     ClientRequestParams, ConfigBatchWriteParams, ConfigReadParams, ConfigValueWriteParams,
     EventSubscribeParams, FsDirectoryCreateParams, FsDirectoryReadParams, MemoryFileReadParams,
@@ -407,30 +405,26 @@ impl AppServerApplication for TalosApplicationAdapter {
             ClientRequestParams::SkillsRefresh(_) => self.refresh_skills(),
             ClientRequestParams::SkillsSuggest(params) => self.suggest_skills(params),
             ClientRequestParams::SkillsRead(params) => {
-                let selector = protocol_skill_selector(params.selector)
-                    .map_err(AppServerErrorBody::from_talos_error)?;
-                to_value(protocol_skill_document(
+                params
+                    .selector
+                    .validate()
+                    .map_err(|err| AppServerErrorBody::invalid_params(err.to_string()))?;
+                to_value(
                     self.app
                         .skills
-                        .read_document(&selector)
+                        .read_document(&params.selector)
                         .map_err(AppServerErrorBody::from_talos_error)?,
-                ))
+                )
             }
             ClientRequestParams::SkillsResolve(params) => {
-                let selected = params
-                    .selected
-                    .into_iter()
-                    .map(protocol_skill_selector)
-                    .collect::<TalosResult<Vec<_>>>()
-                    .map_err(AppServerErrorBody::from_talos_error)?;
                 let (skills, warnings) = self
                     .app
                     .skills
-                    .resolve(&params.text, &selected)
+                    .resolve(&params.text, &params.selected)
                     .map_err(AppServerErrorBody::from_talos_error)?;
                 to_value(SkillsResolveResponse {
-                    data: skills.into_iter().map(protocol_skill_summary).collect(),
-                    warnings: warnings.into_iter().map(protocol_skill_warning).collect(),
+                    data: skills,
+                    warnings,
                 })
             }
             ClientRequestParams::PluginSourceList(params) => to_value(
@@ -467,6 +461,12 @@ impl AppServerApplication for TalosApplicationAdapter {
                 self.app
                     .plugins
                     .list_plugins(params)
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
+            ClientRequestParams::PluginRead(params) => to_value(
+                self.app
+                    .plugins
+                    .read(params)
                     .map_err(AppServerErrorBody::from_talos_error)?,
             ),
             ClientRequestParams::PluginInstall(params) => to_value(
@@ -843,16 +843,8 @@ impl TalosApplicationAdapter {
         snapshot: talos_skills::SkillSnapshot,
     ) -> ProtocolResult<Value> {
         to_value(SkillsListResponse {
-            data: snapshot
-                .skills
-                .into_iter()
-                .map(protocol_skill_summary)
-                .collect(),
-            errors: snapshot
-                .errors
-                .into_iter()
-                .map(protocol_skill_load_error)
-                .collect(),
+            data: snapshot.skills,
+            errors: snapshot.errors,
         })
     }
 
@@ -862,9 +854,7 @@ impl TalosApplicationAdapter {
             .skills
             .suggest(&params.query, params.limit.unwrap_or(20))
             .map_err(AppServerErrorBody::from_talos_error)?;
-        to_value(SkillsSuggestResponse {
-            data: skills.into_iter().map(protocol_skill_suggestion).collect(),
-        })
+        to_value(SkillsSuggestResponse { data: skills })
     }
 
     fn list_apps(&self) -> Vec<Value> {

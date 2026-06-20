@@ -27,25 +27,80 @@ pub fn suggest(
 ) -> TalosResult<Vec<SkillSuggestion>> {
     let query = query.as_ref().trim().to_ascii_lowercase();
     let limit = limit.max(1);
-    let suggestions = refresh(roots)?
+    let mut suggestions = refresh(roots)?
         .skills
         .into_iter()
         .filter(|skill| skill.enabled)
-        .filter(|skill| {
-            query.is_empty()
-                || skill.name.to_ascii_lowercase().contains(&query)
-                || skill.description.to_ascii_lowercase().contains(&query)
-                || skill
-                    .short_description
-                    .as_deref()
-                    .unwrap_or_default()
-                    .to_ascii_lowercase()
-                    .contains(&query)
+        .filter_map(|skill| {
+            skill_suggest_score(&skill, &query).map(|score| SkillSuggestCandidate { skill, score })
         })
+        .collect::<Vec<_>>();
+    if !query.is_empty() {
+        suggestions.sort_by(|left, right| {
+            left.score
+                .cmp(&right.score)
+                .then_with(|| left.skill.name.cmp(&right.skill.name))
+                .then_with(|| left.skill.path.cmp(&right.skill.path))
+        });
+    }
+    let suggestions = suggestions
+        .into_iter()
         .take(limit)
-        .map(|skill| SkillSuggestion::from(&skill))
+        .map(|candidate| SkillSuggestion::from(&candidate.skill))
         .collect();
     Ok(suggestions)
+}
+
+struct SkillSuggestCandidate {
+    skill: SkillSummary,
+    score: usize,
+}
+
+fn skill_suggest_score(skill: &SkillSummary, query: &str) -> Option<usize> {
+    if query.is_empty() {
+        return Some(0);
+    }
+    [
+        (0, skill.name.as_str()),
+        (20, skill.short_description.as_deref().unwrap_or_default()),
+        (40, skill.description.as_str()),
+    ]
+    .into_iter()
+    .filter_map(|(base, value)| fuzzy_score(value, query).map(|score| base + score))
+    .min()
+}
+
+fn fuzzy_score(value: &str, query: &str) -> Option<usize> {
+    let value = value.to_ascii_lowercase();
+    if value == query {
+        return Some(0);
+    }
+    if value.starts_with(query) {
+        return Some(5);
+    }
+    if let Some(index) = value.find(query) {
+        return Some(15 + index);
+    }
+    subsequence_score(&value, query).map(|score| 50 + score)
+}
+
+fn subsequence_score(value: &str, query: &str) -> Option<usize> {
+    let mut score = 0usize;
+    let mut last_match: Option<usize> = None;
+    let mut search_from = 0usize;
+    for needle in query.chars() {
+        let relative = value[search_from..].find(needle)?;
+        let index = search_from + relative;
+        score += relative;
+        if let Some(last) = last_match {
+            score += index.saturating_sub(last + 1);
+        } else {
+            score += index;
+        }
+        last_match = Some(index);
+        search_from = index + needle.len_utf8();
+    }
+    Some(score)
 }
 
 pub fn read_document(roots: &SkillRoots, selector: &SkillSelector) -> TalosResult<SkillDocument> {
@@ -72,9 +127,10 @@ pub fn resolve(
     let mut warnings = Vec::new();
     let mut blocked_plain_names = HashSet::new();
     for selector in selected {
-        if let SkillSelector::Selection { name, .. } = selector {
-            if !name.trim().is_empty() {
-                blocked_plain_names.insert(name.clone());
+        if let (Some(name), Some(_)) = (selector.name.as_ref(), selector.path.as_ref()) {
+            let name = name.trim();
+            if !name.is_empty() {
+                blocked_plain_names.insert(name.to_string());
             }
         }
         match select_skill(roots, selector, true) {
@@ -116,10 +172,10 @@ pub(crate) fn select_skill(
         .skills
         .into_iter()
         .filter(|skill| !enabled_only || skill.enabled)
-        .filter(|skill| match selector {
-            SkillSelector::Selection { path, .. } => same_path(&skill.path, path),
-            SkillSelector::ByPath { path } => same_path(&skill.path, path),
-            SkillSelector::ByName { name } => skill.name == *name,
+        .filter(|skill| match (&selector.name, &selector.path) {
+            (_, Some(path)) => same_path(&skill.path, path),
+            (Some(name), None) => skill.name == *name,
+            (None, None) => false,
         })
         .collect::<Vec<_>>();
     if matches.is_empty() {

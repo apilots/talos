@@ -1,5 +1,4 @@
-use crate::{PluginManager, PluginStateStore};
-use talos_config::{PluginRootConfig as ConfigRoot, PluginSourceConfig, PluginsRuntimeConfig};
+use crate::test_support::{manager_with_state_path, write_skill};
 use talos_types::{MarketplaceSourceInput, PluginSourceAddRequest};
 
 #[test]
@@ -26,7 +25,7 @@ Alpha skill.
     run_git(&repo, ["commit", "-m", "add alpha skill"]);
     let url = format!("file://{}", repo.display());
 
-    let first_added = manager_with_state(temp.path().join("state-one"))
+    let first_added = manager_with_state_path(temp.path().join("state-one"))
         .add_source(PluginSourceAddRequest {
             source: MarketplaceSourceInput::Git {
                 url: url.clone(),
@@ -36,7 +35,7 @@ Alpha skill.
             refresh: true,
         })
         .expect("git source should refresh");
-    let second_added = manager_with_state(temp.path().join("state-two"))
+    let second_added = manager_with_state_path(temp.path().join("state-two"))
         .add_source(PluginSourceAddRequest {
             source: MarketplaceSourceInput::Git {
                 url,
@@ -55,22 +54,6 @@ Alpha skill.
         Some("skills/alpha")
     );
     assert!(first_added.plugins[0].source_commit.is_some());
-}
-
-fn manager_with_state(path: std::path::PathBuf) -> PluginManager {
-    PluginManager::with_state_store(
-        PluginsRuntimeConfig {
-            sources: Vec::<PluginSourceConfig>::new(),
-            roots: Vec::<ConfigRoot>::new(),
-        },
-        PluginStateStore::new(path),
-    )
-}
-
-fn write_skill(root: &std::path::Path, name: &str, contents: &str) {
-    let skill_dir = root.join(name);
-    std::fs::create_dir_all(&skill_dir).expect("skill dir should be created");
-    std::fs::write(skill_dir.join("SKILL.md"), contents).expect("skill file should be written");
 }
 
 fn run_git<const N: usize>(cwd: &std::path::Path, args: [&str; N]) {

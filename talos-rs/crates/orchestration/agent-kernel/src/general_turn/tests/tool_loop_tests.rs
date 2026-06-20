@@ -178,6 +178,7 @@ async fn test_run_general_turn_bash_then_task_output() {
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    configure_test_skill_root(&mut config, &workspace_dir);
     let mut ctx = build_ctx_with_stream(None);
 
     let result = run_general_turn(
@@ -190,6 +191,7 @@ async fn test_run_general_turn_bash_then_task_output() {
         tool_registry,
         memory_store,
         &config,
+        skill_options_from_config(&workspace_dir, &config),
     )
     .await
     .expect("general turn should succeed");
@@ -230,6 +232,7 @@ async fn test_run_general_turn_stops_on_pending_dynamic_tool_result() {
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    configure_test_skill_root(&mut config, &workspace_dir);
     let mut ctx = build_ctx_with_stream(None);
 
     let provider = Arc::new(DynamicLoopProvider::default());
@@ -243,6 +246,7 @@ async fn test_run_general_turn_stops_on_pending_dynamic_tool_result() {
         tool_registry,
         memory_store,
         &config,
+        skill_options_from_config(&workspace_dir, &config),
     )
     .await
     .expect("general turn should succeed");
@@ -277,6 +281,7 @@ async fn test_execute_general_turn_loop_uses_policy_step_hooks() {
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    configure_test_skill_root(&mut config, &workspace_dir);
     let provider = Arc::new(PolicyStepProvider::default());
     let policy = Arc::new(RecordingStepPolicy::default());
     let prepared = PreparedGeneralTurn {
@@ -356,6 +361,7 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    configure_test_skill_root(&mut config, &workspace_dir);
     let provider = Arc::new(DynamicResumeProvider::default());
     let prepared = PreparedGeneralTurn {
         session_id: "s1".to_string(),

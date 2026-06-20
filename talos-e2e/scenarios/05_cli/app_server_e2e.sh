@@ -10,7 +10,6 @@ build_binaries
 prepare_talos_home
 
 configure_cli_skills_fixture() {
-  local config_path="${TALOS_HOME}/conf/talos.yaml"
   local skill_root="${TALOS_HOME}/agents-skills/cli-review"
   mkdir -p "${skill_root}"
   cat >"${skill_root}/SKILL.md" <<'EOF'
@@ -21,31 +20,6 @@ description: Review from CLI smoke.
 
 CLI smoke skill.
 EOF
-
-  CONFIG_PATH="${config_path}" TALOS_HOME_PATH="${TALOS_HOME}" python3 - <<'PY'
-import json
-import os
-from pathlib import Path
-
-config_path = Path(os.environ["CONFIG_PATH"])
-talos_home = Path(os.environ["TALOS_HOME_PATH"])
-text = config_path.read_text()
-skills_block = (
-    "    skills:\n"
-    "      enabled: true\n"
-    "      max_skill_md_bytes: 65536\n"
-    "      max_available_summary_bytes: 8192\n"
-    "    plugins:\n"
-    "      roots:\n"
-    "        - kind: skill\n"
-    f"          path: {json.dumps(str(talos_home / 'agents-skills'))}\n"
-    "          read_only: true\n"
-)
-marker = '    planner_mode: "built_in"\n'
-if "    skills:\n" not in text:
-    text = text.replace(marker, skills_block + marker)
-config_path.write_text(text)
-PY
 }
 
 configure_cli_skills_fixture

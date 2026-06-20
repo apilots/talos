@@ -11,14 +11,14 @@ import {
 } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
 import { resolveProjectRecord } from "@/shared/types/domain";
-import type { ProtocolSkillSuggestion } from "@talos/sdk-browser";
+import type { SkillSuggestion } from "@talos/sdk-browser";
 
 interface HomeLocationState {
   initialDraft?: string;
-  initialSkills?: ProtocolSkillSuggestion[];
+  initialSkills?: SkillSuggestion[];
 }
 
-function initialSkillsState(skills: ProtocolSkillSuggestion[]) {
+function initialSkillsState(skills: SkillSuggestion[]) {
   return skills.length > 0 ? skills : undefined;
 }
 
@@ -36,7 +36,7 @@ export function ChatHomePage() {
   const connection = useAppStore((state) => state.connection);
   const setConnection = useAppStore((state) => state.setConnection);
   const [draft, setDraft] = useState(locationState?.initialDraft ?? "");
-  const [initialSkills] = useState<ProtocolSkillSuggestion[]>(locationState?.initialSkills ?? []);
+  const [initialSkills] = useState<SkillSuggestion[]>(locationState?.initialSkills ?? []);
   const [selectedModel, setSelectedModel] = useState<string | undefined>(models?.[0]?.id);
 
   const activeProject = useMemo(
@@ -63,7 +63,7 @@ export function ChatHomePage() {
     navigate(location.pathname, { replace: true, state: null });
   }, [location.pathname, locationState?.initialDraft, locationState?.initialSkills, navigate]);
 
-  async function handleStartDraft(initialPrompt?: string, skills: ProtocolSkillSuggestion[] = []) {
+  async function handleStartDraft(initialPrompt?: string, skills: SkillSuggestion[] = []) {
     const trimmed = initialPrompt?.trim();
     const sessionId = generateSessionId();
     navigate(`/sessions/${sessionId}`, {

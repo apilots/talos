@@ -5,7 +5,7 @@ use talos_prompt::{
     CompactionTrimUnitKind, PromptSectionKind, SessionHistoryCompactionOutcome,
     SessionHistoryCompactionTrigger,
 };
-use talos_skills::{SkillRoot, SkillRoots, SkillSelector};
+use talos_skills::SkillSelector;
 
 #[tokio::test]
 async fn test_prepare_general_turn_injects_selected_skill_prompt_context() {
@@ -21,15 +21,12 @@ async fn test_prepare_general_turn_injects_selected_skill_prompt_context() {
         "---\nname: review\ndescription: Review code changes.\n---\n\n# Review\n\nUse verified repository evidence.",
     )
     .expect("skill document should exist");
-    let roots = SkillRoots {
-        roots: vec![SkillRoot::configured(workspace_dir.join("skills"))],
-        state_path: workspace_dir
-            .join("plugins")
-            .join("skills")
-            .join("skills-state.json"),
-        max_skill_md_bytes: 64 * 1024,
-        max_available_summary_bytes: 8 * 1024,
-    };
+    let mut config = AgentKernelConfig::default();
+    config.plugins.roots = vec![talos_config::PluginRootConfig {
+        kind: talos_config::PluginRootKind::Skill,
+        path: workspace_dir.join("skills").to_string_lossy().to_string(),
+        read_only: true,
+    }];
     let mut ctx = build_ctx_with_stream(None);
 
     let prepared = prepare_general_turn(
@@ -40,14 +37,15 @@ async fn test_prepare_general_turn_injects_selected_skill_prompt_context() {
         provider,
         tool_registry.clone(),
         memory_store,
-        &AgentKernelConfig::default(),
-        Some(GeneralTurnSkillOptions {
-            selected: vec![SkillSelector::selection(
+        &config,
+        Some(skill_options_from_config_with_selected(
+            &workspace_dir,
+            &config,
+            vec![SkillSelector::selection(
                 "review",
                 skill_root.join("SKILL.md"),
             )],
-            roots: Some(roots),
-        }),
+        )),
     )
     .await
     .expect("turn should prepare with selected skill");
@@ -90,12 +88,12 @@ async fn test_prepare_general_turn_uses_configured_skill_prompt_budget() {
         .expect("skill document should exist");
     }
     let mut config = AgentKernelConfig::default();
+    config.skills.max_available_summary_bytes = 96;
     config.plugins.roots = vec![talos_config::PluginRootConfig {
         kind: talos_config::PluginRootKind::Skill,
-        path: skills_root.display().to_string(),
+        path: skills_root.to_string_lossy().to_string(),
         read_only: true,
     }];
-    config.skills.max_available_summary_bytes = 96;
     let mut ctx = build_ctx_with_stream(None);
 
     let prepared = prepare_general_turn(
@@ -107,7 +105,7 @@ async fn test_prepare_general_turn_uses_configured_skill_prompt_budget() {
         tool_registry.clone(),
         memory_store,
         &config,
-        None,
+        Some(skill_options_from_config(&workspace_dir, &config)),
     )
     .await
     .expect("turn should prepare with configured skill budget");
@@ -171,6 +169,7 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
 
     let mut config = AgentKernelConfig::default();
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    configure_test_skill_root(&mut config, &workspace_dir);
     config.prompt.bootstrap.enabled = false;
     config.prompt.window.compaction_buffer_tokens = 32;
     config.prompt.window.reserved_output_tokens =
@@ -191,7 +190,7 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
         tool_registry,
         memory_store.clone(),
         &config,
-        None,
+        Some(skill_options_from_config(&workspace_dir, &config)),
     )
     .await
     .expect("prompt prepare should succeed");
@@ -309,6 +308,7 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_reaches_
 
     let mut config = AgentKernelConfig::default();
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    configure_test_skill_root(&mut config, &workspace_dir);
     config.prompt.bootstrap.enabled = false;
     config.prompt.window.compaction_buffer_tokens = 32;
     config.prompt.window.reserved_output_tokens =
@@ -329,7 +329,7 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_reaches_
         tool_registry,
         memory_store,
         &config,
-        None,
+        Some(skill_options_from_config(&workspace_dir, &config)),
     )
     .await
     .expect("prompt prepare should succeed");
@@ -398,6 +398,7 @@ async fn test_run_general_turn_updates_compaction_state_to_recovery_after_succes
 
     let mut config = AgentKernelConfig::default();
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    configure_test_skill_root(&mut config, &workspace_dir);
     config.prompt.bootstrap.enabled = false;
     config.prompt.window.compaction_buffer_tokens = 32;
     config.prompt.window.reserved_output_tokens =
@@ -417,6 +418,7 @@ async fn test_run_general_turn_updates_compaction_state_to_recovery_after_succes
         tool_registry,
         memory_store,
         &config,
+        skill_options_from_config(&workspace_dir, &config),
     )
     .await
     .expect("general turn should succeed");
@@ -480,6 +482,7 @@ async fn test_prepare_general_turn_drops_sections_only_after_compaction_exhauste
 
     let mut config = AgentKernelConfig::default();
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    configure_test_skill_root(&mut config, &workspace_dir);
     config.prompt.bootstrap.enabled = false;
     config.prompt.window.compaction_buffer_tokens = 64;
     config.prompt.window.reserved_output_tokens =
@@ -498,7 +501,7 @@ async fn test_prepare_general_turn_drops_sections_only_after_compaction_exhauste
         tool_registry,
         memory_store,
         &config,
-        None,
+        Some(skill_options_from_config(&workspace_dir, &config)),
     )
     .await
     .expect("prompt prepare should succeed");
@@ -570,6 +573,7 @@ async fn test_prepare_general_turn_records_rejected_compaction_when_summary_is_m
 
     let mut config = AgentKernelConfig::default();
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    configure_test_skill_root(&mut config, &workspace_dir);
     config.prompt.bootstrap.enabled = false;
     config.prompt.window.compaction_buffer_tokens = 64;
     config.prompt.window.reserved_output_tokens =
@@ -588,7 +592,7 @@ async fn test_prepare_general_turn_records_rejected_compaction_when_summary_is_m
         tool_registry,
         memory_store,
         &config,
-        None,
+        Some(skill_options_from_config(&workspace_dir, &config)),
     )
     .await
     .expect("prompt prepare should succeed");
@@ -620,6 +624,7 @@ async fn test_prepare_general_turn_rejects_blocked_session_state() {
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    configure_test_skill_root(&mut config, &workspace_dir);
 
     let mut ctx = build_ctx_with_stream(None);
     ctx.session.state.insert(
@@ -638,7 +643,7 @@ async fn test_prepare_general_turn_rejects_blocked_session_state() {
         tool_registry,
         memory_store,
         &config,
-        None,
+        Some(skill_options_from_config(&workspace_dir, &config)),
     )
     .await
     .expect_err("blocked session should reject new execution");
@@ -669,6 +674,7 @@ async fn test_run_general_turn_blocks_session_when_budget_remains_exhausted() {
 
     let mut config = AgentKernelConfig::default();
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    configure_test_skill_root(&mut config, &workspace_dir);
     config.prompt.bootstrap.auto_create_missing_files = false;
     config.prompt.window.compaction_buffer_tokens = 8;
     config.prompt.window.reserved_output_tokens =
@@ -687,6 +693,7 @@ async fn test_run_general_turn_blocks_session_when_budget_remains_exhausted() {
         tool_registry,
         memory_store,
         &config,
+        skill_options_from_config(&workspace_dir, &config),
     )
     .await
     .expect_err("unrecoverable prompt budget should block the session");
@@ -747,6 +754,7 @@ async fn test_prepare_general_turn_uses_compacted_load_policy_during_recovery() 
     config.prompt.window.reserved_output_tokens =
         talos_config::ReservedOutputPolicy::Fixed { tokens: 512 };
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    configure_test_skill_root(&mut config, &workspace_dir);
 
     let mut normal_ctx = build_ctx_with_stream(None);
     normal_ctx.selected_model_info.context_window = 16_384;
@@ -759,7 +767,7 @@ async fn test_prepare_general_turn_uses_compacted_load_policy_during_recovery() 
         tool_registry.clone(),
         memory_store.clone(),
         &config,
-        None,
+        Some(skill_options_from_config(&workspace_dir, &config)),
     )
     .await
     .expect("normal prepare should succeed");
@@ -790,7 +798,7 @@ async fn test_prepare_general_turn_uses_compacted_load_policy_during_recovery() 
         tool_registry,
         memory_store,
         &config,
-        None,
+        Some(skill_options_from_config(&workspace_dir, &config)),
     )
     .await
     .expect("recovery prepare should succeed");

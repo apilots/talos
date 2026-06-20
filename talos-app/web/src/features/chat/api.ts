@@ -1,7 +1,7 @@
 import { TalosHttpError } from "@talos/sdk-browser";
 import type {
   ModelInfo,
-  ProtocolSkillSuggestion,
+  SkillSuggestion,
   ProjectRecord as ApiProjectRecord,
   SessionUpdate,
   TalosContext,
@@ -88,7 +88,7 @@ export function createInitialTurnRequest(
   text: string,
   model: string | undefined,
   project: ProjectRecord | undefined,
-  skills: ProtocolSkillSuggestion[] = [],
+  skills: SkillSuggestion[] = [],
 ): TalosMessageRequest {
   const input: TalosInputItem[] = [
     { type: "text", text },

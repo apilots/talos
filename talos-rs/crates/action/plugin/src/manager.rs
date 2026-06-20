@@ -1,23 +1,28 @@
 use crate::installer::{
+    commit_install_activation, commit_uninstall_activation, commit_update_activation,
     install_plugin, installed_plugin, installed_skill_root, missing_plugin_from_install,
-    uninstall_plugin, update_plugin, InstallCandidate,
+    rollback_install_activation, rollback_uninstall_activation, rollback_update_activation,
+    stage_uninstall_plugin, update_plugin, InstallCandidate,
 };
 use crate::scanner::{scan_source, scanned_at_ms};
 use crate::source::{config_source, source_from_input};
 use crate::state::SourceScanCacheFile;
 use crate::PluginStateStore;
+mod matchers;
+mod read;
+use matchers::{plugin_matches_list, plugin_matches_search};
 use std::collections::BTreeSet;
 use talos_config::{
     resolve_runtime_path, PluginRootKind as ConfigPluginRootKind, PluginsRuntimeConfig,
+    SkillsRuntimeConfig,
 };
 use talos_error::{TalosError, TalosResult};
-use talos_skills::{load_skill_state, save_skill_state, PluginSkillStateKey};
+use talos_skills::PluginSkillStateKey;
 use talos_types::{
     Plugin, PluginDisableRequest, PluginDisableResponse, PluginEnableRequest, PluginEnableResponse,
     PluginInstall, PluginInstallRequest, PluginInstallResponse, PluginInstallTarget,
-    PluginListRequest, PluginListResponse, PluginRootConfig, PluginRootKind,
-    PluginSearchRefreshPolicy, PluginSearchRequest, PluginSearchResponse, PluginSearchStatusFilter,
-    PluginSourceAddRequest, PluginSourceAddResponse, PluginSourceListRequest,
+    PluginListRequest, PluginListResponse, PluginSearchRefreshPolicy, PluginSearchRequest,
+    PluginSearchResponse, PluginSourceAddRequest, PluginSourceAddResponse, PluginSourceListRequest,
     PluginSourceListResponse, PluginSourceRefreshRequest, PluginSourceRefreshResponse,
     PluginSourceRemoveRequest, PluginSourceRemoveResponse, PluginStatus, PluginUninstallRequest,
     PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse, PluginWarning,
@@ -28,6 +33,7 @@ use talos_types::{
 pub struct PluginManager {
     state: PluginStateStore,
     config: PluginsRuntimeConfig,
+    max_skill_md_bytes: usize,
 }
 
 impl PluginManager {
@@ -35,22 +41,29 @@ impl PluginManager {
         Self {
             state: PluginStateStore::from_runtime_home(),
             config,
+            max_skill_md_bytes: SkillsRuntimeConfig::default().max_skill_md_bytes,
         }
     }
 
     pub fn with_state_store(config: PluginsRuntimeConfig, state: PluginStateStore) -> Self {
-        Self { state, config }
+        Self {
+            state,
+            config,
+            max_skill_md_bytes: SkillsRuntimeConfig::default().max_skill_md_bytes,
+        }
+    }
+
+    pub fn with_max_skill_md_bytes(mut self, max_skill_md_bytes: usize) -> Self {
+        self.max_skill_md_bytes = max_skill_md_bytes;
+        self
     }
 
     pub fn list_sources(
         &self,
-        request: PluginSourceListRequest,
+        _request: PluginSourceListRequest,
     ) -> TalosResult<PluginSourceListResponse> {
         let mut sources = self.config_sources();
         sources.extend(self.state.load_sources()?.sources);
-        if !request.include_disabled {
-            sources.retain(|source| source.enabled);
-        }
         sources.sort_by(|left, right| {
             left.source_type
                 .cmp(&right.source_type)
@@ -73,9 +86,7 @@ impl PluginManager {
         request: PluginSourceAddRequest,
     ) -> TalosResult<PluginSourceAddResponse> {
         let source = source_from_input(request.source)?;
-        let existing = self.list_sources(PluginSourceListRequest {
-            include_disabled: true,
-        })?;
+        let existing = self.list_sources(PluginSourceListRequest {})?;
         if existing.sources.iter().any(|item| item.id == source.id) {
             return Err(TalosError::Conflict(format!(
                 "plugin source `{}` already exists",
@@ -169,12 +180,7 @@ impl PluginManager {
     pub fn search(&self, request: PluginSearchRequest) -> TalosResult<PluginSearchResponse> {
         let mut plugins = Vec::new();
         let mut warnings = Vec::new();
-        for source in self
-            .list_sources(PluginSourceListRequest {
-                include_disabled: false,
-            })?
-            .sources
-        {
+        for source in self.list_sources(PluginSourceListRequest {})?.sources {
             if request
                 .source_id
                 .as_ref()
@@ -189,11 +195,28 @@ impl PluginManager {
                 PluginSearchRefreshPolicy::ForceRefresh => true,
             };
             let source_plugins = if should_refresh {
-                let refreshed = self.refresh_source(PluginSourceRefreshRequest {
+                match self.refresh_source(PluginSourceRefreshRequest {
                     source_id: source.id.clone(),
-                })?;
-                warnings.extend(refreshed.warnings);
-                refreshed.plugins
+                }) {
+                    Ok(refreshed) => {
+                        warnings.extend(refreshed.warnings);
+                        refreshed.plugins
+                    }
+                    Err(err) => {
+                        warnings.push(PluginWarning {
+                            code: PluginWarningCode::SourceRefreshFailed,
+                            message: format!(
+                                "failed to refresh plugin source `{}`: {err}",
+                                source.id.0
+                            ),
+                            kind: None,
+                            source_id: Some(source.id.clone()),
+                            path: None,
+                        });
+                        warnings.extend(cached.warnings);
+                        cached.plugins
+                    }
+                }
             } else {
                 warnings.extend(cached.warnings);
                 cached.plugins
@@ -258,13 +281,25 @@ impl PluginManager {
                 plugin_id.0
             )));
         }
-        let (_, install) = install_plugin(&self.state, candidate, request.conflict_policy)?;
-        let mut installs = self.state.load_installs()?;
+        let activation = install_plugin(&self.state, candidate, request.conflict_policy)?;
+        let install = activation.install.clone();
+        let previous_installs = self.state.load_installs()?;
+        let mut installs = previous_installs.clone();
         installs.installs.retain(|item| item.id != install.id);
         installs.installs.push(install.clone());
-        self.state.save_installs(&installs)?;
         let enabled = request.enable != Some(false);
-        self.set_install_enabled(&install, enabled)?;
+        if let Err(err) = self.state.save_installs(&installs) {
+            let _ = rollback_install_activation(&self.state, &activation);
+            return Err(err);
+        }
+        if let Err(err) = self.set_install_enabled(&install, enabled) {
+            let _ = rollback_install_activation(&self.state, &activation);
+            let _ = self.state.save_installs(&previous_installs);
+            return Err(err);
+        }
+        if let Err(err) = commit_install_activation(&activation) {
+            return Err(err);
+        }
         let plugin = self.plugin_for_install(&install, enabled);
         Ok(PluginInstallResponse { plugin, install })
     }
@@ -286,19 +321,24 @@ impl PluginManager {
                 install.id.0
             )));
         }
-        let (plugin, updated) = update_plugin(
+        let activation = update_plugin(
             &self.state,
             &install,
             candidate,
             request.conflict_policy,
             enabled,
         )?;
+        let updated = activation.install.clone();
         let mut installs = self.state.load_installs()?;
         installs.installs.retain(|item| item.id != updated.id);
         installs.installs.push(updated.clone());
-        self.state.save_installs(&installs)?;
+        if let Err(err) = self.state.save_installs(&installs) {
+            let _ = rollback_update_activation(&self.state, &activation);
+            return Err(err);
+        }
+        commit_update_activation(&activation)?;
         Ok(PluginUpdateResponse {
-            plugin,
+            plugin: activation.plugin,
             install: updated,
         })
     }
@@ -317,6 +357,7 @@ impl PluginManager {
     ) -> TalosResult<PluginUninstallResponse> {
         let mut installs = self.state.load_installs()?;
         let original_len = installs.installs.len();
+        let previous_installs = installs.clone();
         let removed_install = installs
             .installs
             .iter()
@@ -326,16 +367,32 @@ impl PluginManager {
             .installs
             .retain(|install| install.id != request.install_id);
         let removed_record = installs.installs.len() != original_len;
-        let removed_path = uninstall_plugin(&self.state, &request.install_id)?;
+        let previous_skill_state = if removed_install.is_some() {
+            Some(self.state.load_skill_state()?)
+        } else {
+            None
+        };
+        let activation = stage_uninstall_plugin(&self.state, &request.install_id)?;
         if removed_record {
-            self.state.save_installs(&installs)?;
+            if let Err(err) = self.state.save_installs(&installs) {
+                let _ = rollback_uninstall_activation(&self.state, &activation);
+                return Err(err);
+            }
             if let Some(install) = removed_install {
-                self.set_install_enabled(&install, true)?;
+                if let Err(err) = self.set_install_enabled(&install, true) {
+                    let _ = rollback_uninstall_activation(&self.state, &activation);
+                    let _ = self.state.save_installs(&previous_installs);
+                    if let Some(previous_skill_state) = previous_skill_state {
+                        let _ = self.state.save_skill_state(&previous_skill_state);
+                    }
+                    return Err(err);
+                }
             }
         }
+        commit_uninstall_activation(&activation)?;
         Ok(PluginUninstallResponse {
             install_id: request.install_id,
-            uninstalled: removed_record || removed_path,
+            uninstalled: removed_record || activation.removed_path,
         })
     }
 
@@ -404,35 +461,36 @@ impl PluginManager {
         })
     }
 
-    pub fn configured_skill_roots(&self) -> Vec<PluginRootConfig> {
+    pub fn skill_roots(
+        &self,
+        config: &SkillsRuntimeConfig,
+    ) -> TalosResult<talos_skills::SkillRoots> {
+        self.state.with_exclusive_lock("plugin.skill_roots", || {
+            self.state.cleanup_install_temps()?;
+            let mut roots = self.configured_skill_root_entries();
+            roots.extend(
+                self.state
+                    .load_installs()?
+                    .installs
+                    .iter()
+                    .filter_map(installed_skill_root),
+            );
+            Ok(talos_skills::SkillRoots {
+                roots,
+                state_path: self.state.skills_state_path(),
+                max_skill_md_bytes: config.max_skill_md_bytes,
+                max_available_summary_bytes: config.max_available_summary_bytes,
+            })
+        })
+    }
+
+    fn configured_skill_root_entries(&self) -> Vec<talos_skills::SkillRoot> {
         self.config
             .roots
             .iter()
             .filter(|root| root.kind == ConfigPluginRootKind::Skill && root.read_only)
-            .map(|root| PluginRootConfig {
-                kind: PluginRootKind::Skill,
-                path: resolve_runtime_path(&root.path),
-                read_only: true,
-            })
+            .map(|root| talos_skills::SkillRoot::configured(resolve_runtime_path(&root.path)))
             .collect()
-    }
-
-    pub fn installed_skill_roots(&self) -> TalosResult<Vec<talos_skills::SkillRoot>> {
-        self.state
-            .with_exclusive_lock("plugin.installed_skill_roots", || {
-                self.installed_skill_roots_locked()
-            })
-    }
-
-    fn installed_skill_roots_locked(&self) -> TalosResult<Vec<talos_skills::SkillRoot>> {
-        self.state.cleanup_install_temps()?;
-        Ok(self
-            .state
-            .load_installs()?
-            .installs
-            .iter()
-            .filter_map(installed_skill_root)
-            .collect())
     }
 
     fn config_sources(&self) -> Vec<talos_types::MarketplaceSource> {
@@ -466,12 +524,7 @@ impl PluginManager {
         &self,
         plugin_id: &talos_types::PluginId,
     ) -> TalosResult<InstallCandidate> {
-        for source in self
-            .list_sources(PluginSourceListRequest {
-                include_disabled: false,
-            })?
-            .sources
-        {
+        for source in self.list_sources(PluginSourceListRequest {})?.sources {
             let cache = self.state.load_source_scan_cache(&source.id)?;
             if let Some(plugin) = cache
                 .plugins
@@ -534,11 +587,7 @@ impl PluginManager {
     }
 
     fn find_cached_plugin(&self, plugin_id: &talos_types::PluginId) -> Option<Plugin> {
-        let sources = self
-            .list_sources(PluginSourceListRequest {
-                include_disabled: true,
-            })
-            .ok()?;
+        let sources = self.list_sources(PluginSourceListRequest {}).ok()?;
         for source in sources.sources {
             let Ok(cache) = self.state.load_source_scan_cache(&source.id) else {
                 continue;
@@ -555,20 +604,19 @@ impl PluginManager {
     }
 
     fn install_enabled(&self, install: &PluginInstall) -> TalosResult<bool> {
-        let state = load_skill_state(&self.state.skills_state_path())?;
+        let state = self.state.load_skill_state()?;
         Ok(!state.is_disabled(Some(&install_state_key(install))))
     }
 
     fn set_install_enabled(&self, install: &PluginInstall, enabled: bool) -> TalosResult<()> {
-        let path = self.state.skills_state_path();
-        let mut state = load_skill_state(&path)?;
+        let mut state = self.state.load_skill_state()?;
         let key = install_state_key(install);
         if enabled {
             state.enable(&key);
         } else {
             state.disable(key);
         }
-        save_skill_state(&path, &state)
+        self.state.save_skill_state(&state)
     }
 
     fn merge_installed_statuses(&self, plugins: &mut [Plugin]) -> TalosResult<()> {
@@ -697,75 +745,6 @@ fn plugins_with_source_commit(mut plugins: Vec<Plugin>, commit: Option<String>) 
         plugin.source_commit = commit.clone();
     }
     plugins
-}
-
-fn plugin_matches_search(plugin: &Plugin, request: &PluginSearchRequest) -> bool {
-    if request.kind.is_some_and(|kind| kind != plugin.kind) {
-        return false;
-    }
-    if !matches_status(plugin, request.status) {
-        return false;
-    }
-    if let Some(query) = request
-        .query
-        .as_deref()
-        .map(str::trim)
-        .filter(|query| !query.is_empty())
-    {
-        let query = query.to_lowercase();
-        return plugin.name.to_lowercase().contains(&query)
-            || plugin.description.to_lowercase().contains(&query);
-    }
-    true
-}
-
-fn matches_status(plugin: &Plugin, status: Option<PluginSearchStatusFilter>) -> bool {
-    match status.unwrap_or(PluginSearchStatusFilter::Any) {
-        PluginSearchStatusFilter::Any => true,
-        PluginSearchStatusFilter::NotInstalled => {
-            matches!(plugin.status, PluginStatus::NotInstalled)
-        }
-        PluginSearchStatusFilter::Installed => {
-            matches!(plugin.status, PluginStatus::Installed { .. })
-        }
-        PluginSearchStatusFilter::UpdateAvailable => {
-            matches!(plugin.status, PluginStatus::UpdateAvailable { .. })
-        }
-        PluginSearchStatusFilter::Conflict => {
-            matches!(plugin.status, PluginStatus::Conflict { .. })
-        }
-    }
-}
-
-fn plugin_matches_list(plugin: &Plugin, request: &PluginListRequest) -> bool {
-    if request
-        .source_id
-        .as_ref()
-        .is_some_and(|source_id| plugin.source_id.as_ref() != Some(source_id))
-    {
-        return false;
-    }
-    match request.status {
-        Some(talos_types::PluginListStatusFilter::Installed) => {
-            matches!(plugin.status, PluginStatus::Installed { enabled: true, .. })
-        }
-        Some(talos_types::PluginListStatusFilter::Disabled) => {
-            matches!(
-                plugin.status,
-                PluginStatus::Installed { enabled: false, .. }
-            )
-        }
-        Some(talos_types::PluginListStatusFilter::UpdateAvailable) => {
-            matches!(plugin.status, PluginStatus::UpdateAvailable { .. })
-        }
-        Some(talos_types::PluginListStatusFilter::SourceMissing) => {
-            matches!(plugin.status, PluginStatus::SourceMissing { .. })
-        }
-        Some(talos_types::PluginListStatusFilter::Conflict) => {
-            matches!(plugin.status, PluginStatus::Conflict { .. })
-        }
-        None => true,
-    }
 }
 
 fn install_state_key(install: &PluginInstall) -> PluginSkillStateKey {

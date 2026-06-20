@@ -15,16 +15,42 @@ pub(crate) struct InstallCandidate {
     pub source: MarketplaceSource,
 }
 
+pub(crate) struct InstallActivation {
+    pub install: PluginInstall,
+    backup_dir: Option<PathBuf>,
+}
+
+pub(crate) struct UpdateActivation {
+    pub plugin: Plugin,
+    pub install: PluginInstall,
+    backup_dir: Option<PathBuf>,
+}
+
+pub(crate) struct UninstallActivation {
+    pub removed_path: bool,
+    install_id: PluginInstallId,
+    trash_dir: PathBuf,
+}
+
 pub(crate) fn install_plugin(
     state: &PluginStateStore,
     candidate: InstallCandidate,
     conflict_policy: PluginInstallConflictPolicy,
-) -> TalosResult<(Plugin, PluginInstall)> {
+) -> TalosResult<InstallActivation> {
     ensure_skill_plugin(&candidate.plugin)?;
     let install_id = install_id_for(&candidate.plugin.id);
     let install_dir = state.install_dir(&install_id);
+    let backup_dir = state.install_backup_dir(&install_id);
     state.cleanup_install_temps()?;
-    if install_dir.exists() {
+    if backup_dir.exists() {
+        fs::remove_dir_all(&backup_dir).map_err(|err| {
+            TalosError::StorageError(format!(
+                "failed to clear plugin install backup dir `{}`: {err}",
+                backup_dir.display()
+            ))
+        })?;
+    }
+    let replace_existing = if install_dir.exists() {
         match conflict_policy {
             PluginInstallConflictPolicy::Reject => {
                 return Err(TalosError::Conflict(format!(
@@ -32,16 +58,11 @@ pub(crate) fn install_plugin(
                     install_id.0
                 )));
             }
-            PluginInstallConflictPolicy::Replace => {
-                fs::remove_dir_all(&install_dir).map_err(|err| {
-                    TalosError::StorageError(format!(
-                        "failed to replace plugin install `{}`: {err}",
-                        install_dir.display()
-                    ))
-                })?
-            }
+            PluginInstallConflictPolicy::Replace => true,
         }
-    }
+    } else {
+        false
+    };
 
     let temp_dir = state.install_temp_dir(&install_id);
     if temp_dir.exists() {
@@ -53,7 +74,20 @@ pub(crate) fn install_plugin(
         })?;
     }
     let file_manifest = materialize_install_dir(state, &candidate, &install_id, &temp_dir)?;
+    if replace_existing {
+        fs::rename(&install_dir, &backup_dir).map_err(|err| {
+            TalosError::StorageError(format!(
+                "failed to stage existing plugin install `{}` for replace: {err}",
+                install_dir.display()
+            ))
+        })?;
+    }
     fs::rename(&temp_dir, &install_dir).map_err(|err| {
+        let _ = if backup_dir.exists() {
+            fs::rename(&backup_dir, &install_dir)
+        } else {
+            Ok(())
+        };
         TalosError::StorageError(format!(
             "failed to activate plugin install `{}`: {err}",
             install_dir.display()
@@ -73,8 +107,50 @@ pub(crate) fn install_plugin(
         updated_at_ms: now_ms,
         file_manifest,
     };
-    let plugin = installed_plugin(candidate.plugin, &install, true);
-    Ok((plugin, install))
+    Ok(InstallActivation {
+        install,
+        backup_dir: backup_dir.exists().then_some(backup_dir),
+    })
+}
+
+pub(crate) fn commit_install_activation(activation: &InstallActivation) -> TalosResult<()> {
+    if let Some(backup_dir) = &activation.backup_dir {
+        if backup_dir.exists() {
+            fs::remove_dir_all(backup_dir).map_err(|err| {
+                TalosError::StorageError(format!(
+                    "failed to remove plugin install backup `{}`: {err}",
+                    backup_dir.display()
+                ))
+            })?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn rollback_install_activation(
+    state: &PluginStateStore,
+    activation: &InstallActivation,
+) -> TalosResult<()> {
+    let install_dir = state.install_dir(&activation.install.id);
+    if install_dir.exists() {
+        fs::remove_dir_all(&install_dir).map_err(|err| {
+            TalosError::StorageError(format!(
+                "failed to remove failed plugin install `{}`: {err}",
+                install_dir.display()
+            ))
+        })?;
+    }
+    if let Some(backup_dir) = &activation.backup_dir {
+        if backup_dir.exists() {
+            fs::rename(backup_dir, &install_dir).map_err(|err| {
+                TalosError::StorageError(format!(
+                    "failed to restore plugin install backup `{}`: {err}",
+                    backup_dir.display()
+                ))
+            })?;
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn update_plugin(
@@ -83,7 +159,7 @@ pub(crate) fn update_plugin(
     candidate: InstallCandidate,
     conflict_policy: PluginUpdateConflictPolicy,
     enabled: bool,
-) -> TalosResult<(Plugin, PluginInstall)> {
+) -> TalosResult<UpdateActivation> {
     ensure_skill_plugin(&candidate.plugin)?;
     if install.kind != candidate.plugin.kind || install.plugin_id != candidate.plugin.id {
         return Err(TalosError::Conflict(format!(
@@ -143,14 +219,6 @@ pub(crate) fn update_plugin(
             install_dir.display()
         ))
     })?;
-    if backup_dir.exists() {
-        fs::remove_dir_all(&backup_dir).map_err(|err| {
-            TalosError::StorageError(format!(
-                "failed to remove plugin update backup `{}`: {err}",
-                backup_dir.display()
-            ))
-        })?;
-    }
 
     let mut updated = install.clone();
     updated.name = candidate.plugin.name.clone();
@@ -160,24 +228,122 @@ pub(crate) fn update_plugin(
     updated.updated_at_ms = Utc::now().timestamp_millis();
     updated.file_manifest = file_manifest;
     let plugin = installed_plugin(candidate.plugin, &updated, enabled);
-    Ok((plugin, updated))
+    Ok(UpdateActivation {
+        plugin,
+        install: updated,
+        backup_dir: backup_dir.exists().then_some(backup_dir),
+    })
 }
 
-pub(crate) fn uninstall_plugin(
+pub(crate) fn commit_update_activation(activation: &UpdateActivation) -> TalosResult<()> {
+    if let Some(backup_dir) = &activation.backup_dir {
+        if backup_dir.exists() {
+            fs::remove_dir_all(backup_dir).map_err(|err| {
+                TalosError::StorageError(format!(
+                    "failed to remove plugin update backup `{}`: {err}",
+                    backup_dir.display()
+                ))
+            })?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn rollback_update_activation(
+    state: &PluginStateStore,
+    activation: &UpdateActivation,
+) -> TalosResult<()> {
+    let install_dir = state.install_dir(&activation.install.id);
+    if install_dir.exists() {
+        fs::remove_dir_all(&install_dir).map_err(|err| {
+            TalosError::StorageError(format!(
+                "failed to remove failed plugin update `{}`: {err}",
+                install_dir.display()
+            ))
+        })?;
+    }
+    if let Some(backup_dir) = &activation.backup_dir {
+        if backup_dir.exists() {
+            fs::rename(backup_dir, &install_dir).map_err(|err| {
+                TalosError::StorageError(format!(
+                    "failed to restore plugin update backup `{}`: {err}",
+                    backup_dir.display()
+                ))
+            })?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn stage_uninstall_plugin(
     state: &PluginStateStore,
     install_id: &PluginInstallId,
-) -> TalosResult<bool> {
+) -> TalosResult<UninstallActivation> {
     let path = state.install_dir(install_id);
-    if !path.exists() {
-        return Ok(false);
+    let trash_dir = state.install_trash_dir(install_id);
+    if trash_dir.exists() {
+        fs::remove_dir_all(&trash_dir).map_err(|err| {
+            TalosError::StorageError(format!(
+                "failed to clear plugin uninstall trash `{}`: {err}",
+                trash_dir.display()
+            ))
+        })?;
     }
-    fs::remove_dir_all(&path).map_err(|err| {
+    if !path.exists() {
+        return Ok(UninstallActivation {
+            removed_path: false,
+            install_id: install_id.clone(),
+            trash_dir,
+        });
+    }
+    fs::rename(&path, &trash_dir).map_err(|err| {
         TalosError::StorageError(format!(
-            "failed to remove plugin install `{}`: {err}",
+            "failed to stage plugin uninstall `{}`: {err}",
             path.display()
         ))
     })?;
-    Ok(true)
+    Ok(UninstallActivation {
+        removed_path: true,
+        install_id: install_id.clone(),
+        trash_dir,
+    })
+}
+
+pub(crate) fn commit_uninstall_activation(activation: &UninstallActivation) -> TalosResult<()> {
+    if activation.removed_path && activation.trash_dir.exists() {
+        fs::remove_dir_all(&activation.trash_dir).map_err(|err| {
+            TalosError::StorageError(format!(
+                "failed to remove plugin uninstall trash `{}`: {err}",
+                activation.trash_dir.display()
+            ))
+        })?;
+    }
+    Ok(())
+}
+
+pub(crate) fn rollback_uninstall_activation(
+    state: &PluginStateStore,
+    activation: &UninstallActivation,
+) -> TalosResult<()> {
+    if !activation.removed_path || !activation.trash_dir.exists() {
+        return Ok(());
+    }
+    let install_dir = state.install_dir(&activation.install_id);
+    if install_dir.exists() {
+        fs::remove_dir_all(&activation.trash_dir).map_err(|err| {
+            TalosError::StorageError(format!(
+                "failed to remove plugin uninstall trash `{}`: {err}",
+                activation.trash_dir.display()
+            ))
+        })?;
+        return Ok(());
+    }
+    fs::rename(&activation.trash_dir, &install_dir).map_err(|err| {
+        TalosError::StorageError(format!(
+            "failed to restore staged plugin uninstall `{}`: {err}",
+            activation.trash_dir.display()
+        ))
+    })
 }
 
 pub(crate) fn installed_skill_root(install: &PluginInstall) -> Option<talos_skills::SkillRoot> {
@@ -341,7 +507,7 @@ fn copy_dir(source: &Path, target: &Path) -> TalosResult<FileManifest> {
     Ok(FileManifest { files })
 }
 
-fn manifest_for_dir(root: &Path) -> TalosResult<FileManifest> {
+pub(crate) fn manifest_for_dir(root: &Path) -> TalosResult<FileManifest> {
     if !root.exists() {
         return Ok(FileManifest::default());
     }

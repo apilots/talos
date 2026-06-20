@@ -49,7 +49,7 @@ use self::misc::{
 };
 use self::plugin::{
     add_plugin_source_handler, disable_plugin_handler, enable_plugin_handler,
-    install_plugin_handler, list_plugin_sources_handler, list_plugins_handler,
+    install_plugin_handler, list_plugin_sources_handler, list_plugins_handler, read_plugin_handler,
     refresh_plugin_source_handler, remove_plugin_source_handler, search_plugins_handler,
     uninstall_plugin_handler, update_plugin_handler,
 };
@@ -217,6 +217,7 @@ impl HttpServer {
             )
             .route("/v1/plugin/search", post(search_plugins_handler))
             .route("/v1/plugin/list", post(list_plugins_handler))
+            .route("/v1/plugin/read", post(read_plugin_handler))
             .route("/v1/plugin/install", post(install_plugin_handler))
             .route("/v1/plugin/update", post(update_plugin_handler))
             .route("/v1/plugin/uninstall", post(uninstall_plugin_handler))

@@ -3,9 +3,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SkillsRuntimeConfig {
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-
     #[serde(default = "default_max_skill_md_bytes")]
     pub max_skill_md_bytes: usize,
 
@@ -16,15 +13,10 @@ pub struct SkillsRuntimeConfig {
 impl Default for SkillsRuntimeConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
             max_skill_md_bytes: default_max_skill_md_bytes(),
             max_available_summary_bytes: default_max_available_summary_bytes(),
         }
     }
-}
-
-fn default_true() -> bool {
-    true
 }
 
 fn default_max_skill_md_bytes() -> usize {

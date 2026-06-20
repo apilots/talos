@@ -13,12 +13,12 @@ import { createInitialTurnRequest } from "../api";
 import { applyActiveTurnSnapshot, applyStreamEvent, clearInactiveTurnSnapshot } from "../stream-events";
 import { useAppStore } from "@/shared/store/app-store";
 import type { PendingInput, ProjectRecord, SessionInputHistory, SessionInputHistoryItem } from "@/shared/types/ui";
-import type { ProtocolSkillSuggestion } from "@talos/sdk-browser";
+import type { SkillSuggestion } from "@talos/sdk-browser";
 
 interface SendTextOptions {
   model?: string;
   project?: ProjectRecord;
-  skills?: ProtocolSkillSuggestion[];
+  skills?: SkillSuggestion[];
 }
 
 export function useChatSession(

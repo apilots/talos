@@ -1,7 +1,7 @@
 use ratatui::text::Line;
 use talos_error::TalosResult;
 use talos_sdk::{
-    ModelInfo, ProtocolSkillSuggestion, SessionHistorySnapshot, TalosContentItem, TalosJsonValue,
+    ModelInfo, SessionHistorySnapshot, SkillSuggestion, TalosContentItem, TalosJsonValue,
     TalosSession, TimelineRecoverySnapshot,
 };
 
@@ -265,12 +265,12 @@ pub(crate) struct ChatSelection {
 #[derive(Debug, Clone)]
 pub(crate) struct QueuedMessage {
     pub(crate) text: String,
-    pub(crate) skills: Vec<ProtocolSkillSuggestion>,
+    pub(crate) skills: Vec<SkillSuggestion>,
     pub(crate) dispatch_attempts: u8,
 }
 
 impl QueuedMessage {
-    pub(crate) fn with_skills(text: String, skills: Vec<ProtocolSkillSuggestion>) -> Self {
+    pub(crate) fn with_skills(text: String, skills: Vec<SkillSuggestion>) -> Self {
         Self {
             text,
             skills,

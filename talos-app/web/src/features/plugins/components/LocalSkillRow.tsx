@@ -1,9 +1,9 @@
 import { Box, Check } from "lucide-react";
-import type { ProtocolSkillSummary } from "@talos/sdk-browser";
+import type { SkillSummary } from "@talos/sdk-browser";
 
 interface LocalSkillRowProps {
-  skill: ProtocolSkillSummary;
-  onOpen: (skill: ProtocolSkillSummary) => void;
+  skill: SkillSummary;
+  onOpen: (skill: SkillSummary) => void;
 }
 
 export function LocalSkillRow({ skill, onOpen }: LocalSkillRowProps) {

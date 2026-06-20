@@ -140,12 +140,12 @@ impl TuiApp {
                     self.skill_suggestions.clear();
                     return Ok(false);
                 }
-                KeyCode::Up | KeyCode::Char('k') => {
+                KeyCode::Up => {
                     self.skill_autocomplete_selected =
                         self.skill_autocomplete_selected.saturating_sub(1);
                     return Ok(false);
                 }
-                KeyCode::Down | KeyCode::Char('j') => {
+                KeyCode::Down => {
                     let max = self.skill_suggestions.len().saturating_sub(1);
                     if self.skill_autocomplete_selected < max {
                         self.skill_autocomplete_selected += 1;
@@ -255,6 +255,7 @@ impl TuiApp {
             }
             KeyCode::Left => {
                 self.cursor_index = self.cursor_index.saturating_sub(1);
+                self.refresh_skill_suggestions().await;
                 Ok(false)
             }
             KeyCode::Right => {
@@ -262,6 +263,7 @@ impl TuiApp {
                 if self.cursor_index < count {
                     self.cursor_index += 1;
                 }
+                self.refresh_skill_suggestions().await;
                 Ok(false)
             }
             KeyCode::Up => {
@@ -450,9 +452,9 @@ impl TuiApp {
             self.show_skill_autocomplete = false;
             return;
         };
-        self.input_buffer
-            .replace_range(trigger.start..trigger.end, &format!("${} ", skill.name));
-        self.cursor_index = self.input_buffer.chars().count();
+        let replacement = replace_skill_trigger(&self.input_buffer, &trigger, &skill.name);
+        self.input_buffer = replacement.value;
+        self.cursor_index = replacement.cursor_index;
         if !self
             .selected_skills
             .iter()
@@ -602,12 +604,26 @@ struct SkillTrigger {
     query: String,
 }
 
+struct SkillReplacement {
+    value: String,
+    cursor_index: usize,
+}
+
 fn active_skill_trigger(input: &str, cursor_index: usize) -> Option<SkillTrigger> {
-    if cursor_index != input.chars().count() {
+    if cursor_index > input.chars().count() {
         return None;
     }
+    let cursor_byte = byte_index_at_char(input, cursor_index);
+    if input[cursor_byte..]
+        .chars()
+        .next()
+        .is_some_and(is_skill_query_char)
+    {
+        return None;
+    }
+    let prefix = &input[..cursor_byte];
     let mut start = None;
-    for (idx, ch) in input.char_indices().rev() {
+    for (idx, ch) in prefix.char_indices().rev() {
         if ch == '$' {
             start = Some(idx);
             break;
@@ -623,16 +639,51 @@ fn active_skill_trigger(input: &str, cursor_index: usize) -> Option<SkillTrigger
             return None;
         }
     }
-    let query = &input[start + 1..];
-    if !query
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.')
-    {
+    let query = &prefix[start + 1..];
+    if !query.chars().all(is_skill_query_char) {
         return None;
     }
     Some(SkillTrigger {
         start,
-        end: input.len(),
+        end: cursor_byte,
         query: query.to_string(),
     })
+}
+
+fn replace_skill_trigger(
+    input: &str,
+    trigger: &SkillTrigger,
+    skill_name: &str,
+) -> SkillReplacement {
+    let before = &input[..trigger.start];
+    let after = &input[trigger.end..];
+    let prefix = if !before.is_empty()
+        && before
+            .chars()
+            .next_back()
+            .is_some_and(|ch| !ch.is_whitespace())
+    {
+        format!("{before} ")
+    } else {
+        before.to_string()
+    };
+    let token = format!("${skill_name}");
+    let suffix = if after.is_empty() {
+        " ".to_string()
+    } else if after.chars().next().is_some_and(char::is_whitespace) {
+        after.to_string()
+    } else {
+        format!(" {after}")
+    };
+    let cursor_index = prefix.chars().count()
+        + token.chars().count()
+        + usize::from(suffix.chars().next().is_some_and(char::is_whitespace));
+    SkillReplacement {
+        value: format!("{prefix}{token}{suffix}"),
+        cursor_index,
+    }
+}
+
+fn is_skill_query_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.'
 }

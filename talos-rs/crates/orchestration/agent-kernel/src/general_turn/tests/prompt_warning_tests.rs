@@ -69,6 +69,7 @@ async fn test_run_general_turn_emits_prompt_warning_event() {
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.auto_create_missing_files = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    configure_test_skill_root(&mut config, &workspace_dir);
     let mut ctx = build_ctx_with_stream(None);
 
     let result = run_general_turn(
@@ -81,6 +82,7 @@ async fn test_run_general_turn_emits_prompt_warning_event() {
         tool_registry,
         memory_store,
         &config,
+        skill_options_from_config(&workspace_dir, &config),
     )
     .await
     .expect("general turn should succeed");
@@ -109,6 +111,7 @@ async fn test_run_general_turn_streams_prompt_warning_event() {
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.auto_create_missing_files = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    configure_test_skill_root(&mut config, &workspace_dir);
     let (tx, mut rx) = mpsc::channel(16);
     let mut ctx = build_ctx_with_stream(Some(tx));
 
@@ -122,6 +125,7 @@ async fn test_run_general_turn_streams_prompt_warning_event() {
         tool_registry,
         memory_store,
         &config,
+        skill_options_from_config(&workspace_dir, &config),
     )
     .await
     .expect("general turn should succeed");

@@ -4,14 +4,16 @@ use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 use talos_sdk::{
     canonical_method, AppServerClient, AppServerClientConfig, EventSubscribeParams,
-    ExpectedFileVersion, ProjectPatch, ProtocolSkillSelector, SkillsResolveRequest,
-    SkillsSuggestRequest, TalosContext, TalosError, TalosInputItem, TalosMessageRequest,
-    TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta,
+    ExpectedFileVersion, ProjectPatch, TalosContext, TalosError, TalosInputItem,
+    TalosMessageRequest, TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta,
     TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItemKind,
     TimelineEventEnvelope, WorkspaceDocKind,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
+
+mod skills_e2e;
+use skills_e2e::{prepare_skills_fixture, skills_e2e};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -333,152 +335,6 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
         "missing dynamic tool result session should map to not found",
     )?;
 
-    Ok(())
-}
-
-async fn skills_e2e(client: &mut AppServerClient) -> Result<()> {
-    eprintln!("skills-e2e suggest");
-    let suggestions = client
-        .suggest_skills(SkillsSuggestRequest {
-            query: "localizer".to_string(),
-            limit: Some(8),
-        })
-        .await?;
-    let skill = suggestions
-        .data
-        .into_iter()
-        .find(|skill| skill.name == "e2e-localizer")
-        .ok_or_else(|| anyhow!("e2e-localizer skill was not suggested"))?;
-
-    eprintln!("skills-e2e resolve");
-    let resolved = client
-        .resolve_skills(SkillsResolveRequest {
-            text: "Use $e2e-localizer.".to_string(),
-            selected: vec![ProtocolSkillSelector {
-                name: Some(skill.name.clone()),
-                path: Some(skill.path.clone()),
-            }],
-        })
-        .await?;
-    if !resolved.warnings.is_empty() {
-        return Err(anyhow!(
-            "skills.resolve returned warnings: {:?}",
-            resolved.warnings
-        ));
-    }
-    if !resolved
-        .data
-        .iter()
-        .any(|candidate| candidate.path == skill.path)
-    {
-        return Err(anyhow!(
-            "skills.resolve did not include selected localizer skill"
-        ));
-    }
-
-    eprintln!("skills-e2e turn.start");
-    let session_id = new_session_id(client).await?;
-    client
-        .start_turn(
-            &session_id,
-            TalosMessageRequest {
-                input: vec![
-                    TalosInputItem::Text {
-                        text: concat!(
-                            "Use $e2e-localizer. Localize this source text: ",
-                            "\"The Skill chip opens the Plugin marketplace before the permission prompt appears.\" ",
-                            "Follow the selected skill output contract."
-                        )
-                        .to_string(),
-                    },
-                    TalosInputItem::SkillSelection {
-                        name: skill.name.clone(),
-                        path: skill.path.to_string_lossy().to_string(),
-                    },
-                ],
-                workspace_id: None,
-                context: Some(test_talos_context()),
-                model: std::env::var("TALOS_APP_SERVER_TEST_MODEL")
-                    .ok()
-                    .filter(|value| !value.trim().is_empty()),
-                project_id: None,
-                current_directory: None,
-            },
-            Some(format!(
-                "app-server-skills-{}",
-                uuid::Uuid::new_v4().simple()
-            )),
-        )
-        .await?;
-    eprintln!("skills-e2e event.subscribe");
-    let subscription = subscribe_events(client, &session_id).await?;
-    eprintln!("skills-e2e collect events");
-    let events = collect_until_terminal(client, &subscription.subscription_id).await?;
-    ensure_turn_event_flow(&events)?;
-    let output = assistant_text_from_events(&events);
-    eprintln!("skills-e2e assistant output:\n{output}");
-    assert_skill_localizer_output(&output)?;
-    Ok(())
-}
-
-fn assert_skill_localizer_output(output: &str) -> Result<()> {
-    for expected in [
-        "Skill: e2e-localizer",
-        "Translation:",
-        "技能标签",
-        "插件市场",
-        "权限提示",
-        "Terms:",
-        "Skill chip=技能标签",
-        "Plugin marketplace=插件市场",
-        "permission prompt=权限提示",
-        "Check: localized-by-skill",
-    ] {
-        if !output.contains(expected) {
-            return Err(anyhow!(
-                "skill localizer output missing `{expected}`; output={output:?}"
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn prepare_skills_fixture() -> Result<()> {
-    let talos_home = std::env::var("TALOS_HOME").context("TALOS_HOME is required")?;
-    let skill_root = std::path::Path::new(&talos_home)
-        .join("agents-skills")
-        .join("e2e-localizer");
-    std::fs::create_dir_all(&skill_root)
-        .with_context(|| format!("create skill fixture {}", skill_root.display()))?;
-    std::fs::write(
-        skill_root.join("SKILL.md"),
-        r#"---
-name: e2e-localizer
-description: Localize Talos UI release notes into Simplified Chinese with the E2E glossary.
-metadata:
-  author: talos-e2e
-  version: 1
-  argument-hint: source text
----
-
-When this skill is selected, localize the user's source text into Simplified Chinese.
-Use this glossary exactly:
-
-- Skill chip = 技能标签
-- Plugin marketplace = 插件市场
-- permission prompt = 权限提示
-
-Always answer with exactly these four lines:
-
-Skill: e2e-localizer
-Translation: <localized Chinese sentence using the glossary terms>
-Terms: Skill chip=技能标签; Plugin marketplace=插件市场; permission prompt=权限提示
-Check: localized-by-skill
-
-Do not answer with a generic acknowledgement.
-"#,
-    )
-    .with_context(|| format!("write skill fixture {}", skill_root.display()))?;
     Ok(())
 }
 

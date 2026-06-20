@@ -13,7 +13,7 @@ pub use prompt::{
     LocalSkillProvider, SkillPromptBudget, SkillPromptContext, SkillPromptInjection,
     SkillPromptRequest, SkillPromptWarning, SkillProvider,
 };
-pub use state::{load_skill_state, save_skill_state, PluginSkillStateKey, SkillState};
+pub use state::{load_skill_state, PluginSkillStateKey, SkillState};
 
 #[cfg(test)]
 mod tests {
@@ -129,6 +129,42 @@ Broken.
 
         assert_eq!(snapshot.skills.len(), 0);
         assert_eq!(snapshot.errors.len(), 2);
+    }
+
+    #[test]
+    fn suggest_supports_fuzzy_name_matching() {
+        let temp = tempfile::tempdir().expect("temp dir should be created");
+        let roots = test_roots(&temp);
+        write_skill(
+            &roots.roots[1].path,
+            "find-skills",
+            r#"---
+name: find-skills
+description: Discover and install agent skills.
+---
+
+Find skills.
+"#,
+        );
+        write_skill(
+            &roots.roots[1].path,
+            "documents",
+            r#"---
+name: documents
+description: Mentions fuzzy search in the description only.
+---
+
+Work with documents.
+"#,
+        );
+
+        let suggestions = suggest(&roots, "fs", 10).expect("skills should suggest fuzzy matches");
+
+        assert_eq!(
+            suggestions.first().map(|skill| skill.name.as_str()),
+            Some("find-skills")
+        );
+        assert!(suggestions.iter().any(|skill| skill.name == "find-skills"));
     }
 
     #[test]

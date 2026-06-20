@@ -560,7 +560,6 @@ SkillPromptContext {
 
 ```yaml
 skills:
-  enabled: true
   max_skill_md_bytes: 65536
   max_available_summary_bytes: 8192
 
@@ -576,7 +575,7 @@ plugins:
 
 配置规则：
 
-- `skills.enabled` 控制 Skills catalog / prompt injection 是否启用。
+- Skills 不提供全局关闭开关；正式路径始终启用 Skills catalog / prompt injection。
 - `plugins.roots` 是 Plugin Manager 统一维护的本地 plugin roots 配置数组。
 - `plugins.roots[*].kind = skill` 的只读 roots 会进入 Skills catalog，并使用 `SkillScope::External`。
 - `plugins.roots` 不代表 Talos lifecycle ownership；这些目录不支持 `plugin.update` / `plugin.uninstall` / `plugin.enable` / `plugin.disable`。

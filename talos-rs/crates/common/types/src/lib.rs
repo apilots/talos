@@ -14,6 +14,7 @@ pub mod plugin;
 pub mod runtime;
 pub mod schema;
 pub mod session;
+pub mod skills;
 pub mod talos;
 
 pub use file_api::*;
@@ -24,6 +25,7 @@ pub use model::*;
 pub use plugin::*;
 pub use runtime::*;
 pub use session::*;
+pub use skills::*;
 pub use talos::*;
 
 #[cfg(test)]

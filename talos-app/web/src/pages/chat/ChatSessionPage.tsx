@@ -19,17 +19,17 @@ import { ChatContextBar } from "@/widgets/chat-context-bar/ChatContextBar";
 import { Panel } from "@/shared/ui/Panel";
 import { Button } from "@/shared/ui/Button";
 import { ChatSessionReconnectPanel } from "./ChatSessionReconnectPanel";
-import type { ProtocolSkillSuggestion } from "@talos/sdk-browser";
+import type { SkillSuggestion } from "@talos/sdk-browser";
 
 interface SessionLocationState {
   initialPrompt?: string;
   initialModel?: string;
   initialProjectId?: string;
   initialProject?: ProjectRecord;
-  initialSkills?: ProtocolSkillSuggestion[];
+  initialSkills?: SkillSuggestion[];
 }
 
-function selectedSkillsOption(skills?: ProtocolSkillSuggestion[]) {
+function selectedSkillsOption(skills?: SkillSuggestion[]) {
   return skills && skills.length > 0 ? skills : undefined;
 }
 

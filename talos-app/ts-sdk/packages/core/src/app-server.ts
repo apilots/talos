@@ -133,7 +133,7 @@ export class AppServerClient {
   }
 
   listPluginSources(
-    params: AppProtocol.PluginSourceListRequest = { include_disabled: false },
+    params: AppProtocol.PluginSourceListRequest = {},
   ): Promise<AppProtocol.PluginSourceListResponse> {
     return this.transport.request("plugin.source.list", params);
   }
@@ -160,6 +160,10 @@ export class AppServerClient {
 
   listPlugins(params: AppProtocol.PluginListRequest): Promise<AppProtocol.PluginListResponse> {
     return this.transport.request("plugin.list", params);
+  }
+
+  readPlugin(params: AppProtocol.PluginReadRequest): Promise<AppProtocol.PluginReadResponse> {
+    return this.transport.request("plugin.read", params);
   }
 
   installPlugin(params: AppProtocol.PluginInstallRequest): Promise<AppProtocol.PluginInstallResponse> {
@@ -194,7 +198,7 @@ export class AppServerClient {
     return this.transport.request("skills.suggest", params);
   }
 
-  readSkill(params: AppProtocol.SkillsReadRequest): Promise<AppProtocol.ProtocolSkillDocument> {
+  readSkill(params: AppProtocol.SkillsReadRequest): Promise<AppProtocol.SkillDocument> {
     return this.transport.request("skills.read", params);
   }
 

@@ -9,36 +9,6 @@ load_env
 build_binaries
 prepare_talos_home
 
-configure_skills_roots() {
-  local config_path="${TALOS_HOME}/conf/talos.yaml"
-  CONFIG_PATH="${config_path}" TALOS_HOME_PATH="${TALOS_HOME}" python3 - <<'PY'
-import json
-import os
-from pathlib import Path
-
-config_path = Path(os.environ["CONFIG_PATH"])
-talos_home = Path(os.environ["TALOS_HOME_PATH"])
-text = config_path.read_text()
-skills_block = (
-    "    skills:\n"
-    "      enabled: true\n"
-    "      max_skill_md_bytes: 65536\n"
-    "      max_available_summary_bytes: 8192\n"
-    "    plugins:\n"
-    "      roots:\n"
-    "        - kind: skill\n"
-    f"          path: {json.dumps(str(talos_home / 'agents-skills'))}\n"
-    "          read_only: true\n"
-)
-marker = '    planner_mode: "built_in"\n'
-if "    skills:\n" not in text:
-    text = text.replace(marker, skills_block + marker)
-config_path.write_text(text)
-PY
-}
-
-configure_skills_roots
-
 export TALOS_APP_SERVER_BIN="${TALOS_RS_DIR}/target/debug/app-server"
 export TALOS_APP_SERVER_TEST_MODEL="${TALOS_APP_SERVER_TEST_MODEL:-qwen3.6-flash}"
 

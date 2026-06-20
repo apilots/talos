@@ -1,28 +1,62 @@
 use fs4::FileExt;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use talos_config::resolve_talos_home;
 use talos_error::{TalosError, TalosResult};
+use talos_skills::SkillState;
 use talos_types::{
     MarketplaceSource, MarketplaceSourceId, Plugin, PluginInstall, PluginInstallId, PluginWarning,
 };
 
+use crate::installer::manifest_for_dir;
+
 #[derive(Debug, Clone)]
 pub struct PluginStateStore {
     root: PathBuf,
+    #[cfg(test)]
+    fail_next_save_installs: Arc<AtomicBool>,
+    #[cfg(test)]
+    fail_next_save_skill_state: Arc<AtomicBool>,
 }
 
 impl PluginStateStore {
     pub fn from_runtime_home() -> Self {
         Self {
             root: resolve_talos_home().join("plugins"),
+            #[cfg(test)]
+            fail_next_save_installs: Arc::new(AtomicBool::new(false)),
+            #[cfg(test)]
+            fail_next_save_skill_state: Arc::new(AtomicBool::new(false)),
         }
     }
 
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            #[cfg(test)]
+            fail_next_save_installs: Arc::new(AtomicBool::new(false)),
+            #[cfg(test)]
+            fail_next_save_skill_state: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_next_save_installs(&self) {
+        self.fail_next_save_installs.store(true, Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_next_save_skill_state(&self) {
+        self.fail_next_save_skill_state
+            .store(true, Ordering::SeqCst);
     }
 
     pub fn sources_path(&self) -> PathBuf {
@@ -54,11 +88,21 @@ impl PluginStateStore {
             .join(format!(".backup-{}", install_id.0))
     }
 
+    pub fn install_trash_dir(&self, install_id: &PluginInstallId) -> PathBuf {
+        self.installs_dir().join(format!(".trash-{}", install_id.0))
+    }
+
     pub fn cleanup_install_temps(&self) -> TalosResult<()> {
         let installs_dir = self.installs_dir();
         if !installs_dir.exists() {
             return Ok(());
         }
+        let installs_by_id = self
+            .load_installs()?
+            .installs
+            .into_iter()
+            .map(|install| (install.id.0.clone(), install))
+            .collect::<HashMap<_, _>>();
         for entry in fs::read_dir(&installs_dir).map_err(|err| {
             TalosError::StorageError(format!(
                 "failed to read plugin installs dir `{}`: {err}",
@@ -73,13 +117,32 @@ impl PluginStateStore {
             })?;
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
-            if path.is_dir() && (name.starts_with(".tmp-") || name.starts_with(".backup-")) {
-                fs::remove_dir_all(&path).map_err(|err| {
-                    TalosError::StorageError(format!(
-                        "failed to remove plugin transaction dir `{}`: {err}",
-                        path.display()
-                    ))
-                })?;
+            if path.is_dir() && name.starts_with(".trash-") {
+                let install_id = name.trim_start_matches(".trash-");
+                let install_dir = installs_dir.join(install_id);
+                if installs_by_id.contains_key(install_id) {
+                    restore_transaction_dir(&path, &install_dir, "plugin uninstall trash")?;
+                } else {
+                    remove_transaction_dir(&path, "plugin uninstall trash")?;
+                }
+                continue;
+            }
+            if path.is_dir() && name.starts_with(".backup-") {
+                let install_id = name.trim_start_matches(".backup-");
+                let install_dir = installs_dir.join(install_id);
+                if let Some(install) = installs_by_id.get(install_id) {
+                    if install_dir_matches_record(&install_dir, install)? {
+                        remove_transaction_dir(&path, "plugin install backup")?;
+                    } else {
+                        restore_transaction_dir(&path, &install_dir, "plugin install backup")?;
+                    }
+                } else {
+                    remove_transaction_dir(&path, "plugin install backup")?;
+                }
+                continue;
+            }
+            if path.is_dir() && name.starts_with(".tmp-") {
+                remove_transaction_dir(&path, "plugin install temp")?;
             }
         }
         Ok(())
@@ -132,6 +195,23 @@ impl PluginStateStore {
         self.root.join("skills").join("skills-state.json")
     }
 
+    pub fn load_skill_state(&self) -> TalosResult<SkillState> {
+        read_json_or_default(&self.skills_state_path())
+    }
+
+    pub fn save_skill_state(&self, state: &SkillState) -> TalosResult<()> {
+        #[cfg(test)]
+        if self
+            .fail_next_save_skill_state
+            .swap(false, Ordering::SeqCst)
+        {
+            return Err(TalosError::StorageError(
+                "injected plugin skill state save failure".to_string(),
+            ));
+        }
+        write_json_atomic(&self.skills_state_path(), state)
+    }
+
     pub fn marketplace_cache_dir(&self, source_id: &MarketplaceSourceId) -> PathBuf {
         self.root
             .join("cache")
@@ -157,6 +237,12 @@ impl PluginStateStore {
     }
 
     pub fn save_installs(&self, installs: &PluginInstallsFile) -> TalosResult<()> {
+        #[cfg(test)]
+        if self.fail_next_save_installs.swap(false, Ordering::SeqCst) {
+            return Err(TalosError::StorageError(
+                "injected plugin installs save failure".to_string(),
+            ));
+        }
         write_json_atomic(&self.installs_path(), installs)
     }
 
@@ -187,6 +273,41 @@ impl PluginStateStore {
             ))
         })
     }
+}
+
+fn install_dir_matches_record(install_dir: &Path, install: &PluginInstall) -> TalosResult<bool> {
+    if !install_dir.exists() {
+        return Ok(false);
+    }
+    let skill_dir = install_dir.join("skills").join(&install.name);
+    Ok(manifest_for_dir(&skill_dir)? == install.file_manifest)
+}
+
+fn restore_transaction_dir(source: &Path, target: &Path, label: &str) -> TalosResult<()> {
+    if target.exists() {
+        fs::remove_dir_all(target).map_err(|err| {
+            TalosError::StorageError(format!(
+                "failed to remove stale plugin install dir `{}` before restoring {label}: {err}",
+                target.display()
+            ))
+        })?;
+    }
+    fs::rename(source, target).map_err(|err| {
+        TalosError::StorageError(format!(
+            "failed to restore {label} `{}` to `{}`: {err}",
+            source.display(),
+            target.display()
+        ))
+    })
+}
+
+fn remove_transaction_dir(path: &Path, label: &str) -> TalosResult<()> {
+    fs::remove_dir_all(path).map_err(|err| {
+        TalosError::StorageError(format!(
+            "failed to remove {label} dir `{}`: {err}",
+            path.display()
+        ))
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

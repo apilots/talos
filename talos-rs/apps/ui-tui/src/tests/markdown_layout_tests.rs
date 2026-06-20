@@ -234,23 +234,23 @@ async fn test_skill_autocomplete_keyboard_selects_structured_skill() {
     app.cursor_index = 1;
     app.show_skill_autocomplete = true;
     app.skill_suggestions = vec![
-        ProtocolSkillSuggestion {
+        SkillSuggestion {
             name: "browser".to_string(),
             description: "Control the in-app browser with Codex".to_string(),
             short_description: None,
             root: PathBuf::from("/tmp/skills/browser"),
             path: PathBuf::from("/tmp/skills/browser/SKILL.md"),
-            scope: talos_sdk::ProtocolSkillScope::Plugin,
+            scope: talos_sdk::SkillScope::Plugin,
             source_plugin: Some("browser".to_string()),
             source_install: Some("install_browser".to_string()),
         },
-        ProtocolSkillSuggestion {
+        SkillSuggestion {
             name: "web-design-guidelines".to_string(),
             description: "Review UI code for Web Interface Guidelines compliance".to_string(),
             short_description: None,
             root: PathBuf::from("/tmp/skills/web-design-guidelines"),
             path: PathBuf::from("/tmp/skills/web-design-guidelines/SKILL.md"),
-            scope: talos_sdk::ProtocolSkillScope::External,
+            scope: talos_sdk::SkillScope::External,
             source_plugin: None,
             source_install: None,
         },
@@ -273,6 +273,75 @@ async fn test_skill_autocomplete_keyboard_selects_structured_skill() {
         PathBuf::from("/tmp/skills/web-design-guidelines/SKILL.md")
     );
     assert!(!app.show_skill_autocomplete);
+}
+
+#[tokio::test]
+async fn test_skill_autocomplete_inserts_body_selection_with_spacing() {
+    let mut app = create_app_server_app();
+    app.input_buffer = "please use $br now".to_string();
+    app.cursor_index = 14;
+    app.show_skill_autocomplete = true;
+    app.skill_suggestions = vec![SkillSuggestion {
+        name: "browser".to_string(),
+        description: "Control the in-app browser with Codex".to_string(),
+        short_description: None,
+        root: PathBuf::from("/tmp/skills/browser"),
+        path: PathBuf::from("/tmp/skills/browser/SKILL.md"),
+        scope: talos_sdk::SkillScope::Plugin,
+        source_plugin: Some("browser".to_string()),
+        source_install: Some("install_browser".to_string()),
+    }];
+
+    let _ = app
+        .handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .unwrap();
+
+    assert_eq!(app.input_buffer, "please use $browser now");
+    assert_eq!(app.cursor_index, 20);
+    assert_eq!(app.selected_skills.len(), 1);
+    assert_eq!(app.selected_skills[0].name, "browser");
+}
+
+#[tokio::test]
+async fn test_skill_autocomplete_allows_query_chars_k_and_j() {
+    let mut app = create_app_server_app();
+    app.input_buffer = "$find-s".to_string();
+    app.cursor_index = app.input_buffer.chars().count();
+    app.show_skill_autocomplete = true;
+    app.skill_suggestions = vec![SkillSuggestion {
+        name: "find-skills".to_string(),
+        description: "Find installable skills".to_string(),
+        short_description: None,
+        root: PathBuf::from("/tmp/skills/find-skills"),
+        path: PathBuf::from("/tmp/skills/find-skills/SKILL.md"),
+        scope: talos_sdk::SkillScope::External,
+        source_plugin: None,
+        source_install: None,
+    }];
+
+    let _ = app
+        .handle_input(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE))
+        .await
+        .unwrap();
+    let _ = app
+        .handle_input(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE))
+        .await
+        .unwrap();
+    let _ = app
+        .handle_input(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE))
+        .await
+        .unwrap();
+    let _ = app
+        .handle_input(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE))
+        .await
+        .unwrap();
+    let _ = app
+        .handle_input(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE))
+        .await
+        .unwrap();
+
+    assert_eq!(app.input_buffer, "$find-skills");
 }
 
 #[tokio::test]

@@ -1,13 +1,13 @@
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FileText, Loader2, X } from "lucide-react";
-import type { ProtocolSkillSummary } from "@talos/sdk-browser";
+import type { SkillSummary } from "@talos/sdk-browser";
 
 import { readSkillDocument } from "@/features/plugins/api";
 import { MarkdownRenderer } from "@/widgets/message-list/MarkdownRenderer";
 
 interface SkillDocumentDialogProps {
-  skill: ProtocolSkillSummary | null;
+  skill: SkillSummary | null;
   onClose: () => void;
 }
 
@@ -15,7 +15,7 @@ export function SkillDocumentDialog({ skill, onClose }: SkillDocumentDialogProps
   const documentQuery = useQuery({
     enabled: Boolean(skill),
     queryKey: ["talos", "skills", "document", skill?.path],
-    queryFn: () => readSkillDocument(skill as ProtocolSkillSummary),
+    queryFn: () => readSkillDocument(skill as SkillSummary),
   });
 
   useEffect(() => {
@@ -40,7 +40,12 @@ export function SkillDocumentDialog({ skill, onClose }: SkillDocumentDialogProps
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-ink/28 px-6 py-8 backdrop-blur-[2px]">
-      <button aria-label="Close skill document" className="absolute inset-0 cursor-default" onClick={onClose} />
+      <button
+        aria-label="Close skill document backdrop"
+        className="absolute inset-0 cursor-default"
+        onClick={onClose}
+        type="button"
+      />
       <section className="relative flex max-h-[86vh] w-full max-w-[860px] flex-col overflow-hidden rounded-[1.1rem] border border-border bg-background shadow-[0_24px_80px_rgba(34,28,20,0.22)]">
         <header className="flex items-start justify-between gap-4 border-b border-border px-6 py-5">
           <div className="flex min-w-0 items-start gap-3">
@@ -50,13 +55,15 @@ export function SkillDocumentDialog({ skill, onClose }: SkillDocumentDialogProps
             <div className="min-w-0">
               <h2 className="truncate text-lg font-semibold text-ink">{title}</h2>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted">
-                <span className="rounded-full bg-card px-2 py-0.5 capitalize">{skill.scope}</span>
+                <span className="rounded-full bg-card px-2 py-0.5">
+                  {scopeLabel(skill)}
+                </span>
                 <span className="min-w-0 truncate">{skill.path}</span>
               </div>
             </div>
           </div>
           <button
-            aria-label="Close"
+            aria-label="Close skill document"
             className="flex size-9 shrink-0 items-center justify-center rounded-[0.7rem] text-muted transition hover:bg-card hover:text-ink"
             onClick={onClose}
             type="button"
@@ -103,4 +110,14 @@ function stripFrontmatter(contents: string) {
     return contents;
   }
   return contents.slice(end + 4).trimStart();
+}
+
+function scopeLabel(skill: SkillSummary) {
+  if (skill.scope === "plugin") {
+    return "User";
+  }
+  if (skill.read_only) {
+    return "Extension";
+  }
+  return "User";
 }

@@ -427,6 +427,7 @@
         "plugin.source.remove",
         "plugin.search",
         "plugin.list",
+        "plugin.read",
         "plugin.install",
         "plugin.update",
         "plugin.uninstall",
@@ -1301,6 +1302,24 @@
             },
             "params": {
               "$ref": "#/definitions/PluginListRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "plugin.read"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/PluginReadRequest"
             }
           },
           "required": [
@@ -2313,6 +2332,17 @@
       ],
       "type": "string"
     },
+    "PluginReadRequest": {
+      "properties": {
+        "plugin_id": {
+          "$ref": "#/definitions/PluginId"
+        }
+      },
+      "required": [
+        "plugin_id"
+      ],
+      "type": "object"
+    },
     "PluginSearchRefreshPolicy": {
       "enum": [
         "cache_only",
@@ -2402,12 +2432,6 @@
       "type": "object"
     },
     "PluginSourceListRequest": {
-      "properties": {
-        "include_disabled": {
-          "default": false,
-          "type": "boolean"
-        }
-      },
       "type": "object"
     },
     "PluginSourceRefreshRequest": {
@@ -2527,25 +2551,6 @@
       "required": [
         "project_id"
       ],
-      "type": "object"
-    },
-    "ProtocolSkillSelector": {
-      "properties": {
-        "name": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "path": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
       "type": "object"
     },
     "ProtocolVersion": {
@@ -3040,6 +3045,25 @@
       ],
       "type": "object"
     },
+    "SkillSelector": {
+      "properties": {
+        "name": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "SkillsListRequest": {
       "properties": {
         "include_disabled": {
@@ -3052,7 +3076,7 @@
     "SkillsReadRequest": {
       "properties": {
         "selector": {
-          "$ref": "#/definitions/ProtocolSkillSelector"
+          "$ref": "#/definitions/SkillSelector"
         }
       },
       "required": [
@@ -3068,7 +3092,7 @@
         "selected": {
           "default": [],
           "items": {
-            "$ref": "#/definitions/ProtocolSkillSelector"
+            "$ref": "#/definitions/SkillSelector"
           },
           "type": "array"
         },
@@ -3104,8 +3128,6 @@
         "tool_round_limit",
         "waiting_dynamic_input",
         "transfer_unresolved",
-        "before_model_callback_stopped",
-        "after_model_callback_stopped",
         "cancelled"
       ],
       "type": "string"

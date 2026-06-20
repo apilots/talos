@@ -7,8 +7,6 @@ pub(crate) fn to_api_stop_reason(reason: StopReason) -> TalosApiStopReason {
         StopReason::ToolRoundLimit => TalosApiStopReason::ToolRoundLimit,
         StopReason::WaitingDynamicInput => TalosApiStopReason::WaitingDynamicInput,
         StopReason::TransferUnresolved => TalosApiStopReason::TransferUnresolved,
-        StopReason::BeforeModelCallbackStopped => TalosApiStopReason::BeforeModelCallbackStopped,
-        StopReason::AfterModelCallbackStopped => TalosApiStopReason::AfterModelCallbackStopped,
     }
 }
 

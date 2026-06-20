@@ -11,7 +11,7 @@ pub(crate) use std::path::PathBuf;
 use std::sync::Mutex;
 use talos_error::TalosError;
 pub(crate) use talos_sdk::{
-    ProtocolSkillSuggestion, SessionHistorySnapshot, StopReason, TalosContentItem, TalosInputItem,
+    SessionHistorySnapshot, SkillSuggestion, StopReason, TalosContentItem, TalosInputItem,
     TalosMessageRequest, TalosTimelineContent, TalosTimelineDelta, TalosTimelineEvent,
     TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItem, TalosTimelineItemKind,
     TalosTimelineItemStatus, TalosTimelinePhase, TimelineActiveTurnSnapshot,
@@ -563,7 +563,7 @@ impl GatewayClient for MockGatewayClient {
         Ok(state.models.clone())
     }
 
-    async fn suggest_skills(&self, _query: &str) -> TalosResult<Vec<ProtocolSkillSuggestion>> {
+    async fn suggest_skills(&self, _query: &str) -> TalosResult<Vec<SkillSuggestion>> {
         Ok(Vec::new())
     }
 
