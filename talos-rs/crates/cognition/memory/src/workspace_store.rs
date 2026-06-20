@@ -1,7 +1,7 @@
 use talos_error::{TalosError, TalosResult};
-use tokio::fs::{self, OpenOptions};
-use tokio::io::AsyncWriteExt;
+use tokio::fs;
 
+use crate::file;
 use crate::retrieval;
 use crate::store::{MemoryStore, WorkspaceMemoryRecord};
 
@@ -84,17 +84,7 @@ pub(crate) async fn append_workspace_memory(
         return Ok(());
     }
 
-    let dir = store.workspace_memory_dir();
-    fs::create_dir_all(&dir)
-        .await
-        .map_err(|e| TalosError::StorageError(format!("create workspace memory dir: {}", e)))?;
     let file_path = store.workspace_memory_file_for(record.timestamp);
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(file_path)
-        .await
-        .map_err(|e| TalosError::StorageError(format!("open workspace memory file: {}", e)))?;
     let payload = format!(
         "## [{}] {}\nsession: {}\n\n{}\n\n",
         record
@@ -105,9 +95,7 @@ pub(crate) async fn append_workspace_memory(
         record.session_id,
         body
     );
-    file.write_all(payload.as_bytes())
-        .await
-        .map_err(|e| TalosError::StorageError(format!("append workspace memory file: {}", e)))?;
+    file::append_string(&file_path, payload).await?;
     retrieval::rebuild_file_index_for_timestamp(store, record.timestamp).await?;
     Ok(())
 }

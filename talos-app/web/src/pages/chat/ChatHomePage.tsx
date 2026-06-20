@@ -90,30 +90,28 @@ export function ChatHomePage() {
         <h1 className="mb-8 text-center text-[26px] font-semibold tracking-tight text-ink">
           {t("chat:startPromptTitle")}
         </h1>
-        <div className="space-y-2">
-          <ChatComposer
-            activeProjectId={activeProject?.id ?? activeProjectId}
-            disabled={false}
-            draft={draft}
-            isStreaming={false}
-            models={(models ?? []).map((model) => ({ id: model.id, name: model.name }))}
-            onCreateProject={handleCreateProject}
-            onDraftChange={setDraft}
-            initialSelectedSkills={initialSkills}
-            onModelChange={setSelectedModel}
-            onProjectChange={setActiveProjectId}
-            onRuntimeModeChange={(mode) => {
-              if (mode === "local") {
-                setConnection({ runtimeMode: mode });
-              }
-            }}
-            onSend={(skills) => handleStartDraft(draft, skills)}
-            projects={projects}
-            runtimeMode={connection.runtimeMode}
-            selectedModel={selectedModel}
-            showProjectSelector
-          />
-        </div>
+        <ChatComposer
+          activeProjectId={activeProject?.id ?? activeProjectId}
+          disabled={false}
+          draft={draft}
+          isStreaming={false}
+          models={(models ?? []).map((model) => ({ id: model.id, name: model.name }))}
+          onCreateProject={handleCreateProject}
+          onDraftChange={setDraft}
+          initialSelectedSkills={initialSkills}
+          onModelChange={setSelectedModel}
+          onProjectChange={setActiveProjectId}
+          onRuntimeModeChange={(mode) => {
+            if (mode === "local") {
+              setConnection({ runtimeMode: mode });
+            }
+          }}
+          onSend={(skills) => handleStartDraft(draft, skills)}
+          projects={projects}
+          runtimeMode={connection.runtimeMode}
+          selectedModel={selectedModel}
+          showProjectSelector
+        />
       </div>
     </div>
   );

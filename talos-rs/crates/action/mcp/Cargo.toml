@@ -1,0 +1,27 @@
+[package]
+name = "talos-mcp"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+rmcp = { workspace = true, features = [
+    "base64",
+    "client",
+    "macros",
+    "transport-child-process",
+    "transport-streamable-http-client-reqwest",
+] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+talos-error = { workspace = true }
+talos-types = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "process", "sync", "time"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

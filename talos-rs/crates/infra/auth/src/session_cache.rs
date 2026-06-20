@@ -1,10 +1,9 @@
-use std::fs::{self, OpenOptions};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use talos_error::{TalosError, TalosResult};
+use talos_fs::{FileLock, FilePermissions, WriteOptions};
 use ts_rs::TS;
 
 use crate::{AuthResponse, UserDto, UserRole};
@@ -12,7 +11,8 @@ use crate::{AuthResponse, UserDto, UserRole};
 const SCHEMA_VERSION: u32 = 1;
 const CACHE_RELATIVE_PATH: &[&str] = &["auth", "cloud-session.json"];
 const LOCK_EXTENSION: &str = "lock";
-const FILE_PERMISSIONS: u32 = 0o600;
+const FILE_PERMISSION_MODE: u32 = 0o600;
+const FILE_PERMISSIONS: FilePermissions = FilePermissions::unix(FILE_PERMISSION_MODE);
 
 pub const DEFAULT_CLOUD_SESSION_IDLE_TIMEOUT_MS: i64 = 15 * 24 * 60 * 60 * 1000;
 pub const DEFAULT_CLOUD_SESSION_TOUCH_INTERVAL_MS: i64 = 24 * 60 * 60 * 1000;
@@ -205,16 +205,8 @@ impl CloudSessionCache {
     }
 
     pub fn load_candidate(&self, now_ms: i64) -> TalosResult<Option<CloudSessionCacheEntry>> {
-        let content = match fs::read_to_string(&self.path) {
-            Ok(content) => content,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(err) => {
-                return Err(TalosError::StorageError(format!(
-                    "read cloud session cache {}: {}",
-                    self.path.display(),
-                    err
-                )))
-            }
+        let Some(content) = talos_fs::read_optional_to_string(&self.path)? else {
+            return Ok(None);
         };
         let entry: CloudSessionCacheEntry = serde_json::from_str(&content).map_err(|err| {
             TalosError::SerializationError(format!(
@@ -241,8 +233,12 @@ impl CloudSessionCache {
                 "cloud session cache access token is empty".to_string(),
             ));
         }
-        let _lock = CacheLock::acquire(&lock_path(&self.path))?;
-        write_cache_file(&self.path, entry)
+        let _lock = acquire_cache_lock(&lock_path(&self.path))?;
+        talos_fs::write_json_pretty_with(
+            &self.path,
+            entry,
+            WriteOptions::default().with_permissions(FILE_PERMISSIONS),
+        )
     }
 
     pub fn touch(&self, now_ms: i64) -> TalosResult<Option<CloudSessionCacheEntry>> {
@@ -271,16 +267,8 @@ impl CloudSessionCache {
     }
 
     pub fn clear(&self) -> TalosResult<()> {
-        let _lock = CacheLock::acquire(&lock_path(&self.path))?;
-        match fs::remove_file(&self.path) {
-            Ok(()) => Ok(()),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(err) => Err(TalosError::StorageError(format!(
-                "remove cloud session cache {}: {}",
-                self.path.display(),
-                err
-            ))),
-        }
+        let _lock = acquire_cache_lock(&lock_path(&self.path))?;
+        talos_fs::remove_file(&self.path)
     }
 
     pub fn now_ms() -> i64 {
@@ -292,44 +280,13 @@ impl CloudSessionCache {
     }
 }
 
-struct CacheLock {
-    path: PathBuf,
-}
-
-impl CacheLock {
-    fn acquire(path: &Path) -> TalosResult<Self> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|err| {
-                TalosError::StorageError(format!(
-                    "create cloud session cache lock dir {}: {}",
-                    parent.display(),
-                    err
-                ))
-            })?;
-        }
-        match OpenOptions::new().write(true).create_new(true).open(path) {
-            Ok(_) => Ok(Self {
-                path: path.to_path_buf(),
-            }),
-            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-                Err(TalosError::Conflict(format!(
-                    "cloud session cache lock already exists: {}",
-                    path.display()
-                )))
-            }
-            Err(err) => Err(TalosError::StorageError(format!(
-                "create cloud session cache lock {}: {}",
-                path.display(),
-                err
-            ))),
-        }
-    }
-}
-
-impl Drop for CacheLock {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
-    }
+fn acquire_cache_lock(path: &Path) -> TalosResult<FileLock> {
+    talos_fs::try_lock_exclusive(path)?.ok_or_else(|| {
+        TalosError::Conflict(format!(
+            "cloud session cache lock already exists: {}",
+            path.display()
+        ))
+    })
 }
 
 fn lock_path(path: &Path) -> PathBuf {
@@ -338,79 +295,10 @@ fn lock_path(path: &Path) -> PathBuf {
     lock_path
 }
 
-fn write_cache_file(path: &Path, entry: &CloudSessionCacheEntry) -> TalosResult<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|err| {
-            TalosError::StorageError(format!(
-                "create cloud session cache dir {}: {}",
-                parent.display(),
-                err
-            ))
-        })?;
-    }
-    let payload = serde_json::to_vec_pretty(entry).map_err(|err| {
-        TalosError::SerializationError(format!("serialize cloud session cache: {err}"))
-    })?;
-    let temp_path = path.with_extension("tmp");
-    {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(&temp_path)
-            .map_err(|err| {
-                TalosError::StorageError(format!(
-                    "open cloud session cache temp {}: {}",
-                    temp_path.display(),
-                    err
-                ))
-            })?;
-        file.write_all(&payload).map_err(|err| {
-            TalosError::StorageError(format!(
-                "write cloud session cache temp {}: {}",
-                temp_path.display(),
-                err
-            ))
-        })?;
-        file.sync_all().map_err(|err| {
-            TalosError::StorageError(format!(
-                "sync cloud session cache temp {}: {}",
-                temp_path.display(),
-                err
-            ))
-        })?;
-    }
-    set_permissions(&temp_path)?;
-    fs::rename(&temp_path, path).map_err(|err| {
-        TalosError::StorageError(format!(
-            "replace cloud session cache {}: {}",
-            path.display(),
-            err
-        ))
-    })?;
-    Ok(())
-}
-
-#[cfg(unix)]
-fn set_permissions(path: &Path) -> TalosResult<()> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(FILE_PERMISSIONS)).map_err(|err| {
-        TalosError::StorageError(format!(
-            "set cloud session cache permission {}: {}",
-            path.display(),
-            err
-        ))
-    })
-}
-
-#[cfg(not(unix))]
-fn set_permissions(_path: &Path) -> TalosResult<()> {
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     fn test_entry(now_ms: i64) -> CloudSessionCacheEntry {
         CloudSessionCacheEntry {
@@ -618,6 +506,6 @@ mod tests {
         cache.store(&test_entry(1_000_000)).unwrap();
 
         let mode = fs::metadata(cache.path()).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, FILE_PERMISSIONS);
+        assert_eq!(mode, FILE_PERMISSION_MODE);
     }
 }

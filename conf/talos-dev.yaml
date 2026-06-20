@@ -62,6 +62,23 @@ agent:
           path: "~/.codex/skills"
           read_only: true
     planner_mode: "built_in"
+    mcp:
+      servers:
+        - name: "playwright"
+          transport:
+            type: "stdio"
+            command: "npx"
+            args:
+              - "-y"
+              - "@playwright/mcp@latest"
+              - "--headless"
+              - "--isolated"
+              - "--viewport-size"
+              - "1280x900"
+              - "--executable-path"
+              - "${TALOS_PLAYWRIGHT_MCP_BROWSER}"
+              - "--output-dir"
+              - "${TALOS_PLAYWRIGHT_MCP_E2E_OUTPUT}"
     prompt:
       window:
         reserved_output_tokens:

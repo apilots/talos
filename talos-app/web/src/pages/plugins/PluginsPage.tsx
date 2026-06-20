@@ -1,27 +1,15 @@
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
-import type { Plugin, SkillSuggestion, SkillSummary } from "@talos/sdk-browser";
+import { useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import type { SkillSuggestion, SkillSummary } from "@talos/sdk-browser";
 
 import { AddPluginMarketplaceDialog } from "@/features/plugins/components/AddPluginMarketplaceDialog";
-import {
-  addMarketplaceSource,
-  disableSkillPlugin,
-  enableSkillPlugin,
-  installSkillPlugin,
-  listManagedSkillPlugins,
-  listSkills,
-  searchSkillPlugins,
-  uninstallSkillPlugin,
-  updateSkillPlugin,
-} from "@/features/plugins/api";
+import { AllPluginsManagementView } from "@/features/plugins/components/AllPluginsManagementView";
+import { McpPluginsManagementView } from "@/features/plugins/components/McpPluginsManagementView";
 import { PluginCatalogActions } from "@/features/plugins/components/PluginCatalogActions";
 import { PluginCatalogSearch } from "@/features/plugins/components/PluginCatalogSearch";
 import { PluginCatalogTabs } from "@/features/plugins/components/PluginCatalogTabs";
-import { PluginDocumentDialog } from "@/features/plugins/components/PluginDocumentDialog";
-import { PluginManagementPanel } from "@/features/plugins/components/PluginManagementPanel";
-import { SkillDocumentDialog } from "@/features/plugins/components/SkillDocumentDialog";
-import { SkillsCatalogList } from "@/features/plugins/components/SkillsCatalogList";
+import { SkillPluginsManagementView } from "@/features/plugins/components/SkillPluginsManagementView";
+import { addMarketplaceSource, listSkills } from "@/features/plugins/api";
 import type { PluginsCatalogTab } from "@/features/plugins/types";
 
 const CREATE_SKILL_DRAFT =
@@ -31,43 +19,18 @@ const CREATE_PLUGIN_DRAFT =
 
 export function PluginsPage() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<PluginsCatalogTab>("plugins");
+  const location = useLocation();
+  const locationState = location.state as { initialTab?: PluginsCatalogTab } | null;
+  const [tab, setTab] = useState<PluginsCatalogTab>(locationState?.initialTab ?? "plugins");
   const [query, setQuery] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [marketplaceOpen, setMarketplaceOpen] = useState(false);
-  const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null);
-  const [selectedPlugin, setSelectedPlugin] = useState<Plugin | null>(null);
-  const [actionPluginId, setActionPluginId] = useState<string | null>(null);
-  const skillsQuery = useQuery({
-    queryKey: ["talos", "skills", "catalog"],
-    queryFn: () => listSkills(true),
-  });
-  const installedPluginsQuery = useQuery({
-    enabled: tab === "plugins",
-    queryKey: ["talos", "plugins", "installed", "skills"],
-    queryFn: listManagedSkillPlugins,
-  });
-  const marketplaceQuery = useQuery({
-    enabled: tab === "plugins",
-    queryKey: ["talos", "plugins", "skills", "search", query],
-    queryFn: () => searchSkillPlugins(query, "refresh_stale"),
-  });
-  const skills = useMemo(
-    () => filterSkills(skillsQuery.data?.data ?? [], query),
-    [query, skillsQuery.data?.data],
-  );
-  const marketplacePlugins = useMemo(
-    () => marketplaceQuery.data?.plugins ?? [],
-    [marketplaceQuery.data?.plugins],
-  );
-  const installedPlugins = useMemo(
-    () => installedPluginsQuery.data?.plugins ?? [],
-    [installedPluginsQuery.data?.plugins],
-  );
+  const [refreshVersion, setRefreshVersion] = useState(0);
 
-  function createSkill() {
+  async function createSkill() {
     setMenuOpen(false);
-    const creator = findSkillCreator(skillsQuery.data?.data ?? []);
+    const skills = await listSkills(true);
+    const creator = findSkillCreator(skills.data);
     navigate("/", {
       state: {
         initialDraft: creator ? "" : CREATE_SKILL_DRAFT,
@@ -86,34 +49,13 @@ export function PluginsPage() {
     setMarketplaceOpen(true);
   }
 
-  async function refresh() {
-    if (tab !== "skills") {
-      await Promise.all([
-        installedPluginsQuery.refetch(),
-        searchSkillPlugins(query, "force_refresh").then(() => marketplaceQuery.refetch()),
-      ]);
-      return;
-    }
-    await skillsQuery.refetch();
+  function refresh() {
+    setRefreshVersion((version) => version + 1);
   }
 
   async function submitMarketplace(input: { source: string; gitRef: string; sparsePaths: string }) {
     await addMarketplaceSource(input);
-    void marketplaceQuery.refetch();
-  }
-
-  async function runPluginAction(plugin: Plugin, action: (plugin: Plugin) => Promise<unknown>) {
-    setActionPluginId(plugin.id);
-    try {
-      await action(plugin);
-      await Promise.all([
-        installedPluginsQuery.refetch(),
-        marketplaceQuery.refetch(),
-        skillsQuery.refetch(),
-      ]);
-    } finally {
-      setActionPluginId(null);
-    }
+    refresh();
   }
 
   return (
@@ -122,14 +64,8 @@ export function PluginsPage() {
         <div className="flex items-start justify-between gap-4">
           <div>
             <PluginCatalogTabs activeTab={tab} onTabChange={setTab} />
-            <h1 className="font-display text-[34px] font-semibold tracking-tight">
-              {tab === "plugins" ? "Plugins" : "Skills"}
-            </h1>
-            <p className="mt-1 text-[15px] text-muted">
-              {tab === "plugins"
-                ? "Extend Talos with packaged integrations and reusable capabilities."
-                : "Extend Talos with task-specific instruction bundles."}
-            </p>
+            <h1 className="font-display text-[34px] font-semibold tracking-tight">{pageTitle(tab)}</h1>
+            <p className="mt-1 text-[15px] text-muted">{pageDescription(tab)}</p>
           </div>
           <PluginCatalogActions
             activeTab={tab}
@@ -143,25 +79,11 @@ export function PluginsPage() {
         </div>
         <PluginCatalogSearch onQueryChange={setQuery} query={query} />
         {tab === "plugins" ? (
-          <PluginManagementPanel
-            actionPluginId={actionPluginId}
-            installedPlugins={installedPlugins}
-            loading={installedPluginsQuery.isLoading || marketplaceQuery.isLoading}
-            marketplacePlugins={marketplacePlugins}
-            onDisable={(plugin) => void runPluginAction(plugin, disableSkillPlugin)}
-            onEnable={(plugin) => void runPluginAction(plugin, enableSkillPlugin)}
-            onInstall={(plugin) => void runPluginAction(plugin, installSkillPlugin)}
-            onOpen={setSelectedPlugin}
-            onUninstall={(plugin) => void runPluginAction(plugin, uninstallSkillPlugin)}
-            onUpdate={(plugin) => void runPluginAction(plugin, updateSkillPlugin)}
-            warnings={warningMessages(marketplaceQuery.data?.warnings ?? [])}
-          />
+          <AllPluginsManagementView query={query} refreshVersion={refreshVersion} />
+        ) : tab === "skills" ? (
+          <SkillPluginsManagementView query={query} refreshVersion={refreshVersion} />
         ) : (
-          <SkillsCatalogList
-            loading={skillsQuery.isLoading && skills.length === 0}
-            onSkillOpen={setSelectedSkill}
-            skills={skills}
-          />
+          <McpPluginsManagementView query={query} refreshVersion={refreshVersion} />
         )}
       </div>
       <AddPluginMarketplaceDialog
@@ -169,27 +91,30 @@ export function PluginsPage() {
         onSubmit={submitMarketplace}
         open={marketplaceOpen}
       />
-      <PluginDocumentDialog onClose={() => setSelectedPlugin(null)} plugin={selectedPlugin} />
-      <SkillDocumentDialog onClose={() => setSelectedSkill(null)} skill={selectedSkill} />
     </div>
   );
 }
 
-function filterSkills(skills: SkillSummary[], query: string) {
-  const needle = query.trim().toLowerCase();
-  if (!needle) {
-    return skills;
+function pageTitle(tab: PluginsCatalogTab) {
+  switch (tab) {
+    case "skills":
+      return "Skills";
+    case "mcp":
+      return "MCP";
+    case "plugins":
+      return "Plugins";
   }
-  return skills.filter((skill) =>
-    [skill.name, skill.description, skill.short_description ?? "", skill.source_plugin ?? ""]
-      .join(" ")
-      .toLowerCase()
-      .includes(needle),
-  );
 }
 
-function warningMessages(warnings: Array<{ message: string }>) {
-  return warnings.map((warning) => warning.message);
+function pageDescription(tab: PluginsCatalogTab) {
+  switch (tab) {
+    case "skills":
+      return "Manage skill plugins that provide task-specific instruction bundles.";
+    case "mcp":
+      return "Manage MCP server plugins that expose model-callable tools.";
+    case "plugins":
+      return "Manage all installed and marketplace plugin capabilities.";
+  }
 }
 
 function findSkillCreator(skills: SkillSummary[]) {

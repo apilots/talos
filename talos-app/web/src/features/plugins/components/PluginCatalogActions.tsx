@@ -24,6 +24,7 @@ export function PluginCatalogActions({
   return (
     <div className="relative flex items-center gap-2">
       <button
+        aria-label="Open plugin actions"
         className="inline-flex h-9 items-center gap-1 rounded-full border border-border/80 bg-card px-3 text-sm text-ink shadow-sm transition hover:border-brand/35"
         onClick={() => onMenuOpenChange(!menuOpen)}
         type="button"
@@ -32,6 +33,7 @@ export function PluginCatalogActions({
         <ChevronDown size={14} />
       </button>
       <button
+        aria-label="Refresh plugins"
         className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border/80 bg-card text-muted shadow-sm transition hover:border-brand/35 hover:text-ink"
         onClick={() => void onRefresh()}
         type="button"
@@ -41,7 +43,7 @@ export function PluginCatalogActions({
       {menuOpen ? (
         <div className="absolute right-0 top-11 z-20 w-56 rounded-[1rem] border border-border/80 bg-card p-1.5 shadow-[0_18px_36px_rgba(35,32,28,0.14)]">
           {activeTab === "skills" ? (
-            <SkillsMenu onCreateSkill={onCreateSkill} />
+            <SkillsMenu onAddMarketplace={onAddMarketplace} onCreateSkill={onCreateSkill} />
           ) : (
             <PluginsMenu onAddMarketplace={onAddMarketplace} onCreatePlugin={onCreatePlugin} />
           )}
@@ -51,7 +53,13 @@ export function PluginCatalogActions({
   );
 }
 
-function SkillsMenu({ onCreateSkill }: { onCreateSkill: () => Promise<void> | void }) {
+function SkillsMenu({
+  onAddMarketplace,
+  onCreateSkill,
+}: {
+  onAddMarketplace: () => void;
+  onCreateSkill: () => Promise<void> | void;
+}) {
   return (
     <>
       <button
@@ -69,6 +77,14 @@ function SkillsMenu({ onCreateSkill }: { onCreateSkill: () => Promise<void> | vo
       >
         <CircleDot size={15} />
         Record a skill
+      </button>
+      <button
+        className="flex w-full items-center gap-2 rounded-[0.8rem] px-3 py-2 text-left text-sm text-ink transition hover:bg-background/80"
+        onClick={onAddMarketplace}
+        type="button"
+      >
+        <Box size={15} />
+        Add marketplace
       </button>
     </>
   );

@@ -195,6 +195,79 @@ Use this skill to translate text.
 }
 
 #[test]
+fn installs_mcp_plugin_and_controls_runtime_capabilities() {
+    let temp = tempfile::tempdir().expect("temp dir should exist");
+    let repo = temp.path().join("repo");
+    let mcp_dir = repo.join("mcp").join("playwright");
+    std::fs::create_dir_all(&mcp_dir).expect("MCP dir should exist");
+    std::fs::write(
+        mcp_dir.join("talos-mcp.json"),
+        r#"{
+  "name": "playwright",
+  "description": "Browser automation MCP server.",
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["@playwright/mcp@latest"]
+  }
+}"#,
+    )
+    .expect("MCP manifest should be written");
+    let state = PluginStateStore::new(temp.path().join("state"));
+    let manager = manager_with_state(state);
+    let added = manager
+        .add_source(PluginSourceAddRequest {
+            source: MarketplaceSourceInput::LocalFolder {
+                path: repo,
+                sparse_paths: vec!["mcp".to_string()],
+            },
+            refresh: true,
+        })
+        .expect("MCP source should add");
+    let plugin = added.plugins[0].clone();
+
+    let installed = manager
+        .install(PluginInstallRequest {
+            target: PluginInstallTarget::Plugin {
+                plugin_id: plugin.id.clone(),
+                expected_source_commit: None,
+            },
+            enable: Some(true),
+            conflict_policy: PluginInstallConflictPolicy::Reject,
+        })
+        .expect("MCP plugin should install");
+
+    assert!(installed.install.exposed_skill_root.is_none());
+    assert_eq!(installed.install.exposed_mcp_servers.len(), 1);
+    let servers = manager.mcp_servers().expect("MCP servers should list");
+    assert_eq!(servers.len(), 1);
+    assert_eq!(servers[0].server.name, "playwright");
+
+    manager
+        .disable(PluginDisableRequest {
+            install_id: installed.install.id.clone(),
+        })
+        .expect("MCP plugin should disable");
+    assert!(manager
+        .mcp_servers()
+        .expect("MCP servers should list")
+        .is_empty());
+
+    manager
+        .enable(PluginEnableRequest {
+            install_id: installed.install.id,
+        })
+        .expect("MCP plugin should enable");
+    assert_eq!(
+        manager
+            .mcp_servers()
+            .expect("MCP servers should list")
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn update_rejects_local_changes_and_replace_updates_install() {
     let temp = tempfile::tempdir().expect("temp dir should exist");
     let fixture = PluginFixture::new(

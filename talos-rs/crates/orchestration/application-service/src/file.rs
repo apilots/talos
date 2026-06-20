@@ -34,7 +34,17 @@ where
 {
     let lock = registry.lock_for(path.display().to_string()).await;
     let _guard = lock.lock().await;
-    fut.await
+    let lock_path = lock_path_for(path);
+    let file_lock = tokio::task::spawn_blocking(move || talos_fs::lock_exclusive(&lock_path))
+        .await
+        .map_err(|err| TalosError::StorageError(format!("join file lock task: {err}")))??;
+    let result = fut.await;
+    let unlock_result = file_lock.unlock();
+    match (result, unlock_result) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(err), _) => Err(err),
+        (Ok(_), Err(err)) => Err(err),
+    }
 }
 
 pub fn workspace_root(config: &TalosConfig) -> PathBuf {
@@ -107,31 +117,20 @@ pub fn validate_expected_version(
 }
 
 pub async fn write_atomic(path: &Path, content: &str) -> TalosResult<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).await.map_err(|err| {
-            TalosError::StorageError(format!("create dir {}: {}", parent.display(), err))
-        })?;
-    }
+    let path = path.to_path_buf();
+    let content = content.to_string();
+    tokio::task::spawn_blocking(move || talos_fs::write_string(&path, &content))
+        .await
+        .map_err(|err| TalosError::StorageError(format!("join file write task: {err}")))?
+}
 
-    let temp_path = path.with_extension(format!(
-        "{}.tmp-{}",
-        path.extension()
-            .and_then(|value| value.to_str())
-            .unwrap_or("tmp"),
-        uuid::Uuid::new_v4()
-    ));
-    fs::write(&temp_path, content).await.map_err(|err| {
-        TalosError::StorageError(format!("write temp file {}: {}", temp_path.display(), err))
-    })?;
-    fs::rename(&temp_path, path).await.map_err(|err| {
-        TalosError::StorageError(format!(
-            "replace file {} from {}: {}",
-            path.display(),
-            temp_path.display(),
-            err
-        ))
-    })?;
-    Ok(())
+fn lock_path_for(path: &Path) -> PathBuf {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| format!("{value}.lock"))
+        .unwrap_or_else(|| "lock".to_string());
+    path.with_extension(extension)
 }
 
 #[cfg(test)]

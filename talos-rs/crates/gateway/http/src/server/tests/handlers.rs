@@ -474,7 +474,7 @@ Use this skill for protocol contract verification.
     )
     .await
     .expect("HTTP plugin source add should succeed");
-    assert_eq!(added.0.plugins[0].name, "contract-skill");
+    assert_eq!(added.0.plugins[0].metadata.name, "contract-skill");
     assert!(added.0.warnings.is_empty());
 
     let adapter = TalosApplicationAdapter::new(state.app.clone(), 32);
@@ -497,7 +497,10 @@ Use this skill for protocol contract verification.
         .await
         .expect("app-server plugin search should use shared service");
 
-    assert_eq!(app_server_search["plugins"][0]["name"], "contract-skill");
+    assert_eq!(
+        app_server_search["plugins"][0]["metadata"]["name"],
+        "contract-skill"
+    );
     assert_eq!(
         app_server_search["warnings"].as_array().map(Vec::len),
         Some(0)

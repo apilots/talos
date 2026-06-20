@@ -3,10 +3,10 @@ use talos_error::TalosResult;
 use talos_plugin::PluginManager;
 use talos_skills::SkillRoots;
 use talos_types::{
-    PluginDisableRequest, PluginDisableResponse, PluginEnableRequest, PluginEnableResponse,
-    PluginInstallRequest, PluginInstallResponse, PluginListRequest, PluginListResponse,
-    PluginReadRequest, PluginReadResponse, PluginSearchRequest, PluginSearchResponse,
-    PluginSourceAddRequest, PluginSourceAddResponse, PluginSourceListRequest,
+    McpServerRuntimeDescriptor, PluginDisableRequest, PluginDisableResponse, PluginEnableRequest,
+    PluginEnableResponse, PluginInstallRequest, PluginInstallResponse, PluginListRequest,
+    PluginListResponse, PluginReadRequest, PluginReadResponse, PluginSearchRequest,
+    PluginSearchResponse, PluginSourceAddRequest, PluginSourceAddResponse, PluginSourceListRequest,
     PluginSourceListResponse, PluginSourceRefreshRequest, PluginSourceRefreshResponse,
     PluginSourceRemoveRequest, PluginSourceRemoveResponse, PluginUninstallRequest,
     PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse,
@@ -95,10 +95,14 @@ impl PluginManagerService {
         self.manager.skill_roots(config)
     }
 
+    pub fn mcp_servers(&self) -> TalosResult<Vec<McpServerRuntimeDescriptor>> {
+        self.manager.mcp_servers()
+    }
+
     pub fn skill_roots_for_kernel_config(
         &self,
         config: &AgentKernelConfig,
     ) -> TalosResult<SkillRoots> {
-        PluginManager::new(config.plugins.clone()).skill_roots(&config.skills)
+        self.manager.skill_roots(&config.skills)
     }
 }

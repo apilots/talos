@@ -17,7 +17,7 @@ pub use talos_app_protocol::requests::{
     EventSubscribeParams, EventSubscribeResponse, ProtocolTalosContext, SessionHistoryParams,
     TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
     TimelineRecoveryParams, TimelineRecoverySnapshot, TimelineReplay,
-    ToolDynamicResultSubmitParams,
+    ToolDynamicResultSubmitParams, ToolExecuteParams, ToolExecuteResponse,
 };
 pub use talos_auth::{
     AuthResponse, CloudLoginClientKind, CloudLoginStartResponse, CloudLoginStatusResponse, UserDto,
@@ -44,15 +44,17 @@ pub use talos_types::{
 };
 pub use talos_types::{
     MarketplaceSource, MarketplaceSourceInput, Plugin, PluginDefinition, PluginDisableRequest,
-    PluginDisableResponse, PluginEnableRequest, PluginEnableResponse, PluginInstall,
+    PluginDisableResponse, PluginDocument, PluginDocumentMediaType, PluginDocumentRef,
+    PluginDocumentRole, PluginEnableRequest, PluginEnableResponse, PluginInstall,
     PluginInstallConflictPolicy, PluginInstallId, PluginInstallRequest, PluginInstallResponse,
     PluginInstallSource, PluginInstallTarget, PluginKind, PluginListRequest, PluginListResponse,
-    PluginListStatusFilter, PluginSearchRefreshPolicy, PluginSearchRequest, PluginSearchResponse,
-    PluginSearchStatusFilter, PluginSourceAddRequest, PluginSourceAddResponse,
-    PluginSourceListRequest, PluginSourceListResponse, PluginSourceRefreshRequest,
-    PluginSourceRefreshResponse, PluginSourceRemoveRequest, PluginSourceRemoveResponse,
-    PluginUninstallRequest, PluginUninstallResponse, PluginUpdateConflictPolicy,
-    PluginUpdateRequest, PluginUpdateResponse, SkillPlugin,
+    PluginListStatusFilter, PluginMetadata, PluginReadRequest, PluginReadResponse,
+    PluginSearchRefreshPolicy, PluginSearchRequest, PluginSearchResponse, PluginSearchStatusFilter,
+    PluginSourceAddRequest, PluginSourceAddResponse, PluginSourceListRequest,
+    PluginSourceListResponse, PluginSourceRefreshRequest, PluginSourceRefreshResponse,
+    PluginSourceRemoveRequest, PluginSourceRemoveResponse, PluginStatus, PluginUninstallRequest,
+    PluginUninstallResponse, PluginUpdateConflictPolicy, PluginUpdateRequest, PluginUpdateResponse,
+    SkillPlugin,
 };
 pub use talos_types::{
     SkillDocument, SkillLoadError, SkillMetadata, SkillScope, SkillSelector, SkillSuggestion,

@@ -1,8 +1,6 @@
-use fs4::FileExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::{
@@ -153,32 +151,21 @@ impl PluginStateStore {
         operation: &str,
         action: impl FnOnce() -> TalosResult<T>,
     ) -> TalosResult<T> {
-        fs::create_dir_all(&self.root).map_err(|err| {
+        talos_fs::create_dir_all(&self.root).map_err(|err| {
             TalosError::StorageError(format!(
                 "failed to create plugin state root `{}`: {err}",
                 self.root.display()
             ))
         })?;
         let path = self.lock_path();
-        let file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .open(&path)
-            .map_err(|err| {
-                TalosError::StorageError(format!(
-                    "failed to open plugin state lock `{}`: {err}",
-                    path.display()
-                ))
-            })?;
-        FileExt::lock(&file).map_err(|err| {
+        let lock = talos_fs::lock_exclusive(&path).map_err(|err| {
             TalosError::StorageError(format!(
                 "failed to lock plugin state for {operation} `{}`: {err}",
                 path.display()
             ))
         })?;
         let result = action();
-        let unlock_result = FileExt::unlock(&file).map_err(|err| {
+        let unlock_result = lock.unlock().map_err(|err| {
             TalosError::StorageError(format!(
                 "failed to unlock plugin state for {operation} `{}`: {err}",
                 path.display()
@@ -196,7 +183,7 @@ impl PluginStateStore {
     }
 
     pub fn load_skill_state(&self) -> TalosResult<SkillState> {
-        read_json_or_default(&self.skills_state_path())
+        talos_fs::read_json_or_default(&self.skills_state_path())
     }
 
     pub fn save_skill_state(&self, state: &SkillState) -> TalosResult<()> {
@@ -209,7 +196,7 @@ impl PluginStateStore {
                 "injected plugin skill state save failure".to_string(),
             ));
         }
-        write_json_atomic(&self.skills_state_path(), state)
+        talos_fs::write_json_pretty(&self.skills_state_path(), state)
     }
 
     pub fn marketplace_cache_dir(&self, source_id: &MarketplaceSourceId) -> PathBuf {
@@ -225,15 +212,15 @@ impl PluginStateStore {
     }
 
     pub fn load_sources(&self) -> TalosResult<MarketplaceSourcesFile> {
-        read_json_or_default(&self.sources_path())
+        talos_fs::read_json_or_default(&self.sources_path())
     }
 
     pub fn save_sources(&self, sources: &MarketplaceSourcesFile) -> TalosResult<()> {
-        write_json_atomic(&self.sources_path(), sources)
+        talos_fs::write_json_pretty(&self.sources_path(), sources)
     }
 
     pub fn load_installs(&self) -> TalosResult<PluginInstallsFile> {
-        read_json_or_default(&self.installs_path())
+        talos_fs::read_json_or_default(&self.installs_path())
     }
 
     pub fn save_installs(&self, installs: &PluginInstallsFile) -> TalosResult<()> {
@@ -243,14 +230,14 @@ impl PluginStateStore {
                 "injected plugin installs save failure".to_string(),
             ));
         }
-        write_json_atomic(&self.installs_path(), installs)
+        talos_fs::write_json_pretty(&self.installs_path(), installs)
     }
 
     pub fn load_source_scan_cache(
         &self,
         source_id: &MarketplaceSourceId,
     ) -> TalosResult<SourceScanCacheFile> {
-        read_json_or_default(&self.source_scan_cache_path(source_id))
+        talos_fs::read_json_or_default(&self.source_scan_cache_path(source_id))
     }
 
     pub fn save_source_scan_cache(
@@ -258,7 +245,7 @@ impl PluginStateStore {
         source_id: &MarketplaceSourceId,
         cache: &SourceScanCacheFile,
     ) -> TalosResult<()> {
-        write_json_atomic(&self.source_scan_cache_path(source_id), cache)
+        talos_fs::write_json_pretty(&self.source_scan_cache_path(source_id), cache)
     }
 
     pub fn remove_marketplace_cache(&self, source_id: &MarketplaceSourceId) -> TalosResult<()> {
@@ -279,8 +266,14 @@ fn install_dir_matches_record(install_dir: &Path, install: &PluginInstall) -> Ta
     if !install_dir.exists() {
         return Ok(false);
     }
-    let skill_dir = install_dir.join("skills").join(&install.name);
-    Ok(manifest_for_dir(&skill_dir)? == install.file_manifest)
+    let content_dir = match install.kind {
+        talos_types::PluginKind::Skill => install_dir.join("skills").join(&install.name),
+        talos_types::PluginKind::McpServer => install_dir.join("mcp").join(&install.name),
+        talos_types::PluginKind::Package | talos_types::PluginKind::Feature => {
+            install_dir.to_path_buf()
+        }
+    };
+    Ok(manifest_for_dir(&content_dir)? == install.file_manifest)
 }
 
 fn restore_transaction_dir(source: &Path, target: &Path, label: &str) -> TalosResult<()> {
@@ -362,72 +355,4 @@ impl Default for PluginInstallsFile {
             installs: Vec::new(),
         }
     }
-}
-
-fn read_json_or_default<T>(path: &Path) -> TalosResult<T>
-where
-    T: Default + for<'de> Deserialize<'de>,
-{
-    if !path.exists() {
-        return Ok(T::default());
-    }
-    let contents = fs::read_to_string(path).map_err(|err| {
-        TalosError::StorageError(format!("failed to read `{}`: {err}", path.display()))
-    })?;
-    serde_json::from_str(&contents).map_err(|err| {
-        TalosError::SerializationError(format!("failed to parse `{}`: {err}", path.display()))
-    })
-}
-
-fn write_json_atomic<T>(path: &Path, value: &T) -> TalosResult<()>
-where
-    T: Serialize,
-{
-    let parent = path.parent();
-    if let Some(parent) = parent {
-        fs::create_dir_all(parent).map_err(|err| {
-            TalosError::StorageError(format!(
-                "failed to create plugin state directory `{}`: {err}",
-                parent.display()
-            ))
-        })?;
-    }
-    let contents = serde_json::to_string_pretty(value).map_err(|err| {
-        TalosError::SerializationError(format!("failed to serialize plugin state: {err}"))
-    })?;
-    let temp = path.with_extension("tmp");
-    {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(&temp)
-            .map_err(|err| {
-                TalosError::StorageError(format!("failed to open `{}`: {err}", temp.display()))
-            })?;
-        file.write_all(contents.as_bytes()).map_err(|err| {
-            TalosError::StorageError(format!("failed to write `{}`: {err}", temp.display()))
-        })?;
-        file.sync_all().map_err(|err| {
-            TalosError::StorageError(format!("failed to sync `{}`: {err}", temp.display()))
-        })?;
-    }
-    fs::rename(&temp, path).map_err(|err| {
-        TalosError::StorageError(format!(
-            "failed to replace `{}` with `{}`: {err}",
-            path.display(),
-            temp.display()
-        ))
-    })?;
-    if let Some(parent) = parent {
-        File::open(parent)
-            .and_then(|file| file.sync_all())
-            .map_err(|err| {
-                TalosError::StorageError(format!(
-                    "failed to sync plugin state directory `{}`: {err}",
-                    parent.display()
-                ))
-            })?;
-    }
-    Ok(())
 }

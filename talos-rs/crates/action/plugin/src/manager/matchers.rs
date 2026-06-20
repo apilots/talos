@@ -17,8 +17,18 @@ pub(super) fn plugin_matches_search(plugin: &Plugin, request: &PluginSearchReque
         .filter(|query| !query.is_empty())
     {
         let query = query.to_lowercase();
-        return plugin.name.to_lowercase().contains(&query)
-            || plugin.description.to_lowercase().contains(&query);
+        return plugin.metadata.name.to_lowercase().contains(&query)
+            || plugin.metadata.description.to_lowercase().contains(&query)
+            || plugin
+                .metadata
+                .display_name
+                .as_deref()
+                .is_some_and(|display_name| display_name.to_lowercase().contains(&query))
+            || plugin
+                .metadata
+                .short_description
+                .as_deref()
+                .is_some_and(|description| description.to_lowercase().contains(&query));
     }
     true
 }

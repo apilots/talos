@@ -12,7 +12,9 @@ use talos_sdk::{
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
+mod mcp_e2e;
 mod skills_e2e;
+use mcp_e2e::{mcp_e2e, prepare_mcp_fixture};
 use skills_e2e::{prepare_skills_fixture, skills_e2e};
 
 #[tokio::main]
@@ -25,6 +27,9 @@ async fn main() -> Result<()> {
     }
     if scenario == Scenario::SkillsE2e {
         prepare_skills_fixture()?;
+    }
+    if scenario == Scenario::McpE2e {
+        prepare_mcp_fixture()?;
     }
 
     let mut client = AppServerClient::connect(AppServerClientConfig {
@@ -45,6 +50,7 @@ async fn main() -> Result<()> {
         Scenario::ResourceMatrix => resource_matrix(&mut client).await?,
         Scenario::CloudSessionCache => cloud_session_cache(&mut client).await?,
         Scenario::SkillsE2e => skills_e2e(&mut client).await?,
+        Scenario::McpE2e => mcp_e2e(&mut client).await?,
     }
     client.shutdown().await?;
     Ok(())
@@ -61,6 +67,7 @@ enum Scenario {
     ResourceMatrix,
     CloudSessionCache,
     SkillsE2e,
+    McpE2e,
 }
 
 impl Scenario {
@@ -75,6 +82,7 @@ impl Scenario {
             "resource-matrix" => Ok(Self::ResourceMatrix),
             "cloud-session-cache" => Ok(Self::CloudSessionCache),
             "skills-e2e" => Ok(Self::SkillsE2e),
+            "mcp-e2e" => Ok(Self::McpE2e),
             other => Err(anyhow!("unsupported scenario: {other}")),
         }
     }
@@ -406,7 +414,7 @@ async fn collect_until_terminal(
     _subscription_id: &str,
 ) -> Result<Vec<TimelineEventEnvelope>> {
     let mut events = Vec::new();
-    for _ in 0..128 {
+    for _ in 0..1024 {
         let event = next_event_with_timeout(client).await?;
         let terminal = is_terminal_event(&event);
         events.push(event);

@@ -1,3 +1,4 @@
+mod documents;
 mod installer;
 mod manager;
 mod scanner;

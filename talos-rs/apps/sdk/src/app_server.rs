@@ -20,8 +20,9 @@ use talos_app_protocol::requests::{
     SkillsListRequest, SkillsListResponse, SkillsReadRequest, SkillsRefreshRequest,
     SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse,
     TimelineActiveTurnSnapshot, TimelineRecoveryParams, TimelineRecoverySnapshot,
-    ToolDynamicResultSubmitParams, TurnInterruptParams, TurnStartParams, TurnStartResponse,
-    WorkspaceDocListParams, WorkspaceDocReadParams, WorkspaceDocWriteParams,
+    ToolDynamicResultSubmitParams, ToolExecuteParams, ToolExecuteResponse, TurnInterruptParams,
+    TurnStartParams, TurnStartResponse, WorkspaceDocListParams, WorkspaceDocReadParams,
+    WorkspaceDocWriteParams,
 };
 use talos_app_protocol::version::ProtocolVersion;
 use talos_auth::{
@@ -33,10 +34,11 @@ use talos_error::{TalosError, TalosResult};
 use talos_types::{
     PluginDisableRequest, PluginDisableResponse, PluginEnableRequest, PluginEnableResponse,
     PluginInstallRequest, PluginInstallResponse, PluginListRequest, PluginListResponse,
-    PluginSearchRequest, PluginSearchResponse, PluginSourceAddRequest, PluginSourceAddResponse,
-    PluginSourceListRequest, PluginSourceListResponse, PluginSourceRefreshRequest,
-    PluginSourceRefreshResponse, PluginSourceRemoveRequest, PluginSourceRemoveResponse,
-    PluginUninstallRequest, PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse,
+    PluginReadRequest, PluginReadResponse, PluginSearchRequest, PluginSearchResponse,
+    PluginSourceAddRequest, PluginSourceAddResponse, PluginSourceListRequest,
+    PluginSourceListResponse, PluginSourceRefreshRequest, PluginSourceRefreshResponse,
+    PluginSourceRemoveRequest, PluginSourceRemoveResponse, PluginUninstallRequest,
+    PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
@@ -346,6 +348,13 @@ impl AppServerClient {
         self.request_typed("plugin.list", params).await
     }
 
+    pub async fn read_plugin(
+        &mut self,
+        params: PluginReadRequest,
+    ) -> TalosResult<PluginReadResponse> {
+        self.request_typed("plugin.read", params).await
+    }
+
     pub async fn install_plugin(
         &mut self,
         params: PluginInstallRequest,
@@ -379,6 +388,19 @@ impl AppServerClient {
         params: PluginDisableRequest,
     ) -> TalosResult<PluginDisableResponse> {
         self.request_typed("plugin.disable", params).await
+    }
+
+    pub async fn list_tools(&mut self) -> TalosResult<Vec<Value>> {
+        self.request_typed::<_, ListResponse<Value>>("tool.list", serde_json::json!({}))
+            .await
+            .map(|response| response.data)
+    }
+
+    pub async fn execute_tool(
+        &mut self,
+        params: ToolExecuteParams,
+    ) -> TalosResult<ToolExecuteResponse> {
+        self.request_typed("tool.execute", params).await
     }
 
     pub async fn config_read(&mut self) -> TalosResult<Value> {

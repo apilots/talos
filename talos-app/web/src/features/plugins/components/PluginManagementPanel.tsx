@@ -1,11 +1,14 @@
 import type { Plugin } from "@talos/sdk-browser";
 
 import { InstalledPluginRow } from "./InstalledPluginRow";
-import { MarketplaceSkillRow } from "./MarketplaceSkillRow";
+import { MarketplacePluginRow } from "./MarketplacePluginRow";
 import { PluginsEmptyState } from "./PluginsEmptyState";
 
 interface PluginManagementPanelProps {
   actionPluginId: string | null;
+  catalogLabel?: string;
+  emptyInstalledDescription: string;
+  installedLabel?: string;
   installedPlugins: Plugin[];
   loading: boolean;
   marketplacePlugins: Plugin[];
@@ -20,6 +23,9 @@ interface PluginManagementPanelProps {
 
 export function PluginManagementPanel({
   actionPluginId,
+  catalogLabel = "Marketplace skills",
+  emptyInstalledDescription,
+  installedLabel = "Installed extensions",
   installedPlugins,
   loading,
   marketplacePlugins,
@@ -43,9 +49,9 @@ export function PluginManagementPanel({
         </div>
       ) : null}
       <section>
-        <h2 className="mb-3 text-sm font-semibold text-ink">Installed extensions</h2>
+        <h2 className="mb-3 text-sm font-semibold text-ink">{installedLabel}</h2>
         {installedPlugins.length === 0 ? (
-          <PluginsEmptyState />
+          <PluginsEmptyState description={emptyInstalledDescription} />
         ) : (
           <div className="space-y-1">
             {installedPlugins.map((plugin) => (
@@ -63,15 +69,15 @@ export function PluginManagementPanel({
         )}
       </section>
       <section>
-        <h2 className="mb-3 text-sm font-semibold text-ink">Marketplace skills</h2>
+        <h2 className="mb-3 text-sm font-semibold text-ink">{catalogLabel}</h2>
         {marketplacePlugins.length === 0 ? (
           <div className="rounded-[1.25rem] border border-dashed border-border/80 bg-card/55 px-6 py-8 text-sm text-muted">
-            No marketplace skills found.
+            No marketplace plugins found.
           </div>
         ) : (
           <div className="space-y-1">
             {marketplacePlugins.map((plugin) => (
-              <MarketplaceSkillRow
+              <MarketplacePluginRow
                 installing={actionPluginId === plugin.id}
                 key={plugin.id}
                 onInstall={onInstall}

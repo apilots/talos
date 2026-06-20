@@ -9,7 +9,7 @@ use talos_auth::{AuthService, CloudAuthService, OpenModeUserService, UserService
 use talos_channel::{ChannelServer, TelegramChannel};
 use talos_config::{
     effective_llm_protocol, AgentKernelConfig, Config, LlmConfigManager, LlmConfigService,
-    LlmProtocol, ProviderConfig, TalosPaths, YamlLlmConfigStore,
+    LlmProtocol, McpTransportConfig, ProviderConfig, TalosPaths, YamlLlmConfigStore,
 };
 use talos_coordinator::{Coordinator, CoordinatorImpl};
 use talos_error::{TalosError, TalosResult};
@@ -30,9 +30,12 @@ use talos_session_store::{
 use talos_storage::{create_storage, StorageConfig};
 use talos_tools::{
     register_collaboration_tools, register_core_local_tools, register_network_tools,
-    CollaborationRuntime, ToolRegistry,
+    CollaborationRuntime, McpConnectionManager, ToolRegistry,
 };
-use talos_types::{resolve_model_catalog, RequestHandler, SessionRuntime};
+use talos_types::{
+    resolve_model_catalog, McpServerDefinition, McpServerRuntimeDescriptor, McpServerSource,
+    McpTransportDefinition, RequestHandler, SessionRuntime,
+};
 use tokio::signal;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -50,6 +53,61 @@ impl SkillRootsResolver for AgentSkillRootsResolver {
     ) -> TalosResult<talos_skills::SkillRoots> {
         self.plugins.skill_roots_for_kernel_config(kernel_config)
     }
+}
+
+async fn register_mcp_tools(
+    tool_registry: &ToolRegistry,
+    kernel_config: &AgentKernelConfig,
+    plugin_manager: &PluginManagerService,
+) -> TalosResult<()> {
+    if !kernel_config.tools.enable_mcp_tools {
+        return Ok(());
+    }
+    let mut servers = configured_mcp_servers(kernel_config)?;
+    servers.extend(plugin_manager.mcp_servers()?);
+    if servers.is_empty() {
+        return Ok(());
+    }
+    let runtime = Arc::new(talos_mcp::TalosMcpRuntime::connect_all(servers).await);
+    let manager = Arc::new(McpConnectionManager::from_runtime(runtime).await);
+    tool_registry.register_mcp_server(manager);
+    Ok(())
+}
+
+fn configured_mcp_servers(
+    kernel_config: &AgentKernelConfig,
+) -> TalosResult<Vec<McpServerRuntimeDescriptor>> {
+    kernel_config
+        .mcp
+        .servers
+        .iter()
+        .map(|server| {
+            let transport = match &server.transport {
+                McpTransportConfig::Stdio { command, args, env } => McpTransportDefinition::Stdio {
+                    command: command.clone(),
+                    args: args.clone(),
+                    env: env
+                        .iter()
+                        .map(|(key, value)| (key.clone(), value.clone()))
+                        .collect(),
+                    cwd: None,
+                },
+                McpTransportConfig::Http { url, .. } => McpTransportDefinition::StreamableHttp {
+                    url: url.clone(),
+                    headers: Default::default(),
+                },
+            };
+            Ok(McpServerRuntimeDescriptor {
+                server: McpServerDefinition {
+                    name: server.name.clone(),
+                    display_name: None,
+                    description: None,
+                    transport,
+                },
+                source: McpServerSource::Config,
+            })
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Default)]
@@ -453,6 +511,12 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
         config.agent.kernel.plugins.clone(),
         config.agent.kernel.skills.clone(),
     );
+    register_mcp_tools(
+        tool_registry.as_ref(),
+        &config.agent.kernel,
+        &plugin_manager_service,
+    )
+    .await?;
     let skill_roots_resolver = Arc::new(AgentSkillRootsResolver {
         plugins: plugin_manager_service.clone(),
     });

@@ -1,8 +1,8 @@
 use crate::installer::{
     commit_install_activation, commit_uninstall_activation, commit_update_activation,
-    install_plugin, installed_plugin, installed_skill_root, missing_plugin_from_install,
-    rollback_install_activation, rollback_uninstall_activation, rollback_update_activation,
-    stage_uninstall_plugin, update_plugin, InstallCandidate,
+    install_plugin, installed_mcp_servers, installed_plugin, installed_skill_root,
+    missing_plugin_from_install, rollback_install_activation, rollback_uninstall_activation,
+    rollback_update_activation, stage_uninstall_plugin, update_plugin, InstallCandidate,
 };
 use crate::scanner::{scan_source, scanned_at_ms};
 use crate::source::{config_source, source_from_input};
@@ -226,8 +226,9 @@ impl PluginManager {
         self.merge_installed_statuses(&mut plugins)?;
         plugins.retain(|plugin| plugin_matches_search(plugin, &request));
         plugins.sort_by(|left, right| {
-            left.name
-                .cmp(&right.name)
+            left.metadata
+                .name
+                .cmp(&right.metadata.name)
                 .then_with(|| left.id.cmp(&right.id))
         });
         if let Some(limit) = request.limit {
@@ -255,8 +256,9 @@ impl PluginManager {
         }
         plugins.retain(|plugin| plugin_matches_list(plugin, &request));
         plugins.sort_by(|left, right| {
-            left.name
-                .cmp(&right.name)
+            left.metadata
+                .name
+                .cmp(&right.metadata.name)
                 .then_with(|| left.id.cmp(&right.id))
         });
         Ok(PluginListResponse { plugins, warnings })
@@ -481,6 +483,28 @@ impl PluginManager {
                 max_skill_md_bytes: config.max_skill_md_bytes,
                 max_available_summary_bytes: config.max_available_summary_bytes,
             })
+        })
+    }
+
+    pub fn mcp_servers(&self) -> TalosResult<Vec<talos_types::McpServerRuntimeDescriptor>> {
+        self.state.with_exclusive_lock("plugin.mcp_servers", || {
+            self.state.cleanup_install_temps()?;
+            let mut servers = Vec::new();
+            for install in self.state.load_installs()?.installs {
+                if install.kind != talos_types::PluginKind::McpServer
+                    || !self.install_enabled(&install)?
+                {
+                    continue;
+                }
+                servers.extend(installed_mcp_servers(&install));
+            }
+            servers.sort_by(|left, right| {
+                left.server
+                    .name
+                    .cmp(&right.server.name)
+                    .then_with(|| format!("{:?}", left.source).cmp(&format!("{:?}", right.source)))
+            });
+            Ok(servers)
         })
     }
 

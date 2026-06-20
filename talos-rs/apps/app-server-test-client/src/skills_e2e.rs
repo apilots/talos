@@ -1,10 +1,11 @@
 use anyhow::{anyhow, Context, Result};
 use talos_sdk::{
-    AppServerClient, MarketplaceSourceInput, PluginInstallConflictPolicy, PluginInstallRequest,
-    PluginInstallTarget, PluginKind, PluginSearchRefreshPolicy, PluginSearchRequest,
-    PluginSearchStatusFilter, PluginSourceAddRequest, PluginSourceRefreshRequest, SkillScope,
-    SkillSelector, SkillSummary, SkillsListRequest, SkillsReadRequest, SkillsResolveRequest,
-    SkillsSuggestRequest, TalosInputItem, TalosMessageRequest,
+    AppServerClient, MarketplaceSourceInput, PluginDocumentMediaType, PluginDocumentRole,
+    PluginInstallConflictPolicy, PluginInstallRequest, PluginInstallTarget, PluginKind,
+    PluginReadRequest, PluginSearchRefreshPolicy, PluginSearchRequest, PluginSearchStatusFilter,
+    PluginSourceAddRequest, PluginSourceRefreshRequest, SkillScope, SkillSelector, SkillSummary,
+    SkillsListRequest, SkillsReadRequest, SkillsResolveRequest, SkillsSuggestRequest,
+    TalosInputItem, TalosMessageRequest,
 };
 
 pub(super) async fn skills_e2e(client: &mut AppServerClient) -> Result<()> {
@@ -100,8 +101,46 @@ async fn plugin_installed_skill_e2e(client: &mut AppServerClient) -> Result<()> 
     let plugin = search
         .plugins
         .into_iter()
-        .find(|plugin| plugin.name == "e2e-plugin-localizer")
+        .find(|plugin| plugin.metadata.name == "e2e-plugin-localizer")
         .ok_or_else(|| anyhow!("e2e-plugin-localizer plugin was not found by search"))?;
+    if plugin.metadata.description
+        != "Localize Talos plugin manager release notes into Simplified Chinese with the E2E glossary."
+    {
+        return Err(anyhow!(
+            "plugin skill metadata mismatch: {:?}",
+            plugin.metadata
+        ));
+    }
+    if plugin.documents.len() != 1
+        || plugin.documents[0].role != PluginDocumentRole::Primary
+        || plugin.documents[0].path != "skills/e2e-plugin-localizer/SKILL.md"
+        || plugin.documents[0].media_type != PluginDocumentMediaType::Markdown
+    {
+        return Err(anyhow!(
+            "plugin skill document refs mismatch: {:?}",
+            plugin.documents
+        ));
+    }
+
+    eprintln!("skills-e2e plugin read");
+    let plugin_document = client
+        .read_plugin(PluginReadRequest {
+            plugin_id: plugin.id.clone(),
+        })
+        .await?;
+    if plugin_document.plugin.metadata.name != "e2e-plugin-localizer"
+        || plugin_document.documents.len() != 1
+        || plugin_document.documents[0].role != PluginDocumentRole::Primary
+        || plugin_document.documents[0].media_type != PluginDocumentMediaType::Markdown
+        || !plugin_document.documents[0]
+            .contents
+            .contains("Check: localized-by-plugin-skill")
+    {
+        return Err(anyhow!(
+            "plugin.read returned wrong skill document structure: {:?}",
+            plugin_document.documents
+        ));
+    }
 
     eprintln!("skills-e2e plugin install");
     let installed = client

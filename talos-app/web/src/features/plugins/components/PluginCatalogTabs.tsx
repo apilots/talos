@@ -15,6 +15,9 @@ export function PluginCatalogTabs({ activeTab, onTabChange }: PluginCatalogTabsP
       <TabButton active={activeTab === "skills"} onClick={() => onTabChange("skills")}>
         Skills
       </TabButton>
+      <TabButton active={activeTab === "mcp"} onClick={() => onTabChange("mcp")}>
+        MCP
+      </TabButton>
     </div>
   );
 }
@@ -31,8 +34,10 @@ function TabButton({
   return (
     <button
       className={cn(
-        "rounded-[0.55rem] px-3 py-2 text-sm transition",
-        active ? "bg-card text-ink shadow-sm" : "text-muted hover:bg-card/65 hover:text-ink",
+        "inline-flex h-9 items-center rounded-[0.55rem] border px-3 text-sm transition-colors",
+        active
+          ? "border-ink bg-ink text-background shadow-sm"
+          : "border-transparent text-muted hover:border-border/80 hover:text-ink",
       )}
       onClick={onClick}
       type="button"

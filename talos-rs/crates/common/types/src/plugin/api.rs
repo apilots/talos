@@ -1,6 +1,7 @@
 use super::{
-    MarketplaceSource, MarketplaceSourceId, MarketplaceSourceInput, Plugin, PluginId,
-    PluginInstall, PluginInstallId, PluginKind, PluginWarning,
+    MarketplaceSource, MarketplaceSourceId, MarketplaceSourceInput, Plugin,
+    PluginDocumentMediaType, PluginDocumentRole, PluginId, PluginInstall, PluginInstallId,
+    PluginKind, PluginWarning,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -83,6 +84,15 @@ pub struct PluginReadRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct PluginReadResponse {
     pub plugin: Plugin,
+    pub documents: Vec<PluginDocument>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct PluginDocument {
+    pub role: PluginDocumentRole,
+    pub path: String,
+    pub title: String,
+    pub media_type: PluginDocumentMediaType,
     pub contents: String,
 }
 

@@ -1,1 +1,1 @@
-export type PluginsCatalogTab = "plugins" | "skills";
+export type PluginsCatalogTab = "plugins" | "skills" | "mcp";

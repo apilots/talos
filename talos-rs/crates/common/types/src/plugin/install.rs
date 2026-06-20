@@ -1,4 +1,5 @@
 use super::{MarketplaceSourceId, PluginId, PluginInstallId, PluginKind};
+use crate::McpServerDefinition;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -11,7 +12,10 @@ pub struct PluginInstall {
     pub kind: PluginKind,
     pub name: String,
     pub installed_path: PathBuf,
+    #[serde(default)]
     pub exposed_skill_root: Option<PathBuf>,
+    #[serde(default)]
+    pub exposed_mcp_servers: Vec<McpServerDefinition>,
     pub source: PluginInstallSource,
     pub installed_at_ms: i64,
     pub updated_at_ms: i64,

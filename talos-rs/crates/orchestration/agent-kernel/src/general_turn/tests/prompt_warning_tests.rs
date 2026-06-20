@@ -22,6 +22,7 @@ async fn test_execute_general_turn_loop_reports_model_output_limit() {
         prompt_prefix_messages: Vec::new(),
         messages: Vec::new(),
         tool_definitions: Vec::new(),
+        tool_selection_request: talos_tools::ToolSelectionRequest::default().with_session_id("s1"),
         prompt_diagnostics: PromptDiagnostics {
             mode: PromptMode::Full,
             included_sections: Vec::new(),

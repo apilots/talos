@@ -1,3 +1,9 @@
+mod runtime;
+
+pub(crate) use runtime::{
+    installed_mcp_servers, installed_plugin, installed_skill_root, missing_plugin_from_install,
+};
+
 use crate::PluginStateStore;
 use chrono::Utc;
 use sha2::{Digest, Sha256};
@@ -7,7 +13,7 @@ use talos_error::{TalosError, TalosResult};
 use talos_types::{
     FileEntry, FileManifest, MarketplaceSource, MarketplaceSourceLocation, Plugin,
     PluginDefinition, PluginId, PluginInstall, PluginInstallConflictPolicy, PluginInstallId,
-    PluginInstallSource, PluginKind, PluginStatus, PluginUpdateConflictPolicy,
+    PluginInstallSource, PluginKind, PluginUpdateConflictPolicy,
 };
 
 pub(crate) struct InstallCandidate {
@@ -37,7 +43,7 @@ pub(crate) fn install_plugin(
     candidate: InstallCandidate,
     conflict_policy: PluginInstallConflictPolicy,
 ) -> TalosResult<InstallActivation> {
-    ensure_skill_plugin(&candidate.plugin)?;
+    ensure_installable_plugin(&candidate.plugin)?;
     let install_id = install_id_for(&candidate.plugin.id);
     let install_dir = state.install_dir(&install_id);
     let backup_dir = state.install_backup_dir(&install_id);
@@ -94,14 +100,16 @@ pub(crate) fn install_plugin(
         ))
     })?;
     let now_ms = Utc::now().timestamp_millis();
-    let exposed_skill_root = install_dir.join("skills");
+    let exposed_skill_root = exposed_skill_root_for(&candidate.plugin, &install_dir);
+    let exposed_mcp_servers = exposed_mcp_servers_for(&candidate.plugin, &install_dir)?;
     let install = PluginInstall {
         id: install_id.clone(),
         plugin_id: candidate.plugin.id.clone(),
         kind: candidate.plugin.kind,
-        name: candidate.plugin.name.clone(),
+        name: candidate.plugin.metadata.name.clone(),
         installed_path: install_dir,
-        exposed_skill_root: Some(exposed_skill_root),
+        exposed_skill_root,
+        exposed_mcp_servers,
         source: install_source(&candidate.source, &candidate.plugin),
         installed_at_ms: now_ms,
         updated_at_ms: now_ms,
@@ -160,7 +168,7 @@ pub(crate) fn update_plugin(
     conflict_policy: PluginUpdateConflictPolicy,
     enabled: bool,
 ) -> TalosResult<UpdateActivation> {
-    ensure_skill_plugin(&candidate.plugin)?;
+    ensure_installable_plugin(&candidate.plugin)?;
     if install.kind != candidate.plugin.kind || install.plugin_id != candidate.plugin.id {
         return Err(TalosError::Conflict(format!(
             "plugin install `{}` does not match update candidate `{}`",
@@ -221,9 +229,10 @@ pub(crate) fn update_plugin(
     })?;
 
     let mut updated = install.clone();
-    updated.name = candidate.plugin.name.clone();
+    updated.name = candidate.plugin.metadata.name.clone();
     updated.installed_path = install_dir.clone();
-    updated.exposed_skill_root = Some(install_dir.join("skills"));
+    updated.exposed_skill_root = exposed_skill_root_for(&candidate.plugin, &install_dir);
+    updated.exposed_mcp_servers = exposed_mcp_servers_for(&candidate.plugin, &install_dir)?;
     updated.source = install_source(&candidate.source, &candidate.plugin);
     updated.updated_at_ms = Utc::now().timestamp_millis();
     updated.file_manifest = file_manifest;
@@ -346,61 +355,17 @@ pub(crate) fn rollback_uninstall_activation(
     })
 }
 
-pub(crate) fn installed_skill_root(install: &PluginInstall) -> Option<talos_skills::SkillRoot> {
-    install.exposed_skill_root.as_ref().map(|root| {
-        talos_skills::SkillRoot::plugin(root, install.plugin_id.0.clone(), install.id.0.clone())
-    })
-}
-
-pub(crate) fn installed_plugin(
-    mut plugin: Plugin,
-    install: &PluginInstall,
-    enabled: bool,
-) -> Plugin {
-    plugin.status = PluginStatus::Installed {
-        install_id: install.id.clone(),
-        installed_path: install.installed_path.clone(),
-        installed_commit: source_commit(install),
-        enabled,
-    };
-    plugin
-}
-
-pub(crate) fn missing_plugin_from_install(install: &PluginInstall, enabled: bool) -> Plugin {
-    Plugin {
-        id: install.plugin_id.clone(),
-        kind: install.kind,
-        name: install.name.clone(),
-        description: install.name.clone(),
-        source_id: source_id(install),
-        path_in_source: path_in_source(install),
-        source_commit: source_commit(install),
-        status: PluginStatus::SourceMissing {
-            install_id: install.id.clone(),
-            installed_path: install.installed_path.clone(),
-            installed_commit: source_commit(install),
-            enabled,
-        },
-        definition: PluginDefinition::Skill(talos_types::SkillPlugin {
-            manifest: talos_types::SkillManifest {
-                name: install.name.clone(),
-                description: install.name.clone(),
-                short_description: None,
-                metadata: None,
-                license: None,
-            },
-            skill_md_path: "SKILL.md".to_string(),
-        }),
-        warnings: Vec::new(),
-    }
-}
-
-fn ensure_skill_plugin(plugin: &Plugin) -> TalosResult<()> {
+fn ensure_installable_plugin(plugin: &Plugin) -> TalosResult<()> {
     if plugin.kind == PluginKind::Skill && matches!(plugin.definition, PluginDefinition::Skill(_)) {
         return Ok(());
     }
+    if plugin.kind == PluginKind::McpServer
+        && matches!(plugin.definition, PluginDefinition::McpServer(_))
+    {
+        return Ok(());
+    }
     Err(TalosError::ValidationError(format!(
-        "plugin `{}` is not a skill plugin",
+        "plugin `{}` is not an installable plugin",
         plugin.id.0
     )))
 }
@@ -421,7 +386,17 @@ fn plugin_source_dir(
     };
     let path = root.join(path_in_source);
     ensure_contained_dir(&root, &path)?;
-    if is_regular_file(&path.join("SKILL.md")) {
+    let required_file = match plugin.kind {
+        PluginKind::Skill => "SKILL.md",
+        PluginKind::McpServer => "talos-mcp.json",
+        PluginKind::Package | PluginKind::Feature => {
+            return Err(TalosError::ValidationError(format!(
+                "plugin `{}` is not installable",
+                plugin.id.0
+            )));
+        }
+    };
+    if is_regular_file(&path.join(required_file)) {
         return Ok(path);
     }
     Err(TalosError::ResourceNotFound(format!(
@@ -466,17 +441,26 @@ fn materialize_install_dir(
     install_dir: &Path,
 ) -> TalosResult<FileManifest> {
     let source_dir = plugin_source_dir(state, &candidate.source, &candidate.plugin)?;
-    let target_skill_dir = install_dir.join("skills").join(&candidate.plugin.name);
-    fs::create_dir_all(&target_skill_dir).map_err(|err| {
+    let target_dir = installed_content_dir_for_kind(
+        candidate.plugin.kind,
+        install_dir,
+        &candidate.plugin.metadata.name,
+    )?;
+    fs::create_dir_all(&target_dir).map_err(|err| {
         TalosError::StorageError(format!(
             "failed to create plugin install dir `{}`: {err}",
-            target_skill_dir.display()
+            target_dir.display()
         ))
     })?;
-    let manifest = copy_dir(&source_dir, &target_skill_dir)?;
-    if !target_skill_dir.join("SKILL.md").is_file() {
+    let manifest = copy_dir(&source_dir, &target_dir)?;
+    let required_file = match candidate.plugin.kind {
+        PluginKind::Skill => "SKILL.md",
+        PluginKind::McpServer => "talos-mcp.json",
+        PluginKind::Package | PluginKind::Feature => unreachable!("kind checked above"),
+    };
+    if !target_dir.join(required_file).is_file() {
         return Err(TalosError::StorageError(format!(
-            "plugin install `{}` did not materialize SKILL.md",
+            "plugin install `{}` did not materialize {required_file}",
             install_id.0
         )));
     }
@@ -558,9 +542,50 @@ fn manifest_for_dir_inner(
 }
 
 fn has_local_changes(install: &PluginInstall) -> TalosResult<bool> {
-    let skill_dir = install.installed_path.join("skills").join(&install.name);
-    let current = manifest_for_dir(&skill_dir)?;
+    let current = manifest_for_dir(&installed_content_dir(install)?)?;
     Ok(current != install.file_manifest)
+}
+
+fn exposed_skill_root_for(plugin: &Plugin, install_dir: &Path) -> Option<PathBuf> {
+    (plugin.kind == PluginKind::Skill).then(|| install_dir.join("skills"))
+}
+
+fn exposed_mcp_servers_for(
+    plugin: &Plugin,
+    install_dir: &Path,
+) -> TalosResult<Vec<talos_types::McpServerDefinition>> {
+    let PluginDefinition::McpServer(mcp) = &plugin.definition else {
+        return Ok(Vec::new());
+    };
+    let mut server = mcp.server.clone();
+    let plugin_dir = install_dir.join("mcp").join(&plugin.metadata.name);
+    if let talos_types::McpTransportDefinition::Stdio { cwd, .. } = &mut server.transport {
+        let resolved = match cwd.take() {
+            Some(path) if path.is_absolute() => path,
+            Some(path) => plugin_dir.join(path),
+            None => plugin_dir,
+        };
+        *cwd = Some(resolved);
+    }
+    Ok(vec![server])
+}
+
+fn installed_content_dir(install: &PluginInstall) -> TalosResult<PathBuf> {
+    installed_content_dir_for_kind(install.kind, &install.installed_path, &install.name)
+}
+
+fn installed_content_dir_for_kind(
+    kind: PluginKind,
+    install_dir: &Path,
+    name: &str,
+) -> TalosResult<PathBuf> {
+    match kind {
+        PluginKind::Skill => Ok(install_dir.join("skills").join(name)),
+        PluginKind::McpServer => Ok(install_dir.join("mcp").join(name)),
+        PluginKind::Package | PluginKind::Feature => Err(TalosError::ValidationError(format!(
+            "plugin kind `{kind:?}` is not installable"
+        ))),
+    }
 }
 
 fn copy_dir_inner(
@@ -646,27 +671,4 @@ fn sha256_hex(bytes: &[u8]) -> String {
 
 fn short_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-fn source_commit(install: &PluginInstall) -> Option<String> {
-    match &install.source {
-        PluginInstallSource::Marketplace { commit, .. } => Some(commit.clone()),
-        PluginInstallSource::LocalPath { .. } | PluginInstallSource::Manual => None,
-    }
-}
-
-fn source_id(install: &PluginInstall) -> Option<talos_types::MarketplaceSourceId> {
-    match &install.source {
-        PluginInstallSource::Marketplace { source_id, .. } => Some(source_id.clone()),
-        PluginInstallSource::LocalPath { source_id, .. } => Some(source_id.clone()),
-        PluginInstallSource::Manual => None,
-    }
-}
-
-fn path_in_source(install: &PluginInstall) -> Option<String> {
-    match &install.source {
-        PluginInstallSource::Marketplace { path_in_source, .. } => Some(path_in_source.clone()),
-        PluginInstallSource::LocalPath { path_in_source, .. } => Some(path_in_source.clone()),
-        PluginInstallSource::Manual => None,
-    }
 }

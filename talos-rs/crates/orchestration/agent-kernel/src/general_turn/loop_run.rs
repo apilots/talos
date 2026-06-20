@@ -83,9 +83,12 @@ pub async fn execute_general_turn_loop_with_policy(
     }
 
     let (final_text, stop_reason) = loop {
+        let tool_definitions =
+            tool_executor_port.get_tool_definitions_for_request(&prepared.tool_selection_request);
         let mut step_request = build_general_turn_step_request(
             &prepared,
             &state,
+            tool_definitions,
             execution_settings.tool_execution_mode == crate::ToolExecutionMode::Parallel,
         );
         if prepared.stream_tx.is_some() {

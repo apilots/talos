@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use talos_error::{TalosError, TalosResult};
-use tokio::fs::{self, OpenOptions};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::fs;
+use tokio::io::{AsyncBufReadExt, BufReader};
 
+use crate::file;
 use crate::path_policy;
 use crate::store::{
     MemoryStore, SessionPromptContext, SessionPromptContextConfig, SessionToolExchangeContext,
@@ -54,22 +55,12 @@ async fn append_session_artifact(
     timestamp: chrono::DateTime<chrono::Utc>,
     record: &SessionArtifactRecord,
 ) -> TalosResult<()> {
-    let session_dir = path_policy::session_dir(store, session_id);
-    fs::create_dir_all(&session_dir)
-        .await
-        .map_err(|e| TalosError::StorageError(format!("create session memory dir: {}", e)))?;
-
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(session_day_file_path(store, session_id, timestamp))
-        .await
-        .map_err(|e| TalosError::StorageError(format!("open session artifact file: {}", e)))?;
-
     let payload = serialize_session_artifact_line(record)?;
-    file.write_all(payload.as_bytes())
-        .await
-        .map_err(|e| TalosError::StorageError(format!("append session artifact file: {}", e)))?;
+    file::append_string(
+        &session_day_file_path(store, session_id, timestamp),
+        payload,
+    )
+    .await?;
 
     Ok(())
 }
@@ -864,16 +855,7 @@ pub(crate) async fn session_size_bytes(store: &MemoryStore, session_id: &str) ->
 
 pub(crate) async fn reset_session(store: &MemoryStore, session_id: &str) -> TalosResult<()> {
     let session_dir = path_policy::session_dir(store, session_id);
-    match fs::remove_dir_all(&session_dir).await {
-        Ok(()) => {}
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-        Err(err) => {
-            return Err(TalosError::StorageError(format!(
-                "remove session memory dir: {}",
-                err
-            )));
-        }
-    }
+    file::remove_dir_all(&session_dir).await?;
 
     store.hot_cache.write().await.remove(session_id);
     store.transcript_cache.write().await.remove(session_id);

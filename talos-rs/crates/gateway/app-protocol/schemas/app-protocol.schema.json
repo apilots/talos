@@ -404,6 +404,7 @@
         "event.subscribe",
         "event.unsubscribe",
         "tool.dynamic_result.submit",
+        "tool.execute",
         "model.list",
         "config.read",
         "config.value.write",
@@ -888,6 +889,24 @@
             },
             "params": {
               "$ref": "#/definitions/ToolDynamicResultSubmitParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "tool.execute"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ToolExecuteParams"
             }
           },
           "required": [
@@ -5135,6 +5154,34 @@
         "output",
         "session_id",
         "success",
+        "tool_name"
+      ],
+      "type": "object"
+    },
+    "ToolExecuteParams": {
+      "properties": {
+        "arguments": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/TalosJsonValue"
+            }
+          ],
+          "default": {
+            "value": null
+          }
+        },
+        "session_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool_name": {
+          "type": "string"
+        }
+      },
+      "required": [
         "tool_name"
       ],
       "type": "object"

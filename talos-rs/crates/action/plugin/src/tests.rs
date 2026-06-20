@@ -5,11 +5,11 @@ use crate::{
 use talos_config::{PluginSourceConfig, PluginSourceKind, PluginSourceType, PluginsRuntimeConfig};
 use talos_error::TalosError;
 use talos_types::{
-    MarketplaceSourceInput, MarketplaceSourceType, PluginDefinition, PluginInstallConflictPolicy,
-    PluginInstallRequest, PluginInstallTarget, PluginKind, PluginReadRequest,
-    PluginSearchRefreshPolicy, PluginSearchRequest, PluginSearchStatusFilter,
-    PluginSourceAddRequest, PluginSourceListRequest, PluginSourceRefreshRequest,
-    PluginSourceRemoveRequest, PluginWarningCode,
+    MarketplaceSourceInput, MarketplaceSourceType, PluginDefinition, PluginDocumentMediaType,
+    PluginDocumentRole, PluginInstallConflictPolicy, PluginInstallRequest, PluginInstallTarget,
+    PluginKind, PluginReadRequest, PluginSearchRefreshPolicy, PluginSearchRequest,
+    PluginSearchStatusFilter, PluginSourceAddRequest, PluginSourceListRequest,
+    PluginSourceRefreshRequest, PluginSourceRemoveRequest, PluginWarningCode,
 };
 
 #[test]
@@ -26,6 +26,76 @@ fn lists_default_official_source_and_user_sources() {
     assert_eq!(sources.len(), 1);
     assert_eq!(sources[0].source_type, MarketplaceSourceType::Official);
     assert_eq!(sources[0].display_name, "Apilots Skills");
+}
+
+#[test]
+fn refresh_scans_local_mcp_source_and_rejects_unsupported_transport() {
+    let temp = tempfile::tempdir().expect("temp dir should exist");
+    let repo = temp.path().join("repo");
+    let mcp_root = repo.join("mcp");
+    let valid_dir = mcp_root.join("playwright");
+    std::fs::create_dir_all(&valid_dir).expect("valid MCP dir should exist");
+    std::fs::write(
+        valid_dir.join("talos-mcp.json"),
+        r#"{
+  "name": "playwright",
+  "display_name": "Playwright",
+  "description": "Browser automation MCP server.",
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["@playwright/mcp@latest"]
+  }
+}"#,
+    )
+    .expect("valid MCP manifest should be written");
+    let invalid_dir = mcp_root.join("legacy-sse");
+    std::fs::create_dir_all(&invalid_dir).expect("invalid MCP dir should exist");
+    std::fs::write(
+        invalid_dir.join("talos-mcp.json"),
+        r#"{
+  "name": "legacy_sse",
+  "transport": { "type": "sse" }
+}"#,
+    )
+    .expect("invalid MCP manifest should be written");
+
+    let manager = manager_with_state(PluginStateStore::new(temp.path().join("state")));
+    let added = manager
+        .add_source(PluginSourceAddRequest {
+            source: MarketplaceSourceInput::LocalFolder {
+                path: repo,
+                sparse_paths: vec!["mcp".to_string()],
+            },
+            refresh: true,
+        })
+        .expect("MCP source should add and refresh");
+
+    assert_eq!(added.plugins.len(), 1);
+    assert_eq!(added.plugins[0].kind, PluginKind::McpServer);
+    assert_eq!(
+        added.plugins[0].path_in_source.as_deref(),
+        Some("mcp/playwright")
+    );
+    assert_eq!(added.plugins[0].metadata.name, "playwright");
+    assert_eq!(
+        added.plugins[0].metadata.display_name.as_deref(),
+        Some("Playwright")
+    );
+    assert_eq!(
+        added.plugins[0].metadata.description,
+        "Browser automation MCP server."
+    );
+    match &added.plugins[0].definition {
+        PluginDefinition::McpServer(mcp) => {
+            assert_eq!(mcp.server.name, "playwright");
+            assert_eq!(mcp.manifest_path, "mcp/playwright/talos-mcp.json");
+        }
+        _ => panic!("expected MCP plugin"),
+    }
+    assert_eq!(added.warnings.len(), 1);
+    assert_eq!(added.warnings[0].kind, Some(PluginKind::McpServer));
+    assert_eq!(added.warnings[0].code, PluginWarningCode::InvalidManifest);
 }
 
 #[test]
@@ -163,11 +233,25 @@ Use this skill for docx files.
     );
     match &added.plugins[0].definition {
         PluginDefinition::Skill(skill) => {
-            assert_eq!(skill.manifest.name, "docx");
             assert_eq!(skill.skill_md_path, "skills/docx/SKILL.md");
         }
         _ => panic!("expected skill plugin"),
     }
+    assert_eq!(added.plugins[0].metadata.name, "docx");
+    assert_eq!(
+        added.plugins[0].metadata.description,
+        "Work with Word documents."
+    );
+    assert_eq!(
+        added.plugins[0].metadata.short_description.as_deref(),
+        Some("Edit Word documents")
+    );
+    assert_eq!(added.plugins[0].documents.len(), 1);
+    assert_eq!(
+        added.plugins[0].documents[0].role,
+        PluginDocumentRole::Primary
+    );
+    assert_eq!(added.plugins[0].documents[0].path, "skills/docx/SKILL.md");
 
     let search = fixture
         .manager
@@ -182,7 +266,7 @@ Use this skill for docx files.
         .expect("search should read scan cache");
 
     assert_eq!(search.plugins.len(), 1);
-    assert_eq!(search.plugins[0].name, "docx");
+    assert_eq!(search.plugins[0].metadata.name, "docx");
 }
 
 #[test]
@@ -211,7 +295,28 @@ Expected marker: plugin-read-visible
             plugin_id: plugin.id.clone(),
         })
         .expect("marketplace plugin should read");
-    assert!(marketplace_doc
+    assert_eq!(marketplace_doc.plugin.metadata.name, "manual-reviewer");
+    assert_eq!(
+        marketplace_doc.plugin.metadata.description,
+        "Review a manual test marker."
+    );
+    match &marketplace_doc.plugin.definition {
+        PluginDefinition::Skill(skill) => {
+            assert_eq!(skill.skill_md_path, "skills/manual-reviewer/SKILL.md")
+        }
+        _ => panic!("expected skill plugin"),
+    }
+    assert_eq!(marketplace_doc.documents.len(), 1);
+    assert_eq!(
+        marketplace_doc.documents[0].role,
+        PluginDocumentRole::Primary
+    );
+    assert_eq!(marketplace_doc.documents[0].path, "SKILL.md");
+    assert_eq!(
+        marketplace_doc.documents[0].media_type,
+        PluginDocumentMediaType::Markdown
+    );
+    assert!(marketplace_doc.documents[0]
         .contents
         .contains("Expected marker: plugin-read-visible"));
     assert!(matches!(
@@ -237,9 +342,138 @@ Expected marker: plugin-read-visible
         })
         .expect("installed plugin should read");
 
-    assert!(installed_doc
+    assert!(matches!(
+        installed_doc.plugin.definition,
+        PluginDefinition::Skill(_)
+    ));
+    assert_eq!(installed_doc.documents.len(), 1);
+    assert_eq!(installed_doc.documents[0].path, "SKILL.md");
+    assert!(installed_doc.documents[0]
         .contents
         .contains("Expected marker: plugin-read-visible"));
+    assert!(matches!(
+        installed_doc.plugin.status,
+        talos_types::PluginStatus::Installed { .. }
+    ));
+}
+
+#[test]
+fn reads_marketplace_and_installed_mcp_manifest() {
+    let temp = tempfile::tempdir().expect("temp dir should exist");
+    let repo = temp.path().join("repo");
+    let mcp_dir = repo.join("mcp").join("playwright");
+    std::fs::create_dir_all(&mcp_dir).expect("MCP dir should exist");
+    std::fs::write(
+        mcp_dir.join("talos-mcp.json"),
+        r#"{
+  "name": "playwright",
+  "display_name": "Playwright",
+  "description": "Browser automation MCP server.",
+  "icon": "browser",
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["@playwright/mcp@latest"]
+  },
+  "marker": "mcp-read-visible"
+}"#,
+    )
+    .expect("MCP manifest should be written");
+    std::fs::write(
+        mcp_dir.join("README.md"),
+        "# Playwright MCP\n\nExpected marker: mcp-readme-visible\n",
+    )
+    .expect("MCP README should be written");
+
+    let manager = manager_with_state(PluginStateStore::new(temp.path().join("state")));
+    let added = manager
+        .add_source(PluginSourceAddRequest {
+            source: MarketplaceSourceInput::LocalFolder {
+                path: repo,
+                sparse_paths: vec!["mcp".to_string()],
+            },
+            refresh: true,
+        })
+        .expect("MCP source should add");
+    let plugin = added.plugins[0].clone();
+
+    let marketplace_doc = manager
+        .read(PluginReadRequest {
+            plugin_id: plugin.id.clone(),
+        })
+        .expect("marketplace MCP plugin should read");
+    match &marketplace_doc.plugin.definition {
+        PluginDefinition::McpServer(mcp) => {
+            assert_eq!(mcp.server.name, "playwright");
+        }
+        _ => panic!("expected MCP plugin"),
+    }
+    assert_eq!(marketplace_doc.plugin.metadata.name, "playwright");
+    assert_eq!(
+        marketplace_doc.plugin.metadata.display_name.as_deref(),
+        Some("Playwright")
+    );
+    assert_eq!(
+        marketplace_doc.plugin.metadata.icon.as_deref(),
+        Some("browser")
+    );
+    assert_eq!(marketplace_doc.documents.len(), 2);
+    assert_eq!(
+        marketplace_doc.documents[0].role,
+        PluginDocumentRole::Readme
+    );
+    assert_eq!(marketplace_doc.documents[0].path, "README.md");
+    assert_eq!(
+        marketplace_doc.documents[0].media_type,
+        PluginDocumentMediaType::Markdown
+    );
+    assert!(marketplace_doc.documents[0]
+        .contents
+        .contains("mcp-readme-visible"));
+    assert_eq!(marketplace_doc.documents[1].path, "talos-mcp.json");
+    assert!(marketplace_doc.documents[1]
+        .contents
+        .contains("mcp-read-visible"));
+    assert!(matches!(
+        marketplace_doc.plugin.status,
+        talos_types::PluginStatus::NotInstalled
+    ));
+
+    manager
+        .install(PluginInstallRequest {
+            target: PluginInstallTarget::Plugin {
+                plugin_id: plugin.id.clone(),
+                expected_source_commit: plugin.source_commit.clone(),
+            },
+            enable: Some(true),
+            conflict_policy: PluginInstallConflictPolicy::Reject,
+        })
+        .expect("MCP plugin should install");
+    let installed_doc = manager
+        .read(PluginReadRequest {
+            plugin_id: plugin.id.clone(),
+        })
+        .expect("installed MCP plugin should read");
+
+    match &installed_doc.plugin.definition {
+        PluginDefinition::McpServer(mcp) => {
+            assert_eq!(mcp.server.name, "playwright");
+        }
+        _ => panic!("expected MCP plugin"),
+    }
+    assert_eq!(
+        installed_doc.plugin.metadata.icon.as_deref(),
+        Some("browser")
+    );
+    assert_eq!(installed_doc.documents.len(), 2);
+    assert_eq!(installed_doc.documents[0].path, "README.md");
+    assert!(installed_doc.documents[0]
+        .contents
+        .contains("mcp-readme-visible"));
+    assert_eq!(installed_doc.documents[1].path, "talos-mcp.json");
+    assert!(installed_doc.documents[1]
+        .contents
+        .contains("mcp-read-visible"));
     assert!(matches!(
         installed_doc.plugin.status,
         talos_types::PluginStatus::Installed { .. }
@@ -333,7 +567,7 @@ Broken skill.
     let mut names = added
         .plugins
         .iter()
-        .map(|plugin| plugin.name.as_str())
+        .map(|plugin| plugin.metadata.name.as_str())
         .collect::<Vec<_>>();
     names.sort();
     assert_eq!(names, vec!["inner", "outer", "valid"]);
@@ -486,7 +720,7 @@ Manual body.
         .expect("search should continue after one source refresh failure");
 
     assert_eq!(search.plugins.len(), 1);
-    assert_eq!(search.plugins[0].name, "manual");
+    assert_eq!(search.plugins[0].metadata.name, "manual");
     assert!(search
         .warnings
         .iter()

@@ -759,6 +759,11 @@ pub async fn prepare_general_turn(
         .then_some(ctx.selected_model_info.reasoning_effort);
     let speed = ctx.selected_model_info.speed;
 
+    let tool_selection_request =
+        build_tool_selection_request(&session_id, input, phase, kernel_config);
+    let tool_definitions =
+        tool_definition_provider.get_tool_definitions_for_request(&tool_selection_request);
+
     Ok(PreparedGeneralTurn {
         session_id: session_id.clone(),
         message_id,
@@ -774,9 +779,8 @@ pub async fn prepare_general_turn(
             input,
         ),
         messages: render_prompt_assembly(&prompt_assembly),
-        tool_definitions: tool_definition_provider.get_tool_definitions_for_request(
-            &build_tool_selection_request(&session_id, input, phase, kernel_config),
-        ),
+        tool_definitions,
+        tool_selection_request,
         prompt_diagnostics,
         warnings,
         prompt_warning_state,

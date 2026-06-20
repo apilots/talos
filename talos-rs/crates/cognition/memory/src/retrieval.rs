@@ -184,9 +184,7 @@ pub(crate) async fn rebuild_file_index(
     let index_file = build_index_file_from_content(store.workspace_dir(), &md_path, &content);
     let json = serde_json::to_string_pretty(&index_file)
         .map_err(|e| TalosError::StorageError(format!("serialize memory index: {}", e)))?;
-    fs::write(index_file_path_for(&md_path), json)
-        .await
-        .map_err(|e| TalosError::StorageError(format!("write memory index file: {}", e)))?;
+    crate::file::write_string(&index_file_path_for(&md_path), json).await?;
     Ok(index_file)
 }
 

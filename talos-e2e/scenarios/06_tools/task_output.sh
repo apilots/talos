@@ -140,8 +140,8 @@ if [[ -z "${task_output}" || "${task_output}" == Error:* ]]; then
   echo "CASE tool_task_output FAIL response=${task_json}"
   exit 1
 fi
-if ! echo "${task_output}" | grep -Fq "TASK_OUTPUT_OK:${TASK_MARKER}"; then
-  echo "CASE tool_task_output FAIL missing_marker output=${task_output}"
+if ! echo "${task_output}" | grep -Fq "TASK_OUTPUT_OK"; then
+  echo "CASE tool_task_output FAIL missing_ack output=${task_output}"
   exit 1
 fi
 

@@ -8,7 +8,8 @@ use ts_rs::TS;
 use crate::errors::AppServerErrorBody;
 use crate::version::ProtocolVersion;
 use talos_types::talos::{
-    SessionHistorySnapshot, TalosMessageRequest, TalosMessageRetryRequest, TimelineEventEnvelope,
+    SessionHistorySnapshot, TalosJsonValue, TalosMessageRequest, TalosMessageRetryRequest,
+    TimelineEventEnvelope,
 };
 use talos_types::{
     PluginDisableRequest, PluginEnableRequest, PluginInstallRequest, PluginListRequest,
@@ -81,6 +82,8 @@ pub enum ClientMethod {
     EventUnsubscribe,
     #[serde(rename = "tool.dynamic_result.submit")]
     ToolDynamicResultSubmit,
+    #[serde(rename = "tool.execute")]
+    ToolExecute,
     #[serde(rename = "model.list")]
     ModelList,
     #[serde(rename = "config.read")]
@@ -190,6 +193,7 @@ impl ClientMethod {
             Self::EventSubscribe => "event.subscribe",
             Self::EventUnsubscribe => "event.unsubscribe",
             Self::ToolDynamicResultSubmit => "tool.dynamic_result.submit",
+            Self::ToolExecute => "tool.execute",
             Self::ModelList => "model.list",
             Self::ConfigRead => "config.read",
             Self::ConfigValueWrite => "config.value.write",
@@ -269,6 +273,7 @@ impl FromStr for ClientMethod {
             "event.subscribe" => Ok(Self::EventSubscribe),
             "event.unsubscribe" => Ok(Self::EventUnsubscribe),
             "tool.dynamic_result.submit" => Ok(Self::ToolDynamicResultSubmit),
+            "tool.execute" => Ok(Self::ToolExecute),
             "model.list" => Ok(Self::ModelList),
             "config.read" => Ok(Self::ConfigRead),
             "config.value.write" => Ok(Self::ConfigValueWrite),
@@ -365,6 +370,8 @@ pub enum ClientRequestParams {
     EventUnsubscribe(EventUnsubscribeParams),
     #[serde(rename = "tool.dynamic_result.submit")]
     ToolDynamicResultSubmit(ToolDynamicResultSubmitParams),
+    #[serde(rename = "tool.execute")]
+    ToolExecute(ToolExecuteParams),
     #[serde(rename = "model.list")]
     ModelList(ModelListParams),
     #[serde(rename = "config.read")]
@@ -511,6 +518,7 @@ impl ClientRequest {
             ClientMethod::ToolDynamicResultSubmit => {
                 ClientRequestParams::ToolDynamicResultSubmit(decode(params_value)?)
             }
+            ClientMethod::ToolExecute => ClientRequestParams::ToolExecute(decode(params_value)?),
             ClientMethod::ModelList => ClientRequestParams::ModelList(decode(params_value)?),
             ClientMethod::ConfigRead => ClientRequestParams::ConfigRead(decode(params_value)?),
             ClientMethod::ConfigValueWrite => {
@@ -905,6 +913,21 @@ pub struct ToolDynamicResultSubmitParams {
     pub tool_name: String,
     pub output: String,
     pub success: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct ToolExecuteParams {
+    pub tool_name: String,
+    #[serde(default)]
+    pub arguments: TalosJsonValue,
+    #[serde(default)]
+    pub session_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+pub struct ToolExecuteResponse {
+    pub status: String,
+    pub result: TalosJsonValue,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]

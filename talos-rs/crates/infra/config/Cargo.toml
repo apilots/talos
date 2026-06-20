@@ -18,6 +18,7 @@ config = "0.14"
 
 # Error handling
 talos-error = { path = "../error" }
+talos-fs = { workspace = true }
 
 # Logging
 talos-logging = { path = "../logging" }

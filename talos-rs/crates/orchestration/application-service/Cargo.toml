@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 talos-error = { workspace = true }
+talos-fs = { workspace = true }
 talos-gateway = { workspace = true }
 talos-config = { workspace = true }
 talos-auth = { workspace = true }

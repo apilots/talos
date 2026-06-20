@@ -3,6 +3,7 @@ use super::*;
 pub fn build_general_turn_step_request(
     prepared: &PreparedGeneralTurn,
     state: &GeneralTurnLoopState,
+    tool_definitions: Vec<ToolDefinition>,
     parallel_tool_calls: bool,
 ) -> GeneralTurnStepRequest {
     let mut messages = prepared.messages.clone();
@@ -14,7 +15,7 @@ pub fn build_general_turn_step_request(
         model: prepared.selected_model.clone(),
         max_tokens: prepared.max_output_tokens,
         messages,
-        tool_definitions: prepared.tool_definitions.clone(),
+        tool_definitions,
         parallel_tool_calls,
         reasoning_effort: prepared.reasoning_effort,
         speed: prepared.speed,

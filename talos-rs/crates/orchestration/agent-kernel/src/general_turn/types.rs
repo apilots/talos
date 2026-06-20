@@ -93,6 +93,7 @@ pub struct PreparedGeneralTurn {
     pub prompt_prefix_messages: Vec<ChatMessage>,
     pub messages: Vec<ChatMessage>,
     pub tool_definitions: Vec<ToolDefinition>,
+    pub tool_selection_request: talos_tools::ToolSelectionRequest,
     pub prompt_diagnostics: PromptDiagnostics,
     pub warnings: Vec<KernelWarning>,
     pub prompt_warning_state: Option<PromptWarningState>,

@@ -11,8 +11,8 @@ use talos_app_protocol::requests::{
     SkillsListRequest, SkillsListResponse, SkillsResolveResponse, SkillsSuggestRequest,
     SkillsSuggestResponse, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus,
     TimelineCursorStatus, TimelinePendingDynamicToolResult, TimelinePendingUserAction,
-    TimelineRecoverySnapshot, TimelineReplay, TurnStartParams, TurnStartResponse,
-    WorkspaceInfoResponse,
+    TimelineRecoverySnapshot, TimelineReplay, ToolExecuteParams, ToolExecuteResponse,
+    TurnStartParams, TurnStartResponse, WorkspaceInfoResponse,
 };
 use talos_application_service::{
     Actor, MemoryDate, MemoryListParams, MemorySearchParams, TalosApplicationService,
@@ -28,7 +28,7 @@ use talos_error::TalosError;
 use talos_session_store::{
     ActiveTurnRecord, ActiveTurnStatus, IdempotencyStatus, PendingUserAction, TimelineEventId,
 };
-use talos_tools::ToolRegistry;
+use talos_tools::{ToolContext, ToolDispatchOutcome, ToolRegistry};
 use talos_types::talos::TalosInputItem;
 use talos_types::{
     DocUpdateRequest, ExpectedFileVersion, OptionalCurrentDirectoryPatch, OptionalProjectIdPatch,
@@ -501,6 +501,11 @@ impl AppServerApplication for TalosApplicationAdapter {
             ),
             ClientRequestParams::AppList(_) => to_value(json!({ "data": self.list_apps() })),
             ClientRequestParams::ToolList(_) => to_value(json!({ "data": self.list_tools() })),
+            ClientRequestParams::ToolExecute(params) => to_value(
+                self.execute_tool(actor, params)
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
             ClientRequestParams::AuthLogout(_) => {
                 self.app
                     .account
@@ -818,6 +823,47 @@ impl TalosApplicationAdapter {
                 })
             })
             .collect()
+    }
+
+    async fn execute_tool(
+        &self,
+        actor: &Actor,
+        params: ToolExecuteParams,
+    ) -> TalosResult<ToolExecuteResponse> {
+        let registry = self
+            .tool_registry
+            .as_ref()
+            .ok_or_else(|| TalosError::ToolError("tool registry is not available".to_string()))?;
+        let invocation = registry.build_function_invocation(
+            format!("app-server-tool-{}", uuid::Uuid::new_v4().simple()),
+            params.tool_name,
+            params.arguments.into(),
+        )?;
+        let session_id = params
+            .session_id
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "app-server-tool-execute".to_string());
+        let context = ToolContext::new(session_id, actor.user_id.clone());
+        let outcome = registry
+            .execute_invocation_with_context(invocation, context)
+            .await?;
+        match outcome {
+            ToolDispatchOutcome::Executed { payload } => Ok(ToolExecuteResponse {
+                status: "executed".to_string(),
+                result: talos_types::talos::TalosJsonValue::from(
+                    serde_json::to_value(payload.envelope()).map_err(|err| {
+                        TalosError::SerializationError(format!("serialize tool result: {err}"))
+                    })?,
+                ),
+            }),
+            ToolDispatchOutcome::Pending { tool_name, pending } => Ok(ToolExecuteResponse {
+                status: "pending".to_string(),
+                result: talos_types::talos::TalosJsonValue::from(json!({
+                    "tool_name": tool_name,
+                    "pending": pending,
+                })),
+            }),
+        }
     }
 
     fn list_skills(&self, params: SkillsListRequest) -> ProtocolResult<Value> {

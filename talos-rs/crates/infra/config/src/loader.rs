@@ -146,7 +146,7 @@ pub(crate) fn save_config(config: &Config, path: &str) -> TalosResult<()> {
     let yaml = serde_yaml::to_string(config)
         .map_err(|e| TalosError::ConfigError(format!("Failed to serialize config: {}", e)))?;
 
-    std::fs::write(path, yaml)
+    talos_fs::write_string(Path::new(path), &yaml)
         .map_err(|e| TalosError::ConfigError(format!("Failed to write config file: {}", e)))?;
 
     Ok(())

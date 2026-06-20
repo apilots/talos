@@ -3,30 +3,44 @@ import type {
   MarketplaceSourceInput,
   Plugin,
   PluginSearchRefreshPolicy,
-  SkillSummary,
 } from "@talos/sdk-browser";
+
+type PluginKind = Plugin["kind"];
 
 export async function listSkills(includeDisabled = true) {
   return getTalosClient().skills.list({ include_disabled: includeDisabled });
-}
-
-export async function readSkillDocument(skill: SkillSummary) {
-  return getTalosClient().skills.read({
-    selector: {
-      name: skill.name,
-      path: skill.path,
-    },
-  });
 }
 
 export async function searchSkillPlugins(
   query: string,
   refresh: PluginSearchRefreshPolicy = "refresh_stale",
 ) {
+  return searchPluginsByKind("skill", query, refresh);
+}
+
+export async function searchMcpPlugins(
+  query: string,
+  refresh: PluginSearchRefreshPolicy = "refresh_stale",
+) {
+  return searchPluginsByKind("mcp_server", query, refresh);
+}
+
+export async function searchPlugins(
+  query: string,
+  refresh: PluginSearchRefreshPolicy = "refresh_stale",
+) {
+  return searchPluginsByKind(null, query, refresh);
+}
+
+export async function searchPluginsByKind(
+  kind: PluginKind | null,
+  query: string,
+  refresh: PluginSearchRefreshPolicy = "refresh_stale",
+) {
   return getTalosClient().plugin.search({
     query: query.trim() || null,
     source_id: null,
-    kind: "skill",
+    kind,
     status: "any",
     refresh,
     limit: 80,
@@ -34,8 +48,20 @@ export async function searchSkillPlugins(
 }
 
 export async function listManagedSkillPlugins() {
+  return listManagedPluginsByKind("skill");
+}
+
+export async function listManagedMcpPlugins() {
+  return listManagedPluginsByKind("mcp_server");
+}
+
+export async function listManagedPlugins() {
+  return listManagedPluginsByKind(null);
+}
+
+export async function listManagedPluginsByKind(kind: PluginKind | null) {
   return getTalosClient().plugin.list({
-    kind: "skill",
+    kind,
     status: null,
     source_id: null,
     include_disabled: true,
@@ -46,7 +72,7 @@ export async function readPluginDocument(plugin: Plugin) {
   return getTalosClient().plugin.read({ plugin_id: plugin.id });
 }
 
-export async function installSkillPlugin(plugin: Plugin) {
+export async function installPlugin(plugin: Plugin) {
   return getTalosClient().plugin.install({
     target: {
       kind: "plugin",
@@ -58,7 +84,7 @@ export async function installSkillPlugin(plugin: Plugin) {
   });
 }
 
-export async function enableSkillPlugin(plugin: Plugin) {
+export async function enablePlugin(plugin: Plugin) {
   const installId = pluginInstallId(plugin);
   if (!installId) {
     throw new Error("Plugin is not installed.");
@@ -66,7 +92,7 @@ export async function enableSkillPlugin(plugin: Plugin) {
   return getTalosClient().plugin.enable({ install_id: installId });
 }
 
-export async function disableSkillPlugin(plugin: Plugin) {
+export async function disablePlugin(plugin: Plugin) {
   const installId = pluginInstallId(plugin);
   if (!installId) {
     throw new Error("Plugin is not installed.");
@@ -74,7 +100,7 @@ export async function disableSkillPlugin(plugin: Plugin) {
   return getTalosClient().plugin.disable({ install_id: installId });
 }
 
-export async function uninstallSkillPlugin(plugin: Plugin) {
+export async function uninstallPlugin(plugin: Plugin) {
   const installId = pluginInstallId(plugin);
   if (!installId) {
     throw new Error("Plugin is not installed.");
@@ -82,7 +108,7 @@ export async function uninstallSkillPlugin(plugin: Plugin) {
   return getTalosClient().plugin.uninstall({ install_id: installId });
 }
 
-export async function updateSkillPlugin(plugin: Plugin) {
+export async function updatePlugin(plugin: Plugin) {
   const installId = pluginInstallId(plugin);
   if (!installId) {
     throw new Error("Plugin is not installed.");
