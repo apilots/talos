@@ -1,7 +1,7 @@
 # Talos-RS 架构设计文档
 
 **版本**: v2.0  
-**最后更新**: 2026-03-14
+**最后更新**: 2026-06-21
 
 > 说明：本文档描述 Talos 的目标架构与设计意图，不作为实时 crate 清单。
 > 当前实际挂载模块以 `Cargo.toml` workspace members 与 `README.md` 为准。
@@ -43,7 +43,7 @@
                                     ⬇
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  Action 层 - 执行                                                             │
-│  (tools/tools-policy/tools-sandbox/output/skill/audit)                      │
+│  (tools/tool-search/mcp/plugin/skills/tools-policy/tools-sandbox/audit)     │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     ⬇
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -58,7 +58,7 @@
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  Common 层 - 通用库（跨层使用，有业务语义）                                      │
-│  (llm/prompt/types)                                                         │
+│  (llm/prompt/types/fs)                                                      │
 └─────────────────────────────────────────────────────────────────────────────┘
     ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️ ⬆️
 
@@ -88,7 +88,8 @@
 | └─ `template/` | 模板渲染 | - |
 | └─ `context/` | 上下文组装 | - |
 | └─ `presets/` | 预设模板 | - |
-| **types/** | 通用类型定义 | `infra/*` |
+| **types/** | 通用强类型对象，包含 session、tool、plugin、MCP 等跨端共享类型 | `infra/*` |
+| **fs/** | 通用文件系统封装，提供目录操作、原子写入、文件锁等安全文件操作 | `infra/error` |
 
 **为什么独立**：
 - LLM 有业务语义（ChatMessage/Role/Prompt），不是纯技术设施
@@ -150,12 +151,20 @@
 
 | 模块 | 职责 | 依赖 |
 |------|------|------|
-| **tools/** | 工具系统 (read/exec/edit/write) | `infra/*` |
+| **tools/** | 工具系统、内置 tools、tool router、`tool_search` 按需发现 | `infra/*`, `common/types` |
+| **mcp/** | MCP client runtime，基于 `rmcp` 发现并执行外部 MCP tools | `common/types` |
+| **plugin/** | Plugin lifecycle，统一管理 Skills 与 MCP server plugins 的 source、scan、install、enable、disable、update、uninstall | `common/types`, `common/fs` |
+| **skills/** | Skill manifest/document 解析和 prompt 注入领域模型 | `common/types` |
 | **tools-policy/** | 工具策略 (allow/deny/elevated) | `tools` |
 | **tools-sandbox/** | 沙箱执行 (Docker/本地) | `tools` |
 | **output/** | 输出通道 | `infra/*` |
-| **skill/** | 技能系统 | `tools` |
 | **audit/** | 安全审计 (工具调用审计/速率限制) | `tools`, `infra/logging` |
+
+**工具可见性原则**：
+- 系统内置工具默认进入可见上下文。
+- Plugin 提供的外部能力不默认污染上下文，必须通过 `tool_search` 按需发现和激活。
+- MCP server 本身由 Plugin 管理生命周期，MCP server 暴露的具体 tools 由 `talos-mcp` 投影到 `talos-tools` 后再被模型调用。
+- Skills 不注册为 executable tools；Skills 通过 `PromptBuilder` 注入任务指导。
 
 ---
 
@@ -260,11 +269,13 @@ pub struct Learner {
 │  Agent          │ 执行 Agent 逻辑
 │  ├─ Memory      │ 获取短期/长期记忆
 │  ├─ Knowledge   │ RAG 检索相关知识
+│  ├─ Prompt      │ 注入 AGENTS、Skills 和动态上下文
 │  └─ Reasoning   │ 任务规划
 └────────┬────────┘
          ↓
 ┌─────────────────┐
-│  Tools          │ 调用工具 (read/exec/edit/write)
+│  Tools          │ 调用内置工具或经 tool_search 激活的外部工具
+│  ├─ MCP         │ 执行 MCP server 暴露的 tool
 │  └─ Audit       │ 审计日志 + 速率限制
 └────────┬────────┘
          ↓
@@ -421,12 +432,12 @@ talos-rs/
 │
 ├── crates/
 │   ├── common/                   # 通用库（跨层使用）
+│   │   ├── fs/
 │   │   ├── llm/
 │   │   │   ├── provider/
 │   │   │   ├── anthropic/
-│   │   │   ├── openai/
-│   │   │   ├── ollama/
-│   │   │   └── router/
+│   │   │   ├── bailian/
+│   │   │   └── openai/
 │   │   ├── prompt/
 │   │   └── types/
 │   │
@@ -452,38 +463,36 @@ talos-rs/
 │   │   └── decision/
 │   │
 │   ├── action/                   # 执行层
+│   │   ├── mcp/
+│   │   ├── plugin/
+│   │   ├── skills/
 │   │   ├── tools/
 │   │   ├── tools-policy/
-│   │   ├── tools-sandbox/
-│   │   ├── output/
-│   │   ├── skill/
-│   │   └── audit/
+│   │   └── tools-sandbox/
 │   │
 │   ├── orchestration/            # 编排层
 │   │   ├── agent/
-│   │   ├── agent-workspace/
-│   │   ├── session/
+│   │   ├── agent-kernel/
+│   │   ├── application-service/
 │   │   ├── session-store/
-│   │   ├── routing/
-│   │   ├── scheduler/
-│   │   ├── planner/
-│   │   ├── coordinator/
-│   │   └── queue/
+│   │   ├── router/
+│   │   └── coordinator/
 │   │
 │   ├── gateway/                  # 网关层
+│   │   ├── app-protocol/
+│   │   ├── app-server/
 │   │   ├── core/
-│   │   ├── ws/
-│   │   ├── events/
-│   │   └── health/
-│   │
-│   └── meta/                     # 元认知层（横向切面）
-│       ├── monitor/
-│       ├── learner/
-│       ├── personality/
-│       └── maintenance/
+│   │   └── http/
 │
-└── talos/                        # 主 crate（整合所有模块）
-    └── Cargo.toml
+├── apps/
+│   ├── app-server-test-client/
+│   ├── cli/
+│   ├── sdk/
+│   └── ui-tui/
+│
+└── bin/
+    ├── app-server/
+    └── talos-server/
 ```
 
 ---

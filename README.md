@@ -12,7 +12,7 @@ Talos 是一个 AI 智能管家底层框架，为上层应用（如贾维斯 Jar
 
 - **感知层**：多模态输入处理、环境理解、事件监听
 - **认知层**：记忆系统、推理引擎、决策系统
-- **执行层**：工具调用、多 Agent 协作、输出通道
+- **执行层**：工具调用、按需工具发现、Skills、MCP server plugins、多 Agent 协作、输出通道
 - **元认知层**：自我监控、持续学习
 
 ## 用户界面
@@ -76,15 +76,14 @@ Talos提供了多种用户交互界面：
 talos/
 ├── talos-rs/          # Rust 实现
 │   ├── Cargo.toml
-│   ├── src/
-│   ├── tests/
-│   └── examples/
+│   ├── crates/
+│   ├── apps/
+│   └── bin/
 ├── talos-py/          # Python 实现（计划中）
 ├── talos-go/          # Go 实现（计划中）
 ├── talos-app/         # TypeScript Web / Desktop / SDK workspace
 ├── talos-e2e/         # 端到端测试场景与 runner
-├── docs/              # 通用文档
-├── specs/             # 接口规范（语言无关）
+├── spec/              # 接口规范与功能设计
 └── README.md
 ```
 
@@ -139,7 +138,7 @@ cargo run -p talos-server --bin talos-server
 ├─────────────┬─────────────┬─────────────┤
 │   感知层    │   认知层    │   执行层    │
 │ Perception  │ Cognition   │   Action    │
-│   (TUI/CLI) │ (Memory/LLM)│ (Tools)     │
+│   (TUI/CLI) │ (Memory/LLM)│ (Tools/MCP) │
 ├─────────────┴─────────────┴─────────────┤
 │            编排层 / 网关层               │
 │         (Agent/Session/Gateway)         │

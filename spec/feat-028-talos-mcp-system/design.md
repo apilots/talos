@@ -1,9 +1,9 @@
 # Talos MCP System 设计
 
-Status: draft
+Status: implemented
 Owner: agent
 Created: 2026-06-20
-Updated: 2026-06-20
+Updated: 2026-06-21
 
 ## 背景
 
@@ -36,7 +36,7 @@ Plugin manages lifecycle for installable capabilities.
 - Codex 有独立 `codex-mcp` / `codex-rmcp-client`，使用 `rmcp` 管理 MCP runtime。
 - Codex plugin manager 会加载 active plugins，并把 plugin 内声明的 MCP servers 与普通 config MCP servers 合并成 runtime MCP catalog。
 - Codex 每轮构建 tools 时会从 `McpConnectionManager::list_all_tools()` 获取 MCP tools，再放进 tool router。
-- MCP tools 数量较少时直接暴露给模型；数量较多或策略要求时，放入 deferred tools，通过 `tool_search` 激活。
+- Codex 支持 MCP tools 少量直接暴露或 deferred tools；Talos 在本设计中统一采用外部 tools 通过 `tool_search` 按需激活。
 - Skills 走 prompt injection，不进入 MCP runtime，也不作为可执行 tool 注册。
 - Skill 可以声明或提示 MCP dependency，但 dependency 的安装、启用、刷新仍通过 MCP/plugin/config 管理链路完成。
 
@@ -73,18 +73,18 @@ Prompt builder owns guidance, not protocol execution.
 - 不支持 legacy SSE transport 作为第一版目标；第一版只支持 stdio 和 streamable HTTP。
 - 不通过 fallback 掩盖 MCP server 配置缺失、启动失败、tool schema 错误或权限拒绝。
 
-## 当前实现事实
+## 实现状态
 
 | 领域 | 当前状态 | 目标判断 |
 | --- | --- | --- |
-| Plugin 类型 | `PluginKind::McpServer` 和 `McpServerPlugin` 已存在 | 类型预留可复用，但字段不足 |
-| Plugin 安装状态 | `PluginInstall` 只有 `exposed_skill_root` | 需要新增 MCP server 暴露配置 |
-| Plugin 扫描 | 当前只扫描 `SKILL.md` | 需要扫描 MCP manifest |
-| Plugin enable/disable | 当前借用 skill state 管理 plugin-owned skill | 需要统一 plugin capability enable state |
-| MCP runtime | `talos-tools/src/mcp` 有手写 client/transport | 删除，由 `talos-mcp` + `rmcp` 替代 |
-| Runtime 组装 | `talos-base` 只注册 core/network/collaboration tools | 需要合并 enabled MCP servers 并注册 MCP tool projections |
-| ToolSearch | 已有 deferred tool activation 基础 | 需要支持 MCP metadata search 和 namespace-aware activation |
-| PromptBuilder | 已支持 Skills prompt context | 需要增加 MCP/plugin 可用能力说明，但不执行 MCP |
+| Plugin 类型 | `PluginKind::McpServer`、`McpServerPlugin`、`PluginDocumentRef` 已接入共享类型 | MCP 和 Skills 使用同一套 plugin 外层对象，类型特有字段只放在各自 definition 内 |
+| Plugin 安装状态 | `PluginInstall` 已区分 `exposed_skill_root` 与 `exposed_mcp_servers` | Skill 与 MCP 暴露字段不复用语义 |
+| Plugin 扫描 | scanner 已拆分 discovery、materialize、skill manifest、MCP manifest 解析 | `SKILL.md` 与 `talos-mcp.json` 都通过 plugin scanner 进入统一 catalog |
+| Plugin enable/disable | plugin lifecycle API 统一管理 Skills 与 MCP server plugins | lifecycle 不绕过 Plugin Manager |
+| MCP runtime | 历史手写 MCP client/transport 已删除 | `talos-mcp` 基于 `rmcp` 作为唯一 MCP runtime |
+| Runtime 组装 | `talos-base` 合并 enabled MCP server plugin configs，并将 MCP tool projections 接入 tools | MCP server lifecycle 与 tool projection 分层 |
+| ToolSearch | 外部 MCP tools 进入 deferred catalog，通过 `tool_search` 按需激活 | 系统内置 tools 默认可见，外部 tools 按需可见 |
+| PromptBuilder | Skills prompt context 与 MCP/plugin guidance 分离 | Prompt 只注入指导，不执行 MCP |
 
 ## 核心设计判断
 
@@ -131,7 +131,7 @@ Prompt build 可以告诉模型：
 
 - 当前有哪些 plugin capabilities。
 - Skills 如何被触发。
-- MCP tools 可能通过直接 tools 或 `ToolSearch` 发现。
+- MCP tools 通过 `tool_search` 按需发现和激活。
 - 某个 Skill 建议使用哪些 MCP capabilities。
 
 但 Prompt build 不能：
@@ -867,14 +867,13 @@ MCP tool call timeline 建议至少包含：
 - 真实用户 turn 中模型调用 MCP tool，并在 timeline 中看到 begin/end/result。
 - MCP server 启动失败时 UI 显示可行动错误，不影响普通 tools 和 Skills。
 
-## Open risks
+## Remaining risks
 
 - `rmcp` API 仍可能变化，`talos-mcp` 必须隔离第三方类型，避免全仓库扩散。
 - MCP tool naming 与模型 provider 的 tool namespace 限制需要在 provider abstraction 下统一处理。
 - plugin-owned MCP server 的进程沙箱策略需要和 Bash / tools-sandbox 对齐。
 - MCP OAuth / elicitation 不进入第一版，但 HTTP MCP 迟早需要统一 secret 和 auth 流程。
-- 当前 Plugin enable state 借用 skill state，MCP 落地前需要先统一 plugin capability state。
-- ToolSearch 当前是 substring activation，需要升级为 metadata search，否则大量 MCP tools 下体验不足。
+- ToolSearch 已作为外部 tool 按需可见入口，后续仍需要继续优化排序、解释性和大规模 MCP catalog 下的检索质量。
 
 ## 结论
 

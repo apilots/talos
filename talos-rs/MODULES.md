@@ -1,14 +1,14 @@
 # Talos-RS 模块清单
 
-**最后更新**: 2026-04-14
-**当前挂载模块数**: 32 个 crate
+**最后更新**: 2026-06-21
+**当前挂载模块数**: 37 个 crate
 **说明**: 本文档是实时 workspace 清单；目标架构与未来扩展方向请看 `ARCHITECTURE.md`。
 
 ## 分层总览
 
 ```text
 ┌─────────────────────────────────────────────────────────────────┐
-│ Common        6 crates  | LLM abstractions, prompts, shared types │
+│ Common        7 crates  | LLM abstractions, prompts, fs, types    │
 ├─────────────────────────────────────────────────────────────────┤
 │ Infra         5 crates  | config, auth, logging, storage, errors  │
 ├─────────────────────────────────────────────────────────────────┤
@@ -16,9 +16,9 @@
 ├─────────────────────────────────────────────────────────────────┤
 │ Cognition     1 crate   | memory services                         │
 ├─────────────────────────────────────────────────────────────────┤
-│ Action        3 crates  | tools, policy, sandbox                  │
+│ Action        6 crates  | tools, skills, plugin, MCP, policy      │
 ├─────────────────────────────────────────────────────────────────┤
-│ Orchestration 5 crates  | agent runtime and coordination          │
+│ Orchestration 6 crates  | agent runtime, services, coordination   │
 ├─────────────────────────────────────────────────────────────────┤
 │ Gateway       4 crates  | gateway core, HTTP API, app-server      │
 ├─────────────────────────────────────────────────────────────────┤
@@ -38,6 +38,7 @@
 | `talos-llm-anthropic` | `crates/common/llm/anthropic` | Anthropic provider 实现 |
 | `talos-llm-bailian` | `crates/common/llm/bailian` | Bailian provider 实现 |
 | `talos-llm-openai` | `crates/common/llm/openai` | OpenAI provider 实现；也承载 Ollama-compatible 接入 |
+| `talos-fs` | `crates/common/fs` | 通用文件系统封装，提供目录创建/删除、原子写入和文件锁等安全文件操作 |
 | `talos-prompt` | `crates/common/prompt` | `PromptBuilder`、prompt 预算和动态上下文组装 |
 | `talos-types` | `crates/common/types` | Session、Talos item、usage、source/provider 等共享类型 |
 
@@ -67,6 +68,9 @@
 
 | Crate | 路径 | 说明 |
 |------|------|------|
+| `talos-mcp` | `crates/action/mcp` | 基于 `rmcp` 的 MCP client runtime、tool discovery 和 tool execution 封装 |
+| `talos-plugin` | `crates/action/plugin` | Plugin marketplace/source/scan/install/enable/disable/update/uninstall 生命周期管理，统一管理 Skills 与 MCP server plugins |
+| `talos-skills` | `crates/action/skills` | Skill manifest、skill document 和 prompt 注入相关领域逻辑 |
 | `talos-tools` | `crates/action/tools` | tool registry、built-in tools、runtime 路由 |
 | `talos-tools-policy` | `crates/action/tools-policy` | 工具权限与 allow/deny/elevated 策略 |
 | `talos-tools-sandbox` | `crates/action/tools-sandbox` | 工具执行计划与安全沙箱编排 |
@@ -77,6 +81,7 @@
 |------|------|------|
 | `talos-agent-kernel` | `crates/orchestration/agent-kernel` | `general_turn`、planner、processor、runtime 主执行流 |
 | `talos-agent` | `crates/orchestration/agent` | Agent facade、kernel binding、flush manager |
+| `talos-application-service` | `crates/orchestration/application-service` | HTTP、app-server、SDK 共享的应用服务层，封装 project/file/plugin 等用例 API |
 | `talos-session-store` | `crates/orchestration/session-store` | session id/scope/title 和持久化 |
 | `talos-router` | `crates/orchestration/router` | routing rule、binding、优先级匹配 |
 | `talos-coordinator` | `crates/orchestration/coordinator` | session -> agent 编排、多 turn 协调和工具审批转发 |

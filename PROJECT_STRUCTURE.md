@@ -1,6 +1,6 @@
 # Talos 工程目录结构
 
-**最后更新**: 2026-06-14
+**最后更新**: 2026-06-21
 **说明**: 本文档描述当前仓库的真实目录结构；目标架构请看 `talos-rs/ARCHITECTURE.md`，crate 清单请看 `talos-rs/MODULES.md`。
 
 ## 顶层结构
@@ -28,22 +28,28 @@ talos-rs/
 ├── README.md
 ├── MODULES.md
 ├── apps/
+│   ├── app-server-test-client/
 │   ├── cli/
 │   ├── sdk/
 │   └── ui-tui/
 ├── bin/
-│   └── talos/
+│   ├── app-server/
+│   └── talos-server/
 ├── conf/
 ├── crates/
 │   ├── action/
+│   │   ├── mcp/
+│   │   ├── plugin/
+│   │   ├── skills/
 │   │   ├── tools/
 │   │   ├── tools-policy/
 │   │   └── tools-sandbox/
 │   ├── app/
-│   │   └── talos-server/
+│   │   └── talos-base/
 │   ├── cognition/
 │   │   └── memory/
 │   ├── common/
+│   │   ├── fs/
 │   │   ├── llm/
 │   │   │   ├── anthropic/
 │   │   │   ├── bailian/
@@ -52,6 +58,8 @@ talos-rs/
 │   │   ├── prompt/
 │   │   └── types/
 │   ├── gateway/
+│   │   ├── app-protocol/
+│   │   ├── app-server/
 │   │   ├── core/
 │   │   └── http/
 │   ├── infra/
@@ -63,13 +71,12 @@ talos-rs/
 │   ├── orchestration/
 │   │   ├── agent/
 │   │   ├── agent-kernel/
+│   │   ├── application-service/
 │   │   ├── coordinator/
 │   │   ├── router/
 │   │   └── session-store/
 │   └── perception/
 │       └── channels/
-└── tests/
-    └── integration_test.rs
 ```
 
 ## E2E 结构
@@ -77,9 +84,17 @@ talos-rs/
 ```text
 talos-e2e/
 ├── README.md
-├── protocol_smoke.sh
 ├── run_e2e.sh
 ├── scenarios/
+│   ├── 01_health_and_models.sh
+│   ├── 02_session_lifecycle.sh
+│   ├── 03_messages_http_sse.sh
+│   ├── 05_cli/
+│   ├── 06_tools/
+│   ├── 07_memory/
+│   ├── 08_tui/
+│   ├── 09_app_server/
+│   └── 10_talos_app/
 ├── scripts/
 ├── reports/
 └── .tmp/
