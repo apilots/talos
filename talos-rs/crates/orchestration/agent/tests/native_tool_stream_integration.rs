@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use talos_agent::{AgentHarness, AgentOrchestrator, OrchestratorRequest};
+use talos_agent::{Agent, AgentHarness, AgentRequest};
 use talos_error::TalosResult;
 use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, ModelBlockCompleted,
@@ -359,12 +359,12 @@ fn create_agent_with_tool(state: Arc<IntegrationState>) -> AgentHarness {
     )
 }
 
-fn build_request(input: &str) -> OrchestratorRequest {
+fn build_request(input: &str) -> AgentRequest {
     let session_id = format!(
         "integration-session-{}",
         SESSION_COUNTER.fetch_add(1, Ordering::SeqCst)
     );
-    OrchestratorRequest {
+    AgentRequest {
         session: TalosSession {
             title: "Untitled Session".to_string(),
             user_id: "talos-test-integration-user".to_string(),

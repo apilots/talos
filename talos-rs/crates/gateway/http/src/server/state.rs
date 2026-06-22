@@ -1,12 +1,10 @@
 use std::sync::Arc;
 
-use talos_application_service::{
-    AccountService, ConfigService, EventService, MemoryService, TalosApplicationService,
-    WorkspaceDocService,
-};
+use talos_application_service::TalosApplicationService;
+use talos_auth::AuthService;
 #[cfg(test)]
 use talos_auth::CloudSessionCache;
-use talos_auth::{AuthService, CloudLoginService, CloudSessionCacheManager};
+use talos_gateway::{ApplicationServiceGateway, Gateway};
 #[cfg(test)]
 use talos_session_store::TimelineEventService;
 use talos_types::TalosConfig;
@@ -16,17 +14,11 @@ use super::lifecycle::ServerLifecycle;
 #[derive(Clone)]
 pub(super) struct HttpApiState {
     pub(super) app: Arc<TalosApplicationService>,
+    pub(super) gateway: Arc<dyn Gateway>,
     #[cfg(test)]
     pub(super) event_service: Arc<TimelineEventService>,
-    pub(super) events: Arc<EventService>,
-    pub(super) config: Arc<ConfigService>,
-    pub(super) memory: Arc<MemoryService>,
-    pub(super) workspace_docs: Arc<WorkspaceDocService>,
-    pub(super) account: Arc<AccountService>,
     pub(super) base_config: TalosConfig,
     pub(super) auth_service: Arc<dyn AuthService>,
-    pub(super) cloud_login: Arc<CloudLoginService>,
-    pub(super) cloud_session_cache: CloudSessionCacheManager,
     pub(super) auth_disabled: bool,
     pub(super) lifecycle: Arc<ServerLifecycle>,
 }
@@ -40,38 +32,25 @@ impl HttpApiState {
         auth_disabled: bool,
         lifecycle: Arc<ServerLifecycle>,
     ) -> Self {
-        let cloud_session_cache = CloudSessionCacheManager::for_talos_home(
-            talos_config::TalosPaths::resolve().talos_home,
-        );
-        let cloud_login = Arc::new(CloudLoginService::new(
-            base_config.cloud.api_base_url.clone(),
-            cloud_session_cache.clone(),
-        ));
+        let gateway: Arc<dyn Gateway> = Arc::new(ApplicationServiceGateway::new(app.clone()));
         Self {
             app: app.clone(),
+            gateway,
             #[cfg(test)]
             event_service,
-            events: Arc::new(app.events.clone()),
-            memory: Arc::new(app.memory.clone()),
-            workspace_docs: Arc::new(app.workspace_docs.clone()),
-            config: Arc::new(app.config.clone()),
-            account: Arc::new(app.account.clone()),
             base_config,
             auth_service,
-            cloud_login,
-            cloud_session_cache,
             auth_disabled,
             lifecycle,
         }
     }
 
     #[cfg(test)]
-    pub(super) fn with_cloud_session_cache(mut self, cache: CloudSessionCache) -> Self {
-        self.cloud_session_cache = CloudSessionCacheManager::new(cache);
-        self.cloud_login = Arc::new(CloudLoginService::new(
-            self.base_config.cloud.api_base_url.clone(),
-            self.cloud_session_cache.clone(),
-        ));
+    pub(super) fn with_cloud_session_cache(self, cache: CloudSessionCache) -> Self {
+        self.app
+            .account
+            .set_cloud_session_cache(cache)
+            .expect("cloud session cache should configure");
         self
     }
 }

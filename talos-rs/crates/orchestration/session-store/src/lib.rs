@@ -7,9 +7,9 @@ use talos_storage::{Row, Storage};
 use talos_types::talos::TalosUsage;
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType};
 use talos_types::{
-    OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, ProjectPatch, ProjectRecord,
-    ProjectStatus, SessionConf, SessionConfigOverridePolicy, SessionPatch, SessionPatchAck,
-    SessionQuery, SessionRecord, DEFAULT_SESSION_TITLE,
+    OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, SessionConf,
+    SessionConfigOverridePolicy, SessionPatch, SessionPatchResponse, SessionQuery, SessionRecord,
+    DEFAULT_SESSION_TITLE,
 };
 
 pub mod active_turn;
@@ -28,7 +28,7 @@ pub use active_turn::{
 pub use event_service::{TimelineEventRetentionConfig, TimelineEventService};
 pub use events::{TimelineEventId, TimelineEventStore};
 pub use idempotency::{
-    IdempotencyRecord, IdempotencyReservation, IdempotencyStatus, MessageCommandAck,
+    IdempotencyRecord, IdempotencyReservation, IdempotencyStatus, MessageCommandResult,
     MessageIdempotencyStore,
 };
 pub use mock::MockSessionStore;
@@ -69,11 +69,11 @@ pub trait SessionStore: Send + Sync {
         &self,
         session_id: &str,
         patch: &SessionPatch,
-    ) -> TalosResult<SessionPatchAck>;
+    ) -> TalosResult<SessionPatchResponse>;
 
-    async fn reset_session_record(&self, session_id: &str) -> TalosResult<SessionPatchAck>;
+    async fn reset_session_record(&self, session_id: &str) -> TalosResult<SessionPatchResponse>;
 
-    async fn delete_session_record(&self, session_id: &str) -> TalosResult<SessionPatchAck>;
+    async fn delete_session_record(&self, session_id: &str) -> TalosResult<SessionPatchResponse>;
 
     async fn update_session_title(&self, session_id: &str, title: &str) -> TalosResult<()>;
 
@@ -84,27 +84,6 @@ pub trait SessionStore: Send + Sync {
         usage: &TalosUsage,
         model: Option<&str>,
     ) -> TalosResult<()>;
-
-    async fn list_projects(&self) -> TalosResult<Vec<ProjectRecord>>;
-
-    async fn get_project(&self, project_id: &str) -> TalosResult<Option<ProjectRecord>>;
-
-    async fn create_project(&self, name: &str, directory: &PathBuf) -> TalosResult<ProjectRecord>;
-
-    async fn create_project_for_owner(
-        &self,
-        name: &str,
-        directory: &PathBuf,
-        user_id: &str,
-    ) -> TalosResult<ProjectRecord>;
-
-    async fn patch_project(
-        &self,
-        project_id: &str,
-        patch: &ProjectPatch,
-    ) -> TalosResult<Option<ProjectRecord>>;
-
-    async fn delete_project(&self, project_id: &str) -> TalosResult<()>;
 }
 
 pub struct DatabaseSessionStore {
@@ -253,32 +232,6 @@ impl DatabaseSessionStore {
     fn build_usage_json(usage: &TalosUsage) -> TalosResult<String> {
         serde_json::to_string(usage)
             .map_err(|e| talos_error::TalosError::SerializationError(e.to_string()))
-    }
-
-    fn parse_project_record(row: &Row) -> ProjectRecord {
-        ProjectRecord {
-            project_id: row.get_string("project_id").unwrap_or_default(),
-            name: row.get_string("name").unwrap_or_default(),
-            user_id: row.get_string("user_id").unwrap_or_default(),
-            directory: row
-                .get_string("directory")
-                .map(PathBuf::from)
-                .unwrap_or_default(),
-            status: ProjectStatus::default(),
-            created_at: row.get_i64("created_at").unwrap_or_default(),
-            updated_at: row.get_i64("updated_at").unwrap_or_default(),
-            session_count: row.get_i64("session_count").unwrap_or_default(),
-        }
-    }
-
-    async fn count_sessions_bound_to_project(&self, project_id: &str) -> TalosResult<i64> {
-        let sql = "SELECT COUNT(*) AS count FROM sessions WHERE project_id = ?";
-        let rows = self.storage.query(sql, &[project_id]).await?;
-        Ok(rows
-            .into_iter()
-            .next()
-            .and_then(|row| row.get_i64("count"))
-            .unwrap_or_default())
     }
 }
 
@@ -636,12 +589,12 @@ impl SessionStore for DatabaseSessionStore {
         &self,
         session_id: &str,
         patch: &SessionPatch,
-    ) -> TalosResult<SessionPatchAck> {
+    ) -> TalosResult<SessionPatchResponse> {
         if let Some(conf) = patch.conf.as_ref() {
             SessionConfigOverridePolicy::validate_conf(conf)?;
         }
         let Some(row) = self.fetch_session_row(session_id).await? else {
-            return Ok(SessionPatchAck { success: false });
+            return Ok(SessionPatchResponse { success: false });
         };
         let mut record = Self::parse_session_record(&row);
         let mut conf = Self::parse_conf_json(row.get_string("conf_json"));
@@ -713,7 +666,7 @@ impl SessionStore for DatabaseSessionStore {
         self.storage
             .update("sessions", &update_row, "session_key = ?", &[session_id])
             .await?;
-        Ok(SessionPatchAck { success: true })
+        Ok(SessionPatchResponse { success: true })
     }
 
     async fn update_session_title(&self, session_id: &str, title: &str) -> TalosResult<()> {
@@ -741,10 +694,10 @@ impl SessionStore for DatabaseSessionStore {
         Ok(())
     }
 
-    async fn reset_session_record(&self, session_id: &str) -> TalosResult<SessionPatchAck> {
+    async fn reset_session_record(&self, session_id: &str) -> TalosResult<SessionPatchResponse> {
         let now = chrono::Utc::now().timestamp_millis();
         let Some(mut record) = self.get_session_record(session_id).await? else {
-            return Ok(SessionPatchAck { success: false });
+            return Ok(SessionPatchResponse { success: false });
         };
 
         record.title = DEFAULT_SESSION_TITLE.to_string();
@@ -793,12 +746,12 @@ impl SessionStore for DatabaseSessionStore {
             .update("sessions", &update_row, "session_key = ?", &[session_id])
             .await?;
 
-        Ok(SessionPatchAck {
+        Ok(SessionPatchResponse {
             success: affected > 0,
         })
     }
 
-    async fn delete_session_record(&self, session_id: &str) -> TalosResult<SessionPatchAck> {
+    async fn delete_session_record(&self, session_id: &str) -> TalosResult<SessionPatchResponse> {
         self.storage
             .delete("timeline_events", "session_id = ?", &[session_id])
             .await?;
@@ -812,7 +765,7 @@ impl SessionStore for DatabaseSessionStore {
             .storage
             .delete("sessions", "session_key = ?", &[session_id])
             .await?;
-        Ok(SessionPatchAck {
+        Ok(SessionPatchResponse {
             success: affected > 0,
         })
     }
@@ -880,104 +833,6 @@ impl SessionStore for DatabaseSessionStore {
             .update("sessions", &update_row, "session_key = ?", &[session_id])
             .await?;
 
-        Ok(())
-    }
-
-    async fn list_projects(&self) -> TalosResult<Vec<ProjectRecord>> {
-        let sql = "SELECT p.project_id, p.name, p.user_id, p.directory, p.created_at, p.updated_at, COUNT(s.session_key) AS session_count FROM projects p LEFT JOIN sessions s ON s.project_id = p.project_id GROUP BY p.project_id, p.name, p.user_id, p.directory, p.created_at, p.updated_at ORDER BY p.created_at DESC";
-        let rows = self.storage.query(sql, &[]).await?;
-        Ok(rows.iter().map(Self::parse_project_record).collect())
-    }
-
-    async fn get_project(&self, project_id: &str) -> TalosResult<Option<ProjectRecord>> {
-        let sql =
-            "SELECT p.project_id, p.name, p.user_id, p.directory, p.created_at, p.updated_at, COUNT(s.session_key) AS session_count FROM projects p LEFT JOIN sessions s ON s.project_id = p.project_id WHERE p.project_id = ? GROUP BY p.project_id, p.name, p.user_id, p.directory, p.created_at, p.updated_at";
-        let rows = self.storage.query(sql, &[project_id]).await?;
-        Ok(rows
-            .into_iter()
-            .next()
-            .map(|row| Self::parse_project_record(&row)))
-    }
-
-    async fn create_project(&self, name: &str, directory: &PathBuf) -> TalosResult<ProjectRecord> {
-        self.create_project_for_owner(name, directory, "").await
-    }
-
-    async fn create_project_for_owner(
-        &self,
-        name: &str,
-        directory: &PathBuf,
-        user_id: &str,
-    ) -> TalosResult<ProjectRecord> {
-        let now = chrono::Utc::now().timestamp_millis();
-        let record = ProjectRecord {
-            project_id: uuid::Uuid::now_v7().to_string(),
-            name: name.to_string(),
-            user_id: user_id.to_string(),
-            directory: directory.clone(),
-            status: ProjectStatus::default(),
-            created_at: now,
-            updated_at: now,
-            session_count: 0,
-        };
-        let row = Row::new(
-            vec![
-                "project_id".to_string(),
-                "name".to_string(),
-                "user_id".to_string(),
-                "directory".to_string(),
-                "created_at".to_string(),
-                "updated_at".to_string(),
-            ],
-            vec![
-                Value::String(record.project_id.clone()),
-                Value::String(record.name.clone()),
-                Value::String(record.user_id.clone()),
-                Value::String(record.directory.display().to_string()),
-                Value::Number(now.into()),
-                Value::Number(now.into()),
-            ],
-        );
-        self.storage.insert("projects", &row).await?;
-        Ok(record)
-    }
-
-    async fn patch_project(
-        &self,
-        project_id: &str,
-        patch: &ProjectPatch,
-    ) -> TalosResult<Option<ProjectRecord>> {
-        let Some(mut record) = self.get_project(project_id).await? else {
-            return Ok(None);
-        };
-        if let Some(name) = patch.name.as_ref() {
-            record.name = name.clone();
-        }
-        record.updated_at = chrono::Utc::now().timestamp_millis();
-        let row = Row::new(
-            vec!["name".to_string(), "updated_at".to_string()],
-            vec![
-                Value::String(record.name.clone()),
-                Value::Number(record.updated_at.into()),
-            ],
-        );
-        self.storage
-            .update("projects", &row, "project_id = ?", &[project_id])
-            .await?;
-        Ok(Some(record))
-    }
-
-    async fn delete_project(&self, project_id: &str) -> TalosResult<()> {
-        let bound_count = self.count_sessions_bound_to_project(project_id).await?;
-        if bound_count > 0 {
-            return Err(talos_error::TalosError::ValidationError(format!(
-                "project {} still has bound sessions",
-                project_id
-            )));
-        }
-        self.storage
-            .execute("DELETE FROM projects WHERE project_id = ?", &[project_id])
-            .await?;
         Ok(())
     }
 }

@@ -306,6 +306,11 @@ pub struct SkillsListResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct SkillsReadResponse {
+    pub document: SkillDocument,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct SkillsSuggestResponse {
     pub data: Vec<SkillSuggestion>,
 }

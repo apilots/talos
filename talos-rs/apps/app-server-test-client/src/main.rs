@@ -3,9 +3,9 @@ use std::{collections::HashMap, process::Stdio};
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 use talos_sdk::{
-    canonical_method, AppServerClient, AppServerClientConfig, EventSubscribeParams,
-    ExpectedFileVersion, ProjectPatch, TalosContext, TalosError, TalosInputItem,
-    TalosMessageRequest, TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta,
+    canonical_method, AppServerClient, AppServerClientConfig, ExpectedFileVersion, ProjectPatch,
+    StartTurnRequest, SubscribeTimelineRequest, TalosContext, TalosError, TalosInputItem,
+    TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta,
     TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItemKind,
     TimelineEventEnvelope, WorkspaceDocKind,
 };
@@ -97,8 +97,8 @@ async fn smoke(client: &mut AppServerClient) -> Result<()> {
     client.list_models().await?;
     eprintln!("session id");
     new_session_id(client).await?;
-    eprintln!("config.read");
-    client.config_read().await?;
+    eprintln!("config.get");
+    client.config_get().await?;
     eprintln!("memory.file.list");
     client.list_memory_files().await?;
     eprintln!("workspace.doc.list");
@@ -193,11 +193,11 @@ async fn active_turn_conflict(client: &mut AppServerClient) -> Result<()> {
     start_turn(client, &session_id).await?;
     eprintln!("active-turn-conflict second turn.start");
     let err = client
-        .start_turn(
+        .start_turn(start_turn_request(
             &session_id,
-            message_request("answer with ok"),
+            "answer with ok",
             Some("app-server-test-conflict".to_string()),
-        )
+        ))
         .await
         .expect_err("second turn should conflict");
     if matches!(err, talos_sdk::TalosError::Conflict(_)) {
@@ -210,14 +210,14 @@ async fn active_turn_conflict(client: &mut AppServerClient) -> Result<()> {
 async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     eprintln!("resource-matrix config/model list");
     client.list_models().await?;
-    client.config_read().await?;
+    client.config_get().await?;
 
     eprintln!("resource-matrix memory roundtrip");
     let memory_path = "2099-12-31.md";
     let memory_content =
         "## [00:00] App Server\nsession: sdk\n\n**Facts:**\n- app-server resource parity\n";
     let memory_expected_version = match client.read_memory_file(memory_path).await {
-        Ok(existing) => Some(existing.version_token),
+        Ok(existing) => Some(existing.file.version_token),
         Err(TalosError::ResourceNotFound(_)) => None,
         Err(error) => return Err(error.into()),
     };
@@ -227,14 +227,15 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
             memory_content.to_string(),
             memory_expected_version,
         )
-        .await?;
+        .await?
+        .file;
     if !written_memory
         .content
         .contains("app-server resource parity")
     {
         return Err(anyhow!("memory write did not persist expected content"));
     }
-    let read_memory = client.read_memory_file(memory_path).await?;
+    let read_memory = client.read_memory_file(memory_path).await?.file;
     if read_memory.version_token != written_memory.version_token {
         return Err(anyhow!("memory read returned a different version token"));
     }
@@ -255,7 +256,10 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     client.list_memory_files().await?;
 
     eprintln!("resource-matrix workspace doc read/conflict");
-    let read_workspace = client.read_workspace_doc(WorkspaceDocKind::Memory).await?;
+    let read_workspace = client
+        .read_workspace_doc(WorkspaceDocKind::Memory)
+        .await?
+        .doc;
     if !read_workspace.exists {
         return Err(anyhow!("expected bootstrap workspace memory doc to exist"));
     }
@@ -281,12 +285,13 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     let project_name = format!("App Server {}", uuid::Uuid::new_v4().simple());
     let project = client
         .create_project(project_name.clone(), project_dir.clone())
-        .await?;
-    let read_project = client.get_project(&project.project_id).await?;
+        .await?
+        .project;
+    let read_project = client.get_project(&project.project_id).await?.project;
     if read_project.directory != project_dir {
         return Err(anyhow!("project.read returned a different directory"));
     }
-    let listed_projects = client.list_projects().await?;
+    let listed_projects = client.list_projects().await?.projects;
     if !listed_projects
         .iter()
         .any(|candidate| candidate.project_id == project.project_id)
@@ -301,7 +306,8 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
                 name: Some(patched_name.clone()),
             },
         )
-        .await?;
+        .await?
+        .project;
     if patched_project.name != patched_name {
         return Err(anyhow!("project.patch did not update name"));
     }
@@ -316,8 +322,9 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     start_turn(client, &session_id).await?;
     let listed_sessions = client.list_sessions(Default::default()).await?;
     if !listed_sessions
+        .sessions
         .iter()
-        .any(|candidate| candidate.context.session_id == session_id)
+        .any(|candidate| candidate.id == session_id)
     {
         return Err(anyhow!("session.list did not include created session"));
     }
@@ -354,7 +361,7 @@ async fn new_session_id(client: &mut AppServerClient) -> Result<String> {
 async fn subscribe_events(
     client: &mut AppServerClient,
     session_id: &str,
-) -> Result<talos_sdk::EventSubscribeResponse> {
+) -> Result<talos_sdk::SubscribeTimelineResponse> {
     subscribe_events_with_limit(client, session_id, 32).await
 }
 
@@ -362,7 +369,7 @@ async fn subscribe_events_with_limit(
     client: &mut AppServerClient,
     session_id: &str,
     replay_limit: usize,
-) -> Result<talos_sdk::EventSubscribeResponse> {
+) -> Result<talos_sdk::SubscribeTimelineResponse> {
     subscribe_events_with_cursor(client, session_id, None, replay_limit).await
 }
 
@@ -371,9 +378,9 @@ async fn subscribe_events_with_cursor(
     session_id: &str,
     since_event_id: Option<String>,
     replay_limit: usize,
-) -> Result<talos_sdk::EventSubscribeResponse> {
+) -> Result<talos_sdk::SubscribeTimelineResponse> {
     Ok(client
-        .subscribe_events(EventSubscribeParams {
+        .subscribe_events(SubscribeTimelineRequest {
             session_id: session_id.to_string(),
             since_event_id,
             replay_limit: Some(replay_limit),
@@ -385,17 +392,22 @@ async fn subscribe_events_with_cursor(
 
 async fn start_turn(client: &mut AppServerClient, session_id: &str) -> Result<()> {
     client
-        .start_turn(
+        .start_turn(start_turn_request(
             session_id,
-            message_request("answer with ok"),
+            "answer with ok",
             Some(format!("app-server-test-{}", uuid::Uuid::new_v4().simple())),
-        )
+        ))
         .await?;
     Ok(())
 }
 
-fn message_request(text: &str) -> TalosMessageRequest {
-    TalosMessageRequest {
+fn start_turn_request(
+    session_id: &str,
+    text: &str,
+    client_request_id: Option<String>,
+) -> StartTurnRequest {
+    StartTurnRequest {
+        session_id: session_id.to_string(),
         input: vec![TalosInputItem::Text {
             text: text.to_string(),
         }],
@@ -406,6 +418,7 @@ fn message_request(text: &str) -> TalosMessageRequest {
             .filter(|value| !value.trim().is_empty()),
         project_id: None,
         current_directory: None,
+        client_request_id,
     }
 }
 

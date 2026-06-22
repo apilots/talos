@@ -27,7 +27,7 @@ import { SelectedSkillChips } from "./SelectedSkillChips";
 import { SkillSuggestionsPopover } from "./SkillSuggestionsPopover";
 import { activeSkillTrigger, replaceSkillTrigger } from "./skillTrigger";
 import type {
-  ProjectRecord,
+  ProjectView,
   ReasoningLevel,
   RuntimeMode,
   SessionInputHistory,
@@ -46,7 +46,7 @@ interface ChatComposerProps {
   models: Array<{ id: string; name: string }>;
   selectedModel?: string;
   onModelChange?: (model: string) => void;
-  projects: ProjectRecord[];
+  projects: ProjectView[];
   activeProjectId: string;
   onProjectChange: (projectId: string) => void;
   onCreateProject?: (input: string | { directory: string; name?: string }) => Promise<void>;
@@ -70,7 +70,7 @@ interface InputHistoryNavigationItem {
 type ProjectPickerMode = "list" | "add_menu" | "existing" | "create";
 type ProjectMenuMode = Exclude<ProjectPickerMode, "existing" | "create">;
 
-function projectStatusUnavailable(project: ProjectRecord) {
+function projectStatusUnavailable(project: ProjectView) {
   return Boolean(project.status && project.status.state !== "available");
 }
 

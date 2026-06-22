@@ -1,9 +1,14 @@
 use super::*;
+use std::sync::Mutex;
+use talos_types::agent_dispatch::AgentDispatchRequest;
 use talos_types::talos::{TalosProvider, TalosSourceType};
 
 pub(crate) struct MockGateway;
 pub(crate) struct SilentGateway;
-pub(crate) struct MockSessionService;
+#[derive(Default)]
+pub(crate) struct MockSessionService {
+    session_cleared: Mutex<bool>,
+}
 pub(crate) struct MockLlmProvider;
 
 fn test_timeline_event(
@@ -68,30 +73,10 @@ impl LlmProvider for MockLlmProvider {
 }
 
 #[async_trait::async_trait]
-impl Gateway for MockGateway {
-    async fn handle_request(
+impl TurnExecutor for MockGateway {
+    async fn start_turn_stream(
         &self,
-        _request: GatewayRequest,
-    ) -> TalosResult<talos_gateway::GatewayResponse> {
-        Ok(talos_gateway::GatewayResponse {
-            content: "mock content".to_string(),
-            output_items: vec![TalosOutputItem::OutputText {
-                text: "mock content".to_string(),
-            }],
-            reasoning: vec![TalosReasoning {
-                text: "mock reasoning".to_string(),
-            }],
-            stop_reason: StopReason::EndTurn,
-            usage: TalosUsage::default(),
-            success: true,
-            model: "qwen-plus".to_string(),
-            session_id: "mock-session".to_string(),
-        })
-    }
-
-    async fn handle_request_stream(
-        &self,
-        _request: GatewayRequest,
+        _request: AgentDispatchRequest,
     ) -> TalosResult<tokio::sync::mpsc::Receiver<TalosTimelineEvent>> {
         let (tx, rx) = tokio::sync::mpsc::channel(8);
         tokio::spawn(async move {
@@ -204,17 +189,13 @@ impl Gateway for MockGateway {
         Ok(rx)
     }
 
-    async fn start(&self) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
+    async fn cancel_active_turn(&self, _session: TalosSession) -> TalosResult<()> {
         Ok(())
     }
 
     async fn submit_dynamic_tool_result(
         &self,
-        _session_id: &str,
+        _session: TalosSession,
         _call_id: &str,
         _tool_name: &str,
         _output: String,
@@ -225,17 +206,10 @@ impl Gateway for MockGateway {
 }
 
 #[async_trait::async_trait]
-impl Gateway for SilentGateway {
-    async fn handle_request(
+impl TurnExecutor for SilentGateway {
+    async fn start_turn_stream(
         &self,
-        _request: GatewayRequest,
-    ) -> TalosResult<talos_gateway::GatewayResponse> {
-        unreachable!("silent gateway is only used by async stream tests")
-    }
-
-    async fn handle_request_stream(
-        &self,
-        _request: GatewayRequest,
+        _request: AgentDispatchRequest,
     ) -> TalosResult<tokio::sync::mpsc::Receiver<TalosTimelineEvent>> {
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         tokio::spawn(async move {
@@ -245,17 +219,13 @@ impl Gateway for SilentGateway {
         Ok(rx)
     }
 
-    async fn start(&self) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
+    async fn cancel_active_turn(&self, _session: TalosSession) -> TalosResult<()> {
         Ok(())
     }
 
     async fn submit_dynamic_tool_result(
         &self,
-        _session_id: &str,
+        _session: TalosSession,
         _call_id: &str,
         _tool_name: &str,
         _output: String,
@@ -329,6 +299,7 @@ impl SessionService for MockSessionService {
         if session_id != "mock-session" {
             return Ok(None);
         }
+        let session_cleared = *self.session_cleared.lock().expect("session state lock");
         Ok(Some(talos_types::TalosSession {
             title: "Untitled Session".to_string(),
             user_id: "static-token".to_string(),
@@ -359,7 +330,7 @@ impl SessionService for MockSessionService {
             state: talos_types::SessionState {
                 created_at: 0,
                 last_activity: 0,
-                message_count: 1,
+                message_count: if session_cleared { 0 } else { 1 },
                 usage: talos_types::talos::TalosUsage::default(),
             },
         }))
@@ -369,8 +340,8 @@ impl SessionService for MockSessionService {
         &self,
         _session_id: &str,
         _patch: talos_types::SessionPatch,
-    ) -> TalosResult<talos_types::SessionPatchAck> {
-        Ok(talos_types::SessionPatchAck { success: true })
+    ) -> TalosResult<talos_types::SessionPatchResponse> {
+        Ok(talos_types::SessionPatchResponse { success: true })
     }
 
     async fn compact_session(&self, session_id: &str) -> TalosResult<talos_types::TalosSession> {
@@ -380,6 +351,7 @@ impl SessionService for MockSessionService {
     }
 
     async fn clear_session(&self, session_id: &str) -> TalosResult<talos_types::TalosSession> {
+        *self.session_cleared.lock().expect("session state lock") = true;
         let mut session = self
             .get_session(session_id)
             .await?
@@ -393,8 +365,11 @@ impl SessionService for MockSessionService {
         Ok(())
     }
 
-    async fn delete_session(&self, _session_id: &str) -> TalosResult<talos_types::SessionPatchAck> {
-        Ok(talos_types::SessionPatchAck { success: true })
+    async fn delete_session(
+        &self,
+        _session_id: &str,
+    ) -> TalosResult<talos_types::SessionPatchResponse> {
+        Ok(talos_types::SessionPatchResponse { success: true })
     }
 
     async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
@@ -414,47 +389,6 @@ impl SessionService for MockSessionService {
                 "session {session_id}"
             )));
         }
-        Ok(())
-    }
-
-    async fn list_projects(&self) -> TalosResult<Vec<talos_types::ProjectRecord>> {
-        Ok(Vec::new())
-    }
-
-    async fn get_project(
-        &self,
-        _project_id: &str,
-    ) -> TalosResult<Option<talos_types::ProjectRecord>> {
-        Ok(None)
-    }
-
-    async fn create_project(
-        &self,
-        name: String,
-        directory: std::path::PathBuf,
-        _user_id: String,
-    ) -> TalosResult<talos_types::ProjectRecord> {
-        Ok(talos_types::ProjectRecord {
-            project_id: "project-mock".to_string(),
-            name,
-            user_id: "static-token".to_string(),
-            directory,
-            status: talos_types::ProjectStatus::default(),
-            created_at: 0,
-            updated_at: 0,
-            session_count: 0,
-        })
-    }
-
-    async fn patch_project(
-        &self,
-        _project_id: &str,
-        _patch: talos_types::ProjectPatch,
-    ) -> TalosResult<Option<talos_types::ProjectRecord>> {
-        Ok(None)
-    }
-
-    async fn delete_project(&self, _project_id: &str) -> TalosResult<()> {
         Ok(())
     }
 }

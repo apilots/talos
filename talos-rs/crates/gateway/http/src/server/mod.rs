@@ -42,7 +42,8 @@ use self::memory_files::{
     search_memory_files_handler,
 };
 use self::messages::{
-    retry_message_attempt_handler, session_message_handler, submit_dynamic_tool_result_handler,
+    interrupt_turn_handler, retry_turn_handler, start_turn_handler,
+    submit_dynamic_tool_result_handler,
 };
 use self::misc::{
     get_llm_handler, health_handler, list_models_handler, put_llm_handler, shutdown_signal,
@@ -58,9 +59,8 @@ use self::projects::{
     patch_project_handler,
 };
 use self::sessions::{
-    cancel_active_turn_handler, clear_session_handler, close_session_handler,
-    compact_session_handler, delete_session_handler, get_session_handler,
-    get_session_history_handler, list_sessions_handler, patch_session_handler,
+    clear_session_handler, close_session_handler, compact_session_handler, delete_session_handler,
+    get_session_handler, get_session_history_handler, list_sessions_handler, patch_session_handler,
 };
 use self::skills::{
     list_skills_handler, read_skill_handler, refresh_skills_handler, resolve_skills_handler,
@@ -259,10 +259,6 @@ impl HttpServer {
                 post(close_session_handler),
             )
             .route(
-                "/v1/sessions/:session_id/cancel",
-                post(cancel_active_turn_handler),
-            )
-            .route(
                 "/v1/sessions/:session_id/compact",
                 post(compact_session_handler),
             )
@@ -270,16 +266,11 @@ impl HttpServer {
                 "/v1/sessions/:session_id/clear",
                 post(clear_session_handler),
             )
+            .route("/v1/turns/start", post(start_turn_handler))
+            .route("/v1/turns/retry", post(retry_turn_handler))
+            .route("/v1/turns/interrupt", post(interrupt_turn_handler))
             .route(
-                "/v1/sessions/:session_id/messages",
-                post(session_message_handler),
-            )
-            .route(
-                "/v1/sessions/:session_id/message-attempts",
-                post(retry_message_attempt_handler),
-            )
-            .route(
-                "/v1/sessions/:session_id/dynamic-tool-results",
+                "/v1/tools/dynamic-results/submit",
                 post(submit_dynamic_tool_result_handler),
             )
             .with_state(state.clone())

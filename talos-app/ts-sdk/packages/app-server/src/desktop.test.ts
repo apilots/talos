@@ -16,7 +16,7 @@ describe("ElectronAppServerClient", () => {
       params: unknown,
     ): Promise<T> {
       calls.push({ method, params });
-      return { data: [{ id: "model-a", name: "Model A" }] } as T;
+      return { models: [{ id: "model-a", name: "Model A" }] } as T;
     };
     const bridge: DesktopRendererBridge = {
       invoke,
@@ -27,7 +27,7 @@ describe("ElectronAppServerClient", () => {
 
     const models = await client.listModels();
 
-    expect(models).toEqual([{ id: "model-a", name: "Model A" }]);
+    expect(models).toEqual({ models: [{ id: "model-a", name: "Model A" }] });
     expect(calls).toEqual([{ method: "model.list", params: {} }]);
   });
 

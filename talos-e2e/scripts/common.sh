@@ -112,7 +112,7 @@ except Exception:
     print("")
     raise SystemExit(0)
 
-models = payload.get("data", payload) if isinstance(payload, dict) else payload
+models = payload.get("models", payload.get("data", payload)) if isinstance(payload, dict) else payload
 if not isinstance(models, list):
     print("")
     raise SystemExit(0)
@@ -194,8 +194,35 @@ def replace_section_value(content: str, section: str, key: str, value: str) -> s
             return "".join(lines)
     raise SystemExit(f"missing config key: {section}.{key}")
 
-def replace_agent_kernel_skills_and_plugins(content: str, talos_home: Path) -> str:
+def add_e2e_skill_root(content: str, talos_home: Path) -> str:
     marker = '    planner_mode: "built_in"\n'
+    root_path = str(talos_home / "agents-skills")
+    if root_path in content:
+        return content
+
+    root_entry = (
+        "        - kind: skill\n"
+        f"          path: {json.dumps(root_path)}\n"
+        "          read_only: true\n"
+    )
+
+    plugins_marker = "    plugins:\n"
+    roots_marker = "      roots:\n"
+    plugins_start = content.find(plugins_marker)
+    if plugins_start >= 0:
+        plugins_end = content.find(marker, plugins_start)
+        if plugins_end < 0:
+            raise SystemExit("unable to locate agent.kernel planner_mode after plugins block")
+        plugins_block = content[plugins_start:plugins_end]
+        roots_start = plugins_block.find(roots_marker)
+        if roots_start >= 0:
+            insert_at = plugins_end
+            return content[:insert_at] + root_entry + content[insert_at:]
+
+        insert_at = plugins_start + len(plugins_marker)
+        roots_block = "      roots:\n" + root_entry
+        return content[:insert_at] + roots_block + content[insert_at:]
+
     block = (
         "    skills:\n"
         "      max_skill_md_bytes: 65536\n"
@@ -203,17 +230,11 @@ def replace_agent_kernel_skills_and_plugins(content: str, talos_home: Path) -> s
         "    plugins:\n"
         "      sources: []\n"
         "      roots:\n"
-        "        - kind: skill\n"
-        f"          path: {json.dumps(str(talos_home / 'agents-skills'))}\n"
-        "          read_only: true\n"
+        f"{root_entry}"
     )
-    start = content.find("    skills:\n")
-    end = content.find(marker)
-    if start >= 0 and end > start:
-        return content[:start] + block + content[end:]
-    if "    skills:\n" not in content:
+    if marker in content:
         return content.replace(marker, block + marker)
-    raise SystemExit("unable to locate agent.kernel skills/plugins block")
+    raise SystemExit("unable to locate agent.kernel plugins block")
 
 gateway_auth = os.environ.get("TALOS_TEST_GATEWAY_AUTH")
 if gateway_auth is None:
@@ -228,7 +249,7 @@ gateway_port = os.environ.get("TALOS_TEST_PORT")
 if gateway_port:
     text = replace_section_value(text, "gateway", "port", gateway_port)
 
-text = replace_agent_kernel_skills_and_plugins(text, talos_home)
+text = add_e2e_skill_root(text, talos_home)
 
 cloud_api_base_url = os.environ.get("TALOS_TEST_CLOUD_API_BASE_URL")
 if cloud_api_base_url:
@@ -396,17 +417,25 @@ message_payload_with_session_context() {
   local payload_path
   payload_path="$(session_context_payload_path "${session_id}")"
   if [[ ! -f "${payload_path}" ]]; then
-    printf '%s\n' "${payload}"
+    MESSAGE_PAYLOAD="${payload}" SESSION_ID="${session_id}" python3 - <<'PY'
+import json
+import os
+
+message_payload = json.loads(os.environ["MESSAGE_PAYLOAD"])
+message_payload["session_id"] = os.environ["SESSION_ID"]
+print(json.dumps(message_payload, ensure_ascii=False, separators=(",", ":")))
+PY
     return 0
   fi
 
-  MESSAGE_PAYLOAD="${payload}" SESSION_PAYLOAD_PATH="${payload_path}" python3 - <<'PY'
+  MESSAGE_PAYLOAD="${payload}" SESSION_ID="${session_id}" SESSION_PAYLOAD_PATH="${payload_path}" python3 - <<'PY'
 import json
 import os
 from pathlib import Path
 
 message_payload = json.loads(os.environ["MESSAGE_PAYLOAD"])
 session_payload = json.loads(Path(os.environ["SESSION_PAYLOAD_PATH"]).read_text())
+message_payload["session_id"] = os.environ["SESSION_ID"]
 
 for key in ("context", "model", "project_id", "current_directory"):
     if key in session_payload and message_payload.get(key) is None:
@@ -425,6 +454,12 @@ usage_total_from_json() {
     return 0
   fi
 
+  usage_total="$(json_get "${json}" "session.usage.total_tokens")"
+  if [[ -n "${usage_total}" ]]; then
+    echo "${usage_total}"
+    return 0
+  fi
+
   json_get "${json}" "state.usage.total_tokens"
 }
 
@@ -434,7 +469,7 @@ send_message_ack() {
   local idempotency_key="${3:-}"
   payload="$(message_payload_with_session_context "${session_id}" "${payload}")"
   local args=(
-    -sS -X POST "${GATEWAY_URL}/v1/sessions/${session_id}/messages"
+    -sS -X POST "${GATEWAY_URL}/v1/turns/start"
     -H "Content-Type: application/json"
   )
   if [[ -n "${idempotency_key}" ]]; then

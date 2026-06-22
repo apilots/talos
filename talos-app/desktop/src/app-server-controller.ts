@@ -76,10 +76,10 @@ export class DesktopAppServerController {
 
     const result = await this.ensureBridge().invoke<T>(method, params, options);
     if (method === "event.subscribe") {
-      this.recordSubscription(params as AppProtocol.EventSubscribeParams, result as AppProtocol.EventSubscribeResponse);
+      this.recordSubscription(params as AppProtocol.SubscribeTimelineRequest, result as AppProtocol.SubscribeTimelineResponse);
     }
     if (method === "event.unsubscribe") {
-      this.forgetSubscription((params as AppProtocol.EventUnsubscribeParams).subscription_id);
+      this.forgetSubscription((params as AppProtocol.EventUnsubscribeRequest).subscription_id);
     }
     return result;
   }
@@ -175,7 +175,7 @@ export class DesktopAppServerController {
   private async replaySubscriptions(): Promise<void> {
     const subscriptions = [...this.subscriptions.values()];
     for (const subscription of subscriptions) {
-      const response = await this.ensureBridge().invoke<AppProtocol.EventSubscribeResponse>(
+      const response = await this.ensureBridge().invoke<AppProtocol.SubscribeTimelineResponse>(
         "event.subscribe",
         {
           session_id: subscription.sessionId,
@@ -183,7 +183,7 @@ export class DesktopAppServerController {
           replay_limit: subscription.replayLimit,
           close_when_idle: subscription.closeWhenIdle,
           close_on_terminal: subscription.closeOnTerminal,
-        } satisfies AppProtocol.EventSubscribeParams,
+        } satisfies AppProtocol.SubscribeTimelineRequest,
       );
       this.subscriptions.set(subscription.sessionId, {
         ...subscription,
@@ -196,8 +196,8 @@ export class DesktopAppServerController {
   }
 
   private recordSubscription(
-    params: AppProtocol.EventSubscribeParams,
-    response: AppProtocol.EventSubscribeResponse,
+    params: AppProtocol.SubscribeTimelineRequest,
+    response: AppProtocol.SubscribeTimelineResponse,
   ): void {
     const previous = this.subscriptions.get(params.session_id);
     if (previous) {

@@ -1,6 +1,7 @@
 use super::*;
 use std::path::Path;
 use std::sync::Arc;
+use talos_project_store::{ProjectStore, StorageProjectStore};
 use talos_storage::SqliteStorage;
 
 fn sample_context() -> TalosContext {
@@ -400,9 +401,10 @@ async fn test_list_session_records_respects_limit_and_offset() {
 #[tokio::test]
 async fn test_list_projects_returns_session_count() {
     let storage = Arc::new(SqliteStorage::new("sqlite::memory:").await.unwrap());
-    let store = DatabaseSessionStore::new(storage).await.unwrap();
+    let store = DatabaseSessionStore::new(storage.clone()).await.unwrap();
+    let project_store = StorageProjectStore::new(storage).await.unwrap();
 
-    let project = store
+    let project = project_store
         .create_project("repo", &PathBuf::from("/repo"))
         .await
         .expect("create project should succeed");
@@ -422,7 +424,7 @@ async fn test_list_projects_returns_session_count() {
         .await
         .expect("create bound session should succeed");
 
-    let projects = store
+    let projects = project_store
         .list_projects()
         .await
         .expect("list projects should succeed");
@@ -430,7 +432,7 @@ async fn test_list_projects_returns_session_count() {
     assert_eq!(projects[0].project_id, project.project_id);
     assert_eq!(projects[0].session_count, 1);
 
-    let loaded = store
+    let loaded = project_store
         .get_project(&project.project_id)
         .await
         .expect("get project should succeed")

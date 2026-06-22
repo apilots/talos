@@ -52,10 +52,11 @@ pub(super) async fn auth_middleware(
     let token = match auth_header.and_then(|v| v.to_str().ok()) {
         Some(v) if v.starts_with("Bearer ") => v[7..].to_string(),
         _ => match state
-            .cloud_session_cache
-            .read_candidate(CloudSessionCache::now_ms())
+            .app
+            .account
+            .read_cached_access_token(CloudSessionCache::now_ms())
         {
-            Ok(Some(entry)) => entry.access_token,
+            Ok(Some(token)) => token,
             _ => return Err(StatusCode::UNAUTHORIZED),
         },
     };
@@ -66,16 +67,18 @@ pub(super) async fn auth_middleware(
         Err(_) => {
             if !skip_cache_touch {
                 let _ = state
-                    .cloud_session_cache
-                    .clear_rejected_token(&token, CloudSessionCache::now_ms());
+                    .app
+                    .account
+                    .clear_rejected_access_token(&token, CloudSessionCache::now_ms());
             }
             return Err(StatusCode::UNAUTHORIZED);
         }
     };
     if !skip_cache_touch {
         let _ = state
-            .cloud_session_cache
-            .record_verified_token_use(&token, CloudSessionCache::now_ms());
+            .app
+            .account
+            .record_verified_access_token_use(&token, CloudSessionCache::now_ms());
     }
 
     req.extensions_mut().insert(auth_result);

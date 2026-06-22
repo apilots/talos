@@ -11,26 +11,22 @@ use crate::store::{
     MemoryGetResult, MemoryIndexFile, MemoryIndexSection, MemorySearchQuery, MemorySearchResult,
     MemoryStore, RetrievedMemoryItem,
 };
+pub use talos_types::MemorySearchResponse;
 
 const INDEX_PREVIEW_LIMIT: usize = 100;
 const HOP1_FILE_SECTION_LIMIT: usize = 3;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct MemorySearchResponse {
-    #[serde(default)]
-    pub results: Vec<MemorySearchResult>,
-}
-
-impl MemorySearchResponse {
-    pub fn into_retrieved_items(self) -> Vec<RetrievedMemoryItem> {
-        self.results
-            .into_iter()
-            .map(|item| RetrievedMemoryItem {
-                path: item.path,
-                snippet: item.snippet,
-            })
-            .collect()
-    }
+pub fn memory_search_response_into_retrieved_items(
+    response: MemorySearchResponse,
+) -> Vec<RetrievedMemoryItem> {
+    response
+        .results
+        .into_iter()
+        .map(|item| RetrievedMemoryItem {
+            path: item.path,
+            snippet: item.snippet,
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]

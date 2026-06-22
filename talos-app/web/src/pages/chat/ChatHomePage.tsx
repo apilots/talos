@@ -10,7 +10,7 @@ import {
   useProjectsQuery,
 } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
-import { resolveProjectRecord } from "@/shared/types/domain";
+import { resolveProjectView } from "@/shared/types/domain";
 import type { SkillSuggestion } from "@talos/sdk-browser";
 
 interface HomeLocationState {
@@ -40,7 +40,7 @@ export function ChatHomePage() {
   const [selectedModel, setSelectedModel] = useState<string | undefined>(models?.[0]?.id);
 
   const activeProject = useMemo(
-    () => resolveProjectRecord(projects, activeProjectId),
+    () => resolveProjectView(projects, activeProjectId),
     [activeProjectId, projects],
   );
 

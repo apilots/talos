@@ -5,7 +5,11 @@ use chrono::NaiveDate;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::LlmProvider;
 use talos_memory::{Memory, MemoryIndexFile, MemorySearchQuery, MemorySearchResult, MemoryStore};
-use talos_types::{DocUpdateRequest, MemoryFileDetail, MemoryFileSummary, TalosConfig};
+use talos_types::{
+    DocUpdateRequest, ExpectedFileVersion, MemoryFileDetail, MemoryFileListRequest,
+    MemoryFileListResponse, MemoryFileReadRequest, MemoryFileSummary, MemoryFileWriteRequest,
+    MemorySearchRequest, MemorySearchResponse, TalosConfig,
+};
 use tokio::fs;
 
 use crate::access::Actor;
@@ -31,7 +35,7 @@ impl MemoryDate {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct MemoryListParams {
+pub struct MemoryListCommand {
     pub limit: Option<usize>,
     pub before_date: Option<MemoryDate>,
     pub date_from: Option<MemoryDate>,
@@ -39,7 +43,7 @@ pub struct MemoryListParams {
 }
 
 #[derive(Debug, Clone)]
-pub struct MemorySearchParams {
+pub struct MemorySearchCommand {
     pub query: String,
     pub limit: Option<usize>,
     pub date_from: Option<MemoryDate>,
@@ -69,7 +73,7 @@ impl MemoryService {
     pub async fn list_files(
         &self,
         actor: &Actor,
-        params: MemoryListParams,
+        params: MemoryListCommand,
     ) -> TalosResult<Vec<MemoryFileSummary>> {
         let workspace = self.resolver.resolve_for_actor(actor)?;
         let config = &workspace.config.agent.kernel.memory;
@@ -120,11 +124,39 @@ impl MemoryService {
         Ok(files)
     }
 
+    pub async fn list_files_with_request(
+        &self,
+        actor: &Actor,
+        request: MemoryFileListRequest,
+    ) -> TalosResult<MemoryFileListResponse> {
+        let files = self
+            .list_files(
+                actor,
+                MemoryListCommand {
+                    limit: request.limit,
+                    before_date: parse_optional_memory_date(request.before_date.as_deref())?,
+                    date_from: parse_optional_memory_date(request.date_from.as_deref())?,
+                    date_to: parse_optional_memory_date(request.date_to.as_deref())?,
+                },
+            )
+            .await?;
+        Ok(MemoryFileListResponse { data: files })
+    }
+
     pub async fn get_file(&self, actor: &Actor, date: MemoryDate) -> TalosResult<MemoryFileDetail> {
         let workspace = self.resolver.resolve_for_actor(actor)?;
         self.load_detail(&workspace.config, date)
             .await?
             .ok_or_else(|| TalosError::ResourceNotFound("memory file not found".to_string()))
+    }
+
+    pub async fn read_file_with_request(
+        &self,
+        actor: &Actor,
+        request: MemoryFileReadRequest,
+    ) -> TalosResult<MemoryFileDetail> {
+        self.get_file(actor, memory_date_from_path(&request.path)?)
+            .await
     }
 
     pub async fn put_file(
@@ -158,10 +190,27 @@ impl MemoryService {
             .ok_or_else(|| TalosError::InternalError("memory file missing after write".to_string()))
     }
 
+    pub async fn write_file_with_request(
+        &self,
+        actor: &Actor,
+        request: MemoryFileWriteRequest,
+    ) -> TalosResult<MemoryFileDetail> {
+        let date = memory_date_from_path(&request.path)?;
+        self.put_file(
+            actor,
+            date,
+            DocUpdateRequest {
+                content: request.content,
+                base_version: expected_version(request.expected_version),
+            },
+        )
+        .await
+    }
+
     pub async fn search_files(
         &self,
         actor: &Actor,
-        params: MemorySearchParams,
+        params: MemorySearchCommand,
     ) -> TalosResult<Vec<MemorySearchResult>> {
         if params.query.trim().is_empty() {
             return Err(TalosError::ValidationError(
@@ -199,6 +248,25 @@ impl MemoryService {
         });
         results.truncate(limit);
         Ok(results)
+    }
+
+    pub async fn search_files_with_request(
+        &self,
+        actor: &Actor,
+        request: MemorySearchRequest,
+    ) -> TalosResult<MemorySearchResponse> {
+        let results = self
+            .search_files(
+                actor,
+                MemorySearchCommand {
+                    query: request.query,
+                    limit: request.limit,
+                    date_from: parse_optional_memory_date(request.date_from.as_deref())?,
+                    date_to: parse_optional_memory_date(request.date_to.as_deref())?,
+                },
+            )
+            .await?;
+        Ok(MemorySearchResponse { results })
     }
 
     fn memory_dir(&self, config: &TalosConfig) -> PathBuf {
@@ -283,6 +351,26 @@ fn date_in_range(
         return false;
     }
     true
+}
+
+fn memory_date_from_path(path: &Path) -> TalosResult<MemoryDate> {
+    let stem = path
+        .file_stem()
+        .or_else(|| path.file_name())
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| TalosError::ValidationError("memory file path is invalid".to_string()))?;
+    MemoryDate::parse(stem)
+}
+
+fn expected_version(value: Option<String>) -> ExpectedFileVersion {
+    match value {
+        Some(version_token) => ExpectedFileVersion::Match { version_token },
+        None => ExpectedFileVersion::MustNotExist,
+    }
+}
+
+fn parse_optional_memory_date(value: Option<&str>) -> TalosResult<Option<MemoryDate>> {
+    value.map(MemoryDate::parse).transpose()
 }
 
 async fn restore_previous_memory_file(

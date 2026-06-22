@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { chatKeys, useConnectionKey } from "./useChatQueries";
 import { getSession } from "../api";
 import { hasRealSessionTitle } from "@/shared/types/domain";
-import type { TalosSession } from "@/shared/types/protocol";
+import type { SessionInfo } from "@/shared/types/protocol";
 
 const TITLE_REFRESH_DELAYS_MS = [400, 1_000, 2_000, 4_000] as const;
 
@@ -61,19 +61,19 @@ export function useSessionQueryInvalidation(sessionId: string) {
     }
   }
 
-  function updateCachedSessionLists(session: TalosSession) {
-    queryClient.setQueriesData<TalosSession[]>(
+  function updateCachedSessionLists(session: SessionInfo) {
+    queryClient.setQueriesData<SessionInfo[]>(
       { queryKey: chatKeys.sessions(connectionKey) },
       (sessions) =>
         sessions?.map((entry) =>
-          entry.context.session_id === session.context.session_id ? session : entry,
+          entry.id === session.id ? session : entry,
         ),
     );
-    queryClient.setQueriesData<TalosSession[]>(
+    queryClient.setQueriesData<SessionInfo[]>(
       { queryKey: [...chatKeys.all, connectionKey, "projectSessions"] },
       (sessions) =>
         sessions?.map((entry) =>
-          entry.context.session_id === session.context.session_id ? session : entry,
+          entry.id === session.id ? session : entry,
         ),
     );
   }

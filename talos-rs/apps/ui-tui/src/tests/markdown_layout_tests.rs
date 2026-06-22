@@ -349,36 +349,19 @@ async fn test_history_enter_switches_session() {
     let mut app = create_app_server_app();
     app.initialize_session().await;
 
-    let mut config = talos_types::TalosConfig::default();
-    config.llm.model = "claude-3".to_string();
-    app.history_sessions = vec![TalosSession {
+    app.history_sessions = vec![SessionInfo {
+        id: "hist-sess-1".to_string(),
         title: "Fix tui paste".to_string(),
         user_id: "u".to_string(),
-        context: talos_types::SessionContext {
-            session_id: "hist-sess-1".to_string(),
-            workspace_id: None,
-            source_type: talos_types::talos::TalosSourceType::Http,
-            provider: talos_types::talos::TalosProvider::Sdk,
-            user_id: "u".to_string(),
-            message_id: "m".to_string(),
-            trace_id: "t".to_string(),
-            channel_id: None,
-            thread_id: None,
-            project_id: None,
-            current_directory: None,
-            project_root: None,
-            environment: None,
-        },
-        conf: talos_sdk::SessionConf::default(),
+        source_type: talos_types::talos::TalosSourceType::Http,
+        provider: talos_types::talos::TalosProvider::Sdk,
+        model: "claude-3".to_string(),
+        created_at: 0,
+        last_activity: 0,
+        message_count: 3,
+        usage: talos_types::talos::TalosUsage::default(),
         project_id: None,
         current_directory: None,
-        config,
-        state: talos_types::SessionState {
-            created_at: 0,
-            last_activity: 0,
-            message_count: 3,
-            usage: talos_types::talos::TalosUsage::default(),
-        },
     }];
     app.current_state = AppState::History;
     app.history_selected = 0;

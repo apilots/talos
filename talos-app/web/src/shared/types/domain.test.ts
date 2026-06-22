@@ -5,7 +5,7 @@ import { i18n } from "@/shared/i18n/setup";
 import {
   createDefaultProjects,
   describeProjectDirectory,
-  resolveProjectRecord,
+  resolveProjectView,
   hasRealSessionTitle,
   outputContentToText,
   UNBOUND_PROJECT_ID,
@@ -46,8 +46,8 @@ describe("domain helpers", () => {
       },
     ];
 
-    expect(resolveProjectRecord(projects, "missing-project")?.id).toBe(UNBOUND_PROJECT_ID);
-    expect(resolveProjectRecord(projects, "project-1")?.id).toBe("project-1");
+    expect(resolveProjectView(projects, "missing-project")?.id).toBe(UNBOUND_PROJECT_ID);
+    expect(resolveProjectView(projects, "project-1")?.id).toBe("project-1");
   });
 
   it("detects generated session titles separately from the default title", () => {

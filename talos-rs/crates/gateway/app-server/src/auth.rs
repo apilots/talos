@@ -2,9 +2,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use talos_app_protocol::requests::{ActorCredential, ActorCredentials};
-use talos_application_service::Actor;
-use talos_auth::{AuthService, CloudSessionCache, CloudSessionCacheManager, RequestIdentity};
-use talos_config::TalosPaths;
+use talos_application_service::{AccountService, Actor};
+use talos_auth::{AuthService, CloudSessionCache, RequestIdentity};
 
 use crate::application::ProtocolResult;
 
@@ -16,29 +15,28 @@ pub trait ActorCredentialValidator: Send + Sync {
 #[derive(Clone)]
 pub struct AuthServiceCredentialValidator {
     auth_service: Arc<dyn AuthService>,
-    cloud_session_cache: CloudSessionCacheManager,
+    account: AccountService,
 }
 
 impl AuthServiceCredentialValidator {
-    pub fn new(auth_service: Arc<dyn AuthService>) -> Self {
+    pub fn new(auth_service: Arc<dyn AuthService>, account: AccountService) -> Self {
         Self {
             auth_service,
-            cloud_session_cache: CloudSessionCacheManager::for_talos_home(
-                TalosPaths::resolve().talos_home,
-            ),
+            account,
         }
     }
 
-    pub fn with_cloud_session_cache(mut self, cache: CloudSessionCache) -> Self {
-        self.cloud_session_cache = CloudSessionCacheManager::new(cache);
+    pub fn with_cloud_session_cache(self, cache: CloudSessionCache) -> Self {
+        self.account
+            .set_cloud_session_cache(cache)
+            .expect("cloud session cache should configure");
         self
     }
 
-    pub fn with_cloud_session_touch_interval_ms(mut self, interval_ms: i64) -> Self {
-        self.cloud_session_cache = self
-            .cloud_session_cache
-            .clone()
-            .with_touch_interval_ms(interval_ms);
+    pub fn with_cloud_session_touch_interval_ms(self, interval_ms: i64) -> Self {
+        self.account
+            .set_cloud_session_touch_interval_ms(interval_ms)
+            .expect("cloud session touch interval should configure");
         self
     }
 }
@@ -52,16 +50,16 @@ impl ActorCredentialValidator for AuthServiceCredentialValidator {
                     Ok(identity) => identity,
                     Err(error) => {
                         let _ = self
-                            .cloud_session_cache
-                            .clear_rejected_token(token, CloudSessionCache::now_ms());
+                            .account
+                            .clear_rejected_access_token(token, CloudSessionCache::now_ms());
                         return Err(
                             talos_app_protocol::errors::AppServerErrorBody::from_talos_error(error),
                         );
                     }
                 };
                 let _ = self
-                    .cloud_session_cache
-                    .record_verified_token_use(token, CloudSessionCache::now_ms());
+                    .account
+                    .record_verified_access_token_use(token, CloudSessionCache::now_ms());
                 Ok(actor_from_identity(&identity))
             }
         }
@@ -83,7 +81,7 @@ mod tests {
     use super::*;
     use talos_auth::{
         AuthResponse, CloudSessionCacheEntry, CloudSessionUserSnapshot, LoginRequest,
-        RegisterRequest, UserRole,
+        RegisterRequest, UserDto, UserRole, UserService,
     };
     use talos_error::{TalosError, TalosResult};
 
@@ -119,6 +117,24 @@ mod tests {
         }
     }
 
+    #[async_trait]
+    impl UserService for FakeAuthService {
+        async fn get_current_user(&self, actor: &RequestIdentity) -> TalosResult<UserDto> {
+            Ok(UserDto {
+                user_id: actor.user_id.clone(),
+                username: actor
+                    .username
+                    .clone()
+                    .unwrap_or_else(|| actor.user_id.clone()),
+                email: None,
+                role: actor.role,
+                disabled: false,
+                created_at: 0,
+                updated_at: 0,
+            })
+        }
+    }
+
     #[tokio::test]
     async fn validates_existing_token_and_touches_stale_cache() {
         let now_ms = CloudSessionCache::now_ms();
@@ -128,7 +144,13 @@ mod tests {
         cache
             .store(&test_entry("token", old_last_used))
             .expect("cache should store");
-        let validator = AuthServiceCredentialValidator::new(Arc::new(FakeAuthService))
+        let auth_service = Arc::new(FakeAuthService);
+        let account = AccountService::new(
+            auth_service.clone(),
+            auth_service.clone(),
+            "http://127.0.0.1:8080",
+        );
+        let validator = AuthServiceCredentialValidator::new(auth_service, account)
             .with_cloud_session_cache(cache.clone())
             .with_cloud_session_touch_interval_ms(1_000);
 
@@ -160,7 +182,13 @@ mod tests {
         cache
             .store(&test_entry("reject", now_ms))
             .expect("cache should store");
-        let validator = AuthServiceCredentialValidator::new(Arc::new(FakeAuthService))
+        let auth_service = Arc::new(FakeAuthService);
+        let account = AccountService::new(
+            auth_service.clone(),
+            auth_service.clone(),
+            "http://127.0.0.1:8080",
+        );
+        let validator = AuthServiceCredentialValidator::new(auth_service, account)
             .with_cloud_session_cache(cache.clone());
 
         let result = validator

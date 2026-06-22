@@ -2,9 +2,13 @@ use std::sync::Arc;
 
 use talos_error::{TalosError, TalosResult};
 use talos_session_store::{
-    ActiveTurnRecord, ActiveTurnStatus, TimelineEventId, TimelineEventService,
+    ActiveTurnRecord, ActiveTurnStatus, PendingUserAction, TimelineEventId, TimelineEventService,
 };
 use talos_types::talos::{TalosTimelineEvent, TimelineEventEnvelope};
+use talos_types::{
+    TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelinePendingDynamicToolResult,
+    TimelinePendingUserAction,
+};
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
@@ -12,7 +16,7 @@ pub type ApplicationEvent = TimelineEventEnvelope;
 pub type ApplicationEventStream = broadcast::Receiver<TimelineEventEnvelope>;
 
 #[derive(Debug, Clone)]
-pub struct TimelineSubscribeParams {
+pub struct TimelineSubscribeCommand {
     pub session_id: String,
     pub after_event_id: Option<TimelineEventId>,
     pub replay_limit: usize,
@@ -48,9 +52,9 @@ pub enum TimelineSubscriptionMessage {
 }
 
 #[derive(Debug)]
-pub struct TimelineRecoverySnapshot {
+pub struct TimelineRecoveryState {
     pub replay: EventReplay,
-    pub active_turn: Option<ActiveTurnRecord>,
+    pub active_turn: TimelineActiveTurnSnapshot,
 }
 
 #[derive(Clone, Default)]
@@ -116,18 +120,18 @@ impl EventService {
         session_id: &str,
         after_event_id: Option<&TimelineEventId>,
         limit: usize,
-    ) -> TalosResult<TimelineRecoverySnapshot> {
+    ) -> TalosResult<TimelineRecoveryState> {
         let replay = self.replay_after(session_id, after_event_id, limit).await?;
         let active_turn = self.get_active_turn(session_id).await?;
-        Ok(TimelineRecoverySnapshot {
+        Ok(TimelineRecoveryState {
             replay,
-            active_turn,
+            active_turn: map_active_turn_snapshot(session_id, active_turn),
         })
     }
 
     pub async fn subscribe(
         &self,
-        params: TimelineSubscribeParams,
+        params: TimelineSubscribeCommand,
     ) -> TalosResult<TimelineSubscription> {
         let live_events = self.subscribe_live_events()?;
         let high_water_mark_event_id = self.latest_event_id(&params.session_id).await?;
@@ -198,6 +202,54 @@ impl EventService {
 
     fn inner_talos(&self) -> TalosResult<&Arc<TimelineEventService>> {
         self.inner()
+    }
+}
+
+pub(crate) fn map_active_turn_snapshot(
+    session_id: &str,
+    active_turn: Option<ActiveTurnRecord>,
+) -> TimelineActiveTurnSnapshot {
+    match active_turn {
+        Some(record) => TimelineActiveTurnSnapshot {
+            session_id: record.session_id,
+            turn_id: Some(record.turn_id),
+            message_id: record.message_id,
+            status: map_active_turn_status(record.status),
+            last_event_id: record.last_event_id.map(|value| value.to_string()),
+            pending_user_action: record.pending_user_action.map(map_pending_user_action),
+            updated_at: record.updated_at,
+        },
+        None => TimelineActiveTurnSnapshot {
+            session_id: session_id.to_string(),
+            turn_id: None,
+            message_id: None,
+            status: TimelineActiveTurnStatus::Completed,
+            last_event_id: None,
+            pending_user_action: None,
+            updated_at: chrono::Utc::now().timestamp_millis(),
+        },
+    }
+}
+
+fn map_active_turn_status(status: ActiveTurnStatus) -> TimelineActiveTurnStatus {
+    match status {
+        ActiveTurnStatus::Running => TimelineActiveTurnStatus::Running,
+        ActiveTurnStatus::WaitingUserAction => TimelineActiveTurnStatus::WaitingUserAction,
+        ActiveTurnStatus::Cancelling => TimelineActiveTurnStatus::Cancelling,
+        ActiveTurnStatus::Completed => TimelineActiveTurnStatus::Completed,
+        ActiveTurnStatus::Failed => TimelineActiveTurnStatus::Failed,
+    }
+}
+
+fn map_pending_user_action(action: PendingUserAction) -> TimelinePendingUserAction {
+    match action {
+        PendingUserAction::DynamicToolResult(pending) => {
+            TimelinePendingUserAction::DynamicToolResult(TimelinePendingDynamicToolResult {
+                item_id: pending.item_id,
+                call_id: pending.call_id,
+                tool_name: pending.tool_name,
+            })
+        }
     }
 }
 
@@ -366,7 +418,7 @@ fn expired_cursor_error() -> TalosError {
 mod tests {
     use super::{
         reject_expired_cursor, EventService, TimelineCursorStatus, TimelineEventEnvelope,
-        TimelineSubscribeParams, TimelineSubscriptionCloseReason, TimelineSubscriptionMessage,
+        TimelineSubscribeCommand, TimelineSubscriptionCloseReason, TimelineSubscriptionMessage,
     };
     use async_trait::async_trait;
     use std::sync::{Arc, Mutex};
@@ -508,7 +560,7 @@ mod tests {
         let first_event_id = first.event_id.clone();
 
         let mut subscription = events
-            .subscribe(TimelineSubscribeParams {
+            .subscribe(TimelineSubscribeCommand {
                 session_id: "s1".to_string(),
                 after_event_id: None,
                 replay_limit: 32,
@@ -550,7 +602,7 @@ mod tests {
             .unwrap();
 
         let mut subscription = events
-            .subscribe(TimelineSubscribeParams {
+            .subscribe(TimelineSubscribeCommand {
                 session_id: "s1".to_string(),
                 after_event_id: None,
                 replay_limit: 32,
@@ -591,7 +643,7 @@ mod tests {
         let events = EventService::new(Arc::new(timeline.clone()));
 
         let mut subscription = events
-            .subscribe(TimelineSubscribeParams {
+            .subscribe(TimelineSubscribeCommand {
                 session_id: "s1".to_string(),
                 after_event_id: None,
                 replay_limit: 32,
@@ -622,7 +674,7 @@ mod tests {
         let events = EventService::new(Arc::new(timeline.clone()));
 
         let mut subscription = events
-            .subscribe(TimelineSubscribeParams {
+            .subscribe(TimelineSubscribeCommand {
                 session_id: "s1".to_string(),
                 after_event_id: None,
                 replay_limit: 32,
@@ -665,7 +717,7 @@ mod tests {
         let events = EventService::new(Arc::new(timeline.clone()));
 
         let mut subscription = events
-            .subscribe(TimelineSubscribeParams {
+            .subscribe(TimelineSubscribeCommand {
                 session_id: "s1".to_string(),
                 after_event_id: None,
                 replay_limit: 32,
@@ -705,9 +757,8 @@ mod tests {
         let snapshot = events.recover_session("s1", None, 32).await.unwrap();
 
         assert_eq!(snapshot.replay.events.len(), 1);
-        let active = snapshot.active_turn.expect("active turn should exist");
-        assert_eq!(active.session_id, "s1");
-        assert_eq!(active.turn_id, "turn-1");
+        assert_eq!(snapshot.active_turn.session_id, "s1");
+        assert_eq!(snapshot.active_turn.turn_id.as_deref(), Some("turn-1"));
     }
 
     #[derive(Default)]

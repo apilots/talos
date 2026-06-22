@@ -1,27 +1,34 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::path::PathBuf;
 use std::str::FromStr;
 use ts_rs::TS;
 
 use crate::errors::AppServerErrorBody;
 use crate::version::ProtocolVersion;
-use talos_types::talos::{
-    SessionHistorySnapshot, TalosJsonValue, TalosMessageRequest, TalosMessageRetryRequest,
-    TimelineEventEnvelope,
-};
 use talos_types::{
-    PluginDisableRequest, PluginEnableRequest, PluginInstallRequest, PluginListRequest,
-    PluginReadRequest, PluginSearchRequest, PluginSourceAddRequest, PluginSourceListRequest,
-    PluginSourceRefreshRequest, PluginSourceRemoveRequest, PluginUninstallRequest,
-    PluginUpdateRequest,
+    AuthLogoutRequest, AuthSessionClearRequest, AuthSessionReadRequest, AuthSessionStoreRequest,
+    ConfigDeleteRequest, ConfigGetRequest, ConfigReloadRequest, ConfigUpdateRequest,
+    EventUnsubscribeRequest, FsDirectoryCreateRequest, FsDirectoryReadRequest,
+    InterruptTurnRequest, MemoryFileListRequest, MemoryFileReadRequest, MemoryFileWriteRequest,
+    MemorySearchRequest, ModelListRequest, PluginDisableRequest, PluginEnableRequest,
+    PluginInstallRequest, PluginListRequest, PluginReadRequest, PluginSearchRequest,
+    PluginSourceAddRequest, PluginSourceListRequest, PluginSourceRefreshRequest,
+    PluginSourceRemoveRequest, PluginUninstallRequest, PluginUpdateRequest, ProjectCreateRequest,
+    ProjectDeleteRequest, ProjectListRequest, ProjectPatchRequest, ProjectReadRequest,
+    RecoverTimelineRequest, RetryTurnRequest, SessionActiveTurnRequest, SessionClearRequest,
+    SessionCloseRequest, SessionCompactRequest, SessionDeleteRequest, SessionGetRequest,
+    SessionHistoryRequest, SessionListRequest, SessionPatchRequest, StartTurnRequest,
+    SubmitToolResultRequest, SubscribeTimelineRequest, UserCurrentRequest, WorkspaceDocListRequest,
+    WorkspaceDocReadRequest, WorkspaceDocWriteRequest, WorkspaceInfoRequest,
 };
 pub use talos_types::{
     SkillDocument, SkillLoadError, SkillMetadata, SkillScope, SkillSelector, SkillSuggestion,
     SkillSummary, SkillWarning, SkillsListRequest, SkillsListResponse, SkillsReadRequest,
     SkillsRefreshRequest, SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest,
-    SkillsSuggestResponse,
+    SkillsSuggestResponse, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus,
+    TimelineCursorStatus, TimelinePendingDynamicToolResult, TimelinePendingUserAction,
+    TimelineRecoveryResponse, TimelineRecoverySnapshot, TimelineReplay,
 };
 
 pub const DEFERRED_CLIENT_METHODS: &[DeferredClientMethod] = &[];
@@ -38,8 +45,8 @@ pub enum ClientMethod {
     Initialize,
     #[serde(rename = "session.list")]
     SessionList,
-    #[serde(rename = "session.read")]
-    SessionRead,
+    #[serde(rename = "session.get")]
+    SessionGet,
     #[serde(rename = "session.patch")]
     SessionPatch,
     #[serde(rename = "session.delete")]
@@ -82,16 +89,14 @@ pub enum ClientMethod {
     EventUnsubscribe,
     #[serde(rename = "tool.dynamic_result.submit")]
     ToolDynamicResultSubmit,
-    #[serde(rename = "tool.execute")]
-    ToolExecute,
     #[serde(rename = "model.list")]
     ModelList,
-    #[serde(rename = "config.read")]
-    ConfigRead,
-    #[serde(rename = "config.value.write")]
-    ConfigValueWrite,
-    #[serde(rename = "config.batch.write")]
-    ConfigBatchWrite,
+    #[serde(rename = "config.get")]
+    ConfigGet,
+    #[serde(rename = "config.update")]
+    ConfigUpdate,
+    #[serde(rename = "config.delete")]
+    ConfigDelete,
     #[serde(rename = "config.reload")]
     ConfigReload,
     #[serde(rename = "memory.file.list")]
@@ -142,10 +147,6 @@ pub enum ClientMethod {
     PluginEnable,
     #[serde(rename = "plugin.disable")]
     PluginDisable,
-    #[serde(rename = "app.list")]
-    AppList,
-    #[serde(rename = "tool.list")]
-    ToolList,
     #[serde(rename = "auth.logout")]
     AuthLogout,
     #[serde(rename = "auth.login.start")]
@@ -171,7 +172,7 @@ impl ClientMethod {
         match self {
             Self::Initialize => "initialize",
             Self::SessionList => "session.list",
-            Self::SessionRead => "session.read",
+            Self::SessionGet => "session.get",
             Self::SessionPatch => "session.patch",
             Self::SessionDelete => "session.delete",
             Self::SessionClose => "session.close",
@@ -193,11 +194,10 @@ impl ClientMethod {
             Self::EventSubscribe => "event.subscribe",
             Self::EventUnsubscribe => "event.unsubscribe",
             Self::ToolDynamicResultSubmit => "tool.dynamic_result.submit",
-            Self::ToolExecute => "tool.execute",
             Self::ModelList => "model.list",
-            Self::ConfigRead => "config.read",
-            Self::ConfigValueWrite => "config.value.write",
-            Self::ConfigBatchWrite => "config.batch.write",
+            Self::ConfigGet => "config.get",
+            Self::ConfigUpdate => "config.update",
+            Self::ConfigDelete => "config.delete",
             Self::ConfigReload => "config.reload",
             Self::MemoryFileList => "memory.file.list",
             Self::MemoryFileRead => "memory.file.read",
@@ -223,8 +223,6 @@ impl ClientMethod {
             Self::PluginUninstall => "plugin.uninstall",
             Self::PluginEnable => "plugin.enable",
             Self::PluginDisable => "plugin.disable",
-            Self::AppList => "app.list",
-            Self::ToolList => "tool.list",
             Self::AuthLogout => "auth.logout",
             Self::AuthLoginStart => "auth.login.start",
             Self::AuthLoginStatus => "auth.login.status",
@@ -251,7 +249,7 @@ impl FromStr for ClientMethod {
         match value {
             "initialize" => Ok(Self::Initialize),
             "session.list" => Ok(Self::SessionList),
-            "session.read" => Ok(Self::SessionRead),
+            "session.get" => Ok(Self::SessionGet),
             "session.patch" => Ok(Self::SessionPatch),
             "session.delete" => Ok(Self::SessionDelete),
             "session.close" => Ok(Self::SessionClose),
@@ -273,11 +271,10 @@ impl FromStr for ClientMethod {
             "event.subscribe" => Ok(Self::EventSubscribe),
             "event.unsubscribe" => Ok(Self::EventUnsubscribe),
             "tool.dynamic_result.submit" => Ok(Self::ToolDynamicResultSubmit),
-            "tool.execute" => Ok(Self::ToolExecute),
             "model.list" => Ok(Self::ModelList),
-            "config.read" => Ok(Self::ConfigRead),
-            "config.value.write" => Ok(Self::ConfigValueWrite),
-            "config.batch.write" => Ok(Self::ConfigBatchWrite),
+            "config.get" => Ok(Self::ConfigGet),
+            "config.update" => Ok(Self::ConfigUpdate),
+            "config.delete" => Ok(Self::ConfigDelete),
             "config.reload" => Ok(Self::ConfigReload),
             "memory.file.list" => Ok(Self::MemoryFileList),
             "memory.file.read" => Ok(Self::MemoryFileRead),
@@ -303,8 +300,6 @@ impl FromStr for ClientMethod {
             "plugin.uninstall" => Ok(Self::PluginUninstall),
             "plugin.enable" => Ok(Self::PluginEnable),
             "plugin.disable" => Ok(Self::PluginDisable),
-            "app.list" => Ok(Self::AppList),
-            "tool.list" => Ok(Self::ToolList),
             "auth.logout" => Ok(Self::AuthLogout),
             "auth.login.start" => Ok(Self::AuthLoginStart),
             "auth.login.status" => Ok(Self::AuthLoginStatus),
@@ -325,77 +320,75 @@ pub enum ClientRequestParams {
     #[serde(rename = "initialize")]
     Initialize(InitializeParams),
     #[serde(rename = "session.list")]
-    SessionList(SessionListParams),
-    #[serde(rename = "session.read")]
-    SessionRead(SessionReadParams),
+    SessionList(SessionListRequest),
+    #[serde(rename = "session.get")]
+    SessionGet(SessionGetRequest),
     #[serde(rename = "session.patch")]
-    SessionPatch(SessionPatchParams),
+    SessionPatch(SessionPatchRequest),
     #[serde(rename = "session.delete")]
-    SessionDelete(SessionDeleteParams),
+    SessionDelete(SessionDeleteRequest),
     #[serde(rename = "session.close")]
-    SessionClose(SessionCloseParams),
+    SessionClose(SessionCloseRequest),
     #[serde(rename = "session.compact")]
-    SessionCompact(SessionCompactParams),
+    SessionCompact(SessionCompactRequest),
     #[serde(rename = "session.clear")]
-    SessionClear(SessionClearParams),
+    SessionClear(SessionClearRequest),
     #[serde(rename = "session.active_turn")]
-    SessionActiveTurn(SessionActiveTurnParams),
+    SessionActiveTurn(SessionActiveTurnRequest),
     #[serde(rename = "session.history")]
-    SessionHistory(SessionHistoryParams),
+    SessionHistory(SessionHistoryRequest),
     #[serde(rename = "session.recover")]
-    SessionRecover(TimelineRecoveryParams),
+    SessionRecover(RecoverTimelineRequest),
     #[serde(rename = "project.create")]
-    ProjectCreate(ProjectCreateParams),
+    ProjectCreate(ProjectCreateRequest),
     #[serde(rename = "project.list")]
-    ProjectList(ProjectListParams),
+    ProjectList(ProjectListRequest),
     #[serde(rename = "project.read")]
-    ProjectRead(ProjectReadParams),
+    ProjectRead(ProjectReadRequest),
     #[serde(rename = "project.patch")]
-    ProjectPatch(ProjectPatchParams),
+    ProjectPatch(ProjectPatchRequest),
     #[serde(rename = "project.delete")]
-    ProjectDelete(ProjectDeleteParams),
+    ProjectDelete(ProjectDeleteRequest),
     #[serde(rename = "fs.directory.read")]
-    FsDirectoryRead(FsDirectoryReadParams),
+    FsDirectoryRead(FsDirectoryReadRequest),
     #[serde(rename = "fs.directory.create")]
-    FsDirectoryCreate(FsDirectoryCreateParams),
+    FsDirectoryCreate(FsDirectoryCreateRequest),
     #[serde(rename = "turn.start")]
-    TurnStart(TurnStartParams),
+    TurnStart(StartTurnRequest),
     #[serde(rename = "turn.interrupt")]
-    TurnInterrupt(TurnInterruptParams),
+    TurnInterrupt(InterruptTurnRequest),
     #[serde(rename = "turn.retry")]
-    TurnRetry(TurnRetryParams),
+    TurnRetry(RetryTurnRequest),
     #[serde(rename = "event.subscribe")]
-    EventSubscribe(EventSubscribeParams),
+    EventSubscribe(SubscribeTimelineRequest),
     #[serde(rename = "event.unsubscribe")]
-    EventUnsubscribe(EventUnsubscribeParams),
+    EventUnsubscribe(EventUnsubscribeRequest),
     #[serde(rename = "tool.dynamic_result.submit")]
-    ToolDynamicResultSubmit(ToolDynamicResultSubmitParams),
-    #[serde(rename = "tool.execute")]
-    ToolExecute(ToolExecuteParams),
+    ToolDynamicResultSubmit(SubmitToolResultRequest),
     #[serde(rename = "model.list")]
-    ModelList(ModelListParams),
-    #[serde(rename = "config.read")]
-    ConfigRead(ConfigReadParams),
-    #[serde(rename = "config.value.write")]
-    ConfigValueWrite(ConfigValueWriteParams),
-    #[serde(rename = "config.batch.write")]
-    ConfigBatchWrite(ConfigBatchWriteParams),
+    ModelList(ModelListRequest),
+    #[serde(rename = "config.get")]
+    ConfigGet(ConfigGetRequest),
+    #[serde(rename = "config.update")]
+    ConfigUpdate(ConfigUpdateRequest),
+    #[serde(rename = "config.delete")]
+    ConfigDelete(ConfigDeleteRequest),
     #[serde(rename = "config.reload")]
-    ConfigReload(ConfigReloadParams),
+    ConfigReload(ConfigReloadRequest),
     #[serde(rename = "memory.file.list")]
-    MemoryFileList(MemoryFileListParams),
+    MemoryFileList(MemoryFileListRequest),
     #[serde(rename = "memory.file.read")]
-    MemoryFileRead(MemoryFileReadParams),
+    MemoryFileRead(MemoryFileReadRequest),
     #[serde(rename = "memory.file.write")]
-    MemoryFileWrite(MemoryFileWriteParams),
+    MemoryFileWrite(MemoryFileWriteRequest),
     #[serde(rename = "workspace.doc.list")]
-    WorkspaceDocList(WorkspaceDocListParams),
+    WorkspaceDocList(WorkspaceDocListRequest),
     #[serde(rename = "workspace.doc.read")]
-    WorkspaceDocRead(WorkspaceDocReadParams),
+    WorkspaceDocRead(WorkspaceDocReadRequest),
     #[serde(rename = "workspace.doc.write")]
-    WorkspaceDocWrite(WorkspaceDocWriteParams),
+    WorkspaceDocWrite(WorkspaceDocWriteRequest),
     #[serde(rename = "workspace.info")]
-    WorkspaceInfo(WorkspaceInfoParams),
+    WorkspaceInfo(WorkspaceInfoRequest),
     #[serde(rename = "skills.list")]
     SkillsList(SkillsListRequest),
     #[serde(rename = "skills.refresh")]
@@ -430,12 +423,8 @@ pub enum ClientRequestParams {
     PluginEnable(PluginEnableRequest),
     #[serde(rename = "plugin.disable")]
     PluginDisable(PluginDisableRequest),
-    #[serde(rename = "app.list")]
-    AppList(AppListParams),
-    #[serde(rename = "tool.list")]
-    ToolList(ToolListParams),
     #[serde(rename = "auth.logout")]
-    AuthLogout(AuthLogoutParams),
+    AuthLogout(AuthLogoutRequest),
     #[serde(rename = "auth.login.start")]
     AuthLoginStart(talos_auth::CloudLoginStartRequest),
     #[serde(rename = "auth.login.status")]
@@ -443,15 +432,15 @@ pub enum ClientRequestParams {
     #[serde(rename = "auth.login.cancel")]
     AuthLoginCancel(talos_auth::CloudLoginCancelRequest),
     #[serde(rename = "auth.session.read")]
-    AuthSessionRead(AuthSessionReadParams),
+    AuthSessionRead(AuthSessionReadRequest),
     #[serde(rename = "auth.session.store")]
-    AuthSessionStore(AuthSessionStoreParams),
+    AuthSessionStore(AuthSessionStoreRequest),
     #[serde(rename = "auth.session.clear")]
-    AuthSessionClear(AuthSessionClearParams),
+    AuthSessionClear(AuthSessionClearRequest),
     #[serde(rename = "user.current")]
-    UserCurrent(UserCurrentParams),
+    UserCurrent(UserCurrentRequest),
     #[serde(rename = "memory.search")]
-    MemorySearch(MemorySearchParams),
+    MemorySearch(MemorySearchRequest),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
@@ -470,7 +459,7 @@ impl ClientRequest {
         let params = match method_kind {
             ClientMethod::Initialize => ClientRequestParams::Initialize(decode(params_value)?),
             ClientMethod::SessionList => ClientRequestParams::SessionList(decode(params_value)?),
-            ClientMethod::SessionRead => ClientRequestParams::SessionRead(decode(params_value)?),
+            ClientMethod::SessionGet => ClientRequestParams::SessionGet(decode(params_value)?),
             ClientMethod::SessionPatch => ClientRequestParams::SessionPatch(decode(params_value)?),
             ClientMethod::SessionDelete => {
                 ClientRequestParams::SessionDelete(decode(params_value)?)
@@ -518,15 +507,10 @@ impl ClientRequest {
             ClientMethod::ToolDynamicResultSubmit => {
                 ClientRequestParams::ToolDynamicResultSubmit(decode(params_value)?)
             }
-            ClientMethod::ToolExecute => ClientRequestParams::ToolExecute(decode(params_value)?),
             ClientMethod::ModelList => ClientRequestParams::ModelList(decode(params_value)?),
-            ClientMethod::ConfigRead => ClientRequestParams::ConfigRead(decode(params_value)?),
-            ClientMethod::ConfigValueWrite => {
-                ClientRequestParams::ConfigValueWrite(decode(params_value)?)
-            }
-            ClientMethod::ConfigBatchWrite => {
-                ClientRequestParams::ConfigBatchWrite(decode(params_value)?)
-            }
+            ClientMethod::ConfigGet => ClientRequestParams::ConfigGet(decode(params_value)?),
+            ClientMethod::ConfigUpdate => ClientRequestParams::ConfigUpdate(decode(params_value)?),
+            ClientMethod::ConfigDelete => ClientRequestParams::ConfigDelete(decode(params_value)?),
             ClientMethod::ConfigReload => ClientRequestParams::ConfigReload(decode(params_value)?),
             ClientMethod::MemoryFileList => {
                 ClientRequestParams::MemoryFileList(decode(params_value)?)
@@ -586,8 +570,6 @@ impl ClientRequest {
             ClientMethod::PluginDisable => {
                 ClientRequestParams::PluginDisable(decode(params_value)?)
             }
-            ClientMethod::AppList => ClientRequestParams::AppList(decode(params_value)?),
-            ClientMethod::ToolList => ClientRequestParams::ToolList(decode(params_value)?),
             ClientMethod::AuthLogout => ClientRequestParams::AuthLogout(decode(params_value)?),
             ClientMethod::AuthLoginStart => {
                 ClientRequestParams::AuthLoginStart(decode(params_value)?)
@@ -670,404 +652,6 @@ pub enum ActorCredential {
     ExistingSessionToken { token: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct SessionListParams {
-    #[serde(default)]
-    pub project_id: Option<String>,
-    #[serde(default)]
-    pub limit: Option<usize>,
-    #[serde(default)]
-    pub offset: Option<usize>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct SessionReadParams {
-    pub session_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct SessionPatchParams {
-    pub session_id: String,
-    #[serde(default)]
-    pub project_id: Option<OptionalStringPatch>,
-    #[serde(default)]
-    pub current_directory: Option<OptionalPathPatch>,
-    #[serde(default)]
-    pub model: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct SessionDeleteParams {
-    pub session_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct SessionCloseParams {
-    pub session_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct SessionCompactParams {
-    pub session_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct SessionClearParams {
-    pub session_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct SessionActiveTurnParams {
-    pub session_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct SessionHistoryParams {
-    pub session_id: String,
-}
-
-pub type SessionHistoryResponse = SessionHistorySnapshot;
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct TimelineRecoveryParams {
-    pub session_id: String,
-    #[serde(default)]
-    pub after_event_id: Option<String>,
-    #[serde(default)]
-    pub replay_limit: Option<usize>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct TimelineRecoverySnapshot {
-    pub replay: TimelineReplay,
-    pub active_turn: TimelineActiveTurnSnapshot,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct TimelineReplay {
-    pub events: Vec<TimelineEventEnvelope>,
-    #[serde(default)]
-    pub high_water_mark_event_id: Option<String>,
-    pub last_replay_seq: i64,
-    pub cursor_status: TimelineCursorStatus,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum TimelineCursorStatus {
-    Current,
-    FromBeginning,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct TimelineActiveTurnSnapshot {
-    pub session_id: String,
-    #[serde(default)]
-    pub turn_id: Option<String>,
-    #[serde(default)]
-    pub message_id: Option<String>,
-    pub status: TimelineActiveTurnStatus,
-    #[serde(default)]
-    pub last_event_id: Option<String>,
-    #[serde(default)]
-    pub pending_user_action: Option<TimelinePendingUserAction>,
-    pub updated_at: i64,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum TimelineActiveTurnStatus {
-    Running,
-    WaitingUserAction,
-    Cancelling,
-    Completed,
-    Failed,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum TimelinePendingUserAction {
-    DynamicToolResult(TimelinePendingDynamicToolResult),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct TimelinePendingDynamicToolResult {
-    #[serde(default)]
-    pub item_id: Option<String>,
-    pub call_id: String,
-    pub tool_name: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct ProjectCreateParams {
-    pub name: String,
-    pub directory: PathBuf,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct ProjectListParams {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct ProjectReadParams {
-    pub project_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct ProjectPatchParams {
-    pub project_id: String,
-    #[serde(default)]
-    pub name: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct ProjectDeleteParams {
-    pub project_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct FsDirectoryReadParams {
-    #[serde(default)]
-    pub path: Option<PathBuf>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct FsDirectoryCreateParams {
-    pub parent: PathBuf,
-    pub name: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct TurnStartParams {
-    pub session_id: String,
-    pub request: TalosMessageRequest,
-    #[serde(default)]
-    pub client_request_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum MessageCommandStatus {
-    Pending,
-    Accepted,
-    Failed,
-    FailedNoFirstEvent,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct TurnStartResponse {
-    pub request_id: String,
-    #[serde(default)]
-    pub message_id: Option<String>,
-    pub session_id: String,
-    pub turn_id: String,
-    pub status: MessageCommandStatus,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct TurnInterruptParams {
-    pub session_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct TurnRetryParams {
-    pub session_id: String,
-    pub request: TalosMessageRetryRequest,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct EventSubscribeParams {
-    pub session_id: String,
-    #[serde(default)]
-    pub since_event_id: Option<String>,
-    #[serde(default)]
-    pub replay_limit: Option<usize>,
-    #[serde(default)]
-    pub close_when_idle: Option<bool>,
-    #[serde(default)]
-    pub close_on_terminal: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct EventSubscribeResponse {
-    pub subscription_id: String,
-    pub session_id: String,
-    #[serde(default)]
-    pub high_water_mark_event_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct EventUnsubscribeParams {
-    pub subscription_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct EventUnsubscribeResponse {
-    pub subscription_id: String,
-    pub unsubscribed: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct ToolDynamicResultSubmitParams {
-    pub session_id: String,
-    pub call_id: String,
-    pub tool_name: String,
-    pub output: String,
-    pub success: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct ToolExecuteParams {
-    pub tool_name: String,
-    #[serde(default)]
-    pub arguments: TalosJsonValue,
-    #[serde(default)]
-    pub session_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct ToolExecuteResponse {
-    pub status: String,
-    pub result: TalosJsonValue,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct ModelListParams {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct ConfigReadParams {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct ConfigValueWriteParams {
-    pub path: String,
-    pub value: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct ConfigBatchWriteParams {
-    pub entries: Vec<ConfigValueWriteParams>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct ConfigReloadParams {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct MemoryFileListParams {
-    #[serde(default)]
-    pub limit: Option<usize>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct MemoryFileReadParams {
-    pub path: PathBuf,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct MemoryFileWriteParams {
-    pub path: PathBuf,
-    pub content: String,
-    #[serde(default)]
-    pub expected_version: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct WorkspaceDocListParams {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct WorkspaceDocReadParams {
-    pub kind: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct WorkspaceDocWriteParams {
-    pub kind: String,
-    pub content: String,
-    #[serde(default)]
-    pub expected_version: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct WorkspaceInfoParams {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct WorkspaceInfoResponse {
-    pub user_id: String,
-    #[serde(default)]
-    pub username: Option<String>,
-    pub base_workspace_dir: String,
-    pub user_workspace_dir: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct AppListParams {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct ToolListParams {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct AuthLogoutParams {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct AuthSessionReadParams {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct AuthSessionReadResponse {
-    #[serde(default)]
-    pub session: Option<AuthSessionSnapshot>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct AuthSessionStoreParams {
-    pub session: AuthSessionSnapshot,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct AuthSessionClearParams {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct AuthSessionSnapshot {
-    pub schema_version: u32,
-    pub cloud_api_base_url: String,
-    pub access_token: String,
-    pub token_type: String,
-    #[serde(default)]
-    pub expires_at_ms: Option<String>,
-    pub last_used_at_ms: String,
-    pub user: AuthSessionUserSnapshot,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct AuthSessionUserSnapshot {
-    pub user_id: String,
-    pub username: String,
-    #[serde(default)]
-    pub email: Option<String>,
-    pub role: talos_auth::UserRole,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct UserCurrentParams {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct MemorySearchParams {
-    pub query: String,
-    #[serde(default)]
-    pub limit: Option<usize>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum OptionalStringPatch {
-    Set { value: String },
-    Clear,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum OptionalPathPatch {
-    Set { path: PathBuf },
-    Clear,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct ProtocolTalosContext {
     pub source_type: String,
@@ -1096,7 +680,7 @@ mod tests {
     #[test]
     fn decodes_typed_request_params() {
         let request = ClientRequest::decode(
-            "session.read",
+            "session.get",
             Some(json!({
                 "session_id": "s1"
             })),
@@ -1104,7 +688,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             request.params,
-            ClientRequestParams::SessionRead(SessionReadParams { .. })
+            ClientRequestParams::SessionGet(SessionGetRequest { .. })
         ));
     }
 

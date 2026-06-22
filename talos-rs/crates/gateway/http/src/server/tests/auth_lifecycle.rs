@@ -192,7 +192,7 @@ async fn test_http_auth_session_store_and_read_require_verified_matching_token()
                 .header(axum::http::header::AUTHORIZATION, "Bearer token")
                 .header(axum::http::header::CONTENT_TYPE, "application/json")
                 .body(Body::from(
-                    serde_json::to_vec(&talos_app_protocol::requests::AuthSessionStoreParams {
+                    serde_json::to_vec(&talos_types::AuthSessionStoreRequest {
                         session: test_cloud_session_snapshot("token", client_last_used_at_ms),
                     })
                     .expect("body should serialize"),
@@ -289,7 +289,7 @@ async fn test_http_auth_session_store_rejects_mismatched_token() {
                 .header(axum::http::header::AUTHORIZATION, "Bearer token")
                 .header(axum::http::header::CONTENT_TYPE, "application/json")
                 .body(Body::from(
-                    serde_json::to_vec(&talos_app_protocol::requests::AuthSessionStoreParams {
+                    serde_json::to_vec(&talos_types::AuthSessionStoreRequest {
                         session: test_cloud_session_snapshot("other-token", now_ms),
                     })
                     .expect("body should serialize"),
@@ -357,8 +357,8 @@ fn test_cloud_session_entry(
 fn test_cloud_session_snapshot(
     token: &str,
     last_used_at_ms: i64,
-) -> talos_app_protocol::requests::AuthSessionSnapshot {
-    talos_app_protocol::requests::AuthSessionSnapshot {
+) -> talos_types::AuthSessionSnapshot {
+    talos_types::AuthSessionSnapshot {
         schema_version: 1,
         cloud_api_base_url: "http://127.0.0.1:8787".to_string(),
         access_token: token.to_string(),
@@ -369,7 +369,7 @@ fn test_cloud_session_snapshot(
                 .to_string(),
         ),
         last_used_at_ms: last_used_at_ms.to_string(),
-        user: talos_app_protocol::requests::AuthSessionUserSnapshot {
+        user: talos_types::AuthSessionUserSnapshot {
             user_id: "user-1".to_string(),
             username: "user-1".to_string(),
             email: Some("user@example.com".to_string()),
@@ -400,13 +400,13 @@ async fn test_list_sessions_allows_anonymous_route_when_auth_disabled() {
         .await
         .expect("body should be readable");
     let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
-    assert!(payload["data"].is_array());
+    assert!(payload["sessions"].is_array());
 }
 
 #[tokio::test]
 async fn test_get_llm_allows_auth_disabled_actor() {
     let state = test_state(true);
-    let response = get_llm_handler(State(state))
+    let response = get_llm_handler(State(state), None)
         .await
         .expect("auth disabled actor should access llm config");
     assert_eq!(response.0.config.provider, "anthropic");

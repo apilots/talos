@@ -1,11 +1,16 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
+use talos_application_service::{Actor, TimelineSubscriptionMessage};
 use talos_config::Config;
-use talos_error::TalosResult;
-use talos_types::gateway::GatewayRequest;
-use talos_types::talos::{TalosContext, TalosInputItem, TalosProvider};
-use talos_types::RequestHandler;
+use talos_error::{TalosError, TalosResult};
+use talos_gateway::Gateway;
+use talos_types::talos::{
+    TalosContext, TalosInputItem, TalosProvider, TalosTimelineContent, TalosTimelineDelta,
+    TalosTimelineEventPayload, TalosTimelineItemKind,
+};
+use talos_types::{StartTurnRequest, SubscribeTimelineRequest};
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
@@ -15,7 +20,7 @@ use crate::traits::{
 
 pub struct ChannelServer {
     config: Arc<Config>,
-    request_handler: Arc<dyn RequestHandler>,
+    gateway: Arc<dyn Gateway>,
     channels: HashMap<String, Box<dyn Channel>>,
     started_accounts: HashMap<String, Vec<String>>,
     event_tx: mpsc::Sender<ChannelEvent>,
@@ -23,11 +28,11 @@ pub struct ChannelServer {
 }
 
 impl ChannelServer {
-    pub fn new(config: Arc<Config>, request_handler: Arc<dyn RequestHandler>) -> Self {
+    pub fn new(config: Arc<Config>, gateway: Arc<dyn Gateway>) -> Self {
         let (event_tx, event_rx) = mpsc::channel(256);
         Self {
             config,
-            request_handler,
+            gateway,
             channels: HashMap::new(),
             started_accounts: HashMap::new(),
             event_tx,
@@ -93,7 +98,7 @@ impl ChannelServer {
                     content,
                     reply_to_id,
                 } => {
-                    let request = build_gateway_request(
+                    let request = build_start_turn_request(
                         &channel_id,
                         &account_id,
                         &user_id,
@@ -103,9 +108,10 @@ impl ChannelServer {
                         content,
                     );
 
-                    match self.request_handler.handle(request).await {
-                        Ok(response) => {
-                            let Some(text) = normalize_channel_response(&response.content) else {
+                    let actor = Actor::regular(user_id);
+                    match submit_channel_turn(self.gateway.as_ref(), &actor, request).await {
+                        Ok(content) => {
+                            let Some(text) = normalize_channel_response(&content) else {
                                 continue;
                             };
                             let Some(channel) = self.get_channel(&channel_id) else {
@@ -135,10 +141,7 @@ impl ChannelServer {
                             }
                         }
                         Err(err) => {
-                            error!(
-                                "Failed to process channel event via request handler: {}",
-                                err
-                            );
+                            error!("Failed to process channel event via gateway: {}", err);
                         }
                     }
                 }
@@ -171,7 +174,111 @@ impl ChannelServer {
     }
 }
 
-fn build_gateway_request(
+async fn submit_channel_turn(
+    gateway: &dyn Gateway,
+    actor: &Actor,
+    request: StartTurnRequest,
+) -> TalosResult<String> {
+    let response = gateway.start_turn(actor, request, None).await?;
+    let mut subscription = gateway
+        .subscribe_timeline(
+            actor,
+            SubscribeTimelineRequest {
+                session_id: response.session_id.clone(),
+                since_event_id: None,
+                replay_limit: Some(128),
+                close_when_idle: Some(false),
+                close_on_terminal: Some(true),
+            },
+        )
+        .await?;
+
+    let mut collector = ChannelTurnReplyCollector::default();
+    let timeout = tokio::time::sleep(Duration::from_secs(120));
+    tokio::pin!(timeout);
+
+    loop {
+        tokio::select! {
+            _ = &mut timeout => {
+                return Err(TalosError::InternalError(format!(
+                    "timed out waiting for channel turn `{}` to complete",
+                    response.turn_id
+                )));
+            }
+            message = subscription.events.recv() => {
+                let Some(message) = message else {
+                    return Ok(collector.finish());
+                };
+                match message {
+                    TimelineSubscriptionMessage::Event(record) => {
+                        if record.turn_id != response.turn_id {
+                            continue;
+                        }
+                        if collector.apply(record.event.payload) {
+                            return Ok(collector.finish());
+                        }
+                    }
+                    TimelineSubscriptionMessage::Closed(_) => {
+                        return Ok(collector.finish());
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Default)]
+struct ChannelTurnReplyCollector {
+    assistant_text_items: HashMap<String, String>,
+}
+
+impl ChannelTurnReplyCollector {
+    fn apply(&mut self, payload: TalosTimelineEventPayload) -> bool {
+        match payload {
+            TalosTimelineEventPayload::ItemStarted(started) => {
+                if started.item.kind == TalosTimelineItemKind::AssistantText {
+                    let text = match started.item.content {
+                        TalosTimelineContent::Text { text } => text,
+                        _ => String::new(),
+                    };
+                    self.assistant_text_items.insert(started.item.item_id, text);
+                }
+            }
+            TalosTimelineEventPayload::ItemDelta(delta) => {
+                if let TalosTimelineDelta::Text { text } = delta.delta {
+                    if let Some(existing) = self.assistant_text_items.get_mut(&delta.item_id) {
+                        existing.push_str(&text);
+                    }
+                }
+            }
+            TalosTimelineEventPayload::ItemCompleted(completed) => {
+                if let Some(existing) = self.assistant_text_items.get_mut(&completed.item_id) {
+                    if let Some(TalosTimelineContent::Text { text }) = completed.final_content {
+                        *existing = text;
+                    }
+                }
+            }
+            TalosTimelineEventPayload::TurnCompleted(_)
+            | TalosTimelineEventPayload::TurnError(_) => {
+                return true;
+            }
+            TalosTimelineEventPayload::TurnStarted(_)
+            | TalosTimelineEventPayload::AssistantTextCommitted(_)
+            | TalosTimelineEventPayload::TurnMetrics(_) => {}
+        }
+        false
+    }
+
+    fn finish(self) -> String {
+        self.assistant_text_items
+            .into_values()
+            .filter(|text| !text.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+fn build_start_turn_request(
     channel_id: &str,
     _account_id: &str,
     user_id: &str,
@@ -179,7 +286,7 @@ fn build_gateway_request(
     thread_id: Option<String>,
     session_id: String,
     content: MessageContent,
-) -> GatewayRequest {
+) -> StartTurnRequest {
     let input = match content {
         MessageContent::Text(text) => vec![TalosInputItem::Text { text }],
         MessageContent::Media { kind, file_id } => vec![TalosInputItem::Text {
@@ -202,13 +309,15 @@ fn build_gateway_request(
         }
     };
 
-    GatewayRequest {
+    StartTurnRequest {
         session_id,
-        turn_id: None,
         workspace_id: None,
-        resume_context: None,
         input,
-        context,
+        context: Some(context),
+        model: None,
+        project_id: None,
+        current_directory: None,
+        client_request_id: None,
     }
 }
 
@@ -226,10 +335,48 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use std::sync::Mutex;
-    use talos_types::gateway::{GatewayRequest, GatewayResponse};
+    use talos_application_service::{EventReplay, TimelineCursorStatus, TimelineSubscription};
+    use talos_auth::{
+        CloudLoginCancelRequest, CloudLoginStartRequest, CloudLoginStartResponse,
+        CloudLoginStatusRequest, CloudLoginStatusResponse,
+    };
     use talos_types::talos::{
-        TalosReasoning, TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType,
-        TalosTurnStartedEvent, TalosUsage,
+        StopReason, TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType,
+        TalosTimelineItem, TalosTimelineItemStatus, TalosTimelinePhase, TalosTurnCompletedEvent,
+        TimelineEventEnvelope,
+    };
+    use talos_types::{
+        AuthLogoutRequest, AuthLogoutResponse, AuthSessionClearRequest, AuthSessionClearResponse,
+        AuthSessionReadRequest, AuthSessionReadResponse, AuthSessionStoreRequest,
+        AuthSessionStoreResponse, CloudLoginCancelResponse, ConfigDeleteRequest,
+        ConfigDeleteResponse, ConfigGetRequest, ConfigGetResponse, ConfigReloadRequest,
+        ConfigReloadResponse, ConfigUpdateRequest, ConfigUpdateResponse, FsDirectoryCreateRequest,
+        FsDirectoryCreateResponse, FsDirectoryReadRequest, FsDirectoryReadResponse,
+        InterruptTurnRequest, InterruptTurnResponse, MemoryFileListRequest, MemoryFileListResponse,
+        MemoryFileReadRequest, MemoryFileReadResponse, MemoryFileWriteRequest,
+        MemoryFileWriteResponse, MemorySearchRequest, MemorySearchResponse, ModelListRequest,
+        ModelListResponse, PluginDisableRequest, PluginDisableResponse, PluginEnableRequest,
+        PluginEnableResponse, PluginInstallRequest, PluginInstallResponse, PluginListRequest,
+        PluginListResponse, PluginReadRequest, PluginReadResponse, PluginSearchRequest,
+        PluginSearchResponse, PluginSourceAddRequest, PluginSourceAddResponse,
+        PluginSourceListRequest, PluginSourceListResponse, PluginSourceRefreshRequest,
+        PluginSourceRefreshResponse, PluginSourceRemoveRequest, PluginSourceRemoveResponse,
+        PluginUninstallRequest, PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse,
+        ProjectCreateRequest, ProjectCreateResponse, ProjectDeleteRequest, ProjectDeleteResponse,
+        ProjectListRequest, ProjectListResponse, ProjectPatchRequest, ProjectPatchResponse,
+        ProjectReadRequest, ProjectReadResponse, RecoverTimelineRequest, RetryTurnRequest,
+        RetryTurnResponse, SessionActiveTurnRequest, SessionActiveTurnResponse,
+        SessionClearRequest, SessionClearResponse, SessionCloseRequest, SessionCloseResponse,
+        SessionCompactRequest, SessionCompactResponse, SessionDeleteRequest, SessionDeleteResponse,
+        SessionGetRequest, SessionGetResponse, SessionHistoryRequest, SessionHistoryResponse,
+        SessionListRequest, SessionListResponse, SessionPatchRequest, SessionUpdateResponse,
+        SkillsListRequest, SkillsListResponse, SkillsReadRequest, SkillsReadResponse,
+        SkillsRefreshRequest, SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest,
+        SkillsSuggestResponse, StartTurnResponse, SubmitToolResultRequest,
+        SubmitToolResultResponse, TimelineRecoveryResponse, TurnCommandStatus, UserCurrentRequest,
+        UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
+        WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
+        WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
     };
 
     use crate::traits::{ChannelCapabilities, ChannelDefinition, DeliveryResult, OutboundAdapter};
@@ -321,61 +468,582 @@ mod tests {
         }
     }
 
-    struct MockRequestHandler;
+    struct MockGateway;
+
+    fn unused_gateway<T>(method: &str) -> TalosResult<T> {
+        unreachable!("{method} is not used by channel tests")
+    }
 
     #[async_trait]
-    impl RequestHandler for MockRequestHandler {
-        async fn handle(&self, request: GatewayRequest) -> TalosResult<GatewayResponse> {
-            Ok(GatewayResponse {
-                content: format!("Echo: {}", extract_text_input(&request.input)),
-                output_items: Vec::new(),
-                reasoning: vec![TalosReasoning {
-                    text: "mock reasoning".to_string(),
-                }],
-                stop_reason: talos_types::talos::StopReason::EndTurn,
-                usage: TalosUsage::default(),
-                success: true,
-                model: "mock-model".to_string(),
+    impl Gateway for MockGateway {
+        async fn start_turn(
+            &self,
+            _actor: &Actor,
+            request: StartTurnRequest,
+            _idempotency_key: Option<String>,
+        ) -> TalosResult<StartTurnResponse> {
+            Ok(StartTurnResponse {
+                request_id: "req-mock".to_string(),
+                message_id: Some("msg-mock".to_string()),
                 session_id: request.session_id,
+                turn_id: "turn-mock".to_string(),
+                status: TurnCommandStatus::Accepted,
             })
         }
 
-        async fn handle_stream(
+        async fn retry_turn(
             &self,
-            request: GatewayRequest,
-        ) -> TalosResult<tokio::sync::mpsc::Receiver<TalosTimelineEvent>> {
-            let response = self.handle(request).await?;
-            let (tx, rx) = tokio::sync::mpsc::channel(1);
-            tokio::spawn(async move {
-                let _ = tx
-                    .send(TalosTimelineEvent {
-                        event_seq: None,
-                        event_id: None,
-                        created_at_ms: None,
-                        event_type: TalosTimelineEventType::TurnStarted,
-                        turn_id: "turn-mock".to_string(),
-                        message_id: "msg-mock".to_string(),
-                        session_id: response.session_id,
-                        sequence: 0,
-                        payload: TalosTimelineEventPayload::TurnStarted(TalosTurnStartedEvent {
-                            request_id: "req-mock".to_string(),
-                            turn_id: "turn-mock".to_string(),
-                            started_at_ms: 0,
-                        }),
-                    })
-                    .await;
-            });
-            Ok(rx)
+            _actor: &Actor,
+            _request: RetryTurnRequest,
+        ) -> TalosResult<RetryTurnResponse> {
+            unreachable!("retry_turn is not used by channel tests")
         }
 
-        async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
+        async fn interrupt_turn(
+            &self,
+            _actor: &Actor,
+            _request: InterruptTurnRequest,
+        ) -> TalosResult<InterruptTurnResponse> {
+            unreachable!("interrupt_turn is not used by channel tests")
+        }
+
+        async fn submit_tool_result(
+            &self,
+            _actor: &Actor,
+            _request: SubmitToolResultRequest,
+        ) -> TalosResult<SubmitToolResultResponse> {
+            unreachable!("submit_tool_result is not used by channel tests")
+        }
+
+        async fn subscribe_timeline(
+            &self,
+            _actor: &Actor,
+            request: SubscribeTimelineRequest,
+        ) -> TalosResult<TimelineSubscription> {
+            let (tx, rx) = tokio::sync::mpsc::channel(4);
+            let session_id = request.session_id.clone();
+            tokio::spawn(async move {
+                let _ = tx
+                    .send(TimelineSubscriptionMessage::Event(timeline_envelope(
+                        "event-1",
+                        TalosTimelineEventType::ItemStarted,
+                        session_id.clone(),
+                        TalosTimelineEventPayload::ItemStarted(
+                            talos_types::talos::TalosItemStartedEvent {
+                                request_id: "req-mock".to_string(),
+                                turn_id: "turn-mock".to_string(),
+                                item: TalosTimelineItem {
+                                    item_id: "item-1".to_string(),
+                                    parent_item_id: None,
+                                    kind: TalosTimelineItemKind::AssistantText,
+                                    phase: TalosTimelinePhase::FinalAnswer,
+                                    status: TalosTimelineItemStatus::Running,
+                                    title: None,
+                                    started_at_ms: 0,
+                                    completed_at_ms: None,
+                                    content: TalosTimelineContent::Text {
+                                        text: "Echo: ".to_string(),
+                                    },
+                                },
+                            },
+                        ),
+                    )))
+                    .await;
+                let _ = tx
+                    .send(TimelineSubscriptionMessage::Event(timeline_envelope(
+                        "event-2",
+                        TalosTimelineEventType::ItemDelta,
+                        session_id.clone(),
+                        TalosTimelineEventPayload::ItemDelta(
+                            talos_types::talos::TalosItemDeltaEvent {
+                                request_id: "req-mock".to_string(),
+                                turn_id: "turn-mock".to_string(),
+                                item_id: "item-1".to_string(),
+                                delta: TalosTimelineDelta::Text {
+                                    text: "hello".to_string(),
+                                },
+                            },
+                        ),
+                    )))
+                    .await;
+                let _ = tx
+                    .send(TimelineSubscriptionMessage::Event(timeline_envelope(
+                        "event-3",
+                        TalosTimelineEventType::TurnCompleted,
+                        session_id,
+                        TalosTimelineEventPayload::TurnCompleted(TalosTurnCompletedEvent {
+                            request_id: "req-mock".to_string(),
+                            turn_id: "turn-mock".to_string(),
+                            completed_at_ms: 0,
+                            stop_reason: StopReason::EndTurn,
+                            usage: Default::default(),
+                            metrics: None,
+                        }),
+                    )))
+                    .await;
+            });
+            Ok(TimelineSubscription {
+                session_id: request.session_id,
+                high_water_mark_event_id: None,
+                replay: EventReplay {
+                    events: Vec::new(),
+                    high_water_mark_event_id: None,
+                    last_replay_seq: 0,
+                    cursor_status: TimelineCursorStatus::Current,
+                },
+                events: rx,
+                has_live_turn: true,
+            })
+        }
+
+        async fn recover_timeline(
+            &self,
+            _actor: &Actor,
+            _request: RecoverTimelineRequest,
+        ) -> TalosResult<TimelineRecoveryResponse> {
+            unreachable!("recover_timeline is not used by channel tests")
+        }
+
+        async fn list_sessions(
+            &self,
+            _actor: &Actor,
+            _request: SessionListRequest,
+        ) -> TalosResult<SessionListResponse> {
+            unreachable!("list_sessions is not used by channel tests")
+        }
+
+        async fn get_session(
+            &self,
+            _actor: &Actor,
+            _request: SessionGetRequest,
+        ) -> TalosResult<SessionGetResponse> {
+            unreachable!("get_session is not used by channel tests")
+        }
+
+        async fn get_session_history(
+            &self,
+            _actor: &Actor,
+            _request: SessionHistoryRequest,
+        ) -> TalosResult<SessionHistoryResponse> {
+            unreachable!("get_session_history is not used by channel tests")
+        }
+
+        async fn get_active_turn(
+            &self,
+            _actor: &Actor,
+            _request: SessionActiveTurnRequest,
+        ) -> TalosResult<SessionActiveTurnResponse> {
+            unreachable!("get_active_turn is not used by channel tests")
+        }
+
+        async fn patch_session(
+            &self,
+            _actor: &Actor,
+            _request: SessionPatchRequest,
+        ) -> TalosResult<SessionUpdateResponse> {
+            unreachable!("patch_session is not used by channel tests")
+        }
+
+        async fn close_session(
+            &self,
+            _actor: &Actor,
+            _request: SessionCloseRequest,
+        ) -> TalosResult<SessionCloseResponse> {
+            unreachable!("close_session is not used by channel tests")
+        }
+
+        async fn delete_session(
+            &self,
+            _actor: &Actor,
+            _request: SessionDeleteRequest,
+        ) -> TalosResult<SessionDeleteResponse> {
+            unreachable!("delete_session is not used by channel tests")
+        }
+
+        async fn compact_session(
+            &self,
+            _actor: &Actor,
+            _request: SessionCompactRequest,
+        ) -> TalosResult<SessionCompactResponse> {
+            unreachable!("compact_session is not used by channel tests")
+        }
+
+        async fn clear_session(
+            &self,
+            _actor: &Actor,
+            _request: SessionClearRequest,
+        ) -> TalosResult<SessionClearResponse> {
+            unreachable!("clear_session is not used by channel tests")
+        }
+
+        async fn list_projects(
+            &self,
+            _actor: &Actor,
+            _request: ProjectListRequest,
+        ) -> TalosResult<ProjectListResponse> {
+            unreachable!("list_projects is not used by channel tests")
+        }
+
+        async fn get_project(
+            &self,
+            _actor: &Actor,
+            _request: ProjectReadRequest,
+        ) -> TalosResult<ProjectReadResponse> {
+            unreachable!("get_project is not used by channel tests")
+        }
+
+        async fn create_project(
+            &self,
+            _actor: &Actor,
+            _request: ProjectCreateRequest,
+        ) -> TalosResult<ProjectCreateResponse> {
+            unreachable!("create_project is not used by channel tests")
+        }
+
+        async fn patch_project(
+            &self,
+            _actor: &Actor,
+            _request: ProjectPatchRequest,
+        ) -> TalosResult<ProjectPatchResponse> {
+            unreachable!("patch_project is not used by channel tests")
+        }
+
+        async fn delete_project(
+            &self,
+            _actor: &Actor,
+            _request: ProjectDeleteRequest,
+        ) -> TalosResult<ProjectDeleteResponse> {
+            unreachable!("delete_project is not used by channel tests")
+        }
+
+        async fn read_fs_directory(
+            &self,
+            _actor: &Actor,
+            _request: FsDirectoryReadRequest,
+        ) -> TalosResult<FsDirectoryReadResponse> {
+            unreachable!("read_fs_directory is not used by channel tests")
+        }
+
+        async fn create_fs_directory(
+            &self,
+            _actor: &Actor,
+            _request: FsDirectoryCreateRequest,
+        ) -> TalosResult<FsDirectoryCreateResponse> {
+            unreachable!("create_fs_directory is not used by channel tests")
+        }
+
+        async fn list_models(
+            &self,
+            _actor: &Actor,
+            _request: ModelListRequest,
+        ) -> TalosResult<ModelListResponse> {
+            unreachable!("list_models is not used by channel tests")
+        }
+
+        async fn get_config(
+            &self,
+            _actor: &Actor,
+            _request: ConfigGetRequest,
+        ) -> TalosResult<ConfigGetResponse> {
+            unused_gateway("get_config")
+        }
+
+        async fn update_config(
+            &self,
+            _actor: &Actor,
+            _request: ConfigUpdateRequest,
+        ) -> TalosResult<ConfigUpdateResponse> {
+            unused_gateway("update_config")
+        }
+
+        async fn delete_config(
+            &self,
+            _actor: &Actor,
+            _request: ConfigDeleteRequest,
+        ) -> TalosResult<ConfigDeleteResponse> {
+            unused_gateway("delete_config")
+        }
+
+        async fn reload_config(
+            &self,
+            _actor: &Actor,
+            _request: ConfigReloadRequest,
+        ) -> TalosResult<ConfigReloadResponse> {
+            unused_gateway("reload_config")
+        }
+
+        async fn list_skills(
+            &self,
+            _actor: &Actor,
+            _request: SkillsListRequest,
+        ) -> TalosResult<SkillsListResponse> {
+            unused_gateway("list_skills")
+        }
+
+        async fn refresh_skills(
+            &self,
+            _actor: &Actor,
+            _request: SkillsRefreshRequest,
+        ) -> TalosResult<SkillsListResponse> {
+            unused_gateway("refresh_skills")
+        }
+
+        async fn suggest_skills(
+            &self,
+            _actor: &Actor,
+            _request: SkillsSuggestRequest,
+        ) -> TalosResult<SkillsSuggestResponse> {
+            unused_gateway("suggest_skills")
+        }
+
+        async fn read_skill(
+            &self,
+            _actor: &Actor,
+            _request: SkillsReadRequest,
+        ) -> TalosResult<SkillsReadResponse> {
+            unused_gateway("read_skill")
+        }
+
+        async fn resolve_skills(
+            &self,
+            _actor: &Actor,
+            _request: SkillsResolveRequest,
+        ) -> TalosResult<SkillsResolveResponse> {
+            unused_gateway("resolve_skills")
+        }
+
+        async fn list_plugin_sources(
+            &self,
+            _actor: &Actor,
+            _request: PluginSourceListRequest,
+        ) -> TalosResult<PluginSourceListResponse> {
+            unused_gateway("list_plugin_sources")
+        }
+
+        async fn add_plugin_source(
+            &self,
+            _actor: &Actor,
+            _request: PluginSourceAddRequest,
+        ) -> TalosResult<PluginSourceAddResponse> {
+            unused_gateway("add_plugin_source")
+        }
+
+        async fn refresh_plugin_source(
+            &self,
+            _actor: &Actor,
+            _request: PluginSourceRefreshRequest,
+        ) -> TalosResult<PluginSourceRefreshResponse> {
+            unused_gateway("refresh_plugin_source")
+        }
+
+        async fn remove_plugin_source(
+            &self,
+            _actor: &Actor,
+            _request: PluginSourceRemoveRequest,
+        ) -> TalosResult<PluginSourceRemoveResponse> {
+            unused_gateway("remove_plugin_source")
+        }
+
+        async fn search_plugins(
+            &self,
+            _actor: &Actor,
+            _request: PluginSearchRequest,
+        ) -> TalosResult<PluginSearchResponse> {
+            unused_gateway("search_plugins")
+        }
+
+        async fn list_plugins(
+            &self,
+            _actor: &Actor,
+            _request: PluginListRequest,
+        ) -> TalosResult<PluginListResponse> {
+            unused_gateway("list_plugins")
+        }
+
+        async fn read_plugin(
+            &self,
+            _actor: &Actor,
+            _request: PluginReadRequest,
+        ) -> TalosResult<PluginReadResponse> {
+            unused_gateway("read_plugin")
+        }
+
+        async fn install_plugin(
+            &self,
+            _actor: &Actor,
+            _request: PluginInstallRequest,
+        ) -> TalosResult<PluginInstallResponse> {
+            unused_gateway("install_plugin")
+        }
+
+        async fn update_plugin(
+            &self,
+            _actor: &Actor,
+            _request: PluginUpdateRequest,
+        ) -> TalosResult<PluginUpdateResponse> {
+            unused_gateway("update_plugin")
+        }
+
+        async fn uninstall_plugin(
+            &self,
+            _actor: &Actor,
+            _request: PluginUninstallRequest,
+        ) -> TalosResult<PluginUninstallResponse> {
+            unused_gateway("uninstall_plugin")
+        }
+
+        async fn enable_plugin(
+            &self,
+            _actor: &Actor,
+            _request: PluginEnableRequest,
+        ) -> TalosResult<PluginEnableResponse> {
+            unused_gateway("enable_plugin")
+        }
+
+        async fn disable_plugin(
+            &self,
+            _actor: &Actor,
+            _request: PluginDisableRequest,
+        ) -> TalosResult<PluginDisableResponse> {
+            unused_gateway("disable_plugin")
+        }
+
+        async fn list_memory_files(
+            &self,
+            _actor: &Actor,
+            _request: MemoryFileListRequest,
+        ) -> TalosResult<MemoryFileListResponse> {
+            unused_gateway("list_memory_files")
+        }
+
+        async fn read_memory_file(
+            &self,
+            _actor: &Actor,
+            _request: MemoryFileReadRequest,
+        ) -> TalosResult<MemoryFileReadResponse> {
+            unused_gateway("read_memory_file")
+        }
+
+        async fn write_memory_file(
+            &self,
+            _actor: &Actor,
+            _request: MemoryFileWriteRequest,
+        ) -> TalosResult<MemoryFileWriteResponse> {
+            unused_gateway("write_memory_file")
+        }
+
+        async fn search_memory(
+            &self,
+            _actor: &Actor,
+            _request: MemorySearchRequest,
+        ) -> TalosResult<MemorySearchResponse> {
+            unused_gateway("search_memory")
+        }
+
+        async fn list_workspace_docs(
+            &self,
+            _actor: &Actor,
+            _request: WorkspaceDocListRequest,
+        ) -> TalosResult<WorkspaceDocListResponse> {
+            unused_gateway("list_workspace_docs")
+        }
+
+        async fn read_workspace_doc(
+            &self,
+            _actor: &Actor,
+            _request: WorkspaceDocReadRequest,
+        ) -> TalosResult<WorkspaceDocReadResponse> {
+            unused_gateway("read_workspace_doc")
+        }
+
+        async fn write_workspace_doc(
+            &self,
+            _actor: &Actor,
+            _request: WorkspaceDocWriteRequest,
+        ) -> TalosResult<WorkspaceDocWriteResponse> {
+            unused_gateway("write_workspace_doc")
+        }
+
+        async fn workspace_info(
+            &self,
+            _actor: &Actor,
+            _request: WorkspaceInfoRequest,
+        ) -> TalosResult<WorkspaceInfoResponse> {
+            unused_gateway("workspace_info")
+        }
+
+        async fn logout(
+            &self,
+            _actor: &Actor,
+            _request: AuthLogoutRequest,
+        ) -> TalosResult<AuthLogoutResponse> {
+            unused_gateway("logout")
+        }
+
+        async fn start_cloud_login(
+            &self,
+            _actor: &Actor,
+            _request: CloudLoginStartRequest,
+        ) -> TalosResult<CloudLoginStartResponse> {
+            unused_gateway("start_cloud_login")
+        }
+
+        async fn cloud_login_status(
+            &self,
+            _actor: &Actor,
+            _request: CloudLoginStatusRequest,
+        ) -> TalosResult<CloudLoginStatusResponse> {
+            unused_gateway("cloud_login_status")
+        }
+
+        async fn cancel_cloud_login(
+            &self,
+            _actor: &Actor,
+            _request: CloudLoginCancelRequest,
+        ) -> TalosResult<CloudLoginCancelResponse> {
+            unused_gateway("cancel_cloud_login")
+        }
+
+        async fn read_auth_session(
+            &self,
+            _actor: &Actor,
+            _request: AuthSessionReadRequest,
+        ) -> TalosResult<AuthSessionReadResponse> {
+            unused_gateway("read_auth_session")
+        }
+
+        async fn store_auth_session(
+            &self,
+            _actor: &Actor,
+            _request: AuthSessionStoreRequest,
+        ) -> TalosResult<AuthSessionStoreResponse> {
+            unused_gateway("store_auth_session")
+        }
+
+        async fn clear_auth_session(
+            &self,
+            _actor: &Actor,
+            _request: AuthSessionClearRequest,
+        ) -> TalosResult<AuthSessionClearResponse> {
+            unused_gateway("clear_auth_session")
+        }
+
+        async fn current_user(
+            &self,
+            _actor: &Actor,
+            _request: UserCurrentRequest,
+        ) -> TalosResult<UserCurrentResponse> {
+            unused_gateway("current_user")
+        }
+
+        async fn start(&self) -> TalosResult<()> {
             Ok(())
         }
     }
 
     #[test]
-    fn test_build_gateway_request_from_channel_event() {
-        let request = build_gateway_request(
+    fn test_build_start_turn_request_from_channel_event() {
+        let request = build_start_turn_request(
             "telegram",
             "bot-a",
             "user-1",
@@ -388,7 +1056,7 @@ mod tests {
         assert_eq!(extract_text_input(&request.input), "hello");
         assert_eq!(request.session_id, "session-1");
 
-        let context = request.context;
+        let context = request.context.expect("context should be set");
         assert_eq!(context.provider, TalosProvider::Telegram);
         assert_eq!(context.channel_id.as_deref(), Some("chat-1"));
         assert_eq!(context.thread_id.as_deref(), Some("topic-1"));
@@ -407,8 +1075,8 @@ mod tests {
     #[tokio::test]
     async fn test_channel_server_registers_channels() {
         let config = Arc::new(Config::default());
-        let request_handler: Arc<dyn RequestHandler> = Arc::new(MockRequestHandler);
-        let mut server = ChannelServer::new(config, request_handler);
+        let gateway: Arc<dyn Gateway> = Arc::new(MockGateway);
+        let mut server = ChannelServer::new(config, gateway);
         server.register(Box::new(MockChannel::new()));
 
         assert_eq!(server.channel_ids(), vec!["mock"]);
@@ -462,14 +1130,14 @@ mod tests {
     #[tokio::test]
     async fn test_channel_server_processes_events_and_replies() {
         let config = Arc::new(Config::default());
-        let request_handler: Arc<dyn RequestHandler> = Arc::new(MockRequestHandler);
+        let gateway: Arc<dyn Gateway> = Arc::new(MockGateway);
         let outbound_messages = Arc::new(Mutex::new(Vec::new()));
         let channel = MockChannelWithOutbound {
             outbound: MockOutboundAdapter {
                 messages: outbound_messages.clone(),
             },
         };
-        let mut server = ChannelServer::new(config, request_handler);
+        let mut server = ChannelServer::new(config, gateway);
         server.register(Box::new(channel));
 
         let run = tokio::time::timeout(std::time::Duration::from_millis(50), server.run()).await;
@@ -499,5 +1167,32 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    fn timeline_envelope(
+        event_id: &str,
+        event_type: TalosTimelineEventType,
+        session_id: String,
+        payload: TalosTimelineEventPayload,
+    ) -> TimelineEventEnvelope {
+        TimelineEventEnvelope {
+            event_id: event_id.to_string(),
+            event_seq: 1,
+            created_at_ms: 0,
+            session_id: session_id.clone(),
+            turn_id: "turn-mock".to_string(),
+            message_id: "msg-mock".to_string(),
+            event: TalosTimelineEvent {
+                event_seq: Some(1),
+                event_id: Some(event_id.to_string()),
+                created_at_ms: Some(0),
+                event_type,
+                turn_id: "turn-mock".to_string(),
+                message_id: "msg-mock".to_string(),
+                session_id,
+                sequence: 1,
+                payload,
+            },
+        }
     }
 }

@@ -13,7 +13,7 @@ export type ReasoningLevel = "low" | "medium" | "high" | "extra_high";
 export type ThreadFilter = "all" | "running" | "done" | "error";
 export type SessionUiStatus = "running" | "done" | "error";
 
-export interface ProjectRecord {
+export interface ProjectView {
   id: string;
   name: string;
   directory?: string | null;

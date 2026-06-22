@@ -3,9 +3,10 @@ use std::path::{Path, PathBuf};
 
 use talos_config::{DirectoryPickerConfig, DirectoryPickerRoot};
 use talos_error::{TalosError, TalosResult};
+use talos_project_store::ProjectRecord;
 use talos_types::{
-    FsDirectoryCreateResponse, FsDirectoryEntry, FsDirectorySnapshot, FsEntryKind, ProjectRecord,
-    ProjectStatus, ProjectStatusState, ProjectUnavailableReason,
+    FsDirectoryCreateResponse, FsDirectoryEntry, FsDirectorySnapshot, FsEntryKind, ProjectStatus,
+    ProjectStatusState, ProjectUnavailableReason,
 };
 
 use crate::Actor;

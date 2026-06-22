@@ -1,4 +1,4 @@
-use crate::gateway;
+use crate::agent_dispatch;
 use crate::talos;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -54,7 +54,7 @@ pub mod tools {
     pub struct ToolCall {
         pub id: String,
         pub name: String,
-        pub arguments: talos::TalosJsonValue,
+        pub arguments: talos::ToolArguments,
     }
 
     /// Result of a tool execution.
@@ -79,17 +79,17 @@ pub fn now() -> u64 {
         .as_millis() as u64
 }
 
-/// RequestHandler trait for decoupling Gateway from Orchestration.
+/// Runtime boundary used by Application Service to dispatch work to AgentCoordinator.
 ///
-/// This trait defines the interface that Gateway uses to communicate
-/// with the orchestration layer without direct dependency.
+/// Public transports must call Gateway. This trait is only for the internal
+/// Application Service -> AgentCoordinator dispatch boundary.
 #[async_trait]
-pub trait RequestHandler: Send + Sync {
-    /// Handle a gateway request and return a response.
+pub trait AgentDispatchRuntime: Send + Sync {
+    /// Dispatch a prepared agent request and return a response.
     async fn handle(
         &self,
-        request: gateway::GatewayRequest,
-    ) -> crate::TalosResult<gateway::GatewayResponse>;
+        request: agent_dispatch::AgentDispatchRequest,
+    ) -> crate::TalosResult<agent_dispatch::AgentDispatchResponse>;
 
     /// Return the internal domain timeline stream before application-service persistence.
     ///
@@ -97,14 +97,17 @@ pub trait RequestHandler: Send + Sync {
     /// these domain events and attaches recovery cursor metadata.
     async fn handle_stream(
         &self,
-        request: gateway::GatewayRequest,
+        request: agent_dispatch::AgentDispatchRequest,
     ) -> crate::TalosResult<tokio::sync::mpsc::Receiver<talos::TalosTimelineEvent>>;
 
-    async fn cancel_active_turn(&self, session_id: &str) -> crate::TalosResult<()>;
+    async fn cancel_active_turn(
+        &self,
+        session: crate::session::TalosSession,
+    ) -> crate::TalosResult<()>;
 
     async fn submit_dynamic_tool_result(
         &self,
-        _session_id: &str,
+        _session: crate::session::TalosSession,
         _call_id: &str,
         _tool_name: &str,
         _output: String,
@@ -113,5 +116,9 @@ pub trait RequestHandler: Send + Sync {
         Err(crate::TalosError::InternalError(
             "submit_dynamic_tool_result is not supported by this request handler".to_string(),
         ))
+    }
+
+    async fn take_session_title_update(&self, _session_id: &str, _turn_id: &str) -> Option<String> {
+        None
     }
 }

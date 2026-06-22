@@ -34,7 +34,7 @@ use std::{
 };
 use talos_error::TalosResult;
 use talos_sdk::{
-    ModelInfo, SkillSuggestion, TalosSession, TalosTimelineItem, TimelineEventEnvelope,
+    ModelInfo, SessionInfo, SkillSuggestion, TalosTimelineItem, TimelineEventEnvelope,
 };
 use talos_types::talos::{TalosUsage, TurnExecutionMetrics};
 use tokio::sync::mpsc;
@@ -73,9 +73,9 @@ fn format_session_timestamp(timestamp_ms: u64) -> String {
     local_dt.format("%Y-%m-%d %H:%M").to_string()
 }
 
-pub(crate) fn session_list_label(session: &TalosSession) -> String {
+pub(crate) fn session_list_label(session: &SessionInfo) -> String {
     let title = session.title.trim();
-    let time_text = format_session_timestamp(session.state.last_activity);
+    let time_text = format_session_timestamp(session.last_activity);
     format!(" {}  {}", title, time_text)
 }
 
@@ -137,7 +137,7 @@ pub struct TuiApp {
     pub(crate) stream_started_at: Option<Instant>,
     pub(crate) last_stream_event_at: Option<Instant>,
     pub(crate) gateway_client: Option<Arc<dyn GatewayClient>>,
-    pub(crate) history_sessions: Vec<TalosSession>,
+    pub(crate) history_sessions: Vec<SessionInfo>,
     pub(crate) history_selected: usize,
     pub(crate) show_model_picker: bool,
     pub(crate) model_picker_selected: usize,

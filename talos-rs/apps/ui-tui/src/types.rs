@@ -1,8 +1,8 @@
 use ratatui::text::Line;
 use talos_error::TalosResult;
 use talos_sdk::{
-    ModelInfo, SessionHistorySnapshot, SkillSuggestion, TalosContentItem, TalosJsonValue,
-    TalosSession, TimelineRecoverySnapshot,
+    ModelInfo, SessionHistorySnapshot, SessionInfo, SkillSuggestion, TalosContentItem,
+    TimelineRecoveryResponse, ToolArguments,
 };
 
 // ── Suggestions ──────────────────────────────────────────────────────────────
@@ -140,7 +140,7 @@ pub(crate) struct ChatBlock {
     pub(crate) content: String,
     pub(crate) tool_call_id: Option<String>,
     pub(crate) tool_name: Option<String>,
-    pub(crate) tool_input: Option<TalosJsonValue>,
+    pub(crate) tool_input: Option<ToolArguments>,
     pub(crate) tool_content_items: Vec<TalosContentItem>,
     pub(crate) tool_status: Option<ToolCallStatus>,
     pub(crate) tool_progress: Vec<String>,
@@ -173,7 +173,7 @@ impl ChatBlock {
     pub(crate) fn new_tool_call(
         call_id: String,
         tool_name: String,
-        tool_input: impl Into<TalosJsonValue>,
+        tool_input: impl Into<ToolArguments>,
         iteration: u64,
         item_index: u64,
         timing_ms: Option<u64>,
@@ -281,27 +281,27 @@ impl QueuedMessage {
 
 pub(crate) struct SessionHistoryLoad {
     pub(crate) history: SessionHistorySnapshot,
-    pub(crate) live_recovery: Option<TalosResult<TimelineRecoverySnapshot>>,
+    pub(crate) live_recovery: Option<TalosResult<TimelineRecoveryResponse>>,
 }
 
 // ── Command update ───────────────────────────────────────────────────────────
 
 pub(crate) enum CommandUpdate {
     ModelsLoaded(TalosResult<Vec<ModelInfo>>),
-    StatusLoaded(TalosResult<Option<TalosSession>>),
-    SessionCompacted(TalosResult<TalosSession>),
-    SessionCleared(TalosResult<TalosSession>),
+    StatusLoaded(TalosResult<Option<SessionInfo>>),
+    SessionCompacted(TalosResult<SessionInfo>),
+    SessionCleared(TalosResult<SessionInfo>),
     ModelSwitched {
         requested: String,
-        result: TalosResult<TalosSession>,
+        result: TalosResult<SessionInfo>,
     },
-    HistoryLoaded(TalosResult<Vec<TalosSession>>),
+    HistoryLoaded(TalosResult<Vec<SessionInfo>>),
     ModelPickerSwitched {
         requested: String,
-        result: TalosResult<TalosSession>,
+        result: TalosResult<SessionInfo>,
     },
     SessionHistoryLoaded {
-        session: TalosSession,
+        session: SessionInfo,
         result: TalosResult<SessionHistoryLoad>,
     },
 }

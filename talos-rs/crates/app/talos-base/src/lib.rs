@@ -1,10 +1,15 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use talos_agent::{AgentHarness, AgentOrchestrator, SkillRootsResolver};
+use async_trait::async_trait;
+use talos_agent::{Agent, AgentHarness, SkillRootsResolver};
 use talos_app_server::BackgroundTaskDrain;
-use talos_application_service::{PluginManagerService, TalosApplicationService};
+use talos_application_service::{
+    Actor, AgentDispatchTurnExecutor, PluginManagerService, TalosApplicationService,
+    TimelineSubscribeCommand, TimelineSubscriptionMessage,
+};
 use talos_auth::{AuthService, CloudAuthService, OpenModeUserService, UserService};
 use talos_channel::{ChannelServer, TelegramChannel};
 use talos_config::{
@@ -13,7 +18,7 @@ use talos_config::{
 };
 use talos_coordinator::{Coordinator, CoordinatorImpl};
 use talos_error::{TalosError, TalosResult};
-use talos_gateway::{Gateway, GatewayImpl};
+use talos_gateway::{ApplicationServiceGateway, Gateway};
 use talos_gateway_http::{HttpServer, ServerLifecycle, ServerLifecycleState};
 use talos_llm_anthropic::AnthropicProvider;
 use talos_llm_bailian::BailianProvider;
@@ -22,6 +27,7 @@ use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, LlmProvider, PromptCacheSupport, ReasoningSupport,
 };
 use talos_logging::LogGuard;
+use talos_project_store::{ProjectStore, StorageProjectStore};
 use talos_router::{Binding, MatchRule, Router, RouterImpl};
 use talos_session_store::{
     ActiveTurnStore, DatabaseSessionStore, MessageIdempotencyStore, SessionStore,
@@ -30,11 +36,15 @@ use talos_session_store::{
 use talos_storage::{create_storage, StorageConfig};
 use talos_tools::{
     register_collaboration_tools, register_core_local_tools, register_network_tools,
-    CollaborationRuntime, McpConnectionManager, ToolRegistry,
+    CollaborationAgentHost, CollaborationRuntime, McpConnectionManager, ToolRegistry,
+};
+use talos_types::talos::{
+    TalosInputItem, TalosTimelineContent, TalosTimelineDelta, TalosTimelineEventPayload,
 };
 use talos_types::{
-    resolve_model_catalog, McpServerDefinition, McpServerRuntimeDescriptor, McpServerSource,
-    McpTransportDefinition, RequestHandler, SessionRuntime,
+    resolve_model_catalog, AgentDispatchResponse, AgentDispatchRuntime, McpServerDefinition,
+    McpServerRuntimeDescriptor, McpServerSource, McpTransportDefinition, SessionRuntime,
+    StartTurnRequest, TalosContext, TalosSession,
 };
 use tokio::signal;
 use tokio::task::JoinSet;
@@ -135,9 +145,173 @@ pub struct TalosApplicationRuntime {
     pub application_service: Arc<TalosApplicationService>,
     pub event_service: Arc<TimelineEventService>,
     pub auth_service: Arc<dyn AuthService>,
-    pub request_handler: Arc<dyn RequestHandler>,
+    pub gateway: Arc<dyn Gateway>,
+    pub agent_dispatch_runtime: Arc<dyn AgentDispatchRuntime>,
     pub coordinator: Arc<CoordinatorImpl>,
     pub tool_registry: Arc<ToolRegistry>,
+}
+
+struct ApplicationCollaborationHost {
+    application_service: Arc<TalosApplicationService>,
+    session_users: RwLock<HashMap<String, String>>,
+}
+
+impl ApplicationCollaborationHost {
+    fn new(application_service: Arc<TalosApplicationService>) -> Self {
+        Self {
+            application_service,
+            session_users: RwLock::new(HashMap::new()),
+        }
+    }
+
+    fn next_session_id() -> String {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        format!("collab_{nanos}")
+    }
+
+    fn actor_for_user(user_id: &str) -> Actor {
+        Actor::regular(user_id.to_string())
+    }
+}
+
+#[async_trait]
+impl CollaborationAgentHost for ApplicationCollaborationHost {
+    async fn create_session(&self, context: TalosContext) -> TalosResult<TalosSession> {
+        let session_id = Self::next_session_id();
+        let user_id = context.user_id.clone();
+        let actor = Self::actor_for_user(&user_id);
+        let session = self
+            .application_service
+            .access
+            .get_or_create_session(&actor, &session_id, context, None, None, None)
+            .await?;
+        self.session_users
+            .write()
+            .expect("collaboration session users write lock")
+            .insert(session.context.session_id.clone(), user_id);
+        Ok(session)
+    }
+
+    async fn get_session(&self, session_id: &str) -> TalosResult<Option<TalosSession>> {
+        let Some(user_id) = self
+            .session_users
+            .read()
+            .expect("collaboration session users read lock")
+            .get(session_id)
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        match self
+            .application_service
+            .get_session(&Self::actor_for_user(&user_id), session_id)
+            .await
+        {
+            Ok(session) => Ok(Some(session)),
+            Err(TalosError::ResourceNotFound(_)) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn close_session(&self, session: TalosSession) -> TalosResult<()> {
+        let session_id = session.context.session_id.clone();
+        self.application_service
+            .close_session(&Self::actor_for_user(&session.user_id), &session_id)
+            .await?;
+        self.session_users
+            .write()
+            .expect("collaboration session users write lock")
+            .remove(&session_id);
+        Ok(())
+    }
+
+    async fn submit_input(
+        &self,
+        session: TalosSession,
+        message: String,
+    ) -> TalosResult<AgentDispatchResponse> {
+        let session_id = session.context.session_id.clone();
+        let model = session.config.llm.model.clone();
+        let request = StartTurnRequest {
+            session_id: session_id.clone(),
+            input: vec![TalosInputItem::Text { text: message }],
+            workspace_id: session.context.workspace_id.clone(),
+            context: Some(TalosContext {
+                source_type: session.context.source_type.clone(),
+                provider: session.context.provider.clone(),
+                user_id: session.context.user_id.clone(),
+                message_id: Self::next_session_id(),
+                trace_id: Self::next_session_id(),
+                channel_id: session.context.channel_id.clone(),
+                thread_id: session.context.thread_id.clone(),
+                project_root: session.context.project_root.clone(),
+                environment: session.context.environment.clone(),
+            }),
+            model: None,
+            project_id: None,
+            current_directory: None,
+            client_request_id: None,
+        };
+        let ack = self
+            .application_service
+            .start_turn(&Self::actor_for_user(&session.user_id), request, None)
+            .await?;
+        let mut subscription = self
+            .application_service
+            .events
+            .subscribe(TimelineSubscribeCommand {
+                session_id,
+                after_event_id: None,
+                replay_limit: 1_000,
+                close_when_idle: true,
+                close_on_terminal: true,
+            })
+            .await?;
+        let mut output = String::new();
+        while let Some(message) = subscription.events.recv().await {
+            let TimelineSubscriptionMessage::Event(envelope) = message else {
+                continue;
+            };
+            if envelope.turn_id != ack.turn_id {
+                continue;
+            }
+            match envelope.event.payload {
+                TalosTimelineEventPayload::ItemDelta(delta) => {
+                    if let TalosTimelineDelta::Text { text } = delta.delta {
+                        output.push_str(&text);
+                    }
+                }
+                TalosTimelineEventPayload::ItemCompleted(completed) => {
+                    if let Some(TalosTimelineContent::Text { text }) = completed.final_content {
+                        output = text;
+                    }
+                }
+                TalosTimelineEventPayload::TurnCompleted(completed) => {
+                    return Ok(AgentDispatchResponse {
+                        session_id: envelope.session_id,
+                        content: output,
+                        stop_reason: completed.stop_reason,
+                        usage: completed.usage,
+                        success: true,
+                        model,
+                        output_items: Vec::new(),
+                        reasoning: Vec::new(),
+                    });
+                }
+                TalosTimelineEventPayload::TurnError(error) => {
+                    return Err(TalosError::GatewayError(error.error));
+                }
+                _ => {}
+            }
+        }
+        Err(TalosError::GatewayError(format!(
+            "collaboration turn {} ended without terminal event",
+            ack.turn_id
+        )))
+    }
 }
 
 const MEMORY_FLUSH_DRAIN_TIMEOUT: Duration = Duration::from_secs(60);
@@ -421,7 +595,7 @@ pub async fn start_server(
         .unwrap_or(true);
     let channel_server = if enable_channels {
         let mut channel_server =
-            ChannelServer::new(Arc::new(config.clone()), runtime.request_handler.clone());
+            ChannelServer::new(Arc::new(config.clone()), runtime.gateway.clone());
         channel_server.register(Box::new(TelegramChannel::new()));
         Some(channel_server)
     } else {
@@ -441,16 +615,17 @@ pub async fn start_server(
 pub async fn run_json_rpc_stdio(config: Config) -> TalosResult<()> {
     let runtime = build_application_runtime(config.clone()).await?;
     let replay_limit = config.agent.kernel.timeline_events.replay_batch_size.max(1);
+    let application_service = runtime.application_service.clone();
     let app = Arc::new(
-        talos_app_server::TalosApplicationAdapter::new(runtime.application_service, replay_limit)
+        talos_app_server::TalosApplicationAdapter::new(application_service.clone(), replay_limit)
             .with_drain_provider(Box::new(CoordinatorDrain {
                 coordinator: runtime.coordinator,
             }))
-            .with_tool_registry(runtime.tool_registry)
             .with_cloud_api_base_url(config.cloud.api_base_url.clone()),
     );
     let validator = Arc::new(talos_app_server::AuthServiceCredentialValidator::new(
         runtime.auth_service,
+        application_service.account.clone(),
     ));
     talos_app_server::run_stdio(
         app,
@@ -474,7 +649,9 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
     .await?;
     let storage: Arc<dyn talos_storage::Storage> = Arc::from(storage_impl);
     let session_store_impl = Arc::new(DatabaseSessionStore::new(storage.clone()).await?);
+    let project_store_impl = Arc::new(StorageProjectStore::new(storage.clone()).await?);
     let session_store: Arc<dyn SessionStore> = session_store_impl.clone();
+    let project_store: Arc<dyn ProjectStore> = project_store_impl.clone();
     let event_store: Arc<dyn TimelineEventStore> = session_store_impl.clone();
     let active_turn_store: Arc<dyn ActiveTurnStore> = session_store_impl.clone();
     let idempotency_store: Arc<dyn MessageIdempotencyStore> = session_store_impl.clone();
@@ -531,26 +708,17 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
         config.agent.kernel.clone(),
         skill_roots_resolver,
     );
-    let agent: Arc<dyn AgentOrchestrator> = Arc::new(agent);
+    let agent: Arc<dyn Agent> = Arc::new(agent);
 
-    let coordinator_builder = CoordinatorImpl::new(router, session_store.clone(), config.clone())
-        .with_channel_dm_scope("telegram", config.channels.telegram.dm_scope.to_string())
-        .with_default_workspace_id(config.agent.kernel.default_workspace_id.clone());
-    let coordinator = Arc::new(coordinator_builder);
-
-    if config.agent.kernel.tools.enable_collaboration_tools {
-        register_collaboration_tools(tool_registry.as_ref());
-        tool_registry.set_collaboration_runtime(Arc::new(CollaborationRuntime::new(
-            coordinator.clone(),
-            coordinator.clone(),
-        )));
-    }
+    let coordinator = Arc::new(CoordinatorImpl::new(router));
 
     coordinator.register_agent("default", agent).await?;
 
-    let request_handler: Arc<dyn RequestHandler> = coordinator.clone();
+    let agent_dispatch_runtime: Arc<dyn AgentDispatchRuntime> = coordinator.clone();
     let session_runtime: Arc<dyn SessionRuntime> = coordinator.clone();
-    let gateway: Arc<dyn Gateway> = Arc::new(GatewayImpl::new(request_handler.clone()));
+    let turn_executor = Arc::new(AgentDispatchTurnExecutor::new(
+        agent_dispatch_runtime.clone(),
+    ));
     let cloud_auth = Arc::new(CloudAuthService::new(config.cloud.api_base_url.clone()));
     let auth_service: Arc<dyn AuthService> = cloud_auth.clone();
     let user_service: Arc<dyn UserService> = if config.gateway.auth {
@@ -565,21 +733,20 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
 
     let model_catalog = resolve_model_catalog(&config.llm);
     let provider_reloader = reloadable_llm_provider.clone();
-    let coordinator_reloader = coordinator.clone();
     let runtime_reload_hook: talos_application_service::RuntimeConfigReloadHook =
         Arc::new(move |_| {
             let reloaded_config = Config::load()?;
             reloaded_config.validate_runtime()?;
             let reloaded_provider = create_llm_provider(&reloaded_config)?;
-            coordinator_reloader.update_base_llm(&reloaded_config.llm);
             provider_reloader.reload(reloaded_provider);
             Ok(())
         });
 
     let application_service = Arc::new(TalosApplicationService::new_with_reload_hook(
-        gateway,
+        turn_executor,
         session_runtime,
         session_store,
+        project_store,
         event_service.clone(),
         idempotency_store,
         config.clone(),
@@ -591,12 +758,25 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
         Some(runtime_reload_hook),
     ));
 
+    if config.agent.kernel.tools.enable_collaboration_tools {
+        register_collaboration_tools(tool_registry.as_ref());
+        let collaboration_host = Arc::new(ApplicationCollaborationHost::new(
+            application_service.clone(),
+        ));
+        tool_registry
+            .set_collaboration_runtime(Arc::new(CollaborationRuntime::new(collaboration_host)));
+    }
+
+    let gateway: Arc<dyn Gateway> =
+        Arc::new(ApplicationServiceGateway::new(application_service.clone()));
+
     Ok(TalosApplicationRuntime {
         config,
         application_service,
         event_service,
         auth_service,
-        request_handler,
+        gateway,
+        agent_dispatch_runtime,
         coordinator,
         tool_registry,
     })

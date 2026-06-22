@@ -1,0 +1,14 @@
+[package]
+name = "talos-project-store"
+version = "0.1.2"
+edition = "2021"
+
+[dependencies]
+async-trait = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+talos-error = { workspace = true }
+talos-storage = { workspace = true }
+talos-types = { workspace = true }
+uuid = { workspace = true, features = ["v7"] }

@@ -18,8 +18,8 @@ mod tests;
 pub use mock::MockAgent;
 
 use crate::{
-    empty_skill_roots_resolver, flush_manager::MemoryFlushManager, AgentOrchestrator,
-    OrchestratorExecution, OrchestratorRequest, SessionTitleUpdate, SkillRootsResolver,
+    empty_skill_roots_resolver, flush_manager::MemoryFlushManager, Agent, AgentRequest,
+    AgentResponse, SessionTitleUpdate, SkillRootsResolver,
 };
 use talos_agent_kernel::{
     run_general_turn_with_resume, ContextStateBags, DynamicToolResultResume, GeneralTurnOutcome,
@@ -35,7 +35,7 @@ use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{ChatMessage, ChatRequest, LlmProvider};
 use talos_memory::{Memory, MemoryStore, SessionTranscriptBranch, SessionTranscriptPayload};
 use talos_tools::ToolRegistry;
-use talos_types::gateway::GatewayResumeContext;
+use talos_types::agent_dispatch::AgentDispatchResumeContext;
 use talos_types::normalize_session_title;
 use talos_types::talos::{
     StopReason as TalosStopReason, TalosContentItem, TalosInputItem, TalosOutputItem,
@@ -63,11 +63,11 @@ pub(crate) enum ActiveTurnHandle {
 
 pub(crate) enum QueuedTurn {
     Unary {
-        request: OrchestratorRequest,
-        response_tx: oneshot::Sender<TalosResult<OrchestratorExecution>>,
+        request: AgentRequest,
+        response_tx: oneshot::Sender<TalosResult<AgentResponse>>,
     },
     Stream {
-        request: OrchestratorRequest,
+        request: AgentRequest,
         event_tx: mpsc::Sender<TalosTimelineEvent>,
     },
 }
@@ -185,7 +185,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
 
     fn build_invocation_context(
         &self,
-        agent_request: &crate::service::AgentRequest,
+        agent_request: &crate::service::AgentKernelRequest,
         input: String,
         invocation_id: String,
         stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
@@ -238,7 +238,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
         &self,
         memory_store: &MemoryStore,
         session_id: &str,
-        resume_context: Option<GatewayResumeContext>,
+        resume_context: Option<AgentDispatchResumeContext>,
     ) -> TalosResult<Option<GeneralTurnResume>> {
         let Some(tool_call) = resume_context.and_then(|context| context.tool_call) else {
             return Ok(None);
@@ -362,8 +362,8 @@ After receiving tool outputs, continue reasoning and provide the final response.
 
     async fn reserve_or_enqueue_unary_turn(
         &self,
-        request: OrchestratorRequest,
-    ) -> TalosResult<Option<oneshot::Receiver<TalosResult<OrchestratorExecution>>>> {
+        request: AgentRequest,
+    ) -> TalosResult<Option<oneshot::Receiver<TalosResult<AgentResponse>>>> {
         let session_id = request.session.context.session_id.clone();
         if self.has_queued_turns(&session_id).await {
             let (response_tx, response_rx) = oneshot::channel();
@@ -397,7 +397,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
 
     async fn reserve_or_enqueue_stream_turn(
         &self,
-        request: OrchestratorRequest,
+        request: AgentRequest,
         event_tx: mpsc::Sender<TalosTimelineEvent>,
     ) -> TalosResult<bool> {
         let session_id = request.session.context.session_id.clone();
@@ -417,10 +417,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
         }
     }
 
-    async fn execute_reserved_run(
-        &self,
-        request: OrchestratorRequest,
-    ) -> TalosResult<OrchestratorExecution> {
+    async fn execute_reserved_run(&self, request: AgentRequest) -> TalosResult<AgentResponse> {
         let resume_context = request.resume_context.clone();
         let agent_request = self.to_agent_request(request);
         let input = Self::extract_text_input(&agent_request.input);
@@ -483,7 +480,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
                         &output_text,
                     )
                     .await;
-                Ok(OrchestratorExecution {
+                Ok(AgentResponse {
                     output_text,
                     output_items,
                     reasoning,
@@ -495,7 +492,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
                 })
             }
             Ok(Err(err)) => Err(err),
-            Err(err) if err.is_cancelled() => Ok(OrchestratorExecution {
+            Err(err) if err.is_cancelled() => Ok(AgentResponse {
                 output_text: String::new(),
                 output_items: Vec::new(),
                 reasoning: Vec::new(),
@@ -516,7 +513,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
 
     fn spawn_reserved_stream_turn(
         &self,
-        request: OrchestratorRequest,
+        request: AgentRequest,
         tx: mpsc::Sender<TalosTimelineEvent>,
     ) {
         let this = self.clone();
@@ -876,7 +873,7 @@ fn outcome_metrics(outcome: &GeneralTurnOutcome) -> TurnExecutionMetrics {
 fn seed_resume_context(
     timeline: &mut TimelineBuilder,
     state: &mut KernelTimelineState,
-    resume_context: Option<GatewayResumeContext>,
+    resume_context: Option<AgentDispatchResumeContext>,
 ) {
     let Some(tool_call) = resume_context.and_then(|context| context.tool_call) else {
         return;
@@ -1448,7 +1445,7 @@ fn stream_key_key(stream_key: &ToolStreamKey) -> String {
 }
 
 #[async_trait]
-impl AgentOrchestrator for AgentHarness {
+impl Agent for AgentHarness {
     fn id(&self) -> &str {
         &self.id
     }
@@ -1463,13 +1460,10 @@ impl AgentOrchestrator for AgentHarness {
             .map(|(_, update)| update)
     }
 
-    async fn run(&self, request: OrchestratorRequest) -> TalosResult<OrchestratorExecution> {
+    async fn run(&self, request: AgentRequest) -> TalosResult<AgentResponse> {
         if let Some(response_rx) = self.reserve_or_enqueue_unary_turn(request.clone()).await? {
             return response_rx.await.map_err(|err| {
-                TalosError::InternalError(format!(
-                    "queued orchestrator execution channel closed: {}",
-                    err
-                ))
+                TalosError::InternalError(format!("queued agent execution channel closed: {}", err))
             })?;
         }
 
@@ -1478,7 +1472,7 @@ impl AgentOrchestrator for AgentHarness {
 
     async fn run_stream(
         &self,
-        request: OrchestratorRequest,
+        request: AgentRequest,
     ) -> TalosResult<mpsc::Receiver<TalosTimelineEvent>> {
         let (tx, rx) = mpsc::channel(256);
         let should_start_now = self

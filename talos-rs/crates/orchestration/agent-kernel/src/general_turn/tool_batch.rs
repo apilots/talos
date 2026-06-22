@@ -10,7 +10,7 @@ pub(crate) fn parse_retrieved_memory_items(
     match tool_name {
         "MemorySearch" | "memory_search" => {
             match serde_json::from_value::<MemorySearchResponse>(payload.clone()) {
-                Ok(response) => response.into_retrieved_items(),
+                Ok(response) => memory_search_response_into_retrieved_items(response),
                 Err(err) => {
                     warn!(
                         tool_name = %tool_name,

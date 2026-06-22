@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use talos_error::TalosResult;
-use talos_sdk::{SkillSuggestion, TalosInputItem, TalosMessageRequest};
+use talos_sdk::{SkillSuggestion, StartTurnRequest, TalosInputItem};
 use tokio::sync::mpsc;
 use tracing::error;
 
@@ -48,7 +48,8 @@ impl TuiApp {
             name: skill.name.clone(),
             path: skill.path.to_string_lossy().to_string(),
         }));
-        let request = TalosMessageRequest {
+        let request = StartTurnRequest {
+            session_id: session_id.clone(),
             input,
             workspace_id: None,
             context: is_first_turn.then(|| self.build_talos_context()),
@@ -57,6 +58,7 @@ impl TuiApp {
                 .filter(|model| !model.is_empty()),
             project_id: None,
             current_directory: is_first_turn.then(|| self.startup_directory.clone()),
+            client_request_id: None,
         };
 
         self.abort_pending_stream_task();
@@ -88,7 +90,7 @@ impl TuiApp {
         self.push_right_event(format!("message dispatched to session {}", session_id));
 
         let handle = tokio::spawn(async move {
-            let result = client.send_timeline_events(&session_id, &request).await;
+            let result = client.send_timeline_events(request).await;
             if tx.send(result).await.is_err() {
                 error!(
                     session_id = %session_id,

@@ -6,6 +6,7 @@ pub mod file;
 pub mod fs;
 pub mod history;
 pub mod memory;
+pub mod model;
 pub mod plugin;
 pub mod session;
 pub mod skills;
@@ -18,7 +19,7 @@ pub use account::AccountService;
 pub use config::{ConfigService, RuntimeConfigReloadHook};
 pub use event::{
     ApplicationEvent, ApplicationEventStream, EventReplay, EventService, TimelineCursorStatus,
-    TimelineRecoverySnapshot, TimelineSubscribeParams, TimelineSubscription,
+    TimelineRecoveryState, TimelineSubscribeCommand, TimelineSubscription,
     TimelineSubscriptionCloseReason, TimelineSubscriptionClosed, TimelineSubscriptionMessage,
 };
 pub use file::{
@@ -27,11 +28,13 @@ pub use file::{
 };
 pub use fs::FsService;
 pub use history::SessionHistoryService;
-pub use memory::{MemoryDate, MemoryListParams, MemorySearchParams, MemoryService};
+pub use memory::{MemoryDate, MemoryListCommand, MemorySearchCommand, MemoryService};
 pub use plugin::PluginManagerService;
 pub use session::SessionService;
 pub use skills::SkillsService;
-pub use turn::{message_request_hash, TurnRetryRequest, TurnService};
+pub use turn::{
+    turn_submission_hash, AgentDispatchTurnExecutor, TurnExecutor, TurnRetryRequest, TurnService,
+};
 pub use workspace::{AgentWorkspaceInfo, EffectiveAgentWorkspace, EffectiveWorkspaceResolver};
 pub use workspace_docs::WorkspaceDocService;
 
@@ -41,16 +44,18 @@ use std::sync::Arc;
 
 use talos_auth::{AuthService, UserService};
 use talos_config::LlmConfigService;
-use talos_gateway::Gateway;
 use talos_llm_provider::LlmProvider;
+use talos_project_store::{ProjectRecord, ProjectStore};
 use talos_session_store::{
-    IdempotencyStatus, MessageCommandAck, MessageIdempotencyStore, SessionStore,
-    TimelineEventService,
+    IdempotencyStatus, MessageCommandResult, MessageIdempotencyStore, SessionStore,
+    TimelineEventId, TimelineEventService,
 };
-use talos_types::talos::TalosMessageRequest;
 use talos_types::{
-    ModelInfo, ProjectPatch, ProjectRecord, SessionPatch, SessionPatchAck, SessionQuery,
-    SessionRuntime, TalosConfig, TalosSession,
+    InterruptTurnRequest, InterruptTurnResponse, ModelInfo, ProjectInfo, ProjectPatch,
+    RecoverTimelineRequest, RetryTurnRequest as SharedRetryTurnRequest, RetryTurnResponse,
+    SessionPatch, SessionPatchResponse, SessionQuery, SessionRuntime, StartTurnRequest,
+    StartTurnResponse, SubmitToolResultRequest, SubmitToolResultResponse, SubscribeTimelineRequest,
+    TalosConfig, TalosSession, TimelineActiveTurnSnapshot, TurnCommandStatus,
 };
 
 #[derive(Clone)]
@@ -70,9 +75,10 @@ pub struct TalosApplicationService {
 
 impl TalosApplicationService {
     pub fn new(
-        gateway: Arc<dyn Gateway>,
+        turn_executor: Arc<dyn TurnExecutor>,
         session_runtime: Arc<dyn SessionRuntime>,
         session_store: Arc<dyn SessionStore>,
+        project_store: Arc<dyn ProjectStore>,
         event_service: Arc<TimelineEventService>,
         idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
@@ -83,9 +89,10 @@ impl TalosApplicationService {
         user_service: Arc<dyn UserService>,
     ) -> Self {
         Self::new_with_reload_hook(
-            gateway,
+            turn_executor,
             session_runtime,
             session_store,
+            project_store,
             event_service,
             idempotency_store,
             base_config,
@@ -99,9 +106,10 @@ impl TalosApplicationService {
     }
 
     pub fn new_with_reload_hook(
-        gateway: Arc<dyn Gateway>,
+        turn_executor: Arc<dyn TurnExecutor>,
         session_runtime: Arc<dyn SessionRuntime>,
         session_store: Arc<dyn SessionStore>,
+        project_store: Arc<dyn ProjectStore>,
         event_service: Arc<TimelineEventService>,
         idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
@@ -112,7 +120,11 @@ impl TalosApplicationService {
         user_service: Arc<dyn UserService>,
         reload_hook: Option<RuntimeConfigReloadHook>,
     ) -> Self {
-        let mut session_records = SessionService::new(session_store, base_config.clone());
+        let mut session_records = SessionService::new(
+            session_store.clone(),
+            project_store.clone(),
+            base_config.clone(),
+        );
         session_records = session_records
             .with_default_workspace_id(base_config.agent.kernel.default_workspace_id.clone());
         session_records = session_records.with_channel_dm_scope(
@@ -142,12 +154,18 @@ impl TalosApplicationService {
         .with_plugin_manager(plugins.clone());
 
         Self {
-            access: ResourceAccessService::with_records(session_runtime, session_records),
-            account: AccountService::new(auth_service, user_service),
+            access: ResourceAccessService::with_records(session_runtime.clone(), session_records),
+            account: AccountService::new(
+                auth_service,
+                user_service,
+                base_config.cloud.api_base_url.clone(),
+            ),
             turns: TurnService::new(
-                gateway,
+                turn_executor,
                 event_service.clone(),
                 idempotency_store,
+                session_store,
+                session_runtime,
                 base_config.clone(),
             ),
             events: EventService::new(event_service.clone()),
@@ -162,9 +180,10 @@ impl TalosApplicationService {
     }
 
     pub fn new_with_session_store(
-        gateway: Arc<dyn Gateway>,
+        turn_executor: Arc<dyn TurnExecutor>,
         session_runtime: Arc<dyn SessionRuntime>,
         session_store: Arc<dyn SessionStore>,
+        project_store: Arc<dyn ProjectStore>,
         event_service: Arc<TimelineEventService>,
         idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
@@ -175,9 +194,10 @@ impl TalosApplicationService {
         user_service: Arc<dyn UserService>,
     ) -> Self {
         Self::new_with_reload_hook(
-            gateway,
+            turn_executor,
             session_runtime,
             session_store,
+            project_store,
             event_service,
             idempotency_store,
             base_config,
@@ -195,7 +215,7 @@ impl TalosApplicationService {
         actor: &Actor,
         session_id: &str,
         patch: SessionPatch,
-    ) -> ApplicationResult<SessionPatchAck> {
+    ) -> ApplicationResult<SessionPatchResponse> {
         if let Some(model) = patch.agent_model()? {
             self.config.validate_model_supported(&model)?;
         }
@@ -227,18 +247,28 @@ impl TalosApplicationService {
         self.history.snapshot(session_id).await
     }
 
-    pub async fn submit_message(
+    pub async fn get_active_turn(
         &self,
         actor: &Actor,
         session_id: &str,
-        request: TalosMessageRequest,
+    ) -> ApplicationResult<TimelineActiveTurnSnapshot> {
+        let _session = self.access.get_session(actor, session_id).await?;
+        let active_turn = self.events.get_active_turn(session_id).await?;
+        Ok(event::map_active_turn_snapshot(session_id, active_turn))
+    }
+
+    async fn submit_start_turn(
+        &self,
+        actor: &Actor,
+        request: StartTurnRequest,
         idempotency_key: Option<String>,
-    ) -> ApplicationResult<MessageCommandAck> {
-        TurnService::validate_message_request(&request)?;
+    ) -> ApplicationResult<MessageCommandResult> {
+        TurnService::validate_start_turn_request(&request)?;
         if let Some(model) = request.model.as_deref() {
             self.config.validate_model_supported(model)?;
         }
-        let (session, created_session) = match self.access.get_session(actor, session_id).await {
+        let session_id = request.session_id.clone();
+        let (session, created_session) = match self.access.get_session(actor, &session_id).await {
             Ok(session) => (session, false),
             Err(talos_error::TalosError::ResourceNotFound(_)) => {
                 let context = request.context.clone().ok_or_else(|| {
@@ -250,7 +280,7 @@ impl TalosApplicationService {
                     .access
                     .get_or_create_session(
                         actor,
-                        session_id,
+                        &session_id,
                         context,
                         request.model.clone(),
                         request.project_id.clone(),
@@ -263,12 +293,12 @@ impl TalosApplicationService {
         };
         let result = self
             .turns
-            .submit_message(session, request, idempotency_key)
+            .submit_start_turn(session, request, idempotency_key)
             .await;
         if created_session
-            && !matches!(&result, Ok(ack) if ack.status == IdempotencyStatus::Accepted)
+            && !matches!(&result, Ok(result) if result.status == IdempotencyStatus::Accepted)
         {
-            if let Err(error) = self.access.discard_session_record(actor, session_id).await {
+            if let Err(error) = self.access.discard_session_record(actor, &session_id).await {
                 tracing::error!(
                     session_id = %session_id,
                     error = %error,
@@ -279,14 +309,59 @@ impl TalosApplicationService {
         result
     }
 
+    pub async fn start_turn(
+        &self,
+        actor: &Actor,
+        request: StartTurnRequest,
+        idempotency_key: Option<String>,
+    ) -> ApplicationResult<StartTurnResponse> {
+        let result = self
+            .submit_start_turn(actor, request, idempotency_key)
+            .await?;
+        Ok(StartTurnResponse {
+            request_id: result.request_id,
+            message_id: result.message_id,
+            session_id: result.session_id,
+            turn_id: result.turn_id,
+            status: turn_command_status(result.status),
+        })
+    }
+
     pub async fn submit_retry(
         &self,
         actor: &Actor,
         session_id: &str,
         request: TurnRetryRequest,
-    ) -> ApplicationResult<MessageCommandAck> {
+    ) -> ApplicationResult<MessageCommandResult> {
         let session = self.access.get_session(actor, session_id).await?;
         self.turns.submit_retry(session, request).await
+    }
+
+    pub async fn retry_turn(
+        &self,
+        actor: &Actor,
+        request: SharedRetryTurnRequest,
+    ) -> ApplicationResult<RetryTurnResponse> {
+        let session_id = request.session_id.clone();
+        let result = self
+            .submit_retry(
+                actor,
+                &session_id,
+                TurnRetryRequest {
+                    input: request.input,
+                    workspace_id: request.workspace_id,
+                    client_message_id: request.client_message_id,
+                    retry_of_message_id: request.retry_of_message_id,
+                },
+            )
+            .await?;
+        Ok(RetryTurnResponse {
+            request_id: result.request_id,
+            message_id: result.message_id,
+            session_id: result.session_id,
+            turn_id: result.turn_id,
+            status: turn_command_status(result.status),
+        })
     }
 
     pub async fn compact_session(
@@ -313,7 +388,7 @@ impl TalosApplicationService {
         &self,
         actor: &Actor,
         session_id: &str,
-    ) -> ApplicationResult<SessionPatchAck> {
+    ) -> ApplicationResult<SessionPatchResponse> {
         self.access.delete_session(actor, session_id).await
     }
 
@@ -323,6 +398,15 @@ impl TalosApplicationService {
         session_id: &str,
     ) -> ApplicationResult<()> {
         self.access.cancel_active_turn(actor, session_id).await
+    }
+
+    pub async fn interrupt_turn(
+        &self,
+        actor: &Actor,
+        request: InterruptTurnRequest,
+    ) -> ApplicationResult<InterruptTurnResponse> {
+        self.cancel_active_turn(actor, &request.session_id).await?;
+        Ok(InterruptTurnResponse { success: true })
     }
 
     pub async fn submit_dynamic_tool_result(
@@ -340,11 +424,78 @@ impl TalosApplicationService {
             .await
     }
 
-    pub async fn list_projects(&self, actor: &Actor) -> ApplicationResult<Vec<ProjectRecord>> {
+    pub async fn submit_tool_result(
+        &self,
+        actor: &Actor,
+        request: SubmitToolResultRequest,
+    ) -> ApplicationResult<SubmitToolResultResponse> {
+        self.submit_dynamic_tool_result(
+            actor,
+            &request.session_id,
+            &request.call_id,
+            &request.tool_name,
+            request.output,
+            request.success,
+        )
+        .await?;
+        Ok(SubmitToolResultResponse { success: true })
+    }
+
+    pub async fn subscribe_timeline(
+        &self,
+        actor: &Actor,
+        request: SubscribeTimelineRequest,
+    ) -> ApplicationResult<TimelineSubscription> {
+        let _session = self.access.get_session(actor, &request.session_id).await?;
+        let after_event_id = parse_timeline_event_id(request.since_event_id)?;
+        self.events
+            .subscribe(TimelineSubscribeCommand {
+                session_id: request.session_id,
+                after_event_id,
+                replay_limit: request.replay_limit.unwrap_or(1).max(1),
+                close_when_idle: request.close_when_idle.unwrap_or(false),
+                close_on_terminal: request.close_on_terminal.unwrap_or(false),
+            })
+            .await
+    }
+
+    pub async fn recover_timeline(
+        &self,
+        actor: &Actor,
+        request: RecoverTimelineRequest,
+    ) -> ApplicationResult<talos_types::TimelineRecoveryResponse> {
+        let _session = self.access.get_session(actor, &request.session_id).await?;
+        let after_event_id = parse_timeline_event_id(request.after_event_id)?;
+        let recovery = self
+            .events
+            .recover_session(
+                &request.session_id,
+                after_event_id.as_ref(),
+                request.replay_limit.unwrap_or(1).max(1),
+            )
+            .await?;
+        Ok(talos_types::TimelineRecoveryResponse {
+            snapshot: talos_types::TimelineRecoverySnapshot {
+                replay: talos_types::TimelineReplay {
+                    events: recovery.replay.events,
+                    high_water_mark_event_id: recovery
+                        .replay
+                        .high_water_mark_event_id
+                        .map(|value| value.to_string()),
+                    last_replay_seq: recovery.replay.last_replay_seq,
+                    cursor_status: map_timeline_cursor_status(recovery.replay.cursor_status),
+                },
+                active_turn: recovery.active_turn,
+            },
+        })
+    }
+
+    pub async fn list_projects(&self, actor: &Actor) -> ApplicationResult<Vec<ProjectInfo>> {
         let projects = self.access.list_projects(actor).await?;
         Ok(projects
             .into_iter()
             .map(|project| self.fs.project_status(project))
+            .map(project_info_from_record)
             .collect())
     }
 
@@ -352,9 +503,9 @@ impl TalosApplicationService {
         &self,
         actor: &Actor,
         project_id: &str,
-    ) -> ApplicationResult<ProjectRecord> {
+    ) -> ApplicationResult<ProjectInfo> {
         let project = self.access.get_project(actor, project_id).await?;
-        Ok(self.fs.project_status(project))
+        Ok(project_info_from_record(self.fs.project_status(project)))
     }
 
     pub async fn create_project(
@@ -362,9 +513,9 @@ impl TalosApplicationService {
         actor: &Actor,
         name: String,
         directory: std::path::PathBuf,
-    ) -> ApplicationResult<ProjectRecord> {
+    ) -> ApplicationResult<ProjectInfo> {
         let project = self.access.create_project(actor, name, directory).await?;
-        Ok(self.fs.project_status(project))
+        Ok(project_info_from_record(self.fs.project_status(project)))
     }
 
     pub async fn patch_project(
@@ -372,9 +523,9 @@ impl TalosApplicationService {
         actor: &Actor,
         project_id: &str,
         patch: ProjectPatch,
-    ) -> ApplicationResult<ProjectRecord> {
+    ) -> ApplicationResult<ProjectInfo> {
         let project = self.access.patch_project(actor, project_id, patch).await?;
-        Ok(self.fs.project_status(project))
+        Ok(project_info_from_record(self.fs.project_status(project)))
     }
 
     pub async fn delete_project(&self, actor: &Actor, project_id: &str) -> ApplicationResult<()> {
@@ -399,6 +550,44 @@ impl TalosApplicationService {
     }
 }
 
+fn project_info_from_record(record: ProjectRecord) -> ProjectInfo {
+    ProjectInfo {
+        project_id: record.project_id,
+        name: record.name,
+        directory: record.directory,
+        status: record.status,
+        created_at: record.created_at,
+        updated_at: record.updated_at,
+        session_count: record.session_count,
+    }
+}
+
+fn turn_command_status(status: IdempotencyStatus) -> TurnCommandStatus {
+    match status {
+        IdempotencyStatus::Pending => TurnCommandStatus::Pending,
+        IdempotencyStatus::Accepted => TurnCommandStatus::Accepted,
+        IdempotencyStatus::Failed => TurnCommandStatus::Failed,
+        IdempotencyStatus::FailedNoFirstEvent => TurnCommandStatus::FailedNoFirstEvent,
+    }
+}
+
+fn parse_timeline_event_id(value: Option<String>) -> ApplicationResult<Option<TimelineEventId>> {
+    value
+        .map(|raw| {
+            let event_id = TimelineEventId::from(raw);
+            event_id.event_seq()?;
+            Ok(event_id)
+        })
+        .transpose()
+}
+
+fn map_timeline_cursor_status(status: TimelineCursorStatus) -> talos_types::TimelineCursorStatus {
+    match status {
+        TimelineCursorStatus::Current => talos_types::TimelineCursorStatus::Current,
+        TimelineCursorStatus::FromBeginning => talos_types::TimelineCursorStatus::FromBeginning,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -411,26 +600,26 @@ mod tests {
     };
     use talos_config::{InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService};
     use talos_error::{TalosError, TalosResult};
-    use talos_gateway::{GatewayRequest, GatewayResponse};
     use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
+    use talos_project_store::StorageProjectStore;
     use talos_session_store::{
         ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, DatabaseSessionStore,
         IdempotencyReservation, MessageIdempotencyStore, SessionStore,
         TimelineEventRetentionConfig, TimelineEventStore,
     };
     use talos_storage::SqliteStorage;
+    use talos_types::agent_dispatch::AgentDispatchRequest;
     use talos_types::talos::{
-        StopReason, TalosContext, TalosInputItem, TalosOutputItem, TalosProvider, TalosReasoning,
-        TalosSourceType, TalosTimelineEvent, TalosUsage,
+        TalosContext, TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineEvent,
     };
 
-    enum TestGatewayMode {
+    enum TestTurnExecutorMode {
         Timeout,
         Closed,
     }
 
-    struct TestGateway {
-        mode: TestGatewayMode,
+    struct TestTurnExecutor {
+        mode: TestTurnExecutorMode,
     }
 
     struct TestSessionRuntime;
@@ -438,52 +627,31 @@ mod tests {
     struct TestAuthService;
 
     #[async_trait]
-    impl Gateway for TestGateway {
-        async fn handle_request(&self, _request: GatewayRequest) -> TalosResult<GatewayResponse> {
-            Ok(GatewayResponse {
-                content: "ok".to_string(),
-                output_items: vec![TalosOutputItem::OutputText {
-                    text: "ok".to_string(),
-                }],
-                reasoning: vec![TalosReasoning {
-                    text: String::new(),
-                }],
-                stop_reason: StopReason::EndTurn,
-                usage: TalosUsage::default(),
-                success: true,
-                model: "default".to_string(),
-                session_id: "session-1".to_string(),
-            })
-        }
-
-        async fn handle_request_stream(
+    impl TurnExecutor for TestTurnExecutor {
+        async fn start_turn_stream(
             &self,
-            _request: GatewayRequest,
+            _request: AgentDispatchRequest,
         ) -> TalosResult<tokio::sync::mpsc::Receiver<TalosTimelineEvent>> {
             let (tx, rx) = tokio::sync::mpsc::channel(1);
             match self.mode {
-                TestGatewayMode::Timeout => {
+                TestTurnExecutorMode::Timeout => {
                     tokio::spawn(async move {
                         tokio::time::sleep(Duration::from_secs(60)).await;
                         drop(tx);
                     });
                 }
-                TestGatewayMode::Closed => drop(tx),
+                TestTurnExecutorMode::Closed => drop(tx),
             }
             Ok(rx)
         }
 
-        async fn start(&self) -> TalosResult<()> {
-            Ok(())
-        }
-
-        async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
+        async fn cancel_active_turn(&self, _session: TalosSession) -> TalosResult<()> {
             Ok(())
         }
 
         async fn submit_dynamic_tool_result(
             &self,
-            _session_id: &str,
+            _session: TalosSession,
             _call_id: &str,
             _tool_name: &str,
             _output: String,
@@ -499,29 +667,35 @@ mod tests {
             Ok("default".to_string())
         }
 
-        async fn compact_session(&self, _session_id: &str) -> TalosResult<TalosSession> {
+        async fn compact_session(
+            &self,
+            _session: talos_types::TalosSession,
+        ) -> TalosResult<talos_types::TalosUsage> {
             unreachable!("not used in this test")
         }
 
-        async fn clear_session(&self, _session_id: &str) -> TalosResult<TalosSession> {
+        async fn clear_session(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
             unreachable!("not used in this test")
         }
 
-        async fn close_session(&self, _session_id: &str) -> TalosResult<()> {
+        async fn close_session(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
             unreachable!("not used in this test")
         }
 
-        async fn delete_session(&self, _session_id: &str) -> TalosResult<SessionPatchAck> {
-            unreachable!("rollback deletes the just-created record directly")
+        async fn prepare_delete_session(
+            &self,
+            _session: talos_types::TalosSession,
+        ) -> TalosResult<()> {
+            Ok(())
         }
 
-        async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
+        async fn cancel_active_turn(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
             Ok(())
         }
 
         async fn submit_dynamic_tool_result(
             &self,
-            _session_id: &str,
+            _session: talos_types::TalosSession,
             _call_id: &str,
             _tool_name: &str,
             _output: String,
@@ -597,11 +771,12 @@ mod tests {
     }
 
     async fn test_application(
-        gateway: Arc<dyn Gateway>,
+        turn_executor: Arc<dyn TurnExecutor>,
         config: TalosConfig,
     ) -> (TalosApplicationService, Arc<DatabaseSessionStore>) {
         let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
-        let store = Arc::new(DatabaseSessionStore::new(storage).await.unwrap());
+        let store = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());
+        let project_store = Arc::new(StorageProjectStore::new(storage).await.unwrap());
         let event_store: Arc<dyn TimelineEventStore> = store.clone();
         let active_turn_store: Arc<dyn ActiveTurnStore> = store.clone();
         let event_service = Arc::new(TimelineEventService::new(
@@ -617,9 +792,10 @@ mod tests {
         let auth_service: Arc<dyn AuthService> = auth.clone();
         let user_service: Arc<dyn UserService> = auth;
         let service = TalosApplicationService::new_with_session_store(
-            gateway,
+            turn_executor,
             Arc::new(TestSessionRuntime),
             store.clone(),
+            project_store,
             event_service,
             idempotency_store,
             config,
@@ -646,8 +822,9 @@ mod tests {
         }
     }
 
-    fn message_request(text: &str) -> TalosMessageRequest {
-        TalosMessageRequest {
+    fn start_turn_request(session_id: &str, text: &str) -> StartTurnRequest {
+        StartTurnRequest {
+            session_id: session_id.to_string(),
             input: vec![TalosInputItem::Text {
                 text: text.to_string(),
             }],
@@ -656,6 +833,7 @@ mod tests {
             model: None,
             project_id: None,
             current_directory: None,
+            client_request_id: None,
         }
     }
 
@@ -687,7 +865,10 @@ mod tests {
             .await
             .expect("recovery should succeed");
         assert!(recovery.replay.events.is_empty());
-        assert!(recovery.active_turn.is_none());
+        assert_eq!(
+            recovery.active_turn.status,
+            talos_types::TimelineActiveTurnStatus::Completed
+        );
         assert!(service
             .events
             .get_active_turn(session_id)
@@ -720,18 +901,17 @@ mod tests {
         let mut config = TalosConfig::default();
         config.agent.kernel.timeline_events.first_event_timeout_ms = 1;
         let (service, store) = test_application(
-            Arc::new(TestGateway {
-                mode: TestGatewayMode::Timeout,
+            Arc::new(TestTurnExecutor {
+                mode: TestTurnExecutorMode::Timeout,
             }),
             config,
         )
         .await;
 
         let result = service
-            .submit_message(
+            .start_turn(
                 &Actor::regular("member-user"),
-                "session-timeout",
-                message_request("hello"),
+                start_turn_request("session-timeout", "hello"),
                 Some("timeout-key".to_string()),
             )
             .await;
@@ -749,18 +929,17 @@ mod tests {
     #[tokio::test]
     async fn first_turn_closed_stream_does_not_leave_session_record() {
         let (service, store) = test_application(
-            Arc::new(TestGateway {
-                mode: TestGatewayMode::Closed,
+            Arc::new(TestTurnExecutor {
+                mode: TestTurnExecutorMode::Closed,
             }),
             TalosConfig::default(),
         )
         .await;
 
         let result = service
-            .submit_message(
+            .start_turn(
                 &Actor::regular("member-user"),
-                "session-closed",
-                message_request("hello"),
+                start_turn_request("session-closed", "hello"),
                 Some("closed-key".to_string()),
             )
             .await;
@@ -773,8 +952,8 @@ mod tests {
     #[tokio::test]
     async fn first_turn_idempotency_conflict_does_not_leave_session_record() {
         let (service, store) = test_application(
-            Arc::new(TestGateway {
-                mode: TestGatewayMode::Closed,
+            Arc::new(TestTurnExecutor {
+                mode: TestTurnExecutorMode::Closed,
             }),
             TalosConfig::default(),
         )
@@ -793,10 +972,9 @@ mod tests {
         assert!(matches!(reservation, IdempotencyReservation::Reserved(_)));
 
         let result = service
-            .submit_message(
+            .start_turn(
                 &Actor::regular("member-user"),
-                "session-idempotency-conflict",
-                message_request("hello"),
+                start_turn_request("session-idempotency-conflict", "hello"),
                 Some("conflict-key".to_string()),
             )
             .await;
@@ -814,8 +992,8 @@ mod tests {
     #[tokio::test]
     async fn first_turn_active_turn_conflict_does_not_leave_session_record() {
         let (service, store) = test_application(
-            Arc::new(TestGateway {
-                mode: TestGatewayMode::Closed,
+            Arc::new(TestTurnExecutor {
+                mode: TestTurnExecutorMode::Closed,
             }),
             TalosConfig::default(),
         )
@@ -834,10 +1012,9 @@ mod tests {
             .expect("active turn insert should succeed");
 
         let result = service
-            .submit_message(
+            .start_turn(
                 &Actor::regular("member-user"),
-                "session-active-conflict",
-                message_request("hello"),
+                start_turn_request("session-active-conflict", "hello"),
                 None,
             )
             .await;

@@ -2,7 +2,9 @@ use std::path::PathBuf;
 
 use talos_error::{TalosError, TalosResult};
 use talos_types::{
-    DocUpdateRequest, TalosConfig, WorkspaceDocDetail, WorkspaceDocKind, WorkspaceDocSummary,
+    DocUpdateRequest, ExpectedFileVersion, TalosConfig, WorkspaceDocInfo, WorkspaceDocKind,
+    WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
+    WorkspaceDocSummary, WorkspaceDocWriteRequest, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 
 use crate::access::Actor;
@@ -54,21 +56,44 @@ impl WorkspaceDocService {
         Ok(docs)
     }
 
+    pub async fn list_docs_with_request(
+        &self,
+        actor: &Actor,
+        _request: WorkspaceDocListRequest,
+    ) -> TalosResult<WorkspaceDocListResponse> {
+        let docs = self.list_docs(actor).await?;
+        Ok(WorkspaceDocListResponse { data: docs })
+    }
+
     pub fn workspace_info(&self, actor: &Actor) -> TalosResult<AgentWorkspaceInfo> {
         Ok(self.resolver.resolve_for_actor(actor)?.into())
+    }
+
+    pub fn workspace_info_with_request(
+        &self,
+        actor: &Actor,
+        _request: WorkspaceInfoRequest,
+    ) -> TalosResult<WorkspaceInfoResponse> {
+        let info = self.workspace_info(actor)?;
+        Ok(WorkspaceInfoResponse {
+            user_id: info.user_id,
+            username: info.username,
+            base_workspace_dir: info.base_workspace_dir,
+            user_workspace_dir: info.user_workspace_dir,
+        })
     }
 
     pub async fn get_doc(
         &self,
         actor: &Actor,
         kind: WorkspaceDocKind,
-    ) -> TalosResult<WorkspaceDocDetail> {
+    ) -> TalosResult<WorkspaceDocInfo> {
         let workspace = self.resolver.resolve_for_actor(actor)?;
         let path = self.doc_path(&workspace.config, kind);
         let content = read_optional(&path).await?;
         let updated_at = modified_at_ms(&path).await?;
         match content {
-            Some(content) => Ok(WorkspaceDocDetail {
+            Some(content) => Ok(WorkspaceDocInfo {
                 kind,
                 path: kind.file_name().to_string(),
                 exists: true,
@@ -76,7 +101,7 @@ impl WorkspaceDocService {
                 version_token: Some(content_hash(&content)),
                 content,
             }),
-            None => Ok(WorkspaceDocDetail {
+            None => Ok(WorkspaceDocInfo {
                 kind,
                 path: kind.file_name().to_string(),
                 exists: false,
@@ -87,12 +112,20 @@ impl WorkspaceDocService {
         }
     }
 
+    pub async fn read_doc_with_request(
+        &self,
+        actor: &Actor,
+        request: WorkspaceDocReadRequest,
+    ) -> TalosResult<WorkspaceDocInfo> {
+        self.get_doc(actor, request.kind).await
+    }
+
     pub async fn put_doc(
         &self,
         actor: &Actor,
         kind: WorkspaceDocKind,
         request: DocUpdateRequest,
-    ) -> TalosResult<WorkspaceDocDetail> {
+    ) -> TalosResult<WorkspaceDocInfo> {
         let workspace = self.resolver.resolve_for_actor(actor)?;
         self.resolver.write_profile_snapshot(&workspace).await?;
         let path = self.doc_path(&workspace.config, kind);
@@ -104,6 +137,22 @@ impl WorkspaceDocService {
         .await?;
 
         self.get_doc(actor, kind).await
+    }
+
+    pub async fn write_doc_with_request(
+        &self,
+        actor: &Actor,
+        request: WorkspaceDocWriteRequest,
+    ) -> TalosResult<WorkspaceDocInfo> {
+        self.put_doc(
+            actor,
+            request.kind,
+            DocUpdateRequest {
+                content: request.content,
+                base_version: expected_version(request.expected_version),
+            },
+        )
+        .await
     }
 
     fn doc_path(&self, config: &TalosConfig, kind: WorkspaceDocKind) -> PathBuf {
@@ -119,6 +168,13 @@ fn supported_doc_kinds() -> [WorkspaceDocKind; 5] {
         WorkspaceDocKind::Heartbeat,
         WorkspaceDocKind::Memory,
     ]
+}
+
+fn expected_version(value: Option<String>) -> ExpectedFileVersion {
+    match value {
+        Some(version_token) => ExpectedFileVersion::Match { version_token },
+        None => ExpectedFileVersion::MustNotExist,
+    }
 }
 
 #[cfg(test)]

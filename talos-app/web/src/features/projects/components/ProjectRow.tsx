@@ -1,11 +1,11 @@
 import { ArrowUpRight, FolderRoot, Trash2, TriangleAlert } from "lucide-react";
 
-import type { ProjectRecord } from "@/shared/types/ui";
+import type { ProjectView } from "@/shared/types/ui";
 import { cn } from "@/shared/lib/cn";
 import { formatRelativeTime } from "@/shared/lib/time";
 
 interface ProjectRowProps {
-  project: ProjectRecord;
+  project: ProjectView;
   label: string;
   onSelect: () => void;
   onDelete: () => void;

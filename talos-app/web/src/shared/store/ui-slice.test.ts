@@ -5,7 +5,7 @@ import {
   defaultProjects,
   type UiSlice,
 } from "./ui-slice";
-import type { ProjectRecord } from "@/shared/types/ui";
+import type { ProjectView } from "@/shared/types/ui";
 
 describe("ui slice project state", () => {
   it("replaces stale server projects when a different user loads projects", () => {
@@ -16,7 +16,7 @@ describe("ui slice project state", () => {
 
     state = createUiSlice(set);
 
-    const oldUserProject: ProjectRecord = {
+    const oldUserProject: ProjectView = {
       id: "project-old",
       name: "legacy",
       directory: "/workspace/legacy",
@@ -25,7 +25,7 @@ describe("ui slice project state", () => {
       origin: "server",
       sessionCount: 1,
     };
-    const currentUserProject: ProjectRecord = {
+    const currentUserProject: ProjectView = {
       id: "project-current",
       name: "claude-code",
       directory: "/workspace/claude-code",

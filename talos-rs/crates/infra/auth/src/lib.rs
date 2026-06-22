@@ -150,7 +150,9 @@ pub struct UserDto {
     pub email: Option<String>,
     pub role: UserRole,
     pub disabled: bool,
+    #[ts(type = "number")]
     pub created_at: i64,
+    #[ts(type = "number")]
     pub updated_at: i64,
 }
 

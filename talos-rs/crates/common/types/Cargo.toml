@@ -14,3 +14,4 @@ async-trait = "0.1"
 tokio = { version = "1.0", features = ["sync", "rt"] }
 talos-error = { path = "../../infra/error" }
 talos-config = { path = "../../infra/config" }
+talos-auth = { path = "../../infra/auth" }

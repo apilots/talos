@@ -2,41 +2,40 @@ use super::*;
 use async_trait::async_trait;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, Request, StatusCode};
+use axum::http::{Request, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
 use serde_json::Value;
-use talos_application_service::TalosApplicationService;
+use talos_application_service::{TalosApplicationService, TurnExecutor};
 use talos_auth::{
     AuthResponse, AuthService, LoginRequest, RegisterRequest, RequestIdentity, UserDto, UserService,
 };
 use talos_config::{InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService};
 use talos_error::{TalosError, TalosResult};
-use talos_gateway::Gateway;
-use talos_gateway::GatewayRequest;
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
+use talos_project_store::MockProjectStore;
 use talos_session_store::{
     ActiveTurnRecord, ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, IdempotencyRecord,
-    IdempotencyReservation, IdempotencyStatus, MessageCommandAck, MessageIdempotencyStore,
+    IdempotencyReservation, IdempotencyStatus, MessageCommandResult, MessageIdempotencyStore,
     PendingDynamicToolResult, PendingUserAction, SessionStore, TimelineEventId,
     TimelineEventRetentionConfig, TimelineEventService, TimelineEventStore,
 };
 use talos_types::talos::{
-    StopReason, TalosContext, TalosInputItem, TalosItemDeltaEvent, TalosItemStartedEvent,
-    TalosMessageRequest, TalosOutputItem, TalosReasoning, TalosTimelineContent, TalosTimelineDelta,
-    TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItem,
-    TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase, TalosToolProgressKind,
-    TalosTurnCompletedEvent, TalosTurnStartedEvent, TalosUsage,
+    StopReason, TalosContext, TalosItemDeltaEvent, TalosItemStartedEvent, TalosTimelineContent,
+    TalosTimelineDelta, TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType,
+    TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase,
+    TalosToolProgressKind, TalosTurnCompletedEvent, TalosTurnStartedEvent, TalosUsage,
 };
 use talos_types::{
-    ModelInfo, ProjectPatch, ProjectRecord, SessionConf, SessionPatch, SessionPatchAck,
-    SessionQuery, SessionRecord, SessionRuntime, SessionService, TalosSession,
+    ModelInfo, SessionConf, SessionListRequest, SessionPatch, SessionPatchResponse, SessionQuery,
+    SessionRecord, SessionRuntime, SessionService, TalosSession,
 };
 use tower::util::ServiceExt;
 
 use crate::server::events::{get_active_turn_handler, subscribe_timeline_events_handler};
 use crate::server::messages::{
-    retry_message_attempt_handler, session_message_handler, submit_message_command,
+    interrupt_turn_handler, retry_turn_handler, start_turn_handler,
+    submit_dynamic_tool_result_handler,
 };
 use crate::server::misc::get_llm_handler;
 
@@ -80,7 +79,7 @@ fn test_state_with_lifecycle(
     let event_store = Arc::new(RecordingEventStore::default());
     build_test_state_with_lifecycle(
         Arc::new(MockGateway),
-        Arc::new(MockSessionService),
+        Arc::new(MockSessionService::default()),
         event_service_from_store(event_store.clone()),
         event_store,
         test_config(),
@@ -93,7 +92,7 @@ fn test_state_with_lifecycle(
 }
 
 fn build_test_state_with_lifecycle(
-    gateway: Arc<dyn Gateway>,
+    turn_executor: Arc<dyn TurnExecutor>,
     session_service: Arc<dyn SessionService>,
     event_service: Arc<TimelineEventService>,
     idempotency_store: Arc<dyn MessageIdempotencyStore>,
@@ -108,7 +107,7 @@ fn build_test_state_with_lifecycle(
         InMemoryLlmConfigStore::new(base_config.llm.clone()),
     )));
     build_test_state_with_lifecycle_and_config(
-        gateway,
+        turn_executor,
         session_service,
         event_service,
         idempotency_store,
@@ -124,7 +123,7 @@ fn build_test_state_with_lifecycle(
 }
 
 fn build_test_state_with_lifecycle_and_config(
-    gateway: Arc<dyn Gateway>,
+    turn_executor: Arc<dyn TurnExecutor>,
     session_service: Arc<dyn SessionService>,
     event_service: Arc<TimelineEventService>,
     idempotency_store: Arc<dyn MessageIdempotencyStore>,
@@ -138,9 +137,10 @@ fn build_test_state_with_lifecycle_and_config(
     lifecycle: Arc<ServerLifecycle>,
 ) -> Arc<HttpApiState> {
     let app = Arc::new(TalosApplicationService::new_with_session_store(
-        gateway,
+        turn_executor,
         Arc::new(SessionServiceRuntimeAdapter::new(session_service.clone())),
         Arc::new(SessionStoreAdapter::new(session_service)),
+        Arc::new(MockProjectStore::new()),
         event_service.clone(),
         idempotency_store,
         base_config.clone(),
@@ -172,7 +172,7 @@ fn test_state_with_config(
     let event_store = Arc::new(RecordingEventStore::default());
     build_test_state_with_lifecycle(
         Arc::new(MockGateway),
-        Arc::new(MockSessionService),
+        Arc::new(MockSessionService::default()),
         event_service_from_store(event_store.clone()),
         event_store,
         config,
@@ -207,7 +207,7 @@ fn test_state_with_event_store(
 }
 
 fn test_state_with_gateway_event_store_config(
-    gateway: Arc<dyn Gateway>,
+    turn_executor: Arc<dyn TurnExecutor>,
     auth_disabled: bool,
     store: Arc<RecordingEventStore>,
     config: talos_types::TalosConfig,
@@ -216,7 +216,7 @@ fn test_state_with_gateway_event_store_config(
         InMemoryLlmConfigStore::new(config.llm.clone()),
     )));
     test_state_with_gateway_event_store_config_and_lifecycle(
-        gateway,
+        turn_executor,
         auth_disabled,
         store,
         config,
@@ -244,36 +244,49 @@ impl SessionRuntime for SessionServiceRuntimeAdapter {
         self.service.resolve_target_agent(context).await
     }
 
-    async fn compact_session(&self, session_id: &str) -> talos_error::TalosResult<TalosSession> {
-        self.service.compact_session(session_id).await
+    async fn compact_session(
+        &self,
+        _session: TalosSession,
+    ) -> talos_error::TalosResult<talos_types::TalosUsage> {
+        Ok(talos_types::TalosUsage::default())
     }
 
-    async fn clear_session(&self, session_id: &str) -> talos_error::TalosResult<TalosSession> {
-        self.service.clear_session(session_id).await
+    async fn clear_session(&self, _session: TalosSession) -> talos_error::TalosResult<()> {
+        Ok(())
     }
 
-    async fn close_session(&self, session_id: &str) -> talos_error::TalosResult<()> {
-        self.service.close_session(session_id).await
+    async fn close_session(&self, session: TalosSession) -> talos_error::TalosResult<()> {
+        self.service
+            .close_session(&session.context.session_id)
+            .await
     }
 
-    async fn delete_session(&self, session_id: &str) -> talos_error::TalosResult<SessionPatchAck> {
-        self.service.delete_session(session_id).await
+    async fn prepare_delete_session(&self, _session: TalosSession) -> talos_error::TalosResult<()> {
+        Ok(())
     }
 
-    async fn cancel_active_turn(&self, session_id: &str) -> talos_error::TalosResult<()> {
-        self.service.cancel_active_turn(session_id).await
+    async fn cancel_active_turn(&self, session: TalosSession) -> talos_error::TalosResult<()> {
+        self.service
+            .cancel_active_turn(&session.context.session_id)
+            .await
     }
 
     async fn submit_dynamic_tool_result(
         &self,
-        session_id: &str,
+        session: TalosSession,
         call_id: &str,
         tool_name: &str,
         output: String,
         success: bool,
     ) -> talos_error::TalosResult<()> {
         self.service
-            .submit_dynamic_tool_result(session_id, call_id, tool_name, output, success)
+            .submit_dynamic_tool_result(
+                &session.context.session_id,
+                call_id,
+                tool_name,
+                output,
+                success,
+            )
             .await
     }
 }
@@ -379,21 +392,22 @@ impl SessionStore for SessionStoreAdapter {
         &self,
         session_id: &str,
         patch: &SessionPatch,
-    ) -> talos_error::TalosResult<SessionPatchAck> {
+    ) -> talos_error::TalosResult<SessionPatchResponse> {
         self.service.patch_session(session_id, patch.clone()).await
     }
 
     async fn reset_session_record(
         &self,
         session_id: &str,
-    ) -> talos_error::TalosResult<SessionPatchAck> {
-        self.service.delete_session(session_id).await
+    ) -> talos_error::TalosResult<SessionPatchResponse> {
+        self.service.clear_session(session_id).await?;
+        Ok(SessionPatchResponse { success: true })
     }
 
     async fn delete_session_record(
         &self,
         session_id: &str,
-    ) -> talos_error::TalosResult<SessionPatchAck> {
+    ) -> talos_error::TalosResult<SessionPatchResponse> {
         self.service.delete_session(session_id).await
     }
 
@@ -414,54 +428,10 @@ impl SessionStore for SessionStoreAdapter {
     ) -> talos_error::TalosResult<()> {
         Ok(())
     }
-
-    async fn list_projects(&self) -> talos_error::TalosResult<Vec<ProjectRecord>> {
-        self.service.list_projects().await
-    }
-
-    async fn get_project(
-        &self,
-        project_id: &str,
-    ) -> talos_error::TalosResult<Option<ProjectRecord>> {
-        self.service.get_project(project_id).await
-    }
-
-    async fn create_project(
-        &self,
-        name: &str,
-        directory: &std::path::PathBuf,
-    ) -> talos_error::TalosResult<ProjectRecord> {
-        self.service
-            .create_project(name.to_string(), directory.clone(), String::new())
-            .await
-    }
-
-    async fn create_project_for_owner(
-        &self,
-        name: &str,
-        directory: &std::path::PathBuf,
-        user_id: &str,
-    ) -> talos_error::TalosResult<ProjectRecord> {
-        self.service
-            .create_project(name.to_string(), directory.clone(), user_id.to_string())
-            .await
-    }
-
-    async fn patch_project(
-        &self,
-        project_id: &str,
-        patch: &ProjectPatch,
-    ) -> talos_error::TalosResult<Option<ProjectRecord>> {
-        self.service.patch_project(project_id, patch.clone()).await
-    }
-
-    async fn delete_project(&self, project_id: &str) -> talos_error::TalosResult<()> {
-        self.service.delete_project(project_id).await
-    }
 }
 
 fn test_state_with_gateway_event_store_config_and_lifecycle(
-    gateway: Arc<dyn Gateway>,
+    turn_executor: Arc<dyn TurnExecutor>,
     auth_disabled: bool,
     store: Arc<RecordingEventStore>,
     config: talos_types::TalosConfig,
@@ -470,8 +440,8 @@ fn test_state_with_gateway_event_store_config_and_lifecycle(
 ) -> Arc<HttpApiState> {
     let (auth_service, user_service) = test_auth_services();
     build_test_state_with_lifecycle_and_config(
-        gateway,
-        Arc::new(MockSessionService),
+        turn_executor,
+        Arc::new(MockSessionService::default()),
         event_service_from_store(store.clone()),
         store,
         config,
@@ -639,7 +609,7 @@ impl MessageIdempotencyStore for RecordingEventStore {
             turn_id: turn_id.to_string(),
             message_id: None,
             status: IdempotencyStatus::Pending,
-            ack: None,
+            result: None,
             created_at: now_ms,
             updated_at: now_ms,
             expires_at: expires_at_ms,
@@ -654,7 +624,7 @@ impl MessageIdempotencyStore for RecordingEventStore {
         idempotency_key: &str,
         status: IdempotencyStatus,
         message_id: Option<&str>,
-        ack: &MessageCommandAck,
+        result: &MessageCommandResult,
         now_ms: i64,
     ) -> TalosResult<()> {
         let mut records = self.idempotency_records.lock().unwrap();
@@ -662,7 +632,7 @@ impl MessageIdempotencyStore for RecordingEventStore {
         if let Some(record) = records.get_mut(&key) {
             record.status = status;
             record.message_id = message_id.map(ToString::to_string);
-            record.ack = Some(ack.clone());
+            record.result = Some(result.clone());
             record.updated_at = now_ms;
         }
         Ok(())

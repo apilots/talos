@@ -8,7 +8,10 @@ use serde_json::{json, Value};
 use talos_application_service::WorkspaceDocService;
 use talos_auth::RequestIdentity;
 use talos_error::TalosError;
-use talos_types::DocUpdateRequest;
+use talos_types::{
+    DocUpdateRequest, ExpectedFileVersion, WorkspaceDocListRequest, WorkspaceDocReadRequest,
+    WorkspaceDocWriteRequest, WorkspaceInfoRequest,
+};
 
 use super::access::shared_actor;
 use super::errors::ApiError;
@@ -19,12 +22,12 @@ pub(super) async fn list_workspace_docs_handler(
     auth: axum::extract::Extension<RequestIdentity>,
 ) -> Result<Json<Value>, ApiError> {
     let actor = shared_actor(&auth.0);
-    let docs = state
-        .workspace_docs
-        .list_docs(&actor)
+    let response = state
+        .gateway
+        .list_workspace_docs(&actor, WorkspaceDocListRequest {})
         .await
         .map_err(map_workspace_doc_error)?;
-    Ok(Json(json!({ "data": docs })))
+    Ok(Json(json!(response)))
 }
 
 pub(super) async fn get_workspace_info_handler(
@@ -33,8 +36,9 @@ pub(super) async fn get_workspace_info_handler(
 ) -> Result<Json<Value>, ApiError> {
     let actor = shared_actor(&auth.0);
     let info = state
-        .workspace_docs
-        .workspace_info(&actor)
+        .gateway
+        .workspace_info(&actor, WorkspaceInfoRequest {})
+        .await
         .map_err(map_workspace_doc_error)?;
     Ok(Json(json!(info)))
 }
@@ -47,8 +51,8 @@ pub(super) async fn get_workspace_doc_handler(
     let actor = shared_actor(&auth.0);
     let kind = WorkspaceDocService::parse_kind(&kind).map_err(map_workspace_doc_error)?;
     let detail = state
-        .workspace_docs
-        .get_doc(&actor, kind)
+        .gateway
+        .read_workspace_doc(&actor, WorkspaceDocReadRequest { kind })
         .await
         .map_err(map_workspace_doc_error)?;
     Ok(Json(json!(detail)))
@@ -63,11 +67,25 @@ pub(super) async fn put_workspace_doc_handler(
     let actor = shared_actor(&auth.0);
     let kind = WorkspaceDocService::parse_kind(&kind).map_err(map_workspace_doc_error)?;
     let detail = state
-        .workspace_docs
-        .put_doc(&actor, kind, request)
+        .gateway
+        .write_workspace_doc(
+            &actor,
+            WorkspaceDocWriteRequest {
+                kind,
+                content: request.content,
+                expected_version: expected_file_version_token(request.base_version),
+            },
+        )
         .await
         .map_err(map_workspace_doc_error)?;
     Ok(Json(json!(detail)))
+}
+
+fn expected_file_version_token(value: ExpectedFileVersion) -> Option<String> {
+    match value {
+        ExpectedFileVersion::MustNotExist => None,
+        ExpectedFileVersion::Match { version_token } => Some(version_token),
+    }
 }
 
 fn map_workspace_doc_error(error: TalosError) -> ApiError {

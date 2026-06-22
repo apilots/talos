@@ -1,4 +1,4 @@
-import type { TalosSession } from "@talos/sdk-browser";
+import type { SessionInfo } from "@talos/sdk-browser";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -6,11 +6,11 @@ import { chatKeys, listSessionsByProject, useConnectionKey, useProjectsQuery } f
 import { useAppStore } from "@/shared/store/app-store";
 import { getEffectiveSessionStatus, getSessionModel } from "@/shared/types/domain";
 
-export function filterProjectSessions(sessions: TalosSession[], query: string) {
+export function filterProjectSessions(sessions: SessionInfo[], query: string) {
   const normalizedQuery = query.trim().toLowerCase();
   return sessions
     .slice()
-    .sort((left, right) => right.state.last_activity - left.state.last_activity)
+    .sort((left, right) => right.last_activity - left.last_activity)
     .filter((session) => {
       if (!normalizedQuery) {
         return true;
@@ -47,10 +47,10 @@ export function useProjectSessionsPageState(projectId: string) {
   const sessionRows = useMemo(
     () =>
       filteredSessions.map((session) => {
-        const sessionId = session.context.session_id;
+        const sessionId = session.id;
         return {
           id: sessionId,
-          lastActivityAt: session.state.last_activity,
+          lastActivityAt: session.last_activity,
           model: getSessionModel(session),
           status: getEffectiveSessionStatus(statuses[sessionId], streams[sessionId]),
           title: session.title,

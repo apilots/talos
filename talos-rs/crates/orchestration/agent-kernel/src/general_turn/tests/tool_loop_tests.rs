@@ -272,7 +272,7 @@ async fn test_run_general_turn_bash_then_task_output() {
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     configure_test_skill_root(&mut config, &workspace_dir);
-    let mut ctx = build_ctx_with_stream(None);
+    let mut ctx = build_ctx_with_stream_for_session("tool-loop-bash-task-output", None);
 
     let result = run_general_turn(
         &mut ctx,
@@ -326,7 +326,7 @@ async fn test_run_general_turn_stops_on_pending_dynamic_tool_result() {
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     configure_test_skill_root(&mut config, &workspace_dir);
-    let mut ctx = build_ctx_with_stream(None);
+    let mut ctx = build_ctx_with_stream_for_session("tool-loop-pending-dynamic", None);
 
     let provider = Arc::new(DynamicLoopProvider::default());
     let result = run_general_turn(
@@ -398,7 +398,7 @@ async fn test_run_general_turn_activates_external_tool_with_tool_search_in_same_
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     configure_test_skill_root(&mut config, &workspace_dir);
-    let mut ctx = build_ctx_with_stream(None);
+    let mut ctx = build_ctx_with_stream_for_session("tool-loop-tool-search-activation", None);
 
     let provider = Arc::new(ToolSearchActivationProvider::default());
     let result = run_general_turn(

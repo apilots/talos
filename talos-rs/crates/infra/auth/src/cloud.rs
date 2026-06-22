@@ -57,7 +57,9 @@ pub struct CloudLoginStartResponse {
     pub login_id: String,
     pub login_url: String,
     pub user_code: String,
+    #[ts(type = "number")]
     pub expires_at_ms: i64,
+    #[ts(type = "number")]
     pub interval_ms: u64,
 }
 
@@ -74,8 +76,13 @@ pub struct CloudLoginCancelRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum CloudLoginStatusResponse {
-    Pending { interval_ms: u64 },
-    Authenticated { user: UserDto },
+    Pending {
+        #[ts(type = "number")]
+        interval_ms: u64,
+    },
+    Authenticated {
+        user: UserDto,
+    },
     Denied,
     Expired,
 }

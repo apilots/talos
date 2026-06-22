@@ -15,28 +15,6 @@ fn test_session_id() {
 }
 
 #[test]
-fn test_talos_roundtrip() {
-    let req = talos::TalosMessageRequest {
-        input: vec![talos::TalosInputItem::Text {
-            text: "hello".to_string(),
-        }],
-        workspace_id: Some("workspace-1".to_string()),
-        context: None,
-        model: None,
-        project_id: None,
-        current_directory: None,
-    };
-
-    let encoded = serde_json::to_string(&req).unwrap();
-    let decoded: talos::TalosMessageRequest = serde_json::from_str(&encoded).unwrap();
-    assert_eq!(decoded.workspace_id.as_deref(), Some("workspace-1"));
-    assert!(matches!(
-        decoded.input.first(),
-        Some(talos::TalosInputItem::Text { text }) if text == "hello"
-    ));
-}
-
-#[test]
 fn test_talos_timeline_tool_progress_updates_same_item() {
     let event = talos::TalosTimelineEvent {
         event_seq: None,
@@ -321,25 +299,6 @@ fn test_session_query_roundtrip_with_project_id() {
 }
 
 #[test]
-fn test_project_record_roundtrip_with_session_count() {
-    let record = ProjectRecord {
-        project_id: "project-1".to_string(),
-        name: "repo".to_string(),
-        user_id: "user-1".to_string(),
-        directory: std::path::PathBuf::from("/repo"),
-        status: ProjectStatus::default(),
-        created_at: 1,
-        updated_at: 2,
-        session_count: 3,
-    };
-
-    let encoded = serde_json::to_string(&record).unwrap();
-    let decoded: ProjectRecord = serde_json::from_str(&encoded).unwrap();
-
-    assert_eq!(decoded, record);
-}
-
-#[test]
 fn test_resolve_effective_project_root_prefers_project_directory() {
     let session = TalosSession::from_record(
         &SessionRecord {
@@ -466,7 +425,7 @@ fn test_workspace_doc_kind_file_name() {
 
 #[test]
 fn test_workspace_doc_detail_roundtrip() {
-    let detail = WorkspaceDocDetail {
+    let detail = WorkspaceDocInfo {
         kind: WorkspaceDocKind::Memory,
         path: "MEMORY.md".to_string(),
         exists: true,
@@ -476,7 +435,7 @@ fn test_workspace_doc_detail_roundtrip() {
     };
 
     let encoded = serde_json::to_string(&detail).unwrap();
-    let decoded: WorkspaceDocDetail = serde_json::from_str(&encoded).unwrap();
+    let decoded: WorkspaceDocInfo = serde_json::from_str(&encoded).unwrap();
 
     assert_eq!(decoded, detail);
 }

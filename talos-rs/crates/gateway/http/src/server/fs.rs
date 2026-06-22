@@ -1,54 +1,43 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
-use serde::Deserialize;
-use serde_json::{json, Value};
 
 use talos_auth::RequestIdentity;
+use talos_types::{
+    FsDirectoryCreateRequest, FsDirectoryCreateResponse, FsDirectoryReadRequest,
+    FsDirectoryReadResponse,
+};
 
 use super::access::shared_actor;
 use super::errors::ApiError;
 use super::state::HttpApiState;
 
-#[derive(Debug, Deserialize)]
-pub(super) struct ReadDirectoryQuery {
-    path: Option<PathBuf>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct CreateDirectoryRequest {
-    parent: PathBuf,
-    name: String,
-}
-
 pub(super) async fn read_directory_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
-    Query(query): Query<ReadDirectoryQuery>,
-) -> Result<Json<Value>, ApiError> {
-    let snapshot = state
-        .app
-        .read_fs_directory(&shared_actor(&actor.0), query.path)
+    Query(request): Query<FsDirectoryReadRequest>,
+) -> Result<Json<FsDirectoryReadResponse>, ApiError> {
+    let response = state
+        .gateway
+        .read_fs_directory(&shared_actor(&actor.0), request)
         .await
         .map_err(map_fs_error)?;
-    Ok(Json(json!(snapshot)))
+    Ok(Json(response))
 }
 
 pub(super) async fn create_directory_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
-    Json(request): Json<CreateDirectoryRequest>,
-) -> Result<Json<Value>, ApiError> {
+    Json(request): Json<FsDirectoryCreateRequest>,
+) -> Result<Json<FsDirectoryCreateResponse>, ApiError> {
     let response = state
-        .app
-        .create_fs_directory(&shared_actor(&actor.0), request.parent, request.name)
+        .gateway
+        .create_fs_directory(&shared_actor(&actor.0), request)
         .await
         .map_err(map_fs_error)?;
-    Ok(Json(json!(response)))
+    Ok(Json(response))
 }
 
 fn map_fs_error(error: talos_error::TalosError) -> ApiError {

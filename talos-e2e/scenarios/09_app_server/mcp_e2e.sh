@@ -10,7 +10,7 @@ build_binaries
 prepare_talos_home
 
 export TALOS_APP_SERVER_BIN="${TALOS_RS_DIR}/target/debug/app-server"
-export TALOS_APP_SERVER_TEST_MODEL="${TALOS_APP_SERVER_TEST_MODEL:-qwen3.7-plus}"
+export TALOS_APP_SERVER_TEST_MODEL="${TALOS_APP_SERVER_TEST_MODEL:-qwen3.6-flash}"
 export TALOS_PLAYWRIGHT_MCP_BROWSER="${TALOS_PLAYWRIGHT_MCP_BROWSER:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
 
 playwright_output_dir="$(scenario_report_path "playwright-mcp")"

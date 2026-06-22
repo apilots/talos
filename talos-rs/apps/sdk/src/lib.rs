@@ -7,40 +7,59 @@ pub mod app_server;
 mod app_server_events;
 mod common;
 mod login;
-mod message;
 
 pub use app_server::{AppServerClient, AppServerClientConfig};
 pub use login::{now_ms, open_external_url};
-pub use message::{MessageCommandAck, MessageCommandStatus};
 pub use talos_app_protocol::events::{canonical_method, ApplicationEvent};
 pub use talos_app_protocol::requests::{
-    EventSubscribeParams, EventSubscribeResponse, ProtocolTalosContext, SessionHistoryParams,
-    TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
-    TimelineRecoveryParams, TimelineRecoverySnapshot, TimelineReplay,
-    ToolDynamicResultSubmitParams, ToolExecuteParams, ToolExecuteResponse,
+    ProtocolTalosContext, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus,
 };
 pub use talos_auth::{
     AuthResponse, CloudLoginClientKind, CloudLoginStartResponse, CloudLoginStatusResponse, UserDto,
     UserRole,
 };
-pub use talos_config::LlmConfig;
 pub use talos_error::{TalosError, TalosResult};
 pub use talos_types::talos::{
-    SessionHistoryMessage, SessionHistorySnapshot, StopReason, TalosAssistantTextCommittedEvent,
-    TalosContentItem, TalosContext, TalosInputItem, TalosItemCompletedEvent, TalosItemDeltaEvent,
-    TalosItemStartedEvent, TalosJsonValue, TalosMessageRequest, TalosMessageResponse,
-    TalosMessageRetryRequest, TalosOutputItem, TalosProvider, TalosSourceType,
-    TalosTimelineContent, TalosTimelineDelta, TalosTimelineEvent, TalosTimelineEventPayload,
-    TalosTimelineEventType, TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus,
-    TalosTimelineNoticeLevel, TalosTimelinePhase, TalosToolProgressEntry, TalosToolProgressKind,
-    TalosToolResult, TalosTurnCompletedEvent, TalosTurnErrorEvent, TalosTurnMetricsEvent,
-    TalosTurnStartedEvent, TalosUsage, TimelineEventEnvelope, TurnExecutionMetrics,
+    DynamicToolArguments, JsonContentValue, SessionHistoryMessage, SessionHistorySnapshot,
+    StopReason, TalosAssistantTextCommittedEvent, TalosContentItem, TalosContext, TalosInputItem,
+    TalosItemCompletedEvent, TalosItemDeltaEvent, TalosItemStartedEvent, TalosOutputItem,
+    TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta, TalosTimelineEvent,
+    TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItem, TalosTimelineItemKind,
+    TalosTimelineItemStatus, TalosTimelineNoticeLevel, TalosTimelinePhase, TalosToolProgressEntry,
+    TalosToolProgressKind, TalosToolResult, TalosTurnCompletedEvent, TalosTurnErrorEvent,
+    TalosTurnMetricsEvent, TalosTurnStartedEvent, TalosUsage, TimelineEventEnvelope, ToolArguments,
+    ToolExecutionResult, TurnExecutionMetrics,
 };
+pub use talos_types::RecoverTimelineRequest;
 pub use talos_types::{
-    DocUpdateRequest, ExpectedFileVersion, MemoryFileDetail, MemoryFileSummary, ModelInfo,
-    OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, ProjectPatch, ProjectRecord,
-    SessionAgentConf, SessionConf, SessionQuery, TalosSession, WorkspaceDocDetail,
-    WorkspaceDocKind, WorkspaceDocSummary,
+    AuthLogoutRequest, AuthLogoutResponse, AuthSessionClearRequest, AuthSessionClearResponse,
+    AuthSessionReadRequest, AuthSessionReadResponse, AuthSessionSnapshot, AuthSessionStoreRequest,
+    AuthSessionStoreResponse, AuthSessionUserSnapshot, CloudLoginCancelResponse,
+    ConfigDeleteRequest, ConfigDeleteResponse, ConfigGetRequest, ConfigGetResponse,
+    ConfigReloadRequest, ConfigReloadResponse, ConfigUpdateRequest, ConfigUpdateResponse,
+    ConfigValue, DocUpdateRequest, EventUnsubscribeRequest, EventUnsubscribeResponse,
+    ExpectedFileVersion, FsDirectoryCreateRequest, FsDirectoryReadRequest, FsDirectoryReadResponse,
+    InterruptTurnRequest, InterruptTurnResponse, LlmConfig, LlmModelCompat, LlmModelConfig,
+    LlmModelCost, LlmModelInputKind, LlmModelSpeed, LlmProtocol, LlmProviderConfig,
+    LlmReasoningEffort, LlmThinkingFormat, MemoryFileDetail, MemoryFileListRequest,
+    MemoryFileReadRequest, MemoryFileReadResponse, MemoryFileSummary, MemoryFileWriteRequest,
+    MemoryFileWriteResponse, MemorySearchRequest, ModelInfo, ModelListRequest, ModelListResponse,
+    ModelReadiness, OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, ProjectCreateRequest,
+    ProjectCreateResponse, ProjectDeleteRequest, ProjectDeleteResponse, ProjectInfo,
+    ProjectListRequest, ProjectListResponse, ProjectPatch, ProjectPatchRequest,
+    ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse, ProjectStatus,
+    ProjectStatusState, ProjectUnavailableReason, ProviderKeyStatus, RetryTurnRequest,
+    RetryTurnResponse, SessionActiveTurnResponse, SessionAgentConf, SessionClearResponse,
+    SessionCloseResponse, SessionCompactResponse, SessionConf, SessionDeleteResponse,
+    SessionGetRequest, SessionGetResponse, SessionHistoryRequest, SessionHistoryResponse,
+    SessionInfo, SessionListRequest, SessionListResponse, SessionPatchRequest,
+    SessionUpdateRequest, SessionUpdateResponse, StartTurnRequest, StartTurnResponse,
+    SubmitToolResultRequest, SubmitToolResultResponse, SubscribeTimelineRequest,
+    SubscribeTimelineResponse, TimelineCursorStatus, TimelineRecoveryResponse, TimelineReplay,
+    TurnCommandStatus, UserCurrentRequest, UserCurrentResponse, WorkspaceDocInfo, WorkspaceDocKind,
+    WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
+    WorkspaceDocReadResponse, WorkspaceDocSummary, WorkspaceDocWriteRequest,
+    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 pub use talos_types::{
     MarketplaceSource, MarketplaceSourceInput, Plugin, PluginDefinition, PluginDisableRequest,
@@ -59,8 +78,8 @@ pub use talos_types::{
 pub use talos_types::{
     SkillDocument, SkillLoadError, SkillMetadata, SkillScope, SkillSelector, SkillSuggestion,
     SkillSummary, SkillWarning, SkillsListRequest, SkillsListResponse, SkillsReadRequest,
-    SkillsRefreshRequest, SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest,
-    SkillsSuggestResponse,
+    SkillsReadResponse, SkillsRefreshRequest, SkillsResolveRequest, SkillsResolveResponse,
+    SkillsSuggestRequest, SkillsSuggestResponse,
 };
 
 pub async fn connect_app_server(config: AppServerClientConfig) -> TalosResult<AppServerClient> {

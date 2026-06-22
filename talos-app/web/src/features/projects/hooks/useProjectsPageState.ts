@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
 
 import { useProjectsQuery } from "@/features/chat";
-import type { ProjectRecord } from "@/shared/types/ui";
+import type { ProjectView } from "@/shared/types/ui";
 
 export type ProjectSort = "activity" | "last_edited" | "date_created";
 
-export function filterProjects(projects: ProjectRecord[], query: string, sort: ProjectSort) {
+export function filterProjects(projects: ProjectView[], query: string, sort: ProjectSort) {
   const normalizedQuery = query.trim().toLowerCase();
   return projects
     .slice()

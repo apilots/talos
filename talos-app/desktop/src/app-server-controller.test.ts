@@ -38,12 +38,12 @@ class FakeBridge implements AppServerBridge {
   invoke<T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T> {
     this.requests.push({ method, params });
     if (method === "event.subscribe") {
-      const request = params as AppProtocol.EventSubscribeParams;
+      const request = params as AppProtocol.SubscribeTimelineRequest;
       return Promise.resolve({
         subscription_id: `sub-${this.requests.length}`,
         session_id: request.session_id,
         high_water_mark_event_id: request.since_event_id,
-      } satisfies AppProtocol.EventSubscribeResponse as T);
+      } satisfies AppProtocol.SubscribeTimelineResponse as T);
     }
     return Promise.resolve({} as T);
   }
@@ -114,7 +114,7 @@ describe("DesktopAppServerController", () => {
       replay_limit: 50,
       close_when_idle: true,
       close_on_terminal: true,
-    } satisfies AppProtocol.EventSubscribeParams);
+    } satisfies AppProtocol.SubscribeTimelineRequest);
 
     bridges[0]?.emitEvent(createEventEnvelope("event-7", "session-1", "turn_started"));
     bridges[0]?.emitExit();
@@ -151,16 +151,16 @@ describe("DesktopAppServerController", () => {
     });
 
     await controller.connect();
-    const response = await controller.invoke<AppProtocol.EventSubscribeResponse>("event.subscribe", {
+    const response = await controller.invoke<AppProtocol.SubscribeTimelineResponse>("event.subscribe", {
       session_id: "session-1",
       since_event_id: null,
       replay_limit: 50,
       close_when_idle: null,
       close_on_terminal: null,
-    } satisfies AppProtocol.EventSubscribeParams);
+    } satisfies AppProtocol.SubscribeTimelineRequest);
     await controller.invoke("event.unsubscribe", {
       subscription_id: response.subscription_id,
-    } satisfies AppProtocol.EventUnsubscribeParams);
+    } satisfies AppProtocol.EventUnsubscribeRequest);
 
     bridges[0]?.emitExit();
     await vi.advanceTimersByTimeAsync(10);
@@ -264,34 +264,34 @@ function createEventEnvelope(
   eventType: "turn_started" | "turn_completed",
 ): AppProtocol.TimelineEventEnvelope {
   return {
-    event_seq: 1n,
+    event_seq: 1,
     event_id: eventId,
-    created_at_ms: 1n,
+    created_at_ms: 1,
     turn_id: "turn-1",
     message_id: "message-1",
     session_id: sessionId,
     event: {
-      event_seq: 1n,
+      event_seq: 1,
       event_id: eventId,
-      created_at_ms: 1n,
+      created_at_ms: 1,
       turn_id: "turn-1",
       event_type: eventType,
       message_id: "message-1",
       session_id: sessionId,
-      sequence: 0n,
+      sequence: 0,
       payload:
         eventType === "turn_started"
           ? {
               type: "turn_started",
               request_id: "request-1",
               turn_id: "turn-1",
-              started_at_ms: 1n,
+              started_at_ms: 1,
             }
           : {
               type: "turn_completed",
               request_id: "request-1",
               turn_id: "turn-1",
-              completed_at_ms: 2n,
+              completed_at_ms: 2,
               stop_reason: "end_turn",
               usage: {
                 input_tokens: 0,

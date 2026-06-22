@@ -5,7 +5,7 @@ use talos_sdk::{
     PluginReadRequest, PluginSearchRefreshPolicy, PluginSearchRequest, PluginSearchStatusFilter,
     PluginSourceAddRequest, PluginSourceRefreshRequest, SkillScope, SkillSelector, SkillSummary,
     SkillsListRequest, SkillsReadRequest, SkillsResolveRequest, SkillsSuggestRequest,
-    TalosInputItem, TalosMessageRequest,
+    StartTurnRequest, TalosInputItem,
 };
 
 pub(super) async fn skills_e2e(client: &mut AppServerClient) -> Result<()> {
@@ -193,6 +193,7 @@ async fn plugin_installed_skill_e2e(client: &mut AppServerClient) -> Result<()> 
         })
         .await?;
     if !document
+        .document
         .contents
         .contains("Check: localized-by-plugin-skill")
     {
@@ -254,32 +255,30 @@ async fn run_selected_skill_turn(
     eprintln!("skills-e2e turn.start {}", skill.name);
     let session_id = super::new_session_id(client).await?;
     client
-        .start_turn(
-            &session_id,
-            TalosMessageRequest {
-                input: vec![
-                    TalosInputItem::Text {
-                        text: prompt.to_string(),
-                    },
-                    TalosInputItem::SkillSelection {
-                        name: skill.name.clone(),
-                        path: skill.path.to_string_lossy().to_string(),
-                    },
-                ],
-                workspace_id: None,
-                context: Some(super::test_talos_context()),
-                model: std::env::var("TALOS_APP_SERVER_TEST_MODEL")
-                    .ok()
-                    .filter(|value| !value.trim().is_empty()),
-                project_id: None,
-                current_directory: None,
-            },
-            Some(format!(
+        .start_turn(StartTurnRequest {
+            session_id: session_id.clone(),
+            input: vec![
+                TalosInputItem::Text {
+                    text: prompt.to_string(),
+                },
+                TalosInputItem::SkillSelection {
+                    name: skill.name.clone(),
+                    path: skill.path.to_string_lossy().to_string(),
+                },
+            ],
+            workspace_id: None,
+            context: Some(super::test_talos_context()),
+            model: std::env::var("TALOS_APP_SERVER_TEST_MODEL")
+                .ok()
+                .filter(|value| !value.trim().is_empty()),
+            project_id: None,
+            current_directory: None,
+            client_request_id: Some(format!(
                 "{}-{}",
                 operation_prefix,
                 uuid::Uuid::new_v4().simple()
             )),
-        )
+        })
         .await?;
     eprintln!("skills-e2e event.subscribe {}", skill.name);
     let subscription = super::subscribe_events(client, &session_id).await?;

@@ -31,7 +31,7 @@ Talos is an AI Agent Framework designed to serve as the software brain for AI as
 - **Coordination**: Multi-agent coordination and management
 
 ### Gateway Layer
-- **HTTP Server**: Session-first REST API (`/v1/sessions` + `/v1/sessions/{id}/messages`)
+- **HTTP Server**: Session-first REST API (`/v1/sessions` + `/v1/turns/start`)
 - **App Server**: Local JSON-RPC over stdio JSONL for CLI, TUI, and Desktop
 - **Application Service**: Shared service layer used by HTTP, app-server, SDK, and WebUI adapters
 - **Plugin API**: Shared API surface for plugin source, lifecycle, search, read, and MCP/Skill detail flows
@@ -131,13 +131,15 @@ Start a chat with a client supplied session id:
 ```bash
 SESSION_ID="sess_$(uuidgen | tr '[:upper:]' '[:lower:]' | tr -d '-')"
 
-curl -X POST "http://localhost:8080/v1/sessions/${SESSION_ID}/messages" \
+curl -X POST "http://localhost:8080/v1/turns/start" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-token-here" \
   -d '{
+    "session_id": "'"${SESSION_ID}"'",
     "input": [
       { "type": "text", "text": "Hello, how are you?" }
     ],
+    "workspace_id": null,
     "context": {
       "source_type": "http",
       "provider": "http",
@@ -147,19 +149,29 @@ curl -X POST "http://localhost:8080/v1/sessions/${SESSION_ID}/messages" \
       "message_id": "msg-start-1",
       "trace_id": "trace-start-1"
     },
-    "model": "gpt-4o-mini"
+    "model": "gpt-4o-mini",
+    "project_id": null,
+    "current_directory": null,
+    "client_request_id": null
   }'
 ```
 
 Send another message inside an existing session:
 ```bash
-curl -X POST http://localhost:8080/v1/sessions/<session_id>/messages \
+curl -X POST http://localhost:8080/v1/turns/start \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-token-here" \
   -d '{
+    "session_id": "<session_id>",
     "input": [
       { "type": "text", "text": "Hello, how are you?" }
-    ]
+    ],
+    "workspace_id": null,
+    "context": null,
+    "model": null,
+    "project_id": null,
+    "current_directory": null,
+    "client_request_id": null
   }'
 ```
 

@@ -60,7 +60,10 @@ export function useMemoryPage() {
   const normalizedDebouncedQuery = debouncedQuery.trim();
   const listQuery = useQuery({
     queryKey: ["talos", connectionKey, "memory-files"],
-    queryFn: () => getTalosClient().memory.list({ limit: 90 }),
+    queryFn: async () => {
+      const response = await getTalosClient().memory.list({ limit: 90 });
+      return response.data;
+    },
     refetchOnWindowFocus: false,
   });
 
@@ -68,10 +71,12 @@ export function useMemoryPage() {
     queryKey: ["talos", connectionKey, "memory-search", normalizedDebouncedQuery],
     queryFn: async ({ signal }) => {
       return await Promise.race([
-        getTalosClient().memory.search(
-          { q: normalizedDebouncedQuery, limit: 20 },
-          { signal },
-        ),
+        getTalosClient()
+          .memory.search(
+            { q: normalizedDebouncedQuery, limit: 20 },
+            { signal },
+          )
+          .then((response) => response.results),
         new Promise<never>((_, reject) => {
           window.setTimeout(() => {
             reject(new Error("Memory search timed out. Try a narrower query."));
@@ -88,7 +93,8 @@ export function useMemoryPage() {
     queryKey: ["talos", connectionKey, "memory-file", selectedDate],
     queryFn: async () => {
       try {
-        return await getTalosClient().memory.get(selectedDate);
+        const response = await getTalosClient().memory.get(selectedDate);
+        return response.file;
       } catch (error) {
         if (isNotFoundError(error)) {
           return buildMissingDetail(selectedDate);
@@ -131,10 +137,11 @@ export function useMemoryPage() {
       const baseVersion: ExpectedFileVersion = detail.version_token
         ? { mode: "match", version_token: detail.version_token }
         : { mode: "must_not_exist" };
-      return getTalosClient().memory.put(selectedDate, {
+      const response = await getTalosClient().memory.put(selectedDate, {
         content: editorContent,
         base_version: baseVersion,
       });
+      return response.file;
     },
     onSuccess: async (detail) => {
       queryClient.setQueryData(["talos", connectionKey, "memory-file", detail.date], detail);

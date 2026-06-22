@@ -1,9 +1,12 @@
 use crate::model::TalosConfig;
 use crate::talos;
+use crate::turn_api::TimelineActiveTurnSnapshot;
 use async_trait::async_trait;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use talos_error::TalosError;
+use ts_rs::TS;
 
 /// Session record stored by the gateway.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -291,7 +294,196 @@ pub struct SessionQuery {
     pub offset: Option<usize>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct SessionListRequest {
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub offset: Option<usize>,
+}
+
+impl SessionListRequest {
+    pub fn into_query(self) -> SessionQuery {
+        SessionQuery {
+            user_id: None,
+            channel_id: None,
+            provider: None,
+            project_id: self.project_id,
+            limit: self.limit,
+            offset: self.offset,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+pub struct SessionListResponse {
+    pub sessions: Vec<SessionInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+pub struct SessionInfo {
+    pub id: String,
+    pub title: String,
+    pub user_id: String,
+    pub source_type: talos::TalosSourceType,
+    pub provider: talos::TalosProvider,
+    pub model: String,
+    #[ts(type = "number")]
+    pub created_at: u64,
+    #[ts(type = "number")]
+    pub last_activity: u64,
+    #[ts(type = "number")]
+    pub message_count: u64,
+    #[serde(default)]
+    pub usage: talos::TalosUsage,
+    #[serde(default)]
+    #[ts(optional)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub current_directory: Option<PathBuf>,
+}
+
+impl From<&SessionRecord> for SessionInfo {
+    fn from(record: &SessionRecord) -> Self {
+        Self {
+            id: record.id.clone(),
+            title: record.title.clone(),
+            user_id: record.user_id.clone(),
+            source_type: record.context.source_type.clone(),
+            provider: record.context.provider.clone(),
+            model: record.model.clone(),
+            created_at: record.created_at,
+            last_activity: record.last_activity,
+            message_count: record.message_count,
+            usage: record.usage.clone(),
+            project_id: record.project_id.clone(),
+            current_directory: record.current_directory.clone(),
+        }
+    }
+}
+
+impl From<&TalosSession> for SessionInfo {
+    fn from(session: &TalosSession) -> Self {
+        Self {
+            id: session.context.session_id.clone(),
+            title: session.title.clone(),
+            user_id: session.user_id.clone(),
+            source_type: session.context.source_type.clone(),
+            provider: session.context.provider.clone(),
+            model: session.config.llm.model.clone(),
+            created_at: session.state.created_at,
+            last_activity: session.state.last_activity,
+            message_count: session.state.message_count,
+            usage: session.state.usage.clone(),
+            project_id: session.project_id.clone(),
+            current_directory: session.current_directory.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct SessionGetRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+pub struct SessionGetResponse {
+    pub session: SessionInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct SessionDeleteRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct SessionCloseRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct SessionCompactRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct SessionClearRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct SessionActiveTurnRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+pub struct SessionActiveTurnResponse {
+    pub active_turn: TimelineActiveTurnSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct SessionHistoryRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+pub struct SessionHistoryResponse {
+    pub history: talos::SessionHistorySnapshot,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct SessionPatchRequest {
+    #[serde(default)]
+    pub session_id: String,
+    #[serde(default)]
+    pub conf: Option<SessionConf>,
+    #[serde(default)]
+    pub project_id: Option<OptionalProjectIdPatch>,
+    #[serde(default)]
+    pub current_directory: Option<OptionalCurrentDirectoryPatch>,
+}
+
+pub type SessionUpdateRequest = SessionPatchRequest;
+
+impl SessionPatchRequest {
+    pub fn into_patch(self) -> SessionPatch {
+        SessionPatch {
+            conf: self.conf,
+            project_id: self.project_id,
+            current_directory: self.current_directory,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+pub struct SessionUpdateResponse {
+    pub session: SessionInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct SessionDeleteResponse {
+    pub success: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct SessionCloseResponse {
+    pub success: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+pub struct SessionClearResponse {
+    pub session: SessionInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+pub struct SessionCompactResponse {
+    pub session: SessionInfo,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 pub struct SessionPatch {
     #[serde(default)]
     pub conf: Option<SessionConf>,
@@ -308,53 +500,114 @@ impl SessionPatch {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OptionalProjectIdPatch {
     Set { project_id: String },
     Clear,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OptionalCurrentDirectoryPatch {
     Set { path: PathBuf },
     Clear,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 pub struct SessionAgentConf {
     #[serde(default)]
     pub model: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 pub struct SessionConf {
     #[serde(default)]
     pub agent: Option<SessionAgentConf>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProjectRecord {
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct ProjectListRequest {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct ProjectCreateRequest {
+    pub name: String,
+    pub directory: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct ProjectReadRequest {
+    pub project_id: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct ProjectPatchRequest {
+    #[serde(default)]
+    pub project_id: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub name: Option<String>,
+}
+
+impl ProjectPatchRequest {
+    pub fn into_patch(self) -> ProjectPatch {
+        ProjectPatch { name: self.name }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct ProjectDeleteRequest {
+    pub project_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct ProjectInfo {
     pub project_id: String,
     pub name: String,
-    pub user_id: String,
     pub directory: PathBuf,
     #[serde(default)]
     pub status: ProjectStatus,
+    #[ts(type = "number")]
     pub created_at: i64,
+    #[ts(type = "number")]
     pub updated_at: i64,
+    #[ts(type = "number")]
     pub session_count: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct ProjectListResponse {
+    pub projects: Vec<ProjectInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct ProjectReadResponse {
+    pub project: ProjectInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct ProjectCreateResponse {
+    pub project: ProjectInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct ProjectPatchResponse {
+    pub project: ProjectInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct ProjectDeleteResponse {
+    pub success: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 pub struct ProjectStatus {
     pub state: ProjectStatusState,
     #[serde(default)]
     pub reason: Option<ProjectUnavailableReason>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectStatusState {
     Available,
@@ -363,7 +616,7 @@ pub enum ProjectStatusState {
     PermissionDenied,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectUnavailableReason {
     PathNotFound,
@@ -380,14 +633,15 @@ impl Default for ProjectStatus {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 pub struct ProjectPatch {
     #[serde(default)]
+    #[ts(optional)]
     pub name: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct SessionPatchAck {
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct SessionPatchResponse {
     pub success: bool,
 }
 
@@ -485,19 +739,20 @@ pub trait SessionRuntime: Send + Sync {
         Ok(())
     }
 
-    async fn compact_session(&self, session_id: &str) -> crate::TalosResult<TalosSession>;
+    async fn compact_session(&self, session: TalosSession)
+        -> crate::TalosResult<talos::TalosUsage>;
 
-    async fn clear_session(&self, session_id: &str) -> crate::TalosResult<TalosSession>;
+    async fn clear_session(&self, session: TalosSession) -> crate::TalosResult<()>;
 
-    async fn close_session(&self, session_id: &str) -> crate::TalosResult<()>;
+    async fn close_session(&self, session: TalosSession) -> crate::TalosResult<()>;
 
-    async fn delete_session(&self, session_id: &str) -> crate::TalosResult<SessionPatchAck>;
+    async fn prepare_delete_session(&self, session: TalosSession) -> crate::TalosResult<()>;
 
-    async fn cancel_active_turn(&self, session_id: &str) -> crate::TalosResult<()>;
+    async fn cancel_active_turn(&self, session: TalosSession) -> crate::TalosResult<()>;
 
     async fn submit_dynamic_tool_result(
         &self,
-        session_id: &str,
+        session: TalosSession,
         call_id: &str,
         tool_name: &str,
         output: String,
@@ -537,7 +792,7 @@ pub trait SessionService: Send + Sync {
         &self,
         session_id: &str,
         patch: SessionPatch,
-    ) -> crate::TalosResult<SessionPatchAck>;
+    ) -> crate::TalosResult<SessionPatchResponse>;
 
     async fn compact_session(&self, session_id: &str) -> crate::TalosResult<TalosSession>;
 
@@ -545,7 +800,7 @@ pub trait SessionService: Send + Sync {
 
     async fn close_session(&self, session_id: &str) -> crate::TalosResult<()>;
 
-    async fn delete_session(&self, session_id: &str) -> crate::TalosResult<SessionPatchAck>;
+    async fn delete_session(&self, session_id: &str) -> crate::TalosResult<SessionPatchResponse>;
 
     async fn cancel_active_turn(&self, session_id: &str) -> crate::TalosResult<()>;
 
@@ -557,23 +812,4 @@ pub trait SessionService: Send + Sync {
         output: String,
         success: bool,
     ) -> crate::TalosResult<()>;
-
-    async fn list_projects(&self) -> crate::TalosResult<Vec<ProjectRecord>>;
-
-    async fn get_project(&self, project_id: &str) -> crate::TalosResult<Option<ProjectRecord>>;
-
-    async fn create_project(
-        &self,
-        name: String,
-        directory: PathBuf,
-        user_id: String,
-    ) -> crate::TalosResult<ProjectRecord>;
-
-    async fn patch_project(
-        &self,
-        project_id: &str,
-        patch: ProjectPatch,
-    ) -> crate::TalosResult<Option<ProjectRecord>>;
-
-    async fn delete_project(&self, project_id: &str) -> crate::TalosResult<()>;
 }

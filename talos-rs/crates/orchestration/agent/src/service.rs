@@ -6,7 +6,7 @@ use talos_agent_kernel::TurnPhase;
 use talos_config::{resolve_talos_home, AgentKernelConfig};
 use talos_error::TalosResult;
 use talos_skills::SkillRoots;
-use talos_types::gateway::GatewayResumeContext;
+use talos_types::agent_dispatch::AgentDispatchResumeContext;
 use talos_types::talos::{
     StopReason, TalosInputItem, TalosOutputItem, TalosReasoning, TalosTimelineEvent, TalosUsage,
 };
@@ -14,12 +14,12 @@ use talos_types::TalosSession;
 use tokio::sync::mpsc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OrchestratorRequest {
+pub struct AgentRequest {
     pub session: TalosSession,
     #[serde(default)]
     pub turn_id: Option<String>,
     #[serde(default)]
-    pub resume_context: Option<GatewayResumeContext>,
+    pub resume_context: Option<AgentDispatchResumeContext>,
     pub input: Vec<TalosInputItem>,
 }
 
@@ -29,7 +29,7 @@ pub struct SessionTitleUpdate {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OrchestratorExecution {
+pub struct AgentResponse {
     pub output_text: String,
     #[serde(default)]
     pub output_items: Vec<TalosOutputItem>,
@@ -45,7 +45,7 @@ pub struct OrchestratorExecution {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentRequest {
+pub struct AgentKernelRequest {
     pub session: TalosSession,
     pub input: Vec<TalosInputItem>,
     #[serde(default)]
@@ -53,6 +53,8 @@ pub struct AgentRequest {
     pub planning_instruction: Option<String>,
     pub transfer_to: Option<String>,
 }
+
+pub type AgentEvent = TalosTimelineEvent;
 
 pub trait SkillRootsResolver: Send + Sync {
     fn skill_roots(&self, kernel_config: &AgentKernelConfig) -> TalosResult<SkillRoots>;
@@ -80,13 +82,10 @@ pub fn empty_skill_roots_resolver() -> Arc<dyn SkillRootsResolver> {
 }
 
 #[async_trait]
-pub trait AgentOrchestrator: Send + Sync {
+pub trait Agent: Send + Sync {
     fn id(&self) -> &str;
-    async fn run(&self, request: OrchestratorRequest) -> TalosResult<OrchestratorExecution>;
-    async fn run_stream(
-        &self,
-        request: OrchestratorRequest,
-    ) -> TalosResult<mpsc::Receiver<TalosTimelineEvent>>;
+    async fn run(&self, request: AgentRequest) -> TalosResult<AgentResponse>;
+    async fn run_stream(&self, request: AgentRequest) -> TalosResult<mpsc::Receiver<AgentEvent>>;
     fn take_session_title_update(
         &self,
         _session_id: &str,

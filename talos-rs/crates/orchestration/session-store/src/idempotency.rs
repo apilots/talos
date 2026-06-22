@@ -26,7 +26,7 @@ impl IdempotencyStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct MessageCommandAck {
+pub struct MessageCommandResult {
     pub request_id: String,
     pub message_id: Option<String>,
     pub session_id: String,
@@ -42,7 +42,7 @@ pub struct IdempotencyRecord {
     pub turn_id: String,
     pub message_id: Option<String>,
     pub status: IdempotencyStatus,
-    pub ack: Option<MessageCommandAck>,
+    pub result: Option<MessageCommandResult>,
     pub created_at: i64,
     pub updated_at: i64,
     pub expires_at: Option<i64>,
@@ -78,7 +78,7 @@ pub trait MessageIdempotencyStore: Send + Sync {
         idempotency_key: &str,
         status: IdempotencyStatus,
         message_id: Option<&str>,
-        ack: &MessageCommandAck,
+        result: &MessageCommandResult,
         now_ms: i64,
     ) -> TalosResult<()>;
 
@@ -99,12 +99,12 @@ fn parse_status(raw: &str) -> TalosResult<IdempotencyStatus> {
 }
 
 fn parse_record(row: &Row) -> TalosResult<IdempotencyRecord> {
-    let ack = row
-        .get_string("ack_json")
+    let result = row
+        .get_string("result_json")
         .filter(|value| !value.trim().is_empty())
         .map(|raw| {
-            serde_json::from_str::<MessageCommandAck>(&raw).map_err(|err| {
-                TalosError::SerializationError(format!("parse idempotency ack: {}", err))
+            serde_json::from_str::<MessageCommandResult>(&raw).map_err(|err| {
+                TalosError::SerializationError(format!("parse idempotency result: {}", err))
             })
         })
         .transpose()?;
@@ -117,7 +117,7 @@ fn parse_record(row: &Row) -> TalosResult<IdempotencyRecord> {
             .get_string("message_id")
             .filter(|value| !value.trim().is_empty()),
         status: parse_status(row.get_string("status").unwrap_or_default().as_str())?,
-        ack,
+        result,
         created_at: row.get_i64("created_at").unwrap_or_default(),
         updated_at: row.get_i64("updated_at").unwrap_or_default(),
         expires_at: row.get_i64("expires_at").filter(|value| *value > 0),
@@ -135,7 +135,7 @@ impl DatabaseSessionStore {
             .query(
                 r#"
                 SELECT session_id, idempotency_key, request_hash, turn_id, message_id, status,
-                       ack_json, created_at, updated_at, expires_at
+                       result_json, created_at, updated_at, expires_at
                 FROM message_idempotency_keys
                 WHERE session_id = ? AND idempotency_key = ?
                 "#,
@@ -220,10 +220,10 @@ impl MessageIdempotencyStore for DatabaseSessionStore {
         idempotency_key: &str,
         status: IdempotencyStatus,
         message_id: Option<&str>,
-        ack: &MessageCommandAck,
+        result: &MessageCommandResult,
         now_ms: i64,
     ) -> TalosResult<()> {
-        let ack_json = serde_json::to_string(ack)
+        let result_json = serde_json::to_string(result)
             .map_err(|err| TalosError::SerializationError(err.to_string()))?;
         let now = now_ms.to_string();
         let message_id = message_id.unwrap_or_default();
@@ -231,13 +231,13 @@ impl MessageIdempotencyStore for DatabaseSessionStore {
             .execute(
                 r#"
                 UPDATE message_idempotency_keys
-                SET status = ?, message_id = ?, ack_json = ?, updated_at = ?
+                SET status = ?, message_id = ?, result_json = ?, updated_at = ?
                 WHERE session_id = ? AND idempotency_key = ?
                 "#,
                 &[
                     status.as_str(),
                     message_id,
-                    ack_json.as_str(),
+                    result_json.as_str(),
                     now.as_str(),
                     session_id,
                     idempotency_key,

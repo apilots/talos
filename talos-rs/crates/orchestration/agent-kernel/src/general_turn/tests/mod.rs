@@ -698,8 +698,16 @@ impl LlmProvider for RecordingSummaryProvider {
 fn build_ctx_with_stream(
     stream_tx: Option<mpsc::Sender<crate::KernelStreamEvent>>,
 ) -> InvocationContext {
+    build_ctx_with_stream_for_session("s1", stream_tx)
+}
+
+fn build_ctx_with_stream_for_session(
+    session_id: impl Into<String>,
+    stream_tx: Option<mpsc::Sender<crate::KernelStreamEvent>>,
+) -> InvocationContext {
+    let session_id = session_id.into();
     InvocationContext {
-        session_id: "s1".to_string(),
+        session_id: session_id.clone(),
         message_id: "msg-1".to_string(),
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
@@ -723,7 +731,7 @@ fn build_ctx_with_stream(
         transfer_to: None,
         execution_state: InvocationExecutionState::default(),
         session: crate::InvocationSession {
-            session_id: "s1".to_string(),
+            session_id: session_id.clone(),
             ..crate::InvocationSession::default()
         },
         session_environment: None,

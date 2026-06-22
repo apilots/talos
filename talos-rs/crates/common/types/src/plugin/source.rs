@@ -13,8 +13,11 @@ pub struct MarketplaceSource {
     pub location: MarketplaceSourceLocation,
     pub sparse_paths: Vec<String>,
     pub last_checked_commit: Option<String>,
+    #[ts(type = "number | null")]
     pub last_checked_at_ms: Option<i64>,
+    #[ts(type = "number")]
     pub created_at_ms: i64,
+    #[ts(type = "number")]
     pub updated_at_ms: i64,
 }
 

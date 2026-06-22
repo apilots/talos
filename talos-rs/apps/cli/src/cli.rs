@@ -10,7 +10,7 @@ use std::time::Duration;
 use talos_sdk::{
     now_ms, open_external_url, AppServerClient, AppServerClientConfig, CloudLoginClientKind,
     CloudLoginStatusResponse, SkillSelector, SkillsListRequest, SkillsReadRequest,
-    SkillsRefreshRequest, SkillsSuggestRequest, TalosContext, TalosInputItem, TalosMessageRequest,
+    SkillsRefreshRequest, SkillsSuggestRequest, StartTurnRequest, TalosContext, TalosInputItem,
     TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta,
     TalosTimelineEventPayload, TalosTimelineItemKind, TalosTimelinePhase, TimelineEventEnvelope,
 };
@@ -101,7 +101,8 @@ async fn execute_app_server_skills_command(
             if selector.name.is_none() && selector.path.is_none() {
                 return Err("skills read requires --name or --path".into());
             }
-            let document = client.read_skill(SkillsReadRequest { selector }).await?;
+            let response = client.read_skill(SkillsReadRequest { selector }).await?;
+            let document = response.document;
             println!("# {}", document.summary.name);
             println!("Path: {}", document.summary.path.display());
             println!();
@@ -211,7 +212,7 @@ async fn run_app_server_smoke(
     client: &mut AppServerClient,
 ) -> Result<(), Box<dyn std::error::Error>> {
     client.list_models().await?;
-    client.config_read().await?;
+    client.config_get().await?;
     client.list_sessions(Default::default()).await?;
     Ok(())
 }
@@ -221,19 +222,18 @@ async fn run_app_server_turn_smoke(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let session_id = uuid::Uuid::new_v4().to_string();
     let mut events = client
-        .send_timeline_events(
-            &session_id,
-            TalosMessageRequest {
-                input: vec![TalosInputItem::Text {
-                    text: "answer with ok".to_string(),
-                }],
-                workspace_id: None,
-                context: Some(default_chat_context("cli-app-server")),
-                model: None,
-                project_id: None,
-                current_directory: current_cli_directory(),
-            },
-        )
+        .send_timeline_events(StartTurnRequest {
+            session_id: session_id.clone(),
+            input: vec![TalosInputItem::Text {
+                text: "answer with ok".to_string(),
+            }],
+            workspace_id: None,
+            context: Some(default_chat_context("cli-app-server")),
+            model: None,
+            project_id: None,
+            current_directory: current_cli_directory(),
+            client_request_id: None,
+        })
         .await?;
 
     let mut saw_started = false;
@@ -276,10 +276,10 @@ async fn execute_app_server_chat_command(
             stream,
         } => {
             let session_id = uuid::Uuid::new_v4().to_string();
-            let mut request = build_message_request(&message, model, stream);
+            let mut request = build_start_turn_request(&session_id, &message, model, stream);
             request.context = Some(default_chat_context(user.as_deref().unwrap_or("cli-user")));
             request.current_directory = current_cli_directory();
-            send_and_render_app_server_message(client, &session_id, request).await?;
+            send_and_render_app_server_message(client, request).await?;
         }
         ChatCommands::In {
             session_id,
@@ -287,10 +287,10 @@ async fn execute_app_server_chat_command(
             model,
             stream,
         } => {
-            let mut request = build_message_request(&message, model, stream);
+            let mut request = build_start_turn_request(&session_id, &message, model, stream);
             request.context = Some(default_chat_context("cli-user"));
             request.current_directory = current_cli_directory();
-            send_and_render_app_server_message(client, &session_id, request).await?;
+            send_and_render_app_server_message(client, request).await?;
         }
         ChatCommands::Recent {
             index,
@@ -302,11 +302,11 @@ async fn execute_app_server_chat_command(
                 .list_sessions(Default::default())
                 .await
                 .ok()
-                .and_then(|sessions| sessions.into_iter().nth(index))
-                .map(|session| session.context.session_id);
+                .and_then(|response| response.sessions.into_iter().nth(index))
+                .map(|session| session.id);
             if let Some(session_id) = session_id {
-                let request = build_message_request(&message, model, stream);
-                send_and_render_app_server_message(client, &session_id, request).await?;
+                let request = build_start_turn_request(&session_id, &message, model, stream);
+                send_and_render_app_server_message(client, request).await?;
             } else {
                 debug!("No recent session found at index {}", index);
             }
@@ -323,28 +323,27 @@ async fn execute_app_server_session_command(
         SessionCommands::List { limit, user: _ } => {
             let sessions = client.list_sessions(Default::default()).await?;
             println!("Active Sessions:");
-            for (i, session) in sessions.iter().take(limit).enumerate() {
+            for (i, session) in sessions.sessions.iter().take(limit).enumerate() {
                 println!(
                     "{}. ID: {} | Model: {} | Messages: {}",
-                    i,
-                    session.context.session_id,
-                    session.config.llm.model,
-                    session.state.message_count
+                    i, session.id, session.model, session.message_count
                 );
             }
         }
         SessionCommands::Info { session_id } => {
-            let session = client.get_session(&session_id).await?;
+            let response = client.get_session(&session_id).await?;
+            let session = response.session;
             println!("Session Info:");
-            println!("  ID: {}", session.context.session_id);
-            println!("  Model: {}", session.config.llm.model);
-            println!("  Messages: {}", session.state.message_count);
+            println!("  ID: {}", session.id);
+            println!("  Model: {}", session.model);
+            println!("  Messages: {}", session.message_count);
         }
         SessionCommands::SetModel { session_id, model } => {
-            let session = client.update_session_model(&session_id, &model).await?;
+            let response = client.update_session_model(&session_id, &model).await?;
+            let session = response.session;
             println!("Session model updated:");
-            println!("  ID: {}", session.context.session_id);
-            println!("  Model: {}", session.config.llm.model);
+            println!("  ID: {}", session.id);
+            println!("  Model: {}", session.model);
         }
         SessionCommands::Interactive {
             session_id,
@@ -369,12 +368,11 @@ async fn execute_app_server_session_command(
                     break;
                 }
                 if !input.is_empty() {
-                    let mut request = build_message_request(input, model.clone(), stream);
+                    let mut request =
+                        build_start_turn_request(&session_id, input, model.clone(), stream);
                     request.context = Some(default_chat_context("cli-user"));
                     request.current_directory = current_cli_directory();
-                    if let Err(err) =
-                        send_and_render_app_server_message(client, &session_id, request).await
-                    {
+                    if let Err(err) = send_and_render_app_server_message(client, request).await {
                         debug!("Error: {:?}", err);
                     }
                 }
@@ -394,7 +392,7 @@ async fn execute_app_server_models_command(
         println!("{}", serde_json::to_string_pretty(&models)?);
     } else {
         println!("Available models:");
-        for (i, model) in models.iter().enumerate() {
+        for (i, model) in models.models.iter().enumerate() {
             println!("{}. {} ({})", i, model.id, model.provider);
         }
     }
@@ -410,12 +408,16 @@ async fn execute_app_server_status_command(
         client
             .list_sessions(Default::default())
             .await
+            .map(|response| response.sessions.len())
             .unwrap_or_default()
-            .len()
     );
     println!(
         "Available models: {}",
-        client.list_models().await.unwrap_or_default().len()
+        client
+            .list_models()
+            .await
+            .map(|response| response.models.len())
+            .unwrap_or_default()
     );
     Ok(())
 }
@@ -427,12 +429,14 @@ async fn execute_app_server_info_command() -> Result<(), Box<dyn std::error::Err
     Ok(())
 }
 
-fn build_message_request(
+fn build_start_turn_request(
+    session_id: &str,
     message: &str,
     model: Option<String>,
     _stream: bool,
-) -> TalosMessageRequest {
-    TalosMessageRequest {
+) -> StartTurnRequest {
+    StartTurnRequest {
+        session_id: session_id.to_string(),
         input: vec![TalosInputItem::Text {
             text: message.to_string(),
         }],
@@ -441,17 +445,17 @@ fn build_message_request(
         model,
         project_id: None,
         current_directory: None,
+        client_request_id: None,
     }
 }
 
 async fn send_and_render_app_server_message(
     client: &mut AppServerClient,
-    session_id: &str,
-    request: TalosMessageRequest,
+    request: StartTurnRequest,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let mut output_text = String::new();
     let mut output_stream = std::io::stdout();
-    let mut events = client.send_timeline_events(session_id, request).await?;
+    let mut events = client.send_timeline_events(request).await?;
     let mut item_phases = HashMap::new();
     let mut item_texts = HashMap::new();
 

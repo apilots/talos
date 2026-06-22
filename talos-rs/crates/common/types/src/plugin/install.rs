@@ -17,7 +17,9 @@ pub struct PluginInstall {
     #[serde(default)]
     pub exposed_mcp_servers: Vec<McpServerDefinition>,
     pub source: PluginInstallSource,
+    #[ts(type = "number")]
     pub installed_at_ms: i64,
+    #[ts(type = "number")]
     pub updated_at_ms: i64,
     pub file_manifest: FileManifest,
 }
@@ -49,5 +51,6 @@ pub struct FileManifest {
 pub struct FileEntry {
     pub relative_path: String,
     pub sha256: String,
+    #[ts(type = "number")]
     pub size_bytes: u64,
 }

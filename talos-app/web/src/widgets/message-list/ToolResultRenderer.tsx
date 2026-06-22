@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { jsonContentValue } from "@talos/sdk-browser";
 import type { TalosContentItem } from "@/shared/types/protocol";
 import type { ChatTimelineItem, ChatToolStatus } from "@/shared/types/ui";
 
@@ -249,7 +250,7 @@ function buildTextJsonModel(items: TalosContentItem[], status: ChatToolStatus): 
       return item.text.split("\n");
     }
     if (item.type === "json") {
-      return [JSON.stringify(unwrapTalosJsonValue(item.value), null, 2)];
+      return [JSON.stringify(jsonContentValue(item.value), null, 2)];
     }
     if (item.type === "progress") {
       return [item.message];
@@ -320,21 +321,9 @@ function lastDefined<T>(values: Array<T | null | undefined>) {
   return undefined;
 }
 
-function formatDurationSuffix(value: bigint | number | null | undefined) {
+function formatDurationSuffix(value: number | null | undefined) {
   if (value === undefined || value === null) {
     return "";
   }
-  return ` · ${(Number(value) / 1000).toFixed(1)}s`;
-}
-
-function unwrapTalosJsonValue(value: unknown) {
-  if (
-    value &&
-    typeof value === "object" &&
-    "value" in value &&
-    Object.keys(value).length === 1
-  ) {
-    return (value as { value: unknown }).value;
-  }
-  return value;
+  return ` · ${(value / 1000).toFixed(1)}s`;
 }

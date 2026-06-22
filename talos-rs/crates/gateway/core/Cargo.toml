@@ -4,6 +4,9 @@ version = "0.1.2"
 edition = "2021"
 
 [dependencies]
+talos-application-service = { path = "../../orchestration/application-service" }
+talos-auth = { path = "../../infra/auth" }
+talos-config = { path = "../../infra/config" }
 talos-error = { path = "../../infra/error" }
 talos-types = { path = "../../common/types" }
 serde = { version = "1.0", features = ["derive"] }
@@ -15,3 +18,7 @@ async-trait = "0.1"
 
 [dev-dependencies]
 mockall = "0.12"
+talos-llm-provider = { path = "../../common/llm/provider" }
+talos-project-store = { workspace = true }
+talos-session-store = { path = "../../orchestration/session-store" }
+talos-storage = { path = "../../infra/storage" }

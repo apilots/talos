@@ -26,7 +26,8 @@ describe("createDesktopTalosClient", () => {
     };
     const client = createDesktopTalosClient(bridge);
 
-    await client.turns.start("session-1", {
+    await client.turns.start({
+      session_id: "session-1",
       input: [{ type: "text", text: "hello" }],
       context: {
         source_type: "http",
@@ -40,7 +41,6 @@ describe("createDesktopTalosClient", () => {
         environment: null,
       },
       model: "kimi-k2.5",
-      project_id: undefined,
     });
 
     expect(calls).toEqual([
@@ -48,14 +48,12 @@ describe("createDesktopTalosClient", () => {
         method: "turn.start",
         params: expect.objectContaining({
           session_id: "session-1",
-          request: expect.objectContaining({
-            context: expect.objectContaining({
-              source_type: "desktop",
-              provider: "sdk",
-              channel_id: "web",
-              message_id: "msg-1",
-              trace_id: "trace-1",
-            }),
+          context: expect.objectContaining({
+            source_type: "desktop",
+            provider: "sdk",
+            channel_id: "web",
+            message_id: "msg-1",
+            trace_id: "trace-1",
           }),
         }),
       },
@@ -65,11 +63,11 @@ describe("createDesktopTalosClient", () => {
   it("streams desktop turn events by message ack even when event request ids differ", async () => {
     let eventHandler: ((envelope: AppProtocol.TimelineEventEnvelope) => void) | undefined;
     const received: string[] = [];
-    let subscribeParams: AppProtocol.EventSubscribeParams | undefined;
+    let subscribeParams: AppProtocol.SubscribeTimelineRequest | undefined;
     const bridge: DesktopRendererBridge = {
       invoke: async function <T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T> {
         if (method === "event.subscribe") {
-          subscribeParams = params as AppProtocol.EventSubscribeParams;
+          subscribeParams = params as AppProtocol.SubscribeTimelineRequest;
           queueMicrotask(() => {
             eventHandler?.(eventEnvelope("turn_started", "req-provider", "turn-1", "message-1"));
             eventHandler?.(eventEnvelope("turn_completed", "req-provider", "turn-1", "message-1"));
@@ -101,8 +99,7 @@ describe("createDesktopTalosClient", () => {
     const client = createDesktopTalosClient(bridge);
 
     await client.turns.startEvents(
-      "session-1",
-      { input: [{ type: "text", text: "hello" }] },
+      { session_id: "session-1", input: [{ type: "text", text: "hello" }] },
       (envelope) => received.push(envelope.event.event_type),
     );
 
@@ -121,20 +118,20 @@ function eventEnvelope(
   messageId: string,
 ): AppProtocol.TimelineEventEnvelope {
   return {
-    event_seq: 1n,
+    event_seq: 1,
     event_id: `ev-${eventType}`,
-    created_at_ms: 1n,
+    created_at_ms: 1,
     turn_id: turnId,
     message_id: messageId,
     session_id: "session-1",
     event: {
-      event_seq: 1n,
+      event_seq: 1,
       event_id: `ev-${eventType}`,
-      created_at_ms: 1n,
+      created_at_ms: 1,
       turn_id: turnId,
       session_id: "session-1",
       message_id: messageId,
-      sequence: 1n,
+      sequence: 1,
       event_type: eventType,
       payload:
         eventType === "turn_started"
@@ -142,13 +139,13 @@ function eventEnvelope(
               type: "turn_started",
               request_id: requestId,
               turn_id: turnId,
-              started_at_ms: 1n,
+              started_at_ms: 1,
             }
           : {
               type: "turn_completed",
               request_id: requestId,
               turn_id: turnId,
-              completed_at_ms: 2n,
+              completed_at_ms: 2,
               stop_reason: "end_turn",
               usage: usage(),
               metrics: null,

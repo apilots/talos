@@ -1,21 +1,21 @@
 import { TalosHttpError } from "@talos/sdk-browser";
 import type {
   ModelInfo,
+  ProjectInfo as ApiProjectInfo,
+  RetryTurnRequest,
   SkillSuggestion,
-  ProjectRecord as ApiProjectRecord,
+  StartTurnRequest,
+  SessionInfo,
   SessionUpdate,
   TalosContext,
   TalosInputItem,
-  TalosMessageRequest,
-  TalosMessageRetryRequest,
-  TalosSession,
   TalosSessionHistorySnapshot,
   TimelineEventEnvelope,
 } from "@talos/sdk-browser";
 
 import { getTalosClient } from "@/shared/api/client";
 import { isUnboundProject } from "@/shared/types/domain";
-import type { ProjectRecord } from "@/shared/types/ui";
+import type { ProjectView } from "@/shared/types/ui";
 
 function createContext(userId: string): TalosContext {
   const randomPart = Math.random().toString(36).slice(2, 10);
@@ -32,7 +32,7 @@ function createContext(userId: string): TalosContext {
   };
 }
 
-function mapProjectRecord(project: ApiProjectRecord): ProjectRecord {
+function mapProjectView(project: ApiProjectInfo): ProjectView {
   return {
     id: project.project_id,
     name: project.name,
@@ -56,24 +56,32 @@ interface CreateProjectInput {
 }
 
 export async function listModels() {
-  return getTalosClient().models.list();
+  const response = await getTalosClient().models.list();
+  return response.models;
 }
 
 export async function listProjects() {
-  const projects = await getTalosClient().projects.list();
-  return projects.map(mapProjectRecord);
+  const response = await getTalosClient().projects.list();
+  return response.projects.map(mapProjectView);
 }
 
 export async function listSessions() {
-  return getTalosClient().sessions.list();
+  const response = await getTalosClient().sessions.list();
+  return response.sessions;
 }
 
 export async function listSessionsByProject(projectId: string) {
-  return getTalosClient().sessions.list({ project_id: projectId });
+  const response = await getTalosClient().sessions.list({
+    project_id: projectId,
+    limit: null,
+    offset: null,
+  });
+  return response.sessions;
 }
 
 export async function getSession(sessionId: string) {
-  return getTalosClient().sessions.get(sessionId);
+  const response = await getTalosClient().sessions.get(sessionId);
+  return response.session;
 }
 
 export function generateSessionId() {
@@ -84,12 +92,13 @@ export function generateSessionId() {
 }
 
 export function createInitialTurnRequest(
+  sessionId: string,
   userId: string,
   text: string,
   model: string | undefined,
-  project: ProjectRecord | undefined,
+  project: ProjectView | undefined,
   skills: SkillSuggestion[] = [],
-): TalosMessageRequest {
+): StartTurnRequest {
   const input: TalosInputItem[] = [
     { type: "text", text },
     ...skills.map((skill) => ({
@@ -99,6 +108,7 @@ export function createInitialTurnRequest(
     })),
   ];
   return {
+    session_id: sessionId,
     input,
     context: createContext(userId),
     model,
@@ -114,15 +124,16 @@ export async function suggestSkills(query: string, limit = 8) {
 export async function createProject(input: string | CreateProjectInput) {
   const directory = typeof input === "string" ? input : input.directory;
   const name = typeof input === "string" ? deriveProjectName(directory) : input.name?.trim() || deriveProjectName(directory);
-  const record = await getTalosClient().projects.create({
+  const response = await getTalosClient().projects.create({
     name,
     directory,
   });
-  return mapProjectRecord(record);
+  return mapProjectView(response.project);
 }
 
 export async function readFsDirectory(path?: string | null) {
-  return getTalosClient().fs.directory.read({ path });
+  const response = await getTalosClient().fs.directory.read({ path });
+  return response.directory;
 }
 
 export async function createFsDirectory(parent: string, name: string) {
@@ -140,7 +151,7 @@ export async function deleteProject(projectId: string) {
   }
 }
 
-export async function updateSessionProject(sessionId: string, project?: ProjectRecord) {
+export async function updateSessionProject(sessionId: string, project?: ProjectView) {
   const patch: SessionUpdate = project && !isUnboundProject(project.id)
     ? {
         project_id: {
@@ -180,55 +191,58 @@ export async function cancelActiveTurn(sessionId: string) {
 }
 
 export async function compactSession(sessionId: string) {
-  return getTalosClient().sessions.compact(sessionId);
+  const response = await getTalosClient().sessions.compact(sessionId);
+  return response.session;
 }
 
 export async function clearSession(sessionId: string) {
-  return getTalosClient().sessions.clear(sessionId);
+  const response = await getTalosClient().sessions.clear(sessionId);
+  return response.session;
 }
 
 export async function getActiveTurn(sessionId: string) {
-  return getTalosClient().sessions.activeTurn(sessionId);
+  const response = await getTalosClient().sessions.activeTurn(sessionId);
+  return response.active_turn;
 }
 
 export async function getSessionHistory(sessionId: string) {
-  return getTalosClient().sessions.history(sessionId);
+  const response = await getTalosClient().sessions.history(sessionId);
+  return response.history;
 }
 
 export async function recoverSessionLiveTail(sessionId: string, afterEventId?: string) {
-  return getTalosClient().sessions.recover(sessionId, afterEventId);
+  const response = await getTalosClient().sessions.recover(sessionId, afterEventId);
+  return response.snapshot;
 }
 
 export async function sendTimelineEvents(
-  sessionId: string,
-  request: TalosMessageRequest,
+  request: StartTurnRequest,
   onEvent: (event: TimelineEventEnvelope) => void,
   signal?: AbortSignal,
   onAcceptedMessageId?: (messageId: string) => void,
 ) {
   const client = getTalosClient();
-  const ack = await client.turns.start(sessionId, request);
+  const ack = await client.turns.start(request);
   if (!ack.message_id) {
     throw new Error(`Message ack did not include message_id: ${ack.turn_id}`);
   }
   onAcceptedMessageId?.(ack.message_id);
-  return client.turns.eventsForMessage(sessionId, ack.message_id, onEvent, signal);
+  return client.turns.eventsForMessage(request.session_id, ack.message_id, onEvent, signal);
 }
 
 export async function retryTimelineEvents(
-  sessionId: string,
-  request: TalosMessageRetryRequest,
+  request: RetryTurnRequest,
   onEvent: (event: TimelineEventEnvelope) => void,
   signal?: AbortSignal,
   onAcceptedMessageId?: (messageId: string) => void,
 ) {
   const client = getTalosClient();
-  const ack = await client.turns.retry(sessionId, request);
+  const ack = await client.turns.retry(request);
   if (!ack.message_id) {
     throw new Error(`Retry ack did not include message_id: ${ack.turn_id}`);
   }
   onAcceptedMessageId?.(ack.message_id);
-  return client.turns.eventsForMessage(sessionId, ack.message_id, onEvent, signal);
+  return client.turns.eventsForMessage(request.session_id, ack.message_id, onEvent, signal);
 }
 
 export async function subscribeTimelineEventsForMessage(
@@ -247,7 +261,7 @@ export async function subscribeTimelineEventsForMessage(
   );
 }
 
-export function belongsToProject(session: TalosSession, project?: ProjectRecord) {
+export function belongsToProject(session: SessionInfo, project?: ProjectView) {
   if (!project || isUnboundProject(project.id)) {
     return !session.project_id;
   }
@@ -255,7 +269,7 @@ export function belongsToProject(session: TalosSession, project?: ProjectRecord)
 }
 
 export type ChatApiModel = ModelInfo;
-export type ChatApiSession = TalosSession;
+export type ChatApiSession = SessionInfo;
 export type ChatApiActiveTurn = Awaited<ReturnType<typeof getActiveTurn>>;
 export type ChatApiSessionHistory = TalosSessionHistorySnapshot;
-export type ChatApiSessionDetail = TalosSession;
+export type ChatApiSessionDetail = SessionInfo;

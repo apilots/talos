@@ -455,7 +455,7 @@ function itemStarted(
       phase,
       status: "running",
       title: kind === "tool_call" ? "Shell" : null,
-      started_at_ms: 1n,
+      started_at_ms: 1,
       completed_at_ms: null,
       content: kind === "tool_call"
         ? {
@@ -513,7 +513,7 @@ function itemCompleted(itemId: string, sequence: number): TimelineEventEnvelope 
     turn_id: "turn-1",
     item_id: itemId,
     status: "completed",
-    completed_at_ms: BigInt(sequence),
+    completed_at_ms: sequence,
     final_content: null,
   }, sequence);
 }

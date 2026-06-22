@@ -11,6 +11,7 @@ talos-types = { path = "../../common/types" }
 talos-auth = { path = "../../infra/auth" }
 talos-config = { workspace = true }
 talos-llm-provider = { workspace = true }
+talos-project-store = { workspace = true }
 talos-session-store = { path = "../../orchestration/session-store" }
 talos-app-protocol = { workspace = true }
 talos-skills = { workspace = true }

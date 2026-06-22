@@ -115,18 +115,18 @@ impl SessionStore for MockSessionStore {
         &self,
         session_id: &str,
         patch: &SessionPatch,
-    ) -> TalosResult<SessionPatchAck> {
+    ) -> TalosResult<SessionPatchResponse> {
         let _ = session_id;
         let _ = patch.agent_model()?;
-        Ok(SessionPatchAck { success: true })
+        Ok(SessionPatchResponse { success: true })
     }
 
-    async fn reset_session_record(&self, _session_id: &str) -> TalosResult<SessionPatchAck> {
-        Ok(SessionPatchAck { success: true })
+    async fn reset_session_record(&self, _session_id: &str) -> TalosResult<SessionPatchResponse> {
+        Ok(SessionPatchResponse { success: true })
     }
 
-    async fn delete_session_record(&self, _session_id: &str) -> TalosResult<SessionPatchAck> {
-        Ok(SessionPatchAck { success: true })
+    async fn delete_session_record(&self, _session_id: &str) -> TalosResult<SessionPatchResponse> {
+        Ok(SessionPatchResponse { success: true })
     }
 
     async fn update_session_title(&self, _session_id: &str, _title: &str) -> TalosResult<()> {
@@ -140,57 +140,6 @@ impl SessionStore for MockSessionStore {
         _usage: &TalosUsage,
         _model: Option<&str>,
     ) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn list_projects(&self) -> TalosResult<Vec<ProjectRecord>> {
-        Ok(Vec::new())
-    }
-
-    async fn get_project(&self, _project_id: &str) -> TalosResult<Option<ProjectRecord>> {
-        Ok(None)
-    }
-
-    async fn create_project(&self, name: &str, directory: &PathBuf) -> TalosResult<ProjectRecord> {
-        Ok(ProjectRecord {
-            project_id: "project-mock".to_string(),
-            name: name.to_string(),
-            user_id: String::new(),
-            directory: directory.clone(),
-            status: ProjectStatus::default(),
-            created_at: 0,
-            updated_at: 0,
-            session_count: 0,
-        })
-    }
-
-    async fn create_project_for_owner(
-        &self,
-        name: &str,
-        directory: &PathBuf,
-        user_id: &str,
-    ) -> TalosResult<ProjectRecord> {
-        Ok(ProjectRecord {
-            project_id: "project-mock".to_string(),
-            name: name.to_string(),
-            user_id: user_id.to_string(),
-            directory: directory.clone(),
-            status: ProjectStatus::default(),
-            created_at: 0,
-            updated_at: 0,
-            session_count: 0,
-        })
-    }
-
-    async fn patch_project(
-        &self,
-        _project_id: &str,
-        _patch: &ProjectPatch,
-    ) -> TalosResult<Option<ProjectRecord>> {
-        Ok(None)
-    }
-
-    async fn delete_project(&self, _project_id: &str) -> TalosResult<()> {
         Ok(())
     }
 }

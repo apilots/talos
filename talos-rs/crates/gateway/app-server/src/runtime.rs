@@ -11,13 +11,14 @@ use talos_app_protocol::jsonrpc::{
     JsonRpcResponse, RequestId,
 };
 use talos_app_protocol::requests::{
-    ActorCredentials, ClientMethod, ClientRequest, ClientRequestParams, EventSubscribeResponse,
-    EventUnsubscribeResponse, InitializeResponse, ServerInfo,
+    ActorCredentials, ClientMethod, ClientRequest, ClientRequestParams, InitializeResponse,
+    ServerInfo,
 };
 use talos_app_protocol::version::ProtocolVersion;
 use talos_application_service::{
     Actor, TimelineSubscriptionCloseReason, TimelineSubscriptionMessage,
 };
+use talos_types::{EventUnsubscribeResponse, SubscribeTimelineResponse};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -266,7 +267,7 @@ async fn handle_request(
             match app.subscribe_timeline_events(&actor, params).await {
                 Ok(source) => {
                     let subscription_id = format!("sub_{}", Uuid::new_v4().simple());
-                    let response = EventSubscribeResponse {
+                    let response = SubscribeTimelineResponse {
                         subscription_id: subscription_id.clone(),
                         session_id: source.session_id.clone(),
                         high_water_mark_event_id: source
@@ -574,7 +575,7 @@ mod tests {
     use async_trait::async_trait;
     use serde_json::json;
     use talos_app_protocol::errors::{NOT_INITIALIZED, PARSE_ERROR, UNAUTHORIZED};
-    use talos_app_protocol::requests::{ActorCredentials, EventSubscribeParams};
+    use talos_app_protocol::requests::ActorCredentials;
     use talos_application_service::{
         Actor, EventReplay, TimelineSubscriptionCloseReason, TimelineSubscriptionClosed,
         TimelineSubscriptionMessage,
@@ -583,6 +584,7 @@ mod tests {
         TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType,
         TalosTurnStartedEvent, TimelineEventEnvelope,
     };
+    use talos_types::SubscribeTimelineRequest;
     use tokio::io::{duplex, split, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     use tokio::sync::{broadcast, mpsc};
 
@@ -631,7 +633,7 @@ mod tests {
         async fn subscribe_timeline_events(
             &self,
             _actor: &Actor,
-            params: EventSubscribeParams,
+            params: SubscribeTimelineRequest,
         ) -> ProtocolResult<SubscriptionSource> {
             let live_tx = self.live_tx.lock().expect("live tx lock").as_ref().cloned();
             match live_tx {
@@ -757,7 +759,7 @@ mod tests {
         assert!(messages[1]["result"]["ok"].as_bool().unwrap_or(false));
         assert_eq!(
             app.dispatched.lock().expect("dispatch lock").as_slice(),
-            &["session.read"]
+            &["session.get"]
         );
     }
 
@@ -851,7 +853,7 @@ mod tests {
         assert!(messages[1]["result"]["ok"].as_bool().unwrap_or(false));
         assert_eq!(
             app.dispatched.lock().expect("dispatch lock").as_slice(),
-            &["session.read"]
+            &["session.get"]
         );
         assert_eq!(
             app.dispatched_actors
@@ -1223,7 +1225,7 @@ mod tests {
             json!({
                 "jsonrpc": "2.0",
                 "id": 2,
-                "method": "session.read",
+                "method": "session.get",
                 "params": { "session_id": "s1" }
             })
         )
@@ -1235,7 +1237,7 @@ mod tests {
             json!({
                 "jsonrpc": "2.0",
                 "id": 2,
-                "method": "session.read",
+                "method": "session.get",
                 "actor_credentials": {
                     "credential": {
                         "type": "existing_session_token",
@@ -1268,10 +1270,8 @@ mod tests {
                 "method": "turn.start",
                 "params": {
                     "session_id": "s1",
-                    "request": {
-                        "input": [{ "type": "text", "text": "hello" }],
-                        "workspace_id": null
-                    },
+                    "input": [{ "type": "text", "text": "hello" }],
+                    "workspace_id": null,
                     "client_request_id": "request-1"
                 }
             })

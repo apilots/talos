@@ -1,12 +1,12 @@
-use talos_sdk::{TalosContentItem, TalosJsonValue};
+use talos_sdk::{TalosContentItem, ToolArguments};
 
 use crate::types::{ChatBlock, ChatRole, ToolCallStatus};
 use crate::TuiApp;
 
 impl TuiApp {
     fn should_replace_tool_input(
-        existing: Option<&TalosJsonValue>,
-        incoming: &TalosJsonValue,
+        existing: Option<&ToolArguments>,
+        incoming: &ToolArguments,
     ) -> bool {
         let incoming_has_detail = match incoming.as_inner() {
             serde_json::Value::Null => false,
@@ -59,7 +59,7 @@ impl TuiApp {
         &mut self,
         call_id: String,
         tool_name: String,
-        tool_input: impl Into<TalosJsonValue>,
+        tool_input: impl Into<ToolArguments>,
         iteration: u64,
         item_index: u64,
         timing_ms: Option<u64>,

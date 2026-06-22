@@ -1,8 +1,8 @@
 use talos_sdk::{
-    SessionHistorySnapshot, TalosContentItem, TalosJsonValue, TalosTimelineContent,
-    TalosTimelineDelta, TalosTimelineEventPayload, TalosTimelineItem, TalosTimelineItemKind,
-    TalosTimelineItemStatus, TalosTimelinePhase, TalosToolProgressKind, TimelineEventEnvelope,
-    TimelineRecoverySnapshot,
+    SessionHistorySnapshot, TalosContentItem, TalosTimelineContent, TalosTimelineDelta,
+    TalosTimelineEventPayload, TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus,
+    TalosTimelinePhase, TalosToolProgressKind, TimelineEventEnvelope, TimelineRecoveryResponse,
+    ToolArguments,
 };
 
 use crate::types::{ChatRole, ToolCallStatus};
@@ -92,7 +92,8 @@ impl TuiApp {
         }
     }
 
-    pub(crate) fn replay_recovery_snapshot(&mut self, snapshot: TimelineRecoverySnapshot) -> usize {
+    pub(crate) fn replay_recovery_snapshot(&mut self, response: TimelineRecoveryResponse) -> usize {
+        let snapshot = response.snapshot;
         let mut events = snapshot.replay.events;
         events.sort_by(|a, b| a.event_seq.cmp(&b.event_seq));
         let count = events.len();
@@ -402,7 +403,14 @@ impl TuiApp {
                     call_id.clone(),
                     format!("running: {}", crate::utils::display_tool_name(&tool_name)),
                 );
-                self.push_tool_call_block(call_id.clone(), tool_name, arguments, 0, 0, None);
+                self.push_tool_call_block(
+                    call_id.clone(),
+                    tool_name,
+                    ToolArguments::from(serde_json::Value::from(arguments)),
+                    0,
+                    0,
+                    None,
+                );
                 self.update_tool_call_status(&call_id, ToolCallStatus::PendingDynamicInput);
             }
             TalosTimelineDelta::Status { status } => {
@@ -589,10 +597,10 @@ impl TuiApp {
     }
 }
 
-fn parse_tool_arguments(arguments: &str) -> TalosJsonValue {
+fn parse_tool_arguments(arguments: &str) -> ToolArguments {
     serde_json::from_str::<serde_json::Value>(arguments)
-        .map(TalosJsonValue::from)
-        .unwrap_or_else(|_| TalosJsonValue::from(serde_json::Value::String(arguments.to_string())))
+        .map(ToolArguments::from)
+        .unwrap_or_else(|_| ToolArguments::from(serde_json::Value::String(arguments.to_string())))
 }
 
 fn timeline_tool_status(status: TalosTimelineItemStatus) -> ToolCallStatus {

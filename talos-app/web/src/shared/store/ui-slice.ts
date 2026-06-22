@@ -1,5 +1,5 @@
-import { createDefaultProjects, getProjectRecordKey } from "@/shared/types/domain";
-import type { ProjectRecord, ThreadFilter } from "@/shared/types/ui";
+import { createDefaultProjects, getProjectViewKey } from "@/shared/types/domain";
+import type { ProjectView, ThreadFilter } from "@/shared/types/ui";
 
 export type UiTheme = "dark" | "light";
 export type Locale = "en" | "zh-CN";
@@ -10,30 +10,30 @@ export interface UiSlice {
   sidebarOpen: boolean;
   threadFilter: ThreadFilter;
   activeProjectId: string;
-  projects: ProjectRecord[];
+  projects: ProjectView[];
   setUiTheme: (theme: UiTheme) => void;
   setLocale: (locale: Locale) => void;
   setSidebarOpen: (open: boolean) => void;
   setThreadFilter: (filter: ThreadFilter) => void;
   setActiveProjectId: (projectId: string) => void;
-  addProject: (project: ProjectRecord) => void;
-  mergeProjects: (projects: ProjectRecord[], preferredProjectId?: string) => void;
-  replaceProjects: (projects: ProjectRecord[], preferredProjectId?: string) => void;
+  addProject: (project: ProjectView) => void;
+  mergeProjects: (projects: ProjectView[], preferredProjectId?: string) => void;
+  replaceProjects: (projects: ProjectView[], preferredProjectId?: string) => void;
 }
 
 export type UiSliceSetter = (updater: (state: UiSlice) => Partial<UiSlice>) => void;
 
 export const defaultProjects = createDefaultProjects();
 
-export function normalizeProjects(projects?: ProjectRecord[]) {
-  const normalized = new Map<string, ProjectRecord>();
+export function normalizeProjects(projects?: ProjectView[]) {
+  const normalized = new Map<string, ProjectView>();
 
   for (const project of defaultProjects) {
-    normalized.set(getProjectRecordKey(project), project);
+    normalized.set(getProjectViewKey(project), project);
   }
 
   for (const project of projects ?? []) {
-    const key = getProjectRecordKey(project);
+    const key = getProjectViewKey(project);
     const current = normalized.get(key);
     if (!current) {
       normalized.set(key, project);
@@ -70,7 +70,7 @@ export function mergeById<T extends { id: string }>(defaults: T[], persisted?: T
 
 export function createUiSlice(set: UiSliceSetter): UiSlice {
   function resolveActiveProjectId(
-    projects: ProjectRecord[],
+    projects: ProjectView[],
     currentProjectId: string,
     preferredProjectId?: string,
   ) {

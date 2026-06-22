@@ -14,7 +14,9 @@ const llmConfigWriteParams = (params: unknown) =>
   hasString(params, "path") &&
   isRecord(params) &&
   params.path === "llm" &&
-  hasString(params, "value");
+  isRecord(params.value) &&
+  params.value.type === "llm" &&
+  isRecord(params.value.value);
 const authSessionStoreParams = (params: unknown) =>
   isRecord(params) &&
   isRecord(params.session) &&
@@ -94,7 +96,6 @@ const pluginUpdateParams = (params: unknown) =>
   ["reject_local_changes", "replace_local_changes"].includes(String(params.conflict_policy));
 
 const DESKTOP_RENDERER_METHOD_GUARDS = {
-  "app.list": emptyParams,
   "auth.login.cancel": authLoginSessionParams,
   "auth.login.start": authLoginStartParams,
   "auth.login.status": authLoginSessionParams,
@@ -102,12 +103,9 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "auth.session.clear": emptyParams,
   "auth.session.read": emptyParams,
   "auth.session.store": authSessionStoreParams,
-  "config.read": emptyParams,
-  "config.value.write": llmConfigWriteParams,
-  "config.batch.write": (params) =>
-    isRecord(params) &&
-    Array.isArray(params.entries) &&
-    params.entries.every(llmConfigWriteParams),
+  "config.get": emptyParams,
+  "config.update": llmConfigWriteParams,
+  "config.delete": (params) => hasString(params, "path"),
   "config.reload": emptyParams,
   "event.subscribe": sessionParams,
   "event.unsubscribe": (params) => hasString(params, "subscription_id"),
@@ -131,7 +129,7 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "session.history": sessionParams,
   "session.list": emptyParams,
   "session.patch": sessionParams,
-  "session.read": sessionParams,
+  "session.get": sessionParams,
   "session.recover": sessionParams,
   "plugin.source.list": emptyParams,
   "plugin.source.add": pluginSourceAddParams,
@@ -163,7 +161,6 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
     hasString(params, "tool_name") &&
     hasString(params, "output") &&
     hasBoolean(params, "success"),
-  "tool.list": emptyParams,
   "turn.interrupt": sessionParams,
   "turn.retry": (params) =>
     hasString(params, "session_id") &&

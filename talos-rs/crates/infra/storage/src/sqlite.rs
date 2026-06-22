@@ -454,6 +454,26 @@ impl Storage for SqliteStorage {
         self.execute(create_active_turns, &[]).await?;
         debug!("Active turns table created/verified");
 
+        if self.table_exists("message_idempotency_keys").await? {
+            let idempotency_columns = self
+                .query("PRAGMA table_info(message_idempotency_keys)", &[])
+                .await?;
+            let mut existing = std::collections::HashSet::new();
+            for row in idempotency_columns {
+                if let Some(name) = row.get_string("name") {
+                    existing.insert(name);
+                }
+            }
+            if existing.contains("ack_json") && !existing.contains("result_json") {
+                info!("Renaming idempotency ack_json column to result_json");
+                self.execute(
+                    "ALTER TABLE message_idempotency_keys RENAME COLUMN ack_json TO result_json",
+                    &[],
+                )
+                .await?;
+            }
+        }
+
         let create_message_idempotency_keys = r#"
             CREATE TABLE IF NOT EXISTS message_idempotency_keys (
                 session_id TEXT NOT NULL,
@@ -462,7 +482,7 @@ impl Storage for SqliteStorage {
                 turn_id TEXT NOT NULL,
                 message_id TEXT,
                 status TEXT NOT NULL,
-                ack_json TEXT,
+                result_json TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 expires_at INTEGER,

@@ -159,7 +159,7 @@ pub struct ResumeToolCall {
     pub item_id: Option<String>,
     pub call_id: String,
     pub tool_name: String,
-    pub arguments: TalosJsonValue,
+    pub arguments: DynamicToolArguments,
 }
 
 #[derive(Debug, Clone)]

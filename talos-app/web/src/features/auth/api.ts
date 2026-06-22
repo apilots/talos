@@ -24,7 +24,8 @@ export async function logoutUser(): Promise<void> {
 }
 
 export async function getCurrentUser(): Promise<UserDto> {
-  return getTalosClient().user.current();
+  const response = await getTalosClient().user.current();
+  return response.user;
 }
 
 export async function getCurrentUserWithToken(accessToken: string): Promise<UserDto> {
@@ -33,7 +34,7 @@ export async function getCurrentUserWithToken(accessToken: string): Promise<User
     if (!bridge) {
       throw new Error("Desktop runtime bridge is not available.");
     }
-    return bridge.invoke<UserDto>(
+    const response = await bridge.invoke<AppProtocol.UserCurrentResponse>(
       "user.current",
       {},
       {
@@ -45,6 +46,7 @@ export async function getCurrentUserWithToken(accessToken: string): Promise<User
         },
       },
     );
+    return response.user;
   }
 
   const { serverUrl } = getConnectionSettings();
@@ -57,7 +59,8 @@ export async function getCurrentUserWithToken(accessToken: string): Promise<User
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText}`);
   }
-  return response.json() as Promise<UserDto>;
+  const payload = await response.json() as AppProtocol.UserCurrentResponse;
+  return payload.user;
 }
 
 export async function getGatewayHealth(): Promise<HealthResponse> {

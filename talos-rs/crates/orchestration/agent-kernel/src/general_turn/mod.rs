@@ -20,9 +20,9 @@ use talos_llm_provider::{
     ModelBlockKind, ModelBlockStreamEvent, ModelSpeed, ReasoningEffort, ToolChoice, ToolDefinition,
 };
 use talos_memory::{
-    strip_json_fences, Memory, MemoryGetResult, MemorySearchResponse, MemoryStore, RecordHeader,
-    RetrievedMemoryItem, SessionMemorySummary, SessionPromptContextConfig, SummaryRecord,
-    TalosMessageRole, TalosTurn, ToolCallRecord,
+    memory_search_response_into_retrieved_items, strip_json_fences, Memory, MemoryGetResult,
+    MemorySearchResponse, MemoryStore, RecordHeader, RetrievedMemoryItem, SessionMemorySummary,
+    SessionPromptContextConfig, SummaryRecord, TalosMessageRole, TalosTurn, ToolCallRecord,
 };
 use talos_prompt::{
     render_prompt_assembly, CompactionTrimUnitKind, ContinuityAnswerMode, PromptBuildConfig,
@@ -34,7 +34,7 @@ use talos_tools::{
     ToolDefinitionProvider, ToolDispatchOutcome, ToolExecutorPort, ToolOutputPayload, ToolPending,
 };
 use talos_types::talos::{
-    StopReason as TalosApiStopReason, TalosContentItem, TalosJsonValue, TalosOutputItem,
+    DynamicToolArguments, StopReason as TalosApiStopReason, TalosContentItem, TalosOutputItem,
     TalosUsage, TurnExecutionMetrics,
 };
 use tokio::sync::mpsc;

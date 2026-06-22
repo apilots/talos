@@ -198,7 +198,7 @@
 | **health/** | 健康检查 | `core`, `meta/monitor` |
 
 **v1 对外 API 契约（Session-first）**：
-- 对外仅暴露 Session 视角：`/v1/sessions` + `/v1/sessions/{id}/messages`
+- 对外仅暴露 Session/Turn 视角：`/v1/sessions` + `/v1/turns/start`
 - 不暴露 `agent` / `run` 概念
 - 不提供 `/v1/messages*` 与 `/v1/responses*` 双轨入口
 - 请求/响应采用统一 `input[]/output[]` item 结构，支持 SSE 事件流

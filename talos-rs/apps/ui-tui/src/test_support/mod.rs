@@ -11,12 +11,12 @@ pub(crate) use std::path::PathBuf;
 use std::sync::Mutex;
 use talos_error::TalosError;
 pub(crate) use talos_sdk::{
-    SessionHistorySnapshot, SkillSuggestion, StopReason, TalosContentItem, TalosInputItem,
-    TalosMessageRequest, TalosTimelineContent, TalosTimelineDelta, TalosTimelineEvent,
+    SessionHistorySnapshot, SkillSuggestion, StartTurnRequest, StopReason, TalosContentItem,
+    TalosInputItem, TalosTimelineContent, TalosTimelineDelta, TalosTimelineEvent,
     TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItem, TalosTimelineItemKind,
     TalosTimelineItemStatus, TalosTimelinePhase, TimelineActiveTurnSnapshot,
     TimelineActiveTurnStatus, TimelineCursorStatus, TimelineEventEnvelope,
-    TimelineRecoverySnapshot, TimelineReplay, TurnExecutionMetrics,
+    TimelineRecoveryResponse, TimelineRecoverySnapshot, TimelineReplay, TurnExecutionMetrics,
 };
 
 #[derive(Default)]
@@ -40,7 +40,7 @@ pub(crate) struct MockGatewayState {
     pub(crate) reconnect_calls: usize,
     pub(crate) reconnect_since_event_ids: Vec<Option<String>>,
     pub(crate) reconnect_events: Vec<TimelineEventEnvelope>,
-    pub(crate) sent_requests: Vec<TalosMessageRequest>,
+    pub(crate) sent_requests: Vec<StartTurnRequest>,
 }
 
 pub(crate) struct MockGatewayClient {
@@ -59,6 +59,25 @@ pub(crate) fn mock_model_info(id: &str, context_window: u32) -> ModelInfo {
         input: vec![talos_types::ModelInputKind::Text],
         cost: talos_types::ModelCostConfig::default(),
         compat: talos_types::ModelCompatConfig::default(),
+    }
+}
+
+impl MockGatewayState {
+    fn session_info(&self, message_count: u64) -> SessionInfo {
+        SessionInfo {
+            id: self.session_id.clone(),
+            title: "Untitled Session".to_string(),
+            user_id: "test-user".to_string(),
+            source_type: talos_types::talos::TalosSourceType::Http,
+            provider: talos_types::talos::TalosProvider::Sdk,
+            model: self.current_model.clone(),
+            created_at: 1,
+            last_activity: 2,
+            message_count,
+            usage: self.session_usage.clone(),
+            project_id: None,
+            current_directory: self.current_project_root.clone(),
+        }
     }
 }
 
@@ -567,46 +586,13 @@ impl GatewayClient for MockGatewayClient {
         Ok(Vec::new())
     }
 
-    async fn list_sessions(&self) -> TalosResult<Vec<TalosSession>> {
+    async fn list_sessions(&self) -> TalosResult<Vec<SessionInfo>> {
         Ok(vec![])
     }
 
-    async fn get_session(&self, _session_id: &str) -> TalosResult<TalosSession> {
+    async fn get_session(&self, _session_id: &str) -> TalosResult<SessionInfo> {
         let state = self.state.lock().unwrap();
-        Ok(TalosSession {
-            title: "Untitled Session".to_string(),
-            user_id: "test-user".to_string(),
-            context: talos_types::SessionContext {
-                session_id: state.session_id.clone(),
-                workspace_id: None,
-                source_type: talos_types::talos::TalosSourceType::Http,
-                provider: talos_types::talos::TalosProvider::Sdk,
-                user_id: "test-user".to_string(),
-                message_id: "message-1".to_string(),
-                trace_id: "trace-1".to_string(),
-                channel_id: Some("terminal".to_string()),
-                thread_id: None,
-                project_id: None,
-                current_directory: state.current_project_root.clone(),
-                project_root: None,
-                environment: None,
-            },
-            conf: talos_sdk::SessionConf::default(),
-            project_id: None,
-            current_directory: state.current_project_root.clone(),
-            config: {
-                let mut config = talos_types::TalosConfig::default();
-                config.agent.model = state.current_model.clone();
-                config.llm.model = state.current_model.clone();
-                config
-            },
-            state: talos_types::SessionState {
-                created_at: 1,
-                last_activity: 2,
-                message_count: 3,
-                usage: state.session_usage.clone(),
-            },
-        })
+        Ok(state.session_info(3))
     }
 
     async fn close_session(&self, _session_id: &str) -> TalosResult<()> {
@@ -652,130 +638,30 @@ impl GatewayClient for MockGatewayClient {
         &self,
         _session_id: &str,
         model: &str,
-    ) -> TalosResult<TalosSession> {
+    ) -> TalosResult<SessionInfo> {
         let mut state = self.state.lock().unwrap();
         state.current_model = model.to_string();
         state.updated_model = Some(model.to_string());
-        Ok(TalosSession {
-            title: "Untitled Session".to_string(),
-            user_id: "test-user".to_string(),
-            context: talos_types::SessionContext {
-                session_id: state.session_id.clone(),
-                workspace_id: None,
-                source_type: talos_types::talos::TalosSourceType::Http,
-                provider: talos_types::talos::TalosProvider::Sdk,
-                user_id: "test-user".to_string(),
-                message_id: "message-1".to_string(),
-                trace_id: "trace-1".to_string(),
-                channel_id: Some("terminal".to_string()),
-                thread_id: None,
-                project_id: None,
-                current_directory: state.current_project_root.clone(),
-                project_root: None,
-                environment: None,
-            },
-            conf: talos_sdk::SessionConf::default(),
-            project_id: None,
-            current_directory: state.current_project_root.clone(),
-            config: {
-                let mut config = talos_types::TalosConfig::default();
-                config.agent.model = state.current_model.clone();
-                config.llm.model = state.current_model.clone();
-                config
-            },
-            state: talos_types::SessionState {
-                created_at: 1,
-                last_activity: 2,
-                message_count: 3,
-                usage: state.session_usage.clone(),
-            },
-        })
+        Ok(state.session_info(3))
     }
 
-    async fn compact_session(&self, _session_id: &str) -> TalosResult<TalosSession> {
+    async fn compact_session(&self, _session_id: &str) -> TalosResult<SessionInfo> {
         let mut state = self.state.lock().unwrap();
         state.compact_calls = state.compact_calls.saturating_add(1);
         state.session_usage.total_tokens = state.session_usage.total_tokens.saturating_add(42);
-        Ok(TalosSession {
-            title: "Untitled Session".to_string(),
-            user_id: "test-user".to_string(),
-            context: talos_types::SessionContext {
-                session_id: state.session_id.clone(),
-                workspace_id: None,
-                source_type: talos_types::talos::TalosSourceType::Http,
-                provider: talos_types::talos::TalosProvider::Sdk,
-                user_id: "test-user".to_string(),
-                message_id: "message-1".to_string(),
-                trace_id: "trace-1".to_string(),
-                channel_id: Some("terminal".to_string()),
-                thread_id: None,
-                project_id: None,
-                current_directory: state.current_project_root.clone(),
-                project_root: None,
-                environment: None,
-            },
-            conf: talos_sdk::SessionConf::default(),
-            project_id: None,
-            current_directory: state.current_project_root.clone(),
-            config: {
-                let mut config = talos_types::TalosConfig::default();
-                config.agent.model = state.current_model.clone();
-                config.llm.model = state.current_model.clone();
-                config
-            },
-            state: talos_types::SessionState {
-                created_at: 1,
-                last_activity: 2,
-                message_count: 3,
-                usage: state.session_usage.clone(),
-            },
-        })
+        Ok(state.session_info(3))
     }
 
-    async fn clear_session(&self, _session_id: &str) -> TalosResult<TalosSession> {
+    async fn clear_session(&self, _session_id: &str) -> TalosResult<SessionInfo> {
         let mut state = self.state.lock().unwrap();
         state.clear_calls = state.clear_calls.saturating_add(1);
         state.session_usage = talos_types::talos::TalosUsage::default();
-        Ok(TalosSession {
-            title: "Untitled Session".to_string(),
-            user_id: "test-user".to_string(),
-            context: talos_types::SessionContext {
-                session_id: state.session_id.clone(),
-                workspace_id: None,
-                source_type: talos_types::talos::TalosSourceType::Http,
-                provider: talos_types::talos::TalosProvider::Sdk,
-                user_id: "test-user".to_string(),
-                message_id: "message-1".to_string(),
-                trace_id: "trace-1".to_string(),
-                channel_id: Some("terminal".to_string()),
-                thread_id: None,
-                project_id: None,
-                current_directory: state.current_project_root.clone(),
-                project_root: None,
-                environment: None,
-            },
-            conf: talos_sdk::SessionConf::default(),
-            project_id: None,
-            current_directory: state.current_project_root.clone(),
-            config: {
-                let mut config = talos_types::TalosConfig::default();
-                config.agent.model = state.current_model.clone();
-                config.llm.model = state.current_model.clone();
-                config
-            },
-            state: talos_types::SessionState {
-                created_at: 1,
-                last_activity: 2,
-                message_count: 0,
-                usage: state.session_usage.clone(),
-            },
-        })
+        Ok(state.session_info(0))
     }
 
     async fn send_timeline_events(
         &self,
-        session_id: &str,
-        request: &TalosMessageRequest,
+        request: StartTurnRequest,
     ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>> {
         let (delay, should_fail) = {
             let mut state = self.state.lock().unwrap();
@@ -806,6 +692,7 @@ impl GatewayClient for MockGatewayClient {
                 _ => None,
             })
             .unwrap_or_else(|| "unknown".to_string());
+        let session_id = request.session_id.clone();
 
         let message_id = {
             let mut state = self.state.lock().unwrap();
@@ -911,22 +798,24 @@ impl GatewayClient for MockGatewayClient {
         &self,
         _session_id: &str,
         _after_event_id: Option<String>,
-    ) -> TalosResult<TimelineRecoverySnapshot> {
-        Ok(TimelineRecoverySnapshot {
-            replay: TimelineReplay {
-                events: Vec::new(),
-                high_water_mark_event_id: None,
-                last_replay_seq: 0,
-                cursor_status: TimelineCursorStatus::FromBeginning,
-            },
-            active_turn: TimelineActiveTurnSnapshot {
-                session_id: _session_id.to_string(),
-                status: TimelineActiveTurnStatus::Completed,
-                turn_id: None,
-                message_id: None,
-                last_event_id: None,
-                pending_user_action: None,
-                updated_at: 0,
+    ) -> TalosResult<TimelineRecoveryResponse> {
+        Ok(TimelineRecoveryResponse {
+            snapshot: TimelineRecoverySnapshot {
+                replay: TimelineReplay {
+                    events: Vec::new(),
+                    high_water_mark_event_id: None,
+                    last_replay_seq: 0,
+                    cursor_status: TimelineCursorStatus::FromBeginning,
+                },
+                active_turn: TimelineActiveTurnSnapshot {
+                    session_id: _session_id.to_string(),
+                    status: TimelineActiveTurnStatus::Completed,
+                    turn_id: None,
+                    message_id: None,
+                    last_event_id: None,
+                    pending_user_action: None,
+                    updated_at: 0,
+                },
             },
         })
     }

@@ -548,7 +548,7 @@ fn item_prefix(kind: TalosTimelineItemKind) -> &'static str {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use talos_types::talos::{StopReason, TalosJsonValue, TalosUsage};
+    use talos_types::talos::{StopReason, TalosUsage, ToolArguments};
 
     #[test]
     fn history_messages_reuse_timeline_items() {
@@ -568,7 +568,7 @@ mod tests {
                 TalosOutputItem::ToolCall {
                     call_id: "call-1".to_string(),
                     name: "Read".to_string(),
-                    arguments: TalosJsonValue::from(serde_json::json!({"path": "a"})),
+                    arguments: ToolArguments::from(serde_json::json!({"path": "a"})),
                 },
                 TalosOutputItem::ToolResult {
                     call_id: "call-1".to_string(),

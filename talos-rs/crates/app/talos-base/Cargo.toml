@@ -16,7 +16,7 @@ talos-config = { workspace = true }
 talos-coordinator = { path = "../../orchestration/coordinator" }
 talos-error = { workspace = true }
 talos-app-server = { workspace = true }
-talos-gateway = { workspace = true }
+talos-gateway = { path = "../../gateway/core" }
 talos-gateway-http = { path = "../../gateway/http" }
 talos-llm-anthropic = { workspace = true }
 talos-llm-bailian = { workspace = true }
@@ -24,6 +24,7 @@ talos-llm-openai = { workspace = true }
 talos-llm-provider = { workspace = true }
 talos-logging = { workspace = true }
 talos-router = { path = "../../orchestration/router" }
+talos-project-store = { workspace = true }
 talos-session-store = { path = "../../orchestration/session-store" }
 talos-skills = { workspace = true }
 talos-storage = { workspace = true }

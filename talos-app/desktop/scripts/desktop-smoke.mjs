@@ -118,11 +118,6 @@ try {
     "window.__talosSmokeInvoke('model.list', {}).then((r) => r.models?.length ?? r.data?.length ?? 0)",
     30_000,
   );
-  const toolCount = await waitForEvaluate(
-    cdp,
-    "window.__talosSmokeInvoke('tool.list', {}).then((r) => r.tools?.length ?? r.data?.length ?? 0)",
-    30_000,
-  );
   const account = await waitForEvaluate(
     cdp,
     "window.__talosSmokeInvoke('user.current', {})",
@@ -138,21 +133,14 @@ try {
     "window.__talosSmokeInvoke('skills.suggest', { query: '', limit: 5 }).then((r) => r.data?.length ?? 0)",
     30_000,
   );
-  const appCount = await waitForEvaluate(
-    cdp,
-    "window.__talosSmokeInvoke('app.list', {}).then((r) => r.apps?.length ?? r.data?.length ?? 0)",
-    30_000,
-  );
   const adminVisible = await evaluate(
     cdp,
     "Array.from(document.querySelectorAll('a')).some((a) => (a.textContent || '').toLowerCase().includes('admin') || (a.getAttribute('href') || '').includes('/admin'))",
   );
 
   assert(Number.isInteger(modelCount) && modelCount >= 0, "model.list did not return a model count.");
-  assert(toolCount > 0, "tool.list returned no tools.");
   assert(skillCount > 0, "skills.list returned no discoverable skills.");
   assert(skillSuggestionCount > 0, "skills.suggest returned no discoverable skills.");
-  assert(appCount > 0, "app.list returned no app shells.");
   assert(typeof serverInfo?.auth_enabled === "boolean", `desktop server info did not include auth state: ${JSON.stringify(serverInfo)}`);
   if (serverInfo.auth_enabled) {
     assert(account?.username === smokeUsername, `desktop login did not return the smoke user: ${JSON.stringify(account)}`);

@@ -3,29 +3,28 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
-use base64::Engine;
 use talos_sdk::{
     AppServerClient, MarketplaceSourceInput, PluginDocumentMediaType, PluginDocumentRole,
-    PluginInstallConflictPolicy, PluginInstallRequest, PluginInstallTarget, PluginKind,
-    PluginListRequest, PluginListStatusFilter, PluginReadRequest, PluginSearchRefreshPolicy,
-    PluginSearchRequest, PluginSearchStatusFilter, PluginSourceAddRequest,
-    PluginSourceRefreshRequest, PluginStatus, PluginUninstallRequest, ToolExecuteParams,
+    PluginInstallConflictPolicy, PluginInstallId, PluginInstallRequest, PluginInstallTarget,
+    PluginKind, PluginListRequest, PluginListStatusFilter, PluginReadRequest,
+    PluginSearchRefreshPolicy, PluginSearchRequest, PluginSearchStatusFilter,
+    PluginSourceAddRequest, PluginSourceRefreshRequest, PluginStatus, PluginUninstallRequest,
+    TalosTimelineContent, TalosTimelineEventPayload, TalosTimelineItemKind, TimelineEventEnvelope,
 };
 
 const SERVER_NAME: &str = "playwright";
 const HACKER_NEWS_URL: &str = "https://news.ycombinator.com/news";
-const NAVIGATE_TOOL: &str = "mcp__playwright__browser_navigate";
-const SNAPSHOT_TOOL: &str = "mcp__playwright__browser_snapshot";
-const EVALUATE_TOOL: &str = "mcp__playwright__browser_evaluate";
-const SCREENSHOT_TOOL: &str = "mcp__playwright__browser_take_screenshot";
+const NAVIGATE_TOOL_SUFFIX: &str = "browser_navigate";
+const SCREENSHOT_TOOL_SUFFIX: &str = "browser_take_screenshot";
 
 pub(super) async fn mcp_e2e(client: &mut AppServerClient) -> Result<()> {
-    plugin_lifecycle_e2e(client).await?;
+    let install_id = plugin_lifecycle_e2e(client).await?;
     playwright_mcp_tool_e2e(client).await?;
+    uninstall_mcp_plugin(client, install_id).await?;
     Ok(())
 }
 
-async fn plugin_lifecycle_e2e(client: &mut AppServerClient) -> Result<()> {
+async fn plugin_lifecycle_e2e(client: &mut AppServerClient) -> Result<PluginInstallId> {
     eprintln!("mcp-e2e plugin source add");
     let source_repo = plugin_marketplace_fixture_path()?;
     let added = client
@@ -200,11 +199,16 @@ async fn plugin_lifecycle_e2e(client: &mut AppServerClient) -> Result<()> {
         ));
     }
 
+    Ok(installed.install.id)
+}
+
+async fn uninstall_mcp_plugin(
+    client: &mut AppServerClient,
+    install_id: PluginInstallId,
+) -> Result<()> {
     eprintln!("mcp-e2e plugin uninstall");
     let uninstalled = client
-        .uninstall_plugin(PluginUninstallRequest {
-            install_id: installed.install.id,
-        })
+        .uninstall_plugin(PluginUninstallRequest { install_id })
         .await?;
     if !uninstalled.uninstalled {
         return Err(anyhow!("MCP plugin uninstall did not report success"));
@@ -213,72 +217,44 @@ async fn plugin_lifecycle_e2e(client: &mut AppServerClient) -> Result<()> {
 }
 
 async fn playwright_mcp_tool_e2e(client: &mut AppServerClient) -> Result<()> {
-    eprintln!("mcp-e2e tool.list");
-    let tools = client.list_tools().await?;
-    ensure_tool_registered(&tools, NAVIGATE_TOOL)?;
-    ensure_tool_registered(&tools, SNAPSHOT_TOOL)?;
-    ensure_tool_registered(&tools, EVALUATE_TOOL)?;
-    ensure_tool_registered(&tools, SCREENSHOT_TOOL)?;
-
     let session_id = format!("mcp-e2e-{}", uuid::Uuid::new_v4().simple());
-    let mut called_tools = BTreeSet::new();
+    let screenshot_path = output_dir()?.join("hacker-news.png");
+    let prompt = format!(
+        "You must first call tool 'ToolSearch' exactly once with query Playwright browser_navigate to activate the Playwright MCP browser tools. Then use the Playwright browser MCP tools to navigate to {HACKER_NEWS_URL}, inspect the current top stories, take a screenshot saved exactly at {}, and reply with at least five story titles plus the marker playwright-mcp-called.",
+        screenshot_path.display()
+    );
 
-    eprintln!("mcp-e2e tool.execute navigate");
-    execute_mcp_tool(
-        client,
-        &session_id,
-        NAVIGATE_TOOL,
-        serde_json::json!({ "url": HACKER_NEWS_URL }),
-    )
-    .await?;
-    called_tools.insert(NAVIGATE_TOOL.to_string());
+    eprintln!("mcp-e2e turn.start");
+    client
+        .start_turn(super::start_turn_request(
+            &session_id,
+            &prompt,
+            Some(format!("mcp-e2e-{}", uuid::Uuid::new_v4().simple())),
+        ))
+        .await?;
 
-    eprintln!("mcp-e2e tool.execute snapshot");
-    let snapshot = execute_mcp_tool(client, &session_id, SNAPSHOT_TOOL, serde_json::json!({}))
-        .await
-        .context("read Hacker News page snapshot through MCP")?;
-    called_tools.insert(SNAPSHOT_TOOL.to_string());
-    let snapshot_stories = extract_hacker_news_stories(&snapshot);
-    if snapshot_stories.len() < 5 {
-        return Err(anyhow!(
-            "snapshot should expose at least five Hacker News stories, got {snapshot_stories:?}"
-        ));
+    eprintln!("mcp-e2e event.subscribe");
+    let _subscription = super::subscribe_events(client, &session_id).await?;
+
+    eprintln!("mcp-e2e collect events");
+    let events = collect_until_mcp_artifact(client).await?;
+
+    let called_tools = called_mcp_tools_from_events(&events);
+    ensure_tool_called(&called_tools, NAVIGATE_TOOL_SUFFIX)?;
+    ensure_tool_called(&called_tools, SCREENSHOT_TOOL_SUFFIX)?;
+    let _screenshot_path = wait_for_screenshot_artifact().await?;
+
+    let assistant_text = super::assistant_text_from_events(&events);
+    let mut stories = extract_plain_story_lines(&assistant_text);
+    if stories.len() < 5 {
+        stories = extract_story_lines_from_latest_snapshot()?;
     }
-
-    eprintln!("mcp-e2e tool.execute evaluate");
-    let evaluated = execute_mcp_tool(
-        client,
-        &session_id,
-        EVALUATE_TOOL,
-        serde_json::json!({
-            "function": "() => Array.from(document.querySelectorAll('.athing .titleline a')).slice(0, 10).map((a) => a.textContent || '').filter(Boolean).join('\\n')"
-        }),
-    )
-    .await
-    .context("evaluate Hacker News story titles through MCP")?;
-    called_tools.insert(EVALUATE_TOOL.to_string());
-    let stories = extract_plain_story_lines(&evaluated);
     if stories.len() < 5 {
         return Err(anyhow!(
-            "evaluate should return at least five Hacker News stories, got {stories:?}"
+            "MCP e2e should include at least five Hacker News stories, got {stories:?}"
         ));
     }
 
-    eprintln!("mcp-e2e tool.execute screenshot");
-    let screenshot_result = execute_mcp_tool_response(
-        client,
-        &session_id,
-        SCREENSHOT_TOOL,
-        serde_json::json!({
-            "filename": "hacker-news.png",
-            "fullPage": true
-        }),
-    )
-    .await?;
-    called_tools.insert(SCREENSHOT_TOOL.to_string());
-
-    write_screenshot_from_result(&screenshot_result)?;
-    wait_for_screenshot_artifact().await?;
     write_report_artifact(&stories, &called_tools)?;
     Ok(())
 }
@@ -290,7 +266,6 @@ pub(super) fn prepare_mcp_fixture() -> Result<()> {
     clean_output_file(&output_dir, "hacker-news.png")?;
     clean_output_file(&output_dir, "hacker-news-report.md")?;
     clean_playwright_snapshots(&output_dir)?;
-    clean_file(&std::env::current_dir()?.join("hacker-news.png"))?;
 
     let browser_path = browser_path()?;
     if !browser_path.exists() {
@@ -303,149 +278,123 @@ pub(super) fn prepare_mcp_fixture() -> Result<()> {
     Ok(())
 }
 
-fn ensure_tool_registered(tools: &[serde_json::Value], name: &str) -> Result<()> {
-    if tools
-        .iter()
-        .any(|tool| tool.get("name").and_then(|value| value.as_str()) == Some(name))
-    {
-        return Ok(());
-    }
-    let names = tools
-        .iter()
-        .filter_map(|tool| tool.get("name").and_then(|value| value.as_str()))
-        .collect::<Vec<_>>();
-    Err(anyhow!(
-        "tool.list did not include `{name}`; tools={names:?}"
-    ))
-}
-
-async fn execute_mcp_tool(
+async fn collect_until_mcp_artifact(
     client: &mut AppServerClient,
-    session_id: &str,
-    tool_name: &str,
-    arguments: serde_json::Value,
-) -> Result<String> {
-    let result = execute_mcp_tool_response(client, session_id, tool_name, arguments).await?;
-    extract_success_text(tool_name, result)
-}
-
-async fn execute_mcp_tool_response(
-    client: &mut AppServerClient,
-    session_id: &str,
-    tool_name: &str,
-    arguments: serde_json::Value,
-) -> Result<serde_json::Value> {
-    let response = client
-        .execute_tool(ToolExecuteParams {
-            tool_name: tool_name.to_string(),
-            arguments: arguments.into(),
-            session_id: Some(session_id.to_string()),
-        })
-        .await
-        .with_context(|| format!("execute {tool_name}"))?;
-    let result: serde_json::Value = response.result.into();
-    if response.status != "executed" {
-        return Err(anyhow!(
-            "{tool_name} returned non-executed status: {} {:?}",
-            response.status,
-            result
-        ));
-    }
-    if result.get("status").and_then(|value| value.as_str()) != Some("success") {
-        return Err(anyhow!(
-            "{tool_name} returned non-success result: {:?}",
-            result
-        ));
-    }
-    Ok(result)
-}
-
-fn extract_success_text(_tool_name: &str, result: serde_json::Value) -> Result<String> {
-    let text = result
-        .get("content_items")
-        .and_then(|value| value.as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|item| item.get("text").and_then(|value| value.as_str()))
-        .collect::<Vec<_>>()
-        .join("\n");
-    if text.trim().is_empty() {
-        return Ok(result
-            .get("compact_summary")
-            .and_then(|value| value.as_str())
-            .unwrap_or_default()
-            .to_string());
-    }
-    Ok(text)
-}
-
-fn write_screenshot_from_result(result: &serde_json::Value) -> Result<()> {
-    if let Some(image) = result
-        .get("content_items")
-        .and_then(|value| value.as_array())
-        .into_iter()
-        .flatten()
-        .find_map(|item| {
-            let value = item.get("value")?;
-            if value.get("type").and_then(|item| item.as_str()) == Some("image") {
-                value.get("data_base64").and_then(|item| item.as_str())
-            } else {
-                None
+) -> Result<Vec<TimelineEventEnvelope>> {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(90);
+    let mut events = Vec::new();
+    loop {
+        if observed_required_mcp_artifact(&events)? {
+            return Ok(events);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(anyhow!(
+                "timed out waiting for Playwright MCP screenshot; called={:?}",
+                called_mcp_tools_from_events(&events)
+            ));
+        }
+        match tokio::time::timeout(std::time::Duration::from_secs(5), client.next_event()).await {
+            Ok(Ok(event)) => events.push(event),
+            Ok(Err(error)) => return Err(error.into()),
+            Err(_) => {
+                if observed_required_mcp_artifact(&events)? {
+                    return Ok(events);
+                }
             }
-        })
-    {
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(image)
-            .context("decode screenshot image content")?;
-        let screenshot_path = output_dir()?.join("hacker-news.png");
-        return std::fs::write(&screenshot_path, bytes)
-            .with_context(|| format!("write screenshot artifact {}", screenshot_path.display()));
+        }
     }
-
-    let text = result_text(result);
-    let relative_path = screenshot_relative_path(&text).ok_or_else(|| {
-        anyhow!("screenshot result did not include image content or path: {result:?}")
-    })?;
-    let source_path = std::env::current_dir()?.join(relative_path.trim_start_matches("./"));
-    let screenshot_path = output_dir()?.join("hacker-news.png");
-    std::fs::copy(&source_path, &screenshot_path).with_context(|| {
-        format!(
-            "copy screenshot artifact from {} to {}",
-            source_path.display(),
-            screenshot_path.display()
-        )
-    })?;
-    Ok(())
 }
 
-fn result_text(result: &serde_json::Value) -> String {
-    result
-        .get("content_items")
-        .and_then(|value| value.as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|item| item.get("text").and_then(|value| value.as_str()))
-        .collect::<Vec<_>>()
-        .join("\n")
+fn observed_required_mcp_artifact(events: &[TimelineEventEnvelope]) -> Result<bool> {
+    let called_tools = called_mcp_tools_from_events(events);
+    Ok(called_tools
+        .iter()
+        .any(|tool| tool.ends_with(NAVIGATE_TOOL_SUFFIX))
+        && called_tools
+            .iter()
+            .any(|tool| tool.ends_with(SCREENSHOT_TOOL_SUFFIX))
+        && latest_screenshot_artifact()?.is_some())
 }
 
-fn screenshot_relative_path(text: &str) -> Option<String> {
-    let start = text.find("](")? + "](".len();
-    let rest = &text[start..];
-    let end = rest.find(')')?;
-    Some(rest[..end].to_string())
-}
-
-async fn wait_for_screenshot_artifact() -> Result<()> {
-    let screenshot_path = output_dir()?.join("hacker-news.png");
+async fn wait_for_screenshot_artifact() -> Result<PathBuf> {
     for _ in 0..20 {
-        if screenshot_path.exists() {
-            assert_non_empty_file(&screenshot_path)?;
-            return Ok(());
+        if let Some(path) = latest_screenshot_artifact()? {
+            assert_non_empty_file(&path)?;
+            return Ok(path);
         }
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     }
-    assert_non_empty_file(&screenshot_path)
+    latest_screenshot_artifact()?
+        .ok_or_else(|| anyhow!("expected Playwright screenshot artifact"))
+        .and_then(|path| {
+            assert_non_empty_file(&path)?;
+            Ok(path)
+        })
+}
+
+fn latest_screenshot_artifact() -> Result<Option<PathBuf>> {
+    latest_playwright_artifact("png")
+}
+
+fn latest_snapshot_artifact() -> Result<Option<PathBuf>> {
+    latest_playwright_artifact("yml")
+}
+
+fn latest_playwright_artifact(extension: &str) -> Result<Option<PathBuf>> {
+    let mut artifacts = Vec::new();
+    for entry in std::fs::read_dir(output_dir()?)
+        .with_context(|| "read Playwright MCP output directory".to_string())?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if name.starts_with("page-") && name.ends_with(&format!(".{extension}")) {
+            artifacts.push(path);
+        }
+    }
+    artifacts.sort();
+    Ok(artifacts.pop())
+}
+
+fn called_mcp_tools_from_events(events: &[talos_sdk::TimelineEventEnvelope]) -> BTreeSet<String> {
+    let mut tools = BTreeSet::new();
+    for event in events {
+        match &event.event.payload {
+            TalosTimelineEventPayload::ItemStarted(started)
+                if started.item.kind == TalosTimelineItemKind::ToolCall =>
+            {
+                if let TalosTimelineContent::ToolCall { name, .. } = &started.item.content {
+                    if name.starts_with("mcp__") {
+                        tools.insert(name.clone());
+                    }
+                }
+            }
+            TalosTimelineEventPayload::ItemCompleted(completed) => {
+                if let Some(TalosTimelineContent::ToolCall { name, .. }) = &completed.final_content
+                {
+                    if name.starts_with("mcp__") {
+                        tools.insert(name.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    tools
+}
+
+fn ensure_tool_called(called_tools: &BTreeSet<String>, required_suffix: &str) -> Result<()> {
+    if called_tools
+        .iter()
+        .any(|tool| tool.ends_with(required_suffix))
+    {
+        return Ok(());
+    }
+    Err(anyhow!(
+        "MCP e2e did not call a tool ending with `{required_suffix}`; called={called_tools:?}"
+    ))
 }
 
 fn assert_non_empty_file(path: &Path) -> Result<()> {
@@ -486,8 +435,7 @@ fn write_report_artifact(stories: &[String], called_tools: &BTreeSet<String>) ->
          Source: {HACKER_NEWS_URL}\n\n\
          ## Verified Path\n\n\
          - app-server loaded configured Playwright MCP during runtime startup.\n\
-         - `tool.list` exposed browser MCP tools.\n\
-         - `tool.execute` triggered real MCP browser tool calls through app-server.\n\
+         - `turn.start` triggered real MCP browser tool calls through Agent execution.\n\
          - Playwright wrote `hacker-news.png` under the scenario artifact directory.\n\n\
          ## Tools Called\n\n\
          - {tools}\n\n\
@@ -504,13 +452,11 @@ fn write_report_artifact(stories: &[String], called_tools: &BTreeSet<String>) ->
         .with_context(|| format!("write MCP E2E report {}", report_path.display()))
 }
 
-fn extract_hacker_news_stories(text: &str) -> Vec<String> {
+fn extract_plain_story_lines(text: &str) -> Vec<String> {
     let mut stories = Vec::new();
-    for line in text.lines() {
-        let Some(title) = ranked_story_title(line) else {
-            continue;
-        };
-        if is_story_title(&title) && !stories.contains(&title) {
+    for line in expanded_result_lines(text) {
+        let title = trim_hacker_news_domain(line.trim()).to_string();
+        if is_story_title(&title) && !is_domain_only(&title) && !stories.contains(&title) {
             stories.push(title);
         }
         if stories.len() >= 10 {
@@ -520,10 +466,29 @@ fn extract_hacker_news_stories(text: &str) -> Vec<String> {
     stories
 }
 
-fn extract_plain_story_lines(text: &str) -> Vec<String> {
+fn extract_story_lines_from_latest_snapshot() -> Result<Vec<String>> {
+    let Some(path) = latest_snapshot_artifact()? else {
+        return Ok(Vec::new());
+    };
+    let contents = std::fs::read_to_string(&path)
+        .with_context(|| format!("read snapshot {}", path.display()))?;
+    Ok(extract_story_lines_from_snapshot(&contents))
+}
+
+fn extract_story_lines_from_snapshot(contents: &str) -> Vec<String> {
     let mut stories = Vec::new();
-    for line in expanded_result_lines(text) {
-        let title = trim_hacker_news_domain(line.trim()).to_string();
+    for line in contents.lines() {
+        let Some(index) = line.find(". upvote ") else {
+            continue;
+        };
+        let mut title = &line[index + ". upvote ".len()..];
+        if let Some((value, _)) = title.split_once("\" [ref=") {
+            title = value;
+        } else if let Some((value, _)) = title.split_once("' [ref=") {
+            title = value;
+        }
+        let title = trim_hacker_news_domain(title.trim().trim_matches('"').trim_matches('\''))
+            .replace("''", "'");
         if is_story_title(&title) && !is_domain_only(&title) && !stories.contains(&title) {
             stories.push(title);
         }
@@ -548,14 +513,6 @@ fn expanded_result_lines(text: &str) -> Vec<String> {
         }
     }
     lines
-}
-
-fn ranked_story_title(line: &str) -> Option<String> {
-    let trimmed = line.trim().trim_matches('"');
-    if let Some(start) = trimmed.find(". upvote ") {
-        return Some(trim_hacker_news_domain(&trimmed[start + ". upvote ".len()..]).to_string());
-    }
-    None
 }
 
 fn trim_hacker_news_domain(title: &str) -> &str {
@@ -727,7 +684,7 @@ fn clean_playwright_snapshots(output_dir: &Path) -> Result<()> {
         let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
             continue;
         };
-        if name.starts_with("page-") && name.ends_with(".yml") {
+        if name.starts_with("page-") && (name.ends_with(".yml") || name.ends_with(".png")) {
             clean_file(&path)?;
         }
     }

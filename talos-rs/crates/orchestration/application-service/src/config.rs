@@ -1,8 +1,12 @@
 use std::sync::Arc;
 
-use talos_config::{LlmConfig, LlmConfigRead, LlmConfigService};
+use talos_config::{LlmConfig, LlmConfigService};
 use talos_error::{TalosError, TalosResult};
-use talos_types::{resolve_model_catalog, ModelInfo};
+use talos_types::{
+    resolve_model_catalog, ConfigDeleteRequest, ConfigDeleteResponse, ConfigGetRequest,
+    ConfigGetResponse, ConfigReloadRequest, ConfigReloadResponse, ConfigUpdateRequest,
+    ConfigUpdateResponse, ConfigValue, ModelInfo,
+};
 use tokio::sync::RwLock;
 
 pub type RuntimeConfigReloadHook = Arc<dyn Fn(&LlmConfig) -> TalosResult<()> + Send + Sync>;
@@ -52,8 +56,16 @@ impl ConfigService {
         self.llm_config_service.get()
     }
 
-    pub fn get_llm_read(&self) -> TalosResult<LlmConfigRead> {
-        self.llm_config_service.get_read()
+    pub fn get_config(&self, request: ConfigGetRequest) -> TalosResult<ConfigGetResponse> {
+        Self::validate_config_path(request.path.as_deref())?;
+        self.llm_config_service.get_read().map(Into::into)
+    }
+
+    pub fn update_config(&self, request: ConfigUpdateRequest) -> TalosResult<ConfigUpdateResponse> {
+        Self::validate_config_path(Some(&request.path))?;
+        let ConfigValue::Llm(llm) = request.value;
+        self.update_llm(llm.into())?;
+        self.llm_config_service.get_read().map(Into::into)
     }
 
     pub fn update_llm(&self, llm: LlmConfig) -> TalosResult<LlmConfig> {
@@ -65,9 +77,18 @@ impl ConfigService {
         self.llm_config_service.get()
     }
 
-    pub fn update_llm_read(&self, llm: LlmConfig) -> TalosResult<LlmConfigRead> {
-        self.update_llm(llm)?;
-        self.llm_config_service.get_read()
+    pub fn delete_config(&self, request: ConfigDeleteRequest) -> TalosResult<ConfigDeleteResponse> {
+        Self::validate_config_path(Some(&request.path))?;
+        Err(TalosError::ValidationError(
+            "config delete is not supported for llm".to_string(),
+        ))
+    }
+
+    pub fn reload_config(
+        &self,
+        _request: ConfigReloadRequest,
+    ) -> TalosResult<ConfigReloadResponse> {
+        Ok(ConfigReloadResponse { success: true })
     }
 
     fn reload_models(&self, new_config: &LlmConfig) -> TalosResult<()> {
@@ -78,6 +99,16 @@ impl ConfigService {
             .map_err(|_| TalosError::ConfigError("models lock poisoned".to_string()))? =
             new_catalog;
         Ok(())
+    }
+
+    fn validate_config_path(path: Option<&str>) -> TalosResult<()> {
+        match path.unwrap_or("llm") {
+            "" | "llm" => Ok(()),
+            other => Err(TalosError::ValidationError(format!(
+                "unsupported config path: {}",
+                other
+            ))),
+        }
     }
 }
 

@@ -5,9 +5,8 @@ use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::ToolDefinition;
 use talos_mcp::TalosMcpRuntime;
 use talos_types::{
-    McpCallToolRequest, McpContent, McpReadResourceRequest, McpResourceContents,
+    JsonContentValue, McpCallToolRequest, McpContent, McpReadResourceRequest, McpResourceContents,
     McpResourceDescriptor, McpResourceTemplateDescriptor, McpServerSnapshot, TalosContentItem,
-    TalosJsonValue,
 };
 
 use crate::context::ToolContext;
@@ -267,7 +266,7 @@ fn mcp_content_to_payload(content: &[McpContent]) -> TalosResult<McpPayloadConte
                 });
                 entries.push(entry.clone());
                 content_items.push(TalosContentItem::Json {
-                    value: TalosJsonValue::from(entry),
+                    value: JsonContentValue::from(entry),
                 });
             }
             McpContent::Resource { resource } => {
@@ -280,14 +279,14 @@ fn mcp_content_to_payload(content: &[McpContent]) -> TalosResult<McpPayloadConte
                     "resource": raw,
                 }));
                 content_items.push(TalosContentItem::Json {
-                    value: TalosJsonValue::from(raw),
+                    value: JsonContentValue::from(raw),
                 });
             }
             McpContent::Unknown { raw } => {
                 parts.push(raw.to_string());
                 entries.push(raw.clone());
                 content_items.push(TalosContentItem::Json {
-                    value: TalosJsonValue::from(raw.clone()),
+                    value: JsonContentValue::from(raw.clone()),
                 });
             }
         }

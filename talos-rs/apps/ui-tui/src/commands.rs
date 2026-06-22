@@ -9,7 +9,7 @@ use crate::client::GatewayClient;
 use crate::types::{AppState, ChatRole, CommandUpdate, QueuedMessage, SessionHistoryLoad};
 use crate::utils::summarize_for_queue;
 use crate::{TuiApp, MAX_QUEUE_LEN, SESSION_CLOSE_TIMEOUT};
-use talos_sdk::{SkillSuggestion, TalosSession, TimelineActiveTurnStatus};
+use talos_sdk::{SessionInfo, SkillSuggestion, TimelineActiveTurnStatus};
 
 impl TuiApp {
     pub(crate) async fn submit_input(&mut self) -> TalosResult<bool> {
@@ -501,12 +501,12 @@ impl TuiApp {
         self.load_session_history(session);
     }
 
-    pub(crate) fn load_session_history(&mut self, session: TalosSession) {
-        let session_id = session.context.session_id.clone();
-        let model = session.config.llm.model.clone();
+    pub(crate) fn load_session_history(&mut self, session: SessionInfo) {
+        let session_id = session.id.clone();
+        let model = session.model.clone();
         self.session_id = Some(session_id.clone());
         self.current_model = model;
-        self.session_usage = session.state.usage.clone();
+        self.session_usage = session.usage.clone();
         self.turn_metrics = None;
         self.turn_metrics_live = false;
         // Reset chat and input history for the new session
@@ -566,7 +566,7 @@ impl TuiApp {
         let Some(session) = self.history_sessions.get(self.history_selected).cloned() else {
             return;
         };
-        let session_id = session.context.session_id.clone();
+        let session_id = session.id.clone();
         let Some(client) = self.gateway_client.clone() else {
             return;
         };

@@ -3,27 +3,34 @@ use std::sync::{Arc, RwLock};
 
 use talos_config::{provider_config_for_llm, resolve_runtime_path, LlmConfig};
 use talos_error::{TalosError, TalosResult};
+use talos_project_store::{ProjectRecord, ProjectStore};
 use talos_session_store::SessionStore;
 use talos_types::talos::{TalosConnectionMode, TalosContext, TalosProvider};
 use talos_types::{
     connection_mode_from_context, normalize_current_directory, resolve_effective_project_root,
     validate_project_directory, OptionalCurrentDirectoryPatch, OptionalProjectIdPatch,
-    ProjectPatch, ProjectRecord, SessionConf, SessionConfigOverridePolicy, SessionPatch,
-    SessionPatchAck, SessionQuery, SessionRecord, TalosConfig, TalosSession,
+    ProjectPatch, SessionConf, SessionConfigOverridePolicy, SessionPatch, SessionPatchResponse,
+    SessionQuery, SessionRecord, TalosConfig, TalosSession,
 };
 
 #[derive(Clone)]
 pub struct SessionService {
     session_store: Arc<dyn SessionStore>,
+    project_store: Arc<dyn ProjectStore>,
     base_config: Arc<RwLock<TalosConfig>>,
     default_workspace_id: String,
     channel_dm_scopes: std::collections::HashMap<String, String>,
 }
 
 impl SessionService {
-    pub fn new(session_store: Arc<dyn SessionStore>, base_config: TalosConfig) -> Self {
+    pub fn new(
+        session_store: Arc<dyn SessionStore>,
+        project_store: Arc<dyn ProjectStore>,
+        base_config: TalosConfig,
+    ) -> Self {
         Self {
             session_store,
+            project_store,
             base_config: Arc::new(RwLock::new(base_config)),
             default_workspace_id: "default".to_string(),
             channel_dm_scopes: std::collections::HashMap::new(),
@@ -123,7 +130,7 @@ impl SessionService {
     async fn resolve_effective_root(&self, session: &TalosSession) -> TalosResult<Option<PathBuf>> {
         let project_directory = if let Some(project_id) = session.project_id.as_deref() {
             Some(
-                self.session_store
+                self.project_store
                     .get_project(project_id)
                     .await?
                     .ok_or_else(|| TalosError::ResourceNotFound(format!("project {}", project_id)))?
@@ -140,7 +147,7 @@ impl SessionService {
     }
 
     async fn validate_project_id(&self, project_id: &str) -> TalosResult<()> {
-        let exists = self.session_store.get_project(project_id).await?.is_some();
+        let exists = self.project_store.get_project(project_id).await?.is_some();
         if !exists {
             return Err(TalosError::ValidationError(format!(
                 "project {} not found",
@@ -227,9 +234,9 @@ impl SessionService {
         &self,
         session_id: &str,
         patch: SessionPatch,
-    ) -> TalosResult<SessionPatchAck> {
+    ) -> TalosResult<SessionPatchResponse> {
         let Some(record) = self.session_store.get_session_record(session_id).await? else {
-            return Ok(SessionPatchAck { success: false });
+            return Ok(SessionPatchResponse { success: false });
         };
         let patch = self.normalize_session_patch(record.context.clone(), patch)?;
         if let Some(OptionalProjectIdPatch::Set { project_id }) = patch.project_id.as_ref() {
@@ -242,11 +249,22 @@ impl SessionService {
         Ok(ack)
     }
 
-    pub async fn reset_session(&self, session_id: &str) -> TalosResult<SessionPatchAck> {
+    pub async fn reset_session(&self, session_id: &str) -> TalosResult<SessionPatchResponse> {
         self.session_store.reset_session_record(session_id).await
     }
 
-    pub async fn delete_session(&self, session_id: &str) -> TalosResult<SessionPatchAck> {
+    pub async fn record_session_usage(
+        &self,
+        session_id: &str,
+        assistant_model: &str,
+        usage: &talos_types::talos::TalosUsage,
+    ) -> TalosResult<()> {
+        self.session_store
+            .record_session_progress(session_id, 0, usage, Some(assistant_model))
+            .await
+    }
+
+    pub async fn delete_session(&self, session_id: &str) -> TalosResult<SessionPatchResponse> {
         self.session_store.delete_session_record(session_id).await
     }
 
@@ -270,11 +288,11 @@ impl SessionService {
     }
 
     pub async fn list_projects(&self) -> TalosResult<Vec<ProjectRecord>> {
-        self.session_store.list_projects().await
+        self.project_store.list_projects().await
     }
 
     pub async fn get_project(&self, project_id: &str) -> TalosResult<Option<ProjectRecord>> {
-        self.session_store.get_project(project_id).await
+        self.project_store.get_project(project_id).await
     }
 
     pub async fn create_project(
@@ -284,7 +302,7 @@ impl SessionService {
         user_id: String,
     ) -> TalosResult<ProjectRecord> {
         validate_project_directory(&directory)?;
-        self.session_store
+        self.project_store
             .create_project_for_owner(&name, &directory, &user_id)
             .await
     }
@@ -294,11 +312,11 @@ impl SessionService {
         project_id: &str,
         patch: ProjectPatch,
     ) -> TalosResult<Option<ProjectRecord>> {
-        self.session_store.patch_project(project_id, &patch).await
+        self.project_store.patch_project(project_id, &patch).await
     }
 
     pub async fn delete_project(&self, project_id: &str) -> TalosResult<()> {
-        self.session_store.delete_project(project_id).await
+        self.project_store.delete_project(project_id).await
     }
 }
 
@@ -321,6 +339,7 @@ fn clear_session_model_override(conf: &SessionConf) -> SessionConf {
 mod tests {
     use std::sync::Arc;
 
+    use talos_project_store::MockProjectStore;
     use talos_session_store::MockSessionStore;
     use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType};
 
@@ -359,7 +378,11 @@ mod tests {
         let mut base_config = talos_types::TalosConfig::default();
         base_config.llm.provider = "anthropic".to_string();
         base_config.llm.model = "old-model".to_string();
-        let service = SessionService::new(Arc::new(MockSessionStore::new()), base_config);
+        let service = SessionService::new(
+            Arc::new(MockSessionStore::new()),
+            Arc::new(MockProjectStore::new()),
+            base_config,
+        );
         let mut llm = talos_config::LlmConfig::default();
         llm.provider = "openai".to_string();
         llm.model = "new-model".to_string();
@@ -380,7 +403,11 @@ mod tests {
         base_config.llm.provider = "anthropic".to_string();
         base_config.llm.model = "old-default".to_string();
         base_config.llm.anthropic.models = vec![provider_model("old-default")];
-        let service = SessionService::new(Arc::new(MockSessionStore::new()), base_config);
+        let service = SessionService::new(
+            Arc::new(MockSessionStore::new()),
+            Arc::new(MockProjectStore::new()),
+            base_config,
+        );
         let mut llm = talos_config::LlmConfig::default();
         llm.provider = "anthropic".to_string();
         llm.model = "new-default".to_string();
@@ -416,7 +443,11 @@ mod tests {
             provider_model("old-default"),
             provider_model("session-model"),
         ];
-        let service = SessionService::new(Arc::new(MockSessionStore::new()), base_config);
+        let service = SessionService::new(
+            Arc::new(MockSessionStore::new()),
+            Arc::new(MockProjectStore::new()),
+            base_config,
+        );
 
         let original = service
             .create_session(
