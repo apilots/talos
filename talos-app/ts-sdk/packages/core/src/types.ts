@@ -26,6 +26,12 @@ import type {
   SessionCloseResponse as ProtocolSessionCloseResponse,
   SessionCompactResponse as ProtocolSessionCompactResponse,
   SessionDeleteResponse as ProtocolSessionDeleteResponse,
+  SessionActiveTurnRequest as ProtocolSessionActiveTurnRequest,
+  SessionClearRequest as ProtocolSessionClearRequest,
+  SessionCloseRequest as ProtocolSessionCloseRequest,
+  SessionCompactRequest as ProtocolSessionCompactRequest,
+  SessionDeleteRequest as ProtocolSessionDeleteRequest,
+  SessionGetRequest as ProtocolSessionGetRequest,
   SessionGetResponse as ProtocolSessionGetResponse,
   SessionInfo as ProtocolSessionInfo,
   SessionListRequest as ProtocolSessionListRequest,
@@ -308,13 +314,19 @@ export type ModelListResponse = ProtocolModelListResponse;
 export type SessionInfo = ProtocolSessionInfo;
 export type SessionListRequest = ProtocolSessionListRequest;
 export type SessionListResponse = ProtocolSessionListResponse;
+export type SessionGetRequest = ProtocolSessionGetRequest;
 export type SessionGetResponse = ProtocolSessionGetResponse;
-export type SessionUpdate = Partial<Omit<ProtocolSessionPatchRequest, "session_id">>;
+export type SessionPatchRequest = ProtocolSessionPatchRequest;
 export type SessionUpdateResponse = ProtocolSessionUpdateResponse;
+export type SessionDeleteRequest = ProtocolSessionDeleteRequest;
 export type SessionDeleteResponse = ProtocolSessionDeleteResponse;
+export type SessionCloseRequest = ProtocolSessionCloseRequest;
 export type SessionCloseResponse = ProtocolSessionCloseResponse;
+export type SessionCompactRequest = ProtocolSessionCompactRequest;
 export type SessionCompactResponse = ProtocolSessionCompactResponse;
+export type SessionClearRequest = ProtocolSessionClearRequest;
 export type SessionClearResponse = ProtocolSessionClearResponse;
+export type SessionActiveTurnRequest = ProtocolSessionActiveTurnRequest;
 
 export interface PaginationMeta {
   total: number;

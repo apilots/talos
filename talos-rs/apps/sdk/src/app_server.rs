@@ -40,11 +40,11 @@ use talos_types::{
     SessionCloseRequest, SessionCloseResponse, SessionConf, SessionDeleteRequest,
     SessionDeleteResponse, SessionGetRequest, SessionGetResponse, SessionHistoryRequest,
     SessionHistoryResponse, SessionListRequest, SessionListResponse, SessionPatchRequest,
-    SkillsReadResponse, StartTurnRequest, StartTurnResponse, SubmitToolResultRequest,
-    SubmitToolResultResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
-    TimelineRecoveryResponse, UserCurrentResponse, WorkspaceDocListRequest,
-    WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
-    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
+    SessionUpdateResponse, SkillsReadResponse, StartTurnRequest, StartTurnResponse,
+    SubmitToolResultRequest, SubmitToolResultResponse, SubscribeTimelineRequest,
+    SubscribeTimelineResponse, TimelineRecoveryResponse, UserCurrentResponse,
+    WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
+    WorkspaceDocReadResponse, WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
@@ -54,7 +54,7 @@ use crate::app_server_events::is_terminal_application_event;
 use crate::common::expected_file_version_token;
 use crate::ExpectedFileVersion;
 use crate::TalosInputItem;
-use crate::{ProjectPatch, WorkspaceDocKind};
+use crate::WorkspaceDocKind;
 use talos_types::talos::TimelineEventEnvelope;
 
 #[derive(Debug, Clone)]
@@ -490,67 +490,93 @@ impl AppServerClient {
         self.request_typed("session.list", request).await
     }
 
-    pub async fn get_session(&mut self, session_id: &str) -> TalosResult<SessionGetResponse> {
-        self.request_typed(
-            "session.get",
-            SessionGetRequest {
-                session_id: session_id.to_string(),
-            },
-        )
+    pub async fn get_session(
+        &mut self,
+        request: SessionGetRequest,
+    ) -> TalosResult<SessionGetResponse> {
+        self.request_typed("session.get", request).await
+    }
+
+    pub async fn get_session_by_id(&mut self, session_id: &str) -> TalosResult<SessionGetResponse> {
+        self.get_session(SessionGetRequest {
+            session_id: session_id.to_string(),
+        })
         .await
     }
 
     pub async fn get_session_history(
         &mut self,
+        request: SessionHistoryRequest,
+    ) -> TalosResult<SessionHistoryResponse> {
+        self.request_typed("session.history", request).await
+    }
+
+    pub async fn get_session_history_by_id(
+        &mut self,
         session_id: &str,
     ) -> TalosResult<SessionHistoryResponse> {
-        self.request_typed(
-            "session.history",
-            SessionHistoryRequest {
-                session_id: session_id.to_string(),
-            },
-        )
+        self.get_session_history(SessionHistoryRequest {
+            session_id: session_id.to_string(),
+        })
         .await
     }
 
     pub async fn get_active_turn(
         &mut self,
+        request: SessionActiveTurnRequest,
+    ) -> TalosResult<SessionActiveTurnResponse> {
+        self.request_typed("session.active_turn", request).await
+    }
+
+    pub async fn get_active_turn_by_id(
+        &mut self,
         session_id: &str,
     ) -> TalosResult<SessionActiveTurnResponse> {
-        self.request_typed(
-            "session.active_turn",
-            SessionActiveTurnRequest {
-                session_id: session_id.to_string(),
-            },
-        )
+        self.get_active_turn(SessionActiveTurnRequest {
+            session_id: session_id.to_string(),
+        })
         .await
     }
 
-    pub async fn delete_session(&mut self, session_id: &str) -> TalosResult<SessionDeleteResponse> {
-        self.request_typed(
-            "session.delete",
-            SessionDeleteRequest {
-                session_id: session_id.to_string(),
-            },
-        )
+    pub async fn delete_session(
+        &mut self,
+        request: SessionDeleteRequest,
+    ) -> TalosResult<SessionDeleteResponse> {
+        self.request_typed("session.delete", request).await
+    }
+
+    pub async fn delete_session_by_id(
+        &mut self,
+        session_id: &str,
+    ) -> TalosResult<SessionDeleteResponse> {
+        self.delete_session(SessionDeleteRequest {
+            session_id: session_id.to_string(),
+        })
         .await
     }
 
-    pub async fn close_session(&mut self, session_id: &str) -> TalosResult<SessionCloseResponse> {
-        self.request_typed(
-            "session.close",
-            SessionCloseRequest {
-                session_id: session_id.to_string(),
-            },
-        )
+    pub async fn close_session(
+        &mut self,
+        request: SessionCloseRequest,
+    ) -> TalosResult<SessionCloseResponse> {
+        self.request_typed("session.close", request).await
+    }
+
+    pub async fn close_session_by_id(
+        &mut self,
+        session_id: &str,
+    ) -> TalosResult<SessionCloseResponse> {
+        self.close_session(SessionCloseRequest {
+            session_id: session_id.to_string(),
+        })
         .await
     }
 
     pub async fn recover_session(
         &mut self,
-        session_id: &str,
+        request: RecoverTimelineRequest,
     ) -> TalosResult<TimelineRecoveryResponse> {
-        self.recover_session_after(session_id, None).await
+        self.request_typed("session.recover", request).await
     }
 
     pub async fn recover_session_after(
@@ -558,60 +584,58 @@ impl AppServerClient {
         session_id: &str,
         after_event_id: Option<String>,
     ) -> TalosResult<TimelineRecoveryResponse> {
-        self.request_typed(
-            "session.recover",
-            RecoverTimelineRequest {
-                session_id: session_id.to_string(),
-                after_event_id,
-                replay_limit: None,
-            },
-        )
+        self.recover_session(RecoverTimelineRequest {
+            session_id: session_id.to_string(),
+            after_event_id,
+            replay_limit: None,
+        })
         .await
     }
 
-    pub async fn list_projects(&mut self) -> TalosResult<ProjectListResponse> {
-        self.request_typed::<_, ProjectListResponse>("project.list", ProjectListRequest::default())
+    pub async fn list_projects(
+        &mut self,
+        request: ProjectListRequest,
+    ) -> TalosResult<ProjectListResponse> {
+        self.request_typed::<_, ProjectListResponse>("project.list", request)
             .await
     }
 
-    pub async fn get_project(&mut self, project_id: &str) -> TalosResult<ProjectReadResponse> {
-        self.request_typed::<_, ProjectReadResponse>(
-            "project.read",
-            ProjectReadRequest {
-                project_id: project_id.to_string(),
-            },
-        )
+    pub async fn list_all_projects(&mut self) -> TalosResult<ProjectListResponse> {
+        self.list_projects(ProjectListRequest::default()).await
+    }
+
+    pub async fn get_project(
+        &mut self,
+        request: ProjectReadRequest,
+    ) -> TalosResult<ProjectReadResponse> {
+        self.request_typed::<_, ProjectReadResponse>("project.read", request)
+            .await
+    }
+
+    pub async fn get_project_by_id(
+        &mut self,
+        project_id: &str,
+    ) -> TalosResult<ProjectReadResponse> {
+        self.get_project(ProjectReadRequest {
+            project_id: project_id.to_string(),
+        })
         .await
     }
 
     pub async fn create_project(
         &mut self,
-        name: impl Into<String>,
-        directory: impl Into<PathBuf>,
+        request: ProjectCreateRequest,
     ) -> TalosResult<ProjectCreateResponse> {
-        self.request_typed::<_, ProjectCreateResponse>(
-            "project.create",
-            ProjectCreateRequest {
-                name: name.into(),
-                directory: directory.into(),
-            },
-        )
-        .await
+        self.request_typed::<_, ProjectCreateResponse>("project.create", request)
+            .await
     }
 
     pub async fn patch_project(
         &mut self,
-        project_id: &str,
-        patch: ProjectPatch,
+        request: ProjectPatchRequest,
     ) -> TalosResult<ProjectPatchResponse> {
-        self.request_typed::<_, ProjectPatchResponse>(
-            "project.patch",
-            ProjectPatchRequest {
-                project_id: project_id.to_string(),
-                name: patch.name,
-            },
-        )
-        .await
+        self.request_typed::<_, ProjectPatchResponse>("project.patch", request)
+            .await
     }
 
     pub async fn update_project_name(
@@ -619,23 +643,35 @@ impl AppServerClient {
         project_id: &str,
         name: impl Into<String>,
     ) -> TalosResult<ProjectPatchResponse> {
-        self.patch_project(
-            project_id,
-            ProjectPatch {
-                name: Some(name.into()),
-            },
-        )
+        self.patch_project(ProjectPatchRequest {
+            project_id: project_id.to_string(),
+            name: Some(name.into()),
+        })
         .await
     }
 
-    pub async fn delete_project(&mut self, project_id: &str) -> TalosResult<ProjectDeleteResponse> {
-        self.request_typed(
-            "project.delete",
-            ProjectDeleteRequest {
-                project_id: project_id.to_string(),
-            },
-        )
+    pub async fn delete_project(
+        &mut self,
+        request: ProjectDeleteRequest,
+    ) -> TalosResult<ProjectDeleteResponse> {
+        self.request_typed("project.delete", request).await
+    }
+
+    pub async fn delete_project_by_id(
+        &mut self,
+        project_id: &str,
+    ) -> TalosResult<ProjectDeleteResponse> {
+        self.delete_project(ProjectDeleteRequest {
+            project_id: project_id.to_string(),
+        })
         .await
+    }
+
+    pub async fn patch_session(
+        &mut self,
+        request: SessionPatchRequest,
+    ) -> TalosResult<SessionUpdateResponse> {
+        self.request_typed("session.patch", request).await
     }
 
     pub async fn update_session_model(
@@ -643,22 +679,19 @@ impl AppServerClient {
         session_id: &str,
         model: &str,
     ) -> TalosResult<SessionGetResponse> {
-        let _: Value = self
-            .request_typed(
-                "session.patch",
-                SessionPatchRequest {
-                    session_id: session_id.to_string(),
-                    conf: Some(SessionConf {
-                        agent: Some(SessionAgentConf {
-                            model: Some(model.to_string()),
-                        }),
+        let _ = self
+            .patch_session(SessionPatchRequest {
+                session_id: session_id.to_string(),
+                conf: Some(SessionConf {
+                    agent: Some(SessionAgentConf {
+                        model: Some(model.to_string()),
                     }),
-                    project_id: None,
-                    current_directory: None,
-                },
-            )
+                }),
+                project_id: None,
+                current_directory: None,
+            })
             .await?;
-        self.get_session(session_id).await
+        self.get_session_by_id(session_id).await
     }
 
     pub async fn start_turn(
@@ -669,21 +702,24 @@ impl AppServerClient {
         self.request_typed("turn.start", request).await
     }
 
-    pub async fn interrupt_turn(&mut self, session_id: &str) -> TalosResult<InterruptTurnResponse> {
-        self.interrupt_turn_request(InterruptTurnRequest {
-            session_id: session_id.to_string(),
-        })
-        .await
-    }
-
-    pub async fn interrupt_turn_request(
+    pub async fn interrupt_turn(
         &mut self,
         request: InterruptTurnRequest,
     ) -> TalosResult<InterruptTurnResponse> {
         self.request_typed("turn.interrupt", request).await
     }
 
-    pub async fn submit_dynamic_tool_result(
+    pub async fn interrupt_turn_by_id(
+        &mut self,
+        session_id: &str,
+    ) -> TalosResult<InterruptTurnResponse> {
+        self.interrupt_turn(InterruptTurnRequest {
+            session_id: session_id.to_string(),
+        })
+        .await
+    }
+
+    pub async fn submit_dynamic_tool_result_from_fields(
         &mut self,
         session_id: &str,
         call_id: &str,
@@ -778,7 +814,7 @@ impl AppServerClient {
         session_id: &str,
         since_event_id: Option<String>,
     ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>> {
-        let active_turn = self.get_active_turn(session_id).await?.active_turn;
+        let active_turn = self.get_active_turn_by_id(session_id).await?.active_turn;
         let Some(turn_id) = active_turn.turn_id else {
             return Err(TalosError::Conflict(
                 "No active turn stream is available for this session.".to_string(),

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useAppStore } from "@/shared/store/app-store";
-import type { FileRecord } from "@/shared/types/ui";
+import type { FileItemView } from "@/shared/types/ui";
 
 export type FileView = "grid" | "list";
 export type FileCategory = "all" | "document" | "code" | "image" | "data";
@@ -11,7 +11,7 @@ export function getFileExtension(path: string) {
   return path.split(".").at(-1)?.toLowerCase() ?? "";
 }
 
-export function classifyFile(item: FileRecord): FileCategory {
+export function classifyFile(item: FileItemView): FileCategory {
   const ext = getFileExtension(item.path);
   if (["rs", "ts", "tsx", "py", "js", "jsx", "yaml", "yml"].includes(ext)) {
     return "code";

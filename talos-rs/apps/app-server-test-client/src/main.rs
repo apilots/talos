@@ -3,7 +3,7 @@ use std::{collections::HashMap, process::Stdio};
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 use talos_sdk::{
-    canonical_method, AppServerClient, AppServerClientConfig, ExpectedFileVersion, ProjectPatch,
+    canonical_method, AppServerClient, AppServerClientConfig, ExpectedFileVersion,
     StartTurnRequest, SubscribeTimelineRequest, TalosContext, TalosError, TalosInputItem,
     TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta,
     TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItemKind,
@@ -284,14 +284,17 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
         .with_context(|| format!("create project test directory {}", project_dir.display()))?;
     let project_name = format!("App Server {}", uuid::Uuid::new_v4().simple());
     let project = client
-        .create_project(project_name.clone(), project_dir.clone())
+        .create_project(talos_sdk::ProjectCreateRequest {
+            name: project_name.clone(),
+            directory: project_dir.clone(),
+        })
         .await?
         .project;
-    let read_project = client.get_project(&project.project_id).await?.project;
+    let read_project = client.get_project_by_id(&project.project_id).await?.project;
     if read_project.directory != project_dir {
         return Err(anyhow!("project.read returned a different directory"));
     }
-    let listed_projects = client.list_projects().await?.projects;
+    let listed_projects = client.list_all_projects().await?.projects;
     if !listed_projects
         .iter()
         .any(|candidate| candidate.project_id == project.project_id)
@@ -300,20 +303,18 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     }
     let patched_name = format!("{project_name} patched");
     let patched_project = client
-        .patch_project(
-            &project.project_id,
-            ProjectPatch {
-                name: Some(patched_name.clone()),
-            },
-        )
+        .patch_project(talos_sdk::ProjectPatchRequest {
+            project_id: project.project_id.clone(),
+            name: Some(patched_name.clone()),
+        })
         .await?
         .project;
     if patched_project.name != patched_name {
         return Err(anyhow!("project.patch did not update name"));
     }
-    client.delete_project(&project.project_id).await?;
+    client.delete_project_by_id(&project.project_id).await?;
     expect_not_found(
-        client.get_project(&project.project_id).await,
+        client.get_project_by_id(&project.project_id).await,
         "deleted project should map to not found",
     )?;
 
@@ -328,18 +329,18 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     {
         return Err(anyhow!("session.list did not include created session"));
     }
-    let _snapshot = client.recover_session(&session_id).await?;
+    let _snapshot = client.recover_session_after(&session_id, None).await?;
     expect_not_found(
-        client.get_session("missing-session").await,
+        client.get_session_by_id("missing-session").await,
         "missing session should map to not found",
     )?;
     expect_not_found(
-        client.recover_session("missing-session").await,
+        client.recover_session_after("missing-session", None).await,
         "missing session recovery should map to not found",
     )?;
     expect_not_found(
         client
-            .submit_dynamic_tool_result(
+            .submit_dynamic_tool_result_from_fields(
                 "missing-session",
                 "call-1",
                 "DynamicTool",

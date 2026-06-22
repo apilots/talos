@@ -2,11 +2,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use talos_auth::UserRole;
+use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
 use talos_project_store::ProjectRecord;
+use talos_session_store::{SessionPatchAck, SessionQuery};
 use talos_types::{
-    OptionalProjectIdPatch, ProjectPatch, SessionPatch, SessionPatchResponse, SessionQuery,
-    SessionRuntime, TalosSession,
+    OptionalProjectIdPatch, ProjectPatch, SessionListRequest, SessionPatch, TalosSession,
 };
 
 use crate::session::SessionService;
@@ -107,9 +108,16 @@ impl ResourceAccessService {
     pub async fn list_sessions(
         &self,
         actor: &Actor,
-        mut query: SessionQuery,
+        request: SessionListRequest,
     ) -> TalosResult<Vec<TalosSession>> {
-        query.user_id = Some(actor.user_id.clone());
+        let query = SessionQuery {
+            user_id: Some(actor.user_id.clone()),
+            channel_id: None,
+            provider: None,
+            project_id: request.project_id,
+            limit: request.limit,
+            offset: request.offset,
+        };
         let sessions = self.session_records.list_sessions(query).await?;
         Ok(self.filter_sessions(actor, sessions))
     }
@@ -125,7 +133,7 @@ impl ResourceAccessService {
         actor: &Actor,
         session_id: &str,
         patch: SessionPatch,
-    ) -> TalosResult<SessionPatchResponse> {
+    ) -> TalosResult<SessionPatchAck> {
         let _session = self.get_session(actor, session_id).await?;
         if let Some(OptionalProjectIdPatch::Set { project_id }) = patch.project_id.as_ref() {
             self.ensure_project_access(actor, project_id).await?;
@@ -185,7 +193,7 @@ impl ResourceAccessService {
         &self,
         actor: &Actor,
         session_id: &str,
-    ) -> TalosResult<SessionPatchResponse> {
+    ) -> TalosResult<SessionPatchAck> {
         let session = self.get_session(actor, session_id).await?;
         self.prepare_runtime_delete_session(session).await?;
         let ack = self.session_records.delete_session(session_id).await?;
@@ -203,7 +211,7 @@ impl ResourceAccessService {
         &self,
         actor: &Actor,
         session_id: &str,
-    ) -> TalosResult<SessionPatchResponse> {
+    ) -> TalosResult<SessionPatchAck> {
         let _session = self.get_session(actor, session_id).await?;
         let ack = self.session_records.delete_session(session_id).await?;
         if !ack.success {
@@ -407,13 +415,14 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
     use talos_auth::UserRole;
+    use talos_coordinator::SessionRuntime;
     use talos_error::TalosResult;
     use talos_project_store::{ProjectRecord, ProjectStore};
-    use talos_session_store::SessionStore;
+    use talos_session_store::{SessionPatchAck, SessionQuery, SessionRecord, SessionStore};
     use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TalosUsage};
     use talos_types::{
-        ProjectPatch, SessionConf, SessionPatch, SessionPatchResponse, SessionQuery, SessionRecord,
-        SessionRuntime, TalosConfig, DEFAULT_SESSION_TITLE,
+        ProjectPatch, SessionConf, SessionListRequest, SessionPatch, TalosConfig,
+        DEFAULT_SESSION_TITLE,
     };
 
     #[derive(Default)]
@@ -533,8 +542,8 @@ mod tests {
             &self,
             session_id: &str,
             _patch: &SessionPatch,
-        ) -> TalosResult<SessionPatchResponse> {
-            Ok(SessionPatchResponse {
+        ) -> TalosResult<SessionPatchAck> {
+            Ok(SessionPatchAck {
                 success: self
                     .records
                     .lock()
@@ -544,17 +553,11 @@ mod tests {
             })
         }
 
-        async fn reset_session_record(
-            &self,
-            _session_id: &str,
-        ) -> TalosResult<SessionPatchResponse> {
+        async fn reset_session_record(&self, _session_id: &str) -> TalosResult<SessionPatchAck> {
             unreachable!("not used in this test")
         }
 
-        async fn delete_session_record(
-            &self,
-            session_id: &str,
-        ) -> TalosResult<SessionPatchResponse> {
+        async fn delete_session_record(&self, session_id: &str) -> TalosResult<SessionPatchAck> {
             self.deleted_sessions
                 .lock()
                 .unwrap()
@@ -562,7 +565,7 @@ mod tests {
             let mut records = self.records.lock().unwrap();
             let len_before = records.len();
             records.retain(|record| record.id != session_id);
-            Ok(SessionPatchResponse {
+            Ok(SessionPatchAck {
                 success: records.len() != len_before,
             })
         }
@@ -769,14 +772,7 @@ mod tests {
         let sessions = access
             .list_sessions(
                 &Actor::regular("member-user"),
-                SessionQuery {
-                    user_id: Some("external-user".to_string()),
-                    channel_id: None,
-                    provider: None,
-                    project_id: None,
-                    limit: None,
-                    offset: None,
-                },
+                SessionListRequest::default(),
             )
             .await
             .expect("list_sessions should succeed");
@@ -845,7 +841,7 @@ mod tests {
         let access = ResourceAccessService::with_records(Arc::new(NoopSessionRuntime), records);
 
         let sessions = access
-            .list_sessions(&Actor::regular("admin-user"), SessionQuery::default())
+            .list_sessions(&Actor::regular("admin-user"), SessionListRequest::default())
             .await
             .expect("list should succeed");
 
@@ -906,7 +902,7 @@ mod tests {
         let admin_actor = Actor::regular("admin-user").with_role(UserRole::Admin);
 
         let sessions = access
-            .list_sessions(&admin_actor, SessionQuery::default())
+            .list_sessions(&admin_actor, SessionListRequest::default())
             .await
             .expect("list should succeed");
         let read_error = access
@@ -944,7 +940,7 @@ mod tests {
         let access = ResourceAccessService::with_records(Arc::new(NoopSessionRuntime), records);
 
         let sessions = access
-            .list_sessions(&Actor::regular("anonymous"), SessionQuery::default())
+            .list_sessions(&Actor::regular("anonymous"), SessionListRequest::default())
             .await
             .expect("list should succeed");
 

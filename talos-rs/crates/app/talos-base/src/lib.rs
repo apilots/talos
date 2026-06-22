@@ -16,7 +16,7 @@ use talos_config::{
     effective_llm_protocol, AgentKernelConfig, Config, LlmConfigManager, LlmConfigService,
     LlmProtocol, McpTransportConfig, ProviderConfig, TalosPaths, YamlLlmConfigStore,
 };
-use talos_coordinator::{Coordinator, CoordinatorImpl};
+use talos_coordinator::{Coordinator, CoordinatorImpl, SessionRuntime};
 use talos_error::{TalosError, TalosResult};
 use talos_gateway::{ApplicationServiceGateway, Gateway};
 use talos_gateway_http::{HttpServer, ServerLifecycle, ServerLifecycleState};
@@ -43,8 +43,8 @@ use talos_types::talos::{
 };
 use talos_types::{
     resolve_model_catalog, AgentDispatchResponse, AgentDispatchRuntime, McpServerDefinition,
-    McpServerRuntimeDescriptor, McpServerSource, McpTransportDefinition, SessionRuntime,
-    StartTurnRequest, TalosContext, TalosSession,
+    McpServerRuntimeDescriptor, McpServerSource, McpTransportDefinition, StartTurnRequest,
+    TalosContext, TalosSession,
 };
 use tokio::signal;
 use tokio::task::JoinSet;
@@ -594,8 +594,11 @@ pub async fn start_server(
         .and_then(|value| value.enable_channels)
         .unwrap_or(true);
     let channel_server = if enable_channels {
-        let mut channel_server =
-            ChannelServer::new(Arc::new(config.clone()), runtime.gateway.clone());
+        let mut channel_server = ChannelServer::new(
+            Arc::new(config.clone()),
+            runtime.gateway.clone(),
+            runtime.application_service.clone(),
+        );
         channel_server.register(Box::new(TelegramChannel::new()));
         Some(channel_server)
     } else {

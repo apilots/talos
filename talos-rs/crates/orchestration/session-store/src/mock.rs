@@ -115,18 +115,18 @@ impl SessionStore for MockSessionStore {
         &self,
         session_id: &str,
         patch: &SessionPatch,
-    ) -> TalosResult<SessionPatchResponse> {
+    ) -> TalosResult<SessionPatchAck> {
         let _ = session_id;
         let _ = patch.agent_model()?;
-        Ok(SessionPatchResponse { success: true })
+        Ok(SessionPatchAck { success: true })
     }
 
-    async fn reset_session_record(&self, _session_id: &str) -> TalosResult<SessionPatchResponse> {
-        Ok(SessionPatchResponse { success: true })
+    async fn reset_session_record(&self, _session_id: &str) -> TalosResult<SessionPatchAck> {
+        Ok(SessionPatchAck { success: true })
     }
 
-    async fn delete_session_record(&self, _session_id: &str) -> TalosResult<SessionPatchResponse> {
-        Ok(SessionPatchResponse { success: true })
+    async fn delete_session_record(&self, _session_id: &str) -> TalosResult<SessionPatchAck> {
+        Ok(SessionPatchAck { success: true })
     }
 
     async fn update_session_title(&self, _session_id: &str, _title: &str) -> TalosResult<()> {

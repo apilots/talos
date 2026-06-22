@@ -48,12 +48,16 @@ describe("AppServerClient", () => {
       project_id: null,
       current_directory: null,
     });
-    await client.listProjects();
+    await client.listProjects({});
     await client.getLlmConfig();
     await client.updateLlmConfig(testLlmConfig);
-    await client.createProject("Talos", "/tmp/talos");
-    await client.patchProject("project-1", { name: "Talos Core" });
-    await client.recoverSession("session-1", "ev_00000000000000000001", 100);
+    await client.createProject({ name: "Talos", directory: "/tmp/talos" });
+    await client.patchProject({ project_id: "project-1", name: "Talos Core" });
+    await client.recoverSession({
+      session_id: "session-1",
+      after_event_id: "ev_00000000000000000001",
+      replay_limit: 100,
+    });
     await client.submitDynamicToolResult({
       session_id: "session-1",
       call_id: "call-1",

@@ -1,9 +1,9 @@
 import { createDefaultMemory } from "@/shared/types/domain";
-import type { MemoryRecord } from "@/shared/types/ui";
+import type { MemoryItemView } from "@/shared/types/ui";
 
 export interface MemorySlice {
-  memoryItems: MemoryRecord[];
-  upsertMemory: (record: MemoryRecord) => void;
+  memoryItems: MemoryItemView[];
+  upsertMemory: (record: MemoryItemView) => void;
   removeMemory: (id: string) => void;
 }
 

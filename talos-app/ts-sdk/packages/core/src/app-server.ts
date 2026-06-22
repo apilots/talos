@@ -215,105 +215,126 @@ export class AppServerClient {
     return this.transport.request("session.list", params);
   }
 
-  getSession(sessionId: string): Promise<AppProtocol.SessionGetResponse> {
-    return this.transport.request("session.get", { session_id: sessionId });
+  getSession(params: AppProtocol.SessionGetRequest): Promise<AppProtocol.SessionGetResponse> {
+    return this.transport.request("session.get", params);
+  }
+
+  getSessionById(sessionId: string): Promise<AppProtocol.SessionGetResponse> {
+    return this.getSession({ session_id: sessionId });
   }
 
   patchSession(params: AppProtocol.SessionPatchRequest): Promise<SessionUpdateResponse> {
     return this.transport.request("session.patch", params);
   }
 
-  deleteSession(sessionId: string): Promise<SessionDeleteResponse> {
-    return this.transport.request("session.delete", { session_id: sessionId });
+  deleteSession(params: AppProtocol.SessionDeleteRequest): Promise<SessionDeleteResponse> {
+    return this.transport.request("session.delete", params);
   }
 
-  closeSession(sessionId: string): Promise<SessionCloseResponse> {
-    return this.transport.request("session.close", { session_id: sessionId });
+  deleteSessionById(sessionId: string): Promise<SessionDeleteResponse> {
+    return this.deleteSession({ session_id: sessionId });
   }
 
-  compactSession(sessionId: string): Promise<SessionCompactResponse> {
-    return this.transport.request("session.compact", { session_id: sessionId });
+  closeSession(params: AppProtocol.SessionCloseRequest): Promise<SessionCloseResponse> {
+    return this.transport.request("session.close", params);
   }
 
-  clearSession(sessionId: string): Promise<SessionClearResponse> {
-    return this.transport.request("session.clear", { session_id: sessionId });
+  closeSessionById(sessionId: string): Promise<SessionCloseResponse> {
+    return this.closeSession({ session_id: sessionId });
   }
 
-  getActiveTurn(sessionId: string): Promise<SessionActiveTurnResponse> {
-    return this.transport.request("session.active_turn", { session_id: sessionId });
+  compactSession(params: AppProtocol.SessionCompactRequest): Promise<SessionCompactResponse> {
+    return this.transport.request("session.compact", params);
   }
 
-  getSessionHistory(sessionId: string): Promise<SessionHistoryResponse> {
+  compactSessionById(sessionId: string): Promise<SessionCompactResponse> {
+    return this.compactSession({ session_id: sessionId });
+  }
+
+  clearSession(params: AppProtocol.SessionClearRequest): Promise<SessionClearResponse> {
+    return this.transport.request("session.clear", params);
+  }
+
+  clearSessionById(sessionId: string): Promise<SessionClearResponse> {
+    return this.clearSession({ session_id: sessionId });
+  }
+
+  getActiveTurn(params: AppProtocol.SessionActiveTurnRequest): Promise<SessionActiveTurnResponse> {
+    return this.transport.request("session.active_turn", params);
+  }
+
+  getActiveTurnById(sessionId: string): Promise<SessionActiveTurnResponse> {
+    return this.getActiveTurn({ session_id: sessionId });
+  }
+
+  getSessionHistory(params: AppProtocol.SessionHistoryRequest): Promise<SessionHistoryResponse> {
     return this.transport.request<SessionHistoryResponse>("session.history", {
-      session_id: sessionId,
+      session_id: params.session_id,
     });
   }
 
-  recoverSession(
+  getSessionHistoryById(sessionId: string): Promise<SessionHistoryResponse> {
+    return this.getSessionHistory({ session_id: sessionId });
+  }
+
+  recoverSession(params: AppProtocol.RecoverTimelineRequest): Promise<TimelineRecoveryResponse> {
+    return this.transport.request<TimelineRecoveryResponse>("session.recover", params);
+  }
+
+  recoverSessionById(
     sessionId: string,
     afterEventId: string | null = null,
     replayLimit: number | null = null,
   ): Promise<TimelineRecoveryResponse> {
-    return this.transport.request<TimelineRecoveryResponse>("session.recover", {
+    return this.recoverSession({
       session_id: sessionId,
       after_event_id: afterEventId,
       replay_limit: replayLimit,
     });
   }
 
-  listProjects(): Promise<ProjectListResponse> {
-    return this.transport.request<ProjectListResponse>(
-      "project.list",
-      {} satisfies AppProtocol.ProjectListRequest,
-    );
+  listProjects(params: AppProtocol.ProjectListRequest = {}): Promise<ProjectListResponse> {
+    return this.transport.request<ProjectListResponse>("project.list", params);
   }
 
-  getProject(projectId: string): Promise<ProjectReadResponse> {
-    return this.transport.request<ProjectReadResponse>(
-      "project.read",
-      {
-        project_id: projectId,
-      } satisfies AppProtocol.ProjectReadRequest,
-    );
+  getProject(params: AppProtocol.ProjectReadRequest): Promise<ProjectReadResponse> {
+    return this.transport.request<ProjectReadResponse>("project.read", params);
   }
 
-  createProject(name: string, directory: string): Promise<ProjectCreateResponse> {
-    return this.transport.request<ProjectCreateResponse>(
-      "project.create",
-      {
-        name,
-        directory,
-      } satisfies AppProtocol.ProjectCreateRequest,
-    );
+  getProjectById(projectId: string): Promise<ProjectReadResponse> {
+    return this.getProject({ project_id: projectId });
   }
 
-  patchProject(projectId: string, patch: ProjectPatch): Promise<ProjectPatchResponse> {
-    return this.transport.request<ProjectPatchResponse>(
-      "project.patch",
-      {
-        project_id: projectId,
-        name: patch.name,
-      } satisfies AppProtocol.ProjectPatchRequest,
-    );
+  createProject(params: AppProtocol.ProjectCreateRequest): Promise<ProjectCreateResponse> {
+    return this.transport.request<ProjectCreateResponse>("project.create", params);
   }
 
-  deleteProject(projectId: string): Promise<ProjectDeleteResponse> {
-    return this.transport.request("project.delete", {
-      project_id: projectId,
-    } satisfies AppProtocol.ProjectDeleteRequest);
+  createProjectFromFields(name: string, directory: string): Promise<ProjectCreateResponse> {
+    return this.createProject({ name, directory });
   }
 
-  readFsDirectory(path: string | null = null): Promise<FsDirectoryReadResponse> {
-    return this.transport.request("fs.directory.read", {
-      path,
-    } satisfies AppProtocol.FsDirectoryReadRequest);
+  patchProject(params: AppProtocol.ProjectPatchRequest): Promise<ProjectPatchResponse> {
+    return this.transport.request<ProjectPatchResponse>("project.patch", params);
   }
 
-  createFsDirectory(parent: string, name: string): Promise<FsDirectoryCreateResponse> {
-    return this.transport.request("fs.directory.create", {
-      parent,
-      name,
-    } satisfies AppProtocol.FsDirectoryCreateRequest);
+  patchProjectById(projectId: string, patch: ProjectPatch): Promise<ProjectPatchResponse> {
+    return this.patchProject({ project_id: projectId, name: patch.name });
+  }
+
+  deleteProject(params: AppProtocol.ProjectDeleteRequest): Promise<ProjectDeleteResponse> {
+    return this.transport.request("project.delete", params);
+  }
+
+  deleteProjectById(projectId: string): Promise<ProjectDeleteResponse> {
+    return this.deleteProject({ project_id: projectId });
+  }
+
+  readFsDirectory(params: AppProtocol.FsDirectoryReadRequest = { path: null }): Promise<FsDirectoryReadResponse> {
+    return this.transport.request("fs.directory.read", params);
+  }
+
+  createFsDirectory(params: AppProtocol.FsDirectoryCreateRequest): Promise<FsDirectoryCreateResponse> {
+    return this.transport.request("fs.directory.create", params);
   }
 
   startTurn(params: AppProtocol.StartTurnRequest): Promise<AppProtocol.StartTurnResponse> {
@@ -324,8 +345,12 @@ export class AppServerClient {
     return this.transport.request("turn.retry", params);
   }
 
-  interruptTurn(sessionId: string): Promise<AppProtocol.InterruptTurnResponse> {
-    return this.transport.request("turn.interrupt", { session_id: sessionId });
+  interruptTurn(params: AppProtocol.InterruptTurnRequest): Promise<AppProtocol.InterruptTurnResponse> {
+    return this.transport.request("turn.interrupt", params);
+  }
+
+  interruptTurnById(sessionId: string): Promise<AppProtocol.InterruptTurnResponse> {
+    return this.interruptTurn({ session_id: sessionId });
   }
 
   subscribeEvents(

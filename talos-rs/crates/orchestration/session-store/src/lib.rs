@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -8,8 +9,7 @@ use talos_types::talos::TalosUsage;
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType};
 use talos_types::{
     OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, SessionConf,
-    SessionConfigOverridePolicy, SessionPatch, SessionPatchResponse, SessionQuery, SessionRecord,
-    DEFAULT_SESSION_TITLE,
+    SessionConfigOverridePolicy, SessionPatch, TalosSession, DEFAULT_SESSION_TITLE,
 };
 
 pub mod active_turn;
@@ -32,6 +32,78 @@ pub use idempotency::{
     MessageIdempotencyStore,
 };
 pub use mock::MockSessionStore;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionRecord {
+    pub id: String,
+    pub title: String,
+    pub user_id: String,
+    pub context: TalosContext,
+    pub model: String,
+    pub created_at: u64,
+    pub last_activity: u64,
+    pub message_count: u64,
+    #[serde(default)]
+    pub usage: TalosUsage,
+    #[serde(default)]
+    pub conf: SessionConf,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub current_directory: Option<PathBuf>,
+}
+
+impl SessionRecord {
+    pub fn from_session(session: &TalosSession, base_model: &str) -> Self {
+        let effective_model = session.config.llm.model.clone();
+        let conf = SessionConfigOverridePolicy::build_conf_for_model(base_model, &effective_model);
+
+        Self {
+            id: session.context.session_id.clone(),
+            title: session.title.clone(),
+            user_id: session.user_id.clone(),
+            context: TalosContext {
+                source_type: session.context.source_type.clone(),
+                provider: session.context.provider.clone(),
+                user_id: session.context.user_id.clone(),
+                message_id: session.context.message_id.clone(),
+                trace_id: session.context.trace_id.clone(),
+                channel_id: session.context.channel_id.clone(),
+                thread_id: session.context.thread_id.clone(),
+                project_root: session.context.project_root.clone(),
+                environment: session.context.environment.clone(),
+            },
+            model: effective_model,
+            created_at: session.state.created_at,
+            last_activity: session.state.last_activity,
+            message_count: session.state.message_count,
+            usage: session.state.usage.clone(),
+            conf,
+            project_id: session.project_id.clone(),
+            current_directory: session.current_directory.clone(),
+        }
+    }
+
+    pub fn has_real_title(&self) -> bool {
+        let normalized = self.title.trim();
+        !normalized.is_empty() && normalized != DEFAULT_SESSION_TITLE
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SessionQuery {
+    pub user_id: Option<String>,
+    pub channel_id: Option<String>,
+    pub provider: Option<String>,
+    pub project_id: Option<String>,
+    pub limit: Option<usize>,
+    pub offset: Option<usize>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SessionPatchAck {
+    pub success: bool,
+}
 
 #[async_trait]
 pub trait SessionStore: Send + Sync {
@@ -69,11 +141,11 @@ pub trait SessionStore: Send + Sync {
         &self,
         session_id: &str,
         patch: &SessionPatch,
-    ) -> TalosResult<SessionPatchResponse>;
+    ) -> TalosResult<SessionPatchAck>;
 
-    async fn reset_session_record(&self, session_id: &str) -> TalosResult<SessionPatchResponse>;
+    async fn reset_session_record(&self, session_id: &str) -> TalosResult<SessionPatchAck>;
 
-    async fn delete_session_record(&self, session_id: &str) -> TalosResult<SessionPatchResponse>;
+    async fn delete_session_record(&self, session_id: &str) -> TalosResult<SessionPatchAck>;
 
     async fn update_session_title(&self, session_id: &str, title: &str) -> TalosResult<()>;
 
@@ -589,12 +661,12 @@ impl SessionStore for DatabaseSessionStore {
         &self,
         session_id: &str,
         patch: &SessionPatch,
-    ) -> TalosResult<SessionPatchResponse> {
+    ) -> TalosResult<SessionPatchAck> {
         if let Some(conf) = patch.conf.as_ref() {
             SessionConfigOverridePolicy::validate_conf(conf)?;
         }
         let Some(row) = self.fetch_session_row(session_id).await? else {
-            return Ok(SessionPatchResponse { success: false });
+            return Ok(SessionPatchAck { success: false });
         };
         let mut record = Self::parse_session_record(&row);
         let mut conf = Self::parse_conf_json(row.get_string("conf_json"));
@@ -666,7 +738,7 @@ impl SessionStore for DatabaseSessionStore {
         self.storage
             .update("sessions", &update_row, "session_key = ?", &[session_id])
             .await?;
-        Ok(SessionPatchResponse { success: true })
+        Ok(SessionPatchAck { success: true })
     }
 
     async fn update_session_title(&self, session_id: &str, title: &str) -> TalosResult<()> {
@@ -694,10 +766,10 @@ impl SessionStore for DatabaseSessionStore {
         Ok(())
     }
 
-    async fn reset_session_record(&self, session_id: &str) -> TalosResult<SessionPatchResponse> {
+    async fn reset_session_record(&self, session_id: &str) -> TalosResult<SessionPatchAck> {
         let now = chrono::Utc::now().timestamp_millis();
         let Some(mut record) = self.get_session_record(session_id).await? else {
-            return Ok(SessionPatchResponse { success: false });
+            return Ok(SessionPatchAck { success: false });
         };
 
         record.title = DEFAULT_SESSION_TITLE.to_string();
@@ -746,12 +818,12 @@ impl SessionStore for DatabaseSessionStore {
             .update("sessions", &update_row, "session_key = ?", &[session_id])
             .await?;
 
-        Ok(SessionPatchResponse {
+        Ok(SessionPatchAck {
             success: affected > 0,
         })
     }
 
-    async fn delete_session_record(&self, session_id: &str) -> TalosResult<SessionPatchResponse> {
+    async fn delete_session_record(&self, session_id: &str) -> TalosResult<SessionPatchAck> {
         self.storage
             .delete("timeline_events", "session_id = ?", &[session_id])
             .await?;
@@ -765,7 +837,7 @@ impl SessionStore for DatabaseSessionStore {
             .storage
             .delete("sessions", "session_key = ?", &[session_id])
             .await?;
-        Ok(SessionPatchResponse {
+        Ok(SessionPatchAck {
             success: affected > 0,
         })
     }

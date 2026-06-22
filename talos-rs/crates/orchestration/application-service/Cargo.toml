@@ -12,6 +12,7 @@ talos-llm-provider = { workspace = true }
 talos-memory = { workspace = true }
 talos-session-store = { path = "../../orchestration/session-store" }
 talos-project-store = { path = "../../orchestration/project-store" }
+talos-coordinator = { path = "../../orchestration/coordinator" }
 talos-plugin = { workspace = true }
 talos-skills = { workspace = true }
 talos-types = { workspace = true }

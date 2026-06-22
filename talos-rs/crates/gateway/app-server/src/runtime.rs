@@ -16,12 +16,11 @@ use talos_app_protocol::requests::{
 };
 use talos_app_protocol::version::ProtocolVersion;
 use talos_application_service::{
-    Actor, TimelineSubscriptionCloseReason, TimelineSubscriptionMessage,
+    Actor, TimelineSubscription, TimelineSubscriptionCloseReason, TimelineSubscriptionMessage,
 };
-use talos_types::{EventUnsubscribeResponse, SubscribeTimelineResponse};
+use talos_types::EventUnsubscribeResponse;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
-use uuid::Uuid;
 
 use crate::application::{AppServerApplication, ProtocolResult};
 use crate::auth::ActorCredentialValidator;
@@ -266,26 +265,18 @@ async fn handle_request(
             };
             match app.subscribe_timeline_events(&actor, params).await {
                 Ok(source) => {
-                    let subscription_id = format!("sub_{}", Uuid::new_v4().simple());
-                    let response = SubscribeTimelineResponse {
-                        subscription_id: subscription_id.clone(),
-                        session_id: source.session_id.clone(),
-                        high_water_mark_event_id: source
-                            .high_water_mark_event_id
-                            .as_ref()
-                            .map(|value| value.to_string()),
-                    };
+                    let subscription_id = source.response.subscription_id.clone();
                     send_result(
                         outgoing_tx.clone(),
                         id,
-                        serde_json::to_value(response).map_err(|error| {
+                        serde_json::to_value(&source.response).map_err(|error| {
                             AppServerErrorBody::invalid_request(error.to_string())
                         }),
                     )
                     .await?;
                     let task = spawn_subscription(
                         subscription_id.clone(),
-                        source,
+                        source.subscription,
                         outgoing_tx,
                         config.subscription_capacity,
                     );
@@ -403,7 +394,7 @@ async fn resolve_request_actor(
 
 fn spawn_subscription(
     subscription_id: String,
-    mut source: crate::application::SubscriptionSource,
+    mut source: TimelineSubscription,
     outgoing_tx: mpsc::Sender<OutgoingMessage>,
     _subscription_capacity: usize,
 ) -> tokio::task::JoinHandle<()> {
@@ -639,19 +630,31 @@ mod tests {
             match live_tx {
                 Some(_live_tx) => {
                     let (_tx, events) = mpsc::channel(16);
-                    self.stream_txs.lock().expect("stream tx lock").push(_tx);
+                    let subscription_id = {
+                        let mut stream_txs = self.stream_txs.lock().expect("stream tx lock");
+                        let subscription_id = format!("sub_mock_{}", stream_txs.len() + 1);
+                        stream_txs.push(_tx);
+                        subscription_id
+                    };
                     Ok(SubscriptionSource {
-                        session_id: params.session_id,
-                        high_water_mark_event_id: None,
-                        replay: EventReplay {
-                            events: Vec::new(),
+                        response: talos_types::SubscribeTimelineResponse {
+                            subscription_id,
+                            session_id: params.session_id.clone(),
                             high_water_mark_event_id: None,
-                            last_replay_seq: 0,
-                            cursor_status:
-                                talos_application_service::TimelineCursorStatus::FromBeginning,
                         },
-                        events,
-                        has_live_turn: false,
+                        subscription: talos_application_service::TimelineSubscription {
+                            session_id: params.session_id,
+                            high_water_mark_event_id: None,
+                            replay: EventReplay {
+                                events: Vec::new(),
+                                high_water_mark_event_id: None,
+                                last_replay_seq: 0,
+                                cursor_status:
+                                    talos_application_service::TimelineCursorStatus::FromBeginning,
+                            },
+                            events,
+                            has_live_turn: false,
+                        },
                     })
                 }
                 None => Err(AppServerErrorBody::method_not_found("event.subscribe")),

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use talos_application_service::{Actor, TimelineSubscription};
+use talos_application_service::Actor;
 use talos_auth::{
     CloudLoginCancelRequest, CloudLoginStartRequest, CloudLoginStartResponse,
     CloudLoginStatusRequest, CloudLoginStatusResponse,
@@ -32,10 +32,10 @@ use talos_types::{
     SkillsListResponse, SkillsReadRequest, SkillsReadResponse, SkillsRefreshRequest,
     SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse,
     StartTurnRequest, StartTurnResponse, SubmitToolResultRequest, SubmitToolResultResponse,
-    SubscribeTimelineRequest, TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse,
-    WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
-    WorkspaceDocReadResponse, WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
-    WorkspaceInfoRequest, WorkspaceInfoResponse,
+    SubscribeTimelineRequest, SubscribeTimelineResponse, TimelineRecoveryResponse,
+    UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
+    WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
+    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 
 #[async_trait]
@@ -69,7 +69,7 @@ pub trait Gateway: Send + Sync {
         &self,
         actor: &Actor,
         request: SubscribeTimelineRequest,
-    ) -> TalosResult<TimelineSubscription>;
+    ) -> TalosResult<SubscribeTimelineResponse>;
 
     async fn recover_timeline(
         &self,

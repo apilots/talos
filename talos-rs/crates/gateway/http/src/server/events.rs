@@ -52,8 +52,8 @@ pub(super) async fn subscribe_timeline_events_handler(
         .max(1);
 
     let subscription = state
-        .gateway
-        .subscribe_timeline(
+        .app
+        .open_timeline_subscription(
             &shared_actor(&actor.0),
             SubscribeTimelineRequest {
                 session_id: session_id.clone(),
@@ -66,7 +66,7 @@ pub(super) async fn subscribe_timeline_events_handler(
         .await
         .map_err(map_event_replay_error)?;
 
-    let stream = ReceiverStream::new(subscription.events).filter_map(|message| {
+    let stream = ReceiverStream::new(subscription.subscription.events).filter_map(|message| {
         let TimelineSubscriptionMessage::Event(record) = message else {
             return None;
         };

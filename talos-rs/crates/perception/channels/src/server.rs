@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use talos_application_service::{Actor, TimelineSubscriptionMessage};
+use talos_application_service::{
+    Actor, TalosApplicationService, TimelineSubscriptionMessage, TimelineSubscriptionSource,
+};
 use talos_config::Config;
 use talos_error::{TalosError, TalosResult};
 use talos_gateway::Gateway;
@@ -18,9 +20,30 @@ use crate::traits::{
     Channel, ChannelEvent, ChannelRuntimeContext, MessageContent, MessageTarget, OutboundContext,
 };
 
+#[async_trait::async_trait]
+pub trait ChannelTimelineSubscriptionService: Send + Sync {
+    async fn open_timeline_subscription(
+        &self,
+        actor: &Actor,
+        request: SubscribeTimelineRequest,
+    ) -> TalosResult<TimelineSubscriptionSource>;
+}
+
+#[async_trait::async_trait]
+impl ChannelTimelineSubscriptionService for TalosApplicationService {
+    async fn open_timeline_subscription(
+        &self,
+        actor: &Actor,
+        request: SubscribeTimelineRequest,
+    ) -> TalosResult<TimelineSubscriptionSource> {
+        TalosApplicationService::open_timeline_subscription(self, actor, request).await
+    }
+}
+
 pub struct ChannelServer {
     config: Arc<Config>,
     gateway: Arc<dyn Gateway>,
+    timeline_subscriptions: Arc<dyn ChannelTimelineSubscriptionService>,
     channels: HashMap<String, Box<dyn Channel>>,
     started_accounts: HashMap<String, Vec<String>>,
     event_tx: mpsc::Sender<ChannelEvent>,
@@ -28,11 +51,16 @@ pub struct ChannelServer {
 }
 
 impl ChannelServer {
-    pub fn new(config: Arc<Config>, gateway: Arc<dyn Gateway>) -> Self {
+    pub fn new(
+        config: Arc<Config>,
+        gateway: Arc<dyn Gateway>,
+        timeline_subscriptions: Arc<dyn ChannelTimelineSubscriptionService>,
+    ) -> Self {
         let (event_tx, event_rx) = mpsc::channel(256);
         Self {
             config,
             gateway,
+            timeline_subscriptions,
             channels: HashMap::new(),
             started_accounts: HashMap::new(),
             event_tx,
@@ -109,7 +137,14 @@ impl ChannelServer {
                     );
 
                     let actor = Actor::regular(user_id);
-                    match submit_channel_turn(self.gateway.as_ref(), &actor, request).await {
+                    match submit_channel_turn(
+                        self.gateway.as_ref(),
+                        self.timeline_subscriptions.as_ref(),
+                        &actor,
+                        request,
+                    )
+                    .await
+                    {
                         Ok(content) => {
                             let Some(text) = normalize_channel_response(&content) else {
                                 continue;
@@ -176,12 +211,13 @@ impl ChannelServer {
 
 async fn submit_channel_turn(
     gateway: &dyn Gateway,
+    timeline_subscriptions: &dyn ChannelTimelineSubscriptionService,
     actor: &Actor,
     request: StartTurnRequest,
 ) -> TalosResult<String> {
     let response = gateway.start_turn(actor, request, None).await?;
-    let mut subscription = gateway
-        .subscribe_timeline(
+    let mut subscription = timeline_subscriptions
+        .open_timeline_subscription(
             actor,
             SubscribeTimelineRequest {
                 session_id: response.session_id.clone(),
@@ -205,7 +241,7 @@ async fn submit_channel_turn(
                     response.turn_id
                 )));
             }
-            message = subscription.events.recv() => {
+            message = subscription.subscription.events.recv() => {
                 let Some(message) = message else {
                     return Ok(collector.finish());
                 };
@@ -373,10 +409,11 @@ mod tests {
         SkillsListRequest, SkillsListResponse, SkillsReadRequest, SkillsReadResponse,
         SkillsRefreshRequest, SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest,
         SkillsSuggestResponse, StartTurnResponse, SubmitToolResultRequest,
-        SubmitToolResultResponse, TimelineRecoveryResponse, TurnCommandStatus, UserCurrentRequest,
-        UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
-        WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
-        WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
+        SubmitToolResultResponse, SubscribeTimelineResponse, TimelineRecoveryResponse,
+        TurnCommandStatus, UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest,
+        WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
+        WorkspaceDocWriteRequest, WorkspaceDocWriteResponse, WorkspaceInfoRequest,
+        WorkspaceInfoResponse,
     };
 
     use crate::traits::{ChannelCapabilities, ChannelDefinition, DeliveryResult, OutboundAdapter};
@@ -469,6 +506,7 @@ mod tests {
     }
 
     struct MockGateway;
+    struct MockTimelineSubscriptions;
 
     fn unused_gateway<T>(method: &str) -> TalosResult<T> {
         unreachable!("{method} is not used by channel tests")
@@ -519,80 +557,11 @@ mod tests {
             &self,
             _actor: &Actor,
             request: SubscribeTimelineRequest,
-        ) -> TalosResult<TimelineSubscription> {
-            let (tx, rx) = tokio::sync::mpsc::channel(4);
-            let session_id = request.session_id.clone();
-            tokio::spawn(async move {
-                let _ = tx
-                    .send(TimelineSubscriptionMessage::Event(timeline_envelope(
-                        "event-1",
-                        TalosTimelineEventType::ItemStarted,
-                        session_id.clone(),
-                        TalosTimelineEventPayload::ItemStarted(
-                            talos_types::talos::TalosItemStartedEvent {
-                                request_id: "req-mock".to_string(),
-                                turn_id: "turn-mock".to_string(),
-                                item: TalosTimelineItem {
-                                    item_id: "item-1".to_string(),
-                                    parent_item_id: None,
-                                    kind: TalosTimelineItemKind::AssistantText,
-                                    phase: TalosTimelinePhase::FinalAnswer,
-                                    status: TalosTimelineItemStatus::Running,
-                                    title: None,
-                                    started_at_ms: 0,
-                                    completed_at_ms: None,
-                                    content: TalosTimelineContent::Text {
-                                        text: "Echo: ".to_string(),
-                                    },
-                                },
-                            },
-                        ),
-                    )))
-                    .await;
-                let _ = tx
-                    .send(TimelineSubscriptionMessage::Event(timeline_envelope(
-                        "event-2",
-                        TalosTimelineEventType::ItemDelta,
-                        session_id.clone(),
-                        TalosTimelineEventPayload::ItemDelta(
-                            talos_types::talos::TalosItemDeltaEvent {
-                                request_id: "req-mock".to_string(),
-                                turn_id: "turn-mock".to_string(),
-                                item_id: "item-1".to_string(),
-                                delta: TalosTimelineDelta::Text {
-                                    text: "hello".to_string(),
-                                },
-                            },
-                        ),
-                    )))
-                    .await;
-                let _ = tx
-                    .send(TimelineSubscriptionMessage::Event(timeline_envelope(
-                        "event-3",
-                        TalosTimelineEventType::TurnCompleted,
-                        session_id,
-                        TalosTimelineEventPayload::TurnCompleted(TalosTurnCompletedEvent {
-                            request_id: "req-mock".to_string(),
-                            turn_id: "turn-mock".to_string(),
-                            completed_at_ms: 0,
-                            stop_reason: StopReason::EndTurn,
-                            usage: Default::default(),
-                            metrics: None,
-                        }),
-                    )))
-                    .await;
-            });
-            Ok(TimelineSubscription {
+        ) -> TalosResult<SubscribeTimelineResponse> {
+            Ok(SubscribeTimelineResponse {
+                subscription_id: "sub-mock".to_string(),
                 session_id: request.session_id,
                 high_water_mark_event_id: None,
-                replay: EventReplay {
-                    events: Vec::new(),
-                    high_water_mark_event_id: None,
-                    last_replay_seq: 0,
-                    cursor_status: TimelineCursorStatus::Current,
-                },
-                events: rx,
-                has_live_turn: true,
             })
         }
 
@@ -1041,6 +1010,97 @@ mod tests {
         }
     }
 
+    #[async_trait]
+    impl ChannelTimelineSubscriptionService for MockTimelineSubscriptions {
+        async fn open_timeline_subscription(
+            &self,
+            _actor: &Actor,
+            request: SubscribeTimelineRequest,
+        ) -> TalosResult<TimelineSubscriptionSource> {
+            let (tx, rx) = tokio::sync::mpsc::channel(4);
+            let session_id = request.session_id.clone();
+            tokio::spawn(async move {
+                let _ = tx
+                    .send(TimelineSubscriptionMessage::Event(timeline_envelope(
+                        "event-1",
+                        TalosTimelineEventType::ItemStarted,
+                        session_id.clone(),
+                        TalosTimelineEventPayload::ItemStarted(
+                            talos_types::talos::TalosItemStartedEvent {
+                                request_id: "req-mock".to_string(),
+                                turn_id: "turn-mock".to_string(),
+                                item: TalosTimelineItem {
+                                    item_id: "item-1".to_string(),
+                                    parent_item_id: None,
+                                    kind: TalosTimelineItemKind::AssistantText,
+                                    phase: TalosTimelinePhase::FinalAnswer,
+                                    status: TalosTimelineItemStatus::Running,
+                                    title: None,
+                                    started_at_ms: 0,
+                                    completed_at_ms: None,
+                                    content: TalosTimelineContent::Text {
+                                        text: "Echo: ".to_string(),
+                                    },
+                                },
+                            },
+                        ),
+                    )))
+                    .await;
+                let _ = tx
+                    .send(TimelineSubscriptionMessage::Event(timeline_envelope(
+                        "event-2",
+                        TalosTimelineEventType::ItemDelta,
+                        session_id.clone(),
+                        TalosTimelineEventPayload::ItemDelta(
+                            talos_types::talos::TalosItemDeltaEvent {
+                                request_id: "req-mock".to_string(),
+                                turn_id: "turn-mock".to_string(),
+                                item_id: "item-1".to_string(),
+                                delta: TalosTimelineDelta::Text {
+                                    text: "hello".to_string(),
+                                },
+                            },
+                        ),
+                    )))
+                    .await;
+                let _ = tx
+                    .send(TimelineSubscriptionMessage::Event(timeline_envelope(
+                        "event-3",
+                        TalosTimelineEventType::TurnCompleted,
+                        session_id,
+                        TalosTimelineEventPayload::TurnCompleted(TalosTurnCompletedEvent {
+                            request_id: "req-mock".to_string(),
+                            turn_id: "turn-mock".to_string(),
+                            completed_at_ms: 0,
+                            stop_reason: StopReason::EndTurn,
+                            usage: Default::default(),
+                            metrics: None,
+                        }),
+                    )))
+                    .await;
+            });
+            Ok(TimelineSubscriptionSource {
+                response: SubscribeTimelineResponse {
+                    subscription_id: "sub-mock".to_string(),
+                    session_id: request.session_id.clone(),
+                    high_water_mark_event_id: None,
+                },
+                subscription: TimelineSubscription {
+                    session_id: request.session_id,
+                    high_water_mark_event_id: None,
+                    replay: EventReplay {
+                        events: Vec::new(),
+                        high_water_mark_event_id: None,
+                        last_replay_seq: 0,
+                        cursor_status: TimelineCursorStatus::Current,
+                    },
+                    events: rx,
+                    has_live_turn: true,
+                },
+            })
+        }
+    }
+
     #[test]
     fn test_build_start_turn_request_from_channel_event() {
         let request = build_start_turn_request(
@@ -1076,7 +1136,9 @@ mod tests {
     async fn test_channel_server_registers_channels() {
         let config = Arc::new(Config::default());
         let gateway: Arc<dyn Gateway> = Arc::new(MockGateway);
-        let mut server = ChannelServer::new(config, gateway);
+        let subscriptions: Arc<dyn ChannelTimelineSubscriptionService> =
+            Arc::new(MockTimelineSubscriptions);
+        let mut server = ChannelServer::new(config, gateway, subscriptions);
         server.register(Box::new(MockChannel::new()));
 
         assert_eq!(server.channel_ids(), vec!["mock"]);
@@ -1131,13 +1193,15 @@ mod tests {
     async fn test_channel_server_processes_events_and_replies() {
         let config = Arc::new(Config::default());
         let gateway: Arc<dyn Gateway> = Arc::new(MockGateway);
+        let subscriptions: Arc<dyn ChannelTimelineSubscriptionService> =
+            Arc::new(MockTimelineSubscriptions);
         let outbound_messages = Arc::new(Mutex::new(Vec::new()));
         let channel = MockChannelWithOutbound {
             outbound: MockOutboundAdapter {
                 messages: outbound_messages.clone(),
             },
         };
-        let mut server = ChannelServer::new(config, gateway);
+        let mut server = ChannelServer::new(config, gateway, subscriptions);
         server.register(Box::new(channel));
 
         let run = tokio::time::timeout(std::time::Duration::from_millis(50), server.run()).await;

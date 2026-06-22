@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use talos_application_service::{Actor, TimelineSubscription};
+use talos_application_service::Actor;
 use talos_auth::{
     CloudLoginCancelRequest, CloudLoginStartRequest, CloudLoginStartResponse,
     CloudLoginStatusRequest, CloudLoginStatusResponse,
@@ -32,10 +32,10 @@ use talos_types::{
     SkillsListResponse, SkillsReadRequest, SkillsReadResponse, SkillsRefreshRequest,
     SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse,
     StartTurnRequest, StartTurnResponse, SubmitToolResultRequest, SubmitToolResultResponse,
-    SubscribeTimelineRequest, TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse,
-    WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
-    WorkspaceDocReadResponse, WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
-    WorkspaceInfoRequest, WorkspaceInfoResponse,
+    SubscribeTimelineRequest, SubscribeTimelineResponse, TimelineRecoveryResponse,
+    UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
+    WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
+    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 
 use crate::api::Gateway;
@@ -80,7 +80,7 @@ impl Gateway for ApplicationServiceGateway {
         &self,
         actor: &Actor,
         request: SubscribeTimelineRequest,
-    ) -> TalosResult<TimelineSubscription> {
+    ) -> TalosResult<SubscribeTimelineResponse> {
         ApplicationServiceGateway::subscribe_timeline(self, actor, request).await
     }
 

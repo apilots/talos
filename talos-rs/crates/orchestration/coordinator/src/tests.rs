@@ -8,7 +8,9 @@ use talos_types::talos::{
     StopReason, TalosContext, TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineEvent,
     TalosUsage,
 };
-use talos_types::{SessionConf, SessionRecord, TalosConfig, TalosSession, DEFAULT_SESSION_TITLE};
+use talos_types::{
+    SessionConf, SessionContext, SessionState, TalosConfig, TalosSession, DEFAULT_SESSION_TITLE,
+};
 use tokio::sync::mpsc;
 
 struct MockRouter;
@@ -43,22 +45,35 @@ impl TrackingFlushAgent {
 }
 
 fn test_session(session_id: &str, context: TalosContext) -> TalosSession {
-    let record = SessionRecord {
-        id: session_id.to_string(),
+    TalosSession {
         title: DEFAULT_SESSION_TITLE.to_string(),
         user_id: context.user_id.clone(),
-        context,
-        model: "mock-model".to_string(),
-        created_at: 0,
-        last_activity: 0,
-        message_count: 0,
-        usage: TalosUsage::default(),
+        context: SessionContext {
+            session_id: session_id.to_string(),
+            workspace_id: None,
+            source_type: context.source_type,
+            provider: context.provider,
+            user_id: context.user_id,
+            message_id: context.message_id,
+            trace_id: context.trace_id,
+            channel_id: context.channel_id,
+            thread_id: context.thread_id,
+            project_id: None,
+            current_directory: None,
+            project_root: context.project_root,
+            environment: context.environment,
+        },
         conf: SessionConf::default(),
         project_id: None,
         current_directory: None,
-    };
-    TalosSession::restore(&record, &TalosConfig::default(), None)
-        .expect("test session should restore")
+        config: TalosConfig::default(),
+        state: SessionState {
+            created_at: 0,
+            last_activity: 0,
+            message_count: 0,
+            usage: TalosUsage::default(),
+        },
+    }
 }
 
 #[async_trait::async_trait]

@@ -36,15 +36,22 @@ import type {
   PluginUninstallRequest,
   PluginUninstallResponse,
   UserCurrentResponse,
+  FsDirectoryCreateRequest,
   FsDirectoryCreateResponse,
+  FsDirectoryReadRequest,
   FsDirectoryReadResponse,
   ProjectCreateRequest,
   ProjectCreateResponse,
+  ProjectDeleteRequest,
   ProjectDeleteResponse,
   ProjectListResponse,
+  ProjectListRequest,
   ProjectPatch,
+  ProjectPatchRequest,
   ProjectPatchResponse,
+  ProjectReadRequest,
   ProjectReadResponse,
+  SessionActiveTurnRequest,
   SkillsListRequest,
   SkillsListResponse,
   SkillsReadRequest,
@@ -54,19 +61,27 @@ import type {
   SkillsResolveResponse,
   SkillsSuggestRequest,
   SkillsSuggestResponse,
-  SessionUpdate,
+  SessionPatchRequest,
+  SessionClearRequest,
   SessionCompactResponse,
+  SessionCompactRequest,
   SessionClearResponse,
+  SessionCloseRequest,
   SessionCloseResponse,
+  SessionDeleteRequest,
   SessionDeleteResponse,
+  SessionGetRequest,
   SessionGetResponse,
   SessionActiveTurnResponse,
+  SessionHistoryRequest,
   SessionHistoryResponse,
   SessionListRequest,
   SessionListResponse,
   SessionUpdateResponse,
   InterruptTurnResponse,
+  InterruptTurnRequest,
   RetryTurnRequest,
+  RecoverTimelineRequest,
   StartTurnRequest,
   StartTurnResponse,
   TimelineEventEnvelope,
@@ -225,15 +240,17 @@ export class TalosClient {
   sessions = {
     list: (query?: SessionListRequest): Promise<SessionListResponse> =>
       this.http.request<SessionListResponse>(this.urlWithQuery("/v1/sessions", query)),
-    get: (sessionId: string) =>
-      this.http.request<SessionGetResponse>(this.url(`/v1/sessions/${sessionId}`)),
-    patch: (sessionId: string, update: SessionUpdate): Promise<SessionUpdateResponse> =>
-      this.http.request<SessionUpdateResponse>(this.url(`/v1/sessions/${sessionId}`), {
+    get: (request: SessionGetRequest): Promise<SessionGetResponse> =>
+      this.http.request<SessionGetResponse>(this.url(`/v1/sessions/${request.session_id}`)),
+    getById: (sessionId: string): Promise<SessionGetResponse> =>
+      this.sessions.get({ session_id: sessionId }),
+    patch: (request: SessionPatchRequest): Promise<SessionUpdateResponse> =>
+      this.http.request<SessionUpdateResponse>(this.url(`/v1/sessions/${request.session_id}`), {
         method: "PATCH",
-        body: JSON.stringify(update),
+        body: JSON.stringify(request),
       }),
-    close: async (sessionId: string): Promise<SessionCloseResponse> => {
-      const response = await this.http.request<SessionCloseResponse>(this.url(`/v1/sessions/${sessionId}/close`), {
+    close: async (request: SessionCloseRequest): Promise<SessionCloseResponse> => {
+      const response = await this.http.request<SessionCloseResponse>(this.url(`/v1/sessions/${request.session_id}/close`), {
         method: "POST",
       });
       if (!response.success) {
@@ -241,8 +258,10 @@ export class TalosClient {
       }
       return response;
     },
-    delete: async (sessionId: string): Promise<SessionDeleteResponse> => {
-      const response = await this.http.request<SessionDeleteResponse>(this.url(`/v1/sessions/${sessionId}`), {
+    closeById: (sessionId: string): Promise<SessionCloseResponse> =>
+      this.sessions.close({ session_id: sessionId }),
+    delete: async (request: SessionDeleteRequest): Promise<SessionDeleteResponse> => {
+      const response = await this.http.request<SessionDeleteResponse>(this.url(`/v1/sessions/${request.session_id}`), {
         method: "DELETE",
       });
       if (!response.success) {
@@ -250,12 +269,14 @@ export class TalosClient {
       }
       return response;
     },
-    cancel: async (sessionId: string): Promise<InterruptTurnResponse> => {
+    deleteById: (sessionId: string): Promise<SessionDeleteResponse> =>
+      this.sessions.delete({ session_id: sessionId }),
+    cancel: async (request: InterruptTurnRequest): Promise<InterruptTurnResponse> => {
       const response = await this.http.request<InterruptTurnResponse>(
         this.url("/v1/turns/interrupt"),
         {
           method: "POST",
-          body: JSON.stringify({ session_id: sessionId }),
+          body: JSON.stringify(request),
         },
       );
       if (!response.success) {
@@ -263,65 +284,87 @@ export class TalosClient {
       }
       return response;
     },
-    compact: (sessionId: string) =>
-      this.http.request<SessionCompactResponse>(this.url(`/v1/sessions/${sessionId}/compact`), {
+    cancelById: (sessionId: string): Promise<InterruptTurnResponse> =>
+      this.sessions.cancel({ session_id: sessionId }),
+    compact: (request: SessionCompactRequest) =>
+      this.http.request<SessionCompactResponse>(this.url(`/v1/sessions/${request.session_id}/compact`), {
         method: "POST",
       }),
-    clear: (sessionId: string) =>
-      this.http.request<SessionClearResponse>(this.url(`/v1/sessions/${sessionId}/clear`), {
+    compactById: (sessionId: string): Promise<SessionCompactResponse> =>
+      this.sessions.compact({ session_id: sessionId }),
+    clear: (request: SessionClearRequest) =>
+      this.http.request<SessionClearResponse>(this.url(`/v1/sessions/${request.session_id}/clear`), {
         method: "POST",
       }),
-    activeTurn: (sessionId: string) =>
-      this.http.request<SessionActiveTurnResponse>(this.url(`/v1/sessions/${sessionId}/active-turn`)),
-    history: async (sessionId: string): Promise<SessionHistoryResponse> => {
+    clearById: (sessionId: string): Promise<SessionClearResponse> =>
+      this.sessions.clear({ session_id: sessionId }),
+    activeTurn: (request: SessionActiveTurnRequest) =>
+      this.http.request<SessionActiveTurnResponse>(this.url(`/v1/sessions/${request.session_id}/active-turn`)),
+    activeTurnById: (sessionId: string): Promise<SessionActiveTurnResponse> =>
+      this.sessions.activeTurn({ session_id: sessionId }),
+    history: async (request: SessionHistoryRequest): Promise<SessionHistoryResponse> => {
       return this.http.request<SessionHistoryResponse>(
-        this.url(`/v1/sessions/${sessionId}/history`),
+        this.url(`/v1/sessions/${request.session_id}/history`),
       );
     },
-    recover: async (
-      sessionId: string,
-      afterEventId?: string,
-      replayLimit?: number,
-    ): Promise<TimelineRecoveryResponse> => {
+    historyById: (sessionId: string): Promise<SessionHistoryResponse> =>
+      this.sessions.history({ session_id: sessionId }),
+    recover: async (request: RecoverTimelineRequest): Promise<TimelineRecoveryResponse> => {
       return this.http.request<TimelineRecoveryResponse>(
-        this.urlWithQuery(`/v1/sessions/${sessionId}/recovery`, {
-          after_event_id: afterEventId,
-          limit: replayLimit,
+        this.urlWithQuery(`/v1/sessions/${request.session_id}/recovery`, {
+          after_event_id: request.after_event_id ?? undefined,
+          limit: request.replay_limit ?? undefined,
         }),
       );
     },
+    recoverById: (
+      sessionId: string,
+      afterEventId?: string,
+      replayLimit?: number,
+    ): Promise<TimelineRecoveryResponse> =>
+      this.sessions.recover({
+        session_id: sessionId,
+        after_event_id: afterEventId ?? null,
+        replay_limit: replayLimit ?? null,
+      }),
   };
 
   projects = {
-    list: (): Promise<ProjectListResponse> =>
+    list: (_request: ProjectListRequest = {}): Promise<ProjectListResponse> =>
       this.http.request<ProjectListResponse>(this.url("/v1/projects")),
-    get: (projectId: string): Promise<ProjectReadResponse> =>
-      this.http.request<ProjectReadResponse>(this.url(`/v1/projects/${projectId}`)),
+    get: (request: ProjectReadRequest): Promise<ProjectReadResponse> =>
+      this.http.request<ProjectReadResponse>(this.url(`/v1/projects/${request.project_id}`)),
+    getById: (projectId: string): Promise<ProjectReadResponse> =>
+      this.projects.get({ project_id: projectId }),
     create: (body: ProjectCreateRequest): Promise<ProjectCreateResponse> =>
       this.http.request<ProjectCreateResponse>(this.url("/v1/projects"), {
         method: "POST",
         body: JSON.stringify(body),
       }),
-    patch: (projectId: string, patch: ProjectPatch): Promise<ProjectPatchResponse> =>
-      this.http.request<ProjectPatchResponse>(this.url(`/v1/projects/${projectId}`), {
+    patch: (request: ProjectPatchRequest): Promise<ProjectPatchResponse> =>
+      this.http.request<ProjectPatchResponse>(this.url(`/v1/projects/${request.project_id}`), {
         method: "PATCH",
-        body: JSON.stringify(patch),
+        body: JSON.stringify(request),
       }),
-    delete: (projectId: string): Promise<ProjectDeleteResponse> =>
-      this.http.request<ProjectDeleteResponse>(this.url(`/v1/projects/${projectId}`), {
+    patchById: (projectId: string, patch: ProjectPatch): Promise<ProjectPatchResponse> =>
+      this.projects.patch({ project_id: projectId, name: patch.name }),
+    delete: (request: ProjectDeleteRequest): Promise<ProjectDeleteResponse> =>
+      this.http.request<ProjectDeleteResponse>(this.url(`/v1/projects/${request.project_id}`), {
         method: "DELETE",
       }),
+    deleteById: (projectId: string): Promise<ProjectDeleteResponse> =>
+      this.projects.delete({ project_id: projectId }),
   };
 
   fs = {
     directory: {
-      read: (query?: { path?: string | null }): Promise<FsDirectoryReadResponse> =>
+      read: (query: FsDirectoryReadRequest = { path: null }): Promise<FsDirectoryReadResponse> =>
         this.http.request<FsDirectoryReadResponse>(
           this.urlWithQuery("/v1/fs/directory", {
             path: query?.path ?? undefined,
           }),
         ),
-      create: (body: { parent: string; name: string }): Promise<FsDirectoryCreateResponse> =>
+      create: (body: FsDirectoryCreateRequest): Promise<FsDirectoryCreateResponse> =>
         this.http.request<FsDirectoryCreateResponse>(this.url("/v1/fs/directory"), {
           method: "POST",
           body: JSON.stringify(body),

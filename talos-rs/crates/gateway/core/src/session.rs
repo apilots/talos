@@ -18,7 +18,7 @@ impl ApplicationServiceGateway {
     ) -> TalosResult<SessionListResponse> {
         let sessions = self
             .application_service
-            .list_sessions(actor, request.into_query())
+            .list_sessions(actor, request)
             .await?;
         Ok(SessionListResponse {
             sessions: sessions.iter().map(SessionInfo::from).collect(),

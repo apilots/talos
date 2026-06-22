@@ -331,7 +331,7 @@ async fn execute_app_server_session_command(
             }
         }
         SessionCommands::Info { session_id } => {
-            let response = client.get_session(&session_id).await?;
+            let response = client.get_session_by_id(&session_id).await?;
             let session = response.session;
             println!("Session Info:");
             println!("  ID: {}", session.id);
@@ -362,7 +362,7 @@ async fn execute_app_server_session_command(
                 stdin.lock().read_line(&mut line).unwrap();
                 let input = line.trim();
                 if input == "quit" || input == "exit" {
-                    if let Err(err) = client.delete_session(&session_id).await {
+                    if let Err(err) = client.delete_session_by_id(&session_id).await {
                         debug!("Failed to close session {}: {}", session_id, err);
                     }
                     break;

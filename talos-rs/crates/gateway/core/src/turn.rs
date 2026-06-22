@@ -1,9 +1,10 @@
-use talos_application_service::{Actor, TimelineSubscription};
+use talos_application_service::Actor;
 use talos_error::TalosResult;
 use talos_types::{
     InterruptTurnRequest, InterruptTurnResponse, RecoverTimelineRequest, RetryTurnRequest,
     RetryTurnResponse, StartTurnRequest, StartTurnResponse, SubmitToolResultRequest,
-    SubmitToolResultResponse, SubscribeTimelineRequest, TimelineRecoveryResponse,
+    SubmitToolResultResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
+    TimelineRecoveryResponse,
 };
 use tracing::info;
 
@@ -58,7 +59,7 @@ impl ApplicationServiceGateway {
         &self,
         actor: &Actor,
         request: SubscribeTimelineRequest,
-    ) -> TalosResult<TimelineSubscription> {
+    ) -> TalosResult<SubscribeTimelineResponse> {
         self.application_service
             .subscribe_timeline(actor, request)
             .await

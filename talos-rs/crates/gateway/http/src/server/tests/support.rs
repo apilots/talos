@@ -283,12 +283,15 @@ impl SessionService for MockSessionService {
 
     async fn list_sessions(
         &self,
-        _query: talos_types::SessionQuery,
+        _request: talos_types::SessionListRequest,
     ) -> TalosResult<Vec<talos_types::TalosSession>> {
         Ok(Vec::new())
     }
 
-    async fn count_sessions(&self, _query: talos_types::SessionQuery) -> TalosResult<usize> {
+    async fn count_sessions(
+        &self,
+        _request: talos_types::SessionListRequest,
+    ) -> TalosResult<usize> {
         Ok(0)
     }
 
@@ -340,14 +343,8 @@ impl SessionService for MockSessionService {
         &self,
         _session_id: &str,
         _patch: talos_types::SessionPatch,
-    ) -> TalosResult<talos_types::SessionPatchResponse> {
-        Ok(talos_types::SessionPatchResponse { success: true })
-    }
-
-    async fn compact_session(&self, session_id: &str) -> TalosResult<talos_types::TalosSession> {
-        self.get_session(session_id)
-            .await?
-            .ok_or_else(|| talos_error::TalosError::ResourceNotFound(session_id.to_string()))
+    ) -> TalosResult<SessionPatchAck> {
+        Ok(SessionPatchAck { success: true })
     }
 
     async fn clear_session(&self, session_id: &str) -> TalosResult<talos_types::TalosSession> {
@@ -365,11 +362,8 @@ impl SessionService for MockSessionService {
         Ok(())
     }
 
-    async fn delete_session(
-        &self,
-        _session_id: &str,
-    ) -> TalosResult<talos_types::SessionPatchResponse> {
-        Ok(talos_types::SessionPatchResponse { success: true })
+    async fn delete_session(&self, _session_id: &str) -> TalosResult<SessionPatchAck> {
+        Ok(SessionPatchAck { success: true })
     }
 
     async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {

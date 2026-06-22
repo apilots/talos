@@ -3,7 +3,7 @@ use serde::Serialize;
 use serde_json::Value;
 use talos_app_protocol::errors::AppServerErrorBody;
 use talos_app_protocol::requests::{ClientRequest, ClientRequestParams};
-use talos_application_service::{Actor, TalosApplicationService, TimelineSubscription};
+use talos_application_service::{Actor, TalosApplicationService, TimelineSubscriptionSource};
 use talos_auth::CloudSessionCache;
 use talos_error::TalosError;
 use talos_gateway::{ApplicationServiceGateway, Gateway};
@@ -52,7 +52,7 @@ pub trait AppServerApplication: Send + Sync {
     async fn drain_background_tasks(&self, timeout: Duration) -> TalosResult<()>;
 }
 
-pub type SubscriptionSource = TimelineSubscription;
+pub type SubscriptionSource = TimelineSubscriptionSource;
 
 #[derive(Clone)]
 pub struct TalosApplicationAdapter {
@@ -497,8 +497,8 @@ impl AppServerApplication for TalosApplicationAdapter {
         mut request: SubscribeTimelineRequest,
     ) -> ProtocolResult<SubscriptionSource> {
         request.replay_limit = Some(request.replay_limit.unwrap_or(self.replay_limit).max(1));
-        self.gateway
-            .subscribe_timeline(actor, request)
+        self.app
+            .open_timeline_subscription(actor, request)
             .await
             .map_err(AppServerErrorBody::from_talos_error)
     }

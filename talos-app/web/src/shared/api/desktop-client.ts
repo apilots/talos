@@ -11,7 +11,7 @@ import type {
   StartTurnRequest,
   StartTurnResponse,
   SessionListRequest,
-  SessionUpdate,
+  SessionPatchRequest,
   TalosSessionHistorySnapshot,
   TimelineEventEnvelope,
   TimelineRecoveryResponse,
@@ -122,48 +122,50 @@ export function createDesktopTalosClient(
           limit: query?.limit ?? null,
           offset: query?.offset ?? null,
         }),
-      get: (sessionId: string) => client.getSession(sessionId),
-      patch: (sessionId: string, update: SessionUpdate) =>
+      get: (sessionId: string) => client.getSession({ session_id: sessionId }),
+      patch: (request: SessionPatchRequest) =>
         client.patchSession({
-          session_id: sessionId,
-          conf: toProtocolSessionConf(update.conf),
-          project_id: toProtocolProjectPatch(update.project_id),
-          current_directory: toProtocolDirectoryPatch(update.current_directory),
+          session_id: request.session_id,
+          conf: toProtocolSessionConf(request.conf),
+          project_id: toProtocolProjectPatch(request.project_id),
+          current_directory: toProtocolDirectoryPatch(request.current_directory),
         }),
       close: (sessionId: string) =>
-        client.closeSession(sessionId),
-      delete: (sessionId: string) => client.deleteSession(sessionId),
-      cancel: (sessionId: string) => client.interruptTurn(sessionId),
-      compact: (sessionId: string) => client.compactSession(sessionId),
-      clear: (sessionId: string) => client.clearSession(sessionId),
+        client.closeSession({ session_id: sessionId }),
+      delete: (sessionId: string) => client.deleteSession({ session_id: sessionId }),
+      cancel: (sessionId: string) => client.interruptTurn({ session_id: sessionId }),
+      compact: (sessionId: string) => client.compactSession({ session_id: sessionId }),
+      clear: (sessionId: string) => client.clearSession({ session_id: sessionId }),
       activeTurn: (sessionId: string) =>
-        client.getActiveTurn(sessionId).then((response) => response.active_turn),
+        client.getActiveTurn({ session_id: sessionId }).then((response) => response.active_turn),
       history: (sessionId: string): Promise<TalosSessionHistorySnapshot> =>
-        client.getSessionHistory(sessionId).then((response) => response.history),
+        client.getSessionHistory({ session_id: sessionId }).then((response) => response.history),
       recover: (
         sessionId: string,
         afterEventId?: string,
         replayLimit?: number,
       ): Promise<TimelineRecoveryResponse> =>
-        client.recoverSession(sessionId, afterEventId ?? null, replayLimit ?? null),
+        client.recoverSession({
+          session_id: sessionId,
+          after_event_id: afterEventId ?? null,
+          replay_limit: replayLimit ?? null,
+        }),
     },
     projects: {
-      list: () => client.listProjects(),
-      get: (projectId: string) => client.getProject(projectId),
+      list: () => client.listProjects({}),
+      get: (projectId: string) => client.getProject({ project_id: projectId }),
       create: (body: Parameters<TalosWebClient["projects"]["create"]>[0]) =>
-        client.createProject(body.name, body.directory),
-      patch: (
-        projectId: string,
-        patch: Parameters<TalosWebClient["projects"]["patch"]>[1],
-      ) => client.patchProject(projectId, patch),
-      delete: (projectId: string) => client.deleteProject(projectId),
+        client.createProject(body),
+      patch: (request: Parameters<TalosWebClient["projects"]["patch"]>[0]) =>
+        client.patchProject(request),
+      delete: (projectId: string) => client.deleteProject({ project_id: projectId }),
     },
     fs: {
       directory: {
         read: (query?: { path?: string | null }) =>
-          client.readFsDirectory(query?.path ?? null).then((response) => response.directory),
+          client.readFsDirectory({ path: query?.path ?? null }).then((response) => response.directory),
         create: (body: { parent: string; name: string }) =>
-          client.createFsDirectory(body.parent, body.name),
+          client.createFsDirectory(body),
       },
     },
     memory: {
@@ -406,7 +408,7 @@ function isTerminalEvent(event: TimelineEventEnvelope): boolean {
 }
 
 function toProtocolProjectPatch(
-  patch: SessionUpdate["project_id"] | undefined | null,
+  patch: SessionPatchRequest["project_id"] | undefined | null,
 ): AppProtocol.OptionalProjectIdPatch | null {
   if (!patch) {
     return null;
@@ -417,7 +419,7 @@ function toProtocolProjectPatch(
 }
 
 function toProtocolDirectoryPatch(
-  patch: SessionUpdate["current_directory"] | undefined | null,
+  patch: SessionPatchRequest["current_directory"] | undefined | null,
 ): AppProtocol.OptionalCurrentDirectoryPatch | null {
   if (!patch) {
     return null;
@@ -428,7 +430,7 @@ function toProtocolDirectoryPatch(
 }
 
 function toProtocolSessionConf(
-  conf: SessionUpdate["conf"] | undefined | null,
+  conf: SessionPatchRequest["conf"] | undefined | null,
 ): AppProtocol.SessionConf | null {
   if (!conf) {
     return null;

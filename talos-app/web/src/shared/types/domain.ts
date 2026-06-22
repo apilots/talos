@@ -2,8 +2,8 @@ import { i18n } from "@/shared/i18n/setup";
 import { jsonContentValue } from "@talos/sdk-browser";
 import type { SessionInfo, TalosContentItem } from "./protocol";
 import type {
-  FileRecord,
-  MemoryRecord,
+  FileItemView,
+  MemoryItemView,
   ProjectView,
   SessionUiStatus,
   StreamSessionState,
@@ -77,7 +77,7 @@ export function isUnboundProject(projectId?: string | null) {
   return !projectId || projectId === UNBOUND_PROJECT_ID;
 }
 
-export function createDefaultMemory(): MemoryRecord[] {
+export function createDefaultMemory(): MemoryItemView[] {
   const now = Date.now();
   return [
     {
@@ -111,7 +111,7 @@ export function createDefaultMemory(): MemoryRecord[] {
   ];
 }
 
-export function createDefaultFiles(): FileRecord[] {
+export function createDefaultFiles(): FileItemView[] {
   const now = Date.now();
   return [
     {

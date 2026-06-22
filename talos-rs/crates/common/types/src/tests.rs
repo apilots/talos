@@ -75,12 +75,13 @@ fn test_desktop_source_type_roundtrip() {
 }
 
 #[test]
-fn test_session_context_and_state_from_record() {
-    let record = SessionRecord {
-        id: "session-1".to_string(),
+fn test_talos_session_apply_turn_progress_updates_state_and_model() {
+    let mut session = TalosSession {
         title: "Untitled Session".to_string(),
         user_id: "user-1".to_string(),
-        context: talos::TalosContext {
+        context: SessionContext {
+            session_id: "session-progress".to_string(),
+            workspace_id: None,
             source_type: talos::TalosSourceType::Im,
             provider: talos::TalosProvider::Telegram,
             user_id: "user-1".to_string(),
@@ -88,105 +89,28 @@ fn test_session_context_and_state_from_record() {
             trace_id: "trace-1".to_string(),
             channel_id: Some("channel-1".to_string()),
             thread_id: Some("thread-1".to_string()),
+            project_id: Some("project-1".to_string()),
+            current_directory: Some(std::path::PathBuf::from("/repo")),
             project_root: Some(std::path::PathBuf::from("/repo")),
             environment: None,
         },
-        model: "qwen-max".to_string(),
-        created_at: 100,
-        last_activity: 200,
-        message_count: 3,
-        usage: talos::TalosUsage::default(),
         conf: SessionConf::default(),
         project_id: Some("project-1".to_string()),
         current_directory: Some(std::path::PathBuf::from("/repo")),
-    };
-
-    let context = SessionContext::from_record(&record, Some("workspace-1".to_string()));
-    let state = SessionState::from_record(&record);
-
-    assert_eq!(context.session_id, "session-1");
-    assert_eq!(context.workspace_id.as_deref(), Some("workspace-1"));
-    assert_eq!(
-        context.current_directory.as_deref(),
-        Some(std::path::Path::new("/repo"))
-    );
-    assert_eq!(context.project_id.as_deref(), Some("project-1"));
-    assert_eq!(context.provider, talos::TalosProvider::Telegram);
-    assert_eq!(state.created_at, 100);
-    assert_eq!(state.last_activity, 200);
-    assert_eq!(state.message_count, 3);
-    assert_eq!(state.usage.total_tokens, 0);
-}
-
-#[test]
-fn test_talos_session_from_record_applies_conf_override() {
-    let mut record = SessionRecord {
-        id: "session-1".to_string(),
-        title: "Untitled Session".to_string(),
-        user_id: "user-1".to_string(),
-        context: talos::TalosContext {
-            source_type: talos::TalosSourceType::Http,
-            provider: talos::TalosProvider::Http,
-            user_id: "user-1".to_string(),
-            message_id: "message-1".to_string(),
-            trace_id: "trace-1".to_string(),
-            channel_id: Some("default".to_string()),
-            thread_id: None,
-            project_root: None,
-            environment: None,
+        config: TalosConfig::default(),
+        state: SessionState {
+            created_at: 100,
+            last_activity: 200,
+            message_count: 3,
+            usage: talos::TalosUsage {
+                input_tokens: 1,
+                output_tokens: 2,
+                total_tokens: 3,
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
+            },
         },
-        model: "qwen-max".to_string(),
-        created_at: 100,
-        last_activity: 200,
-        message_count: 3,
-        usage: talos::TalosUsage::default(),
-        conf: SessionConf::default(),
-        project_id: None,
-        current_directory: None,
     };
-    record.conf = SessionConfigOverridePolicy::single_model_conf("qwen-plus");
-
-    let session = TalosSession::from_record(&record, &TalosConfig::default(), None)
-        .expect("talos session restore should succeed");
-    assert_eq!(session.title, "Untitled Session");
-    assert_eq!(session.config.agent.model, "qwen-plus");
-    assert_eq!(session.config.llm.model, "qwen-plus");
-}
-
-#[test]
-fn test_talos_session_apply_turn_progress_updates_state_and_model() {
-    let record = SessionRecord {
-        id: "session-progress".to_string(),
-        title: "Untitled Session".to_string(),
-        user_id: "user-1".to_string(),
-        context: talos::TalosContext {
-            source_type: talos::TalosSourceType::Http,
-            provider: talos::TalosProvider::Http,
-            user_id: "user-1".to_string(),
-            message_id: "message-1".to_string(),
-            trace_id: "trace-1".to_string(),
-            channel_id: Some("default".to_string()),
-            thread_id: None,
-            project_root: None,
-            environment: None,
-        },
-        model: "qwen-max".to_string(),
-        created_at: 100,
-        last_activity: 200,
-        message_count: 3,
-        usage: talos::TalosUsage {
-            input_tokens: 1,
-            output_tokens: 2,
-            total_tokens: 3,
-            cache_creation_input_tokens: None,
-            cache_read_input_tokens: None,
-        },
-        conf: SessionConf::default(),
-        project_id: None,
-        current_directory: None,
-    };
-    let mut session = TalosSession::from_record(&record, &TalosConfig::default(), None)
-        .expect("talos session restore should succeed");
 
     session.apply_turn_progress(
         "qwen-plus",
@@ -277,58 +201,36 @@ fn test_session_patch_roundtrip_with_project_binding_fields() {
 }
 
 #[test]
-fn test_session_query_roundtrip_with_project_id() {
-    let query = SessionQuery {
-        user_id: Some("user-1".to_string()),
-        channel_id: Some("channel-1".to_string()),
-        provider: Some("http".to_string()),
-        project_id: Some("project-1".to_string()),
-        limit: Some(20),
-        offset: Some(40),
-    };
-
-    let encoded = serde_json::to_string(&query).unwrap();
-    let decoded: SessionQuery = serde_json::from_str(&encoded).unwrap();
-
-    assert_eq!(decoded.user_id.as_deref(), Some("user-1"));
-    assert_eq!(decoded.channel_id.as_deref(), Some("channel-1"));
-    assert_eq!(decoded.provider.as_deref(), Some("http"));
-    assert_eq!(decoded.project_id.as_deref(), Some("project-1"));
-    assert_eq!(decoded.limit, Some(20));
-    assert_eq!(decoded.offset, Some(40));
-}
-
-#[test]
 fn test_resolve_effective_project_root_prefers_project_directory() {
-    let session = TalosSession::from_record(
-        &SessionRecord {
-            id: "session-root".to_string(),
-            title: DEFAULT_SESSION_TITLE.to_string(),
+    let session = TalosSession {
+        title: DEFAULT_SESSION_TITLE.to_string(),
+        user_id: "user-1".to_string(),
+        context: SessionContext {
+            session_id: "session-root".to_string(),
+            workspace_id: None,
+            source_type: talos::TalosSourceType::Http,
+            provider: talos::TalosProvider::Http,
             user_id: "user-1".to_string(),
-            context: talos::TalosContext {
-                source_type: talos::TalosSourceType::Http,
-                provider: talos::TalosProvider::Http,
-                user_id: "user-1".to_string(),
-                message_id: "message-1".to_string(),
-                trace_id: "trace-1".to_string(),
-                channel_id: Some("default".to_string()),
-                thread_id: None,
-                project_root: None,
-                environment: None,
-            },
-            model: "qwen-max".to_string(),
+            message_id: "message-1".to_string(),
+            trace_id: "trace-1".to_string(),
+            channel_id: Some("default".to_string()),
+            thread_id: None,
+            project_id: Some("project-1".to_string()),
+            current_directory: Some(std::path::PathBuf::from("/current")),
+            project_root: None,
+            environment: None,
+        },
+        conf: SessionConf::default(),
+        project_id: Some("project-1".to_string()),
+        current_directory: Some(std::path::PathBuf::from("/current")),
+        config: TalosConfig::default(),
+        state: SessionState {
             created_at: 100,
             last_activity: 200,
             message_count: 0,
             usage: talos::TalosUsage::default(),
-            conf: SessionConf::default(),
-            project_id: Some("project-1".to_string()),
-            current_directory: Some(std::path::PathBuf::from("/current")),
         },
-        &TalosConfig::default(),
-        None,
-    )
-    .expect("session should restore");
+    };
 
     let root = resolve_effective_project_root(
         &session,
@@ -341,38 +243,38 @@ fn test_resolve_effective_project_root_prefers_project_directory() {
 
 #[test]
 fn test_resolve_effective_project_root_uses_embedded_current_directory() {
-    let session = TalosSession::from_record(
-        &SessionRecord {
-            id: "session-root".to_string(),
-            title: DEFAULT_SESSION_TITLE.to_string(),
+    let session = TalosSession {
+        title: DEFAULT_SESSION_TITLE.to_string(),
+        user_id: "user-1".to_string(),
+        context: SessionContext {
+            session_id: "session-root".to_string(),
+            workspace_id: None,
+            source_type: talos::TalosSourceType::Http,
+            provider: talos::TalosProvider::Http,
             user_id: "user-1".to_string(),
-            context: talos::TalosContext {
-                source_type: talos::TalosSourceType::Http,
-                provider: talos::TalosProvider::Http,
-                user_id: "user-1".to_string(),
-                message_id: "message-1".to_string(),
-                trace_id: "trace-1".to_string(),
-                channel_id: Some("default".to_string()),
-                thread_id: None,
-                project_root: None,
-                environment: Some(talos::TalosSessionEnvironment {
-                    directory: std::path::PathBuf::from("/current"),
-                    connection_mode: talos::TalosConnectionMode::Embedded,
-                }),
-            },
-            model: "qwen-max".to_string(),
+            message_id: "message-1".to_string(),
+            trace_id: "trace-1".to_string(),
+            channel_id: Some("default".to_string()),
+            thread_id: None,
+            project_id: None,
+            current_directory: Some(std::path::PathBuf::from("/current")),
+            project_root: None,
+            environment: Some(talos::TalosSessionEnvironment {
+                directory: std::path::PathBuf::from("/current"),
+                connection_mode: talos::TalosConnectionMode::Embedded,
+            }),
+        },
+        conf: SessionConf::default(),
+        project_id: None,
+        current_directory: Some(std::path::PathBuf::from("/current")),
+        config: TalosConfig::default(),
+        state: SessionState {
             created_at: 100,
             last_activity: 200,
             message_count: 0,
             usage: talos::TalosUsage::default(),
-            conf: SessionConf::default(),
-            project_id: None,
-            current_directory: Some(std::path::PathBuf::from("/current")),
         },
-        &TalosConfig::default(),
-        None,
-    )
-    .expect("session should restore");
+    };
 
     let root = resolve_effective_project_root(
         &session,

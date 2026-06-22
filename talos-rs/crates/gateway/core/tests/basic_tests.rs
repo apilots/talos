@@ -5,6 +5,7 @@ use talos_auth::{
     AuthResponse, AuthService, LoginRequest, RegisterRequest, RequestIdentity, UserDto, UserService,
 };
 use talos_config::{InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService};
+use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
 use talos_gateway::{ApplicationServiceGateway, Gateway};
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
@@ -20,8 +21,8 @@ use talos_types::talos::{
     TalosTimelineEventPayload, TalosTimelineEventType, TalosTurnStartedEvent,
 };
 use talos_types::{
-    AgentDispatchRuntime, SessionPatchRequest, SessionRuntime, StartTurnRequest, TalosConfig,
-    TalosSession, TalosUsage, TurnCommandStatus,
+    AgentDispatchRuntime, SessionPatchRequest, StartTurnRequest, TalosConfig, TalosSession,
+    TalosUsage, TurnCommandStatus,
 };
 use tokio::sync::mpsc;
 

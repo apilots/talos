@@ -1,9 +1,9 @@
 import { createDefaultFiles } from "@/shared/types/domain";
-import type { FileRecord } from "@/shared/types/ui";
+import type { FileItemView } from "@/shared/types/ui";
 
 export interface FilesSlice {
-  fileItems: FileRecord[];
-  upsertFile: (record: FileRecord) => void;
+  fileItems: FileItemView[];
+  upsertFile: (record: FileItemView) => void;
   removeFile: (id: string) => void;
 }
 

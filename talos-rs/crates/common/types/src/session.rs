@@ -1,33 +1,11 @@
 use crate::model::TalosConfig;
 use crate::talos;
 use crate::turn_api::TimelineActiveTurnSnapshot;
-use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use talos_error::TalosError;
 use ts_rs::TS;
-
-/// Session record stored by the gateway.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionRecord {
-    pub id: String,
-    pub title: String,
-    pub user_id: String,
-    pub context: talos::TalosContext,
-    pub model: String,
-    pub created_at: u64,
-    pub last_activity: u64,
-    pub message_count: u64,
-    #[serde(default)]
-    pub usage: talos::TalosUsage,
-    #[serde(default)]
-    pub conf: SessionConf,
-    #[serde(default)]
-    pub project_id: Option<String>,
-    #[serde(default)]
-    pub current_directory: Option<PathBuf>,
-}
 
 pub const DEFAULT_SESSION_TITLE: &str = "Untitled Session";
 
@@ -67,43 +45,6 @@ pub fn session_title_or_fallback(generated: String, first_user_text: &str) -> St
         .unwrap_or_else(|| deterministic_session_title(first_user_text))
 }
 
-impl SessionRecord {
-    pub fn from_session(session: &TalosSession, base_model: &str) -> Self {
-        let effective_model = session.config.llm.model.clone();
-        let conf = SessionConfigOverridePolicy::build_conf_for_model(base_model, &effective_model);
-
-        Self {
-            id: session.context.session_id.clone(),
-            title: session.title.clone(),
-            user_id: session.user_id.clone(),
-            context: talos::TalosContext {
-                source_type: session.context.source_type.clone(),
-                provider: session.context.provider.clone(),
-                user_id: session.context.user_id.clone(),
-                message_id: session.context.message_id.clone(),
-                trace_id: session.context.trace_id.clone(),
-                channel_id: session.context.channel_id.clone(),
-                thread_id: session.context.thread_id.clone(),
-                project_root: session.context.project_root.clone(),
-                environment: session.context.environment.clone(),
-            },
-            model: effective_model,
-            created_at: session.state.created_at,
-            last_activity: session.state.last_activity,
-            message_count: session.state.message_count,
-            usage: session.state.usage.clone(),
-            conf,
-            project_id: session.project_id.clone(),
-            current_directory: session.current_directory.clone(),
-        }
-    }
-
-    pub fn has_real_title(&self) -> bool {
-        let normalized = self.title.trim();
-        !normalized.is_empty() && normalized != DEFAULT_SESSION_TITLE
-    }
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionContext {
     pub session_id: String,
@@ -128,26 +69,6 @@ pub struct SessionContext {
     pub environment: Option<talos::TalosSessionEnvironment>,
 }
 
-impl SessionContext {
-    pub fn from_record(record: &SessionRecord, workspace_id: Option<String>) -> Self {
-        Self {
-            session_id: record.id.clone(),
-            workspace_id,
-            source_type: record.context.source_type.clone(),
-            provider: record.context.provider.clone(),
-            user_id: record.context.user_id.clone(),
-            message_id: record.context.message_id.clone(),
-            trace_id: record.context.trace_id.clone(),
-            channel_id: record.context.channel_id.clone(),
-            thread_id: record.context.thread_id.clone(),
-            project_id: record.project_id.clone(),
-            current_directory: record.current_directory.clone(),
-            project_root: record.context.project_root.clone(),
-            environment: record.context.environment.clone(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionState {
     pub created_at: u64,
@@ -155,17 +76,6 @@ pub struct SessionState {
     pub message_count: u64,
     #[serde(default)]
     pub usage: talos::TalosUsage,
-}
-
-impl SessionState {
-    pub fn from_record(record: &SessionRecord) -> Self {
-        Self {
-            created_at: record.created_at,
-            last_activity: record.last_activity,
-            message_count: record.message_count,
-            usage: record.usage.clone(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -237,34 +147,6 @@ impl SessionConfigOverridePolicy {
 }
 
 impl TalosSession {
-    pub fn restore(
-        record: &SessionRecord,
-        base_config: &TalosConfig,
-        workspace_id: Option<String>,
-    ) -> crate::TalosResult<Self> {
-        let config =
-            SessionConfigOverridePolicy::apply_to_config(base_config, &record.model, &record.conf)?;
-
-        Ok(Self {
-            title: record.title.clone(),
-            user_id: record.user_id.clone(),
-            context: SessionContext::from_record(record, workspace_id),
-            conf: record.conf.clone(),
-            project_id: record.project_id.clone(),
-            current_directory: record.current_directory.clone(),
-            config,
-            state: SessionState::from_record(record),
-        })
-    }
-
-    pub fn from_record(
-        record: &SessionRecord,
-        base_config: &TalosConfig,
-        workspace_id: Option<String>,
-    ) -> crate::TalosResult<Self> {
-        Self::restore(record, base_config, workspace_id)
-    }
-
     pub fn has_real_title(&self) -> bool {
         let normalized = self.title.trim();
         !normalized.is_empty() && normalized != DEFAULT_SESSION_TITLE
@@ -284,16 +166,6 @@ impl TalosSession {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct SessionQuery {
-    pub user_id: Option<String>,
-    pub channel_id: Option<String>,
-    pub provider: Option<String>,
-    pub project_id: Option<String>,
-    pub limit: Option<usize>,
-    pub offset: Option<usize>,
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 pub struct SessionListRequest {
     #[serde(default)]
@@ -302,19 +174,6 @@ pub struct SessionListRequest {
     pub limit: Option<usize>,
     #[serde(default)]
     pub offset: Option<usize>,
-}
-
-impl SessionListRequest {
-    pub fn into_query(self) -> SessionQuery {
-        SessionQuery {
-            user_id: None,
-            channel_id: None,
-            provider: None,
-            project_id: self.project_id,
-            limit: self.limit,
-            offset: self.offset,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
@@ -344,25 +203,6 @@ pub struct SessionInfo {
     #[serde(default)]
     #[ts(optional)]
     pub current_directory: Option<PathBuf>,
-}
-
-impl From<&SessionRecord> for SessionInfo {
-    fn from(record: &SessionRecord) -> Self {
-        Self {
-            id: record.id.clone(),
-            title: record.title.clone(),
-            user_id: record.user_id.clone(),
-            source_type: record.context.source_type.clone(),
-            provider: record.context.provider.clone(),
-            model: record.model.clone(),
-            created_at: record.created_at,
-            last_activity: record.last_activity,
-            message_count: record.message_count,
-            usage: record.usage.clone(),
-            project_id: record.project_id.clone(),
-            current_directory: record.current_directory.clone(),
-        }
-    }
 }
 
 impl From<&TalosSession> for SessionInfo {
@@ -445,8 +285,6 @@ pub struct SessionPatchRequest {
     #[serde(default)]
     pub current_directory: Option<OptionalCurrentDirectoryPatch>,
 }
-
-pub type SessionUpdateRequest = SessionPatchRequest;
 
 impl SessionPatchRequest {
     pub fn into_patch(self) -> SessionPatch {
@@ -640,11 +478,6 @@ pub struct ProjectPatch {
     pub name: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct SessionPatchResponse {
-    pub success: bool,
-}
-
 pub fn connection_mode_from_context(context: &talos::TalosContext) -> talos::TalosConnectionMode {
     context
         .environment
@@ -724,92 +557,4 @@ fn validate_project_directory_with_label(
         )));
     }
     Ok(())
-}
-
-#[async_trait]
-pub trait SessionRuntime: Send + Sync {
-    async fn resolve_target_agent(
-        &self,
-        _context: &talos::TalosContext,
-    ) -> crate::TalosResult<String> {
-        Ok("default".to_string())
-    }
-
-    async fn invalidate_cached_session(&self, _session_id: &str) -> crate::TalosResult<()> {
-        Ok(())
-    }
-
-    async fn compact_session(&self, session: TalosSession)
-        -> crate::TalosResult<talos::TalosUsage>;
-
-    async fn clear_session(&self, session: TalosSession) -> crate::TalosResult<()>;
-
-    async fn close_session(&self, session: TalosSession) -> crate::TalosResult<()>;
-
-    async fn prepare_delete_session(&self, session: TalosSession) -> crate::TalosResult<()>;
-
-    async fn cancel_active_turn(&self, session: TalosSession) -> crate::TalosResult<()>;
-
-    async fn submit_dynamic_tool_result(
-        &self,
-        session: TalosSession,
-        call_id: &str,
-        tool_name: &str,
-        output: String,
-        success: bool,
-    ) -> crate::TalosResult<()>;
-}
-
-#[async_trait]
-pub trait SessionService: Send + Sync {
-    async fn resolve_target_agent(
-        &self,
-        _context: &talos::TalosContext,
-    ) -> crate::TalosResult<String> {
-        Ok("default".to_string())
-    }
-
-    async fn create_session(
-        &self,
-        context: talos::TalosContext,
-        model: Option<String>,
-        conf: Option<SessionConf>,
-        project_id: Option<String>,
-        current_directory: Option<PathBuf>,
-    ) -> crate::TalosResult<TalosSession>;
-
-    async fn list_sessions(&self, query: SessionQuery) -> crate::TalosResult<Vec<TalosSession>>;
-
-    async fn count_sessions(&self, query: SessionQuery) -> crate::TalosResult<usize>;
-
-    async fn get_session(&self, session_id: &str) -> crate::TalosResult<Option<TalosSession>>;
-
-    async fn invalidate_cached_session(&self, _session_id: &str) -> crate::TalosResult<()> {
-        Ok(())
-    }
-
-    async fn patch_session(
-        &self,
-        session_id: &str,
-        patch: SessionPatch,
-    ) -> crate::TalosResult<SessionPatchResponse>;
-
-    async fn compact_session(&self, session_id: &str) -> crate::TalosResult<TalosSession>;
-
-    async fn clear_session(&self, session_id: &str) -> crate::TalosResult<TalosSession>;
-
-    async fn close_session(&self, session_id: &str) -> crate::TalosResult<()>;
-
-    async fn delete_session(&self, session_id: &str) -> crate::TalosResult<SessionPatchResponse>;
-
-    async fn cancel_active_turn(&self, session_id: &str) -> crate::TalosResult<()>;
-
-    async fn submit_dynamic_tool_result(
-        &self,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-        output: String,
-        success: bool,
-    ) -> crate::TalosResult<()>;
 }

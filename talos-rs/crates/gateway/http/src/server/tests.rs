@@ -11,14 +11,16 @@ use talos_auth::{
     AuthResponse, AuthService, LoginRequest, RegisterRequest, RequestIdentity, UserDto, UserService,
 };
 use talos_config::{InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService};
+use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
 use talos_project_store::MockProjectStore;
 use talos_session_store::{
     ActiveTurnRecord, ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, IdempotencyRecord,
     IdempotencyReservation, IdempotencyStatus, MessageCommandResult, MessageIdempotencyStore,
-    PendingDynamicToolResult, PendingUserAction, SessionStore, TimelineEventId,
-    TimelineEventRetentionConfig, TimelineEventService, TimelineEventStore,
+    PendingDynamicToolResult, PendingUserAction, SessionPatchAck, SessionQuery, SessionRecord,
+    SessionStore, TimelineEventId, TimelineEventRetentionConfig, TimelineEventService,
+    TimelineEventStore,
 };
 use talos_types::talos::{
     StopReason, TalosContext, TalosItemDeltaEvent, TalosItemStartedEvent, TalosTimelineContent,
@@ -26,10 +28,7 @@ use talos_types::talos::{
     TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase,
     TalosToolProgressKind, TalosTurnCompletedEvent, TalosTurnStartedEvent, TalosUsage,
 };
-use talos_types::{
-    ModelInfo, SessionConf, SessionListRequest, SessionPatch, SessionPatchResponse, SessionQuery,
-    SessionRecord, SessionRuntime, SessionService, TalosSession,
-};
+use talos_types::{ModelInfo, SessionConf, SessionListRequest, SessionPatch, TalosSession};
 use tower::util::ServiceExt;
 
 use crate::server::events::{get_active_turn_handler, subscribe_timeline_events_handler};
@@ -42,6 +41,51 @@ use crate::server::misc::get_llm_handler;
 #[path = "tests/support.rs"]
 mod support;
 use support::*;
+
+#[async_trait]
+trait SessionService: Send + Sync {
+    async fn resolve_target_agent(&self, _context: &TalosContext) -> TalosResult<String> {
+        Ok("default".to_string())
+    }
+
+    async fn create_session(
+        &self,
+        context: TalosContext,
+        model: Option<String>,
+        conf: Option<SessionConf>,
+        project_id: Option<String>,
+        current_directory: Option<std::path::PathBuf>,
+    ) -> TalosResult<TalosSession>;
+
+    async fn list_sessions(&self, request: SessionListRequest) -> TalosResult<Vec<TalosSession>>;
+
+    async fn count_sessions(&self, request: SessionListRequest) -> TalosResult<usize>;
+
+    async fn get_session(&self, session_id: &str) -> TalosResult<Option<TalosSession>>;
+
+    async fn patch_session(
+        &self,
+        session_id: &str,
+        patch: SessionPatch,
+    ) -> TalosResult<SessionPatchAck>;
+
+    async fn clear_session(&self, session_id: &str) -> TalosResult<TalosSession>;
+
+    async fn close_session(&self, session_id: &str) -> TalosResult<()>;
+
+    async fn delete_session(&self, session_id: &str) -> TalosResult<SessionPatchAck>;
+
+    async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()>;
+
+    async fn submit_dynamic_tool_result(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        output: String,
+        success: bool,
+    ) -> TalosResult<()>;
+}
 
 fn test_model_info() -> ModelInfo {
     ModelInfo {
@@ -378,36 +422,50 @@ impl SessionStore for SessionStoreAdapter {
         query: &SessionQuery,
     ) -> talos_error::TalosResult<Vec<SessionRecord>> {
         let mut records = Vec::new();
-        for session in self.service.list_sessions(query.clone()).await? {
+        for session in self
+            .service
+            .list_sessions(SessionListRequest {
+                project_id: query.project_id.clone(),
+                limit: query.limit,
+                offset: query.offset,
+            })
+            .await?
+        {
             records.push(self.to_record(session)?);
         }
         Ok(records)
     }
 
     async fn count_session_records(&self, query: &SessionQuery) -> talos_error::TalosResult<usize> {
-        self.service.count_sessions(query.clone()).await
+        self.service
+            .count_sessions(SessionListRequest {
+                project_id: query.project_id.clone(),
+                limit: query.limit,
+                offset: query.offset,
+            })
+            .await
     }
 
     async fn patch_session_record(
         &self,
         session_id: &str,
         patch: &SessionPatch,
-    ) -> talos_error::TalosResult<SessionPatchResponse> {
+    ) -> talos_error::TalosResult<SessionPatchAck> {
         self.service.patch_session(session_id, patch.clone()).await
     }
 
     async fn reset_session_record(
         &self,
         session_id: &str,
-    ) -> talos_error::TalosResult<SessionPatchResponse> {
+    ) -> talos_error::TalosResult<SessionPatchAck> {
         self.service.clear_session(session_id).await?;
-        Ok(SessionPatchResponse { success: true })
+        Ok(SessionPatchAck { success: true })
     }
 
     async fn delete_session_record(
         &self,
         session_id: &str,
-    ) -> talos_error::TalosResult<SessionPatchResponse> {
+    ) -> talos_error::TalosResult<SessionPatchAck> {
         self.service.delete_session(session_id).await
     }
 

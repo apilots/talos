@@ -21,6 +21,7 @@ pub use event::{
     ApplicationEvent, ApplicationEventStream, EventReplay, EventService, TimelineCursorStatus,
     TimelineRecoveryState, TimelineSubscribeCommand, TimelineSubscription,
     TimelineSubscriptionCloseReason, TimelineSubscriptionClosed, TimelineSubscriptionMessage,
+    TimelineSubscriptionSource,
 };
 pub use file::{
     content_hash, modified_at_ms, read_optional, validate_expected_version, with_file_lock,
@@ -44,18 +45,19 @@ use std::sync::Arc;
 
 use talos_auth::{AuthService, UserService};
 use talos_config::LlmConfigService;
+use talos_coordinator::SessionRuntime;
 use talos_llm_provider::LlmProvider;
 use talos_project_store::{ProjectRecord, ProjectStore};
 use talos_session_store::{
-    IdempotencyStatus, MessageCommandResult, MessageIdempotencyStore, SessionStore,
-    TimelineEventId, TimelineEventService,
+    IdempotencyStatus, MessageCommandResult, MessageIdempotencyStore, SessionPatchAck,
+    SessionStore, TimelineEventId, TimelineEventService,
 };
 use talos_types::{
     InterruptTurnRequest, InterruptTurnResponse, ModelInfo, ProjectInfo, ProjectPatch,
     RecoverTimelineRequest, RetryTurnRequest as SharedRetryTurnRequest, RetryTurnResponse,
-    SessionPatch, SessionPatchResponse, SessionQuery, SessionRuntime, StartTurnRequest,
-    StartTurnResponse, SubmitToolResultRequest, SubmitToolResultResponse, SubscribeTimelineRequest,
-    TalosConfig, TalosSession, TimelineActiveTurnSnapshot, TurnCommandStatus,
+    SessionListRequest, SessionPatch, StartTurnRequest, StartTurnResponse, SubmitToolResultRequest,
+    SubmitToolResultResponse, SubscribeTimelineRequest, TalosConfig, TalosSession,
+    TimelineActiveTurnSnapshot, TurnCommandStatus,
 };
 
 #[derive(Clone)]
@@ -215,7 +217,7 @@ impl TalosApplicationService {
         actor: &Actor,
         session_id: &str,
         patch: SessionPatch,
-    ) -> ApplicationResult<SessionPatchResponse> {
+    ) -> ApplicationResult<SessionPatchAck> {
         if let Some(model) = patch.agent_model()? {
             self.config.validate_model_supported(&model)?;
         }
@@ -225,9 +227,9 @@ impl TalosApplicationService {
     pub async fn list_sessions(
         &self,
         actor: &Actor,
-        query: SessionQuery,
+        request: SessionListRequest,
     ) -> ApplicationResult<Vec<TalosSession>> {
-        self.access.list_sessions(actor, query).await
+        self.access.list_sessions(actor, request).await
     }
 
     pub async fn get_session(
@@ -388,7 +390,7 @@ impl TalosApplicationService {
         &self,
         actor: &Actor,
         session_id: &str,
-    ) -> ApplicationResult<SessionPatchResponse> {
+    ) -> ApplicationResult<SessionPatchAck> {
         self.access.delete_session(actor, session_id).await
     }
 
@@ -445,10 +447,21 @@ impl TalosApplicationService {
         &self,
         actor: &Actor,
         request: SubscribeTimelineRequest,
-    ) -> ApplicationResult<TimelineSubscription> {
+    ) -> ApplicationResult<talos_types::SubscribeTimelineResponse> {
+        let source = self.open_timeline_subscription(actor, request).await?;
+        Ok(source.response)
+    }
+
+    pub async fn open_timeline_subscription(
+        &self,
+        actor: &Actor,
+        request: SubscribeTimelineRequest,
+    ) -> ApplicationResult<TimelineSubscriptionSource> {
         let _session = self.access.get_session(actor, &request.session_id).await?;
+        let session_id = request.session_id.clone();
         let after_event_id = parse_timeline_event_id(request.since_event_id)?;
-        self.events
+        let subscription = self
+            .events
             .subscribe(TimelineSubscribeCommand {
                 session_id: request.session_id,
                 after_event_id,
@@ -456,7 +469,19 @@ impl TalosApplicationService {
                 close_when_idle: request.close_when_idle.unwrap_or(false),
                 close_on_terminal: request.close_on_terminal.unwrap_or(false),
             })
-            .await
+            .await?;
+        let response = talos_types::SubscribeTimelineResponse {
+            subscription_id: format!("sub_{}", uuid::Uuid::new_v4().simple()),
+            session_id,
+            high_water_mark_event_id: subscription
+                .high_water_mark_event_id
+                .as_ref()
+                .map(|value| value.to_string()),
+        };
+        Ok(TimelineSubscriptionSource {
+            response,
+            subscription,
+        })
     }
 
     pub async fn recover_timeline(

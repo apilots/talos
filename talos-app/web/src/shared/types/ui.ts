@@ -32,7 +32,7 @@ export interface ProjectStatus {
   reason?: ProjectUnavailableReason | null;
 }
 
-export interface MemoryRecord {
+export interface MemoryItemView {
   id: string;
   title: string;
   detail: string;
@@ -40,7 +40,7 @@ export interface MemoryRecord {
   updatedAt: number;
 }
 
-export interface FileRecord {
+export interface FileItemView {
   id: string;
   label: string;
   path: string;

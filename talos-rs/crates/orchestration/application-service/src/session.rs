@@ -4,13 +4,13 @@ use std::sync::{Arc, RwLock};
 use talos_config::{provider_config_for_llm, resolve_runtime_path, LlmConfig};
 use talos_error::{TalosError, TalosResult};
 use talos_project_store::{ProjectRecord, ProjectStore};
-use talos_session_store::SessionStore;
+use talos_session_store::{SessionPatchAck, SessionQuery, SessionRecord, SessionStore};
 use talos_types::talos::{TalosConnectionMode, TalosContext, TalosProvider};
 use talos_types::{
     connection_mode_from_context, normalize_current_directory, resolve_effective_project_root,
     validate_project_directory, OptionalCurrentDirectoryPatch, OptionalProjectIdPatch,
-    ProjectPatch, SessionConf, SessionConfigOverridePolicy, SessionPatch, SessionPatchResponse,
-    SessionQuery, SessionRecord, TalosConfig, TalosSession,
+    ProjectPatch, SessionConf, SessionConfigOverridePolicy, SessionContext, SessionPatch,
+    SessionState, TalosConfig, TalosSession,
 };
 
 #[derive(Clone)]
@@ -94,7 +94,40 @@ impl SessionService {
     ) -> TalosResult<TalosSession> {
         let base_config = self.base_config_snapshot();
         let record = self.normalize_record_for_base_provider(record, &base_config)?;
-        let mut session = TalosSession::restore(&record, &base_config, workspace_id)?;
+        let config = SessionConfigOverridePolicy::apply_to_config(
+            &base_config,
+            &record.model,
+            &record.conf,
+        )?;
+        let mut session = TalosSession {
+            title: record.title.clone(),
+            user_id: record.user_id.clone(),
+            context: SessionContext {
+                session_id: record.id.clone(),
+                workspace_id,
+                source_type: record.context.source_type.clone(),
+                provider: record.context.provider.clone(),
+                user_id: record.context.user_id.clone(),
+                message_id: record.context.message_id.clone(),
+                trace_id: record.context.trace_id.clone(),
+                channel_id: record.context.channel_id.clone(),
+                thread_id: record.context.thread_id.clone(),
+                project_id: record.project_id.clone(),
+                current_directory: record.current_directory.clone(),
+                project_root: record.context.project_root.clone(),
+                environment: record.context.environment.clone(),
+            },
+            conf: record.conf.clone(),
+            project_id: record.project_id.clone(),
+            current_directory: record.current_directory.clone(),
+            config,
+            state: SessionState {
+                created_at: record.created_at,
+                last_activity: record.last_activity,
+                message_count: record.message_count,
+                usage: record.usage.clone(),
+            },
+        };
         session.context.project_root = None;
         Ok(session)
     }
@@ -234,9 +267,9 @@ impl SessionService {
         &self,
         session_id: &str,
         patch: SessionPatch,
-    ) -> TalosResult<SessionPatchResponse> {
+    ) -> TalosResult<SessionPatchAck> {
         let Some(record) = self.session_store.get_session_record(session_id).await? else {
-            return Ok(SessionPatchResponse { success: false });
+            return Ok(SessionPatchAck { success: false });
         };
         let patch = self.normalize_session_patch(record.context.clone(), patch)?;
         if let Some(OptionalProjectIdPatch::Set { project_id }) = patch.project_id.as_ref() {
@@ -249,7 +282,7 @@ impl SessionService {
         Ok(ack)
     }
 
-    pub async fn reset_session(&self, session_id: &str) -> TalosResult<SessionPatchResponse> {
+    pub async fn reset_session(&self, session_id: &str) -> TalosResult<SessionPatchAck> {
         self.session_store.reset_session_record(session_id).await
     }
 
@@ -264,7 +297,7 @@ impl SessionService {
             .await
     }
 
-    pub async fn delete_session(&self, session_id: &str) -> TalosResult<SessionPatchResponse> {
+    pub async fn delete_session(&self, session_id: &str) -> TalosResult<SessionPatchAck> {
         self.session_store.delete_session_record(session_id).await
     }
 

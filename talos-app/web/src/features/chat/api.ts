@@ -6,7 +6,7 @@ import type {
   SkillSuggestion,
   StartTurnRequest,
   SessionInfo,
-  SessionUpdate,
+  SessionPatchRequest,
   TalosContext,
   TalosInputItem,
   TalosSessionHistorySnapshot,
@@ -61,7 +61,7 @@ export async function listModels() {
 }
 
 export async function listProjects() {
-  const response = await getTalosClient().projects.list();
+  const response = await getTalosClient().projects.list({});
   return response.projects.map(mapProjectView);
 }
 
@@ -80,7 +80,7 @@ export async function listSessionsByProject(projectId: string) {
 }
 
 export async function getSession(sessionId: string) {
-  const response = await getTalosClient().sessions.get(sessionId);
+  const response = await getTalosClient().sessions.get({ session_id: sessionId });
   return response.session;
 }
 
@@ -132,7 +132,7 @@ export async function createProject(input: string | CreateProjectInput) {
 }
 
 export async function readFsDirectory(path?: string | null) {
-  const response = await getTalosClient().fs.directory.read({ path });
+  const response = await getTalosClient().fs.directory.read({ path: path ?? null });
   return response.directory;
 }
 
@@ -142,7 +142,7 @@ export async function createFsDirectory(parent: string, name: string) {
 
 export async function deleteProject(projectId: string) {
   try {
-    await getTalosClient().projects.delete(projectId);
+    await getTalosClient().projects.delete({ project_id: projectId });
   } catch (error) {
     if (error instanceof TalosHttpError && error.status === 409) {
       throw new Error("PROJECT_DELETE_CONFLICT");
@@ -152,66 +152,79 @@ export async function deleteProject(projectId: string) {
 }
 
 export async function updateSessionProject(sessionId: string, project?: ProjectView) {
-  const patch: SessionUpdate = project && !isUnboundProject(project.id)
+  const request: SessionPatchRequest = project && !isUnboundProject(project.id)
     ? {
+        session_id: sessionId,
+        conf: null,
         project_id: {
           type: "set",
           project_id: project.id,
         },
+        current_directory: null,
       }
     : {
+        session_id: sessionId,
+        conf: null,
         project_id: {
           type: "clear",
         },
+        current_directory: null,
       };
-  await getTalosClient().sessions.patch(sessionId, patch);
+  await getTalosClient().sessions.patch(request);
 }
 
 export async function updateSessionModel(sessionId: string, model: string) {
-  const patch: SessionUpdate = {
+  const request: SessionPatchRequest = {
+    session_id: sessionId,
     conf: {
       agent: {
         model,
       },
     },
+    project_id: null,
+    current_directory: null,
   };
-  await getTalosClient().sessions.patch(sessionId, patch);
+  await getTalosClient().sessions.patch(request);
 }
 
 export async function closeSession(sessionId: string) {
-  await getTalosClient().sessions.close(sessionId);
+  await getTalosClient().sessions.close({ session_id: sessionId });
 }
 
 export async function deleteSession(sessionId: string) {
-  await getTalosClient().sessions.delete(sessionId);
+  await getTalosClient().sessions.delete({ session_id: sessionId });
 }
 
 export async function cancelActiveTurn(sessionId: string) {
-  await getTalosClient().sessions.cancel(sessionId);
+  await getTalosClient().sessions.cancel({ session_id: sessionId });
 }
 
 export async function compactSession(sessionId: string) {
-  const response = await getTalosClient().sessions.compact(sessionId);
+  const response = await getTalosClient().sessions.compact({ session_id: sessionId });
   return response.session;
 }
 
 export async function clearSession(sessionId: string) {
-  const response = await getTalosClient().sessions.clear(sessionId);
+  const response = await getTalosClient().sessions.clear({ session_id: sessionId });
   return response.session;
 }
 
 export async function getActiveTurn(sessionId: string) {
-  const response = await getTalosClient().sessions.activeTurn(sessionId);
+  const response = await getTalosClient().sessions.activeTurn({ session_id: sessionId });
   return response.active_turn;
 }
 
 export async function getSessionHistory(sessionId: string) {
-  const response = await getTalosClient().sessions.history(sessionId);
+  const response = await getTalosClient().sessions.history({ session_id: sessionId });
   return response.history;
 }
 
 export async function recoverSessionLiveTail(sessionId: string, afterEventId?: string) {
-  const response = await getTalosClient().sessions.recover(sessionId, afterEventId);
+  const response = await getTalosClient().sessions.recover({
+    session_id: sessionId,
+    after_event_id: afterEventId ?? null,
+    replay_limit: null,
+  });
   return response.snapshot;
 }
 

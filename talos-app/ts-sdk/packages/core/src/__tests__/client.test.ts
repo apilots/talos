@@ -203,7 +203,7 @@ describe("TalosClient", () => {
     };
     const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
 
-    await client.sessions.close("session-1");
+    await client.sessions.close({ session_id: "session-1" });
 
     expect(request).toHaveBeenCalledWith("http://localhost:8080/v1/sessions/session-1/close", {
       method: "POST",
@@ -232,7 +232,7 @@ describe("TalosClient", () => {
     };
     const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
 
-    const activeTurn = await client.sessions.activeTurn("session-1");
+    const activeTurn = await client.sessions.activeTurn({ session_id: "session-1" });
 
     expect(request).toHaveBeenCalledWith(
       "http://localhost:8080/v1/sessions/session-1/active-turn",
@@ -269,11 +269,11 @@ describe("TalosClient", () => {
     };
     const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
 
-    const response = await client.sessions.recover(
-      "session-1",
-      "ev_00000000000000000001",
-      100,
-    );
+    const response = await client.sessions.recover({
+      session_id: "session-1",
+      after_event_id: "ev_00000000000000000001",
+      replay_limit: 100,
+    });
 
     expect(request).toHaveBeenCalledWith(
       "http://localhost:8080/v1/sessions/session-1/recovery?after_event_id=ev_00000000000000000001&limit=100",
@@ -314,7 +314,7 @@ describe("TalosClient", () => {
     };
     const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
 
-    await client.projects.delete("project-1");
+    await client.projects.delete({ project_id: "project-1" });
 
     expect(request).toHaveBeenCalledWith("http://localhost:8080/v1/projects/project-1", {
       method: "DELETE",

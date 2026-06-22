@@ -73,7 +73,7 @@ impl GatewayClient for Mutex<AppServerClient> {
     async fn get_session(&self, session_id: &str) -> TalosResult<SessionInfo> {
         self.lock()
             .await
-            .get_session(session_id)
+            .get_session_by_id(session_id)
             .await
             .map(|response| response.session)
     }
@@ -81,7 +81,7 @@ impl GatewayClient for Mutex<AppServerClient> {
     async fn close_session(&self, session_id: &str) -> TalosResult<()> {
         self.lock()
             .await
-            .close_session(session_id)
+            .close_session_by_id(session_id)
             .await
             .map(|_| ())
     }
@@ -89,7 +89,7 @@ impl GatewayClient for Mutex<AppServerClient> {
     async fn delete_session(&self, session_id: &str) -> TalosResult<()> {
         self.lock()
             .await
-            .delete_session(session_id)
+            .delete_session_by_id(session_id)
             .await
             .map(|_| ())
     }
@@ -97,7 +97,7 @@ impl GatewayClient for Mutex<AppServerClient> {
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()> {
         self.lock()
             .await
-            .interrupt_turn(session_id)
+            .interrupt_turn_by_id(session_id)
             .await
             .map(|_| ())
     }
@@ -129,7 +129,7 @@ impl GatewayClient for Mutex<AppServerClient> {
     async fn get_session_history(&self, session_id: &str) -> TalosResult<SessionHistorySnapshot> {
         self.lock()
             .await
-            .get_session_history(session_id)
+            .get_session_history_by_id(session_id)
             .await
             .map(|response| response.history)
     }
@@ -137,7 +137,7 @@ impl GatewayClient for Mutex<AppServerClient> {
     async fn get_active_turn(&self, session_id: &str) -> TalosResult<TimelineActiveTurnSnapshot> {
         self.lock()
             .await
-            .get_active_turn(session_id)
+            .get_active_turn_by_id(session_id)
             .await
             .map(|response| response.active_turn)
     }

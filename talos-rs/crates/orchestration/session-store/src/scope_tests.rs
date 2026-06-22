@@ -76,6 +76,28 @@ fn test_normalized_optional_string_treats_blank_as_none() {
     );
 }
 
+#[test]
+fn test_session_query_roundtrip_with_project_id() {
+    let query = SessionQuery {
+        user_id: Some("user-1".to_string()),
+        channel_id: Some("channel-1".to_string()),
+        provider: Some("http".to_string()),
+        project_id: Some("project-1".to_string()),
+        limit: Some(20),
+        offset: Some(40),
+    };
+
+    let encoded = serde_json::to_string(&query).unwrap();
+    let decoded: SessionQuery = serde_json::from_str(&encoded).unwrap();
+
+    assert_eq!(decoded.user_id.as_deref(), Some("user-1"));
+    assert_eq!(decoded.channel_id.as_deref(), Some("channel-1"));
+    assert_eq!(decoded.provider.as_deref(), Some("http"));
+    assert_eq!(decoded.project_id.as_deref(), Some("project-1"));
+    assert_eq!(decoded.limit, Some(20));
+    assert_eq!(decoded.offset, Some(40));
+}
+
 #[tokio::test]
 async fn test_record_session_progress_returns_not_found_for_missing_session() {
     let storage = Arc::new(SqliteStorage::new("sqlite::memory:").await.unwrap());

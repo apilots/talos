@@ -6,8 +6,8 @@ use talos_session_store::{
 };
 use talos_types::talos::{TalosTimelineEvent, TimelineEventEnvelope};
 use talos_types::{
-    TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelinePendingDynamicToolResult,
-    TimelinePendingUserAction,
+    SubscribeTimelineResponse, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus,
+    TimelinePendingDynamicToolResult, TimelinePendingUserAction,
 };
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
@@ -30,6 +30,11 @@ pub struct TimelineSubscription {
     pub replay: EventReplay,
     pub events: mpsc::Receiver<TimelineSubscriptionMessage>,
     pub has_live_turn: bool,
+}
+
+pub struct TimelineSubscriptionSource {
+    pub response: SubscribeTimelineResponse,
+    pub subscription: TimelineSubscription,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use sha2::{Digest, Sha256};
+use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
 use talos_session_store::{
     ActiveTurnStatus, IdempotencyRecord, IdempotencyReservation, IdempotencyStatus,
@@ -14,9 +15,7 @@ use talos_types::agent_dispatch::{
 };
 use talos_types::talos::{TalosContext, TalosInputItem};
 use talos_types::talos::{TalosTimelineEvent, TalosTimelineEventPayload, TalosTurnErrorEvent};
-use talos_types::{
-    AgentDispatchRuntime, SessionRuntime, StartTurnRequest, TalosConfig, TalosSession,
-};
+use talos_types::{AgentDispatchRuntime, StartTurnRequest, TalosConfig, TalosSession};
 use tokio::sync::mpsc;
 use tracing::error;
 use uuid::Uuid;
@@ -204,13 +203,7 @@ impl TurnService {
                             "Idempotency-Key was already used with a different request".to_string(),
                         ));
                     }
-                    return Ok(record.result.unwrap_or_else(|| MessageCommandResult {
-                        request_id,
-                        message_id: record.message_id,
-                        session_id: record.session_id,
-                        turn_id: record.turn_id,
-                        status: record.status,
-                    }));
+                    return result_from_idempotency_record(record);
                 }
             }
         }
@@ -374,7 +367,7 @@ impl TurnService {
                     "Retry attempt was already used with a different request".to_string(),
                 ));
             }
-            return Ok(result_from_idempotency_record(record));
+            return result_from_idempotency_record(record);
         }
 
         self.validate_retry_attempt(&session_id, &request).await?;
@@ -702,13 +695,14 @@ fn retry_idempotency_key(request: &TurnRetryRequest) -> String {
     )
 }
 
-fn result_from_idempotency_record(record: IdempotencyRecord) -> MessageCommandResult {
-    record.result.unwrap_or_else(|| MessageCommandResult {
-        request_id: format!("req_{}", Uuid::new_v4().simple()),
-        message_id: record.message_id,
-        session_id: record.session_id,
-        turn_id: record.turn_id,
-        status: record.status,
+fn result_from_idempotency_record(record: IdempotencyRecord) -> TalosResult<MessageCommandResult> {
+    record.result.ok_or_else(|| {
+        TalosError::IdempotencyError(format!(
+            "idempotency record is missing result: session_id={}, key={}, status={}",
+            record.session_id,
+            record.idempotency_key,
+            record.status.as_str()
+        ))
     })
 }
 
@@ -1063,6 +1057,46 @@ mod tests {
             .expect("session record should be readable")
             .expect("session record should exist");
         assert_eq!(record.message_count, 2);
+    }
+
+    #[tokio::test]
+    async fn submit_start_turn_fails_when_existing_idempotency_record_has_no_result() {
+        let turn_executor = Arc::new(RecordingTurnExecutor::default());
+        let (service, _event_service, store) = test_service(turn_executor.clone()).await;
+        create_test_session_record(&store).await;
+        let request = StartTurnRequest {
+            session_id: "s1".to_string(),
+            input: vec![TalosInputItem::Text {
+                text: "hello".to_string(),
+            }],
+            workspace_id: None,
+            context: None,
+            model: None,
+            project_id: None,
+            current_directory: None,
+            client_request_id: None,
+        };
+        let request_hash =
+            turn_submission_hash("s1", &request.input, &request.workspace_id).unwrap();
+        store
+            .reserve(
+                "s1",
+                "missing-result",
+                &request_hash,
+                "turn-existing",
+                1,
+                None,
+            )
+            .await
+            .expect("idempotency reservation should be inserted");
+
+        let error = service
+            .submit_start_turn(test_session(), request, Some("missing-result".to_string()))
+            .await
+            .expect_err("missing idempotency result should fail fast");
+
+        assert!(matches!(error, TalosError::IdempotencyError(_)));
+        assert!(turn_executor.stream_request.lock().unwrap().is_none());
     }
 
     #[tokio::test]

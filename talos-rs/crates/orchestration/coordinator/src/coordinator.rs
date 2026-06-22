@@ -15,7 +15,9 @@ use talos_error::{TalosError, TalosResult};
 use talos_router::Router;
 use talos_types::agent_dispatch::{AgentDispatchRequest, AgentDispatchResponse};
 use talos_types::talos::{TalosContext, TalosTimelineEvent};
-use talos_types::{AgentDispatchRuntime, SessionRuntime, TalosSession};
+use talos_types::{AgentDispatchRuntime, TalosSession};
+
+use crate::SessionRuntime;
 use tokio::sync::{mpsc, RwLock};
 use tracing::info;
 use uuid::Uuid;
