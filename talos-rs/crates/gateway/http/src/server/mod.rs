@@ -75,7 +75,7 @@ use self::workspace_docs::{
 use talos_application_service::TalosApplicationService;
 use talos_auth::AuthService;
 use talos_error::TalosResult;
-use talos_session_service::TimelineEventService;
+use talos_service::TimelineEventService;
 use talos_types::TalosConfig;
 
 /// HTTP Server for the Talos Gateway.

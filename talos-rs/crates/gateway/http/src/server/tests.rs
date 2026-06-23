@@ -14,7 +14,7 @@ use talos_config::{InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService};
 use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
-use talos_session_service::{TimelineEventRetentionConfig, TimelineEventService};
+use talos_service::{TimelineEventRetentionConfig, TimelineEventService};
 use talos_store::project::MockProjectStore;
 use talos_store::session::{
     ActiveTurnRecord, ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, IdempotencyRecord,

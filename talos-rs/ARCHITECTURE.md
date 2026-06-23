@@ -388,7 +388,7 @@ pub struct Learner {
 
 ```
 ├── orchestration/store/
-├── orchestration/service/session-service/
+├── orchestration/service/
 ├── orchestration/agent/
 └── orchestration/agent-workspace/
 ```

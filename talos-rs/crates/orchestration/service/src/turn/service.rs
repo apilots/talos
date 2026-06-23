@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
-use talos_session_service::{SessionRecordService, TimelineEventService};
 use talos_store::session::{
     ActiveTurnStatus, IdempotencyReservation, IdempotencyStatus, MessageCommandResult,
     MessageIdempotencyStore, PendingUserAction, SessionStore,
@@ -18,7 +17,9 @@ use tokio::sync::mpsc;
 use tracing::error;
 use uuid::Uuid;
 
-use crate::{
+use crate::{SessionRecordService, TimelineEventService};
+
+use super::{
     completed_turn_from_event, record_completed_turn_progress, result_from_idempotency_record,
     retry_idempotency_key, spawn_event_forwarder, turn_submission_hash, validate_retry_request,
     validate_text_input, TurnExecutor, TurnRetryRequest,

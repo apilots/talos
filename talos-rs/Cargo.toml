@@ -30,8 +30,7 @@ members = [
     "crates/orchestration/agent-kernel",
     "crates/orchestration/agent",
     "crates/orchestration/store",
-    "crates/orchestration/service/session-service",
-    "crates/orchestration/service/turn-service",
+    "crates/orchestration/service",
     "crates/orchestration/router",
     "crates/orchestration/coordinator",
     "crates/orchestration/application-service",
@@ -124,8 +123,7 @@ talos-app-protocol = { path = "crates/gateway/app-protocol" }
 talos-app-server = { path = "crates/gateway/app-server" }
 talos-agent-kernel = { path = "crates/orchestration/agent-kernel" }
 talos-store = { path = "crates/orchestration/store" }
-talos-session-service = { path = "crates/orchestration/service/session-service" }
-talos-turn-service = { path = "crates/orchestration/service/turn-service" }
+talos-service = { path = "crates/orchestration/service" }
 talos-llm-provider = { path = "crates/common/llm/provider" }
 talos-prompt = { path = "crates/common/prompt" }
 talos-llm-anthropic = { path = "crates/common/llm/anthropic" }

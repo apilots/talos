@@ -4,13 +4,14 @@ use async_trait::async_trait;
 use sha2::{Digest, Sha256};
 use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
-use talos_session_service::{SessionRecordService, TimelineEventService};
 use talos_store::session::{IdempotencyRecord, MessageCommandResult};
 use talos_types::agent_dispatch::AgentDispatchRequest;
 use talos_types::talos::{TalosInputItem, TalosTimelineEvent, TalosTimelineEventPayload};
 use talos_types::{AgentDispatchRuntime, TalosSession};
 use tokio::sync::mpsc;
 use tracing::error;
+
+use crate::{SessionRecordService, TimelineEventService};
 
 #[async_trait]
 pub trait TurnExecutor: Send + Sync {
@@ -254,10 +255,10 @@ async fn record_completed_turn_progress(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{SessionRecordService, TimelineEventRetentionConfig};
     use async_trait::async_trait;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
-    use talos_session_service::{SessionRecordService, TimelineEventRetentionConfig};
     use talos_storage::SqliteStorage;
     use talos_store::session::{
         ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, DatabaseSessionStore,

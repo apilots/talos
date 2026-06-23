@@ -49,7 +49,7 @@ use talos_auth::{AuthService, UserService};
 use talos_config::LlmConfigService;
 use talos_coordinator::SessionRuntime;
 use talos_llm_provider::LlmProvider;
-use talos_session_service::TimelineEventService;
+use talos_service::TimelineEventService;
 use talos_store::project::{ProjectRecord, ProjectStore};
 use talos_store::session::{
     IdempotencyStatus, MessageCommandResult, MessageIdempotencyStore, SessionPatchAck,
@@ -633,7 +633,7 @@ mod tests {
     use talos_config::{InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService};
     use talos_error::{TalosError, TalosResult};
     use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
-    use talos_session_service::TimelineEventRetentionConfig;
+    use talos_service::TimelineEventRetentionConfig;
     use talos_storage::SqliteStorage;
     use talos_store::project::StorageProjectStore;
     use talos_store::session::{

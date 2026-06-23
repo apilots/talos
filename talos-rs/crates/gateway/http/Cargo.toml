@@ -11,7 +11,7 @@ talos-types = { path = "../../common/types" }
 talos-auth = { path = "../../infra/auth" }
 talos-config = { workspace = true }
 talos-llm-provider = { workspace = true }
-talos-session-service = { workspace = true }
+talos-service = { workspace = true }
 talos-app-protocol = { workspace = true }
 talos-skills = { workspace = true }
 axum = { version = "0.7", features = ["macros"] }

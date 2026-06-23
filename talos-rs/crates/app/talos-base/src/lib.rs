@@ -28,7 +28,7 @@ use talos_llm_provider::{
 };
 use talos_logging::LogGuard;
 use talos_router::{Binding, MatchRule, Router, RouterImpl};
-use talos_session_service::{TimelineEventRetentionConfig, TimelineEventService};
+use talos_service::{TimelineEventRetentionConfig, TimelineEventService};
 use talos_storage::{create_storage, StorageConfig};
 use talos_store::project::{ProjectStore, StorageProjectStore};
 use talos_store::session::{

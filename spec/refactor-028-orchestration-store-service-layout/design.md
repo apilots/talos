@@ -18,13 +18,13 @@ Depends on: `refactor-027-core-api-object-boundary`
 4. `Record -> Info` 转换边界不稳定，导致服务端内部和客户端之间重复定义 DTO。
 5. 新增业务模块时不知道应该放在 store、service、coordinator 还是 agent。
 
-本 spec 定义 `orchestration/store` 与 `orchestration/service` 的目标目录和职责边界。本轮已落地 `talos-store`、`talos-session-service`、`talos-turn-service` 的拆分；`talos-application-service` 保留为 facade / access / composition 层。
+本 spec 定义 `orchestration/store` 与 `orchestration/service` 的目标目录和职责边界。本轮已落地 `talos-store` 与 `talos-service` 的拆分；`talos-application-service` 保留为 facade / access / composition 层。
 
 ## 目标
 
 1. 在 `orchestration` 下建立清晰的 `store` 和 `service` 物理目录边界。
 2. project/session DB 持久化统一放入 `orchestration/store` 这个 `talos-store` crate，并按 `project` / `session` 分模块。
-3. session/turn 等领域应用服务放入 `orchestration/service/*-service`。
+3. session、timeline、history、turn 等领域应用服务放入 `orchestration/service` 这个 `talos-service` crate，并按业务场景拆模块。
 4. `XxxRecord` 只存在于对应 store crate 内部或其明确公开的 store API 中。
 5. service 层统一组合 Agent / Coordinator 执行能力和一个或多个 store API。
 6. service 往上只返回 `talos_types` 中的 `XxxInfo` / `XxxRequest` / `XxxResponse`。
@@ -63,8 +63,13 @@ talos-rs/crates/orchestration/
         idempotency.rs
 
   service/
-    session-service/
-    turn-service/
+    Cargo.toml              # talos-service
+    src/
+      lib.rs
+      session/
+      timeline/
+      history/
+      turn/
 
   application-service/
   coordinator/
@@ -75,7 +80,7 @@ talos-rs/crates/orchestration/
 说明：
 
 - `store` 是持久化访问层；当前由单一 `talos-store` crate 承载，并按业务域拆 `project` / `session` 子模块。
-- `service` 是领域应用服务层，负责业务事务、幂等、状态流转、Agent 执行协调和 store 组合。
+- `service` 是领域应用服务层；当前由单一 `talos-service` crate 承载，并按 session / timeline / history / turn 拆业务模块。
 - `application-service` 是 facade / access / composition 层，负责权限、对 Gateway 的聚合门面和跨 service 组装。
 - `coordinator`、`agent`、`agent-kernel` 保持执行链路职责，不承接 DB/file 持久化。
 
@@ -167,7 +172,7 @@ Transport / SDK / Web / Desktop / TUI
 
 ```text
 talos_store::session::SessionRecord
-  -> session-service maps to talos_types::SessionInfo
+  -> talos-service::session maps to talos_types::SessionInfo
   -> Gateway returns SessionGetResponse { session: SessionInfo }
   -> HTTP / JSON-RPC / SDK transport envelope
 ```
@@ -188,7 +193,7 @@ talos_store::session::SessionRecord
 
 ```text
 Gateway
-  -> turn-service
+  -> talos-service::turn
        -> talos-store::session
        -> talos-store::session::events
        -> talos-store::session::idempotency
@@ -203,7 +208,8 @@ Gateway
 | --- | --- | --- |
 | 持久化 crate | `talos-store` | `orchestration/store` |
 | 持久化子模块 | `project` / `session` | `talos-store` |
-| 应用服务模块 | `xxx-service` | `orchestration/service` |
+| 应用服务 crate | `talos-service` | `orchestration/service` |
+| 应用服务子模块 | `session` / `timeline` / `history` / `turn` | `talos-service` |
 | 持久化对象 | `XxxRecord` | 对应 store crate |
 | 对外 DTO | `XxxInfo` | `talos_types` |
 | 对外 API 输入 | `XxxRequest` | `talos_types` |
@@ -226,7 +232,7 @@ Gateway 仍然是 HTTP / JSON-RPC / Channel / SDK 之下的统一业务 API 门�
 Transport Adapter
   -> Gateway
   -> application-service
-  -> service/*-service
+  -> talos-service::{session,timeline,history,turn}
   -> talos-store::{project,session}
   -> database / files
 ```
@@ -244,7 +250,7 @@ Gateway 保持薄层：
 AgentCoordinator 负责注册、路由、选择和分发 Agent。AgentHarness 负责包装 Agent Kernel。它们可以被 service 调用，但不应反向依赖 service 或 store。
 
 ```text
-service/turn-service
+talos-service::turn
   -> AgentCoordinator
   -> AgentHarness
   -> Agent Kernel

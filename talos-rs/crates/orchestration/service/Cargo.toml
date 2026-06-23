@@ -1,11 +1,15 @@
 [package]
-name = "talos-session-service"
-version = "0.1.2"
-edition = "2021"
+name = "talos-service"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
+async-trait = { workspace = true }
 chrono = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
 talos-config = { workspace = true }
+talos-coordinator = { path = "../coordinator" }
 talos-error = { workspace = true }
 talos-memory = { workspace = true }
 talos-store = { workspace = true }
@@ -13,9 +17,7 @@ talos-types = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
-uuid = { workspace = true, features = ["v7"] }
+uuid = { workspace = true, features = ["v4", "v7"] }
 
 [dev-dependencies]
-async-trait = { workspace = true }
-serde_json = { workspace = true }
 talos-storage = { workspace = true }

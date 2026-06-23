@@ -1,1 +1,1 @@
-pub use talos_session_service::SessionHistoryService;
+pub use talos_service::SessionHistoryService;

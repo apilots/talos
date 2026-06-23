@@ -9,7 +9,7 @@ use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
 use talos_gateway::{ApplicationServiceGateway, Gateway};
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
-use talos_session_service::{TimelineEventRetentionConfig, TimelineEventService};
+use talos_service::{TimelineEventRetentionConfig, TimelineEventService};
 use talos_storage::SqliteStorage;
 use talos_store::project::{ProjectStore, StorageProjectStore};
 use talos_store::session::{

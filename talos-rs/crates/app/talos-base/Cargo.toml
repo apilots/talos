@@ -25,7 +25,7 @@ talos-llm-provider = { workspace = true }
 talos-logging = { workspace = true }
 talos-router = { path = "../../orchestration/router" }
 talos-store = { workspace = true }
-talos-session-service = { workspace = true }
+talos-service = { workspace = true }
 talos-skills = { workspace = true }
 talos-storage = { workspace = true }
 talos-mcp = { workspace = true }

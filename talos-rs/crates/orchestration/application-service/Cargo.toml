@@ -11,8 +11,7 @@ talos-auth = { workspace = true }
 talos-llm-provider = { workspace = true }
 talos-memory = { workspace = true }
 talos-store = { workspace = true }
-talos-session-service = { workspace = true }
-talos-turn-service = { workspace = true }
+talos-service = { workspace = true }
 talos-coordinator = { path = "../../orchestration/coordinator" }
 talos-plugin = { workspace = true }
 talos-skills = { workspace = true }
