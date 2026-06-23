@@ -8,7 +8,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | --- | ---: |
 | `feat` | 029 |
 | `fix` | 004 |
-| `refactor` | 028 |
+| `refactor` | 029 |
 | `docs` | 001 |
 
 ## Active Specs
@@ -28,6 +28,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | refactor-025 | `refactor-025-talos-tool-capability-alignment` | draft |
 | refactor-026 | `refactor-026-provider-protocol-abstraction` | draft |
 | refactor-027 | `refactor-027-core-api-object-boundary` | implemented |
+| refactor-028 | `refactor-028-orchestration-store-service-layout` | implemented |
 
 ## Archived Specs
 

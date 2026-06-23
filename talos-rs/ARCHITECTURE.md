@@ -32,7 +32,7 @@
                                     ⬇
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  Orchestration 层 - 编排                                                      │
-│  (agent/agent-workspace/session/session-store/routing/scheduler/            │
+│  (agent/agent-workspace/session/store/routing/scheduler/                    │
 │   planner/coordinator/queue)                                                │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     ⬇
@@ -177,7 +177,7 @@
 | **agent/** | Agent 核心 (生命周期) | `common/llm`, `cognition/memory` |
 | **agent-workspace/** | 工作空间管理 (AGENTS.md/SOUL.md 注入) | `agent`, `infra/storage` |
 | **session/** | 会话管理 (SessionKey/dmScope) | `infra/*` |
-| **session-store/** | 会话存储 (sessions.json + JSONL) | `session`, `infra/storage` |
+| **store/** | `talos-store`，project/session DB 持久化 | `infra/storage` |
 | **routing/** | 路由规则 (Bindings) | `session` |
 | **scheduler/** | 任务调度 (cron/heartbeat) | `agent` |
 | **planner/** | 任务规划/工作流 | `agent`, `cognition/reasoning` |
@@ -387,7 +387,8 @@ pub struct Learner {
 ### Phase 3 - Agent + 会话（Week 7-9）
 
 ```
-├── orchestration/session-store/
+├── orchestration/store/
+├── orchestration/service/session-service/
 ├── orchestration/agent/
 └── orchestration/agent-workspace/
 ```
@@ -474,7 +475,7 @@ talos-rs/
 │   │   ├── agent/
 │   │   ├── agent-kernel/
 │   │   ├── application-service/
-│   │   ├── session-store/
+│   │   ├── store/
 │   │   ├── router/
 │   │   └── coordinator/
 │   │
@@ -535,7 +536,7 @@ talos-rs/
 | 3 | 创建 `common/llm/provider/` | 🔴 高 | ⏳ 待开始 |
 | 4 | 创建 `common/types/` | 🟡 中 | ⏳ 待开始 |
 | 5 | 实现 `cognition/memory/` | 🟡 中 | ⏳ 待开始 |
-| 6 | 实现 `orchestration/session-store/` | 🟡 中 | ⏳ 待开始 |
+| 6 | 实现 `orchestration/store/` | 🟡 中 | ⏳ 待开始 |
 | 7 | 实现 `orchestration/agent/` | 🟡 中 | ⏳ 待开始 |
 | 8 | 补充所有 crate 的依赖关系 | 🔴 高 | ⏳ 待开始 |
 

@@ -1,17 +1,14 @@
 use std::sync::Arc;
 
 use talos_error::TalosResult;
-use talos_types::talos::{
-    TalosTimelineDelta, TalosTimelineEvent, TalosTimelineEventPayload, TimelineEventEnvelope,
+use talos_store::session::{
+    ActiveTurnRecord, ActiveTurnStore, ActiveTurnUpdate, TimelineEventId, TimelineEventStore,
 };
+use talos_types::talos::{TalosTimelineEvent, TalosTimelineEventPayload, TimelineEventEnvelope};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
-use crate::active_turn::{
-    ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, PendingDynamicToolResult,
-    PendingUserAction,
-};
-use crate::events::TimelineEventStore;
+use super::active_turn::{resolve_pending_user_action_update, state_for_event};
 
 #[derive(Debug, Clone)]
 pub struct TimelineEventRetentionConfig {
@@ -57,7 +54,7 @@ impl TimelineEventService {
     pub async fn list_events_after(
         &self,
         session_id: &str,
-        after_event_id: Option<&crate::TimelineEventId>,
+        after_event_id: Option<&TimelineEventId>,
         limit: usize,
     ) -> TalosResult<Vec<TalosTimelineEvent>> {
         self.event_store
@@ -65,17 +62,11 @@ impl TimelineEventService {
             .await
     }
 
-    pub async fn latest_event_id(
-        &self,
-        session_id: &str,
-    ) -> TalosResult<Option<crate::TimelineEventId>> {
+    pub async fn latest_event_id(&self, session_id: &str) -> TalosResult<Option<TimelineEventId>> {
         self.event_store.latest_event_id(session_id).await
     }
 
-    pub async fn oldest_event_id(
-        &self,
-        session_id: &str,
-    ) -> TalosResult<Option<crate::TimelineEventId>> {
+    pub async fn oldest_event_id(&self, session_id: &str) -> TalosResult<Option<TimelineEventId>> {
         self.event_store.oldest_event_id(session_id).await
     }
 
@@ -83,31 +74,17 @@ impl TimelineEventService {
         self.live_tx.subscribe()
     }
 
-    pub async fn get_active_turn(
-        &self,
-        session_id: &str,
-    ) -> TalosResult<Option<crate::ActiveTurnRecord>> {
+    pub async fn get_active_turn(&self, session_id: &str) -> TalosResult<Option<ActiveTurnRecord>> {
         self.active_turn_store.get_active_turn(session_id).await
     }
 
     pub async fn resolve_pending_user_action(&self, session_id: &str) -> TalosResult<()> {
-        let Some(active) = self.active_turn_store.get_active_turn(session_id).await? else {
-            return Ok(());
-        };
-        if active.status != ActiveTurnStatus::WaitingUserAction {
-            return Ok(());
+        if let Some(update) =
+            resolve_pending_user_action_update(self.active_turn_store.as_ref(), session_id).await?
+        {
+            self.active_turn_store.upsert_active_turn(update).await?;
         }
-        self.active_turn_store
-            .upsert_active_turn(ActiveTurnUpdate {
-                session_id: active.session_id,
-                turn_id: active.turn_id,
-                message_id: active.message_id,
-                status: ActiveTurnStatus::Running,
-                last_event_id: active.last_event_id,
-                pending_user_action: None,
-                updated_at: chrono::Utc::now().timestamp_millis(),
-            })
-            .await
+        Ok(())
     }
 
     pub async fn record_talos_event(
@@ -123,58 +100,7 @@ impl TimelineEventService {
         let session_id = event.session_id.clone();
         let message_id = event.message_id.clone();
         let turn_id = event.turn_id.clone();
-        let active_state = match &event.payload {
-            TalosTimelineEventPayload::TurnCompleted(_) => {
-                self.completed_active_state(&session_id, &message_id, Some(turn_id.as_str()))
-                    .await?
-            }
-            TalosTimelineEventPayload::TurnError(_) => Some((ActiveTurnStatus::Failed, None)),
-            TalosTimelineEventPayload::ItemDelta(payload) => match &payload.delta {
-                TalosTimelineDelta::ToolDynamicRequest {
-                    call_id, tool_name, ..
-                } => Some((
-                    ActiveTurnStatus::WaitingUserAction,
-                    Some(PendingUserAction::DynamicToolResult(
-                        PendingDynamicToolResult {
-                            item_id: Some(payload.item_id.clone()),
-                            call_id: call_id.clone(),
-                            tool_name: tool_name.clone(),
-                        },
-                    )),
-                )),
-                TalosTimelineDelta::ToolResult { .. } => {
-                    self.resolve_pending_item_state(&session_id, turn_id.as_str(), &payload.item_id)
-                        .await?
-                }
-                _ => {
-                    self.running_active_state(&session_id, turn_id.as_str())
-                        .await?
-                }
-            },
-            TalosTimelineEventPayload::ItemCompleted(payload)
-                if matches!(
-                    payload.status,
-                    talos_types::talos::TalosTimelineItemStatus::WaitingDynamicInput
-                ) =>
-            {
-                None
-            }
-            TalosTimelineEventPayload::ItemCompleted(payload)
-                if matches!(
-                    payload.status,
-                    talos_types::talos::TalosTimelineItemStatus::Completed
-                        | talos_types::talos::TalosTimelineItemStatus::Failed
-                        | talos_types::talos::TalosTimelineItemStatus::Cancelled
-                ) =>
-            {
-                self.resolve_pending_item_state(&session_id, turn_id.as_str(), &payload.item_id)
-                    .await?
-            }
-            _ => {
-                self.running_active_state(&session_id, turn_id.as_str())
-                    .await?
-            }
-        };
+        let active_state = state_for_event(self.active_turn_store.as_ref(), &event).await?;
         let record = self.event_store.append_event(event).await?;
         let envelope = TimelineEventEnvelope::from_persisted_event(record).ok_or_else(|| {
             talos_error::TalosError::SerializationError(
@@ -189,7 +115,7 @@ impl TimelineEventService {
                     turn_id,
                     message_id: Some(message_id),
                     status,
-                    last_event_id: Some(crate::TimelineEventId::from(envelope.event_id.clone())),
+                    last_event_id: Some(TimelineEventId::from(envelope.event_id.clone())),
                     pending_user_action,
                     updated_at: envelope.created_at_ms,
                 })
@@ -199,80 +125,6 @@ impl TimelineEventService {
         let _ = self.live_tx.send(envelope.clone());
 
         Ok(envelope)
-    }
-
-    async fn completed_active_state(
-        &self,
-        session_id: &str,
-        message_id: &str,
-        turn_id: Option<&str>,
-    ) -> TalosResult<Option<(ActiveTurnStatus, Option<PendingUserAction>)>> {
-        let Some(active) = self.active_turn_store.get_active_turn(session_id).await? else {
-            return Ok(Some((ActiveTurnStatus::Completed, None)));
-        };
-        let same_turn = turn_id.is_some_and(|value| value == active.turn_id);
-        let same_message = active
-            .message_id
-            .as_deref()
-            .is_some_and(|value| value == message_id);
-        if (same_turn || same_message)
-            && active.status == ActiveTurnStatus::WaitingUserAction
-            && active.pending_user_action.is_some()
-        {
-            return Ok(Some((
-                ActiveTurnStatus::WaitingUserAction,
-                active.pending_user_action,
-            )));
-        }
-        Ok(Some((ActiveTurnStatus::Completed, None)))
-    }
-
-    async fn running_active_state(
-        &self,
-        session_id: &str,
-        turn_id: &str,
-    ) -> TalosResult<Option<(ActiveTurnStatus, Option<PendingUserAction>)>> {
-        let Some(active) = self.active_turn_store.get_active_turn(session_id).await? else {
-            return Ok(Some((ActiveTurnStatus::Running, None)));
-        };
-        if active.turn_id == turn_id
-            && active.status == ActiveTurnStatus::WaitingUserAction
-            && active.pending_user_action.is_some()
-        {
-            return Ok(Some((
-                ActiveTurnStatus::WaitingUserAction,
-                active.pending_user_action,
-            )));
-        }
-        Ok(Some((ActiveTurnStatus::Running, None)))
-    }
-
-    async fn resolve_pending_item_state(
-        &self,
-        session_id: &str,
-        turn_id: &str,
-        item_id: &str,
-    ) -> TalosResult<Option<(ActiveTurnStatus, Option<PendingUserAction>)>> {
-        let Some(active) = self.active_turn_store.get_active_turn(session_id).await? else {
-            return Ok(Some((ActiveTurnStatus::Running, None)));
-        };
-        if active.turn_id != turn_id || active.status != ActiveTurnStatus::WaitingUserAction {
-            return Ok(Some((ActiveTurnStatus::Running, None)));
-        }
-        let resolves_pending = match active.pending_user_action.as_ref() {
-            Some(PendingUserAction::DynamicToolResult(pending)) => pending
-                .item_id
-                .as_deref()
-                .is_none_or(|pending_item_id| pending_item_id == item_id),
-            None => false,
-        };
-        if resolves_pending {
-            return Ok(Some((ActiveTurnStatus::Running, None)));
-        }
-        Ok(Some((
-            ActiveTurnStatus::WaitingUserAction,
-            active.pending_user_action,
-        )))
     }
 
     pub async fn run_event_log_gc(&self) -> TalosResult<u64> {
@@ -335,9 +187,11 @@ fn live_only_event_envelope(mut event: TalosTimelineEvent) -> TimelineEventEnvel
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DatabaseSessionStore, TimelineEventId, TimelineEventStore};
     use std::sync::Arc;
     use talos_storage::SqliteStorage;
+    use talos_store::session::{
+        ActiveTurnStatus, ActiveTurnStore, DatabaseSessionStore, PendingUserAction,
+    };
     use talos_types::talos::{
         StopReason, TalosItemDeltaEvent, TalosTimelineDelta, TalosTimelineEvent,
         TalosTimelineEventPayload, TalosTimelineEventType, TalosTurnCompletedEvent, TalosUsage,

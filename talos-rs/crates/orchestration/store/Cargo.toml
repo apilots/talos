@@ -1,5 +1,5 @@
 [package]
-name = "talos-project-store"
+name = "talos-store"
 version = "0.1.2"
 edition = "2021"
 
@@ -9,6 +9,9 @@ chrono = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 talos-error = { workspace = true }
+talos-llm-provider = { workspace = true }
 talos-storage = { workspace = true }
 talos-types = { workspace = true }
-uuid = { workspace = true, features = ["v7"] }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true, features = ["v4", "v7"] }

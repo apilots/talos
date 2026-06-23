@@ -20,6 +20,6 @@ async-trait = "0.1"
 mockall = "0.12"
 talos-coordinator = { path = "../../orchestration/coordinator" }
 talos-llm-provider = { path = "../../common/llm/provider" }
-talos-project-store = { workspace = true }
-talos-session-store = { path = "../../orchestration/session-store" }
+talos-store = { workspace = true }
+talos-session-service = { workspace = true }
 talos-storage = { path = "../../infra/storage" }

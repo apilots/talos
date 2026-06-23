@@ -63,7 +63,7 @@ StartTurnRequest
 - `AgentHarness` 当前通过 `Agent` trait 对上提供执行能力。
 - `CoordinatorImpl` 当前位于 Application Service / TurnService 下方，持有 Agent registry，并负责 route 到目标 Agent。
 - `Application Service` 已经存在，是 HTTP / JSON-RPC / Desktop / SDK 等共享服务实现的基础。
-- `TimelineEventService` 已经负责 timeline event append、active turn 更新和 live publish。
+- `TimelineEventService` 位于 `orchestration/service/session-service`，负责 timeline event append、active turn 更新和 live publish。
 - `talos_types` 已经承载大量 SDK/服务端共享对象，但对象归属和命名需要收紧。
 
 ## 目标

@@ -16,7 +16,7 @@ fn test_state_with_config_and_plugin_manager(
         Arc::new(MockGateway),
         Arc::new(SessionServiceRuntimeAdapter::new(session_service.clone())),
         Arc::new(SessionStoreAdapter::new(session_service)),
-        Arc::new(talos_project_store::MockProjectStore::new()),
+        Arc::new(talos_store::project::MockProjectStore::new()),
         event_service.clone(),
         event_store,
         config.clone(),

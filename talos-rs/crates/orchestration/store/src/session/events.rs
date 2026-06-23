@@ -4,7 +4,7 @@ use talos_error::{TalosError, TalosResult};
 use talos_storage::Row;
 use talos_types::talos::{TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType};
 
-use crate::DatabaseSessionStore;
+use super::DatabaseSessionStore;
 
 pub const EVENT_ID_PREFIX: &str = "ev_";
 const EVENT_ID_WIDTH: usize = 20;
@@ -279,7 +279,7 @@ impl TimelineEventStore for DatabaseSessionStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::active_turn::{ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate};
+    use crate::session::active_turn::{ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate};
     use std::sync::Arc;
     use talos_storage::SqliteStorage;
     use talos_types::talos::TalosTurnStartedEvent;

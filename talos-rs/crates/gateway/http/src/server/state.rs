@@ -6,7 +6,7 @@ use talos_auth::AuthService;
 use talos_auth::CloudSessionCache;
 use talos_gateway::{ApplicationServiceGateway, Gateway};
 #[cfg(test)]
-use talos_session_store::TimelineEventService;
+use talos_session_service::TimelineEventService;
 use talos_types::TalosConfig;
 
 use super::lifecycle::ServerLifecycle;

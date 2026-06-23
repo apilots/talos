@@ -132,6 +132,32 @@ Broken.
     }
 
     #[test]
+    fn loader_recurses_collection_dirs_and_ignores_empty_dirs() {
+        let temp = tempfile::tempdir().expect("temp dir should be created");
+        let roots = test_roots(&temp);
+        let system_root = roots.roots[1].path.join(".system");
+        let empty_root = roots.roots[1].path.join("codex-primary-runtime");
+        fs::create_dir_all(&empty_root).expect("empty collection dir should be created");
+        write_skill(
+            &system_root,
+            "openai-docs",
+            r#"---
+name: openai-docs
+description: Use official OpenAI docs.
+---
+
+Read docs.
+"#,
+        );
+
+        let snapshot = refresh(&roots).expect("skills should load");
+
+        assert_eq!(snapshot.errors, Vec::new());
+        assert_eq!(snapshot.skills.len(), 1);
+        assert_eq!(snapshot.skills[0].name, "openai-docs");
+    }
+
+    #[test]
     fn suggest_supports_fuzzy_name_matching() {
         let temp = tempfile::tempdir().expect("temp dir should be created");
         let roots = test_roots(&temp);

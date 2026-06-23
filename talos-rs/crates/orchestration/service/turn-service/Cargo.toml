@@ -1,0 +1,21 @@
+[package]
+name = "talos-turn-service"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+chrono = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+talos-coordinator = { path = "../../coordinator" }
+talos-error = { workspace = true }
+talos-session-service = { workspace = true }
+talos-store = { workspace = true }
+talos-types = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+talos-storage = { workspace = true }

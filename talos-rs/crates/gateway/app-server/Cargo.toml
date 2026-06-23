@@ -13,7 +13,6 @@ talos-auth = { workspace = true }
 talos-config = { workspace = true }
 talos-error = { workspace = true }
 talos-gateway = { path = "../core" }
-talos-session-store = { path = "../../orchestration/session-store" }
 talos-skills = { workspace = true }
 talos-tools = { workspace = true }
 talos-types = { workspace = true }

@@ -27,13 +27,14 @@ use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, LlmProvider, PromptCacheSupport, ReasoningSupport,
 };
 use talos_logging::LogGuard;
-use talos_project_store::{ProjectStore, StorageProjectStore};
 use talos_router::{Binding, MatchRule, Router, RouterImpl};
-use talos_session_store::{
-    ActiveTurnStore, DatabaseSessionStore, MessageIdempotencyStore, SessionStore,
-    TimelineEventRetentionConfig, TimelineEventService, TimelineEventStore,
-};
+use talos_session_service::{TimelineEventRetentionConfig, TimelineEventService};
 use talos_storage::{create_storage, StorageConfig};
+use talos_store::project::{ProjectStore, StorageProjectStore};
+use talos_store::session::{
+    ActiveTurnStore, DatabaseSessionStore, MessageIdempotencyStore, SessionStore,
+    TimelineEventStore,
+};
 use talos_tools::{
     register_collaboration_tools, register_core_local_tools, register_network_tools,
     CollaborationAgentHost, CollaborationRuntime, McpConnectionManager, ToolRegistry,

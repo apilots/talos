@@ -11,8 +11,7 @@ talos-types = { path = "../../common/types" }
 talos-auth = { path = "../../infra/auth" }
 talos-config = { workspace = true }
 talos-llm-provider = { workspace = true }
-talos-project-store = { workspace = true }
-talos-session-store = { path = "../../orchestration/session-store" }
+talos-session-service = { workspace = true }
 talos-app-protocol = { workspace = true }
 talos-skills = { workspace = true }
 axum = { version = "0.7", features = ["macros"] }
@@ -32,4 +31,5 @@ async-trait = "0.1"
 talos-app-server = { workspace = true }
 talos-coordinator = { path = "../../orchestration/coordinator" }
 talos-plugin = { workspace = true }
+talos-store = { workspace = true }
 tempfile = "3"

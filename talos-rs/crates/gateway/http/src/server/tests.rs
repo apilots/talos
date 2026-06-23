@@ -14,13 +14,13 @@ use talos_config::{InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService};
 use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
-use talos_project_store::MockProjectStore;
-use talos_session_store::{
+use talos_session_service::{TimelineEventRetentionConfig, TimelineEventService};
+use talos_store::project::MockProjectStore;
+use talos_store::session::{
     ActiveTurnRecord, ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, IdempotencyRecord,
     IdempotencyReservation, IdempotencyStatus, MessageCommandResult, MessageIdempotencyStore,
     PendingDynamicToolResult, PendingUserAction, SessionPatchAck, SessionQuery, SessionRecord,
-    SessionStore, TimelineEventId, TimelineEventRetentionConfig, TimelineEventService,
-    TimelineEventStore,
+    SessionStore, TimelineEventId, TimelineEventStore,
 };
 use talos_types::talos::{
     StopReason, TalosContext, TalosItemDeltaEvent, TalosItemStartedEvent, TalosTimelineContent,
@@ -354,57 +354,13 @@ impl SessionStoreAdapter {
 
 #[async_trait::async_trait]
 impl SessionStore for SessionStoreAdapter {
-    async fn create_session(
+    async fn insert_session_record(
         &self,
-        session_id: Option<&str>,
-        context: &TalosContext,
+        _record: &SessionRecord,
         _agent_id: &str,
-        _default_model: &str,
-        requested_model: Option<&str>,
-        conf: Option<SessionConf>,
-        _dm_scope: Option<String>,
-        project_id: Option<String>,
-        current_directory: Option<std::path::PathBuf>,
-    ) -> talos_error::TalosResult<SessionRecord> {
-        let session = self
-            .service
-            .create_session(
-                context.clone(),
-                requested_model.map(str::to_string),
-                conf,
-                project_id,
-                current_directory,
-            )
-            .await?;
-        let mut record = self.to_record(session)?;
-        if let Some(session_id) = session_id {
-            record.id = session_id.to_string();
-        }
-        Ok(record)
-    }
-
-    async fn resolve_or_create_session(
-        &self,
-        context: &TalosContext,
-        agent_id: &str,
-        default_model: &str,
-        requested_model: Option<&str>,
-        dm_scope: Option<String>,
-        project_id: Option<String>,
-        current_directory: Option<std::path::PathBuf>,
-    ) -> talos_error::TalosResult<SessionRecord> {
-        self.create_session(
-            None,
-            context,
-            agent_id,
-            default_model,
-            requested_model,
-            None,
-            dm_scope,
-            project_id,
-            current_directory,
-        )
-        .await
+        _scope: &str,
+    ) -> talos_error::TalosResult<()> {
+        Ok(())
     }
 
     async fn get_session_record(
@@ -446,45 +402,15 @@ impl SessionStore for SessionStoreAdapter {
             .await
     }
 
-    async fn patch_session_record(
+    async fn update_session_record(
         &self,
-        session_id: &str,
-        patch: &SessionPatch,
-    ) -> talos_error::TalosResult<SessionPatchAck> {
-        self.service.patch_session(session_id, patch.clone()).await
+        _record: &SessionRecord,
+    ) -> talos_error::TalosResult<bool> {
+        Ok(true)
     }
 
-    async fn reset_session_record(
-        &self,
-        session_id: &str,
-    ) -> talos_error::TalosResult<SessionPatchAck> {
-        self.service.clear_session(session_id).await?;
-        Ok(SessionPatchAck { success: true })
-    }
-
-    async fn delete_session_record(
-        &self,
-        session_id: &str,
-    ) -> talos_error::TalosResult<SessionPatchAck> {
-        self.service.delete_session(session_id).await
-    }
-
-    async fn update_session_title(
-        &self,
-        _session_id: &str,
-        _title: &str,
-    ) -> talos_error::TalosResult<()> {
-        Ok(())
-    }
-
-    async fn record_session_progress(
-        &self,
-        _session_id: &str,
-        _message_delta: u64,
-        _usage: &talos_types::talos::TalosUsage,
-        _model: Option<&str>,
-    ) -> talos_error::TalosResult<()> {
-        Ok(())
+    async fn delete_session_record(&self, session_id: &str) -> talos_error::TalosResult<bool> {
+        Ok(self.service.delete_session(session_id).await?.success)
     }
 }
 

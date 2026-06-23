@@ -34,6 +34,13 @@ pub fn load_skills_from_roots(
         if !root.path.exists() {
             continue;
         }
+        if root.path.join("SKILL.md").exists() {
+            match parse_skill_dir(&root.path, root, state, max_skill_md_bytes) {
+                Ok(skill) => skills.push(skill),
+                Err(error) => errors.push(error),
+            }
+            continue;
+        }
         let entries = match fs::read_dir(&root.path) {
             Ok(entries) => entries,
             Err(err) => {
@@ -50,14 +57,53 @@ pub fn load_skills_from_roots(
             if !skill_root.is_dir() {
                 continue;
             }
-            match parse_skill_dir(&skill_root, root, state, max_skill_md_bytes) {
-                Ok(skill) => skills.push(skill),
-                Err(error) => errors.push(error),
-            }
+            scan_skill_dir(
+                &skill_root,
+                root,
+                state,
+                max_skill_md_bytes,
+                &mut skills,
+                &mut errors,
+            );
         }
     }
     sort_skills(&mut skills);
     SkillSnapshot { skills, errors }
+}
+
+fn scan_skill_dir(
+    candidate: &Path,
+    source: &SkillRoot,
+    state: &SkillState,
+    max_skill_md_bytes: usize,
+    skills: &mut Vec<SkillSummary>,
+    errors: &mut Vec<SkillLoadError>,
+) {
+    if candidate.join("SKILL.md").exists() {
+        match parse_skill_dir(candidate, source, state, max_skill_md_bytes) {
+            Ok(skill) => skills.push(skill),
+            Err(error) => errors.push(error),
+        }
+        return;
+    }
+
+    let entries = match fs::read_dir(candidate) {
+        Ok(entries) => entries,
+        Err(err) => {
+            errors.push(SkillLoadError {
+                root: candidate.to_path_buf(),
+                path: None,
+                message: format!("failed to read skill directory: {err}"),
+            });
+            return;
+        }
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            scan_skill_dir(&path, source, state, max_skill_md_bytes, skills, errors);
+        }
+    }
 }
 
 pub fn parse_skill_dir(

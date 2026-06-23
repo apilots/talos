@@ -10,17 +10,15 @@ talos-config = { workspace = true }
 talos-auth = { workspace = true }
 talos-llm-provider = { workspace = true }
 talos-memory = { workspace = true }
-talos-session-store = { path = "../../orchestration/session-store" }
-talos-project-store = { path = "../../orchestration/project-store" }
+talos-store = { workspace = true }
+talos-session-service = { workspace = true }
+talos-turn-service = { workspace = true }
 talos-coordinator = { path = "../../orchestration/coordinator" }
 talos-plugin = { workspace = true }
 talos-skills = { workspace = true }
 talos-types = { workspace = true }
-async-trait = { workspace = true }
 tokio = { workspace = true }
-tokio-util = { workspace = true }
 chrono = { workspace = true }
-sha2 = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tracing = { workspace = true }

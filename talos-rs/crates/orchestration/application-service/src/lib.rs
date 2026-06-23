@@ -8,6 +8,7 @@ pub mod history;
 pub mod memory;
 pub mod model;
 pub mod plugin;
+pub mod project;
 pub mod session;
 pub mod skills;
 pub mod turn;
@@ -18,10 +19,10 @@ pub use access::{Actor, ResourceAccessService};
 pub use account::AccountService;
 pub use config::{ConfigService, RuntimeConfigReloadHook};
 pub use event::{
-    ApplicationEvent, ApplicationEventStream, EventReplay, EventService, TimelineCursorStatus,
+    ApplicationEvent, ApplicationEventStream, EventReplay, TimelineCursorStatus,
     TimelineRecoveryState, TimelineSubscribeCommand, TimelineSubscription,
     TimelineSubscriptionCloseReason, TimelineSubscriptionClosed, TimelineSubscriptionMessage,
-    TimelineSubscriptionSource,
+    TimelineSubscriptionService, TimelineSubscriptionSource,
 };
 pub use file::{
     content_hash, modified_at_ms, read_optional, validate_expected_version, with_file_lock,
@@ -31,6 +32,7 @@ pub use fs::FsService;
 pub use history::SessionHistoryService;
 pub use memory::{MemoryDate, MemoryListCommand, MemorySearchCommand, MemoryService};
 pub use plugin::PluginManagerService;
+pub use project::ProjectService;
 pub use session::SessionService;
 pub use skills::SkillsService;
 pub use turn::{
@@ -47,10 +49,11 @@ use talos_auth::{AuthService, UserService};
 use talos_config::LlmConfigService;
 use talos_coordinator::SessionRuntime;
 use talos_llm_provider::LlmProvider;
-use talos_project_store::{ProjectRecord, ProjectStore};
-use talos_session_store::{
+use talos_session_service::TimelineEventService;
+use talos_store::project::{ProjectRecord, ProjectStore};
+use talos_store::session::{
     IdempotencyStatus, MessageCommandResult, MessageIdempotencyStore, SessionPatchAck,
-    SessionStore, TimelineEventId, TimelineEventService,
+    SessionStore, TimelineEventId,
 };
 use talos_types::{
     InterruptTurnRequest, InterruptTurnResponse, ModelInfo, ProjectInfo, ProjectPatch,
@@ -65,7 +68,7 @@ pub struct TalosApplicationService {
     pub access: ResourceAccessService,
     pub account: AccountService,
     pub turns: TurnService,
-    pub events: EventService,
+    pub events: TimelineSubscriptionService,
     pub history: SessionHistoryService,
     pub config: ConfigService,
     pub fs: FsService,
@@ -134,6 +137,7 @@ impl TalosApplicationService {
             base_config.channels.telegram.dm_scope.to_string(),
         );
         let session_records = Arc::new(session_records);
+        let projects = Arc::new(ProjectService::new(project_store));
         let reload_hook: Option<RuntimeConfigReloadHook> = {
             let session_records = session_records.clone();
             Some(Arc::new(move |llm: &talos_config::LlmConfig| {
@@ -156,7 +160,11 @@ impl TalosApplicationService {
         .with_plugin_manager(plugins.clone());
 
         Self {
-            access: ResourceAccessService::with_records(session_runtime.clone(), session_records),
+            access: ResourceAccessService::with_records(
+                session_runtime.clone(),
+                session_records,
+                projects,
+            ),
             account: AccountService::new(
                 auth_service,
                 user_service,
@@ -170,7 +178,7 @@ impl TalosApplicationService {
                 session_runtime,
                 base_config.clone(),
             ),
-            events: EventService::new(event_service.clone()),
+            events: TimelineSubscriptionService::new(event_service.clone()),
             history: SessionHistoryService::new(base_config.clone(), event_service.clone()),
             config: ConfigService::new_with_reload_hook(llm_config_service, models, reload_hook),
             fs: FsService::new(base_config.fs.directory_picker.clone()),
@@ -255,8 +263,7 @@ impl TalosApplicationService {
         session_id: &str,
     ) -> ApplicationResult<TimelineActiveTurnSnapshot> {
         let _session = self.access.get_session(actor, session_id).await?;
-        let active_turn = self.events.get_active_turn(session_id).await?;
-        Ok(event::map_active_turn_snapshot(session_id, active_turn))
+        self.events.get_active_turn_snapshot(session_id).await
     }
 
     async fn submit_start_turn(
@@ -626,13 +633,13 @@ mod tests {
     use talos_config::{InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService};
     use talos_error::{TalosError, TalosResult};
     use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
-    use talos_project_store::StorageProjectStore;
-    use talos_session_store::{
-        ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, DatabaseSessionStore,
-        IdempotencyReservation, MessageIdempotencyStore, SessionStore,
-        TimelineEventRetentionConfig, TimelineEventStore,
-    };
+    use talos_session_service::TimelineEventRetentionConfig;
     use talos_storage::SqliteStorage;
+    use talos_store::project::StorageProjectStore;
+    use talos_store::session::{
+        ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, DatabaseSessionStore,
+        IdempotencyReservation, MessageIdempotencyStore, SessionStore, TimelineEventStore,
+    };
     use talos_types::agent_dispatch::AgentDispatchRequest;
     use talos_types::talos::{
         TalosContext, TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineEvent,

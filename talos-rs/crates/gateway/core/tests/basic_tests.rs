@@ -9,12 +9,13 @@ use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
 use talos_gateway::{ApplicationServiceGateway, Gateway};
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
-use talos_project_store::{ProjectStore, StorageProjectStore};
-use talos_session_store::{
-    ActiveTurnStore, DatabaseSessionStore, MessageIdempotencyStore, SessionStore,
-    TimelineEventRetentionConfig, TimelineEventService, TimelineEventStore,
-};
+use talos_session_service::{TimelineEventRetentionConfig, TimelineEventService};
 use talos_storage::SqliteStorage;
+use talos_store::project::{ProjectStore, StorageProjectStore};
+use talos_store::session::{
+    ActiveTurnStore, DatabaseSessionStore, MessageIdempotencyStore, SessionStore,
+    TimelineEventStore,
+};
 use talos_types::agent_dispatch::AgentDispatchRequest;
 use talos_types::talos::{
     TalosContext, TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineEvent,

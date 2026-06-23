@@ -24,8 +24,8 @@ talos-llm-openai = { workspace = true }
 talos-llm-provider = { workspace = true }
 talos-logging = { workspace = true }
 talos-router = { path = "../../orchestration/router" }
-talos-project-store = { workspace = true }
-talos-session-store = { path = "../../orchestration/session-store" }
+talos-store = { workspace = true }
+talos-session-service = { workspace = true }
 talos-skills = { workspace = true }
 talos-storage = { workspace = true }
 talos-mcp = { workspace = true }

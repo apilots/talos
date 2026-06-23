@@ -82,7 +82,8 @@
 | `talos-agent-kernel` | `crates/orchestration/agent-kernel` | `general_turn`、planner、processor、runtime 主执行流 |
 | `talos-agent` | `crates/orchestration/agent` | Agent facade、kernel binding、flush manager |
 | `talos-application-service` | `crates/orchestration/application-service` | HTTP、app-server、SDK 共享的应用服务层，封装 project/file/plugin 等用例 API |
-| `talos-session-store` | `crates/orchestration/session-store` | session id/scope/title 和持久化 |
+| `talos-store` | `crates/orchestration/store` | project/session DB record、store trait、持久化实现和测试 mock |
+| `talos-session-service` | `crates/orchestration/service/session-service` | timeline event 记录、active turn 状态推进、live event 发布和事件日志 GC |
 | `talos-router` | `crates/orchestration/router` | routing rule、binding、优先级匹配 |
 | `talos-coordinator` | `crates/orchestration/coordinator` | session -> agent 编排、多 turn 协调和工具审批转发 |
 
