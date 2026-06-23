@@ -11,8 +11,8 @@ use tokio_stream::StreamExt;
 
 use talos_app_protocol::events::canonical_method;
 use talos_app_protocol::requests::TimelineRecoveryResponse;
-use talos_application_service::TimelineSubscriptionMessage;
 use talos_auth::RequestIdentity;
+use talos_service::TimelineSubscriptionMessage;
 use talos_types::{RecoverTimelineRequest, SessionActiveTurnRequest, SubscribeTimelineRequest};
 
 use super::access::shared_actor;

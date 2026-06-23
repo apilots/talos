@@ -1,8 +1,8 @@
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use talos_config::{DirectoryPickerConfig, DirectoryPickerRoot};
 use talos_error::{TalosError, TalosResult};
+use talos_fs::FileSystem;
 use talos_store::project::ProjectRecord;
 use talos_types::{
     FsDirectoryCreateResponse, FsDirectoryEntry, FsDirectorySnapshot, FsEntryKind, ProjectStatus,
@@ -77,15 +77,13 @@ impl FsService {
         ensure_directory(&parent)?;
         ensure_writable(&parent)?;
         let path = parent.join(name);
-        if path.exists() {
+        if talos_fs::std_fs().get_file_metadata(&path)?.is_some() {
             return Err(TalosError::Conflict(format!(
                 "already_exists: directory already exists: {}",
                 path.display()
             )));
         }
-        fs::create_dir(&path).map_err(|err| {
-            TalosError::StorageError(format!("create directory {}: {}", path.display(), err))
-        })?;
+        talos_fs::create_directory(&path, false)?;
         Ok(FsDirectoryCreateResponse { path })
     }
 
@@ -104,36 +102,28 @@ impl FsService {
                 let home = std::env::var_os("HOME")
                     .map(PathBuf::from)
                     .ok_or_else(|| TalosError::InvalidConfiguration("HOME is not set".into()))?;
-                canonicalize_path(&home)
+                talos_fs::canonicalize_path(&home)
             }
         }
     }
 }
 
 fn status_for_directory(path: &Path) -> ProjectStatus {
-    match fs::metadata(path) {
-        Ok(metadata) if metadata.is_dir() => match fs::read_dir(path) {
+    match talos_fs::std_fs().get_file_metadata(path) {
+        Ok(Some(metadata)) if metadata.is_dir => match talos_fs::read_directory(path) {
             Ok(_) => ProjectStatus::default(),
-            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => ProjectStatus {
-                state: ProjectStatusState::PermissionDenied,
-                reason: Some(ProjectUnavailableReason::PermissionDenied),
-            },
             Err(_) => ProjectStatus {
                 state: ProjectStatusState::PermissionDenied,
                 reason: Some(ProjectUnavailableReason::PermissionDenied),
             },
         },
-        Ok(_) => ProjectStatus {
+        Ok(Some(_)) => ProjectStatus {
             state: ProjectStatusState::NotDirectory,
             reason: Some(ProjectUnavailableReason::NotDirectory),
         },
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => ProjectStatus {
+        Ok(None) => ProjectStatus {
             state: ProjectStatusState::Missing,
             reason: Some(ProjectUnavailableReason::PathNotFound),
-        },
-        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => ProjectStatus {
-            state: ProjectStatusState::PermissionDenied,
-            reason: Some(ProjectUnavailableReason::PermissionDenied),
         },
         Err(_) => ProjectStatus {
             state: ProjectStatusState::PermissionDenied,
@@ -153,8 +143,8 @@ fn validate_absolute(path: &Path, label: &str) -> TalosResult<()> {
 }
 
 fn reject_symlink(path: &Path) -> TalosResult<()> {
-    let metadata = fs::symlink_metadata(path).map_err(map_metadata_error)?;
-    if metadata.file_type().is_symlink() {
+    let metadata = path_metadata_required(path)?;
+    if metadata.is_symlink {
         return Err(TalosError::ValidationError(format!(
             "symlink_not_supported: symlink directories are not supported: {}",
             path.display()
@@ -164,12 +154,12 @@ fn reject_symlink(path: &Path) -> TalosResult<()> {
 }
 
 fn canonicalize_path(path: &Path) -> TalosResult<PathBuf> {
-    fs::canonicalize(path).map_err(map_metadata_error)
+    talos_fs::canonicalize_path(path)
 }
 
 fn ensure_directory(path: &Path) -> TalosResult<()> {
-    let metadata = fs::metadata(path).map_err(map_metadata_error)?;
-    if metadata.is_dir() {
+    let metadata = path_metadata_required(path)?;
+    if metadata.is_dir {
         return Ok(());
     }
     Err(TalosError::ValidationError(format!(
@@ -179,10 +169,7 @@ fn ensure_directory(path: &Path) -> TalosResult<()> {
 }
 
 fn ensure_readable(path: &Path) -> TalosResult<()> {
-    fs::read_dir(path).map_err(|err| match err.kind() {
-        std::io::ErrorKind::PermissionDenied => TalosError::AuthorizationDenied,
-        _ => TalosError::StorageError(format!("read directory {}: {}", path.display(), err)),
-    })?;
+    talos_fs::read_directory(path).map_err(|_| TalosError::AuthorizationDenied)?;
     Ok(())
 }
 
@@ -194,8 +181,9 @@ fn ensure_writable(path: &Path) -> TalosResult<()> {
 }
 
 fn is_writable_directory(path: &Path) -> bool {
-    fs::metadata(path)
-        .map(|metadata| !metadata.permissions().readonly())
+    talos_fs::std_fs()
+        .get_file_metadata(path)
+        .map(|metadata| metadata.is_some_and(|metadata| !metadata.readonly))
         .unwrap_or(false)
 }
 
@@ -215,20 +203,24 @@ fn is_under_root(path: &Path, root: &Path) -> bool {
 
 fn list_child_directories(path: &Path, show_hidden: bool) -> TalosResult<Vec<FsDirectoryEntry>> {
     let mut entries = Vec::new();
-    for entry in fs::read_dir(path).map_err(map_metadata_error)? {
-        let entry = entry.map_err(|err| {
-            TalosError::StorageError(format!("read directory entry {}: {}", path.display(), err))
-        })?;
-        let file_name = entry.file_name();
+    let Some(directory_entries) = talos_fs::read_directory(path)? else {
+        return Err(TalosError::ResourceNotFound(format!(
+            "path_not_found: {}",
+            path.display()
+        )));
+    };
+    for entry in directory_entries {
+        let Some(file_name) = entry.path.file_name() else {
+            continue;
+        };
         let name = file_name.to_string_lossy().to_string();
         let hidden = name.starts_with('.');
         if hidden && !show_hidden {
             continue;
         }
-        let entry_path = entry.path();
-        let symlink_metadata = fs::symlink_metadata(&entry_path).map_err(map_metadata_error)?;
-        let is_symlink = symlink_metadata.file_type().is_symlink();
-        let is_directory = is_symlink || symlink_metadata.is_dir();
+        let entry_path = entry.path;
+        let is_symlink = entry.metadata.is_symlink;
+        let is_directory = is_symlink || entry.metadata.is_dir;
         if !is_directory {
             continue;
         }
@@ -236,7 +228,7 @@ fn list_child_directories(path: &Path, show_hidden: bool) -> TalosResult<Vec<FsD
             name,
             path: entry_path.clone(),
             kind: FsEntryKind::Directory,
-            readable: !is_symlink && fs::read_dir(&entry_path).is_ok(),
+            readable: !is_symlink && talos_fs::read_directory(&entry_path).is_ok(),
             writable: !is_symlink && is_writable_directory(&entry_path),
             hidden,
             is_symlink,
@@ -261,14 +253,10 @@ fn validate_directory_name(name: &str) -> TalosResult<()> {
     Ok(())
 }
 
-fn map_metadata_error(error: std::io::Error) -> TalosError {
-    match error.kind() {
-        std::io::ErrorKind::NotFound => {
-            TalosError::ResourceNotFound(format!("path_not_found: {}", error))
-        }
-        std::io::ErrorKind::PermissionDenied => TalosError::AuthorizationDenied,
-        _ => TalosError::StorageError(error.to_string()),
-    }
+fn path_metadata_required(path: &Path) -> TalosResult<talos_fs::FileMetadata> {
+    talos_fs::std_fs()
+        .get_file_metadata(path)?
+        .ok_or_else(|| TalosError::ResourceNotFound(format!("path_not_found: {}", path.display())))
 }
 
 #[cfg(test)]
@@ -296,12 +284,15 @@ mod tests {
         let _guard = env_lock();
         let temp = tempfile::tempdir().unwrap();
         let child = temp.path().join("project");
-        fs::create_dir(&child).unwrap();
+        talos_fs::create_directory(&child, false).unwrap();
         std::env::set_var("HOME", temp.path());
 
         let snapshot = service().read_directory(&actor(), None).await.unwrap();
 
-        assert_eq!(snapshot.path, fs::canonicalize(temp.path()).unwrap());
+        assert_eq!(
+            snapshot.path,
+            talos_fs::canonicalize_path(temp.path()).unwrap()
+        );
         assert!(snapshot.entries.iter().any(|entry| entry.name == "project"));
         assert!(snapshot.parent.is_none());
     }
@@ -339,7 +330,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(response.path.is_dir());
+        assert!(talos_fs::get_file_metadata(&response.path)
+            .await
+            .unwrap()
+            .is_some_and(|metadata| metadata.is_dir));
         assert_eq!(response.path.file_name().unwrap(), "new-project");
     }
 
@@ -350,13 +344,13 @@ mod tests {
 
         let temp = tempfile::tempdir().unwrap();
         let directory = temp.path().join("private");
-        fs::create_dir(&directory).unwrap();
-        let original_permissions = fs::metadata(&directory).unwrap().permissions();
-        fs::set_permissions(&directory, fs::Permissions::from_mode(0o000)).unwrap();
+        talos_fs::create_directory(&directory, false).unwrap();
+        let original_permissions = std::fs::metadata(&directory).unwrap().permissions();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o000)).unwrap();
 
         let status = status_for_directory(&directory);
 
-        fs::set_permissions(&directory, original_permissions).unwrap();
+        std::fs::set_permissions(&directory, original_permissions).unwrap();
         assert_eq!(status.state, ProjectStatusState::PermissionDenied);
         assert_eq!(
             status.reason,

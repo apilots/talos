@@ -1,9 +1,9 @@
 use crate::PluginStateStore;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
+use talos_fs::FileSystem;
 use talos_types::{MarketplaceSource, MarketplaceSourceLocation};
 use wait_timeout::ChildExt;
 
@@ -26,14 +26,16 @@ pub(crate) fn materialize_source(
         MarketplaceSourceLocation::Git { url, reference } => {
             let repo_dir = state.marketplace_cache_dir(&source.id).join("repo");
             if repo_dir.exists() {
-                fs::remove_dir_all(&repo_dir).map_err(|err| {
-                    TalosError::StorageError(format!(
-                        "failed to clear plugin source cache `{}`: {err}",
-                        repo_dir.display()
-                    ))
-                })?;
+                talos_fs::std_fs()
+                    .remove_directory(&repo_dir)
+                    .map_err(|err| {
+                        TalosError::StorageError(format!(
+                            "failed to clear plugin source cache `{}`: {err}",
+                            repo_dir.display()
+                        ))
+                    })?;
             }
-            fs::create_dir_all(&repo_dir).map_err(|err| {
+            talos_fs::create_directory(&repo_dir, true).map_err(|err| {
                 TalosError::StorageError(format!(
                     "failed to create plugin source cache `{}`: {err}",
                     repo_dir.display()

@@ -2,7 +2,7 @@ use super::*;
 
 fn test_state_with_config_and_plugin_manager(
     config: talos_types::TalosConfig,
-    plugin_manager: talos_application_service::PluginManagerService,
+    plugin_manager: talos_service::PluginManagerService,
     auth_disabled: bool,
 ) -> Arc<HttpApiState> {
     let (auth_service, user_service) = test_auth_services();
@@ -12,7 +12,7 @@ fn test_state_with_config_and_plugin_manager(
         InMemoryLlmConfigStore::new(config.llm.clone()),
     )));
     let session_service: Arc<dyn SessionService> = Arc::new(MockSessionService::default());
-    let app = TalosApplicationService::new_with_session_store(
+    let app = TalosService::new_with_session_store(
         Arc::new(MockGateway),
         Arc::new(SessionServiceRuntimeAdapter::new(session_service.clone())),
         Arc::new(SessionStoreAdapter::new(session_service)),
@@ -28,12 +28,12 @@ fn test_state_with_config_and_plugin_manager(
     );
     let mut app = app;
     app.plugins = plugin_manager.clone();
-    app.skills = talos_application_service::SkillsService::new(
+    app.skills = talos_service::SkillsService::new(
         config.agent.kernel.skills.clone(),
         config.agent.kernel.plugins.clone(),
     )
     .with_plugin_manager(plugin_manager);
-    Arc::new(HttpApiState::from_application_service(
+    Arc::new(HttpApiState::from_service(
         Arc::new(app),
         event_service,
         config,
@@ -321,7 +321,7 @@ async fn test_put_and_get_memory_file_handlers_roundtrip() {
 }
 
 #[tokio::test]
-async fn test_http_and_app_server_adapters_share_application_service_contract() {
+async fn test_http_and_app_server_adapters_share_service_contract() {
     use talos_app_protocol::errors::INVALID_PARAMS;
     use talos_app_protocol::requests::{ClientMethod, ClientRequest, ClientRequestParams};
     use talos_app_server::{AppServerApplication, TalosApplicationAdapter};
@@ -333,7 +333,7 @@ async fn test_http_and_app_server_adapters_share_application_service_contract() 
     let (config, workspace_dir) = isolated_test_config();
     let state = test_state_with_config(config, false);
     let adapter = TalosApplicationAdapter::new(state.app.clone(), 32);
-    let actor = talos_application_service::Actor::regular("static-token");
+    let actor = talos_service::Actor::regular("static-token");
 
     let put_response = put_memory_file_handler(
         State(state.clone()),
@@ -419,12 +419,12 @@ async fn test_http_and_app_server_adapters_share_application_service_contract() 
 }
 
 #[tokio::test]
-async fn test_plugin_http_and_app_server_adapters_share_application_service_contract() {
+async fn test_plugin_http_and_app_server_adapters_share_service_contract() {
     use talos_app_protocol::requests::{ClientMethod, ClientRequest, ClientRequestParams};
     use talos_app_server::{AppServerApplication, TalosApplicationAdapter};
-    use talos_application_service::PluginManagerService;
     use talos_config::PluginsRuntimeConfig;
     use talos_plugin::{PluginManager, PluginStateStore};
+    use talos_service::PluginManagerService;
     use talos_types::{
         MarketplaceSourceInput, PluginKind, PluginSearchRefreshPolicy, PluginSearchRequest,
         PluginSearchStatusFilter, PluginSourceAddRequest,
@@ -473,7 +473,7 @@ Use this skill for protocol contract verification.
     assert!(added.0.warnings.is_empty());
 
     let adapter = TalosApplicationAdapter::new(state.app.clone(), 32);
-    let actor = talos_application_service::Actor::regular("static-token");
+    let actor = talos_service::Actor::regular("static-token");
     let app_server_search = adapter
         .dispatch(
             &actor,

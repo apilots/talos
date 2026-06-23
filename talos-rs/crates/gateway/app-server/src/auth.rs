@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use talos_app_protocol::requests::{ActorCredential, ActorCredentials};
-use talos_application_service::{AccountService, Actor};
 use talos_auth::{AuthService, CloudSessionCache, RequestIdentity};
+use talos_service::{AccountService, Actor};
 
 use crate::application::ProtocolResult;
 

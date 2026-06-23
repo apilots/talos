@@ -8,7 +8,7 @@ Depends on: `refactor-027-core-api-object-boundary`
 
 ## 背景
 
-`refactor-027-core-api-object-boundary` 已经明确了对外对象、Gateway、Application Service、Coordinator、AgentHarness 和 Agent Kernel 的职责边界。但原先 `talos-rs/crates/orchestration` 下的 crate 布局比较平铺，例如 session store、project store、application-service 与 coordinator / agent 并列，目录结构没有直接表达 store 层与 service 层的职责差异。
+`refactor-027-core-api-object-boundary` 已经明确了对外对象、Gateway、Service、Coordinator、AgentHarness 和 Agent Kernel 的职责边界。但原先 `talos-rs/crates/orchestration` 下的 crate 布局比较平铺，例如 session store、project store、应用服务 crate 与 coordinator / agent 并列，目录结构没有直接表达 store 层与 service 层的职责差异。
 
 随着 session、project、timeline、workspace docs、memory、plugin、skills、auth cache 等业务继续增长，如果持久化封装、业务编排和 Agent 执行协调继续散落在同一层级，后续会重新出现几类债务：
 
@@ -18,13 +18,13 @@ Depends on: `refactor-027-core-api-object-boundary`
 4. `Record -> Info` 转换边界不稳定，导致服务端内部和客户端之间重复定义 DTO。
 5. 新增业务模块时不知道应该放在 store、service、coordinator 还是 agent。
 
-本 spec 定义 `orchestration/store` 与 `orchestration/service` 的目标目录和职责边界。本轮已落地 `talos-store` 与 `talos-service` 的拆分；`talos-application-service` 保留为 facade / access / composition 层。
+本 spec 定义 `orchestration/store` 与 `orchestration/service` 的目标目录和职责边界。本轮已落地 `talos-store` 与 `talos-service` 的拆分；原应用服务 crate 已合并进 `talos-service`，由 `talos_service::TalosService` 作为 facade / access / composition 入口。
 
 ## 目标
 
 1. 在 `orchestration` 下建立清晰的 `store` 和 `service` 物理目录边界。
 2. project/session DB 持久化统一放入 `orchestration/store` 这个 `talos-store` crate，并按 `project` / `session` 分模块。
-3. session、timeline、history、turn 等领域应用服务放入 `orchestration/service` 这个 `talos-service` crate，并按业务场景拆模块。
+3. session、timeline、history、turn、project、file、plugin、skills、workspace docs 等领域应用服务放入 `orchestration/service` 这个 `talos-service` crate，并按业务场景拆模块。
 4. `XxxRecord` 只存在于对应 store crate 内部或其明确公开的 store API 中。
 5. service 层统一组合 Agent / Coordinator 执行能力和一个或多个 store API。
 6. service 往上只返回 `talos_types` 中的 `XxxInfo` / `XxxRequest` / `XxxResponse`。
@@ -38,7 +38,7 @@ Depends on: `refactor-027-core-api-object-boundary`
 - 不让 store 直接调用 AgentCoordinator、AgentHarness 或 Gateway。
 - 不让 service 直接处理 HTTP、JSON-RPC、SSE 或 stdio envelope。
 - 不重写 Agent Kernel 或 AgentHarness 内部执行逻辑。
-- 不把 `talos-application-service` 移入 `orchestration/service`；它继续作为 facade / access / composition 层。
+- 不保留旧应用服务兼容 crate；facade / access / composition 能力由 `talos-service/src/service` 承载。
 
 ## 目标目录结构
 
@@ -66,12 +66,28 @@ talos-rs/crates/orchestration/
     Cargo.toml              # talos-service
     src/
       lib.rs
+      service/
+        mod.rs
+        service.rs
+        types.rs
+        mapping.rs
+      access/
+      account/
+      config/
+      file/
+      fs/
+      memory/
+      model/
+      plugin/
+      project/
+      skills/
+      workspace/
+      workspace_docs/
       session/
       timeline/
       history/
       turn/
 
-  application-service/
   coordinator/
   agent/
   agent-kernel/
@@ -80,8 +96,7 @@ talos-rs/crates/orchestration/
 说明：
 
 - `store` 是持久化访问层；当前由单一 `talos-store` crate 承载，并按业务域拆 `project` / `session` 子模块。
-- `service` 是领域应用服务层；当前由单一 `talos-service` crate 承载，并按 session / timeline / history / turn 拆业务模块。
-- `application-service` 是 facade / access / composition 层，负责权限、对 Gateway 的聚合门面和跨 service 组装。
+- `service` 是统一服务层；当前由单一 `talos-service` crate 承载，并按业务模块拆分。`src/service` 内的 `TalosService` 是 facade / access / composition 入口，负责权限、对 Gateway 的聚合门面和跨 service 组装。
 - `coordinator`、`agent`、`agent-kernel` 保持执行链路职责，不承接 DB/file 持久化。
 
 ## Store 层职责
@@ -231,8 +246,8 @@ Gateway 仍然是 HTTP / JSON-RPC / Channel / SDK 之下的统一业务 API 门�
 ```text
 Transport Adapter
   -> Gateway
-  -> application-service
-  -> talos-service::{session,timeline,history,turn}
+  -> talos_service::TalosService
+  -> talos-service::{session,timeline,history,turn,project,file,plugin,skills,...}
   -> talos-store::{project,session}
   -> database / files
 ```

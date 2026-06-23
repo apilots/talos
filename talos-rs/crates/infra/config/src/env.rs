@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use talos_error::{TalosError, TalosResult};
-use talos_fs::WriteOptions;
+use talos_fs::{FileSystem, WriteOptions};
 
 pub const TALOS_ENV_PREFIX: &str = "TALOS_";
 
@@ -63,7 +63,7 @@ impl EnvSecretStore {
         if self.path.exists() {
             return Ok(());
         }
-        match talos_fs::write_string_with(&self.path, "", WriteOptions::create_new()) {
+        match talos_fs::std_fs().write_file_with(&self.path, "", WriteOptions::create_new()) {
             Ok(()) | Err(TalosError::Conflict(_)) => Ok(()),
             Err(err) => Err(TalosError::ConfigError(format!(
                 "failed to create env file {}: {}",
@@ -114,13 +114,15 @@ impl EnvSecretStore {
             output.push_str(&quote_env_value(value));
             output.push('\n');
         }
-        talos_fs::write_string(&self.path, &output).map_err(|err| {
-            TalosError::ConfigError(format!(
-                "failed to write env file {}: {}",
-                self.path.display(),
-                err
-            ))
-        })
+        talos_fs::std_fs()
+            .write_file(&self.path, &output)
+            .map_err(|err| {
+                TalosError::ConfigError(format!(
+                    "failed to write env file {}: {}",
+                    self.path.display(),
+                    err
+                ))
+            })
     }
 }
 

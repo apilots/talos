@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use axum::extract::State;
 use axum::response::Json;
-use talos_application_service::Actor;
 use talos_auth::{
     CloudLoginCancelRequest, CloudLoginStartRequest, CloudLoginStartResponse,
     CloudLoginStatusRequest, CloudLoginStatusResponse,
 };
+use talos_service::Actor;
 use talos_types::{
     AuthSessionClearRequest, AuthSessionClearResponse, AuthSessionReadRequest,
     AuthSessionReadResponse, AuthSessionStoreRequest, AuthSessionStoreResponse,

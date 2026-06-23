@@ -2,6 +2,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 use talos_error::TalosResult;
+use talos_fs::FileSystem;
 
 use crate::{env::RuntimeEnv, validate, Config, EnvSecretStore, TalosPaths};
 
@@ -100,7 +101,7 @@ where
         )));
     };
 
-    std::fs::copy(template_path, &paths.config_file).map_err(|err| {
+    talos_fs::copy_file(template_path, &paths.config_file).map_err(|err| {
         TalosError::ConfigError(format!(
             "failed to copy default config template from {} to {}: {}",
             template_path.display(),
@@ -146,7 +147,8 @@ pub(crate) fn save_config(config: &Config, path: &str) -> TalosResult<()> {
     let yaml = serde_yaml::to_string(config)
         .map_err(|e| TalosError::ConfigError(format!("Failed to serialize config: {}", e)))?;
 
-    talos_fs::write_string(Path::new(path), &yaml)
+    talos_fs::std_fs()
+        .write_file(Path::new(path), &yaml)
         .map_err(|e| TalosError::ConfigError(format!("Failed to write config file: {}", e)))?;
 
     Ok(())

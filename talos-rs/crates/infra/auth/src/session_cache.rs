@@ -1,9 +1,10 @@
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use talos_error::{TalosError, TalosResult};
-use talos_fs::{FileLock, FilePermissions, WriteOptions};
+use talos_fs::{FilePermissions, FileSystem, WriteOptions};
 use ts_rs::TS;
 
 use crate::{AuthResponse, UserDto, UserRole};
@@ -205,8 +206,16 @@ impl CloudSessionCache {
     }
 
     pub fn load_candidate(&self, now_ms: i64) -> TalosResult<Option<CloudSessionCacheEntry>> {
-        let Some(content) = talos_fs::read_optional_to_string(&self.path)? else {
-            return Ok(None);
+        let content = match fs::read_to_string(&self.path) {
+            Ok(content) => content,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => {
+                return Err(TalosError::StorageError(format!(
+                    "read cloud session cache {}: {}",
+                    self.path.display(),
+                    err
+                )));
+            }
         };
         let entry: CloudSessionCacheEntry = serde_json::from_str(&content).map_err(|err| {
             TalosError::SerializationError(format!(
@@ -280,8 +289,8 @@ impl CloudSessionCache {
     }
 }
 
-fn acquire_cache_lock(path: &Path) -> TalosResult<FileLock> {
-    talos_fs::try_lock_exclusive(path)?.ok_or_else(|| {
+fn acquire_cache_lock(path: &Path) -> TalosResult<talos_fs::FileLock> {
+    talos_fs::std_fs().try_file_lock(path)?.ok_or_else(|| {
         TalosError::Conflict(format!(
             "cloud session cache lock already exists: {}",
             path.display()

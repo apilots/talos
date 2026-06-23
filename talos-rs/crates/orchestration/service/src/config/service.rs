@@ -9,7 +9,7 @@ use talos_types::{
 };
 use tokio::sync::RwLock;
 
-pub type RuntimeConfigReloadHook = Arc<dyn Fn(&LlmConfig) -> TalosResult<()> + Send + Sync>;
+use super::types::RuntimeConfigReloadHook;
 
 #[derive(Clone)]
 pub struct ConfigService {

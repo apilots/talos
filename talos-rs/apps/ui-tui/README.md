@@ -62,7 +62,7 @@ export TALOS_APP_SERVER_BIN=./target/debug/app-server
 - Starts `app-server` as a child process
 - Uses JSON-RPC over stdio JSONL
 - Does not listen on a local port
-- Shares the same `talos-application-service` path as HTTP and Desktop
+- Shares the same `talos-service::TalosService` path as HTTP and Desktop
 
 Current app-server mode supports the main chat/session path, model listing,
 session create/list/get/delete, active turn interrupt, model update, event

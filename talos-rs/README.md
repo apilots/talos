@@ -226,10 +226,10 @@ Talos follows an eight-layer architecture with clear separation of concerns:
 - `crates/perception/` - Channel integrations
 - `crates/cognition/` - Memory-related services
 - `crates/action/` - Tools, MCP runtime, Skills, Plugin lifecycle, policy, and sandbox execution
-- `crates/orchestration/` - Agent coordination, kernel, sessions, routing, and application services
+- `crates/orchestration/` - Agent coordination, kernel, store, routing, and service facade
 - `crates/gateway/` - HTTP gateway, app-server JSON-RPC adapter, and protocol types
 - `crates/app/talos-base/` - Shared runtime base used by `app-server` and `talos-server`
-- `crates/orchestration/application-service/` - Shared application services used by protocol adapters
+- `crates/orchestration/service/` - Shared `TalosService` facade and business services used by protocol adapters
 - `apps/sdk/` - Rust SDK package (`talos-sdk`)
 - `bin/app-server/` - App Server binary
 - `bin/talos-server/` - HTTP/WebUI Server binary

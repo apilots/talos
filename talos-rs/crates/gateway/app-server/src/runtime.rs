@@ -15,7 +15,7 @@ use talos_app_protocol::requests::{
     ServerInfo,
 };
 use talos_app_protocol::version::ProtocolVersion;
-use talos_application_service::{
+use talos_service::{
     Actor, TimelineSubscription, TimelineSubscriptionCloseReason, TimelineSubscriptionMessage,
 };
 use talos_types::EventUnsubscribeResponse;
@@ -139,7 +139,7 @@ where
 
     // Keep subscriptions alive while background drains run so final turn events can still be
     // forwarded. After the drain boundary, abort them explicitly; idle subscriptions wait on
-    // the application-service stream and would otherwise keep stdio shutdown from completing.
+    // the TalosService stream and would otherwise keep stdio shutdown from completing.
     for (_, task) in state.subscription_tasks {
         task.abort();
         let _ = task.await;
@@ -567,7 +567,7 @@ mod tests {
     use serde_json::json;
     use talos_app_protocol::errors::{NOT_INITIALIZED, PARSE_ERROR, UNAUTHORIZED};
     use talos_app_protocol::requests::ActorCredentials;
-    use talos_application_service::{
+    use talos_service::{
         Actor, EventReplay, TimelineSubscriptionCloseReason, TimelineSubscriptionClosed,
         TimelineSubscriptionMessage,
     };
@@ -642,15 +642,14 @@ mod tests {
                             session_id: params.session_id.clone(),
                             high_water_mark_event_id: None,
                         },
-                        subscription: talos_application_service::TimelineSubscription {
+                        subscription: talos_service::TimelineSubscription {
                             session_id: params.session_id,
                             high_water_mark_event_id: None,
                             replay: EventReplay {
                                 events: Vec::new(),
                                 high_water_mark_event_id: None,
                                 last_replay_seq: 0,
-                                cursor_status:
-                                    talos_application_service::TimelineCursorStatus::FromBeginning,
+                                cursor_status: talos_service::TimelineCursorStatus::FromBeginning,
                             },
                             events,
                             has_live_turn: false,

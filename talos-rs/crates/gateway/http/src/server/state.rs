@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use talos_application_service::TalosApplicationService;
 use talos_auth::AuthService;
 #[cfg(test)]
 use talos_auth::CloudSessionCache;
-use talos_gateway::{ApplicationServiceGateway, Gateway};
+use talos_gateway::{Gateway, ServiceGateway};
+use talos_service::TalosService;
 #[cfg(test)]
 use talos_service::TimelineEventService;
 use talos_types::TalosConfig;
@@ -13,7 +13,7 @@ use super::lifecycle::ServerLifecycle;
 
 #[derive(Clone)]
 pub(super) struct HttpApiState {
-    pub(super) app: Arc<TalosApplicationService>,
+    pub(super) app: Arc<TalosService>,
     pub(super) gateway: Arc<dyn Gateway>,
     #[cfg(test)]
     pub(super) event_service: Arc<TimelineEventService>,
@@ -24,15 +24,15 @@ pub(super) struct HttpApiState {
 }
 
 impl HttpApiState {
-    pub(super) fn from_application_service(
-        app: Arc<TalosApplicationService>,
+    pub(super) fn from_service(
+        app: Arc<TalosService>,
         #[cfg(test)] event_service: Arc<TimelineEventService>,
         base_config: TalosConfig,
         auth_service: Arc<dyn AuthService>,
         auth_disabled: bool,
         lifecycle: Arc<ServerLifecycle>,
     ) -> Self {
-        let gateway: Arc<dyn Gateway> = Arc::new(ApplicationServiceGateway::new(app.clone()));
+        let gateway: Arc<dyn Gateway> = Arc::new(ServiceGateway::new(app.clone()));
         Self {
             app: app.clone(),
             gateway,

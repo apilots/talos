@@ -1,10 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use talos_error::{TalosError, TalosResult};
-use tokio::fs;
-use tokio::io::{AsyncBufReadExt, BufReader};
 
-use crate::file;
 use crate::path_policy;
 use crate::store::{
     MemoryStore, SessionPromptContext, SessionPromptContextConfig, SessionToolExchangeContext,
@@ -56,9 +53,9 @@ async fn append_session_artifact(
     record: &SessionArtifactRecord,
 ) -> TalosResult<()> {
     let payload = serialize_session_artifact_line(record)?;
-    file::append_string(
+    talos_fs::append_file(
         &session_day_file_path(store, session_id, timestamp),
-        payload,
+        &payload,
     )
     .await?;
 
@@ -74,18 +71,12 @@ async fn load_session_artifacts(
 
     let mut records = Vec::new();
     for path in files {
-        let file = fs::File::open(&path)
-            .await
-            .map_err(|e| TalosError::StorageError(format!("open session artifact file: {}", e)))?;
-        let mut lines = BufReader::new(file).lines();
-        let mut line_number = 0_usize;
+        let content = talos_fs::read_file(&path)
+            .await?
+            .ok_or_else(|| TalosError::StorageError("session artifact file missing".to_string()))?;
 
-        while let Some(line) = lines
-            .next_line()
-            .await
-            .map_err(|e| TalosError::StorageError(format!("read session artifact file: {}", e)))?
-        {
-            line_number = line_number.saturating_add(1);
+        for (line_idx, line) in content.lines().enumerate() {
+            let line_number = line_idx.saturating_add(1);
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 continue;
@@ -844,10 +835,9 @@ pub(crate) async fn latest_seq(store: &MemoryStore, session_id: &str) -> TalosRe
 pub(crate) async fn session_size_bytes(store: &MemoryStore, session_id: &str) -> TalosResult<u64> {
     let mut total = 0_u64;
     for path in path_policy::list_daily_files(store, session_id).await? {
-        let metadata = fs::metadata(path)
-            .await
-            .map_err(|e| TalosError::StorageError(format!("read daily metadata: {}", e)))?;
-        total = total.saturating_add(metadata.len());
+        if let Some(metadata) = talos_fs::get_file_metadata(&path).await? {
+            total = total.saturating_add(metadata.size_bytes);
+        }
     }
 
     Ok(total)
@@ -855,7 +845,7 @@ pub(crate) async fn session_size_bytes(store: &MemoryStore, session_id: &str) ->
 
 pub(crate) async fn reset_session(store: &MemoryStore, session_id: &str) -> TalosResult<()> {
     let session_dir = path_policy::session_dir(store, session_id);
-    file::remove_dir_all(&session_dir).await?;
+    talos_fs::remove_directory(&session_dir).await?;
 
     store.hot_cache.write().await.remove(session_id);
     store.transcript_cache.write().await.remove(session_id);

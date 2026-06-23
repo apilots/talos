@@ -4,7 +4,7 @@ version = "0.1.2"
 edition = "2021"
 
 [dependencies]
-talos-application-service = { path = "../../orchestration/application-service" }
+talos-service = { workspace = true }
 talos-auth = { path = "../../infra/auth" }
 talos-config = { path = "../../infra/config" }
 talos-error = { path = "../../infra/error" }
@@ -21,5 +21,4 @@ mockall = "0.12"
 talos-coordinator = { path = "../../orchestration/coordinator" }
 talos-llm-provider = { path = "../../common/llm/provider" }
 talos-store = { workspace = true }
-talos-service = { workspace = true }
 talos-storage = { path = "../../infra/storage" }

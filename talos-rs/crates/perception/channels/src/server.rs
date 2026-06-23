@@ -2,12 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use talos_application_service::{
-    Actor, TalosApplicationService, TimelineSubscriptionMessage, TimelineSubscriptionSource,
-};
 use talos_config::Config;
 use talos_error::{TalosError, TalosResult};
 use talos_gateway::Gateway;
+use talos_service::{Actor, TalosService, TimelineSubscriptionMessage, TimelineSubscriptionSource};
 use talos_types::talos::{
     TalosContext, TalosInputItem, TalosProvider, TalosTimelineContent, TalosTimelineDelta,
     TalosTimelineEventPayload, TalosTimelineItemKind,
@@ -30,13 +28,13 @@ pub trait ChannelTimelineSubscriptionService: Send + Sync {
 }
 
 #[async_trait::async_trait]
-impl ChannelTimelineSubscriptionService for TalosApplicationService {
+impl ChannelTimelineSubscriptionService for TalosService {
     async fn open_timeline_subscription(
         &self,
         actor: &Actor,
         request: SubscribeTimelineRequest,
     ) -> TalosResult<TimelineSubscriptionSource> {
-        TalosApplicationService::open_timeline_subscription(self, actor, request).await
+        TalosService::open_timeline_subscription(self, actor, request).await
     }
 }
 
@@ -371,11 +369,11 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use std::sync::Mutex;
-    use talos_application_service::{EventReplay, TimelineCursorStatus, TimelineSubscription};
     use talos_auth::{
         CloudLoginCancelRequest, CloudLoginStartRequest, CloudLoginStartResponse,
         CloudLoginStatusRequest, CloudLoginStatusResponse,
     };
+    use talos_service::{EventReplay, TimelineCursorStatus, TimelineSubscription};
     use talos_types::talos::{
         StopReason, TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType,
         TalosTimelineItem, TalosTimelineItemStatus, TalosTimelinePhase, TalosTurnCompletedEvent,

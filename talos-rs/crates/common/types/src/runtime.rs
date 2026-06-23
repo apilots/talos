@@ -79,10 +79,10 @@ pub fn now() -> u64 {
         .as_millis() as u64
 }
 
-/// Runtime boundary used by Application Service to dispatch work to AgentCoordinator.
+/// Runtime boundary used by TalosService to dispatch work to AgentCoordinator.
 ///
 /// Public transports must call Gateway. This trait is only for the internal
-/// Application Service -> AgentCoordinator dispatch boundary.
+/// TalosService -> AgentCoordinator dispatch boundary.
 #[async_trait]
 pub trait AgentDispatchRuntime: Send + Sync {
     /// Dispatch a prepared agent request and return a response.
@@ -91,9 +91,9 @@ pub trait AgentDispatchRuntime: Send + Sync {
         request: agent_dispatch::AgentDispatchRequest,
     ) -> crate::TalosResult<agent_dispatch::AgentDispatchResponse>;
 
-    /// Return the internal domain timeline stream before application-service persistence.
+    /// Return the internal domain timeline stream before TalosService persistence.
     ///
-    /// Public transports must expose `TimelineEventEnvelope` after application-service records
+    /// Public transports must expose `TimelineEventEnvelope` after TalosService records
     /// these domain events and attaches recovery cursor metadata.
     async fn handle_stream(
         &self,

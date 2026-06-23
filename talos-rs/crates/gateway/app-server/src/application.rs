@@ -3,10 +3,10 @@ use serde::Serialize;
 use serde_json::Value;
 use talos_app_protocol::errors::AppServerErrorBody;
 use talos_app_protocol::requests::{ClientRequest, ClientRequestParams};
-use talos_application_service::{Actor, TalosApplicationService, TimelineSubscriptionSource};
 use talos_auth::CloudSessionCache;
 use talos_error::TalosError;
-use talos_gateway::{ApplicationServiceGateway, Gateway};
+use talos_gateway::{Gateway, ServiceGateway};
+use talos_service::{Actor, TalosService, TimelineSubscriptionSource};
 use talos_types::talos::TalosInputItem;
 use talos_types::{
     RecoverTimelineRequest, RetryTurnRequest as SharedRetryTurnRequest, StartTurnRequest,
@@ -56,15 +56,15 @@ pub type SubscriptionSource = TimelineSubscriptionSource;
 
 #[derive(Clone)]
 pub struct TalosApplicationAdapter {
-    app: std::sync::Arc<TalosApplicationService>,
+    app: std::sync::Arc<TalosService>,
     gateway: Arc<dyn Gateway>,
     replay_limit: usize,
     drain_provider: Arc<Option<Box<dyn BackgroundTaskDrain>>>,
 }
 
 impl TalosApplicationAdapter {
-    pub fn new(app: std::sync::Arc<TalosApplicationService>, replay_limit: usize) -> Self {
-        let gateway: Arc<dyn Gateway> = Arc::new(ApplicationServiceGateway::new(app.clone()));
+    pub fn new(app: std::sync::Arc<TalosService>, replay_limit: usize) -> Self {
+        let gateway: Arc<dyn Gateway> = Arc::new(ServiceGateway::new(app.clone()));
         Self {
             gateway,
             app,

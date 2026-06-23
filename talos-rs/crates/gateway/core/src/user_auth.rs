@@ -1,24 +1,24 @@
-use talos_application_service::Actor;
 use talos_auth::{
     CloudLoginCancelRequest, CloudLoginStartRequest, CloudLoginStartResponse,
     CloudLoginStatusRequest, CloudLoginStatusResponse,
 };
 use talos_error::TalosResult;
+use talos_service::Actor;
 use talos_types::{
     AuthLogoutRequest, AuthLogoutResponse, AuthSessionClearRequest, AuthSessionClearResponse,
     AuthSessionReadRequest, AuthSessionReadResponse, AuthSessionStoreRequest,
     AuthSessionStoreResponse, CloudLoginCancelResponse, UserCurrentRequest, UserCurrentResponse,
 };
 
-use crate::application_service_gateway::ApplicationServiceGateway;
+use crate::service_gateway::ServiceGateway;
 
-impl ApplicationServiceGateway {
+impl ServiceGateway {
     pub(crate) async fn logout(
         &self,
         actor: &Actor,
         request: AuthLogoutRequest,
     ) -> TalosResult<AuthLogoutResponse> {
-        self.application_service
+        self.service
             .account
             .logout_with_request(actor, request)
             .await?;
@@ -30,10 +30,7 @@ impl ApplicationServiceGateway {
         _actor: &Actor,
         request: CloudLoginStartRequest,
     ) -> TalosResult<CloudLoginStartResponse> {
-        self.application_service
-            .account
-            .start_cloud_login(request)
-            .await
+        self.service.account.start_cloud_login(request).await
     }
 
     pub(crate) async fn cloud_login_status(
@@ -41,10 +38,7 @@ impl ApplicationServiceGateway {
         _actor: &Actor,
         request: CloudLoginStatusRequest,
     ) -> TalosResult<CloudLoginStatusResponse> {
-        self.application_service
-            .account
-            .cloud_login_status(request)
-            .await
+        self.service.account.cloud_login_status(request).await
     }
 
     pub(crate) async fn cancel_cloud_login(
@@ -52,10 +46,7 @@ impl ApplicationServiceGateway {
         _actor: &Actor,
         request: CloudLoginCancelRequest,
     ) -> TalosResult<CloudLoginCancelResponse> {
-        self.application_service
-            .account
-            .cancel_cloud_login(request)
-            .await?;
+        self.service.account.cancel_cloud_login(request).await?;
         Ok(CloudLoginCancelResponse { success: true })
     }
 
@@ -64,9 +55,7 @@ impl ApplicationServiceGateway {
         actor: &Actor,
         request: AuthSessionReadRequest,
     ) -> TalosResult<AuthSessionReadResponse> {
-        self.application_service
-            .account
-            .read_auth_session(actor, request)
+        self.service.account.read_auth_session(actor, request)
     }
 
     pub(crate) async fn store_auth_session(
@@ -74,9 +63,7 @@ impl ApplicationServiceGateway {
         actor: &Actor,
         request: AuthSessionStoreRequest,
     ) -> TalosResult<AuthSessionStoreResponse> {
-        self.application_service
-            .account
-            .store_auth_session(actor, request)?;
+        self.service.account.store_auth_session(actor, request)?;
         Ok(AuthSessionStoreResponse { success: true })
     }
 
@@ -85,9 +72,7 @@ impl ApplicationServiceGateway {
         _actor: &Actor,
         request: AuthSessionClearRequest,
     ) -> TalosResult<AuthSessionClearResponse> {
-        self.application_service
-            .account
-            .clear_auth_session(request)?;
+        self.service.account.clear_auth_session(request)?;
         Ok(AuthSessionClearResponse { success: true })
     }
 
@@ -97,7 +82,7 @@ impl ApplicationServiceGateway {
         request: UserCurrentRequest,
     ) -> TalosResult<UserCurrentResponse> {
         let user = self
-            .application_service
+            .service
             .account
             .current_user_with_request(actor, request)
             .await?;

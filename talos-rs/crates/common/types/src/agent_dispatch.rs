@@ -4,7 +4,7 @@ use crate::talos::{
 use crate::TalosSession;
 use serde::{Deserialize, Serialize};
 
-/// Internal request dispatched from Application Service to AgentCoordinator.
+/// Internal request dispatched from TalosService to AgentCoordinator.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentDispatchRequest {
     pub session_id: String,
@@ -33,7 +33,7 @@ pub struct AgentDispatchResumeToolCall {
     pub tool_name: String,
 }
 
-/// Internal response returned from AgentCoordinator to Application Service.
+/// Internal response returned from AgentCoordinator to TalosService.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentDispatchResponse {
     pub content: String,

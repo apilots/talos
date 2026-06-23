@@ -1,5 +1,5 @@
-use talos_application_service::Actor;
 use talos_error::TalosResult;
+use talos_service::Actor;
 use talos_types::{
     SessionActiveTurnRequest, SessionActiveTurnResponse, SessionClearRequest, SessionClearResponse,
     SessionCloseRequest, SessionCloseResponse, SessionCompactRequest, SessionCompactResponse,
@@ -8,18 +8,15 @@ use talos_types::{
     SessionListResponse, SessionPatchRequest, SessionUpdateResponse,
 };
 
-use crate::application_service_gateway::{require_non_empty, ApplicationServiceGateway};
+use crate::service_gateway::{require_non_empty, ServiceGateway};
 
-impl ApplicationServiceGateway {
+impl ServiceGateway {
     pub(crate) async fn list_sessions(
         &self,
         actor: &Actor,
         request: SessionListRequest,
     ) -> TalosResult<SessionListResponse> {
-        let sessions = self
-            .application_service
-            .list_sessions(actor, request)
-            .await?;
+        let sessions = self.service.list_sessions(actor, request).await?;
         Ok(SessionListResponse {
             sessions: sessions.iter().map(SessionInfo::from).collect(),
         })
@@ -30,10 +27,7 @@ impl ApplicationServiceGateway {
         actor: &Actor,
         request: SessionGetRequest,
     ) -> TalosResult<SessionGetResponse> {
-        let session = self
-            .application_service
-            .get_session(actor, &request.session_id)
-            .await?;
+        let session = self.service.get_session(actor, &request.session_id).await?;
         Ok(SessionGetResponse {
             session: SessionInfo::from(&session),
         })
@@ -45,7 +39,7 @@ impl ApplicationServiceGateway {
         request: SessionHistoryRequest,
     ) -> TalosResult<SessionHistoryResponse> {
         let history = self
-            .application_service
+            .service
             .get_session_history(actor, &request.session_id)
             .await?;
         Ok(SessionHistoryResponse { history })
@@ -57,7 +51,7 @@ impl ApplicationServiceGateway {
         request: SessionActiveTurnRequest,
     ) -> TalosResult<SessionActiveTurnResponse> {
         let active_turn = self
-            .application_service
+            .service
             .get_active_turn(actor, &request.session_id)
             .await?;
         Ok(SessionActiveTurnResponse { active_turn })
@@ -70,13 +64,10 @@ impl ApplicationServiceGateway {
     ) -> TalosResult<SessionUpdateResponse> {
         require_non_empty(&request.session_id, "session_id")?;
         let session_id = request.session_id.clone();
-        self.application_service
+        self.service
             .patch_session(actor, &session_id, request.into_patch())
             .await?;
-        let session = self
-            .application_service
-            .get_session(actor, &session_id)
-            .await?;
+        let session = self.service.get_session(actor, &session_id).await?;
         Ok(SessionUpdateResponse {
             session: SessionInfo::from(&session),
         })
@@ -87,7 +78,7 @@ impl ApplicationServiceGateway {
         actor: &Actor,
         request: SessionCloseRequest,
     ) -> TalosResult<SessionCloseResponse> {
-        self.application_service
+        self.service
             .close_session(actor, &request.session_id)
             .await?;
         Ok(SessionCloseResponse { success: true })
@@ -98,7 +89,7 @@ impl ApplicationServiceGateway {
         actor: &Actor,
         request: SessionDeleteRequest,
     ) -> TalosResult<SessionDeleteResponse> {
-        self.application_service
+        self.service
             .delete_session(actor, &request.session_id)
             .await
             .map(|result| SessionDeleteResponse {
@@ -112,7 +103,7 @@ impl ApplicationServiceGateway {
         request: SessionCompactRequest,
     ) -> TalosResult<SessionCompactResponse> {
         let session = self
-            .application_service
+            .service
             .compact_session(actor, &request.session_id)
             .await?;
         Ok(SessionCompactResponse {
@@ -126,7 +117,7 @@ impl ApplicationServiceGateway {
         request: SessionClearRequest,
     ) -> TalosResult<SessionClearResponse> {
         let session = self
-            .application_service
+            .service
             .clear_session(actor, &request.session_id)
             .await?;
         Ok(SessionClearResponse {

@@ -9,6 +9,7 @@ use std::sync::{
 };
 use talos_config::resolve_talos_home;
 use talos_error::{TalosError, TalosResult};
+use talos_fs::FileSystem;
 use talos_skills::SkillState;
 use talos_types::{
     MarketplaceSource, MarketplaceSourceId, Plugin, PluginInstall, PluginInstallId, PluginWarning,
@@ -151,14 +152,14 @@ impl PluginStateStore {
         operation: &str,
         action: impl FnOnce() -> TalosResult<T>,
     ) -> TalosResult<T> {
-        talos_fs::create_dir_all(&self.root).map_err(|err| {
+        talos_fs::create_directory(&self.root, true).map_err(|err| {
             TalosError::StorageError(format!(
                 "failed to create plugin state root `{}`: {err}",
                 self.root.display()
             ))
         })?;
         let path = self.lock_path();
-        let lock = talos_fs::lock_exclusive(&path).map_err(|err| {
+        let lock = talos_fs::std_fs().with_file_lock(&path).map_err(|err| {
             TalosError::StorageError(format!(
                 "failed to lock plugin state for {operation} `{}`: {err}",
                 path.display()
@@ -253,7 +254,7 @@ impl PluginStateStore {
         if !path.exists() {
             return Ok(());
         }
-        fs::remove_dir_all(&path).map_err(|err| {
+        talos_fs::std_fs().remove_directory(&path).map_err(|err| {
             TalosError::StorageError(format!(
                 "failed to remove plugin source cache `{}`: {err}",
                 path.display()
@@ -278,14 +279,14 @@ fn install_dir_matches_record(install_dir: &Path, install: &PluginInstall) -> Ta
 
 fn restore_transaction_dir(source: &Path, target: &Path, label: &str) -> TalosResult<()> {
     if target.exists() {
-        fs::remove_dir_all(target).map_err(|err| {
+        talos_fs::std_fs().remove_directory(target).map_err(|err| {
             TalosError::StorageError(format!(
                 "failed to remove stale plugin install dir `{}` before restoring {label}: {err}",
                 target.display()
             ))
         })?;
     }
-    fs::rename(source, target).map_err(|err| {
+    talos_fs::rename(source, target).map_err(|err| {
         TalosError::StorageError(format!(
             "failed to restore {label} `{}` to `{}`: {err}",
             source.display(),
@@ -295,7 +296,7 @@ fn restore_transaction_dir(source: &Path, target: &Path, label: &str) -> TalosRe
 }
 
 fn remove_transaction_dir(path: &Path, label: &str) -> TalosResult<()> {
-    fs::remove_dir_all(path).map_err(|err| {
+    talos_fs::std_fs().remove_directory(path).map_err(|err| {
         TalosError::StorageError(format!(
             "failed to remove {label} dir `{}`: {err}",
             path.display()

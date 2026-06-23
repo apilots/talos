@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use talos_config::resolve_runtime_path;
 use talos_error::{TalosError, TalosResult};
-use talos_fs::WriteOptions;
+use talos_fs::{FileSystem, WriteOptions};
 
 pub(crate) fn expand_workspace_dir(workspace_dir: &str) -> PathBuf {
     resolve_runtime_path(workspace_dir)
@@ -11,7 +11,7 @@ pub(crate) async fn ensure_bootstrap_file(path: &Path, template: &str) -> TalosR
     let path = path.to_path_buf();
     let template = template.to_string();
     match tokio::task::spawn_blocking(move || {
-        talos_fs::write_string_with(&path, &template, WriteOptions::create_new())
+        talos_fs::std_fs().write_file_with(&path, &template, WriteOptions::create_new())
     })
     .await
     .map_err(|err| TalosError::StorageError(format!("join bootstrap write task: {err}")))?

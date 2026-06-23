@@ -9,7 +9,7 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 talos-agent = { path = "../../orchestration/agent" }
-talos-application-service = { workspace = true }
+talos-service = { workspace = true }
 talos-auth = { path = "../../infra/auth" }
 talos-channel = { workspace = true }
 talos-config = { workspace = true }
@@ -25,7 +25,6 @@ talos-llm-provider = { workspace = true }
 talos-logging = { workspace = true }
 talos-router = { path = "../../orchestration/router" }
 talos-store = { workspace = true }
-talos-service = { workspace = true }
 talos-skills = { workspace = true }
 talos-storage = { workspace = true }
 talos-mcp = { workspace = true }

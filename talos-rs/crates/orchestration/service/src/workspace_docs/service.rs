@@ -8,23 +8,20 @@ use talos_types::{
 };
 
 use crate::access::Actor;
-use crate::file::{
-    content_hash, modified_at_ms, read_optional, validate_expected_version, with_file_lock,
-    workspace_root, write_atomic, FileLockRegistry,
+use crate::workspace::file::{
+    ensure_workspace_write_version, resolve_workspace_root, workspace_revision,
 };
 use crate::workspace::{AgentWorkspaceInfo, EffectiveWorkspaceResolver};
 
 #[derive(Clone)]
 pub struct WorkspaceDocService {
     resolver: EffectiveWorkspaceResolver,
-    file_locks: FileLockRegistry,
 }
 
 impl WorkspaceDocService {
-    pub fn new(base_config: TalosConfig, file_locks: FileLockRegistry) -> Self {
+    pub fn new(base_config: TalosConfig) -> Self {
         Self {
             resolver: EffectiveWorkspaceResolver::new(base_config),
-            file_locks,
         }
     }
 
@@ -90,15 +87,17 @@ impl WorkspaceDocService {
     ) -> TalosResult<WorkspaceDocInfo> {
         let workspace = self.resolver.resolve_for_actor(actor)?;
         let path = self.doc_path(&workspace.config, kind);
-        let content = read_optional(&path).await?;
-        let updated_at = modified_at_ms(&path).await?;
+        let content = talos_fs::read_file(&path).await?;
+        let updated_at = talos_fs::get_file_metadata(&path)
+            .await?
+            .and_then(|metadata| metadata.modified_at_ms);
         match content {
             Some(content) => Ok(WorkspaceDocInfo {
                 kind,
                 path: kind.file_name().to_string(),
                 exists: true,
                 updated_at,
-                version_token: Some(content_hash(&content)),
+                version_token: Some(workspace_revision(&content)),
                 content,
             }),
             None => Ok(WorkspaceDocInfo {
@@ -129,10 +128,10 @@ impl WorkspaceDocService {
         let workspace = self.resolver.resolve_for_actor(actor)?;
         self.resolver.write_profile_snapshot(&workspace).await?;
         let path = self.doc_path(&workspace.config, kind);
-        with_file_lock(&self.file_locks, &path, async {
-            let existing = read_optional(&path).await?;
-            validate_expected_version(existing.as_deref(), &request)?;
-            write_atomic(&path, &request.content).await
+        talos_fs::with_file_lock(&path, || async {
+            let existing = talos_fs::read_file(&path).await?;
+            ensure_workspace_write_version(existing.as_deref(), &request)?;
+            talos_fs::write_file(&path, &request.content).await
         })
         .await?;
 
@@ -156,7 +155,7 @@ impl WorkspaceDocService {
     }
 
     fn doc_path(&self, config: &TalosConfig, kind: WorkspaceDocKind) -> PathBuf {
-        workspace_root(config).join(kind.file_name())
+        resolve_workspace_root(config).join(kind.file_name())
     }
 }
 
@@ -181,20 +180,16 @@ fn expected_version(value: Option<String>) -> ExpectedFileVersion {
 mod tests {
     use super::WorkspaceDocService;
     use crate::access::Actor;
-    use crate::file::FileLockRegistry;
     use talos_error::TalosError;
     use talos_types::{DocUpdateRequest, ExpectedFileVersion, TalosConfig, WorkspaceDocKind};
 
     fn test_service() -> (WorkspaceDocService, std::path::PathBuf) {
         let workspace_dir =
             std::env::temp_dir().join(format!("talos-workspace-doc-test-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&workspace_dir).expect("workspace dir should exist");
+        talos_fs::create_directory(&workspace_dir, true).expect("workspace dir should exist");
         let mut config = TalosConfig::default();
         config.agent.kernel.workspace_dir = workspace_dir.to_string_lossy().to_string();
-        (
-            WorkspaceDocService::new(config, FileLockRegistry::default()),
-            workspace_dir,
-        )
+        (WorkspaceDocService::new(config), workspace_dir)
     }
 
     #[tokio::test]
@@ -216,19 +211,22 @@ mod tests {
         assert!(detail.exists);
         assert_eq!(detail.content, "soul content");
         assert_eq!(
-            std::fs::read_to_string(workspace_dir.join("users").join("admin").join("SOUL.md"))
+            talos_fs::read_file(&workspace_dir.join("users").join("admin").join("SOUL.md"))
+                .await
+                .expect("workspace doc should read")
                 .expect("workspace doc should exist on disk"),
             "soul content"
         );
-        let _ = std::fs::remove_dir_all(workspace_dir);
+        let _ = talos_fs::remove_directory(&workspace_dir).await;
     }
 
     #[tokio::test]
     async fn put_doc_rejects_stale_version() {
         let (service, workspace_dir) = test_service();
         let user_dir = workspace_dir.join("users").join("admin");
-        std::fs::create_dir_all(&user_dir).expect("user workspace should exist");
-        std::fs::write(user_dir.join("IDENTITY.md"), "current version")
+        talos_fs::create_directory(&user_dir, true).expect("user workspace should exist");
+        talos_fs::write_file(&user_dir.join("IDENTITY.md"), "current version")
+            .await
             .expect("seed doc should write");
 
         let error = service
@@ -246,7 +244,7 @@ mod tests {
             .expect_err("stale version should be rejected");
 
         assert!(matches!(error, TalosError::Conflict(_)));
-        let _ = std::fs::remove_dir_all(workspace_dir);
+        let _ = talos_fs::remove_directory(&workspace_dir).await;
     }
 
     #[tokio::test]
@@ -261,7 +259,7 @@ mod tests {
         assert_eq!(docs.len(), 5);
         assert_eq!(docs[0].kind, WorkspaceDocKind::Soul);
         assert_eq!(docs[4].kind, WorkspaceDocKind::Memory);
-        let _ = std::fs::remove_dir_all(workspace_dir);
+        let _ = talos_fs::remove_directory(&workspace_dir).await;
     }
 
     #[tokio::test]
@@ -281,6 +279,6 @@ mod tests {
             .expect("regular actor should write own workspace docs");
 
         assert_eq!(detail.content, "# Shared doc");
-        let _ = std::fs::remove_dir_all(workspace_dir);
+        let _ = talos_fs::remove_directory(&workspace_dir).await;
     }
 }

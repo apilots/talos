@@ -1,14 +1,14 @@
 use async_trait::async_trait;
 use std::sync::Arc;
-use talos_application_service::{Actor, AgentDispatchTurnExecutor, TalosApplicationService};
 use talos_auth::{
     AuthResponse, AuthService, LoginRequest, RegisterRequest, RequestIdentity, UserDto, UserService,
 };
 use talos_config::{InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService};
 use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
-use talos_gateway::{ApplicationServiceGateway, Gateway};
+use talos_gateway::{Gateway, ServiceGateway};
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
+use talos_service::{Actor, AgentDispatchTurnExecutor, TalosService};
 use talos_service::{TimelineEventRetentionConfig, TimelineEventService};
 use talos_storage::SqliteStorage;
 use talos_store::project::{ProjectStore, StorageProjectStore};
@@ -189,7 +189,7 @@ impl UserService for TestAuthService {
     }
 }
 
-async fn test_gateway() -> ApplicationServiceGateway {
+async fn test_gateway() -> ServiceGateway {
     let config = TalosConfig::default();
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
     let store = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());
@@ -215,7 +215,7 @@ async fn test_gateway() -> ApplicationServiceGateway {
     let auth = Arc::new(TestAuthService);
     let auth_service: Arc<dyn AuthService> = auth.clone();
     let user_service: Arc<dyn UserService> = auth;
-    let application_service = Arc::new(TalosApplicationService::new_with_session_store(
+    let service = Arc::new(TalosService::new_with_session_store(
         turn_executor,
         session_runtime,
         session_store,
@@ -229,7 +229,7 @@ async fn test_gateway() -> ApplicationServiceGateway {
         auth_service,
         user_service,
     ));
-    ApplicationServiceGateway::new(application_service)
+    ServiceGateway::new(service)
 }
 
 fn request_context() -> TalosContext {
@@ -247,7 +247,7 @@ fn request_context() -> TalosContext {
 }
 
 #[tokio::test]
-async fn gateway_start_turn_delegates_to_application_service() {
+async fn gateway_start_turn_delegates_to_service() {
     let gateway = test_gateway().await;
     let response = gateway
         .start_turn(

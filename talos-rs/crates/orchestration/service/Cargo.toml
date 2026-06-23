@@ -6,12 +6,18 @@ edition.workspace = true
 [dependencies]
 async-trait = { workspace = true }
 chrono = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+talos-auth = { workspace = true }
 talos-config = { workspace = true }
 talos-coordinator = { path = "../coordinator" }
 talos-error = { workspace = true }
+talos-fs = { workspace = true }
+talos-llm-provider = { workspace = true }
 talos-memory = { workspace = true }
+talos-plugin = { workspace = true }
+talos-skills = { workspace = true }
 talos-store = { workspace = true }
 talos-types = { workspace = true }
 tokio = { workspace = true }
@@ -21,3 +27,4 @@ uuid = { workspace = true, features = ["v4", "v7"] }
 
 [dev-dependencies]
 talos-storage = { workspace = true }
+tempfile = "3"

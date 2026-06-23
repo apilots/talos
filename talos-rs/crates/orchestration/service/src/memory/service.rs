@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use chrono::NaiveDate;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::LlmProvider;
 use talos_memory::{Memory, MemoryIndexFile, MemorySearchQuery, MemorySearchResult, MemoryStore};
@@ -10,63 +9,25 @@ use talos_types::{
     MemoryFileListResponse, MemoryFileReadRequest, MemoryFileSummary, MemoryFileWriteRequest,
     MemorySearchRequest, MemorySearchResponse, TalosConfig,
 };
-use tokio::fs;
 
+use super::types::{MemoryDate, MemoryListCommand, MemorySearchCommand};
 use crate::access::Actor;
-use crate::file::{
-    content_hash, modified_at_ms, read_optional, validate_expected_version, with_file_lock,
-    workspace_root, write_atomic, FileLockRegistry,
+use crate::workspace::file::{
+    ensure_workspace_write_version, resolve_workspace_root, workspace_revision,
 };
 use crate::workspace::EffectiveWorkspaceResolver;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct MemoryDate(NaiveDate);
-
-impl MemoryDate {
-    pub fn parse(value: &str) -> TalosResult<Self> {
-        NaiveDate::parse_from_str(value, "%Y-%m-%d")
-            .map(Self)
-            .map_err(|_| TalosError::ValidationError("memory date must use YYYY-MM-DD".to_string()))
-    }
-
-    pub fn file_stem(self) -> String {
-        self.0.format("%Y-%m-%d").to_string()
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct MemoryListCommand {
-    pub limit: Option<usize>,
-    pub before_date: Option<MemoryDate>,
-    pub date_from: Option<MemoryDate>,
-    pub date_to: Option<MemoryDate>,
-}
-
-#[derive(Debug, Clone)]
-pub struct MemorySearchCommand {
-    pub query: String,
-    pub limit: Option<usize>,
-    pub date_from: Option<MemoryDate>,
-    pub date_to: Option<MemoryDate>,
-}
 
 #[derive(Clone)]
 pub struct MemoryService {
     resolver: EffectiveWorkspaceResolver,
     llm_provider: Arc<dyn LlmProvider>,
-    file_locks: FileLockRegistry,
 }
 
 impl MemoryService {
-    pub fn new(
-        base_config: TalosConfig,
-        llm_provider: Arc<dyn LlmProvider>,
-        file_locks: FileLockRegistry,
-    ) -> Self {
+    pub fn new(base_config: TalosConfig, llm_provider: Arc<dyn LlmProvider>) -> Self {
         Self {
             resolver: EffectiveWorkspaceResolver::new(base_config.clone()),
             llm_provider,
-            file_locks,
         }
     }
 
@@ -82,19 +43,14 @@ impl MemoryService {
             .unwrap_or(config.file_list_default_limit)
             .min(config.file_list_max_limit.max(1));
 
-        let mut entries = match tokio::fs::read_dir(self.memory_dir(&workspace.config)).await {
-            Ok(entries) => entries,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(err) => return Err(TalosError::StorageError(err.to_string())),
+        let entries = match talos_fs::read_directory(&self.memory_dir(&workspace.config))? {
+            Some(entries) => entries,
+            None => return Ok(Vec::new()),
         };
 
         let mut files = Vec::new();
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .map_err(|err| TalosError::StorageError(err.to_string()))?
-        {
-            let path = entry.path();
+        for entry in entries {
+            let path = entry.path;
             let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
                 continue;
             };
@@ -168,9 +124,9 @@ impl MemoryService {
         let workspace = self.resolver.resolve_for_actor(actor)?;
         self.resolver.write_profile_snapshot(&workspace).await?;
         let path = self.memory_file_path(&workspace.config, date);
-        with_file_lock(&self.file_locks, &path, async {
-            let existing = read_optional(&path).await?;
-            validate_expected_version(existing.as_deref(), &request)?;
+        talos_fs::with_file_lock(&path, || async {
+            let existing = talos_fs::read_file(&path).await?;
+            ensure_workspace_write_version(existing.as_deref(), &request)?;
             let rebuild_indexes = || {
                 let store = MemoryStore::from_config(&workspace.config.agent.kernel);
                 async move { store.rebuild_memory_indexes().await }
@@ -270,7 +226,7 @@ impl MemoryService {
     }
 
     fn memory_dir(&self, config: &TalosConfig) -> PathBuf {
-        workspace_root(config).join(&config.agent.kernel.memory.memory_dirname)
+        resolve_workspace_root(config).join(&config.agent.kernel.memory.memory_dirname)
     }
 
     fn memory_file_path(&self, config: &TalosConfig, date: MemoryDate) -> PathBuf {
@@ -289,11 +245,13 @@ impl MemoryService {
         date: MemoryDate,
     ) -> TalosResult<Option<MemoryFileDetail>> {
         let path = self.memory_file_path(config, date);
-        let content = read_optional(&path).await?;
-        let updated_at = modified_at_ms(&path).await?;
+        let content = talos_fs::read_file(&path).await?;
+        let updated_at = talos_fs::get_file_metadata(&path)
+            .await?
+            .and_then(|metadata| metadata.modified_at_ms);
         match content {
             Some(content) => {
-                let version_token = content_hash(&content);
+                let version_token = workspace_revision(&content);
                 let section_count = self
                     .load_section_count(config, date, &version_token)
                     .await?;
@@ -318,7 +276,7 @@ impl MemoryService {
         version_token: &str,
     ) -> TalosResult<usize> {
         let index_path = self.memory_index_path(config, date);
-        let Some(index_content) = read_optional(&index_path).await? else {
+        let Some(index_content) = talos_fs::read_file(&index_path).await? else {
             return Ok(0);
         };
         let parsed = serde_json::from_str::<MemoryIndexFile>(&index_content).map_err(|err| {
@@ -378,16 +336,8 @@ async fn restore_previous_memory_file(
     previous_content: Option<&str>,
 ) -> TalosResult<()> {
     match previous_content {
-        Some(content) => write_atomic(path, content).await,
-        None => match fs::remove_file(path).await {
-            Ok(()) => Ok(()),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(err) => Err(TalosError::StorageError(format!(
-                "remove file during rollback {}: {}",
-                path.display(),
-                err
-            ))),
-        },
+        Some(content) => talos_fs::write_file(path, content).await,
+        None => talos_fs::remove_file(path),
     }
 }
 
@@ -401,7 +351,7 @@ where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = TalosResult<()>>,
 {
-    write_atomic(path, content).await?;
+    talos_fs::write_file(path, content).await?;
     if let Err(rebuild_error) = rebuild_indexes().await {
         let rollback_result = restore_previous_memory_file(path, previous_content).await;
         let reindex_after_rollback = if rollback_result.is_ok() {
@@ -430,7 +380,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::{date_in_range, write_memory_file_transaction, MemoryDate};
-    use crate::file::write_atomic;
     use talos_error::TalosError;
 
     #[test]
@@ -475,7 +424,7 @@ mod tests {
 
         assert!(result.is_err());
         assert!(!path.exists(), "new file should be removed after rollback");
-        let _ = std::fs::remove_dir_all(temp_dir);
+        let _ = talos_fs::remove_directory(&temp_dir).await;
     }
 
     #[tokio::test]
@@ -483,7 +432,7 @@ mod tests {
         let temp_dir =
             std::env::temp_dir().join(format!("talos-memory-files-test-{}", uuid::Uuid::new_v4()));
         let path = temp_dir.join("memory").join("2026-04-04.md");
-        write_atomic(&path, "old content")
+        talos_fs::write_file(&path, "old content")
             .await
             .expect("seed file should write");
 
@@ -496,10 +445,11 @@ mod tests {
             .await;
 
         assert!(result.is_err());
-        let restored = tokio::fs::read_to_string(&path)
+        let restored = talos_fs::read_file(&path)
             .await
-            .expect("restored file should read");
+            .expect("restored file should read")
+            .expect("restored file should exist");
         assert_eq!(restored, "old content");
-        let _ = std::fs::remove_dir_all(temp_dir);
+        let _ = talos_fs::remove_directory(&temp_dir).await;
     }
 }

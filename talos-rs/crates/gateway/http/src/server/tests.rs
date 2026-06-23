@@ -6,7 +6,6 @@ use axum::http::{Request, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
 use serde_json::Value;
-use talos_application_service::{TalosApplicationService, TurnExecutor};
 use talos_auth::{
     AuthResponse, AuthService, LoginRequest, RegisterRequest, RequestIdentity, UserDto, UserService,
 };
@@ -14,6 +13,7 @@ use talos_config::{InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService};
 use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
+use talos_service::{TalosService, TurnExecutor};
 use talos_service::{TimelineEventRetentionConfig, TimelineEventService};
 use talos_store::project::MockProjectStore;
 use talos_store::session::{
@@ -180,7 +180,7 @@ fn build_test_state_with_lifecycle_and_config(
     llm_config_service: Arc<dyn LlmConfigService>,
     lifecycle: Arc<ServerLifecycle>,
 ) -> Arc<HttpApiState> {
-    let app = Arc::new(TalosApplicationService::new_with_session_store(
+    let app = Arc::new(TalosService::new_with_session_store(
         turn_executor,
         Arc::new(SessionServiceRuntimeAdapter::new(session_service.clone())),
         Arc::new(SessionStoreAdapter::new(session_service)),
@@ -194,7 +194,7 @@ fn build_test_state_with_lifecycle_and_config(
         auth_service.clone(),
         user_service,
     ));
-    Arc::new(HttpApiState::from_application_service(
+    Arc::new(HttpApiState::from_service(
         app,
         event_service,
         base_config,

@@ -2,7 +2,6 @@ use chrono::{DateTime, Utc};
 use std::path::{Component, Path, PathBuf};
 use talos_config::{resolve_runtime_path, TalosPaths};
 use talos_error::{TalosError, TalosResult};
-use tokio::fs;
 
 use crate::store::MemoryStore;
 
@@ -44,33 +43,20 @@ pub(crate) async fn list_daily_files(
     let mut files = Vec::new();
     let session_dir = session_dir(store, session_id);
 
-    let mut dir = match fs::read_dir(&session_dir).await {
-        Ok(dir) => dir,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(files),
-        Err(err) => {
-            return Err(TalosError::StorageError(format!(
-                "read session memory dir: {}",
-                err
-            )));
-        }
+    let Some(entries) = talos_fs::read_directory(&session_dir)? else {
+        return Ok(files);
     };
-
-    while let Some(entry) = dir
-        .next_entry()
-        .await
-        .map_err(|e| TalosError::StorageError(format!("read session memory entry: {}", e)))?
-    {
-        let path = entry.path();
-        if !path.is_file() {
+    for entry in entries {
+        if !entry.metadata.is_file {
             continue;
         }
-        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+        let Some(name) = entry.path.file_name().and_then(|value| value.to_str()) else {
             continue;
         };
         if !is_session_daily_file_name(name) {
             continue;
         }
-        files.push(path);
+        files.push(entry.path);
     }
 
     Ok(files)
@@ -79,33 +65,20 @@ pub(crate) async fn list_daily_files(
 pub(crate) async fn list_workspace_memory_files(store: &MemoryStore) -> TalosResult<Vec<PathBuf>> {
     let mut files = Vec::new();
     let dir_path = workspace_memory_dir(store);
-    let mut dir = match fs::read_dir(&dir_path).await {
-        Ok(dir) => dir,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(files),
-        Err(err) => {
-            return Err(TalosError::StorageError(format!(
-                "read workspace memory dir: {}",
-                err
-            )));
-        }
+    let Some(entries) = talos_fs::read_directory(&dir_path)? else {
+        return Ok(files);
     };
-
-    while let Some(entry) = dir
-        .next_entry()
-        .await
-        .map_err(|e| TalosError::StorageError(format!("read workspace memory entry: {}", e)))?
-    {
-        let path = entry.path();
-        if !path.is_file() {
+    for entry in entries {
+        if !entry.metadata.is_file {
             continue;
         }
-        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+        let Some(name) = entry.path.file_name().and_then(|value| value.to_str()) else {
             continue;
         };
         if !is_workspace_daily_file_name(name) {
             continue;
         }
-        files.push(path);
+        files.push(entry.path);
     }
 
     files.sort();

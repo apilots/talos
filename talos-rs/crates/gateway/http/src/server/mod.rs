@@ -72,15 +72,15 @@ use self::workspace_docs::{
     get_workspace_doc_handler, get_workspace_info_handler, list_workspace_docs_handler,
     put_workspace_doc_handler,
 };
-use talos_application_service::TalosApplicationService;
 use talos_auth::AuthService;
 use talos_error::TalosResult;
+use talos_service::TalosService;
 use talos_service::TimelineEventService;
 use talos_types::TalosConfig;
 
 /// HTTP Server for the Talos Gateway.
 pub struct HttpServer {
-    application_service: Arc<TalosApplicationService>,
+    service: Arc<TalosService>,
     #[cfg(test)]
     event_service: Arc<TimelineEventService>,
     auth_service: Arc<dyn AuthService>,
@@ -95,7 +95,7 @@ pub struct HttpServer {
 impl HttpServer {
     /// Create a new HTTP server instance.
     pub fn new(
-        application_service: Arc<TalosApplicationService>,
+        service: Arc<TalosService>,
         event_service: Arc<TimelineEventService>,
         auth_service: Arc<dyn AuthService>,
         base_config: TalosConfig,
@@ -105,7 +105,7 @@ impl HttpServer {
         #[cfg(not(test))]
         let _ = event_service;
         Self {
-            application_service,
+            service,
             #[cfg(test)]
             event_service,
             auth_service,
@@ -150,13 +150,13 @@ impl HttpServer {
     pub async fn run_with_shutdown(&self, shutdown: CancellationToken) -> TalosResult<()> {
         info!("Starting HTTP server on {}:{}", self.host, self.port);
         let gc_shutdown = shutdown.clone();
-        let app_events_for_gc = self.application_service.events.clone();
+        let app_events_for_gc = self.service.events.clone();
         let gc_task = tokio::spawn(async move {
             app_events_for_gc.run_event_log_gc_loop(gc_shutdown).await;
         });
 
-        let state = Arc::new(HttpApiState::from_application_service(
-            self.application_service.clone(),
+        let state = Arc::new(HttpApiState::from_service(
+            self.service.clone(),
             #[cfg(test)]
             self.event_service.clone(),
             self.base_config.clone(),

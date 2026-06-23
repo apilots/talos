@@ -1,18 +1,16 @@
 use std::sync::Arc;
 
-use talos_application_service::TalosApplicationService;
 use talos_error::TalosResult;
+use talos_service::TalosService;
 use tracing::info;
 
-pub struct ApplicationServiceGateway {
-    pub(crate) application_service: Arc<TalosApplicationService>,
+pub struct ServiceGateway {
+    pub(crate) service: Arc<TalosService>,
 }
 
-impl ApplicationServiceGateway {
-    pub fn new(application_service: Arc<TalosApplicationService>) -> Self {
-        Self {
-            application_service,
-        }
+impl ServiceGateway {
+    pub fn new(service: Arc<TalosService>) -> Self {
+        Self { service }
     }
 
     pub(crate) async fn start(&self) -> TalosResult<()> {

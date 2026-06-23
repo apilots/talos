@@ -156,12 +156,10 @@ fn test_session_override_policy_builds_model_conf() {
 
 #[test]
 fn test_session_title_policy_normalizes_generated_title() {
-    let title = session_title_or_fallback(
-        "\"Plan Application Service Migration.\"".to_string(),
-        "fallback text",
-    );
+    let title =
+        session_title_or_fallback("\"Plan Service Migration.\"".to_string(), "fallback text");
 
-    assert_eq!(title, "Plan Application Service Migration");
+    assert_eq!(title, "Plan Service Migration");
 }
 
 #[test]

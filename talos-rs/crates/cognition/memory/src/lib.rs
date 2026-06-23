@@ -1,4 +1,3 @@
-mod file;
 mod mapper;
 mod memory_impl;
 mod path_policy;

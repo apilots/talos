@@ -8,7 +8,7 @@ async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 talos-app-protocol = { workspace = true }
-talos-application-service = { workspace = true }
+talos-service = { workspace = true }
 talos-auth = { workspace = true }
 talos-config = { workspace = true }
 talos-error = { workspace = true }

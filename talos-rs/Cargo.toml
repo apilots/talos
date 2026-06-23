@@ -33,7 +33,6 @@ members = [
     "crates/orchestration/service",
     "crates/orchestration/router",
     "crates/orchestration/coordinator",
-    "crates/orchestration/application-service",
     # Gateway
     "crates/gateway/core",
     "crates/gateway/http",
@@ -135,4 +134,3 @@ talos-storage = { path = "crates/infra/storage" }
 talos-channel = { path = "crates/perception/channels" }
 talos-sdk = { path = "apps/sdk" }
 talos-base = { path = "crates/app/talos-base" }
-talos-application-service = { path = "crates/orchestration/application-service" }

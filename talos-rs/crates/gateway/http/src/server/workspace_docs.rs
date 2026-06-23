@@ -5,9 +5,9 @@ use axum::http::StatusCode;
 use axum::response::Json;
 use serde_json::{json, Value};
 
-use talos_application_service::WorkspaceDocService;
 use talos_auth::RequestIdentity;
 use talos_error::TalosError;
+use talos_service::WorkspaceDocService;
 use talos_types::{
     DocUpdateRequest, ExpectedFileVersion, WorkspaceDocListRequest, WorkspaceDocReadRequest,
     WorkspaceDocWriteRequest, WorkspaceInfoRequest,

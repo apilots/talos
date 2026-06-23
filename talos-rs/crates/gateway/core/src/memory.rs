@@ -1,19 +1,19 @@
-use talos_application_service::Actor;
 use talos_error::TalosResult;
+use talos_service::Actor;
 use talos_types::{
     MemoryFileListRequest, MemoryFileListResponse, MemoryFileReadRequest, MemoryFileReadResponse,
     MemoryFileWriteRequest, MemoryFileWriteResponse, MemorySearchRequest, MemorySearchResponse,
 };
 
-use crate::application_service_gateway::ApplicationServiceGateway;
+use crate::service_gateway::ServiceGateway;
 
-impl ApplicationServiceGateway {
+impl ServiceGateway {
     pub(crate) async fn list_memory_files(
         &self,
         actor: &Actor,
         request: MemoryFileListRequest,
     ) -> TalosResult<MemoryFileListResponse> {
-        self.application_service
+        self.service
             .memory
             .list_files_with_request(actor, request)
             .await
@@ -25,7 +25,7 @@ impl ApplicationServiceGateway {
         request: MemoryFileReadRequest,
     ) -> TalosResult<MemoryFileReadResponse> {
         let file = self
-            .application_service
+            .service
             .memory
             .read_file_with_request(actor, request)
             .await?;
@@ -38,7 +38,7 @@ impl ApplicationServiceGateway {
         request: MemoryFileWriteRequest,
     ) -> TalosResult<MemoryFileWriteResponse> {
         let file = self
-            .application_service
+            .service
             .memory
             .write_file_with_request(actor, request)
             .await?;
@@ -50,7 +50,7 @@ impl ApplicationServiceGateway {
         actor: &Actor,
         request: MemorySearchRequest,
     ) -> TalosResult<MemorySearchResponse> {
-        self.application_service
+        self.service
             .memory
             .search_files_with_request(actor, request)
             .await

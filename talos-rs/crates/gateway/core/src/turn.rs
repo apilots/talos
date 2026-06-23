@@ -1,5 +1,5 @@
-use talos_application_service::Actor;
 use talos_error::TalosResult;
+use talos_service::Actor;
 use talos_types::{
     InterruptTurnRequest, InterruptTurnResponse, RecoverTimelineRequest, RetryTurnRequest,
     RetryTurnResponse, StartTurnRequest, StartTurnResponse, SubmitToolResultRequest,
@@ -8,9 +8,9 @@ use talos_types::{
 };
 use tracing::info;
 
-use crate::application_service_gateway::ApplicationServiceGateway;
+use crate::service_gateway::ServiceGateway;
 
-impl ApplicationServiceGateway {
+impl ServiceGateway {
     pub(crate) async fn start_turn(
         &self,
         actor: &Actor,
@@ -22,7 +22,7 @@ impl ApplicationServiceGateway {
             input_items = request.input.len(),
             "starting turn through gateway"
         );
-        self.application_service
+        self.service
             .start_turn(actor, request, idempotency_key)
             .await
     }
@@ -32,7 +32,7 @@ impl ApplicationServiceGateway {
         actor: &Actor,
         request: RetryTurnRequest,
     ) -> TalosResult<RetryTurnResponse> {
-        self.application_service.retry_turn(actor, request).await
+        self.service.retry_turn(actor, request).await
     }
 
     pub(crate) async fn interrupt_turn(
@@ -40,9 +40,7 @@ impl ApplicationServiceGateway {
         actor: &Actor,
         request: InterruptTurnRequest,
     ) -> TalosResult<InterruptTurnResponse> {
-        self.application_service
-            .interrupt_turn(actor, request)
-            .await
+        self.service.interrupt_turn(actor, request).await
     }
 
     pub(crate) async fn submit_tool_result(
@@ -50,9 +48,7 @@ impl ApplicationServiceGateway {
         actor: &Actor,
         request: SubmitToolResultRequest,
     ) -> TalosResult<SubmitToolResultResponse> {
-        self.application_service
-            .submit_tool_result(actor, request)
-            .await
+        self.service.submit_tool_result(actor, request).await
     }
 
     pub(crate) async fn subscribe_timeline(
@@ -60,9 +56,7 @@ impl ApplicationServiceGateway {
         actor: &Actor,
         request: SubscribeTimelineRequest,
     ) -> TalosResult<SubscribeTimelineResponse> {
-        self.application_service
-            .subscribe_timeline(actor, request)
-            .await
+        self.service.subscribe_timeline(actor, request).await
     }
 
     pub(crate) async fn recover_timeline(
@@ -70,8 +64,6 @@ impl ApplicationServiceGateway {
         actor: &Actor,
         request: RecoverTimelineRequest,
     ) -> TalosResult<TimelineRecoveryResponse> {
-        self.application_service
-            .recover_timeline(actor, request)
-            .await
+        self.service.recover_timeline(actor, request).await
     }
 }

@@ -1,7 +1,5 @@
-use talos_error::{TalosError, TalosResult};
-use tokio::fs;
+use talos_error::TalosResult;
 
-use crate::file;
 use crate::retrieval;
 use crate::store::{MemoryStore, WorkspaceMemoryRecord};
 
@@ -60,16 +58,12 @@ async fn is_duplicate_in_today(
     record: &WorkspaceMemoryRecord,
 ) -> TalosResult<bool> {
     let file_path = store.workspace_memory_file_for(record.timestamp);
-    match fs::read_to_string(&file_path).await {
-        Ok(content) => Ok(parse_workspace_memory_blocks(&content)
-            .into_iter()
-            .any(|block| block.session_id == record.session_id && block.title == record.title)),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(err) => Err(TalosError::StorageError(format!(
-            "read workspace memory file for dedupe: {}",
-            err
-        ))),
-    }
+    let Some(content) = talos_fs::read_file(&file_path).await? else {
+        return Ok(false);
+    };
+    Ok(parse_workspace_memory_blocks(&content)
+        .into_iter()
+        .any(|block| block.session_id == record.session_id && block.title == record.title))
 }
 
 pub(crate) async fn append_workspace_memory(
@@ -95,7 +89,7 @@ pub(crate) async fn append_workspace_memory(
         record.session_id,
         body
     );
-    file::append_string(&file_path, payload).await?;
+    talos_fs::append_file(&file_path, &payload).await?;
     retrieval::rebuild_file_index_for_timestamp(store, record.timestamp).await?;
     Ok(())
 }
@@ -128,8 +122,9 @@ mod tests {
             .await
             .expect("append should succeed");
 
-        let content = fs::read_to_string(store.workspace_memory_file_for(timestamp))
+        let content = talos_fs::read_file(&store.workspace_memory_file_for(timestamp))
             .await
+            .expect("memory file should read")
             .expect("memory file should exist");
         assert!(content.contains("## ["));
         assert!(content.contains("session: session-1"));
@@ -156,8 +151,9 @@ mod tests {
             .await
             .expect("second append should dedupe");
 
-        let content = fs::read_to_string(store.workspace_memory_file_for(timestamp))
+        let content = talos_fs::read_file(&store.workspace_memory_file_for(timestamp))
             .await
+            .expect("memory file should read")
             .expect("memory file should exist");
         assert_eq!(content.matches("session: session-1").count(), 1);
     }
@@ -178,8 +174,9 @@ mod tests {
                 .expect("append should succeed");
         }
 
-        let content = fs::read_to_string(store.workspace_memory_file_for(timestamp))
+        let content = talos_fs::read_file(&store.workspace_memory_file_for(timestamp))
             .await
+            .expect("memory file should read")
             .expect("memory file should exist");
         assert_eq!(content.matches("Flush required").count(), 2);
     }
@@ -207,8 +204,9 @@ mod tests {
             .expect("append should succeed");
 
         let file_path = temp_dir.path().join("memory").join("2026-04-05.md");
-        let content = fs::read_to_string(&file_path)
+        let content = talos_fs::read_file(&file_path)
             .await
+            .expect("timezone-adjusted memory file should read")
             .expect("timezone-adjusted memory file should exist");
         assert!(content.contains("## [07:21] Timezone aware record"));
     }

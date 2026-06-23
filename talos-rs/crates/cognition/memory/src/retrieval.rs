@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{ChatMessage, ChatRequest, LlmProvider};
-use tokio::fs;
 
 use crate::path_policy;
 use crate::store::{
@@ -174,13 +173,13 @@ pub(crate) async fn rebuild_file_index(
     date: &str,
 ) -> TalosResult<MemoryIndexFile> {
     let md_path = store.workspace_memory_dir().join(format!("{date}.md"));
-    let content = fs::read_to_string(&md_path)
-        .await
-        .map_err(|e| TalosError::StorageError(format!("read workspace memory file: {}", e)))?;
+    let content = talos_fs::read_file(&md_path)
+        .await?
+        .ok_or_else(|| TalosError::StorageError("workspace memory file missing".to_string()))?;
     let index_file = build_index_file_from_content(store.workspace_dir(), &md_path, &content);
     let json = serde_json::to_string_pretty(&index_file)
         .map_err(|e| TalosError::StorageError(format!("serialize memory index: {}", e)))?;
-    crate::file::write_string(&index_file_path_for(&md_path), json).await?;
+    talos_fs::write_file(&index_file_path_for(&md_path), &json).await?;
     Ok(index_file)
 }
 
@@ -221,14 +220,14 @@ async fn load_index_files(store: &MemoryStore) -> TalosResult<Vec<MemoryIndexFil
     let mut indexes = Vec::new();
     for file in daily_files {
         let index_path = index_file_path_for(&file);
-        let content = fs::read_to_string(&index_path)
-            .await
-            .map_err(|e| TalosError::StorageError(format!("read memory index file: {}", e)))?;
+        let content = talos_fs::read_file(&index_path)
+            .await?
+            .ok_or_else(|| TalosError::StorageError("memory index file missing".to_string()))?;
         let parsed = serde_json::from_str::<MemoryIndexFile>(&content)
             .map_err(|e| TalosError::StorageError(format!("parse memory index file: {}", e)))?;
-        let source = fs::read_to_string(&file)
-            .await
-            .map_err(|e| TalosError::StorageError(format!("read memory source file: {}", e)))?;
+        let source = talos_fs::read_file(&file)
+            .await?
+            .ok_or_else(|| TalosError::StorageError("memory source file missing".to_string()))?;
         if parsed.source_content_hash == source_content_hash(&source) {
             indexes.push(parsed);
             continue;
@@ -441,21 +440,17 @@ pub(crate) async fn get_memory(
 ) -> TalosResult<MemoryGetResult> {
     let normalized = path_policy::normalize_memory_path(path)?;
     let abs_path = store.workspace_dir().join(&normalized);
-    let canonical_workspace = fs::canonicalize(store.workspace_dir())
-        .await
-        .map_err(|e| TalosError::StorageError(format!("canonicalize workspace dir: {}", e)))?;
-    let canonical_path = fs::canonicalize(&abs_path)
-        .await
-        .map_err(|e| TalosError::StorageError(format!("canonicalize memory file: {}", e)))?;
+    let canonical_workspace = talos_fs::canonicalize_path(store.workspace_dir())?;
+    let canonical_path = talos_fs::canonicalize_path(&abs_path)?;
     if !canonical_path.starts_with(&canonical_workspace) {
         return Err(TalosError::ValidationError(format!(
             "memory path is outside workspace: {}",
             path.trim()
         )));
     }
-    let content = fs::read_to_string(&abs_path)
-        .await
-        .map_err(|e| TalosError::StorageError(format!("read memory file: {}", e)))?;
+    let content = talos_fs::read_file(&abs_path)
+        .await?
+        .ok_or_else(|| TalosError::StorageError("memory file missing".to_string()))?;
     let from = from.unwrap_or(1).max(1);
     let line_count = lines.unwrap_or(20).max(1);
     let selected = content
@@ -576,11 +571,9 @@ mod tests {
     async fn test_rebuild_all_indexes_bootstraps_existing_md_files() {
         let (_guard, store) = new_temp_store_with_llm(Vec::new());
         let memory_dir = store.workspace_memory_dir();
-        tokio::fs::create_dir_all(&memory_dir)
-            .await
-            .expect("memory dir should exist");
-        tokio::fs::write(
-            memory_dir.join("2026-04-04.md"),
+        talos_fs::create_directory(&memory_dir, true).expect("memory dir should exist");
+        talos_fs::write_file(
+            &memory_dir.join("2026-04-04.md"),
             "## [10:41] Flush required\nsession: session-1\n\n**Facts:**\n- keep no residue\n",
         )
         .await
@@ -604,11 +597,9 @@ mod tests {
             "[{\"path\":\"memory/2026-04-04.md\",\"from\":1,\"to\":5}]".to_string(),
         ]);
         let memory_dir = store.workspace_memory_dir();
-        tokio::fs::create_dir_all(&memory_dir)
-            .await
-            .expect("memory dir should exist");
-        tokio::fs::write(
-            memory_dir.join("2026-04-04.md"),
+        talos_fs::create_directory(&memory_dir, true).expect("memory dir should exist");
+        talos_fs::write_file(
+            &memory_dir.join("2026-04-04.md"),
             "## [10:41] Flush required\nsession: session-1\n\n**Facts:**\n- flush on close\n",
         )
         .await
@@ -636,17 +627,15 @@ mod tests {
             "[{\"path\":\"memory/2026-04-05.md\",\"from\":1,\"to\":6},{\"path\":\"memory/2026-04-04.md\",\"from\":1,\"to\":99}]".to_string(),
         ]);
         let memory_dir = store.workspace_memory_dir();
-        tokio::fs::create_dir_all(&memory_dir)
-            .await
-            .expect("memory dir should exist");
-        tokio::fs::write(
-            memory_dir.join("2026-04-04.md"),
+        talos_fs::create_directory(&memory_dir, true).expect("memory dir should exist");
+        talos_fs::write_file(
+            &memory_dir.join("2026-04-04.md"),
             "## [10:41] Flush required\nsession: session-1\n\n**Facts:**\n- flush on close\n",
         )
         .await
         .expect("seed memory file should write");
-        tokio::fs::write(
-            memory_dir.join("2026-04-05.md"),
+        talos_fs::write_file(
+            &memory_dir.join("2026-04-05.md"),
             "## [11:01] Unrelated\nsession: session-2\n\n**Facts:**\n- unrelated content\n",
         )
         .await
@@ -672,11 +661,9 @@ mod tests {
             "[{\"path\":\"memory/2026-04-04.md\",\"from\":5,\"to\":1}]".to_string(),
         ]);
         let memory_dir = store.workspace_memory_dir();
-        tokio::fs::create_dir_all(&memory_dir)
-            .await
-            .expect("memory dir should exist");
-        tokio::fs::write(
-            memory_dir.join("2026-04-04.md"),
+        talos_fs::create_directory(&memory_dir, true).expect("memory dir should exist");
+        talos_fs::write_file(
+            &memory_dir.join("2026-04-04.md"),
             "## [10:41] Flush required\nsession: session-1\n\n**Facts:**\n- flush on close\n",
         )
         .await
@@ -702,11 +689,9 @@ mod tests {
             "{\"path\":\"memory/2026-04-04.md\"}".to_string(),
         ]);
         let memory_dir = store.workspace_memory_dir();
-        tokio::fs::create_dir_all(&memory_dir)
-            .await
-            .expect("memory dir should exist");
-        tokio::fs::write(
-            memory_dir.join("2026-04-04.md"),
+        talos_fs::create_directory(&memory_dir, true).expect("memory dir should exist");
+        talos_fs::write_file(
+            &memory_dir.join("2026-04-04.md"),
             "## [10:41] Flush required\nsession: session-1\n\n**Facts:**\n- flush on close\n",
         )
         .await

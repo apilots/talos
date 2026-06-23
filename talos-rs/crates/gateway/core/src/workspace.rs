@@ -1,20 +1,20 @@
-use talos_application_service::Actor;
 use talos_error::TalosResult;
+use talos_service::Actor;
 use talos_types::{
     WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
     WorkspaceDocReadResponse, WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
     WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 
-use crate::application_service_gateway::ApplicationServiceGateway;
+use crate::service_gateway::ServiceGateway;
 
-impl ApplicationServiceGateway {
+impl ServiceGateway {
     pub(crate) async fn list_workspace_docs(
         &self,
         actor: &Actor,
         request: WorkspaceDocListRequest,
     ) -> TalosResult<WorkspaceDocListResponse> {
-        self.application_service
+        self.service
             .workspace_docs
             .list_docs_with_request(actor, request)
             .await
@@ -26,7 +26,7 @@ impl ApplicationServiceGateway {
         request: WorkspaceDocReadRequest,
     ) -> TalosResult<WorkspaceDocReadResponse> {
         let doc = self
-            .application_service
+            .service
             .workspace_docs
             .read_doc_with_request(actor, request)
             .await?;
@@ -39,7 +39,7 @@ impl ApplicationServiceGateway {
         request: WorkspaceDocWriteRequest,
     ) -> TalosResult<WorkspaceDocWriteResponse> {
         let doc = self
-            .application_service
+            .service
             .workspace_docs
             .write_doc_with_request(actor, request)
             .await?;
@@ -51,7 +51,7 @@ impl ApplicationServiceGateway {
         actor: &Actor,
         request: WorkspaceInfoRequest,
     ) -> TalosResult<WorkspaceInfoResponse> {
-        self.application_service
+        self.service
             .workspace_docs
             .workspace_info_with_request(actor, request)
     }

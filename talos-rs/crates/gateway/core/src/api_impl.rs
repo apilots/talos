@@ -1,10 +1,10 @@
 use async_trait::async_trait;
-use talos_application_service::Actor;
 use talos_auth::{
     CloudLoginCancelRequest, CloudLoginStartRequest, CloudLoginStartResponse,
     CloudLoginStatusRequest, CloudLoginStatusResponse,
 };
 use talos_error::TalosResult;
+use talos_service::Actor;
 use talos_types::{
     AuthLogoutRequest, AuthLogoutResponse, AuthSessionClearRequest, AuthSessionClearResponse,
     AuthSessionReadRequest, AuthSessionReadResponse, AuthSessionStoreRequest,
@@ -39,17 +39,17 @@ use talos_types::{
 };
 
 use crate::api::Gateway;
-use crate::application_service_gateway::ApplicationServiceGateway;
+use crate::service_gateway::ServiceGateway;
 
 #[async_trait]
-impl Gateway for ApplicationServiceGateway {
+impl Gateway for ServiceGateway {
     async fn start_turn(
         &self,
         actor: &Actor,
         request: StartTurnRequest,
         idempotency_key: Option<String>,
     ) -> TalosResult<StartTurnResponse> {
-        ApplicationServiceGateway::start_turn(self, actor, request, idempotency_key).await
+        ServiceGateway::start_turn(self, actor, request, idempotency_key).await
     }
 
     async fn retry_turn(
@@ -57,7 +57,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: RetryTurnRequest,
     ) -> TalosResult<RetryTurnResponse> {
-        ApplicationServiceGateway::retry_turn(self, actor, request).await
+        ServiceGateway::retry_turn(self, actor, request).await
     }
 
     async fn interrupt_turn(
@@ -65,7 +65,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: InterruptTurnRequest,
     ) -> TalosResult<InterruptTurnResponse> {
-        ApplicationServiceGateway::interrupt_turn(self, actor, request).await
+        ServiceGateway::interrupt_turn(self, actor, request).await
     }
 
     async fn submit_tool_result(
@@ -73,7 +73,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: SubmitToolResultRequest,
     ) -> TalosResult<SubmitToolResultResponse> {
-        ApplicationServiceGateway::submit_tool_result(self, actor, request).await
+        ServiceGateway::submit_tool_result(self, actor, request).await
     }
 
     async fn subscribe_timeline(
@@ -81,7 +81,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: SubscribeTimelineRequest,
     ) -> TalosResult<SubscribeTimelineResponse> {
-        ApplicationServiceGateway::subscribe_timeline(self, actor, request).await
+        ServiceGateway::subscribe_timeline(self, actor, request).await
     }
 
     async fn recover_timeline(
@@ -89,7 +89,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: RecoverTimelineRequest,
     ) -> TalosResult<TimelineRecoveryResponse> {
-        ApplicationServiceGateway::recover_timeline(self, actor, request).await
+        ServiceGateway::recover_timeline(self, actor, request).await
     }
 
     async fn list_sessions(
@@ -97,7 +97,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: SessionListRequest,
     ) -> TalosResult<SessionListResponse> {
-        ApplicationServiceGateway::list_sessions(self, actor, request).await
+        ServiceGateway::list_sessions(self, actor, request).await
     }
 
     async fn get_session(
@@ -105,7 +105,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: SessionGetRequest,
     ) -> TalosResult<SessionGetResponse> {
-        ApplicationServiceGateway::get_session(self, actor, request).await
+        ServiceGateway::get_session(self, actor, request).await
     }
 
     async fn get_session_history(
@@ -113,7 +113,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: SessionHistoryRequest,
     ) -> TalosResult<SessionHistoryResponse> {
-        ApplicationServiceGateway::get_session_history(self, actor, request).await
+        ServiceGateway::get_session_history(self, actor, request).await
     }
 
     async fn get_active_turn(
@@ -121,7 +121,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: SessionActiveTurnRequest,
     ) -> TalosResult<SessionActiveTurnResponse> {
-        ApplicationServiceGateway::get_active_turn(self, actor, request).await
+        ServiceGateway::get_active_turn(self, actor, request).await
     }
 
     async fn patch_session(
@@ -129,7 +129,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: SessionPatchRequest,
     ) -> TalosResult<SessionUpdateResponse> {
-        ApplicationServiceGateway::patch_session(self, actor, request).await
+        ServiceGateway::patch_session(self, actor, request).await
     }
 
     async fn close_session(
@@ -137,7 +137,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: SessionCloseRequest,
     ) -> TalosResult<SessionCloseResponse> {
-        ApplicationServiceGateway::close_session(self, actor, request).await
+        ServiceGateway::close_session(self, actor, request).await
     }
 
     async fn delete_session(
@@ -145,7 +145,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: SessionDeleteRequest,
     ) -> TalosResult<SessionDeleteResponse> {
-        ApplicationServiceGateway::delete_session(self, actor, request).await
+        ServiceGateway::delete_session(self, actor, request).await
     }
 
     async fn compact_session(
@@ -153,7 +153,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: SessionCompactRequest,
     ) -> TalosResult<SessionCompactResponse> {
-        ApplicationServiceGateway::compact_session(self, actor, request).await
+        ServiceGateway::compact_session(self, actor, request).await
     }
 
     async fn clear_session(
@@ -161,7 +161,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: SessionClearRequest,
     ) -> TalosResult<SessionClearResponse> {
-        ApplicationServiceGateway::clear_session(self, actor, request).await
+        ServiceGateway::clear_session(self, actor, request).await
     }
 
     async fn list_projects(
@@ -169,7 +169,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: ProjectListRequest,
     ) -> TalosResult<ProjectListResponse> {
-        ApplicationServiceGateway::list_projects(self, actor, request).await
+        ServiceGateway::list_projects(self, actor, request).await
     }
 
     async fn get_project(
@@ -177,7 +177,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: ProjectReadRequest,
     ) -> TalosResult<ProjectReadResponse> {
-        ApplicationServiceGateway::get_project(self, actor, request).await
+        ServiceGateway::get_project(self, actor, request).await
     }
 
     async fn create_project(
@@ -185,7 +185,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: ProjectCreateRequest,
     ) -> TalosResult<ProjectCreateResponse> {
-        ApplicationServiceGateway::create_project(self, actor, request).await
+        ServiceGateway::create_project(self, actor, request).await
     }
 
     async fn patch_project(
@@ -193,7 +193,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: ProjectPatchRequest,
     ) -> TalosResult<ProjectPatchResponse> {
-        ApplicationServiceGateway::patch_project(self, actor, request).await
+        ServiceGateway::patch_project(self, actor, request).await
     }
 
     async fn delete_project(
@@ -201,7 +201,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: ProjectDeleteRequest,
     ) -> TalosResult<ProjectDeleteResponse> {
-        ApplicationServiceGateway::delete_project(self, actor, request).await
+        ServiceGateway::delete_project(self, actor, request).await
     }
 
     async fn read_fs_directory(
@@ -209,7 +209,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: FsDirectoryReadRequest,
     ) -> TalosResult<FsDirectoryReadResponse> {
-        ApplicationServiceGateway::read_fs_directory(self, actor, request).await
+        ServiceGateway::read_fs_directory(self, actor, request).await
     }
 
     async fn create_fs_directory(
@@ -217,7 +217,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: FsDirectoryCreateRequest,
     ) -> TalosResult<FsDirectoryCreateResponse> {
-        ApplicationServiceGateway::create_fs_directory(self, actor, request).await
+        ServiceGateway::create_fs_directory(self, actor, request).await
     }
 
     async fn list_models(
@@ -225,7 +225,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: ModelListRequest,
     ) -> TalosResult<ModelListResponse> {
-        ApplicationServiceGateway::list_models(self, actor, request).await
+        ServiceGateway::list_models(self, actor, request).await
     }
 
     async fn get_config(
@@ -233,7 +233,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: ConfigGetRequest,
     ) -> TalosResult<ConfigGetResponse> {
-        ApplicationServiceGateway::get_config(self, actor, request).await
+        ServiceGateway::get_config(self, actor, request).await
     }
 
     async fn update_config(
@@ -241,7 +241,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: ConfigUpdateRequest,
     ) -> TalosResult<ConfigUpdateResponse> {
-        ApplicationServiceGateway::update_config(self, actor, request).await
+        ServiceGateway::update_config(self, actor, request).await
     }
 
     async fn delete_config(
@@ -249,7 +249,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: ConfigDeleteRequest,
     ) -> TalosResult<ConfigDeleteResponse> {
-        ApplicationServiceGateway::delete_config(self, actor, request).await
+        ServiceGateway::delete_config(self, actor, request).await
     }
 
     async fn reload_config(
@@ -257,7 +257,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: ConfigReloadRequest,
     ) -> TalosResult<ConfigReloadResponse> {
-        ApplicationServiceGateway::reload_config(self, actor, request).await
+        ServiceGateway::reload_config(self, actor, request).await
     }
 
     async fn list_skills(
@@ -265,7 +265,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: SkillsListRequest,
     ) -> TalosResult<SkillsListResponse> {
-        ApplicationServiceGateway::list_skills(self, actor, request).await
+        ServiceGateway::list_skills(self, actor, request).await
     }
 
     async fn refresh_skills(
@@ -273,7 +273,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: SkillsRefreshRequest,
     ) -> TalosResult<SkillsListResponse> {
-        ApplicationServiceGateway::refresh_skills(self, actor, request).await
+        ServiceGateway::refresh_skills(self, actor, request).await
     }
 
     async fn suggest_skills(
@@ -281,7 +281,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: SkillsSuggestRequest,
     ) -> TalosResult<SkillsSuggestResponse> {
-        ApplicationServiceGateway::suggest_skills(self, actor, request).await
+        ServiceGateway::suggest_skills(self, actor, request).await
     }
 
     async fn read_skill(
@@ -289,7 +289,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: SkillsReadRequest,
     ) -> TalosResult<SkillsReadResponse> {
-        ApplicationServiceGateway::read_skill(self, actor, request).await
+        ServiceGateway::read_skill(self, actor, request).await
     }
 
     async fn resolve_skills(
@@ -297,7 +297,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: SkillsResolveRequest,
     ) -> TalosResult<SkillsResolveResponse> {
-        ApplicationServiceGateway::resolve_skills(self, actor, request).await
+        ServiceGateway::resolve_skills(self, actor, request).await
     }
 
     async fn list_plugin_sources(
@@ -305,7 +305,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: PluginSourceListRequest,
     ) -> TalosResult<PluginSourceListResponse> {
-        ApplicationServiceGateway::list_plugin_sources(self, actor, request).await
+        ServiceGateway::list_plugin_sources(self, actor, request).await
     }
 
     async fn add_plugin_source(
@@ -313,7 +313,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: PluginSourceAddRequest,
     ) -> TalosResult<PluginSourceAddResponse> {
-        ApplicationServiceGateway::add_plugin_source(self, actor, request).await
+        ServiceGateway::add_plugin_source(self, actor, request).await
     }
 
     async fn refresh_plugin_source(
@@ -321,7 +321,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: PluginSourceRefreshRequest,
     ) -> TalosResult<PluginSourceRefreshResponse> {
-        ApplicationServiceGateway::refresh_plugin_source(self, actor, request).await
+        ServiceGateway::refresh_plugin_source(self, actor, request).await
     }
 
     async fn remove_plugin_source(
@@ -329,7 +329,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: PluginSourceRemoveRequest,
     ) -> TalosResult<PluginSourceRemoveResponse> {
-        ApplicationServiceGateway::remove_plugin_source(self, actor, request).await
+        ServiceGateway::remove_plugin_source(self, actor, request).await
     }
 
     async fn search_plugins(
@@ -337,7 +337,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: PluginSearchRequest,
     ) -> TalosResult<PluginSearchResponse> {
-        ApplicationServiceGateway::search_plugins(self, actor, request).await
+        ServiceGateway::search_plugins(self, actor, request).await
     }
 
     async fn list_plugins(
@@ -345,7 +345,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: PluginListRequest,
     ) -> TalosResult<PluginListResponse> {
-        ApplicationServiceGateway::list_plugins(self, actor, request).await
+        ServiceGateway::list_plugins(self, actor, request).await
     }
 
     async fn read_plugin(
@@ -353,7 +353,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: PluginReadRequest,
     ) -> TalosResult<PluginReadResponse> {
-        ApplicationServiceGateway::read_plugin(self, actor, request).await
+        ServiceGateway::read_plugin(self, actor, request).await
     }
 
     async fn install_plugin(
@@ -361,7 +361,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: PluginInstallRequest,
     ) -> TalosResult<PluginInstallResponse> {
-        ApplicationServiceGateway::install_plugin(self, actor, request).await
+        ServiceGateway::install_plugin(self, actor, request).await
     }
 
     async fn update_plugin(
@@ -369,7 +369,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: PluginUpdateRequest,
     ) -> TalosResult<PluginUpdateResponse> {
-        ApplicationServiceGateway::update_plugin(self, actor, request).await
+        ServiceGateway::update_plugin(self, actor, request).await
     }
 
     async fn uninstall_plugin(
@@ -377,7 +377,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: PluginUninstallRequest,
     ) -> TalosResult<PluginUninstallResponse> {
-        ApplicationServiceGateway::uninstall_plugin(self, actor, request).await
+        ServiceGateway::uninstall_plugin(self, actor, request).await
     }
 
     async fn enable_plugin(
@@ -385,7 +385,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: PluginEnableRequest,
     ) -> TalosResult<PluginEnableResponse> {
-        ApplicationServiceGateway::enable_plugin(self, actor, request).await
+        ServiceGateway::enable_plugin(self, actor, request).await
     }
 
     async fn disable_plugin(
@@ -393,7 +393,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: PluginDisableRequest,
     ) -> TalosResult<PluginDisableResponse> {
-        ApplicationServiceGateway::disable_plugin(self, actor, request).await
+        ServiceGateway::disable_plugin(self, actor, request).await
     }
 
     async fn list_memory_files(
@@ -401,7 +401,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: MemoryFileListRequest,
     ) -> TalosResult<MemoryFileListResponse> {
-        ApplicationServiceGateway::list_memory_files(self, actor, request).await
+        ServiceGateway::list_memory_files(self, actor, request).await
     }
 
     async fn read_memory_file(
@@ -409,7 +409,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: MemoryFileReadRequest,
     ) -> TalosResult<MemoryFileReadResponse> {
-        ApplicationServiceGateway::read_memory_file(self, actor, request).await
+        ServiceGateway::read_memory_file(self, actor, request).await
     }
 
     async fn write_memory_file(
@@ -417,7 +417,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: MemoryFileWriteRequest,
     ) -> TalosResult<MemoryFileWriteResponse> {
-        ApplicationServiceGateway::write_memory_file(self, actor, request).await
+        ServiceGateway::write_memory_file(self, actor, request).await
     }
 
     async fn search_memory(
@@ -425,7 +425,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: MemorySearchRequest,
     ) -> TalosResult<MemorySearchResponse> {
-        ApplicationServiceGateway::search_memory(self, actor, request).await
+        ServiceGateway::search_memory(self, actor, request).await
     }
 
     async fn list_workspace_docs(
@@ -433,7 +433,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: WorkspaceDocListRequest,
     ) -> TalosResult<WorkspaceDocListResponse> {
-        ApplicationServiceGateway::list_workspace_docs(self, actor, request).await
+        ServiceGateway::list_workspace_docs(self, actor, request).await
     }
 
     async fn read_workspace_doc(
@@ -441,7 +441,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: WorkspaceDocReadRequest,
     ) -> TalosResult<WorkspaceDocReadResponse> {
-        ApplicationServiceGateway::read_workspace_doc(self, actor, request).await
+        ServiceGateway::read_workspace_doc(self, actor, request).await
     }
 
     async fn write_workspace_doc(
@@ -449,7 +449,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: WorkspaceDocWriteRequest,
     ) -> TalosResult<WorkspaceDocWriteResponse> {
-        ApplicationServiceGateway::write_workspace_doc(self, actor, request).await
+        ServiceGateway::write_workspace_doc(self, actor, request).await
     }
 
     async fn workspace_info(
@@ -457,7 +457,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: WorkspaceInfoRequest,
     ) -> TalosResult<WorkspaceInfoResponse> {
-        ApplicationServiceGateway::workspace_info(self, actor, request).await
+        ServiceGateway::workspace_info(self, actor, request).await
     }
 
     async fn logout(
@@ -465,7 +465,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: AuthLogoutRequest,
     ) -> TalosResult<AuthLogoutResponse> {
-        ApplicationServiceGateway::logout(self, actor, request).await
+        ServiceGateway::logout(self, actor, request).await
     }
 
     async fn start_cloud_login(
@@ -473,7 +473,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: CloudLoginStartRequest,
     ) -> TalosResult<CloudLoginStartResponse> {
-        ApplicationServiceGateway::start_cloud_login(self, actor, request).await
+        ServiceGateway::start_cloud_login(self, actor, request).await
     }
 
     async fn cloud_login_status(
@@ -481,7 +481,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: CloudLoginStatusRequest,
     ) -> TalosResult<CloudLoginStatusResponse> {
-        ApplicationServiceGateway::cloud_login_status(self, actor, request).await
+        ServiceGateway::cloud_login_status(self, actor, request).await
     }
 
     async fn cancel_cloud_login(
@@ -489,7 +489,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: CloudLoginCancelRequest,
     ) -> TalosResult<CloudLoginCancelResponse> {
-        ApplicationServiceGateway::cancel_cloud_login(self, actor, request).await
+        ServiceGateway::cancel_cloud_login(self, actor, request).await
     }
 
     async fn read_auth_session(
@@ -497,7 +497,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: AuthSessionReadRequest,
     ) -> TalosResult<AuthSessionReadResponse> {
-        ApplicationServiceGateway::read_auth_session(self, actor, request).await
+        ServiceGateway::read_auth_session(self, actor, request).await
     }
 
     async fn store_auth_session(
@@ -505,7 +505,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: AuthSessionStoreRequest,
     ) -> TalosResult<AuthSessionStoreResponse> {
-        ApplicationServiceGateway::store_auth_session(self, actor, request).await
+        ServiceGateway::store_auth_session(self, actor, request).await
     }
 
     async fn clear_auth_session(
@@ -513,7 +513,7 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: AuthSessionClearRequest,
     ) -> TalosResult<AuthSessionClearResponse> {
-        ApplicationServiceGateway::clear_auth_session(self, actor, request).await
+        ServiceGateway::clear_auth_session(self, actor, request).await
     }
 
     async fn current_user(
@@ -521,10 +521,10 @@ impl Gateway for ApplicationServiceGateway {
         actor: &Actor,
         request: UserCurrentRequest,
     ) -> TalosResult<UserCurrentResponse> {
-        ApplicationServiceGateway::current_user(self, actor, request).await
+        ServiceGateway::current_user(self, actor, request).await
     }
 
     async fn start(&self) -> TalosResult<()> {
-        ApplicationServiceGateway::start(self).await
+        ServiceGateway::start(self).await
     }
 }

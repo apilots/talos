@@ -1,12 +1,12 @@
 pub mod api;
 mod api_impl;
-pub mod application_service_gateway;
 mod config;
 mod fs;
 mod memory;
 mod model;
 mod plugin;
 mod project;
+pub mod service_gateway;
 mod session;
 mod skills;
 mod turn;
@@ -14,4 +14,4 @@ mod user_auth;
 mod workspace;
 
 pub use api::Gateway;
-pub use application_service_gateway::ApplicationServiceGateway;
+pub use service_gateway::ServiceGateway;

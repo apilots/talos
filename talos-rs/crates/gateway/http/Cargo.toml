@@ -5,13 +5,12 @@ edition = "2021"
 
 [dependencies]
 talos-gateway = { path = "../core" }
-talos-application-service = { workspace = true }
+talos-service = { workspace = true }
 talos-error = { path = "../../infra/error" }
 talos-types = { path = "../../common/types" }
 talos-auth = { path = "../../infra/auth" }
 talos-config = { workspace = true }
 talos-llm-provider = { workspace = true }
-talos-service = { workspace = true }
 talos-app-protocol = { workspace = true }
 talos-skills = { workspace = true }
 axum = { version = "0.7", features = ["macros"] }

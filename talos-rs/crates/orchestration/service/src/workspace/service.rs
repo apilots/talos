@@ -1,45 +1,15 @@
-use std::path::PathBuf;
-
 use chrono::Utc;
 use serde_json::{json, Value};
 use talos_config::{resolve_effective_kernel_workspace, validate_session_workspace_user};
 use talos_error::{TalosError, TalosResult};
 use talos_types::{TalosConfig, TalosSession};
 
+use super::types::EffectiveAgentWorkspace;
 use crate::access::Actor;
-use crate::file::write_atomic;
 
 #[derive(Clone)]
 pub struct EffectiveWorkspaceResolver {
     base_config: TalosConfig,
-}
-
-#[derive(Debug, Clone)]
-pub struct EffectiveAgentWorkspace {
-    pub user_id: String,
-    pub username: Option<String>,
-    pub base_workspace_dir: PathBuf,
-    pub user_workspace_dir: PathBuf,
-    pub config: TalosConfig,
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct AgentWorkspaceInfo {
-    pub user_id: String,
-    pub username: Option<String>,
-    pub base_workspace_dir: String,
-    pub user_workspace_dir: String,
-}
-
-impl From<EffectiveAgentWorkspace> for AgentWorkspaceInfo {
-    fn from(workspace: EffectiveAgentWorkspace) -> Self {
-        Self {
-            user_id: workspace.user_id,
-            username: workspace.username,
-            base_workspace_dir: workspace.base_workspace_dir.to_string_lossy().to_string(),
-            user_workspace_dir: workspace.user_workspace_dir.to_string_lossy().to_string(),
-        }
-    }
 }
 
 impl EffectiveWorkspaceResolver {
@@ -72,7 +42,7 @@ impl EffectiveWorkspaceResolver {
             "username": workspace.username,
             "updated_at_ms": Utc::now().timestamp_millis(),
         });
-        write_atomic(
+        talos_fs::write_file(
             &path,
             &serde_json::to_string_pretty(&payload)
                 .map_err(|err| TalosError::InternalError(err.to_string()))?,
@@ -108,16 +78,8 @@ async fn profile_snapshot_matches(
     path: &std::path::Path,
     workspace: &EffectiveAgentWorkspace,
 ) -> TalosResult<bool> {
-    let content = match tokio::fs::read_to_string(path).await {
-        Ok(content) => content,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(err) => {
-            return Err(TalosError::StorageError(format!(
-                "read profile snapshot {}: {}",
-                path.display(),
-                err
-            )));
-        }
+    let Some(content) = talos_fs::read_file(path).await? else {
+        return Ok(false);
     };
     let value: Value = match serde_json::from_str(&content) {
         Ok(value) => value,
@@ -136,6 +98,7 @@ async fn profile_snapshot_matches(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     use talos_types::{
         talos::{TalosProvider, TalosSourceType},
         SessionContext, SessionState, TalosSession,
@@ -220,12 +183,13 @@ mod tests {
             .resolve_for_actor(&actor)
             .expect("workspace should resolve");
         let profile_path = workspace.user_workspace_dir.join("profile.json");
-        std::fs::create_dir_all(&workspace.user_workspace_dir)
+        talos_fs::create_directory(&workspace.user_workspace_dir, true)
             .expect("user workspace should be created");
-        std::fs::write(
+        talos_fs::write_file(
             &profile_path,
             r#"{"user_id":"user_1","username":"alice","updated_at_ms":1}"#,
         )
+        .await
         .expect("profile should be seeded");
 
         resolver
@@ -234,11 +198,14 @@ mod tests {
             .expect("profile write should succeed");
 
         let profile: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(&profile_path).expect("profile should be readable"),
+            &talos_fs::read_file(&profile_path)
+                .await
+                .expect("profile should be readable")
+                .expect("profile should exist"),
         )
         .expect("profile should be json");
         assert_eq!(profile["updated_at_ms"], 1);
-        let _ = std::fs::remove_dir_all(temp_dir);
+        let _ = talos_fs::remove_directory(&temp_dir).await;
     }
 
     #[tokio::test]
@@ -251,12 +218,13 @@ mod tests {
             .resolve_for_actor(&actor)
             .expect("workspace should resolve");
         let profile_path = workspace.user_workspace_dir.join("profile.json");
-        std::fs::create_dir_all(&workspace.user_workspace_dir)
+        talos_fs::create_directory(&workspace.user_workspace_dir, true)
             .expect("user workspace should be created");
-        std::fs::write(
+        talos_fs::write_file(
             &profile_path,
             r#"{"user_id":"user_1","username":"alice","updated_at_ms":1}"#,
         )
+        .await
         .expect("profile should be seeded");
 
         resolver
@@ -265,13 +233,16 @@ mod tests {
             .expect("profile write should succeed");
 
         let profile: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(&profile_path).expect("profile should be readable"),
+            &talos_fs::read_file(&profile_path)
+                .await
+                .expect("profile should be readable")
+                .expect("profile should exist"),
         )
         .expect("profile should be json");
         assert_eq!(profile["user_id"], "user_1");
         assert_eq!(profile["username"], "alice-renamed");
         assert_ne!(profile["updated_at_ms"], 1);
-        let _ = std::fs::remove_dir_all(temp_dir);
+        let _ = talos_fs::remove_directory(&temp_dir).await;
     }
 
     fn test_session(user_id: &str) -> TalosSession {

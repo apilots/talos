@@ -1,10 +1,10 @@
 use async_trait::async_trait;
-use talos_application_service::Actor;
 use talos_auth::{
     CloudLoginCancelRequest, CloudLoginStartRequest, CloudLoginStartResponse,
     CloudLoginStatusRequest, CloudLoginStatusResponse,
 };
 use talos_error::TalosResult;
+use talos_service::Actor;
 use talos_types::{
     AuthLogoutRequest, AuthLogoutResponse, AuthSessionClearRequest, AuthSessionClearResponse,
     AuthSessionReadRequest, AuthSessionReadResponse, AuthSessionStoreRequest,

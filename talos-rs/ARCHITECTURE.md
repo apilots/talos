@@ -474,8 +474,8 @@ talos-rs/
 │   ├── orchestration/            # 编排层
 │   │   ├── agent/
 │   │   ├── agent-kernel/
-│   │   ├── application-service/
 │   │   ├── store/
+│   │   ├── service/
 │   │   ├── router/
 │   │   └── coordinator/
 │   │

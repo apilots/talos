@@ -112,7 +112,6 @@ impl SkillsService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use talos_plugin::{PluginManager, PluginStateStore};
 
     fn test_service(
@@ -133,10 +132,10 @@ mod tests {
         let temp = tempfile::tempdir().expect("temp dir should be created");
         let external_root = temp.path().join("external-skills");
         let skill_root = external_root.join("review");
-        fs::create_dir_all(&skill_root).expect("skill root should be created");
-        fs::write(
-            skill_root.join("SKILL.md"),
-            "---\nname: review\ndescription: Review code changes.\n---\n\n# Review\n\nUse evidence.",
+        talos_fs::create_directory(&skill_root, true).expect("skill root should be created");
+        talos_fs::write_bytes(
+            &skill_root.join("SKILL.md"),
+            b"---\nname: review\ndescription: Review code changes.\n---\n\n# Review\n\nUse evidence.",
         )
         .expect("skill should be written");
 

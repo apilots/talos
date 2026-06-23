@@ -1,5 +1,5 @@
-use talos_application_service::Actor;
 use talos_auth::RequestIdentity;
+use talos_service::Actor;
 
 pub(super) fn shared_actor(actor: &RequestIdentity) -> Actor {
     let shared = Actor::regular(actor.user_id.clone())
