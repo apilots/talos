@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { Plugin } from "@talos/sdk-browser";
 
 import { readPluginDocument } from "@/features/plugins/api";
 import {
-  marketplaceStatusLabel,
+  marketplaceStatusLabelKey,
   pluginDocumentName,
   pluginTitle,
 } from "@/features/plugins/lib/pluginDisplay";
@@ -18,6 +19,7 @@ interface PluginDocumentDialogProps {
 }
 
 export function PluginDocumentDialog({ plugin, onClose }: PluginDocumentDialogProps) {
+  const { t } = useTranslation("plugins");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const documentQuery = useQuery({
     enabled: Boolean(plugin),
@@ -48,14 +50,14 @@ export function PluginDocumentDialog({ plugin, onClose }: PluginDocumentDialogPr
 
   const readPlugin = documentQuery.data?.plugin ?? plugin;
   const title = pluginTitle(readPlugin);
-  const documentName = pluginDocumentName(plugin);
+  const documentName = pluginDocumentName(plugin, t("documents.pluginDocument"));
   const documents = documentQuery.data?.documents ?? [];
   const selectedDocument = documents.find((document) => document.path === selectedPath) ?? documents[0];
 
   return (
     <div className="fixed inset-y-0 left-0 right-0 z-[80] flex items-center justify-center bg-ink/28 px-6 py-8 backdrop-blur-[2px] lg:left-[280px]">
       <button
-        aria-label="Close plugin document backdrop"
+        aria-label={t("dialog.closePluginBackdrop")}
         className="absolute inset-0 cursor-default"
         onClick={onClose}
         type="button"
@@ -68,7 +70,7 @@ export function PluginDocumentDialog({ plugin, onClose }: PluginDocumentDialogPr
               <h2 className="truncate text-lg font-semibold text-ink">{title}</h2>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted">
                 <span className="rounded-full bg-card px-2 py-0.5">
-                  {marketplaceStatusLabel(plugin)}
+                  {t(`status.${marketplaceStatusLabelKey(plugin)}`)}
                 </span>
                 <span className="min-w-0 truncate">
                   {plugin.path_in_source ?? plugin.metadata.name}
@@ -77,7 +79,7 @@ export function PluginDocumentDialog({ plugin, onClose }: PluginDocumentDialogPr
             </div>
           </div>
           <button
-            aria-label="Close plugin document"
+            aria-label={t("dialog.closePlugin")}
             className="flex size-9 shrink-0 items-center justify-center rounded-[0.7rem] text-muted transition hover:bg-card hover:text-ink"
             onClick={onClose}
             type="button"
@@ -89,11 +91,11 @@ export function PluginDocumentDialog({ plugin, onClose }: PluginDocumentDialogPr
           {documentQuery.isLoading ? (
             <div className="flex h-40 items-center justify-center gap-2 text-sm text-muted">
               <Loader2 className="animate-spin" size={16} />
-              Loading {documentName}
+              {t("dialog.loadingDocument", { document: documentName })}
             </div>
           ) : documentQuery.isError ? (
             <div className="rounded-[0.8rem] border border-border bg-card px-4 py-3 text-sm text-muted">
-              Failed to load {documentName}.
+              {t("dialog.failedLoadDocument", { document: documentName })}
             </div>
           ) : (
             <>
@@ -119,7 +121,7 @@ export function PluginDocumentDialog({ plugin, onClose }: PluginDocumentDialogPr
                 <PluginDocumentBody document={selectedDocument} />
               ) : (
                 <div className="rounded-[0.8rem] border border-border bg-card px-4 py-3 text-sm text-muted">
-                  No plugin documents returned.
+                  {t("dialog.noPluginDocuments")}
                 </div>
               )}
             </>

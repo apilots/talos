@@ -1,5 +1,6 @@
 import { Power, PowerOff, Trash2 } from "lucide-react";
 import type { Plugin } from "@talos/sdk-browser";
+import { useTranslation } from "react-i18next";
 
 import { PluginIconBadge } from "./PluginIconBadge";
 import { PluginStatusBadge } from "./PluginStatusBadge";
@@ -22,6 +23,7 @@ export function InstalledPluginRow({
   onUninstall,
   plugin,
 }: InstalledPluginRowProps) {
+  const { t } = useTranslation("plugins");
   const enabled = pluginEnabled(plugin);
 
   return (
@@ -43,7 +45,7 @@ export function InstalledPluginRow({
           className="inline-flex size-8 items-center justify-center rounded-full border border-border/80 text-muted transition hover:border-brand/35 hover:text-ink disabled:opacity-50"
           disabled={busy}
           onClick={() => (enabled ? onDisable(plugin) : onEnable(plugin))}
-          title={enabled ? "Disable" : "Enable"}
+          title={enabled ? t("actions.disable") : t("actions.enable")}
           type="button"
         >
           {enabled ? <PowerOff size={14} /> : <Power size={14} />}
@@ -52,7 +54,7 @@ export function InstalledPluginRow({
           className="inline-flex size-8 items-center justify-center rounded-full border border-border/80 text-muted transition hover:border-danger/45 hover:text-danger disabled:opacity-50"
           disabled={busy}
           onClick={() => onUninstall(plugin)}
-          title="Uninstall"
+          title={t("actions.uninstall")}
           type="button"
         >
           <Trash2 size={14} />

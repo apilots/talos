@@ -1,8 +1,9 @@
 import type { Plugin } from "@talos/sdk-browser";
+import { useTranslation } from "react-i18next";
 
 import {
-  installedStatusLabel,
-  marketplaceStatusLabel,
+  installedStatusLabelKey,
+  marketplaceStatusLabelKey,
   pluginStatusBadgeClass,
 } from "@/features/plugins/lib/pluginDisplay";
 
@@ -12,8 +13,10 @@ interface PluginStatusBadgeProps {
 }
 
 export function PluginStatusBadge({ plugin, variant = "installed" }: PluginStatusBadgeProps) {
-  const label = variant === "marketplace"
-    ? marketplaceStatusLabel(plugin)
-    : installedStatusLabel(plugin);
+  const { t } = useTranslation("plugins");
+  const labelKey = variant === "marketplace"
+    ? marketplaceStatusLabelKey(plugin)
+    : installedStatusLabelKey(plugin);
+  const label = t(`status.${labelKey}`);
   return <span className={pluginStatusBadgeClass(plugin)}>{label}</span>;
 }

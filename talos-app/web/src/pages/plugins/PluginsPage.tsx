@@ -1,23 +1,23 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import type { SkillSuggestion, SkillSummary } from "@talos/sdk-browser";
 
-import { AddPluginMarketplaceDialog } from "@/features/plugins/components/AddPluginMarketplaceDialog";
-import { AllPluginsManagementView } from "@/features/plugins/components/AllPluginsManagementView";
-import { McpPluginsManagementView } from "@/features/plugins/components/McpPluginsManagementView";
-import { PluginCatalogActions } from "@/features/plugins/components/PluginCatalogActions";
-import { PluginCatalogSearch } from "@/features/plugins/components/PluginCatalogSearch";
-import { PluginCatalogTabs } from "@/features/plugins/components/PluginCatalogTabs";
-import { SkillPluginsManagementView } from "@/features/plugins/components/SkillPluginsManagementView";
-import { addMarketplaceSource, listSkills } from "@/features/plugins/api";
-import type { PluginsCatalogTab } from "@/features/plugins/types";
-
-const CREATE_SKILL_DRAFT =
-  "I want to create a new Talos skill. Ask me for the skill name, trigger, workflow, and files it should include.";
-const CREATE_PLUGIN_DRAFT =
-  "I want to create a new Talos plugin. Ask me for the plugin name, capabilities, skill roots, MCP servers, and package layout.";
+import {
+  addMarketplaceSource,
+  AddPluginMarketplaceDialog,
+  AllPluginsManagementView,
+  listSkills,
+  McpPluginsManagementView,
+  PluginCatalogActions,
+  PluginCatalogSearch,
+  PluginCatalogTabs,
+  SkillPluginsManagementView,
+  type PluginsCatalogTab,
+} from "@/features/plugins";
 
 export function PluginsPage() {
+  const { t } = useTranslation("plugins");
   const navigate = useNavigate();
   const location = useLocation();
   const locationState = location.state as { initialTab?: PluginsCatalogTab } | null;
@@ -33,7 +33,7 @@ export function PluginsPage() {
     const creator = findSkillCreator(skills.data);
     navigate("/", {
       state: {
-        initialDraft: creator ? "" : CREATE_SKILL_DRAFT,
+        initialDraft: creator ? "" : t("drafts.createSkill"),
         initialSkills: creator ? [toSuggestion(creator)] : [],
       },
     });
@@ -41,7 +41,7 @@ export function PluginsPage() {
 
   function createPlugin() {
     setMenuOpen(false);
-    navigate("/", { state: { initialDraft: CREATE_PLUGIN_DRAFT } });
+    navigate("/", { state: { initialDraft: t("drafts.createPlugin") } });
   }
 
   function addMarketplace() {
@@ -64,8 +64,10 @@ export function PluginsPage() {
         <div className="flex items-start justify-between gap-4">
           <div>
             <PluginCatalogTabs activeTab={tab} onTabChange={setTab} />
-            <h1 className="font-display text-[34px] font-semibold tracking-tight">{pageTitle(tab)}</h1>
-            <p className="mt-1 text-[15px] text-muted">{pageDescription(tab)}</p>
+            <h1 className="font-display text-[34px] font-semibold tracking-tight">
+              {t(`tabs.${tab}`)}
+            </h1>
+            <p className="mt-1 text-[15px] text-muted">{t(`page.${tab}.detail`)}</p>
           </div>
           <PluginCatalogActions
             activeTab={tab}
@@ -93,28 +95,6 @@ export function PluginsPage() {
       />
     </div>
   );
-}
-
-function pageTitle(tab: PluginsCatalogTab) {
-  switch (tab) {
-    case "skills":
-      return "Skills";
-    case "mcp":
-      return "MCP";
-    case "plugins":
-      return "Plugins";
-  }
-}
-
-function pageDescription(tab: PluginsCatalogTab) {
-  switch (tab) {
-    case "skills":
-      return "Manage skill plugins that provide task-specific instruction bundles.";
-    case "mcp":
-      return "Manage MCP server plugins that expose model-callable tools.";
-    case "plugins":
-      return "Manage all installed and marketplace plugin capabilities.";
-  }
 }
 
 function findSkillCreator(skills: SkillSummary[]) {

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
+import "@/shared/i18n/setup";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
@@ -81,8 +82,8 @@ describe("SkillPluginsManagementView", () => {
           name: "marketplace-writer",
           description: "Installed marketplace skill.",
           short_description: null,
-          root: "/Users/xujiang/.talos/plugins/installs/writer/skills/marketplace-writer",
-          path: "/Users/xujiang/.talos/plugins/installs/writer/skills/marketplace-writer/SKILL.md",
+          root: "/Users/xujiang/.talos/plugins/skills/marketplace-writer",
+          path: "/Users/xujiang/.talos/plugins/skills/marketplace-writer/SKILL.md",
           scope: "plugin",
           source_plugin: "writer",
           source_install: "install-writer",

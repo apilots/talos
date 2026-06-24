@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 interface AddPluginMarketplaceDialogProps {
   open: boolean;
@@ -13,6 +14,7 @@ export function AddPluginMarketplaceDialog({
   onClose,
   onSubmit,
 }: AddPluginMarketplaceDialogProps) {
+  const { t } = useTranslation(["plugins", "common"]);
   const [source, setSource] = useState("");
   const [gitRef, setGitRef] = useState("main");
   const [sparsePaths, setSparsePaths] = useState("");
@@ -32,7 +34,7 @@ export function AddPluginMarketplaceDialog({
       setSparsePaths("");
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to add marketplace.");
+      setError(err instanceof Error ? err.message : t("plugins:dialog.failedAddMarketplace"));
     } finally {
       setSubmitting(false);
     }
@@ -44,12 +46,12 @@ export function AddPluginMarketplaceDialog({
         <div className="flex items-start justify-between gap-6">
           <div>
             <h2 className="text-[28px] font-semibold tracking-tight text-ink">
-              Add plugin marketplace
+              {t("plugins:dialog.addMarketplaceTitle")}
             </h2>
             <p className="mt-2 text-[18px] leading-7 text-muted">
-              Add from a GitHub repo, Git URL, or local folder.{" "}
+              {t("plugins:dialog.addMarketplaceDetail")}{" "}
               <a className="text-brand hover:underline" href="#" onClick={(event) => event.preventDefault()}>
-                Learn more
+                {t("plugins:dialog.learnMore")}
               </a>
             </p>
           </div>
@@ -63,7 +65,7 @@ export function AddPluginMarketplaceDialog({
         </div>
 
         <div className="mt-9 space-y-5">
-          <Field label="Source">
+          <Field label={t("plugins:dialog.sourceLabel")}>
             <input
               autoFocus
               className="h-12 w-full rounded-[0.8rem] border border-border bg-background/70 px-4 text-[17px] outline-none transition placeholder:text-muted focus:border-brand"
@@ -72,7 +74,7 @@ export function AddPluginMarketplaceDialog({
               value={source}
             />
           </Field>
-          <Field label="Git ref">
+          <Field label={t("plugins:dialog.gitRefLabel")}>
             <input
               className="h-12 w-full rounded-[0.8rem] border border-border bg-background/70 px-4 text-[17px] outline-none transition placeholder:text-muted focus:border-brand"
               onChange={(event) => setGitRef(event.target.value)}
@@ -80,7 +82,7 @@ export function AddPluginMarketplaceDialog({
               value={gitRef}
             />
           </Field>
-          <Field label="Sparse paths">
+          <Field label={t("plugins:dialog.sparsePathsLabel")}>
             <textarea
               className="min-h-28 w-full resize-y rounded-[0.8rem] border border-border bg-background/70 px-4 py-3 text-[17px] outline-none transition placeholder:text-muted focus:border-brand"
               onChange={(event) => setSparsePaths(event.target.value)}
@@ -97,7 +99,7 @@ export function AddPluginMarketplaceDialog({
             onClick={onClose}
             type="button"
           >
-            Cancel
+            {t("common:cancel")}
           </button>
           <button
             className="rounded-[0.8rem] bg-ink px-6 py-3 text-[17px] text-background transition disabled:bg-muted/40 disabled:text-background"
@@ -105,7 +107,7 @@ export function AddPluginMarketplaceDialog({
             onClick={() => void submit()}
             type="button"
           >
-            {submitting ? "Adding..." : "Add marketplace"}
+            {submitting ? t("plugins:actions.adding") : t("plugins:actions.addMarketplace")}
           </button>
         </div>
       </div>

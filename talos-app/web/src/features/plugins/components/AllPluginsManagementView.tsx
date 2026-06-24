@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+
 import { PluginsManagementView } from "./PluginsManagementView";
 
 interface AllPluginsManagementViewProps {
@@ -6,11 +8,13 @@ interface AllPluginsManagementViewProps {
 }
 
 export function AllPluginsManagementView({ query, refreshVersion }: AllPluginsManagementViewProps) {
+  const { t } = useTranslation("plugins");
+
   return (
     <PluginsManagementView
-      catalogLabel="Marketplace plugins"
-      emptyInstalledDescription="Add a marketplace source or install a plugin to make it available."
-      installedLabel="Installed plugins"
+      catalogLabel={t("views.all.catalogLabel")}
+      emptyInstalledDescription={t("views.all.emptyInstalledDescription")}
+      installedLabel={t("views.all.installedLabel")}
       kind="all"
       query={query}
       refreshVersion={refreshVersion}

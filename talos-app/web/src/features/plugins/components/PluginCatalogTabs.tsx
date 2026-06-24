@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+
 import { cn } from "@/shared/lib/cn";
 import type { PluginsCatalogTab } from "../types";
 
@@ -7,16 +9,18 @@ interface PluginCatalogTabsProps {
 }
 
 export function PluginCatalogTabs({ activeTab, onTabChange }: PluginCatalogTabsProps) {
+  const { t } = useTranslation("plugins");
+
   return (
     <div className="mb-5 flex items-center gap-1">
       <TabButton active={activeTab === "plugins"} onClick={() => onTabChange("plugins")}>
-        Plugins
+        {t("tabs.plugins")}
       </TabButton>
       <TabButton active={activeTab === "skills"} onClick={() => onTabChange("skills")}>
-        Skills
+        {t("tabs.skills")}
       </TabButton>
       <TabButton active={activeTab === "mcp"} onClick={() => onTabChange("mcp")}>
-        MCP
+        {t("tabs.mcp")}
       </TabButton>
     </div>
   );

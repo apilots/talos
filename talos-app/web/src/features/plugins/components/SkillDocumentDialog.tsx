@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FileText, Loader2, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { PluginDocument, SkillSummary } from "@talos/sdk-browser";
 
 import { readLocalSkill } from "@/features/plugins/api";
@@ -13,6 +14,7 @@ interface SkillDocumentDialogProps {
 }
 
 export function SkillDocumentDialog({ skill, onClose }: SkillDocumentDialogProps) {
+  const { t } = useTranslation("plugins");
   const documentQuery = useQuery({
     enabled: Boolean(skill),
     queryKey: ["talos", "skills", "document", skill?.path],
@@ -44,7 +46,7 @@ export function SkillDocumentDialog({ skill, onClose }: SkillDocumentDialogProps
   return (
     <div className="fixed inset-y-0 left-0 right-0 z-[80] flex items-center justify-center bg-ink/28 px-6 py-8 backdrop-blur-[2px] lg:left-[280px]">
       <button
-        aria-label="Close skill document backdrop"
+        aria-label={t("dialog.closeSkillBackdrop")}
         className="absolute inset-0 cursor-default"
         onClick={onClose}
         type="button"
@@ -58,16 +60,16 @@ export function SkillDocumentDialog({ skill, onClose }: SkillDocumentDialogProps
             <div className="min-w-0">
               <h2 className="truncate text-lg font-semibold text-ink">{skillTitle(readSkill)}</h2>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted">
-                <span className="rounded-full bg-card px-2 py-0.5">Local</span>
+                <span className="rounded-full bg-card px-2 py-0.5">{t("localSkills.heading")}</span>
                 {readSkill.read_only ? (
-                  <span className="rounded-full bg-card px-2 py-0.5">Read-only</span>
+                  <span className="rounded-full bg-card px-2 py-0.5">{t("localSkills.readOnly")}</span>
                 ) : null}
                 <span className="min-w-0 truncate">{compactHomePath(readSkill.path)}</span>
               </div>
             </div>
           </div>
           <button
-            aria-label="Close skill document"
+            aria-label={t("dialog.closeSkill")}
             className="flex size-9 shrink-0 items-center justify-center rounded-[0.7rem] text-muted transition hover:bg-card hover:text-ink"
             onClick={onClose}
             type="button"
@@ -79,17 +81,17 @@ export function SkillDocumentDialog({ skill, onClose }: SkillDocumentDialogProps
           {documentQuery.isLoading ? (
             <div className="flex h-40 items-center justify-center gap-2 text-sm text-muted">
               <Loader2 className="animate-spin" size={16} />
-              Loading SKILL.md
+              {t("dialog.loadingSkill")}
             </div>
           ) : documentQuery.isError ? (
             <div className="rounded-[0.8rem] border border-border bg-card px-4 py-3 text-sm text-muted">
-              Failed to load SKILL.md.
+              {t("dialog.failedLoadSkill")}
             </div>
           ) : document ? (
             <PluginDocumentBody document={document} />
           ) : (
             <div className="rounded-[0.8rem] border border-border bg-card px-4 py-3 text-sm text-muted">
-              No skill document returned.
+              {t("dialog.noSkillDocument")}
             </div>
           )}
         </div>

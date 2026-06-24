@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FileText, Lock } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { SkillSummary } from "@talos/sdk-browser";
 
 import { listSkills } from "@/features/plugins/api";
@@ -14,6 +15,7 @@ interface SkillPluginsManagementViewProps {
 }
 
 export function SkillPluginsManagementView({ query, refreshVersion }: SkillPluginsManagementViewProps) {
+  const { t } = useTranslation("plugins");
   const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null);
   const availableSkillsQuery = useQuery({
     queryKey: ["talos", "skills", "available", refreshVersion],
@@ -30,9 +32,9 @@ export function SkillPluginsManagementView({ query, refreshVersion }: SkillPlugi
   return (
     <>
       <PluginsManagementView
-        catalogLabel="Marketplace"
-        emptyInstalledDescription="Installed plugins appear here."
-        installedLabel="Installed"
+        catalogLabel={t("views.skills.catalogLabel")}
+        emptyInstalledDescription={t("views.skills.emptyInstalledDescription")}
+        installedLabel={t("views.skills.installedLabel")}
         introSection={
           <AvailableSkillsSection
             loading={availableSkillsQuery.isLoading}
@@ -59,21 +61,23 @@ interface AvailableSkillsSectionProps {
 }
 
 function AvailableSkillsSection({ loading, onOpen, query, skills }: AvailableSkillsSectionProps) {
+  const { t } = useTranslation("plugins");
+
   return (
     <section>
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-ink">Local</h2>
+        <h2 className="text-sm font-semibold text-ink">{t("localSkills.heading")}</h2>
         <span className="rounded-full border border-border/80 px-2 py-1 text-xs text-muted">
           {skills.length}
         </span>
       </div>
       {loading ? (
         <div className="rounded-[1.25rem] border border-dashed border-border/80 bg-card/55 px-6 py-8 text-sm text-muted">
-          Loading skills...
+          {t("localSkills.loading")}
         </div>
       ) : skills.length === 0 ? (
         <div className="rounded-[1.25rem] border border-dashed border-border/80 bg-card/55 px-6 py-8 text-sm text-muted">
-          {query.trim() ? "No extension skills matched your search." : "No extension skills found."}
+          {query.trim() ? t("localSkills.noMatch") : t("localSkills.empty")}
         </div>
       ) : (
         <div className="space-y-1">
@@ -93,6 +97,8 @@ function AvailableSkillRow({
   onOpen: (skill: SkillSummary) => void;
   skill: SkillSummary;
 }) {
+  const { t } = useTranslation("plugins");
+
   return (
     <div className="grid w-full grid-cols-[44px_minmax(0,1fr)_max-content] items-center gap-3 rounded-[0.8rem] px-2 py-2.5">
       <div className="flex size-10 items-center justify-center rounded-[0.7rem] bg-card text-brand">
@@ -113,20 +119,20 @@ function AvailableSkillRow({
         {skill.read_only ? (
           <span className="inline-flex items-center gap-1 rounded-full border border-border/80 px-2 py-1 text-xs text-muted">
             <Lock size={12} />
-            Read-only
+            {t("localSkills.readOnly")}
           </span>
         ) : null}
         <span className="rounded-full border border-border/80 px-2 py-1 text-xs text-muted">
-          Local
+          {t("localSkills.heading")}
         </span>
         {!skill.enabled ? (
           <span className="rounded-full border border-border/80 px-2 py-1 text-xs text-muted">
-            Disabled
+            {t("localSkills.disabled")}
           </span>
         ) : null}
         {skill.source_plugin ? (
           <span className="rounded-full border border-border/80 px-2 py-1 text-xs text-muted">
-            Plugin
+            {t("localSkills.plugin")}
           </span>
         ) : null}
       </div>

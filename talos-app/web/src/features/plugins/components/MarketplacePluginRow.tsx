@@ -1,4 +1,5 @@
 import type { Plugin } from "@talos/sdk-browser";
+import { useTranslation } from "react-i18next";
 
 import { PluginIconBadge } from "./PluginIconBadge";
 import { PluginStatusBadge } from "./PluginStatusBadge";
@@ -19,7 +20,8 @@ export function MarketplacePluginRow({
   onUpdate,
   plugin,
 }: MarketplacePluginRowProps) {
-  const action = marketplaceAction(plugin, onInstall, onUpdate);
+  const { t } = useTranslation("plugins");
+  const action = marketplaceAction(plugin, onInstall, onUpdate, t);
   return (
     <div className="grid w-full grid-cols-[44px_minmax(0,1fr)_max-content] items-center gap-3 rounded-[0.8rem] px-2 py-2.5 text-left">
       <PluginIconBadge fallback="cloud" plugin={plugin} />
@@ -53,11 +55,12 @@ function marketplaceAction(
   plugin: Plugin,
   onInstall?: (plugin: Plugin) => void,
   onUpdate?: (plugin: Plugin) => void,
+  t: (key: string) => string = (key) => key,
 ) {
   if (plugin.status.status === "not_installed" && onInstall) {
     return {
-      label: "Install",
-      busyLabel: "Installing",
+      label: t("actions.install"),
+      busyLabel: t("actions.installing"),
       disabled: false,
       onClick: onInstall,
       className:
@@ -66,8 +69,8 @@ function marketplaceAction(
   }
   if (plugin.status.status === "update_available" && onUpdate) {
     return {
-      label: "Update",
-      busyLabel: "Updating",
+      label: t("actions.update"),
+      busyLabel: t("actions.updating"),
       disabled: false,
       onClick: onUpdate,
       className:
@@ -76,8 +79,8 @@ function marketplaceAction(
   }
   if (plugin.status.status === "installed") {
     return {
-      label: plugin.status.enabled ? "Installed" : "Disabled",
-      busyLabel: plugin.status.enabled ? "Installed" : "Disabled",
+      label: plugin.status.enabled ? t("status.installed") : t("status.disabled"),
+      busyLabel: plugin.status.enabled ? t("status.installed") : t("status.disabled"),
       disabled: true,
       onClick: () => undefined,
       className:

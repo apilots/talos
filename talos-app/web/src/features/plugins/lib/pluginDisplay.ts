@@ -33,14 +33,14 @@ export function mcpServerDefinition(plugin: Plugin): McpServerDefinition | null 
   return plugin.definition.plugin.server;
 }
 
-export function pluginDocumentName(plugin: Plugin) {
+export function pluginDocumentName(plugin: Plugin, fallback: string) {
   if (plugin.kind === "mcp_server") {
     return "talos-mcp.json";
   }
   if (plugin.kind === "skill") {
     return "SKILL.md";
   }
-  return "plugin document";
+  return fallback;
 }
 
 export function pluginEnabled(plugin: Plugin) {
@@ -53,33 +53,33 @@ export function pluginEnabled(plugin: Plugin) {
   return false;
 }
 
-export function installedStatusLabel(plugin: Plugin) {
+export function installedStatusLabelKey(plugin: Plugin) {
   switch (plugin.status.status) {
     case "installed":
-      return plugin.status.enabled ? "Enabled" : "Disabled";
+      return plugin.status.enabled ? "enabled" : "disabled";
     case "update_available":
-      return "Update available";
+      return "updateAvailable";
     case "source_missing":
-      return "Source missing";
+      return "sourceMissing";
     case "conflict":
-      return "Conflict";
+      return "conflict";
     case "not_installed":
-      return "Not installed";
+      return "notInstalled";
   }
 }
 
-export function marketplaceStatusLabel(plugin: Plugin) {
+export function marketplaceStatusLabelKey(plugin: Plugin) {
   switch (plugin.status.status) {
     case "not_installed":
-      return "Marketplace";
+      return "marketplace";
     case "installed":
-      return plugin.status.enabled ? "Installed" : "Disabled";
+      return plugin.status.enabled ? "installed" : "disabled";
     case "update_available":
-      return "Update available";
+      return "updateAvailable";
     case "source_missing":
-      return "Source missing";
+      return "sourceMissing";
     case "conflict":
-      return "Conflict";
+      return "conflict";
   }
 }
 

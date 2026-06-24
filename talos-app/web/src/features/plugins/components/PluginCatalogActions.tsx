@@ -1,4 +1,6 @@
-import { Box, ChevronDown, CircleDot, Layers3, Plus, RefreshCw } from "lucide-react";
+import { useEffect, useRef } from "react";
+import { Box, ChevronDown, Layers3, Plus, RefreshCw } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import type { PluginsCatalogTab } from "../types";
 
@@ -21,10 +23,38 @@ export function PluginCatalogActions({
   onMenuOpenChange,
   onRefresh,
 }: PluginCatalogActionsProps) {
+  const { t } = useTranslation("plugins");
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!menuOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        onMenuOpenChange(false);
+      }
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onMenuOpenChange(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [menuOpen, onMenuOpenChange]);
+
   return (
-    <div className="relative flex items-center gap-2">
+    <div className="relative flex items-center gap-2" ref={rootRef}>
       <button
-        aria-label="Open plugin actions"
+        aria-label={t("actions.openMenu")}
         className="inline-flex h-9 items-center gap-1 rounded-full border border-border/80 bg-card px-3 text-sm text-ink shadow-sm transition hover:border-brand/35"
         onClick={() => onMenuOpenChange(!menuOpen)}
         type="button"
@@ -33,7 +63,7 @@ export function PluginCatalogActions({
         <ChevronDown size={14} />
       </button>
       <button
-        aria-label="Refresh plugins"
+        aria-label={t("actions.refresh")}
         className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border/80 bg-card text-muted shadow-sm transition hover:border-brand/35 hover:text-ink"
         onClick={() => void onRefresh()}
         type="button"
@@ -60,6 +90,8 @@ function SkillsMenu({
   onAddMarketplace: () => void;
   onCreateSkill: () => Promise<void> | void;
 }) {
+  const { t } = useTranslation("plugins");
+
   return (
     <>
       <button
@@ -68,15 +100,7 @@ function SkillsMenu({
         type="button"
       >
         <Box size={15} />
-        Create skill
-      </button>
-      <button
-        className="flex w-full items-center gap-2 rounded-[0.8rem] px-3 py-2 text-left text-sm text-muted"
-        disabled
-        type="button"
-      >
-        <CircleDot size={15} />
-        Record a skill
+        {t("actions.createSkill")}
       </button>
       <button
         className="flex w-full items-center gap-2 rounded-[0.8rem] px-3 py-2 text-left text-sm text-ink transition hover:bg-background/80"
@@ -84,7 +108,7 @@ function SkillsMenu({
         type="button"
       >
         <Box size={15} />
-        Add marketplace
+        {t("actions.addMarketplace")}
       </button>
     </>
   );
@@ -97,6 +121,8 @@ function PluginsMenu({
   onAddMarketplace: () => void;
   onCreatePlugin: () => void;
 }) {
+  const { t } = useTranslation("plugins");
+
   return (
     <>
       <button
@@ -105,7 +131,7 @@ function PluginsMenu({
         type="button"
       >
         <Layers3 size={15} />
-        Create plugin
+        {t("actions.createPlugin")}
       </button>
       <button
         className="flex w-full items-center gap-2 rounded-[0.8rem] px-3 py-2 text-left text-sm text-ink transition hover:bg-background/80"
@@ -113,7 +139,7 @@ function PluginsMenu({
         type="button"
       >
         <Box size={15} />
-        Add marketplace
+        {t("actions.addMarketplace")}
       </button>
     </>
   );

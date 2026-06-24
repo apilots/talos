@@ -1,5 +1,6 @@
 import type { Plugin } from "@talos/sdk-browser";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 
 import { InstalledPluginRow } from "./InstalledPluginRow";
 import { MarketplacePluginRow } from "./MarketplacePluginRow";
@@ -26,9 +27,9 @@ interface PluginManagementPanelProps {
 
 export function PluginManagementPanel({
   actionPluginId,
-  catalogLabel = "Marketplace skills",
+  catalogLabel,
   emptyInstalledDescription,
-  installedLabel = "Installed extensions",
+  installedLabel,
   installedPlugins,
   introSection,
   loading,
@@ -42,8 +43,12 @@ export function PluginManagementPanel({
   showCatalog = true,
   warnings,
 }: PluginManagementPanelProps) {
+  const { t } = useTranslation("plugins");
+  const resolvedCatalogLabel = catalogLabel ?? t("views.skills.catalogLabel");
+  const resolvedInstalledLabel = installedLabel ?? t("views.skills.installedLabel");
+
   if (loading && installedPlugins.length === 0 && marketplacePlugins.length === 0) {
-    return <div className="mt-10 text-sm text-muted">Loading plugins...</div>;
+    return <div className="mt-10 text-sm text-muted">{t("panel.loading")}</div>;
   }
 
   return (
@@ -55,7 +60,7 @@ export function PluginManagementPanel({
       ) : null}
       {introSection}
       <section>
-        <h2 className="mb-3 text-sm font-semibold text-ink">{installedLabel}</h2>
+        <h2 className="mb-3 text-sm font-semibold text-ink">{resolvedInstalledLabel}</h2>
         {installedPlugins.length === 0 ? (
           <PluginsEmptyState description={emptyInstalledDescription} />
         ) : (
@@ -76,10 +81,10 @@ export function PluginManagementPanel({
       </section>
       {showCatalog ? (
         <section>
-          <h2 className="mb-3 text-sm font-semibold text-ink">{catalogLabel}</h2>
+          <h2 className="mb-3 text-sm font-semibold text-ink">{resolvedCatalogLabel}</h2>
           {marketplacePlugins.length === 0 ? (
             <div className="rounded-[1.25rem] border border-dashed border-border/80 bg-card/55 px-6 py-8 text-sm text-muted">
-              No marketplace plugins found.
+              {t("panel.noMarketplacePlugins")}
             </div>
           ) : (
             <div className="space-y-1">
