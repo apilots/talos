@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FileText, Lock } from "lucide-react";
 import type { SkillSummary } from "@talos/sdk-browser";
@@ -6,6 +6,7 @@ import type { SkillSummary } from "@talos/sdk-browser";
 import { listSkills } from "@/features/plugins/api";
 import { skillTitle } from "@/features/plugins/lib/pluginDisplay";
 import { PluginsManagementView } from "./PluginsManagementView";
+import { SkillDocumentDialog } from "./SkillDocumentDialog";
 
 interface SkillPluginsManagementViewProps {
   query: string;
@@ -13,6 +14,7 @@ interface SkillPluginsManagementViewProps {
 }
 
 export function SkillPluginsManagementView({ query, refreshVersion }: SkillPluginsManagementViewProps) {
+  const [selectedSkill, setSelectedSkill] = useState<SkillSummary | null>(null);
   const availableSkillsQuery = useQuery({
     queryKey: ["talos", "skills", "available", refreshVersion],
     queryFn: () => listSkills(true),
@@ -26,35 +28,41 @@ export function SkillPluginsManagementView({ query, refreshVersion }: SkillPlugi
   );
 
   return (
-    <PluginsManagementView
-      catalogLabel="Marketplace skill plugins"
-      emptyInstalledDescription="Install a skill plugin from the marketplace to manage it here."
-      installedLabel="Installed skill plugins"
-      introSection={
-        <AvailableSkillsSection
-          loading={availableSkillsQuery.isLoading}
-          query={query}
-          skills={availableSkills}
-        />
-      }
-      kind="skill"
-      query={query}
-      refreshVersion={refreshVersion}
-    />
+    <>
+      <PluginsManagementView
+        catalogLabel="Marketplace"
+        emptyInstalledDescription="Installed plugins appear here."
+        installedLabel="Installed"
+        introSection={
+          <AvailableSkillsSection
+            loading={availableSkillsQuery.isLoading}
+            onOpen={setSelectedSkill}
+            query={query}
+            skills={availableSkills}
+          />
+        }
+        kind="skill"
+        query={query}
+        refreshVersion={refreshVersion}
+        showCatalog={false}
+      />
+      <SkillDocumentDialog onClose={() => setSelectedSkill(null)} skill={selectedSkill} />
+    </>
   );
 }
 
 interface AvailableSkillsSectionProps {
   loading: boolean;
+  onOpen: (skill: SkillSummary) => void;
   query: string;
   skills: SkillSummary[];
 }
 
-function AvailableSkillsSection({ loading, query, skills }: AvailableSkillsSectionProps) {
+function AvailableSkillsSection({ loading, onOpen, query, skills }: AvailableSkillsSectionProps) {
   return (
     <section>
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-ink">Extension skills</h2>
+        <h2 className="text-sm font-semibold text-ink">Local</h2>
         <span className="rounded-full border border-border/80 px-2 py-1 text-xs text-muted">
           {skills.length}
         </span>
@@ -70,7 +78,7 @@ function AvailableSkillsSection({ loading, query, skills }: AvailableSkillsSecti
       ) : (
         <div className="space-y-1">
           {skills.map((skill) => (
-            <AvailableSkillRow key={`${skill.path}:${skill.name}`} skill={skill} />
+            <AvailableSkillRow key={`${skill.path}:${skill.name}`} onOpen={onOpen} skill={skill} />
           ))}
         </div>
       )}
@@ -78,16 +86,26 @@ function AvailableSkillsSection({ loading, query, skills }: AvailableSkillsSecti
   );
 }
 
-function AvailableSkillRow({ skill }: { skill: SkillSummary }) {
+function AvailableSkillRow({
+  onOpen,
+  skill,
+}: {
+  onOpen: (skill: SkillSummary) => void;
+  skill: SkillSummary;
+}) {
   return (
     <div className="grid w-full grid-cols-[44px_minmax(0,1fr)_max-content] items-center gap-3 rounded-[0.8rem] px-2 py-2.5">
       <div className="flex size-10 items-center justify-center rounded-[0.7rem] bg-card text-brand">
         <FileText size={18} />
       </div>
       <div className="min-w-0">
-        <div className="block max-w-full truncate text-left text-sm font-semibold text-ink">
+        <button
+          className="block max-w-full truncate text-left text-sm font-semibold text-ink transition hover:text-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
+          onClick={() => onOpen(skill)}
+          type="button"
+        >
           {skillTitle(skill)}
-        </div>
+        </button>
         <div className="mt-0.5 truncate text-sm text-muted">{skill.description}</div>
         <div className="mt-1 truncate text-xs text-muted/80">{compactHomePath(skill.path)}</div>
       </div>
@@ -99,7 +117,7 @@ function AvailableSkillRow({ skill }: { skill: SkillSummary }) {
           </span>
         ) : null}
         <span className="rounded-full border border-border/80 px-2 py-1 text-xs text-muted">
-          Extension
+          Local
         </span>
         {!skill.enabled ? (
           <span className="rounded-full border border-border/80 px-2 py-1 text-xs text-muted">

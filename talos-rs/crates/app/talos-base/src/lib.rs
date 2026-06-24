@@ -319,8 +319,8 @@ const MEMORY_FLUSH_DRAIN_TIMEOUT: Duration = Duration::from_secs(60);
 const SERVER_SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(180);
 
 pub async fn run_app_server() -> TalosResult<()> {
-    let config_source = resolve_default_config_path();
     let config = load_runtime_config()?;
+    let config_source = resolve_config_source_path();
     let logging_options = TalosServerOptions {
         logging_stdout: Some(false),
         ..TalosServerOptions::default()
@@ -335,8 +335,8 @@ pub async fn run_app_server() -> TalosResult<()> {
 }
 
 pub async fn run_server() -> TalosResult<()> {
-    let config_source = resolve_default_config_path();
     let config = load_runtime_config()?;
+    let config_source = resolve_config_source_path();
     let server_options = TalosServerOptions {
         webui_dir: resolve_packaged_webui_dir(),
         ..TalosServerOptions::default()
@@ -369,11 +369,9 @@ fn load_runtime_config() -> TalosResult<Config> {
     Ok(config)
 }
 
-fn resolve_default_config_path() -> Option<PathBuf> {
-    let config_path = Config::default_path();
-    config_path
-        .exists()
-        .then(|| canonical_or_original(config_path))
+fn resolve_config_source_path() -> Option<PathBuf> {
+    let config_path = Config::source_path();
+    config_path.exists().then(|| canonical_or_original(config_path))
 }
 
 fn resolve_packaged_webui_dir() -> Option<PathBuf> {

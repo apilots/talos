@@ -398,6 +398,23 @@ fn test_load_from_path_fails_when_required_keys_missing() {
 }
 
 #[test]
+fn test_source_path_uses_talos_config_env() {
+    let temp_file = std::env::temp_dir().join(format!(
+        "talos-config-source-env-{}.yaml",
+        std::process::id()
+    ));
+    let previous = std::env::var_os("TALOS_CONFIG");
+    std::env::set_var("TALOS_CONFIG", &temp_file);
+
+    assert_eq!(Config::source_path(), temp_file);
+
+    match previous {
+        Some(value) => std::env::set_var("TALOS_CONFIG", value),
+        None => std::env::remove_var("TALOS_CONFIG"),
+    }
+}
+
+#[test]
 fn test_load_from_path_uses_prompt_defaults_when_prompt_block_is_missing() {
     let yaml = r#"
 agent:

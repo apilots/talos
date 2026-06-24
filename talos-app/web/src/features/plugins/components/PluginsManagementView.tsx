@@ -28,6 +28,7 @@ interface PluginsManagementViewProps {
   kind: PluginKindFilter;
   query: string;
   refreshVersion: number;
+  showCatalog?: boolean;
 }
 
 export function PluginsManagementView({
@@ -38,6 +39,7 @@ export function PluginsManagementView({
   kind,
   query,
   refreshVersion,
+  showCatalog = true,
 }: PluginsManagementViewProps) {
   const [selectedPlugin, setSelectedPlugin] = useState<Plugin | null>(null);
   const [actionPluginId, setActionPluginId] = useState<string | null>(null);
@@ -48,6 +50,7 @@ export function PluginsManagementView({
   const marketplaceQuery = useQuery({
     queryKey: ["talos", "plugins", kind, "search", query],
     queryFn: () => searchPluginsForKind(kind, query, "refresh_stale"),
+    enabled: showCatalog,
   });
   const marketplacePlugins = useMemo(
     () => marketplaceQuery.data?.plugins ?? [],
@@ -59,11 +62,15 @@ export function PluginsManagementView({
   );
 
   const refresh = useCallback(async () => {
+    if (!showCatalog) {
+      await installedPluginsQuery.refetch();
+      return;
+    }
     await Promise.all([
       installedPluginsQuery.refetch(),
       searchPluginsForKind(kind, query, "force_refresh").then(() => marketplaceQuery.refetch()),
     ]);
-  }, [installedPluginsQuery.refetch, kind, marketplaceQuery.refetch, query]);
+  }, [installedPluginsQuery.refetch, kind, marketplaceQuery.refetch, query, showCatalog]);
 
   useEffect(() => {
     if (refreshVersion === 0) {
@@ -78,7 +85,7 @@ export function PluginsManagementView({
       await action(plugin);
       await Promise.all([
         installedPluginsQuery.refetch(),
-        marketplaceQuery.refetch(),
+        showCatalog ? marketplaceQuery.refetch() : Promise.resolve(),
       ]);
     } finally {
       setActionPluginId(null);
@@ -102,6 +109,7 @@ export function PluginsManagementView({
         onOpen={setSelectedPlugin}
         onUninstall={(plugin) => void runPluginAction(plugin, uninstallPlugin)}
         onUpdate={(plugin) => void runPluginAction(plugin, updatePlugin)}
+        showCatalog={showCatalog}
         warnings={warningMessages(marketplaceQuery.data?.warnings ?? [])}
       />
       <PluginDocumentDialog onClose={() => setSelectedPlugin(null)} plugin={selectedPlugin} />

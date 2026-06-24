@@ -18,9 +18,7 @@ pub(crate) fn load_config_from_path(path: Option<&str>) -> TalosResult<Config> {
     use talos_error::TalosError;
 
     let paths = TalosPaths::resolve();
-    let explicit_path = path
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os(TALOS_CONFIG_ENV).map(PathBuf::from));
+    let explicit_path = explicit_config_path(path);
     let config_path = match explicit_path {
         Some(path) => path,
         None => {
@@ -65,6 +63,15 @@ pub(crate) fn load_config_from_path(path: Option<&str>) -> TalosResult<Config> {
         .ensure_agent_workspace(&config.agent.name)?;
 
     Ok(config)
+}
+
+pub(crate) fn config_source_path(path: Option<&str>) -> PathBuf {
+    explicit_config_path(path).unwrap_or_else(default_config_path)
+}
+
+fn explicit_config_path(path: Option<&str>) -> Option<PathBuf> {
+    path.map(PathBuf::from)
+        .or_else(|| std::env::var_os(TALOS_CONFIG_ENV).map(PathBuf::from))
 }
 
 fn ensure_first_run_files(paths: &TalosPaths) -> TalosResult<()> {

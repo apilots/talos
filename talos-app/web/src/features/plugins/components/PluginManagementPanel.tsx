@@ -14,6 +14,7 @@ interface PluginManagementPanelProps {
   introSection?: ReactNode;
   loading: boolean;
   marketplacePlugins: Plugin[];
+  showCatalog?: boolean;
   warnings: string[];
   onDisable: (plugin: Plugin) => void;
   onEnable: (plugin: Plugin) => void;
@@ -38,6 +39,7 @@ export function PluginManagementPanel({
   onOpen,
   onUninstall,
   onUpdate,
+  showCatalog = true,
   warnings,
 }: PluginManagementPanelProps) {
   if (loading && installedPlugins.length === 0 && marketplacePlugins.length === 0) {
@@ -72,27 +74,29 @@ export function PluginManagementPanel({
           </div>
         )}
       </section>
-      <section>
-        <h2 className="mb-3 text-sm font-semibold text-ink">{catalogLabel}</h2>
-        {marketplacePlugins.length === 0 ? (
-          <div className="rounded-[1.25rem] border border-dashed border-border/80 bg-card/55 px-6 py-8 text-sm text-muted">
-            No marketplace plugins found.
-          </div>
-        ) : (
-          <div className="space-y-1">
-            {marketplacePlugins.map((plugin) => (
-              <MarketplacePluginRow
-                installing={actionPluginId === plugin.id}
-                key={plugin.id}
-                onInstall={onInstall}
-                onOpen={onOpen}
-                onUpdate={onUpdate}
-                plugin={plugin}
-              />
-            ))}
-          </div>
-        )}
-      </section>
+      {showCatalog ? (
+        <section>
+          <h2 className="mb-3 text-sm font-semibold text-ink">{catalogLabel}</h2>
+          {marketplacePlugins.length === 0 ? (
+            <div className="rounded-[1.25rem] border border-dashed border-border/80 bg-card/55 px-6 py-8 text-sm text-muted">
+              No marketplace plugins found.
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {marketplacePlugins.map((plugin) => (
+                <MarketplacePluginRow
+                  installing={actionPluginId === plugin.id}
+                  key={plugin.id}
+                  onInstall={onInstall}
+                  onOpen={onOpen}
+                  onUpdate={onUpdate}
+                  plugin={plugin}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
     </div>
   );
 }

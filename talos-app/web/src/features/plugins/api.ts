@@ -3,12 +3,22 @@ import type {
   MarketplaceSourceInput,
   Plugin,
   PluginSearchRefreshPolicy,
+  SkillSummary,
 } from "@talos/sdk-browser";
 
 type PluginKind = Plugin["kind"];
 
 export async function listSkills(includeDisabled = true) {
   return getTalosClient().skills.list({ include_disabled: includeDisabled });
+}
+
+export async function readLocalSkill(skill: SkillSummary) {
+  return getTalosClient().skills.read({
+    selector: {
+      name: skill.name,
+      path: skill.path,
+    },
+  });
 }
 
 export async function searchSkillPlugins(
