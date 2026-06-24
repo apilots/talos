@@ -2,7 +2,7 @@ use talos_error::TalosResult;
 use talos_service::Actor;
 use talos_types::{ModelListRequest, ModelListResponse};
 
-use crate::service_gateway::ServiceGateway;
+use crate::gateway_service::ServiceGateway;
 
 impl ServiceGateway {
     pub(crate) async fn list_models(

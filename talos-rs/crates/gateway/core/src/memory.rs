@@ -5,7 +5,7 @@ use talos_types::{
     MemoryFileWriteRequest, MemoryFileWriteResponse, MemorySearchRequest, MemorySearchResponse,
 };
 
-use crate::service_gateway::ServiceGateway;
+use crate::gateway_service::ServiceGateway;
 
 impl ServiceGateway {
     pub(crate) async fn list_memory_files(

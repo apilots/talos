@@ -8,7 +8,7 @@ use talos_types::{
     SessionListResponse, SessionPatchRequest, SessionUpdateResponse,
 };
 
-use crate::service_gateway::{require_non_empty, ServiceGateway};
+use crate::gateway_service::{require_non_empty, ServiceGateway};
 
 impl ServiceGateway {
     pub(crate) async fn list_sessions(

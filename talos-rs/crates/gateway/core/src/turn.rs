@@ -8,7 +8,7 @@ use talos_types::{
 };
 use tracing::info;
 
-use crate::service_gateway::ServiceGateway;
+use crate::gateway_service::ServiceGateway;
 
 impl ServiceGateway {
     pub(crate) async fn start_turn(

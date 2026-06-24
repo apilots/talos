@@ -10,7 +10,7 @@ use talos_types::{
     UserCurrentResponse,
 };
 
-use crate::service_gateway::ServiceGateway;
+use crate::gateway_service::ServiceGateway;
 
 impl ServiceGateway {
     pub(crate) async fn logout(

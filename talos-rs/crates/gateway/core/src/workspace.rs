@@ -6,7 +6,7 @@ use talos_types::{
     WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 
-use crate::service_gateway::ServiceGateway;
+use crate::gateway_service::ServiceGateway;
 
 impl ServiceGateway {
     pub(crate) async fn list_workspace_docs(
